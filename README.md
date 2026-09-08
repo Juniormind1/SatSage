@@ -1,19 +1,31 @@
-# SatSage – know your sats
+<p align="center">
+  <img src="web/img/logo.jpg" alt="SatSage" width="320">
+</p>
 
-Der Name ist Absicht als Wortspiel: **Sat Sage** (Sat-Weiser) und **Sats Age** (Alter der Sats) — passend zum Slogan *know your sats* und zur Frage, wie alt die Bestände on-chain schon sind.
+<p align="center">
+  <strong>know your sats</strong><br>
+  <em>Woher die Sats wann kamen — On-Chain-Alter für Steuer und Überblick</em>
+</p>
 
-**Version 0.9** — steht in der Datei [`VERSION`](VERSION) (einzige Quelle). Neue Nummern setzen nur Maintainer; Builds und UI lesen sie nur. In der Web-GUI erscheint sie in der Fußzeile.
+<p align="center">
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-0.9-f7931a?style=flat-square" alt="Version 0.9"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="MIT">
+  <img src="https://img.shields.io/badge/UI-localhost%20Web--GUI-111111?style=flat-square" alt="Web-GUI">
+</p>
 
-**Sprache:** Web-Oberfläche Deutsch oder Englisch (Einstellungen → Sprache; optional ``UI_LANG`` in ``.env``). Job-Log und viele Server-Meldungen können weiterhin Deutsch sein. Das Handbuch bleibt vorerst nur auf Deutsch.
+---
 
-XPUB-Single- und Multisig-Analyzer für Bitcoin-Wallets.  
-Analysiert Transaktionen und UTXOs und zeigt, **woher die Sats wann kamen** — insbesondere wann sie ein xPub-Wallet betraten oder es wieder verließen. Daraus lässt sich die On-Chain-Haltedauer ablesen. Das ersetzt keine Börsenhistorie und keine Kaufbelege.
+**SatSage** (Wortspiel: *Sat Sage* / *Sats Age*) analysiert XPUB-Single- und Multisig-Wallets und zeigt, **woher die Sats wann kamen** — insbesondere wann sie ein xPub-Wallet betraten oder wieder verließen. Daraus lässt sich die On-Chain-Haltedauer ablesen. Das ersetzt keine Börsenhistorie und keine Kaufbelege.
 
-Technische IDs laufen unter `satsage` (Binary `satsage-webgui`, Specter-Extension `satsage.specterext.satsage`).
+| | |
+|:--|:--|
+| **Version** | [`VERSION`](VERSION) → aktuell **0.9** (einzige Quelle; Fußzeile der Web-GUI) |
+| **Oberfläche** | Web (`py server.py`) + Terminal-Steuerung · Specter-Plugin · StartOS-Sideload |
+| **Sprache** | DE/EN in der UI (`UI_LANG` / Einstellungen); Handbuch vorerst DE |
+| **IDs** | `satsage` · Binary `satsage-webgui` · Specter `satsage.specterext.satsage` |
 
-**Datenquellen:** eigener Electrum-Server (electrs/Fulcrum), Compact Filter über Bitcoin-P2P (`--bip158`), öffentliche Onions, Clearnet. Beim Start ohne explizite Wahl: eigener Electrum-Server → P2P-BIP-158; öffentliche Onions/Clearnet erst nach Bestätigung. Lokaler Pruned-Node für schnellen UTXO-Scan wird erkannt und genutzt.
-
-**Oberflächen:** Web (`py server.py`, empfohlen); Specter-Plugin; StartOS-Sideload (`.s9pk`, x86_64) — Bau: [`doc/START9-packaging.md`](doc/START9-packaging.md). Direktmodi `--txid` / `--address` / `--cli` bleiben für Einmal-Analysen nützlich. Nutzerhandbuch: [`doc/handbuch.html`](doc/handbuch.html) (in der Web-GUI unter „Handbuch“).
+**Datenquellen:** eigener Electrum-Server (electrs/Fulcrum) → Compact Filter über Bitcoin-P2P (`--bip158`) → öffentliche Onions/Clearnet erst nach Bestätigung. Lokaler Pruned-Node für schnellen UTXO-Scan wird erkannt. Nutzerhandbuch: [`doc/handbuch.html`](doc/handbuch.html).
 
 ## Was das ist — und was nicht
 
@@ -23,20 +35,16 @@ SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreic
 
 ## Features
 
-- **Web-Oberfläche** (`py server.py`) — Wallets, UTXO-/Verlaufsscan, Herkunft, Steuerjahr, Assistent (Cache-only), Einstellungen; nur localhost mit Sitzungs-Token
-- **Mehrere XPUBs** gleichzeitig (zpub, xpub, ypub, Taproot, Multisig-Deskriptor) mit Anzeigenamen
-- **Tx-Trace** — TxID, UTXO (`txid:vout`) oder Adresse
-- **Steuerjahr** — Haltefrist (Vorgabe 1 Jahr, Deutschland) und optionaler Stichtag; Chart und Export
-- **Wallet-Alter** — First-seen in `utxo_cache/{hash}_alter.json`, überlebt „Cache löschen“
-- **UTXO-Rangfolge** pro Wallet oder über alle Wallets
-- **UTXO-Cache** pro XPUB (`utxo_cache/`) mit Salden-Check, Light-/Full-Rescan
-- **Adress-Auflösungs-Cache** (`external_addresses.json`) für schnellere Trace-Zuordnung
-- **Immutable-Cache** (`immutable_cache/`) für Transaktionen und Blockzeiten (alle Quellen)
-- **Sanktions- & Blacklists** — OFAC, OpenSanctions, Scam-Listen; Wallet-Check und UTXO-Scan
-- **UTXO-Konsolidierung** — Dust zusammenführen, PSBT erzeugen
-- **Drei Blockchain-Backends** mit Privatsphäre-Hinweis in der Statuszeile
-- **Einstellungen** im Menü bzw. in der Web-GUI: Datenquelle, Verbose, BIP-158-Start, Fristen, Sanktionslisten-Update, `.env`
-- **Specter-Desktop-Plugin** (Testumgebung) — SatSage als Extension in Specter: Wallets/XPUBs vom Node, Tx-/UTXO-Trace und Rangfolge im Browser
+| Bereich | Inhalt |
+|---------|--------|
+| **Web-Oberfläche** | Wallets, UTXO-/Verlaufsscan, Herkunft, Steuerjahr, Assistent (Cache-only), Einstellungen — nur localhost mit Sitzungs-Token |
+| **Wallets** | Mehrere XPUBs (zpub, xpub, ypub, Taproot, Multisig-Deskriptor) mit Anzeigenamen |
+| **Herkunft** | Tx-Trace per TxID, UTXO (`txid:vout`) oder Adresse |
+| **Steuerjahr** | Haltefrist (Vorgabe 1 Jahr, DE), optionaler Stichtag; Chart und Export |
+| **Caches** | UTXO-, Alters-, Adress-Auflösungs- und Immutable-Cache |
+| **Privatsphäre** | Eigener Node / BIP-158 bevorzugt; öffentliche Server nur nach Bestätigung |
+| **Sanktionen** | OFAC, OpenSanctions, Scam-Listen — Wallet-Check und UTXO-Scan |
+| **Mehr** | Dust-Konsolidierung (PSBT), Specter-Desktop-Plugin |
 
 ---
 
@@ -64,49 +72,48 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Kopiere `.env.example` nach `.env` und passe Werte an. Wallets stehen dort als Block je Wallet (`WALLET_0_NAME`, `WALLET_0_XPUB`, …, fortlaufend ab 0) — dann reicht `py server.py` bzw. `py main.py` ohne `--xpubs`. Die alte Schreibweise (`XPUBS`, `WALLET_NAMES`) wird weiter gelesen und beim nächsten Speichern aus der Oberfläche umgewandelt. `.env` ist in `.gitignore` — **niemals** RPC-Passwörter, XPUBs oder persönliche Wallet-Namen committen.
+Kopiere `.env.example` nach `.env` und passe Werte an. Wallets stehen dort als Block je Wallet (`WALLET_0_NAME`, `WALLET_0_XPUB`, …, fortlaufend ab 0) — dann reicht `py server.py` ohne `--xpubs`. Die alte Schreibweise (`XPUBS`, `WALLET_NAMES`) wird weiter gelesen und beim nächsten Speichern aus der Oberfläche umgewandelt. `.env` ist in `.gitignore` — **niemals** RPC-Passwörter, XPUBs oder persönliche Wallet-Namen committen.
 
 ---
 
 ## Schnellstart
 
 ```bash
-# Web-Oberfläche (localhost, Sitzungs-Token in der URL)
+# Empfohlen: Web-GUI + Terminal-Steuerung (localhost, Token in der URL)
 py server.py
 
-# Interaktives Menü (Legacy/Fallback) — XPUBs aus .env oder CLI
-py main.py
-py main.py --xpubs zpub6DeinXPUB... --wallet-names "Mein Wallet"
-
-# Transaktion analysieren (direkt, ohne Menü)
+# Einmal-Analysen ohne GUI (XPUBs aus .env oder --xpubs)
 py main.py --xpubs zpub6... --txid <txid>
-
-# Adresse / einzelnes UTXO
 py main.py --xpubs zpub6... --address bc1q...
 py main.py --xpubs zpub6... --address bc1q... --utxo <txid>:<vout>
-
-# Klassischer CLI-Modus: Top-UTXOs ohne Menü
 py main.py --xpubs zpub6... --cli --top-utxos 10
 ```
 
-Ohne `--wallet-names` bzw. ohne `WALLET_NAMES` in `.env` wird pro XPUB ein **SHA256-Hex** des Keys als Anzeigename verwendet.
+Ohne `--wallet-names` bzw. ohne `WALLET_NAMES` / `WALLET_0_NAME`… in `.env` wird pro XPUB ein **SHA256-Hex** des Keys als Anzeigename verwendet.
 
 ---
 
-## Web-Oberfläche
+## Web-Oberfläche und Terminal-Steuerung
 
 ```bash
-py server.py                 # http://127.0.0.1:8730/?t=… + Terminal-Menü
+py server.py                 # http://127.0.0.1:8730/?t=… + Terminal-Steuerung
 py server.py --port 8731     # anderer Port, falls 8730 belegt
 py server.py --no-browser    # Browser nicht automatisch öffnen
-py server.py --plain-console # ohne Terminal-Menü (nur URL, Strg+C)
+py server.py --plain-console # ohne Terminal-Steuerung (nur URL, Strg+C)
 ```
 
 Der Server bindet **nur an 127.0.0.1**. Jede API-Anfrage braucht das Sitzungs-Token aus der Start-URL — damit eine beliebige Webseite den lokalen Server nicht mitlesen kann.
 
-**Terminal-Steuerung** (TTY): feste Menüzeile unten (Tasten **1** Status · **2** Browser · **3** Beenden); Log scrollt darüber. Der **Browser darf geschlossen werden** — UTXO-/Verlaufsscan und Job-Log laufen im Terminal weiter (dieselben Zeilen wie im Web-Log). Beenden: Taste 3 oder Strg+C. **Konsole offen lassen** (auch beim Onefile-Binary).
+**Zwei Oberflächen, ein Prozess.** `py server.py` startet den lokalen HTTP-Server und — in einem normalen Terminal (TTY) — ein **minimales Steuerungsmenü** in derselben Konsole. Die eigentliche Arbeit (Wallets, Scans, Herkunft, Einstellungen) passiert in der **Browser-GUI**. Das Terminal-Menü steuert den Serverprozess, ersetzt die GUI aber nicht.
 
-| Bereich | Inhalt |
+| Wo | Wofür |
+|----|--------|
+| **Browser-GUI** | Wallets, Scans, Herkunft, Steuerjahr, Einstellungen, Log-Ansicht |
+| **Terminal-Steuerung** | Status, Browser erneut öffnen, Server beenden; Job-Log parallel zur Web-Log-Ansicht |
+
+**Terminal-Steuerung** (TTY): feste Menüzeile unten (Tasten **1** Status · **2** Browser-GUI öffnen · **3** Beenden); das Job-Log scrollt darüber (dieselben Zeilen wie im Web-Log). Der **Browser darf geschlossen werden** — Scans und Logs laufen in der Konsole weiter; Taste **2** öffnet die Token-URL erneut. Beenden: Taste **3** (mit Bestätigung) oder Strg+C. **Konsole offen lassen** (auch beim Onefile-Binary) — schließt du das Terminalfenster, endet der Server. Ohne nutzbare TTY oder mit `--plain-console` entfällt das Menü; der Server läuft trotzdem, Beenden nur per Strg+C.
+
+| Bereich (Browser) | Inhalt |
 |---------|--------|
 | **Wallets** | Bestand, UTXO-Scan (aktuell unspent) und Verlaufsscan (Historie inkl. ausgegeben) |
 | **Herkunft** | Rückwärts über eigene XPUBs bis zur ersten fremden Adresse |
@@ -128,9 +135,9 @@ Ausführlich: [`doc/handbuch.html`](doc/handbuch.html). Offene Lücke (gründlic
 - OpenSanctions: Israel NBCTF, US FBI Lazarus Group, ransomwhe.re
 - Badd-Boyz Bitcoin Scammers
 
-**Automatische Priorität** beim Start (wenn weder CLI-Flag noch manuelle Menüwahl gesetzt):
+**Automatische Priorität** beim Start (wenn weder CLI-Flag noch manuelle Wahl in den Einstellungen gesetzt):
 
-1. eigener Electrum-Server → 2. P2P-BIP-158 → 3./4. öffentliche Onions bzw. Clearnet **nur nach Bestätigung** (`OEFFENTLICHE_ELECTRUM=1`, `--oeffentliche-electrum`, Dialog in der Web-Oberfläche, oder j/N im CLI-Menü)
+1. eigener Electrum-Server → 2. P2P-BIP-158 → 3./4. öffentliche Onions bzw. Clearnet **nur nach Bestätigung** (`OEFFENTLICHE_ELECTRUM=1`, `--oeffentliche-electrum` oder Dialog in der Web-Oberfläche)
 
 Ohne Bestätigung bleiben nur eigener Node und BIP-158. Extra-Scan-Verbindungen gelten nur für den eigenen LAN-Fulcrum. `BIP158_P2P=0` lässt Compact Filter in der Auto-Kette aus.
 
@@ -159,7 +166,7 @@ py check_fulcrum_tor.py
 py check_fulcrum_tor.py --onion-list-only   # nur öffentliche Server scannen
 ```
 
-Erreichbare Onions werden als `FULCRUM_TOR_0=…` usw. ausgegeben — ins Menü **Einstellungen → .env bearbeiten** oder direkt in `.env` eintragen.
+Erreichbare Onions werden als `FULCRUM_TOR_0=…` usw. ausgegeben — in der Web-GUI unter **Einstellungen → .env bearbeiten** oder direkt in `.env` eintragen.
 
 ---
 
@@ -268,7 +275,7 @@ py main.py --immutable-cache-dir ./mein_immutable_cache ...
 
 ### Sanktions-Cache — `sanctioned_cache/`
 
-Lokal gecachte Blacklists (Download über Einstellungen [7] oder aus dem Überblick heraus):
+Lokal gecachte Blacklists (Download in der Web-GUI unter Einstellungen oder aus dem Überblick heraus):
 
 | Datei | Inhalt |
 |-------|--------|
@@ -286,11 +293,11 @@ Lokal gecachte Blacklists (Download über Einstellungen [7] oder aus dem Überbl
 |--------|--------------|
 | `--xpubs XPUB [XPUB ...]` | Extended Public Keys (sonst `WALLET_0_XPUB`… aus `.env`) |
 | `--wallet-names NAME [NAME ...]` | Anzeigenamen (sonst `WALLET_NAMES` / `WALLET_NAME_0`… aus `.env`) |
-| `--txid TXID` | Spending-Tx analysieren (ohne Menü) |
+| `--txid TXID` | Spending-Tx analysieren (Einmal-Lauf) |
 | `--address ADDR` | Unspent UTXOs + Herkunft |
 | `--utxo TXID:VOUT` | Einzelnes UTXO (mit `--address`) |
-| `--cli` | Klassischer Modus: Top-UTXOs statt Menü |
-| `--top-utxos N` | Top-N im Menü bzw. mit `--cli` (Default: 10) |
+| `--cli` | Einmal-Lauf: Top-UTXOs ausgeben und beenden |
+| `--top-utxos N` | Anzahl Top-UTXOs mit `--cli` (Default: 10) |
 | `--max-addresses N` | Abgeleitete Adressen pro XPUB (Default: 50) |
 | `--max-addresses-per-xpub N [N ...]` | Individuelles Limit pro XPUB (Reihenfolge wie `--xpubs`) |
 | `--rescan` | Full-Rescan aller XPUBs |
