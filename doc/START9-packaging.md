@@ -1,4 +1,4 @@
-﻿# StartOS-Paket bauen (Sideload `.s9pk`)
+# StartOS-Paket bauen (Sideload `.s9pk`)
 
 **FÃ¼r den nÃ¤chsten Bot:** Nicht von vorn anfangen. Das Sideload-Paket wird **in diesem Repo** gebaut, Branch `main`, Verzeichnis **`packaging/`**. Es gibt kein separates Ã¶ffentliches `satsage-startos`-Repo und kein `/workspace/satsage-startos` mehr.
 
@@ -16,7 +16,7 @@ Fertiges x86_64-Beispiel: GitHub-Release-Asset `satsage_x86_64-tls11.s9pk` (sieh
 | `packaging/docker_entrypoint.sh` | `server.py` mit Volume `/data` |
 | `scripts/build_startos_s9pk` | `make x86` inkl. Tool-Check |
 | `scripts/publish_startos_release` | `gh release` mit `.s9pk` + SHA-256 |
-| `.github/workflows/build-startos-s9pk.yml` | GHA: `workflow_dispatch` oder Tag `startos-*` |
+| `.github/workflows/build-startos-s9pk.yml` | GHA nur manuell (`workflow_dispatch`); baut Artifact, hängt **nichts** an Releases — Upload mit `publish_startos_release` nach Test |
 | `doc/START9-hardening.md` | App-HÃ¤rtung S0â€“S3 (Bind, Auth, Outbound) |
 | `doc/START9-backlog.md` | Tickets; S4 = dieses Packaging |
 
@@ -101,7 +101,7 @@ Ohne Argument wird `startos-YYYYMMDD` verwendet. Das Skript lÃ¤dt `.s9pk`, `.s
 
 (`--tag-head` forct den Tag auf HEAD und pusht ihn â€” nur nach ausdrÃ¼cklichem Maintainer-OK.)
 
-CI: Tag `startos-*` oder Workflow â€žBuild StartOS s9pkâ€œ. Secret **`STARTOS_BUILD_KEY`** = Inhalt von `.startos/build.key.pem`. Ohne Secret schlÃ¤gt `pack` fehl.
+CI: Workflow „Build StartOS s9pk“ nur manuell (`workflow_dispatch`) — Artifact zum Herunterladen, **kein** Release-Attach. Veröffentlichung nach Test: `./scripts/publish_startos_release`. Secret **`STARTOS_BUILD_KEY`** = Inhalt von `.startos/build.key.pem`. Ohne Secret schlägt `pack` fehl.
 
 ---
 
