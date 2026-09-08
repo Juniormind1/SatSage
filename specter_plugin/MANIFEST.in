@@ -1,0 +1,3 @@
+recursive-include src/satsage/specterext/satsage/templates *
+recursive-include src/satsage/specterext/satsage/static *
+include README.md

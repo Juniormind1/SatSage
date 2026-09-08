@@ -1,0 +1,31 @@
+# Bitcoin Core Regtest für Specter + xPubQuery Plugin-Tests
+# Start: docker compose -f docker-compose.regtest.yml up -d
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:27.0
+    container_name: satsage-bitcoind-regtest
+    ports:
+      - "18443:18443"
+      - "18444:18444"
+    volumes:
+      - bitcoind_regtest_data:/home/bitcoin/.bitcoin
+    command:
+      - -regtest=1
+      - -server=1
+      - -rpcuser=bitcoin
+      - -rpcpassword=secret
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcport=18443
+      - -fallbackfee=0.0001
+      - -txindex=1
+      - -blockfilterindex=1
+      - -printtoconsole=1
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=bitcoin", "-rpcpassword=secret", "getblockchaininfo"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  bitcoind_regtest_data:

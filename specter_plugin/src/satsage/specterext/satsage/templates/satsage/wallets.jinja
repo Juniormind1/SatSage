@@ -1,0 +1,65 @@
+{% extends "satsage/base.jinja" %}
+
+{% block satsage_content %}
+<section>
+    <h2>Specter-Wallets</h2>
+    {% if not wallets %}
+        <p>Keine Wallets gefunden. Lege in Specter ein Wallet an (Device → XPUB → Wallet).</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Alias</th>
+                    <th>Typ</th>
+                    <th>XPUBs</th>
+                    <th>UTXOs</th>
+                    <th>Txs</th>
+                    <th>Balance</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for w in wallets %}
+                <tr>
+                    <td>{{ w.name }}</td>
+                    <td><code>{{ w.alias }}</code></td>
+                    <td>{{ w.address_type or '—' }}</td>
+                    <td>{{ w.xpubs|length }}</td>
+                    <td>{{ w.utxo_count }}</td>
+                    <td>{{ w.tx_count }}</td>
+                    <td>{% if w.balance_btc is not none %}{{ '%.8f'|format(w.balance_btc) }} BTC{% else %}—{% endif %}</td>
+                    <td>
+                        <a class="btn" href="{{ url_for(service.id + '_endpoint.wallet_detail', wallet_alias=w.alias) }}">Details</a>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</section>
+
+{% if wallets %}
+<section style="margin-top: 1.5rem;">
+    <h2>XPUBs / Keys</h2>
+    {% for w in wallets %}
+        <h3>{{ w.name }}</h3>
+        {% if w.xpubs %}
+            <ul>
+            {% for x in w.xpubs %}
+                <li><code style="word-break: break-all;">{{ x if show_sensitive else (x[:16] ~ '…' ~ x[-8:]) }}</code></li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p style="opacity:0.7;">Keine XPUBs extrahiert (prüfe Keys/Deskriptoren).</p>
+        {% endif %}
+        {% if show_sensitive and w.recv_descriptor %}
+            <details>
+                <summary>recv_descriptor</summary>
+                <code style="word-break: break-all;">{{ w.recv_descriptor }}</code>
+            </details>
+        {% endif %}
+    {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

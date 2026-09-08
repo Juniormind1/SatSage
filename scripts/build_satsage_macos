@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Baut die SatSage-Web-GUI als macOS-Standalone (PyInstaller Onefile).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+PY="${PYTHON:-}"
+if [[ -z "$PY" ]]; then
+  if [[ -x "$ROOT/.venv/bin/python" ]]; then
+    PY="$ROOT/.venv/bin/python"
+  else
+    PY="$(command -v python3 || command -v python)"
+  fi
+fi
+
+echo "→ Python: $PY"
+"$PY" -c "import sys; print('  ', sys.version.split()[0], sys.platform)"
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "Hinweis: Dieses Skript ist für macOS gedacht (aktuell: $(uname -s))." >&2
+fi
+
+echo "→ Abhängigkeiten (requirements + pyinstaller + Pillow für Splash)…"
+"$PY" -m pip install -q -r requirements.txt "pyinstaller>=6.0" "Pillow>=9.0"
+
+# Splash-PNG optional (Linux/Windows-Builds nutzen es; macOS-Bootloader nicht).
+echo "→ Marke und Splash (für Cross-Check / Linux-Win-Builds)…"
+"$PY" "$ROOT/scripts/prepare_brand_assets.py" || true
+"$PY" "$ROOT/scripts/make_splash.py" || true
+
+echo "→ PyInstaller (Onefile; unter macOS ohne Splash-Bootloader)…"
+rm -rf build/satsage-webgui dist/satsage-webgui
+"$PY" -m PyInstaller --noconfirm --clean packaging/satsage-webgui.spec
+
+OUT="$ROOT/dist/satsage-webgui"
+if [[ ! -f "$OUT" ]]; then
+  echo "Fehler: $OUT nicht erzeugt." >&2
+  exit 1
+fi
+chmod +x "$OUT"
+# Gatekeeper: lokaler Build ohne Notarisierung — Quarantäne entfernen, falls gesetzt.
+xattr -dr com.apple.quarantine "$OUT" 2>/dev/null || true
+
+if [[ -f "$ROOT/.env.example" ]]; then
+  cp -f "$ROOT/.env.example" "$ROOT/dist/.env.example"
+fi
+
+echo
+echo "Fertig."
+echo "  Binary : $OUT"
+echo "  Splash : unter macOS nicht im Bootloader (PyInstaller-Limit); Win/Linux ja"
+echo "  Start  : $OUT"
+echo "  Config : .env neben dem Binary anlegen (Vorlage: dist/.env.example)"
+echo "  Caches : utxo_cache/ und immutable_cache/ entstehen neben dem Binary"
+echo "  Hinweis: Beim ersten Start ggf. Systemeinstellungen → Datenschutz → trotzdem öffnen."

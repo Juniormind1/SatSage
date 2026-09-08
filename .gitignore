@@ -1,0 +1,68 @@
+.env
+# Die Web-Oberfläche legt vor jedem Schreiben eine Sicherung der .env an und
+# schreibt über eine .tmp. Beide enthalten dieselben Geheimnisse wie die .env
+# selbst — XPUBs, RPC-Zugangsdaten.
+.env.bak
+.env.tmp
+.env.*.bak
+
+__pycache__/
+*.pyc
+.venv/
+
+# Specter plugin test environment (local)
+specter_plugin/.venv/
+specter_plugin/.specter_dev/
+specter_plugin/.bitcoin_regtest/
+specter_plugin/.run/
+specter_plugin/**/*.egg-info/
+
+
+.idea/
+.DS_Store
+Thumbs.db
+
+*.tmp
+*~
+
+utxo_cache/
+immutable_cache/
+sanctioned_cache/
+tor_data/
+label_cache/
+psbt_out/
+
+terminals/
+mcps/
+
+# PyInstaller
+build/
+dist/
+
+# StartOS packaging (key never commit; s9pk is a release asset)
+.startos/
+*.s9pk
+*.s9pk.sha256
+
+_patch_*
+_test_*
+_profile_*
+_check_*
+_list_*
+/workshop/
+tmp/
+
+# SatSage-Regtest-Lab: lokale Chain-Daten, Indizes und Lab-Secrets
+lab/regtest/.data/
+lab/regtest/.tools/
+lab/regtest/.regtest.env
+lab/regtest/secrets/
+lab/regtest/**/*.xprv
+lab/regtest/**/seed*
+tmp/live-psbt/
+tmp/live-timing-*.json
+
+# Local / runtime (public tree)
+price_cache/
+satsage-webgui.exe
+satsage-webgui.exe.sha256

@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Attach the latest packaging/satsage_x86_64*.s9pk to a GitHub release.
+#
+# Usage:
+#   ./scripts/publish_startos_release              # tag startos-YYYYMMDD
+#   ./scripts/publish_startos_release startos-tls12
+#
+# Does not create a git tag unless --tag-head is passed.
+# Requires: gh auth login  (repo is private)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PKG="$ROOT/packaging"
+export PATH="${HOME}/.local/bin:${PATH}"
+
+TAG="${1:-}"
+TAG_HEAD=0
+if [ "${1:-}" = "--tag-head" ]; then
+  TAG_HEAD=1
+  TAG="${2:-}"
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "gh is not installed. See doc/START9-packaging.md" >&2
+  exit 1
+fi
+if ! gh auth status >/dev/null 2>&1; then
+  echo "gh is not logged in. Run: gh auth login" >&2
+  exit 1
+fi
+
+S9PK="$(ls -1t "$PKG"/satsage_x86_64*.s9pk 2>/dev/null | head -n 1 || true)"
+if [ -z "$S9PK" ]; then
+  echo "no satsage_x86_64*.s9pk — run ./scripts/build_startos_s9pk first" >&2
+  exit 1
+fi
+
+BASE="$(basename "$S9PK" .s9pk)"
+SUM="$S9PK.sha256"
+README="$PKG/${BASE}.README.txt"
+if [ ! -f "$SUM" ]; then
+  (cd "$(dirname "$S9PK")" && sha256sum "$(basename "$S9PK")" > "$(basename "$SUM")")
+fi
+HASH="$(awk '{print $1}' "$SUM")"
+if [ -z "$TAG" ]; then
+  TAG="startos-$(date -u +%Y%m%d)"
+fi
+
+cat > "$README" <<EOF
+SatSage StartOS sideload package (x86_64)
+
+File: $(basename "$S9PK")
+SHA-256: $HASH
+
+Sideload: StartOS web UI → Sideload → select this .s9pk.
+Requires running Bitcoin Core and Electrs on the same device.
+
+Build: ./scripts/build_startos_s9pk
+Guide: doc/START9-packaging.md
+EOF
+
+if [ "$TAG_HEAD" -eq 1 ]; then
+  git -C "$ROOT" tag -f "$TAG"
+  git -C "$ROOT" push -f origin "$TAG"
+fi
+
+TITLE="SatSage StartOS – Sideload ($TAG)"
+BODY="$(cat <<EOF
+## Deutsch
+Sideload-Paket für StartOS 0.4 auf x86_64. SHA-256: \`$HASH\`
+
+Voraussetzungen: Bitcoin Core und Electrs auf demselben Gerät, beide gesund.
+
+## English
+Sideload package for StartOS 0.4 on x86_64. Verify the attached SHA256 file before installation. Requires Bitcoin Core and Electrs.
+EOF
+)"
+
+if gh -R "$(gh repo view --json nameWithOwner -q .nameWithOwner)" release view "$TAG" >/dev/null 2>&1; then
+  echo "updating release $TAG"
+  gh release upload "$TAG" "$S9PK" "$SUM" "$README" --clobber
+else
+  echo "creating release $TAG"
+  gh release create "$TAG" "$S9PK" "$SUM" "$README" \
+    --title "$TITLE" \
+    --notes "$BODY"
+fi
+
+echo "release: $(gh release view "$TAG" --json url -q .url)"

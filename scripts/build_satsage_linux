@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Baut die SatSage-Web-GUI als Linux-Standalone (PyInstaller Onefile).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+PY="${PYTHON:-}"
+if [[ -z "$PY" ]]; then
+  if [[ -x "$ROOT/.venv/bin/python" ]]; then
+    PY="$ROOT/.venv/bin/python"
+  else
+    PY="$(command -v python3 || command -v python)"
+  fi
+fi
+
+echo "→ Python: $PY"
+"$PY" -c "import sys; print('  ', sys.version.split()[0], sys.platform)"
+
+echo "→ Abhängigkeiten (requirements + pyinstaller + Pillow für Splash)…"
+"$PY" -m pip install -q -r requirements.txt "pyinstaller>=6.0" "Pillow>=9.0"
+
+echo "→ Marke und Splash (sat-logo + SatSage final)…"
+"$PY" "$ROOT/scripts/prepare_brand_assets.py"
+"$PY" "$ROOT/scripts/make_splash.py"
+
+echo "→ PyInstaller (Onefile + Splash)…"
+rm -rf build/satsage-webgui dist/satsage-webgui
+"$PY" -m PyInstaller --noconfirm --clean packaging/satsage-webgui.spec
+
+OUT="$ROOT/dist/satsage-webgui"
+if [[ ! -f "$OUT" ]]; then
+  echo "Fehler: $OUT nicht erzeugt." >&2
+  exit 1
+fi
+chmod +x "$OUT"
+
+if [[ -f "$ROOT/.env.example" ]]; then
+  cp -f "$ROOT/.env.example" "$ROOT/dist/.env.example"
+fi
+
+echo
+echo "Fertig."
+echo "  Binary : $OUT"
+echo "  Splash : packaging/satsage-splash.png (Logo beim Start)"
+echo "  Start  : $OUT"
+echo "  Config : .env neben dem Binary anlegen (Vorlage: dist/.env.example)"
+echo "  Caches : utxo_cache/ und immutable_cache/ entstehen neben dem Binary"
+echo "  Hinweis: Splash braucht Tcl/Tk (python3-tk). Fehlt es, bricht der Build ab."

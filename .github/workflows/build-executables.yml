@@ -1,0 +1,61 @@
+name: Build Executables
+
+# Läuft nur bei Git-Tags (z.B. v1.0.0) oder manuellem Start, nicht bei jedem
+# Push — schont die begrenzten Actions-Minuten eines privaten Repos, da
+# macOS-Runner mit 10x und Windows-Runner mit 2x gewichtet werden.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller packaging/satsage-webgui.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: satsage-webgui-${{ matrix.os }}
+          path: |
+            dist/satsage-webgui
+            dist/satsage-webgui.exe
+          if-no-files-found: ignore
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Release-Assets vorbereiten
+        run: |
+          mkdir -p release-assets
+          cp artifacts/satsage-webgui-ubuntu-latest/satsage-webgui release-assets/satsage-webgui-linux
+          cp artifacts/satsage-webgui-macos-latest/satsage-webgui release-assets/satsage-webgui-macos
+          cp artifacts/satsage-webgui-windows-latest/satsage-webgui.exe release-assets/satsage-webgui-windows.exe
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*

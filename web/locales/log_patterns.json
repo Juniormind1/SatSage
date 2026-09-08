@@ -1,0 +1,694 @@
+[
+  {
+    "re": "^Lade Block-Header ab SegWit \\(Block 481\\.824, August 2017\\) — einmalig, für alle späteren Wallets\\.$",
+    "en": "Loading block headers from SegWit (block 481,824, August 2017) — one-time, for all later wallets."
+  },
+  {
+    "re": "^Lade Block-Header ab SegWit \\(Block 481\\.824, August 2017\\) — (.*)$",
+    "en": "Loading block headers from SegWit (block 481,824, August 2017) — $1"
+  },
+  {
+    "re": "^Header-Cache bei Block (.+) — prüfe Chain-Tip…$",
+    "en": "Header cache at block $1 — checking chain tip…"
+  },
+  {
+    "re": "^Header-Cache aktuell bis Block (.+) \\(Peer-Tip (.+)\\)\\.$",
+    "en": "Header cache current up to block $1 (peer tip $2)."
+  },
+  {
+    "re": "^Header-Cache unverändert bis Block (.+)\\.$",
+    "en": "Header cache unchanged up to block $1."
+  },
+  {
+    "re": "^Prüfe (.+)…$",
+    "en": "Checking $1…"
+  },
+  {
+    "re": "^Prüfe (.+)$",
+    "en": "Checking $1"
+  },
+  {
+    "re": "einmalig, für alle späteren Wallets\\.",
+    "en": "one-time, for all later wallets."
+  },
+  {
+    "re": "^(\\d+) Vorgänge · (.+)$",
+    "en": "$1 events · $2"
+  },
+  {
+    "re": " · angezeigt: (\\d+)$",
+    "en": " · shown: $1"
+  },
+  {
+    "re": "^UTXO-Scan$",
+    "en": "UTXO scan"
+  },
+  {
+    "re": "^Verlaufsscan$",
+    "en": "History scan"
+  },
+  {
+    "re": "^(.+) für „(.+)“ läuft schon oder wartet\\.$",
+    "en": "$1 for “$2” already running or queued."
+  },
+  {
+    "re": "^(.+) für „(.+)“ angestellt\\.$",
+    "en": "$1 for “$2” queued."
+  },
+  {
+    "re": "^Starte (.+) für „(.+)“…$",
+    "en": "Starting $1 for “$2”…"
+  },
+  {
+    "re": "^BIP-158 nicht vor (.+)\\.$",
+    "en": "BIP-158 not before $1."
+  },
+  {
+    "re": "^Browser darf geschlossen werden — Server und Scan laufen im Terminal weiter\\.$",
+    "en": "You can close the browser — server and scan continue in the terminal."
+  },
+  {
+    "re": "^Starte Scan neu für (.+)…$",
+    "en": "Restarting scan for $1…"
+  },
+  {
+    "re": "^Starte Verlauf aller Wallets…$",
+    "en": "Starting history for all wallets…"
+  },
+  {
+    "re": "^Starte Herkunft aller UTXOs…$",
+    "en": "Starting origin for all UTXOs…"
+  },
+  {
+    "re": "^Starte Verbindungstest…$",
+    "en": "Starting connection test…"
+  },
+  {
+    "re": "^Start-Aktualisierung der Wallets…$",
+    "en": "Start-up wallet refresh…"
+  },
+  {
+    "re": "^Start-Aktualisierung abgebrochen\\.$",
+    "en": "Start-up refresh cancelled."
+  },
+  {
+    "re": "^Start-Aktualisierung fertig: (\\d+) Wallet\\(s\\), (.+) UTXO\\(s\\)\\.$",
+    "en": "Start-up refresh done: $1 wallet(s), $2 UTXO(s)."
+  },
+  {
+    "re": "^Start-Aktualisierung: (.+)$",
+    "en": "Start-up refresh: $1"
+  },
+  {
+    "re": "^Hole Bitcoin-Kurs…$",
+    "en": "Fetching Bitcoin price…"
+  },
+  {
+    "re": "^Kurs: (.+) \\((.+)\\)\\.$",
+    "en": "Price: $1 ($2)."
+  },
+  {
+    "re": "^Kurs: (.+)$",
+    "en": "Price: $1"
+  },
+  {
+    "re": "^Importiere BTC\\/(.+)-Kurs-CSV „(.+)“…$",
+    "en": "Importing BTC/$1 rate CSV “$2”…"
+  },
+  {
+    "re": "^Kurs-CSV (.+): (\\d+) Zeilen gelesen, (\\d+) Tage im Cache(.*)$",
+    "en": "Rate CSV $1: $2 rows read, $3 days in cache$4"
+  },
+  {
+    "re": "^Kurs-Import: (.+)$",
+    "en": "Rate import: $1"
+  },
+  {
+    "re": "^Kurs-CSV ließ sich nicht lesen\\.$",
+    "en": "Could not read rate CSV."
+  },
+  {
+    "re": "^Prüfe Assistenten-Anbindung…$",
+    "en": "Checking assistant connection…"
+  },
+  {
+    "re": "^Assistent: (.+)$",
+    "en": "Assistant: $1"
+  },
+  {
+    "re": "^Assistent erreichbar\\. (.+)$",
+    "en": "Assistant reachable. $1"
+  },
+  {
+    "re": "^Assistent nicht erreichbar(.*)$",
+    "en": "Assistant not reachable$1"
+  },
+  {
+    "re": "^Assistent nicht konfiguriert\\.$",
+    "en": "Assistant not configured."
+  },
+  {
+    "re": "^Frage Assistent…$",
+    "en": "Asking assistant…"
+  },
+  {
+    "re": "^Öffentliche Electrum-Server nur nach Bestätigung\\.$",
+    "en": "Public Electrum servers only after confirmation."
+  },
+  {
+    "re": "^Öffentliche Electrum-Server abgelehnt\\.$",
+    "en": "Public Electrum servers declined."
+  },
+  {
+    "re": "^Öffentliche Electrum-Server bestätigt — verbinde…$",
+    "en": "Public Electrum servers confirmed — connecting…"
+  },
+  {
+    "re": "^Öffentliche Server: (.+)$",
+    "en": "Public servers: $1"
+  },
+  {
+    "re": "^Öffentliche Electrum-Server nicht genutzt \\(Bestätigung fehlt\\)\\.$",
+    "en": "Public Electrum servers not used (confirmation missing)."
+  },
+  {
+    "re": "^Öffentliche Electrum-Server nicht angefragt(.*)$",
+    "en": "Public Electrum servers not requested$1"
+  },
+  {
+    "re": "^Verbinde mit dem Sanktions-Server…$",
+    "en": "Connecting to the sanctions server…"
+  },
+  {
+    "re": "^Verbinde mit der Datenquelle…$",
+    "en": "Connecting to the data source…"
+  },
+  {
+    "re": "^Verbinde mit der Verlaufs-Datenquelle…$",
+    "en": "Connecting to the history data source…"
+  },
+  {
+    "re": "^Verbinde mit (.+) über Tor$",
+    "en": "Connecting to $1 via Tor"
+  },
+  {
+    "re": "^Verbinde mit (.+)$",
+    "en": "Connecting to $1"
+  },
+  {
+    "re": "^Verbinde für (.+)…$",
+    "en": "Connecting for $1…"
+  },
+  {
+    "re": "^Verbunden\\. Compact Filter (.+)$",
+    "en": "Connected. Compact filter $1"
+  },
+  {
+    "re": "^Verbunden\\. (\\d+) öffentliche Electrum-Peers\\.$",
+    "en": "Connected. $1 public Electrum peers."
+  },
+  {
+    "re": "^Verbunden\\. (\\d+) Compact-Filter-(Peer|Peers) für den Scan\\.$",
+    "en": "Connected. $1 compact-filter $2 for the scan."
+  },
+  {
+    "re": "^Verbunden\\. (\\d+) Compact-Filter-Peers\\.$",
+    "en": "Connected. $1 compact-filter peers."
+  },
+  {
+    "re": "^Verbunden\\. (.+)$",
+    "en": "Connected. $1"
+  },
+  {
+    "re": "^Verbindung fehlgeschlagen (.+): (.+)$",
+    "en": "Connection failed $1: $2"
+  },
+  {
+    "re": "^Verbindung fehlgeschlagen: kein Compact-Filter-Peer$",
+    "en": "Connection failed: no compact-filter peer"
+  },
+  {
+    "re": "^Verbindung fehlgeschlagen: keine öffentlichen Electrum-Server$",
+    "en": "Connection failed: no public Electrum servers"
+  },
+  {
+    "re": "^Verbindung fehlgeschlagen(.*)$",
+    "en": "Connection failed$1"
+  },
+  {
+    "re": "^TLS-Handshake fehlgeschlagen(.*)$",
+    "en": "TLS handshake failed$1"
+  },
+  {
+    "re": "^Port geschlossen(.*)$",
+    "en": "Port closed$1"
+  },
+  {
+    "re": "^Zertifikat nicht überprüfbar(.*)$",
+    "en": "Certificate not verifiable$1"
+  },
+  {
+    "re": "^Verbindung ohne TLS abgebrochen(.*)$",
+    "en": "Connection without TLS aborted$1"
+  },
+  {
+    "re": "^Starte Tor \\((.+)\\) — SOCKS (.+)$",
+    "en": "Starting Tor ($1) — SOCKS $2"
+  },
+  {
+    "re": "^Prüfe Tor-SOCKS (.+)…$",
+    "en": "Checking Tor SOCKS $1…"
+  },
+  {
+    "re": "^Tor-SOCKS (.+) erreichbar$",
+    "en": "Tor SOCKS $1 reachable"
+  },
+  {
+    "re": "^Tor-SOCKS (.+) lauscht auf (.+)$",
+    "en": "Tor SOCKS $1 listening on $2"
+  },
+  {
+    "re": "^Tor-SOCKS lauscht auf (.+)$",
+    "en": "Tor SOCKS listening on $1"
+  },
+  {
+    "re": "^Kein laufender Tor-SOCKS — suche Binary…$",
+    "en": "No running Tor SOCKS — searching binary…"
+  },
+  {
+    "re": "^Tor für Core-RPC nicht bereit: (.+)$",
+    "en": "Tor for Core RPC not ready: $1"
+  },
+  {
+    "re": "^Tor für P2P nicht bereit: (.+)$",
+    "en": "Tor for P2P not ready: $1"
+  },
+  {
+    "re": "^Tor für öffentliche Onions nicht bereit: (.+)$",
+    "en": "Tor for public onions not ready: $1"
+  },
+  {
+    "re": "^Tor hat nach (\\d+)s noch keinen SOCKS-Port geöffnet\\.(.*)$",
+    "en": "Tor has not opened a SOCKS port after $1s.$2"
+  },
+  {
+    "re": "^Tor ist sofort beendet:(.*)$",
+    "en": "Tor exited immediately:$1"
+  },
+  {
+    "re": "^Tor nicht erreichbar und nicht startbar\\.$",
+    "en": "Tor not reachable and not startable."
+  },
+  {
+    "re": "^Tor übersprungen — (.+) ist erreichbar\\.$",
+    "en": "Tor skipped — $1 is reachable."
+  },
+  {
+    "re": "^Tor: Kein SOCKS-Proxy — Tor Browser \\(portable\\) starten$",
+    "en": "Tor: no SOCKS proxy — start Tor Browser (portable)"
+  },
+  {
+    "re": "^Kein Tor-Binary gefunden\\.(.*)$",
+    "en": "No tor binary found.$1"
+  },
+  {
+    "re": "^Clearnet-P2P ohne Compact-Filter-Peer — versuche über Tor…$",
+    "en": "Clearnet P2P without compact-filter peer — trying via Tor…"
+  },
+  {
+    "re": "^(\\d+) öffentliche Onions…$",
+    "en": "$1 public onions…"
+  },
+  {
+    "re": "^(\\d+) Clearnet-Server in der Liste, prüfe bis zu (\\d+)…$",
+    "en": "$1 clearnet servers in the list, checking up to $2…"
+  },
+  {
+    "re": "^Zuerst (.+), ohne Filter weitere Peers\\.$",
+    "en": "First $1, without filters more peers."
+  },
+  {
+    "re": "^Synchronisiere Block-Header…$",
+    "en": "Syncing block headers…"
+  },
+  {
+    "re": "^Lade Block-Header ab SegWit \\(Block 481\\.824, August 2017\\) — (.*)$",
+    "en": "Loading block headers from SegWit (block 481,824, August 2017) — $1"
+  },
+  {
+    "re": "^Lade Block-Header ab SegWit \\(Block 481\\.824, August 2017\\)…$",
+    "en": "Loading block headers from SegWit (block 481,824, August 2017)…"
+  },
+  {
+    "re": "^Header-Cache fertig bis Block (.+)\\.$",
+    "en": "Header cache ready up to block $1."
+  },
+  {
+    "re": "^Header bis Block (.+) nachziehen…$",
+    "en": "Catching up headers to block $1…"
+  },
+  {
+    "re": "^Header bis Block (.+)\\.?$",
+    "en": "Headers up to block $1."
+  },
+  {
+    "re": "^Header-Sync abgebrochen \\((.+)\\) — (.*)$",
+    "en": "Header sync aborted ($1) — $2"
+  },
+  {
+    "re": "^P2P-Header-Vorab aus \\(BIP158_P2P=0\\)\\.$",
+    "en": "P2P header prefetch off (BIP158_P2P=0)."
+  },
+  {
+    "re": "^Frage Block-Header ab Höhe (.+) \\(Checkpoint\\)…$",
+    "en": "Requesting block headers from height $1 (checkpoint)…"
+  },
+  {
+    "re": "^Frage Block-Header ab Höhe (.+)…$",
+    "en": "Requesting block headers from height $1…"
+  },
+  {
+    "re": "^Filter über (\\d+) Peers parallel…$",
+    "en": "Filters over $1 peers in parallel…"
+  },
+  {
+    "re": "^Filter (\\S+) Blöcke zu prüfen(.*)$",
+    "en": "Filter $1 blocks to check$2"
+  },
+  {
+    "re": "^Filter Block (.+)–(.+)…$",
+    "en": "Filter blocks $1–$2…"
+  },
+  {
+    "re": "^Filter Block (.+)–(.+)$",
+    "en": "Filter blocks $1–$2"
+  },
+  {
+    "re": "^Inkrementell ab Block (.+): (.*)$",
+    "en": "Incremental from block $1: $2"
+  },
+  {
+    "re": "^Filter-Treffer(.*)$",
+    "en": "Filter hit$1"
+  },
+  {
+    "re": "^False Positive$",
+    "en": "False positive"
+  },
+  {
+    "re": "^hole Block (.+) \\((.+)…\\) (.*)$",
+    "en": "fetching block $1 ($2…) $3"
+  },
+  {
+    "re": "^hole Block (.+)$",
+    "en": "fetching block $1"
+  },
+  {
+    "re": "^— hole Block…$",
+    "en": "— fetching block…"
+  },
+  {
+    "re": " — hole Block…$",
+    "en": " — fetching block…"
+  },
+  {
+    "re": "^Chunk (.+)–(.+) fehlgeschlagen (.*)$",
+    "en": "Chunk $1–$2 failed $3"
+  },
+  {
+    "re": "^Tx (.+)… über Core-RPC…$",
+    "en": "Tx $1… via Core RPC…"
+  },
+  {
+    "re": "^Nur (\\d+) Compact-Filter-(Peer|Peers) — Scan wird langsamer\\.$",
+    "en": "Only $1 compact-filter $2 — scan will be slower."
+  },
+  {
+    "re": "^Kein P2P-Peer mit Compact Filter gefunden(.*)$",
+    "en": "No P2P peer with compact filters found$1"
+  },
+  {
+    "re": "^Suche bis zu (\\d+) Compact-Filter-Peers…$",
+    "en": "Searching up to $1 compact-filter peers…"
+  },
+  {
+    "re": "^Port 8333 wirkt blockiert(.*)$",
+    "en": "Port 8333 appears blocked$1"
+  },
+  {
+    "re": "^Neuer Peer (.+)$",
+    "en": "New peer $1"
+  },
+  {
+    "re": "^Peer (.+) ausgefallen(.*)$",
+    "en": "Peer $1 failed$2"
+  },
+  {
+    "re": "^Wechsel: (.+)$",
+    "en": "Switch: $1"
+  },
+  {
+    "re": "^Frage UTXOs für (\\d+) Adressen…$",
+    "en": "Querying UTXOs for $1 addresses…"
+  },
+  {
+    "re": "^Frage UTXOs…$",
+    "en": "Querying UTXOs…"
+  },
+  {
+    "re": "^Frage Verlauf für (\\d+) Adressen — noch (\\d+) von (\\d+) Adressen$",
+    "en": "Querying history for $1 addresses — $2 of $3 remaining"
+  },
+  {
+    "re": "^Frage Verlauf für (\\d+) Adressen — (.*)$",
+    "en": "Querying history for $1 addresses — $2"
+  },
+  {
+    "re": "^Gap-Scan (.+)-Adressen…$",
+    "en": "Gap scan $1 addresses…"
+  },
+  {
+    "re": "^Gap-Scan (.*)Index #(\\d+) · bisher (.+)$",
+    "en": "Gap scan $1index #$2 · so far $3"
+  },
+  {
+    "re": "^Gap-Scan (.*)Index #(\\d+) — darin (.+)$",
+    "en": "Gap scan $1index #$2 — contains $3"
+  },
+  {
+    "re": "^Gap-Scan (.*)Index #(\\d+)…$",
+    "en": "Gap scan $1index #$2…"
+  },
+  {
+    "re": "^Suche benutzte Adressen von (.+)…$",
+    "en": "Searching used addresses of $1…"
+  },
+  {
+    "re": "^Ermittle Wallet-Alter…$",
+    "en": "Determining wallet age…"
+  },
+  {
+    "re": "^Wallet-Alter: Adresse (\\d+) von (\\d+)…$",
+    "en": "Wallet age: address $1 of $2…"
+  },
+  {
+    "re": "^Prüfe Adresse (\\d+) von (\\d+)…$",
+    "en": "Checking address $1 of $2…"
+  },
+  {
+    "re": "^Aktualisiere (.+) bis Chain-Tip…$",
+    "en": "Updating $1 to chain tip…"
+  },
+  {
+    "re": "^(.+): Gap ab Index #(\\d+)…$",
+    "en": "$1: gap from index #$2…"
+  },
+  {
+    "re": "^(.+): Lookahead (\\d+) Indizes…$",
+    "en": "$1: lookahead $2 indices…"
+  },
+  {
+    "re": "^(.+): prüfe (\\d+) bekannte Adressen…$",
+    "en": "$1: checking $2 known addresses…"
+  },
+  {
+    "re": "^(.+): (\\d+) UTXO\\(s\\) aktuell\\.$",
+    "en": "$1: $2 UTXO(s) current."
+  },
+  {
+    "re": "^(.+): (\\d+) neue Gap-Adressen…$",
+    "en": "$1: $2 new gap addresses…"
+  },
+  {
+    "re": "^scantxoutset läuft auf dem Node…$",
+    "en": "scantxoutset running on the node…"
+  },
+  {
+    "re": "^scantxoutset: (\\d+) UTXO\\(s\\) in (.+)s$",
+    "en": "scantxoutset: $1 UTXO(s) in $2s"
+  },
+  {
+    "re": "^BIP-158: (\\d+) unspent UTXO\\(s\\)(.*)$",
+    "en": "BIP-158: $1 unspent UTXO(s)$2"
+  },
+  {
+    "re": "^BIP-158 Blockwalk für Verlauf(.*)$",
+    "en": "BIP-158 block walk for history$1"
+  },
+  {
+    "re": "^BIP-158 Verlauf: (\\d+) Ein- und Ausgänge$",
+    "en": "BIP-158 history: $1 inflows and outflows"
+  },
+  {
+    "re": "^UTXO-Cache geladen: (.+)$",
+    "en": "UTXO cache loaded: $1"
+  },
+  {
+    "re": "^UTXO-Cache nicht speicherbar: zu wenig freier Speicherplatz\\.$",
+    "en": "UTXO cache not writable: not enough free disk space."
+  },
+  {
+    "re": "^Kein UTXO-Cache(.*)$",
+    "en": "No UTXO cache$1"
+  },
+  {
+    "re": "^Keine UTXOs(.*)$",
+    "en": "No UTXOs$1"
+  },
+  {
+    "re": "^Starte Verlaufsscan für (.+)…$",
+    "en": "Starting history scan for $1…"
+  },
+  {
+    "re": "^Verlaufsscan — eigene Datenquellen-Priorität…$",
+    "en": "History scan — own data-source priority…"
+  },
+  {
+    "re": "^Verlauf: (.+)$",
+    "en": "History: $1"
+  },
+  {
+    "re": "^Herkunft — noch (\\d+) von (\\d+) UTXOs$",
+    "en": "Origin — $1 of $2 UTXOs remaining"
+  },
+  {
+    "re": "^Herkunft für (\\d+) UTXOs$",
+    "en": "Origin for $1 UTXOs"
+  },
+  {
+    "re": "^Herkunft (.+)$",
+    "en": "Origin $1"
+  },
+  {
+    "re": "^Verfolge Herkunft über (.+)…$",
+    "en": "Tracing origin via $1…"
+  },
+  {
+    "re": "^Speichere gründlichere Herkunft über (.+)…$",
+    "en": "Saving deeper origin via $1…"
+  },
+  {
+    "re": "^Aktualisiere Herkunftsbaum…$",
+    "en": "Updating origin tree…"
+  },
+  {
+    "re": "^Folgeanalyse: erst Herkunft, dann Vorgänger-Txs…$",
+    "en": "Follow-up: origin first, then predecessor txs…"
+  },
+  {
+    "re": "^Transaktionsorientierte Folge-Analyse(.*)$",
+    "en": "Transaction-oriented follow-up analysis$1"
+  },
+  {
+    "re": "^Nachziehen: alle eigenen Eingänge großer Sammel-Txs…$",
+    "en": "Catch-up: all own inputs of large consolidation txs…"
+  },
+  {
+    "re": "^↻ Herkunft: Blockzeit zu (.+)…$",
+    "en": "↻ Origin: block time for $1…"
+  },
+  {
+    "re": "^↻ Herkunft: lade Vorgänger-Output (.+)…$",
+    "en": "↻ Origin: loading previous output $1…"
+  },
+  {
+    "re": "^Fortschritt: (\\d+)% \\((\\d+)\\/(\\d+) UTXOs analysiert\\)$",
+    "en": "Progress: $1% ($2/$3 UTXOs analyzed)"
+  },
+  {
+    "re": "^Trace abgeschlossen: 100% \\((\\d+)\\/(\\d+) UTXOs\\)(.*)$",
+    "en": "Trace complete: 100% ($1/$2 UTXOs)$3"
+  },
+  {
+    "re": "^UTXO (\\d+)\\/(\\d+) \\((\\d+)%\\): (.*)$",
+    "en": "UTXO $1/$2 ($3%): $4"
+  },
+  {
+    "re": "^Lade Sanktions- und Blacklists…$",
+    "en": "Loading sanctions and blacklists…"
+  },
+  {
+    "re": "^Lade Adress-Labels…$",
+    "en": "Loading address labels…"
+  },
+  {
+    "re": "^(.+): (\\d+) KB(.*)$",
+    "en": "$1: $2 KB$3"
+  },
+  {
+    "re": "^Sanktions-Fulcrum \\((.+)\\): (.+)$",
+    "en": "Sanctions Fulcrum ($1): $2"
+  },
+  {
+    "re": "^Sanktionsprüfung (.+)$",
+    "en": "Sanctions check $1"
+  },
+  {
+    "re": "^Sanktionsliste Batch (.+)$",
+    "en": "Sanctions list batch $1"
+  },
+  {
+    "re": "^Scanne UTXOs auf sanktionierten Adressen — (.*)$",
+    "en": "Scanning UTXOs on sanctioned addresses — $1"
+  },
+  {
+    "re": "^Suche öffentliche Electrum-Server \\(Clearnet\\)…$",
+    "en": "Searching public Electrum servers (clearnet)…"
+  },
+  {
+    "re": "^Suche geeignete Clearnet-Fulcrum-Server für Sanktionslisten(.*)$",
+    "en": "Searching suitable clearnet Fulcrum servers for sanctions lists$1"
+  },
+  {
+    "re": "^Kein Fulcrum für Sanktionsabfragen erreichbar(.*)$",
+    "en": "No Fulcrum reachable for sanctions queries$1"
+  },
+  {
+    "re": "^Datenquelle: Bitcoin-P2P \\(BIP-158 Compact Filter\\)$",
+    "en": "Data source: Bitcoin P2P (BIP-158 compact filter)"
+  },
+  {
+    "re": "^Datenquelle: eigener Electrum-Server \\(LAN\\) (.+)$",
+    "en": "Data source: own Electrum server (LAN) $1"
+  },
+  {
+    "re": "^Datenquelle: eigener Electrum-Server \\(Tor\\) (.+)$",
+    "en": "Data source: own Electrum server (Tor) $1"
+  },
+  {
+    "re": "^Datenquelle: öffentliche Electrum-Server(.*)$",
+    "en": "Data source: public Electrum servers$1"
+  },
+  {
+    "re": "^Keine Datenquelle erreichbar(.*)$",
+    "en": "No data source reachable$1"
+  },
+  {
+    "re": "^Moment noch(.*)$",
+    "en": "Still working$1"
+  },
+  {
+    "re": "^anderes Wallet$",
+    "en": "another wallet"
+  }
+]

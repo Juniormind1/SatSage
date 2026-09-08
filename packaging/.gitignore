@@ -1,0 +1,7 @@
+*.s9pk
+*.s9pk.sha256
+node_modules/
+javascript/
+ncc-cache/
+docker-images/
+.DS_Store

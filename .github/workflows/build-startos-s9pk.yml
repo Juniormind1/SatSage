@@ -1,0 +1,79 @@
+name: Build StartOS s9pk (x86_64)
+
+# Sideload package for StartOS. Not the desktop PyInstaller workflow.
+# Docs: doc/START9-packaging.md
+#
+# Signing: start-cli needs a workspace key. Store the PEM in the repo secret
+# STARTOS_BUILD_KEY (contents of .startos/build.key.pem). Without it the job
+# still compiles the image and TypeScript, then pack fails — artifact-less.
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "startos-*"
+
+permissions:
+  contents: write
+
+jobs:
+  s9pk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packaging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install squashfs and start-cli
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools squashfs-tools-ng jq
+          curl -fsSL https://start9.com/start-cli/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo /usr/bin >> "$GITHUB_PATH"
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Start9 workspace + signing key
+        working-directory: .
+        run: |
+          if [ -n "${{ secrets.STARTOS_BUILD_KEY }}" ]; then
+            mkdir -p .startos
+            printf '%s\n' "${{ secrets.STARTOS_BUILD_KEY }}" > .startos/build.key.pem
+            chmod 600 .startos/build.key.pem
+          fi
+          if [ ! -d .startos ]; then
+            start-cli s9pk init-workspace .
+          fi
+
+      - name: make x86
+        run: make x86
+
+      - name: Checksum
+        run: |
+          shopt -s nullglob
+          for f in satsage_x86_64*.s9pk; do
+            sha256sum "$f" | tee "$f.sha256"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: satsage-startos-x86_64
+          path: |
+            packaging/satsage_x86_64*.s9pk
+            packaging/satsage_x86_64*.s9pk.sha256
+          if-no-files-found: error
+
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/startos-')
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/publish_startos_release "${GITHUB_REF_NAME}"

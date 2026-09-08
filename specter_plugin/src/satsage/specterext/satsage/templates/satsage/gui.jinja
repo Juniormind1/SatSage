@@ -1,0 +1,29 @@
+{% extends "satsage/base.jinja" %}
+
+{% block satsage_content %}
+{% if error %}
+<div class="card" style="border-color: #c0392b;">
+    <strong>Oberfläche nicht gestartet</strong>
+    <p>{{ error }}</p>
+</div>
+{% else %}
+<p style="margin: 0 0 0.75rem; opacity: 0.85;">
+    Dieselbe Web-GUI wie bei <code>py server.py</code> — Wallets kommen aus Specter.
+    {% if gui and gui.wallet_count is defined %}
+    {{ gui.wallet_count }} Wallet(s), Port {{ gui.port }}.
+    {% endif %}
+    <a class="btn" href="{{ gui_url }}" target="_blank" rel="noopener"
+       style="margin-left: 0.5rem;">In neuem Tab öffnen</a>
+</p>
+<iframe
+    id="xpq-gui-frame"
+    src="{{ gui_url }}"
+    title="SatSage Oberfläche"
+    style="width:100%; height:calc(100vh - 180px); min-height:640px; border:1px solid #444; border-radius:6px; background:#111;"
+    allow="clipboard-read; clipboard-write"
+></iframe>
+<p style="margin-top: 0.5rem; font-size: 0.9rem; opacity: 0.7;">
+    Falls der Rahmen leer bleibt (Browser-CSP): „In neuem Tab öffnen“ nutzen.
+</p>
+{% endif %}
+{% endblock %}

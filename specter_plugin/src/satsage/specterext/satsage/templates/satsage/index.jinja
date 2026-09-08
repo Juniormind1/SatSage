@@ -1,0 +1,43 @@
+{% extends "satsage/base.jinja" %}
+
+{% block satsage_content %}
+<section>
+    <h2>Status</h2>
+    <table>
+        <tr><td>Wallets</td><td><b>{{ wallet_count }}</b></td></tr>
+        <tr><td>XPUBs (unique)</td><td><b>{{ xpub_count }}</b></td></tr>
+        <tr>
+            <td>Node</td>
+            <td>
+                {% if node and node.host %}
+                    {{ node.node_type or '?' }} — {{ node.host }}{% if node.port %}:{{ node.port }}{% endif %}
+                    {% if node.chain %} ({{ node.chain }}){% endif %}
+                {% else %}
+                    <span style="opacity:0.7;">kein Node konfiguriert / nicht lesbar</span>
+                {% endif %}
+            </td>
+        </tr>
+        <tr><td>SatSage-Root</td><td><code>{{ satsage_root }}</code></td></tr>
+        {% if session_info %}
+        <tr><td>Analyse-Backend</td><td><b>{{ session_info.source }}</b>
+            {% if session_info.privacy %} — {{ session_info.privacy }}{% endif %}
+        </td></tr>
+        <tr><td>Adress-Mapping</td><td>{{ session_info.address_count }}</td></tr>
+        <tr><td>Specter-UTXOs</td><td>{{ session_info.utxo_count }}</td></tr>
+        {% endif %}
+    </table>
+    {% if session_error %}
+        <p class="error" style="margin-top:1rem;">Session: {{ session_error }}</p>
+        <p>Prüfe Node-RPC (Host/Port/User/Pass) und dass <code>blockfilterindex=1</code> für BIP-158 gesetzt ist — oder nutze Fulcrum in der SatSage-<code>.env</code>.</p>
+    {% endif %}
+    <p style="margin-top:1rem;">
+        <a class="btn" href="{{ url_for(service.id + '_endpoint.reload_session') }}">Session neu laden</a>
+        <a class="btn action" href="{{ url_for(service.id + '_endpoint.analyze') }}">Zur Analyse</a>
+    </p>
+</section>
+
+<section style="margin-top: 1.5rem;">
+    <h2>Abgeleitete Config</h2>
+    <pre style="white-space: pre-wrap; word-break: break-all; background: rgba(0,0,0,0.25); padding: 1rem; border-radius: 8px;">{{ ctx.env_like | tojson(indent=2) }}</pre>
+</section>
+{% endblock %}

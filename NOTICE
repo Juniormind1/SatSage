@@ -1,0 +1,48 @@
+SatSage
+Copyright (c) 2026 Juniormind1
+
+This product is licensed under the MIT License (see LICENSE).
+
+Third-party components
+----------------------
+
+Runtime dependencies (see requirements.txt):
+
+  embit
+    License: MIT
+    https://github.com/diybitcoinhardware/embit
+
+  chiabip158
+    License: Apache License 2.0
+    https://github.com/Chia-Network/chiabip158
+    This product includes software developed under the Apache License 2.0.
+    The Apache License text is available at:
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Optional Specter Desktop extension host (specter_plugin/):
+
+  cryptoadvance.specter
+    License: MIT
+    https://github.com/cryptoadvance/specter-desktop
+
+Build and test tools (not required to run SatSage from source):
+
+  PyInstaller
+    License: GPLv2 with an exception that allows distributing programs
+    built with PyInstaller under other licenses (including MIT).
+    https://pyinstaller.org/
+
+  Pillow
+    License: MIT-CMU (HPND-derived)
+    https://python-pillow.org/
+
+  playwright
+    License: Apache License 2.0
+    https://playwright.dev/python/
+
+  requests (Specter plugin optional/dev)
+    License: Apache License 2.0
+    https://requests.readthedocs.io/
+
+Binary releases built with PyInstaller may bundle copies of the runtime
+dependencies above; their licenses continue to apply to those components.

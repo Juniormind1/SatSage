@@ -1,0 +1,18 @@
+{% extends "satsage/base.jinja" %}
+
+{% block satsage_content %}
+<section>
+    <h2>{{ title }}</h2>
+    <p>
+        <a class="btn" href="{{ url_for(service.id + '_endpoint.analyze') }}">← zurück zur Analyse</a>
+    </p>
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if output %}
+        <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.28); padding: 1rem; border-radius: 8px; max-height: 70vh; overflow: auto; font-size: 0.85rem; line-height: 1.35;">{{ output }}</pre>
+    {% elif not error %}
+        <p style="opacity:0.7;">Keine Ausgabe.</p>
+    {% endif %}
+</section>
+{% endblock %}

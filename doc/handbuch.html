@@ -1,0 +1,1991 @@
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SatSage – know your sats — Handbuch</title>
+
+<style>
+  :root {
+    --text: #1b1b1d;
+    --dim: #5c5f66;
+    --faint: #8b8f96;
+    --bg: #fdfdfc;
+    --panel: #f5f4f1;
+    --line: #e0dfda;
+    --line-strong: #c4c3bd;
+    --accent: #7a4b12;
+    --code-bg: #f2f1ed;
+    --gruen: #2f6b3a;
+    --gelb: #8a6410;
+    --rot: #a03028;
+    --maxw: 46rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --text: #e6e4df;
+      --dim: #a8a49c;
+      --faint: #7d7a73;
+      --bg: #17171a;
+      --panel: #212125;
+      --line: #32323a;
+      --line-strong: #4a4a54;
+      --accent: #d9a55f;
+      --code-bg: #202026;
+      --gruen: #7fc08c;
+      --gelb: #d9b45c;
+      --rot: #e08a80;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.4rem 6rem; }
+
+  /* ---- Kopf ---- */
+  header.titel {
+    border-bottom: 2px solid var(--text);
+    padding: 3.5rem 0 1.6rem;
+    margin-bottom: 2.5rem;
+  }
+  header.titel h1 {
+    font-size: 2.3rem; line-height: 1.1; margin: 0 0 .5rem;
+    letter-spacing: -.02em;
+  }
+  header.titel p { margin: 0; color: var(--dim); font-size: 1.05rem; }
+  header.titel .meta {
+    margin-top: 1rem; font-size: .8rem; color: var(--faint);
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+
+  /* ---- Inhaltsverzeichnis ---- */
+  nav.toc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.3rem 1.5rem;
+    margin-bottom: 3rem;
+  }
+  nav.toc h2 {
+    font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--faint); margin: 0 0 .8rem; border: 0; padding: 0;
+  }
+  nav.toc ol { margin: 0; padding-left: 1.3rem; }
+  nav.toc > ol { counter-reset: sec; list-style: none; padding-left: 0; }
+  nav.toc > ol > li { counter-increment: sec; margin-bottom: .35rem; }
+  nav.toc > ol > li > a::before {
+    content: counter(sec) ". "; color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  nav.toc ol ol {
+    list-style: none; padding-left: 1.4rem;
+    margin: .2rem 0 .5rem; font-size: .92rem;
+  }
+  nav.toc ol ol a { color: var(--dim); }
+  nav.toc a { text-decoration: none; color: var(--text); }
+  nav.toc a:hover { text-decoration: underline; color: var(--accent); }
+
+  /* ---- Struktur ---- */
+  section { margin-bottom: 3.5rem; scroll-margin-top: 1rem; }
+  h2 {
+    font-size: 1.55rem; margin: 0 0 1.2rem; padding-bottom: .4rem;
+    border-bottom: 1px solid var(--line-strong); letter-spacing: -.01em;
+  }
+  h3 { font-size: 1.15rem; margin: 2.2rem 0 .7rem; }
+  h4 { font-size: 1rem; margin: 1.6rem 0 .5rem; color: var(--dim); }
+  h2 .nr { color: var(--faint); font-weight: 400; margin-right: .5rem; }
+
+  p { margin: 0 0 1rem; }
+  ul, ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+  li { margin-bottom: .35rem; }
+  a { color: var(--accent); }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .875em; background: var(--code-bg);
+    padding: .1em .35em; border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 5px; padding: .9rem 1.1rem; overflow-x: auto;
+    font-size: .85rem; line-height: 1.5; margin: 0 0 1.2rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  .tabelle { overflow-x: auto; margin: 0 0 1.3rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left; border-bottom: 2px solid var(--line-strong);
+    padding: .5rem .7rem .5rem 0; font-size: .74rem;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--dim);
+    white-space: nowrap;
+  }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .7rem .55rem 0;
+       vertical-align: top; }
+  td code { white-space: nowrap; }
+
+  blockquote {
+    margin: 0 0 1.3rem; padding: .9rem 1.2rem;
+    background: var(--panel); border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+  }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  .hinweis {
+    border: 1px solid var(--line-strong); border-left-width: 3px;
+    border-radius: 0 4px 4px 0; padding: .9rem 1.2rem; margin: 0 0 1.3rem;
+    background: var(--panel);
+  }
+  .hinweis p:last-child { margin-bottom: 0; }
+  .hinweis .kopf {
+    font-size: .74rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--dim); margin-bottom: .4rem; font-weight: 600;
+  }
+  .warn { border-left-color: var(--gelb); }
+  .warn .kopf { color: var(--gelb); }
+  .gut { border-left-color: var(--gruen); }
+  .gut .kopf { color: var(--gruen); }
+  .acht { border-left-color: var(--rot); }
+  .acht .kopf { color: var(--rot); }
+
+  .gruen { color: var(--gruen); font-weight: 600; }
+  .gelb  { color: var(--gelb);  font-weight: 600; }
+  .rot   { color: var(--rot);   font-weight: 600; }
+
+  .zurueck {
+    display: inline-block; margin-top: 1.5rem; font-size: .8rem;
+    color: var(--faint); text-decoration: none;
+  }
+  .zurueck:hover { color: var(--accent); }
+
+  footer {
+    border-top: 1px solid var(--line); margin-top: 4rem; padding-top: 1.5rem;
+    font-size: .85rem; color: var(--faint);
+  }
+
+  /* ---- Druck ---- */
+  @media print {
+    :root { --bg: #fff; --text: #000; --panel: #f6f6f6; }
+    body { font-size: 10.5pt; }
+    .wrap { max-width: none; padding: 0; }
+    nav.toc { break-after: page; }
+    section { break-inside: auto; }
+    h2 { break-after: avoid; }
+    h3, h4 { break-after: avoid; }
+    pre, table, .hinweis, blockquote { break-inside: avoid; }
+    .zurueck { display: none; }
+    a { color: #000; text-decoration: none; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="titel">
+  <img src="/img/logo.jpg" alt="SatSage" width="320"
+       style="max-width:100%; height:auto; border-radius:8px; margin-bottom:1rem;">
+  <h1>SatSage – know your sats</h1>
+  <p>Multi-XPUB- und Taproot-Analyzer — woher die Sats kamen, wann sie ein
+     Wallet betraten und wie lange sie schon gehalten werden.</p>
+  <div class="meta">Handbuch · Stand 29. August 2026</div>
+</header>
+
+<nav class="toc">
+  <h2>Inhalt</h2>
+  <ol>
+    <li><a href="#ueberblick">Überblick</a></li>
+    <li><a href="#installation">Installation</a>
+      <ol>
+        <li><a href="#exe">Fertige Datei ohne Python</a></li>
+        <li><a href="#win">Windows</a></li>
+        <li><a href="#mac">macOS</a></li>
+        <li><a href="#linux">Linux</a></li>
+        <li><a href="#danach">Nach der Installation</a></li>
+      </ol>
+    </li>
+    <li><a href="#weboberflaeche">Web-Oberfläche</a>
+      <ol>
+        <li><a href="#start">Start und Sicherheitsmodell</a></li>
+        <li><a href="#wallets">Wallets verwalten</a></li>
+        <li><a href="#skripttyp">Skripttyp — die häufigste Fehlerquelle</a></li>
+        <li><a href="#walletansicht">Wallet-Ansicht</a></li>
+        <li><a href="#explorer">Block-Explorer</a></li>
+        <li><a href="#assistent">Assistent</a></li>
+      </ol>
+    </li>
+    <li><a href="#herkunft">Herkunft und Steuerjahr</a>
+      <ol>
+        <li><a href="#tracen">Herkunft tracen</a></li>
+        <li><a href="#steuerjahr">Steuerjahr</a></li>
+        <li><a href="#anschaffungsdatum">Welches Datum zählt</a></li>
+        <li><a href="#export">On-Chain-Aufstellung exportieren</a></li>
+      </ol>
+    </li>
+    <li><a href="#sanktionen">Sanktions- und Blacklists</a></li>
+    <li><a href="#labels">Adress-Labels</a></li>
+    <li><a href="#menue">Menü und CLI (Legacy / Fallback)</a></li>
+    <li><a href="#datenquellen">Datenquellen und Privatsphäre</a></li>
+    <li><a href="#konfiguration">Konfiguration (<code>.env</code>)</a></li>
+    <li><a href="#caches">Caches</a></li>
+    <li><a href="#sicherheit">Sicherheit und Datenschutz</a></li>
+    <li><a href="#technik">Technischer Teil</a>
+      <ol>
+        <li><a href="#architektur">Architektur</a></li>
+        <li><a href="#api">API</a></li>
+        <li><a href="#tests">Tests</a></li>
+      </ol>
+    </li>
+    <li><a href="#anhang">Anhang: Stolpersteine und Vorgemerktes</a></li>
+  </ol>
+</nav>
+
+
+<!-- ================================================================= -->
+<section id="ueberblick">
+<h2><span class="nr">1</span>Überblick</h2>
+
+<p>SatSage analysiert Transaktionen und unspent UTXOs mehrerer Wallets und
+zeigt, <strong>woher die Sats wann kamen</strong> — insbesondere, wann sie ein
+xPub-Wallet betraten oder es wieder verließen. Daraus lässt sich die
+On-Chain-Haltedauer ablesen.</p>
+
+<div class="hinweis acht">
+  <div class="kopf">Was das ist — und was nicht</div>
+  <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+</div>
+
+<p>Es gibt zwei Bedienwege, die dieselbe <code>.env</code> und dieselben Caches
+benutzen:</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Weg</th><th>Aufruf</th><th>Wofür</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Web-Oberfläche</strong></td><td><code>server.py</code></td>
+        <td>Alles, was sich im Terminal schlecht zeigen lässt: Herkunftsbäume,
+            Haltefristen, Zeitstrahl, Steuer-Export</td></tr>
+    <tr><td><strong>Menü / CLI</strong></td><td><code>main.py</code></td>
+        <td><strong>Legacy / Fallback</strong> (SSH, kein Browser); Direktmodi
+            <code>--txid</code> / <code>--cli</code>; zusätzlich
+            UTXO-Konsolidierung und Scan über Listenadressen</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Was das Werkzeug kann</h3>
+<ul>
+  <li><strong>Mehrere XPUBs</strong> gleichzeitig (zpub, xpub, ypub, Taproot …)
+      mit eigenen Anzeigenamen</li>
+  <li><strong>Herkunftsanalyse</strong> — für eine TxID, ein UTXO
+      (<code>txid:vout</code>) oder eine Adresse</li>
+  <li><strong>UTXO-Rangfolge</strong> pro Wallet oder über alle Wallets</li>
+  <li><strong>Steuerjahr</strong> — Haltefristen, Zeitstrahl, CSV- und
+      PDF-tauglicher Bericht</li>
+  <li><strong>Sanktions- und Blacklists</strong> — OFAC, OpenSanctions,
+      Scam-Listen; Wallet-Check und Scan über Listenadressen</li>
+  <li><strong>UTXO-Konsolidierung</strong> — Dust zusammenführen, PSBT erzeugen</li>
+  <li><strong>Vier Datenquellen</strong> mit ausgewiesenem Privatsphäre-Niveau</li>
+  <li><strong>Assistent</strong> — Fragen in Alltagssprache über den lokalen
+      Cache; Scans nur über die bestehenden Knöpfe</li>
+</ul>
+
+<h3>Voraussetzungen</h3>
+<ul>
+  <li>Python 3.10 oder neuer (entfällt bei der fertigen Executable)</li>
+  <li>Internetzugang für Blockchain-Abfragen und Sanktionslisten</li>
+  <li><em>Optional, aber empfohlen:</em> ein eigener Node — Fulcrum/electrs/
+      ElectrumX oder Bitcoin Core mit <code>blockfilterindex=1</code></li>
+  <li>Für <code>.onion</code>-Verbindungen: laufender Tor Browser oder Tor-Dienst</li>
+</ul>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="installation">
+<h2><span class="nr">2</span>Installation</h2>
+
+<p>SatSage läuft auf Windows, macOS und Linux. Installiert werden nur zwei
+Pakete, beide ohne Compiler-Bedarf:</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Paket</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><code>embit&gt;=0.8.0</code></td>
+        <td>Bitcoin-Kryptografie, BIP32/XPUB, Adressableitung</td></tr>
+    <tr><td><code>chiabip158&gt;=1.5.0</code></td>
+        <td>BIP-158-Blockfilter (nur für <code>--bip158</code>)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="exe">2.1 Fertige Datei ohne Python</h3>
+
+<p>Wer kein Python installieren möchte, lädt die fertig gebaute Web-Oberfläche
+von der Releases-Seite des Repositories — eine einzelne Datei, kein
+<code>pip install</code> nötig.</p>
+
+<p><code>.env</code> und die Caches legt die Executable <strong>neben sich
+selbst</strong> an. Die Datei lässt sich also in einen beliebigen Ordner legen;
+dort verbleiben auch die Einstellungen.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>System</th><th>Vorgehen</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Windows</strong></td>
+        <td><code>satsage-webgui-windows.exe</code> laden und doppelklicken.
+            Es öffnen sich ein Konsolenfenster und der Standardbrowser.
+            Beenden mit <code>Strg+C</code> oder Fenster schließen.</td></tr>
+    <tr><td><strong>macOS</strong></td>
+        <td><code>chmod +x satsage-webgui-macos</code>, dann
+            <code>./satsage-webgui-macos</code> im Terminal. Ein Doppelklick
+            im Finder startet die Datei <em>nicht</em>. Meldet Gatekeeper einen
+            unverifizierten Entwickler: Rechtsklick → <strong>Öffnen</strong>.</td></tr>
+    <tr><td><strong>Linux</strong></td>
+        <td><code>chmod +x satsage-webgui-linux</code>, dann
+            <code>./satsage-webgui-linux</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="hinweis warn">
+  <div class="kopf">Unsignierte Dateien</div>
+  <p>Die Executables sind nicht signiert — Windows SmartScreen und macOS
+  Gatekeeper warnen deshalb beim ersten Start. Das ist erwartet, kein
+  Anzeichen für ein Problem.</p>
+</div>
+
+<h3 id="win">2.2 Windows</h3>
+
+<p>Python von <a href="https://www.python.org/downloads/">python.org</a> laden.
+<strong>Wichtig:</strong> im Installationsprogramm den Haken bei
+<em>„Add python.exe to PATH"</em> setzen — sonst findet die
+Eingabeaufforderung Python später nicht. <code>pip</code> und <code>venv</code>
+sind enthalten.</p>
+
+<pre><code>cd C:\Pfad\zu\SatSage
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env</code></pre>
+
+<p>Starten:</p>
+<pre><code>py server.py     # Web-Oberfläche
+py main.py       # Menü (Legacy/Fallback)</code></pre>
+
+<h4>Besonderheiten</h4>
+<ul>
+  <li><strong>PowerShell verweigert die Aktivierung</strong>
+      (<em>„Die Ausführung von Skripts ist auf diesem System deaktiviert"</em>):
+      einmalig
+      <code>Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass</code>,
+      oder die klassische <code>cmd.exe</code> benutzen.</li>
+  <li><strong>Umlaute in der Konsole:</strong> <code>server.py</code> stellt die
+      Ausgabe selbst auf UTF-8 um. Bei <code>main.py</code> hilft in seltenen
+      Fällen <code>chcp 65001</code> vor dem Start.</li>
+  <li><strong>Tor:</strong> Für <code>.onion</code> muss der Tor Browser laufen
+      (SOCKS-Proxy <code>127.0.0.1:9150</code>).</li>
+</ul>
+
+<h3 id="mac">2.3 macOS</h3>
+
+<p>Das mitgelieferte Python kann veraltet sein. Empfohlen ist Homebrew:</p>
+<pre><code>brew install python
+python3 --version</code></pre>
+
+<pre><code>cd ~/Pfad/zu/SatSage
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env</code></pre>
+
+<h4>Besonderheiten</h4>
+<ul>
+  <li>Beim ersten Start fragt unter Umständen die Firewall. Da der Server
+      ausschließlich an <code>127.0.0.1</code> gebunden ist, kann eingehender
+      Zugriff bedenkenlos verweigert werden.</li>
+  <li><strong>Tor:</strong> Tor Browser (Proxy <code>127.0.0.1:9150</code>) oder
+      <code>brew install tor</code> (dann meist <code>127.0.0.1:9050</code>).</li>
+</ul>
+
+<h3 id="linux">2.4 Linux (Debian, Ubuntu, Zorin OS, Mint)</h3>
+
+<p>Anders als bei den Installationsprogrammen von python.org sind
+<code>pip</code> und <code>venv</code> unter Debian und seinen Abkömmlingen
+<strong>getrennte Pakete</strong> und fehlen sonst:</p>
+
+<pre><code>sudo apt update
+sudo apt install -y python3 python3-pip python3-venv</code></pre>
+
+<p>Auf Fedora <code>sudo dnf install python3 python3-pip</code>, auf openSUSE
+<code>sudo zypper install python3 python3-pip</code> — <code>venv</code> ist
+dort meist enthalten.</p>
+
+<pre><code>cd ~/SatSage
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env</code></pre>
+
+<div class="hinweis">
+  <div class="kopf">Fehlt das venv-Modul</div>
+  <p>Bei der Meldung <em>„ensurepip is not available"</em> entweder das Paket
+  nachinstallieren (<code>sudo apt install python3-venv</code>) oder einen
+  anderen Interpreter nutzen, etwa <code>python3.11 -m venv .venv</code>.
+  Alternativ richtet <code>bash scripts/setup.sh</code> die Umgebung inklusive
+  Abhängigkeiten und Testlauf ein.</p>
+</div>
+
+<h4>Getestete Umgebung</h4>
+<div class="tabelle">
+<table>
+  <thead><tr><th>Komponente</th><th>Version</th></tr></thead>
+  <tbody>
+    <tr><td>Distro</td><td>Zorin OS 18.1 (Ubuntu-24.04-Basis)</td></tr>
+    <tr><td>Kernel</td><td>Linux 7.0.0-28-generic, x86_64</td></tr>
+    <tr><td>Python</td><td>3.12.3</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Beide Abhängigkeiten installieren ohne zusätzliche Build-Tools:
+<code>embit</code> ist reines Python, <code>chiabip158</code> bringt ein
+fertiges <code>manylinux</code>-Wheel mit.</p>
+
+<h3 id="danach">2.5 Nach der Installation</h3>
+
+<p>Prüfen, ob alles sitzt — läuft ohne Netzwerk und ohne Node:</p>
+<pre><code>python3 -m unittest discover -s tests</code></pre>
+
+<p>Konfigurieren geht am bequemsten über die Web-Oberfläche:
+<code>server.py</code> starten, die ausgegebene Adresse öffnen, unter
+<strong>Einstellungen</strong> die Wallets eintragen. Alternativ
+<code>.env</code> direkt bearbeiten.</p>
+
+<h4>Übersicht der Startbefehle</h4>
+<div class="tabelle">
+<table>
+  <thead><tr>
+    <th>Plattform</th><th>Umgebung aktivieren</th>
+    <th>Weboberfläche</th><th>Menü (Legacy)</th>
+  </tr></thead>
+  <tbody>
+    <tr><td>Windows</td><td><code>.venv\Scripts\activate</code></td>
+        <td><code>py server.py</code></td><td><code>py main.py</code></td></tr>
+    <tr><td>macOS</td><td><code>source .venv/bin/activate</code></td>
+        <td><code>python3 server.py</code></td><td><code>python3 main.py</code></td></tr>
+    <tr><td>Linux</td><td><code>source .venv/bin/activate</code></td>
+        <td><code>python3 server.py</code></td><td><code>python3 main.py</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Die Aktivierung gilt nur für die laufende Sitzung und muss in jedem neuen
+Terminal wiederholt werden. Erkennbar am <code>(.venv)</code> vor dem Prompt.</p>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="weboberflaeche">
+<h2><span class="nr">3</span>Web-Oberfläche</h2>
+
+<h3 id="start">3.1 Start und Sicherheitsmodell</h3>
+
+<p>Der Server startet die Web-GUI und im Terminal eine kurze Steuerung
+(Status · Browser erneut öffnen · Server beenden). Die Adresse mit Token
+wird ausgegeben bzw. im Browser geöffnet:</p>
+
+<pre><code>  http://127.0.0.1:8730/?t=XUTaAtRi21RbHp9mehqLFKMAB-Fvj7iI</code></pre>
+
+<p>Diese Adresse vollständig öffnen. Das Token wird in der Sitzung des Browsers
+abgelegt und danach aus der Adresszeile entfernt, damit es nicht in Verlauf
+oder Lesezeichen landet. Bei jedem Neustart des Servers entsteht ein neues.</p>
+
+<p><strong>Browser darf geschlossen werden</strong> — der Server und laufende
+Scans (UTXO, Verlauf) bleiben im Terminal aktiv. Dieselben Fortschrittszeilen
+wie im Web-Log erscheinen dort. Die <strong>Konsole offen lassen</strong>
+(auch beim fertigen Binary). Beenden: Menüpunkt 3 oder Strg+C.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Option</th><th>Bedeutung</th></tr></thead>
+  <tbody>
+    <tr><td><code>--port N</code></td><td>Port (Vorgabe: 8730)</td></tr>
+    <tr><td><code>--env PFAD</code></td><td>Andere Konfigurationsdatei</td></tr>
+    <tr><td><code>--cache-dir DIR</code></td><td>Anderes UTXO-Cache-Verzeichnis</td></tr>
+    <tr><td><code>--immutable-cache-dir DIR</code></td>
+        <td>Anderes Verzeichnis für unveränderliche Daten</td></tr>
+    <tr><td><code>--no-browser</code></td><td>Browser nicht automatisch öffnen</td></tr>
+    <tr><td><code>--plain-console</code></td>
+        <td>Ohne Terminal-Menü (nur URL, Strg+C) — Tests/Automation</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Zum Ausprobieren ohne eigene Schlüssel lässt sich eine getrennte
+Konfiguration angeben — die eigene <code>.env</code> bleibt dann unberührt.</p>
+
+<h4>Vier Maßnahmen, die fest dazugehören</h4>
+
+<p>Sobald XPUBs durch einen Browser laufen, ändert sich die Angriffsfläche:</p>
+
+<ul>
+  <li><strong>Bindung nur an <code>127.0.0.1</code>.</strong> Der Server ist aus
+      dem Netzwerk nicht erreichbar. Es gibt bewusst keine Option, das zu
+      ändern.</li>
+  <li><strong>Sitzungs-Token</strong> für jeden <code>/api/</code>-Aufruf. Ohne
+      gültiges Token antwortet der Server mit 403.</li>
+  <li><strong>Prüfung des <code>Host</code>-Headers.</strong> Eine beliebige
+      besuchte Webseite kann den Browser dazu bringen,
+      <code>127.0.0.1</code> anzusprechen (DNS-Rebinding) — aber nicht dazu,
+      dabei einen zulässigen Host-Namen zu senden.</li>
+  <li><strong>XPUBs werden maskiert ausgeliefert.</strong> Die Oberfläche kennt
+      nur <code>zpub6r…tZYs</code> und spricht gespeicherte Wallets über eine
+      Kennung an. Der vollständige Schlüssel verlässt den Server nicht.
+      RPC-Passwörter werden nie ausgeliefert, nur als „gesetzt" gemeldet.</li>
+</ul>
+
+<p>Zugriffsprotokolle werden nicht geschrieben — die Pfade enthalten
+Wallet-Kennungen.</p>
+
+<h3 id="wallets">3.2 Wallets verwalten</h3>
+
+<p>Unter <strong>Einstellungen</strong> stehen Name, Skripttyp und Scan-Tiefe je
+Wallet. Änderungen gehen erst mit <strong>Speichern</strong> in die
+<code>.env</code>; vorher liegt daneben der Hinweis „Ungespeicherte
+Änderungen". Beim Schreiben bleiben Kommentare, Reihenfolge und fremde
+Schlüssel erhalten; die vorherige Fassung landet als <code>.env.bak</code>
+daneben.</p>
+
+<h4>Mehrere Konten aus einem Seed</h4>
+
+<p>Kein Problem — trag sie alle ein. Konten wie <code>m/84'/0'/0'</code>,
+<code>m/84'/0'/1'</code> und <code>m/84'/0'/2'</code> haben
+<strong>unterschiedliche</strong> Schlüssel und werden sauber
+auseinandergehalten, auch wenn sie aus demselben Seed stammen.</p>
+
+<p>Beanstandet wird nur ein anderer Fall: <strong>dasselbe Konto in zwei
+Fassungen</strong>, etwa einmal als <code>zpub</code> und einmal als
+<code>xpub</code>. Beide leiten dann exakt dieselben Adressen ab, und Beträge
+würden in Summen und im Steuer-Export doppelt gezählt. Die Oberfläche nennt
+dazu die erste Empfangsadresse beider Einträge — stimmt sie überein, ist es
+dasselbe Konto. Das ist eine <strong>Warnung, kein Fehler</strong>: Über
+„Trotzdem speichern" lässt sie sich übergehen.</p>
+
+<h4>Scan-Tiefe</h4>
+
+<p>„Adressen (beide Ketten)" ist die Gesamtzahl, die auf Receive- und
+Change-Kette aufgeteilt wird — 50 bedeutet je 25. Wallets mit
+CoinJoin-Historie (Wasabi) brauchen deutlich mehr.</p>
+
+<h4>Wie die Wallets in der <code>.env</code> stehen</h4>
+
+<p>Ein <strong>Block je Wallet</strong>, fortlaufend ab null:</p>
+
+<pre><code>WALLET_0_NAME=Wasabi
+WALLET_0_XPUB=zpub6…
+WALLET_0_SCRIPT=segwit
+WALLET_0_MAX_ADDRESSES=50
+
+WALLET_1_NAME=Ledger
+WALLET_1_XPUB=xpub6…
+WALLET_1_SCRIPT=segwit</code></pre>
+
+<p>Die Nummerierung darf keine Lücke haben — bei der ersten fehlenden Nummer
+endet die Liste. <code>WALLET_0</code> und <code>WALLET_2</code> ohne
+<code>WALLET_1</code> ergibt also genau ein Wallet; die Diagnose weist auf
+übersprungene Blöcke hin.</p>
+
+<p>Namen dürfen Leerzeichen enthalten, weil jedes Feld für sich steht. Die
+frühere Schreibweise mit <code>XPUBS</code> und <code>WALLET_NAMES</code> in
+je einer Zeile wird weiterhin gelesen; ein Speichern aus der Oberfläche
+überführt sie still ins neue Format, ohne Kommentare oder andere Einträge
+anzutasten.</p>
+
+<h4>Multisig</h4>
+
+<p>Die gespeicherte Form ist der <strong>Output-Deskriptor</strong> — nur er
+kann alle gebräuchlichen Formen ausdrücken:</p>
+
+<pre><code>WALLET_2_NAME=Tresor
+WALLET_2_DESC=wsh(sortedmulti(2,[ab12cd34/48h/0h/0h/2h]xpubA/&lt;0;1&gt;/*,…))#checksum
+WALLET_2_MAX_ADDRESSES=50</code></pre>
+
+<p>Abgedeckt sind Legacy <code>sh(multi)</code>, Nested SegWit
+<code>sh(wsh(sortedmulti))</code>, Native SegWit <code>wsh(sortedmulti)</code>,
+<strong>Taproot</strong> <code>tr(…, multi_a(…))</code> samt mehreren
+Skript-Blättern, sowie <strong>Miniscript-Policies mit Zeitschloss</strong>
+(Liana: Primärschlüssel sofort, Recovery-Schlüssel nach Sperrfrist). Beliebige
+m-aus-n, Fingerprint-Pfade und die Prüfsumme hinter <code>#</code> gehören
+dazu.</p>
+
+<p>Die Ableitung geht über <code>embit.descriptor</code> und trifft die
+offiziellen BIP-84-Testvektoren; <code>sortedmulti</code> sortiert nach BIP-67,
+die Reihenfolge der Cosigner ändert die Adressen also nicht.</p>
+
+<h5>In der Oberfläche anlegen</h5>
+
+<p>Unter <strong>Einstellungen → Wallets</strong> gibt es ein Feld für
+<em>Deskriptor oder Wallet-Export</em>. Dort hinein darf beides — per
+Einfügen oder über <strong>Import</strong>:</p>
+
+<ul>
+  <li>der Deskriptor selbst, getippt oder kopiert,</li>
+  <li>der <strong>JSON-Export</strong> aus Sparrow, Specter oder
+      <code>listdescriptors</code> von Bitcoin Core.</li>
+</ul>
+
+<p>Exportiert eine Wallet Empfangs- und Change-Kette <em>getrennt</em>
+(<code>…/0/*</code> und <code>…/1/*</code>), werden beide zu einer
+mehrpfadigen Form <code>…/&lt;0;1&gt;/*</code> zusammengeführt. Ohne das
+fiele die Change-Kette weg — und mit ihr das Wechselgeld, oft der größere
+Teil des Bestands.</p>
+
+<div class="hinweis">
+  <div class="kopf">Die erste Empfangsadresse prüfen</div>
+  <p>Vor dem Übernehmen zeigt die Oberfläche die erste Empfangsadresse.
+  <strong>Vergleiche sie mit deiner Wallet.</strong> Ein Deskriptor sieht auch
+  dann richtig aus, wenn ein Schlüssel vertauscht oder ein Ableitungspfad
+  falsch ist — nur an der Adresse fällt es auf.</p>
+</div>
+
+<p>Ein Text, der einen <strong>privaten Schlüssel</strong> enthält, wird
+abgelehnt: SatSage schaut nur zu und darf ihn nicht entgegennehmen.</p>
+
+<h5>Kurzform als Eingabe</h5>
+
+<p>Wer drei XPUBs von drei Geräten eingesammelt hat, kann sie auch so
+eintragen:</p>
+
+<pre><code>WALLET_2_NAME=Tresor
+WALLET_2_M=2
+WALLET_2_SCRIPT=wsh
+WALLET_2_XPUBS=xpubA xpubB xpubC</code></pre>
+
+<p>Beim nächsten Speichern wird daraus ein Deskriptor. Ausdrücken kann die
+Kurzform nur <code>sortedmulti</code> in <code>wsh</code> oder
+<code>sh-wsh</code> — für Taproot und Policies mit Zeitschloss führt kein Weg
+am Deskriptor vorbei; ein <code>WALLET_n_SCRIPT=tr</code> wird deshalb als
+Fehler gemeldet statt stillschweigend zu <code>wsh</code> zu werden.</p>
+
+<div class="hinweis warn">
+  <div class="kopf">Was nicht geht</div>
+  <p>Aggregierte Taproot-Schlüssel (<code>musig</code>) kann der Parser nicht
+  lesen. Solche Wallets werden als ungültig gemeldet und aus der Analyse
+  herausgehalten — lieber gar keine Adresse als eine falsche, auf die jemand
+  einzahlt.</p>
+  <p>Ein Cosigner darf nicht zusätzlich als eigenes Wallet eingetragen sein;
+  das Speichern lehnt das ab, weil die Beträge sonst doppelt gezählt würden.
+  Die <em>einzelnen</em> Cosigner tauchen nie als eigene Wallets im Bestand
+  auf — geführt wird die Multisig als Ganzes über ihren Deskriptor.</p>
+  <p>Eine erste Empfangsadresse zeigt die Diagnose bei Multisig nicht: Sie
+  ergibt sich aus allen Cosignern zusammen, und die eines einzelnen wäre
+  gefährlich falsch.</p>
+</div>
+
+<h4>Wie alt ein Wallet ist</h4>
+
+<p>Neben dem Bestand steht <strong>„seit 05.09.2022"</strong> — der Zeitpunkt,
+zu dem eine Adresse dieses XPUB <em>zum ersten Mal</em> eine Transaktion
+gesehen hat. Die Angabe erscheint in der Wallet-Liste der Einstellungen, über
+der Wallet-Ansicht und im Menü des Terminals.</p>
+
+<p>Gemeint ist die älteste Transaktion <em>irgendeiner</em> Adresse, nicht die
+der ersten. Die erste Empfangsadresse muss nicht die zuerst benutzte sein —
+Lücken, Importe oder ein Change-Ausgang zuerst kommen vor.</p>
+
+<div class="hinweis">
+  <div class="kopf">Warum nicht aus dem UTXO-Cache</div>
+  <p>Der kennt nur <em>unverbrauchte</em> Ausgänge. Ein Wallet von 2019, das
+  zwischendurch geleert und 2026 neu befüllt wurde, sähe dort jung aus.
+  Maßgeblich ist deshalb die Transaktions-Historie der Adressen, die auch
+  längst ausgegebene Eingänge kennt.</p>
+</div>
+
+<p>Erhoben wird das <strong>einmalig</strong>, beim Scan eines XPUB, für den
+noch kein Wert vorliegt — die älteste Transaktion eines Wallets kann sich nicht
+mehr ändern. Es kostet eine Abfrage je Adresse und braucht einen
+<strong>Electrum-Server</strong>; läuft der Scan über Esplora oder BIP-158,
+bleibt die Angabe leer und wird beim nächsten Electrum-Scan nachgeholt. Lässt
+sich die Blockzeit nicht auflösen, steht dort die Blockhöhe.</p>
+
+<h3 id="skripttyp">3.3 Skripttyp — die häufigste Fehlerquelle</h3>
+
+<div class="hinweis acht">
+  <div class="kopf">Wallet zeigt 0 UTXO trotz Guthaben?</div>
+  <p>Dann stimmt fast immer der Skripttyp nicht. Das ist der mit Abstand
+  häufigste Grund für ein scheinbar leeres Wallet.</p>
+</div>
+
+<p>SLIP-132 ist optional: Manche Wallets — etwa Ledger Desktop — exportieren
+immer den generischen <code>xpub</code>-Prefix, unabhängig vom tatsächlichen
+Ableitungspfad. Die echten Adressen können trotzdem nativer SegWit
+(<code>bc1q…</code>) sein.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Prefix</th><th>Abgeleiteter Typ</th></tr></thead>
+  <tbody>
+    <tr><td><code>zpub</code> / <code>vpub</code></td>
+        <td>Native SegWit (BIP84, <code>bc1q…</code>)</td></tr>
+    <tr><td><code>ypub</code> / <code>upub</code></td>
+        <td>Nested SegWit (<code>3…</code>)</td></tr>
+    <tr><td><code>xpub</code> / <code>tpub</code></td>
+        <td>alle Typen durchprobiert (Legacy, Nested, SegWit, Taproot)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Steht der Typ auf <strong>Automatisch</strong>, probiert SatSage bei
+<code>xpub</code>/<code>tpub</code> alle gängigen Varianten. Das findet die
+Adressen, kostet aber das Vierfache an Ableitungen.</p>
+
+<p>Wer den Typ kennt, stellt ihn ausdrücklich ein.
+<strong>Skripttyp prüfen</strong> zeigt je Variante die Empfangsadresse #0 —
+genau die Adresse, die jede Wallet-Software als erste anzeigt. Stimmt eine
+davon mit der eigenen Wallet überein, ist der Typ gefunden.</p>
+
+<p>Die Einstellung landet als <code>SCRIPT_TYPES</code> in der
+<code>.env</code> und gilt auch fürs CLI:</p>
+
+<pre><code>py main.py --xpubs xpub6... --script-types segwit</code></pre>
+
+<p>Werte: <code>auto</code>, <code>legacy</code>, <code>nested</code>,
+<code>segwit</code>, <code>taproot</code>. In der <code>.env</code> auch als
+<code>SCRIPT_TYPE_0=segwit</code> je Index.</p>
+
+<h4>Nachsehen, was wirklich konfiguriert ist</h4>
+
+<p>Wenn zwei Wallets unerwartet dieselben Transaktionen zeigen, klärt das
+Diagnosewerkzeug den Fall:</p>
+
+<pre><code>python3 diagnose.py        # Windows: py diagnose.py</code></pre>
+
+<p>Es listet je Wallet die Prüfsumme des Schlüsselmaterials, die erste
+Empfangsadresse, den wirksamen Skripttyp und die Cache-Datei. Gleiche
+Prüfsumme bedeutet: derselbe Schlüssel, also dasselbe Konto. Die Ausgabe
+enthält <strong>keine vollständigen Schlüssel</strong> und lässt sich
+weitergeben.</p>
+
+<h3 id="walletansicht">3.4 Wallet-Ansicht</h3>
+
+<p>Die UTXOs sind <strong>nach Adressen gruppiert</strong>, größter Bestand
+zuerst. Jede Adresse lässt sich aufklappen und zeigt dann ihre einzelnen UTXOs
+mit Betrag, Eingangsdatum, Blockhöhe und Haltedauer. Das Datum
+<strong>Ankunft am … um …</strong> führt in die Herkunftsansicht — derselbe
+Weg wie der Ausklapp-Pfeil dort. <strong>Scan neu</strong> verwirft
+einen gespeicherten Herkunftsbaum und verfolgt nur dieses UTXO erneut.</p>
+
+<p>Die <strong>Haltedauer</strong> steht als Balken neben jedem UTXO: grün und
+voll, sobald ein Jahr überschritten ist, sonst gelb mit dem erreichten Anteil.
+Beim Überfahren erscheint die genaue Zahl der Tage.</p>
+
+<div class="hinweis gut">
+  <div class="kopf">Keine Abfrage nach außen</div>
+  <p>Die Liste kommt ausschließlich aus dem lokalen Cache — das Öffnen eines
+  Wallets erzeugt keine einzige Abfrage nach außen. Erst
+  <strong>UTXO-Scan</strong> fragt die konfigurierte Datenquelle.</p>
+</div>
+
+<p>Die Beträge folgen derselben Regel wie im CLI: unter 0,01 BTC in Satoshis,
+darüber in BTC mit zwei Nachkommastellen.</p>
+
+<h3 id="explorer">3.5 Block-Explorer</h3>
+
+<p>Unter <strong>Einstellungen → Block-Explorer</strong> lässt sich eine eigene
+mempool.space-Instanz eintragen (<code>MEMPOOL_URL</code>). Danach erscheint in
+Wallet-Ansicht, Herkunftsansicht und Steuerjahr-Tabelle ein <strong>↗</strong>
+am Zeilenende.</p>
+
+<blockquote>
+  <p><strong>Auf den Inhalt klicken heißt: tiefer hinein. Ein ↗ heißt: raus aus
+  dem Werkzeug.</strong></p>
+</blockquote>
+
+<p>Ohne eingetragene Instanz erscheinen <strong>keine</strong> Verweise. Das ist
+Absicht: Jeder solche Klick verriete dem Server, welche Transaktion und welche
+Adresse dich interessieren — bei einer Wallet-Adresse also die
+Wallet-Zugehörigkeit.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Anzeige</th><th>Bedeutung</th></tr></thead>
+  <tbody>
+    <tr><td><span class="gruen">eigenes Netz</span></td>
+        <td>Nur bei dir erreichbar</td></tr>
+    <tr><td><span class="gelb">öffentlich erreichbar</span></td>
+        <td>Kann die eigene Instanz sein — das Programm kann es nicht wissen</td></tr>
+    <tr><td><span class="rot">öffentlicher Dienst</span></td>
+        <td>Bekannter Fremdanbieter wie <code>mempool.space</code></td></tr>
+    <tr><td><span class="gelb">nicht eingetragen</span></td>
+        <td>Keine Verweise vorhanden</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Als „eigenes Netz" gelten <code>.onion</code>, <code>.local</code>,
+<code>.lan</code>, <code>.home.arpa</code>, die privaten IP-Bereiche (10/8,
+172.16/12, 192.168/16), IPv6-Loopback und ULA, Hostnamen ohne Punkt — sowie
+<strong>Tailscale</strong> (<code>.ts.net</code> und 100.64.0.0/10).</p>
+
+<pre><code>http://umbrel.local:3006
+http://umbrel.dein-tailnet.ts.net:3006
+http://172.16.1.2:9000
+http://192.168.1.50:3006/de</code></pre>
+
+<p>Beim Speichern wird nur die Form geprüft, <strong>keine Verbindung
+aufgebaut</strong> — das wäre schon der erste Abruf.
+<strong>XPUBs werden nie verlinkt</strong>, auch nicht zu einer eigenen
+Instanz.</p>
+
+<h3 id="assistent">3.6 Assistent</h3>
+
+<p>Unten rechts neben dem Log steht der Assistent. Er erklärt Bestand,
+Lücken und Steuerjahr-Kennzahlen in Alltagssprache. Er ist
+<strong>kein zweiter Scanner</strong> und <strong>keine Steuerberatung</strong>.</p>
+
+<p>Die Kopf-Pille ganz rechts zeigt den Zustand:</p>
+<div class="tabelle">
+<table>
+  <thead><tr><th>Pille</th><th>Bedeutung</th></tr></thead>
+  <tbody>
+    <tr><td>grau <code>LLM</code></td><td>nicht konfiguriert oder noch nicht geprüft</td></tr>
+    <tr><td><span class="rot">LLM offline</span></td><td>eingestellt, aber nicht erreichbar</td></tr>
+    <tr><td><span class="gelb">LLM remote</span></td><td>verbunden, LAN oder Cloud</td></tr>
+    <tr><td><span class="gruen">LLM lokal</span></td><td>verbunden, Modell auf diesem Rechner</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Einrichtung unter <strong>Einstellungen → Assistent</strong>: Adresse
+(zum Beispiel <code>http://127.0.0.1:11434/v1</code> für Ollama), Modellname,
+Anbieter. Vorgabe ist ein lokales Modell. Eine Cloud-API erst nach dem
+Häkchen „Remote-Anbindung ausdrücklich erlauben“ — analog zu öffentlichen
+Electrum-Servern — und mit einem <em>eigenen</em> Key in der
+<code>.env</code> (<code>LLM_API_KEY</code>). Den Key einer laufenden
+Grok-Sitzung nicht dorthin kopieren. Der Key erscheint nie im Chat und nie
+im Status.</p>
+
+<p>„Zeige Log“ blendet nur das Log aus; der Assistent bleibt und nutzt die
+volle Breite der unteren Leiste. Die Höhe lässt sich am oberen Rand ziehen.</p>
+
+<h4>Was er darf</h4>
+<ul>
+  <li>Nur den <strong>lokalen Cache</strong> lesen (Bestand, Verlauf,
+      Herkunft, Steuerauswertung)</li>
+  <li>Lücken benennen und den passenden Knopf nennen
+      (UTXO-Scan, Verlaufsscan, Herkunft aller UTXOs)</li>
+  <li>Slash-Befehle ohne Modell:
+      <code>/hilfe</code>, <code>/anbindung</code>, <code>/neu</code>,
+      <code>/luecken</code>, <code>/wallets</code>,
+      <code>/steuer</code>, <code>/export&nbsp;legende|markdown|brief</code></li>
+  <li>Freitext an das konfigurierte Modell, mit denselben Cache-Lesern als
+      Werkzeuge</li>
+</ul>
+
+<h4>Was er nicht darf</h4>
+<ul>
+  <li>Scans, Herkunft oder Sanktionsprüfungen starten</li>
+  <li>XPUBs, Keys oder volle Adressen ausgeben</li>
+  <li>Die maßgebliche Steuer-CSV oder den HTML-Bericht ersetzen —
+      <code>/export brief</code> und <code>markdown</code> sind Begleittext
+      aus denselben Zahlen</li>
+</ul>
+
+<div class="hinweis acht">
+  <div class="kopf">Keine Scans aus dem Chat</div>
+  <p><code>/scan</code>, <code>/verlauf</code>, <code>/herkunft</code> und
+  ähnliche Befehle sind gesperrt. Fehlt der Cache: Knopf drücken, Kaffee
+  holen, danach erneut fragen.</p>
+</div>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="herkunft">
+<h2><span class="nr">4</span>Herkunft und Steuerjahr</h2>
+
+<h3 id="tracen">4.1 Herkunft tracen</h3>
+
+<p>Die Ansicht startet mit <strong>allen UTXOs aus dem Cache</strong>, über alle
+Wallets hinweg und nach Adressen gruppiert. Das Öffnen kostet keine einzige
+Abfrage nach außen. Drei Ebenen:</p>
+
+<ol>
+  <li><strong>Adressen</strong> (und „Bereits ausgegeben“) starten immer
+      zugeklappt — das ist die Übersicht.</li>
+  <li>Eine Adresse aufklappen zeigt ihre UTXOs. Liegt ein Herkunftsbaum
+      im Cache, steht er <strong>vollständig offen</strong>. Kein Node,
+      kein Job.</li>
+  <li><strong>UTXO ohne gespeicherten Baum</strong> bleibt zu. Aufklappen
+      startet die Herkunftsanalyse für genau dieses UTXO.</li>
+</ol>
+
+<p>Regel: oberste Ebene zu; darunter sichtbar, was der Cache schon hat;
+was den Node bräuchte, wartet auf einen Klick. Die ganze Zeile ist der
+Treffer, nicht nur der Pfeil.</p>
+
+<h4>Bereits ausgegebene Beträge</h4>
+
+<p>Unter dem aktuellen Bestand steht zugeklappt <strong>„Bereits
+ausgegeben"</strong>. Dort liegen alle Outputs, die das Wallet je empfangen
+und inzwischen wieder abgegeben hat — mit Abgangsdatum, und genauso
+aufklappbar und verfolgbar wie ein aktuelles UTXO.</p>
+
+<p>Das ist der Weg für die häufige Frage: <em>Woher kamen eigentlich die Sats,
+die neulich abgeflossen sind?</em> Aus dem UTXO-Cache sind sie verschwunden,
+sobald sie ausgegeben wurden; ohne diesen Abschnitt wären sie nicht mehr
+auffindbar.</p>
+
+<div class="hinweis">
+  <div class="kopf">Setzt den Verlauf voraus</div>
+  <p>Die Liste erscheint erst, wenn ein <strong>Verlaufsscan</strong> (Wallet)
+  oder <strong>Verlauf aller Wallets</strong> (Steuerjahr) gelaufen ist —
+  nur dort werden ausgegebene Outputs überhaupt erfasst. Vorher steht an
+  dieser Stelle ein entsprechender Hinweis.</p>
+  <p>Bei einem Wallet mit Historie sind das schnell deutlich mehr Vorgänge als
+  aktuelle UTXOs; gezeichnet wird die Liste deshalb erst beim Aufklappen.</p>
+</div>
+
+<h4>Einmal verfolgt, bleibt verfolgt</h4>
+
+<p>Die Vorgeschichte eines bestätigten Outputs ändert sich nie. Ein einmal
+gebauter Baum wird deshalb gespeichert und beim nächsten Seitenaufruf
+<strong>sofort</strong> gezeigt — ohne Job, ohne Node-Verbindung, in
+Millisekunden statt Minuten. Verfolgte UTXOs tragen in der Liste die Marke
+<span class="gruen">verfolgt · 02.08.</span>. Ist jeder Sat bis zu einer
+fremden Adresse verfolgt, steht auf der UTXO-Zeile selbst — in der
+Walletübersicht und unter Herkunft, ohne den Baum aufzuklappen —
+<span class="gruen">jüngste sats vom 13.06.2026 um 14:32:05</span> — der
+jüngste Zufluss von außen. Bei unaufgelösten Sammel-Eingängen fehlt diese
+Angabe, weil irgendeiner davon jünger sein könnte. Darüber steht beim
+Aufklappen „Stand …"; zum erneuten Abfragen dient <strong>Scan neu</strong>
+am UTXO (Wallet-Liste und Herkunftsansicht).</p>
+
+<div class="hinweis warn">
+  <div class="kopf">Wenn Wallet-Adressen dazukommen</div>
+  <p>Ob ein Zweig <em>intern</em> oder <em>extern</em> ist, hängt daran, welche
+  Adressen als deine bekannt sind. Trägst du ein XPUB nach oder reicht ein Scan
+  tiefer, kann aus einem externen Zufluss ein interner werden — und damit
+  verschiebt sich das Anschaffungsdatum.</p>
+  <p>Gespeicherte Bäume tragen deshalb einen Fingerabdruck der Adressmenge.
+  Passt er nicht mehr, wird der Baum trotzdem gezeigt, aber gekennzeichnet:
+  Die Marke wird gelb, und über dem Baum steht, wie viele Adressen seither
+  dazugekommen sind. Verworfen wird nichts — <strong>Herkunft aller UTXOs</strong>
+  nimmt diese Bäume mit und löst damit alle Warnungen auf einmal auf.</p>
+</div>
+
+<p>Jeder Zweig läuft eigenständig: mehrere lassen sich nebeneinander verfolgen,
+jeder meldet seinen eigenen Fortschritt und hat seinen eigenen
+Abbrechen-Knopf. Eigene Wallets sind <span class="gruen">grün</span>, fremde
+Adressen grau, nicht aufgelöste Eingänge <span class="gelb">gelb</span>.</p>
+
+<div class="hinweis warn">
+  <div class="kopf">Zwei Grenzen, die die Anzeige ausdrücklich nennt</div>
+  <ul style="margin-bottom:0">
+    <li>Hinter einer fremden Adresse endet die Analyse. Sonst liefe sie über
+        die halbe Blockchain.</li>
+    <li>Sobald ein eigener Eingang gefunden ist, werden die <em>danach</em>
+        folgenden Eingänge nur gezählt, nicht aufgelöst. Die ausgewiesene Summe
+        externer Zuflüsse ist deshalb eine <strong>Untergrenze, keine
+        Gesamtsumme</strong>.</li>
+  </ul>
+</div>
+
+<h3 id="steuerjahr">4.2 Steuerjahr</h3>
+
+<p>Zeigt die Wallet-Eingänge, aufgeteilt nach erfüllter und offener Haltefrist.
+Haltefrist und Stichtag stehen unter <strong>Einstellungen → Fristen und
+Stichtag</strong> und gelten für die Auswertung.</p>
+
+<ul>
+  <li><strong>Haltefrist für Steuerfreiheit:</strong> Vorgabe 1 Jahr
+      (Deutschland, § 23 EStG). Im Dropdown 1–20 Jahre oder keine.
+      Weitere bekannte Fristen: Portugal 1 Jahr, Tschechien 3 Jahre,
+      Luxemburg 6 Monate. Schweiz: private Veräußerungsgewinne in der
+      Regel ohne Frist steuerfrei. Österreich: nach der Reform 2022 keine
+      Steuerfreiheit durch Halten.</li>
+  <li><strong>Stichtag:</strong> Vorgabe leer — die Haltefrist gilt für alle
+      Anschaffungen. Bekannter Cutoff: Österreich 28.02.2021 (BMF,
+      Altbestand). Anschaffungen <em>danach</em> werden nicht durch Halten
+      steuerfrei (Neuvermögen). Andere europäische Länder haben keinen
+      vergleichbaren Stichtag.</li>
+</ul>
+
+<h4>Bezugspunkt: Jahresende oder heute</h4>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Gewähltes Jahr</th><th>Bezug</th><th>Anzeige</th></tr></thead>
+  <tbody>
+    <tr><td>abgeschlossen</td><td>31.12. des Jahres</td>
+        <td>„Stichtag 31.12.2025"</td></tr>
+    <tr><td><strong>laufend</strong></td><td><strong>heute</strong></td>
+        <td>„Stand heute, 02.08.2026"</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Der zweite Fall ist der wichtige. Würde auch im laufenden Jahr gegen den
+31.12. gerechnet, gälten Beträge als fristerfüllt, deren Jahr erst später
+abläuft — ein Zufluss vom 01.10.2025 sähe am 02.08.2026 bereits steuerfrei aus,
+obwohl seine Frist erst am 01.10.2026 abläuft. Wer danach entscheidet, was er
+heute verkaufen kann, bekäme zu viel angezeigt.</p>
+
+<h4>Zeitstrahl</h4>
+
+<p>Über der Tabelle liegen alle Wallet-Eingänge auf einer Zeitachse — vom
+gebündelten linken Rand bis zum Bezugspunkt. UTXOs vor der Haltefrist oder
+vor dem Stichtag sitzen gemeinsam am Quartalsbeginn davor, damit ein sehr
+alter Coin den aktuellen Rand nicht quetscht. Die senkrechte Linie ist die
+<strong>Fristgrenze</strong>, also Bezugspunkt minus Haltefrist: Alles links
+davon liegt außerhalb der Haltefrist (<span class="gruen">grün</span>),
+alles rechts noch innerhalb (<span class="gelb">gelb</span>). Ist ein
+Stichtag gesetzt, nennt der Tooltip zusätzlich vor oder nach dem Stichtag
+und bei gebündelten Punkten „n UTXOs vor Stichtag“ bzw. „älter als
+Haltefrist“.</p>
+
+<p>Die Höhe eines Punkts entspricht seinem Betrag. Die Beschriftung nennt
+nur die Größe in BTC (drei Nachkommastellen); Summe, Wallet und Frist
+stehen im Tooltip. Die Punktgröße
+zeigt zusätzlich in drei Stufen den Anteil am Gesamtbestand. Liegt die
+Fristgrenze außerhalb des gezeigten Zeitraums, wird sie nicht gezeichnet —
+eine Linie am Rand würde einen Stichtag suggerieren, der dort nicht liegt.</p>
+
+<h3 id="anschaffungsdatum">4.3 Welches Datum zählt</h3>
+
+<p>Für jedes UTXO braucht es das <strong>Anschaffungsdatum</strong> — und das
+ist nicht ohne Weiteres das Entstehungsdatum des Outputs.</p>
+
+<blockquote>
+  <p><strong>Grundregel:</strong> Das Anschaffungsdatum eines UTXO ist der
+  <strong>jüngste externe Zufluss</strong> aller Sats, die in ihm stecken. Ein
+  Zufluss ist „extern", wenn die Sats von einer Adresse kamen, die zu
+  <strong>keinem</strong> der konfigurierten XPUBs gehört. Interne Überträge —
+  auch zwischen verschiedenen eigenen Wallets oder Seeds — beginnen keine neue
+  Frist.</p>
+</blockquote>
+
+<h4>Ein durchgehendes Beispiel</h4>
+
+<p>Zwei eigene XPUBs: <code>Wallet A</code> und <code>Wallet B</code>. Der
+heutige UTXO liegt auf Adresse <code>B-receive-9</code>, 1,5 BTC, entstanden
+durch Tx <code>T4</code>.</p>
+
+<pre><code>Zeitachse ──────────────────────────────────────────────────────────►
+
+01.03.2021   Kraken-Auszahlung an A-receive-0
+             [T1: Kraken-intern → A-receive-0]   ← EXTERNER Zufluss, 0,8 BTC
+
+15.06.2022   Bitpanda-Auszahlung an A-receive-3
+             [T2: Bitpanda-intern → A-receive-3] ← EXTERNER Zufluss, 0,7 BTC
+
+10.01.2024   Umzug zur neuen Seed: beides an B-receive-5
+             [T3: A-receive-0 + A-receive-3 → B-receive-5]  ← INTERN
+
+20.11.2025   Konsolidierung: B-receive-5 → B-receive-9 (heutiger UTXO)
+             [T4: B-receive-5 → B-receive-9]  ← INTERN</code></pre>
+
+<p>Der Trace läuft von <code>T4:0</code> rückwärts und findet zwei externe
+Zuflüsse: 01.03.2021 (0,8 BTC) und 15.06.2022 (0,7 BTC). Der
+<strong>jüngste gewinnt: 15.06.2022</strong>.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Feld</th><th>Wert</th></tr></thead>
+  <tbody>
+    <tr><td>Anschaffungsdatum</td><td><strong>15.06.2022</strong></td></tr>
+    <tr><td>Grundlage</td><td>Herkunft verfolgt</td></tr>
+    <tr><td>Haltedauer (Stand 31.12.2025)</td><td>1 295 Tage</td></tr>
+    <tr><td>Frist erfüllt</td><td>ja (seit 15.06.2023)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Wichtig daran:</p>
+<ol>
+  <li><strong>Nicht</strong> das Output-Datum (20.11.2025) — die Coins gehörten
+      vorher schon zum Bestand.</li>
+  <li><strong>Nicht</strong> der letzte interne Transfer (10.01.2024) — intern
+      zählt nicht.</li>
+  <li><strong>Nicht</strong> der älteste externe Zufluss (01.03.2021), sondern
+      der jüngste. Das ist die defensive Lesart: Die Frist gilt erst als
+      erfüllt, wenn <em>alle</em> Sats im UTXO länger als ein Jahr gehalten
+      wurden.</li>
+</ol>
+
+<p>In den Einstellungen unter <strong>Anschaffung aus Herkunft</strong> (bzw.
+<code>STEUER_ANSCHAFFUNG</code>) lässt sich optional die <strong>offensive</strong>
+Lesart wählen: dann zählt der <em>älteste</em> externe Zufluss. Default bleibt
+defensiv. Offensiv kann eine längere Haltedauer ausweisen und ist bei
+unvollständigem Herkunftsbaum besonders riskant — der Report kennzeichnet den
+Modus.</p>
+
+<p>In der Herkunftsansicht können nach dem ersten Trace optional
+<strong>Herkunftslücken geschlossen</strong> werden (ein Knopf, Confirm,
+abbruchbar): übrige eigene Eingänge großer Sammel-Txs und eigene
+Vorgänger-Txs. Solche Sammel-Txs entstehen u. a. durch Konsolidierung,
+Börsen-Batches oder CoinJoin/Mix — ohne automatische Erkennung.</p>
+
+<h4>Die vier Grundlagen</h4>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Grundlage</th><th>Wann</th><th>Verlässlichkeit</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Herkunft verfolgt</strong></td>
+        <td>Analyse liegt vor, alle externen Zuflüsse datiert</td>
+        <td>jüngster externer Zufluss — steuerlich das richtige</td></tr>
+    <tr><td><strong>… (Untergrenze)</strong></td>
+        <td>Analyse vorhanden, nicht alle externen Vorgänger auflösbar</td>
+        <td>Datum kann <strong>zu alt</strong> sein — Haltefrist zu lang
+            ausgewiesen</td></tr>
+    <tr><td><strong>… (nur Wallet-Eingang)</strong></td>
+        <td>Analyse vorhanden, kein externer Zufluss datierbar</td>
+        <td>Datum kann <strong>zu jung</strong> sein — Haltefrist zu kurz
+            ausgewiesen</td></tr>
+    <tr><td><strong>nur Output-Datum</strong></td>
+        <td>noch nicht verfolgt</td>
+        <td>Entstehungsdatum des Outputs</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Die beiden mittleren Fälle zeigen in <strong>entgegengesetzte
+Richtungen</strong> und werden deshalb getrennt ausgewiesen — in der Zeile, in
+den Kennzahlen und im CSV-Export. „Untergrenze" ist der riskante Fall: Die
+Frist erscheint länger erfüllt, als sie es womöglich ist. „Nur Wallet-Eingang"
+ist der defensive.</p>
+
+<h4>Sonderfälle</h4>
+<ul>
+  <li><strong>Coinbase (Mining):</strong> Der Block-Zeitpunkt der Coinbase-Tx
+      ist der externe Zufluss.</li>
+  <li><strong>Große Sammel-Tx (mehr als 20 Eingänge):</strong> Der Trace bricht
+      nach dem ersten internen Eingang ab. Das gefundene Datum wird als
+      <strong>Untergrenze</strong> markiert.</li>
+  <li><strong>Datenquelle ohne Blockzeiten der Vorgänger:</strong> Esplora
+      liefert den Vorgänger-Output inline mit, aber ohne dessen Blockzeit. Bei
+      Transaktionen bis 20 Eingängen wird sie nachgeladen; bei größeren gilt
+      der jüngste Wallet-Eingang. Ein eigener Fulcrum liefert die Blockzeit
+      ohnehin mit.</li>
+  <li><strong>Kein Trace vorhanden:</strong> Rückfall auf das Output-Datum —
+      bewusst defensiv (zu jung, nie zu alt).</li>
+</ul>
+
+<div class="hinweis">
+  <div class="kopf">Warum das erheblich ist</div>
+  <p>Wechselgeld, Konsolidierungen und Eigenüberträge erzeugen <strong>neue
+  Outputs aus alten Coins</strong>: Wer 2020 gekaufte Sats 2026 teilweise
+  ausgibt, bekommt ein Wechselgeld-UTXO von 2026 — die Coins darin gehörten
+  aber längst zum Bestand. Steuerlich liegt keine Anschaffung vor.</p>
+  <p>Ohne Herkunftsanalyse weist die Aufstellung die Haltefrist dort also
+  <strong>zu kurz</strong> aus, nie zu lang. Der Fehler geht zu deinen
+  Ungunsten: Du hältst womöglich für steuerpflichtig, was längst steuerfrei
+  ist.</p>
+</div>
+
+<p><strong>Herkunft aller UTXOs</strong> in der Kopfzeile verfolgt alle noch
+offenen Einträge in einem Durchgang, mit Fortschritt und Abbrechen.</p>
+
+<p>In der <strong>Wallet-Ansicht</strong> gibt es zusätzlich
+<strong>Herkunft vollständig</strong>: jedes UTXO <em>dieses</em> Wallets
+wird wie <strong>Herkunftslücken schließen</strong> durchgezogen (große
+Sammel-Txs und eigene Vorgänger-Txs) bis zu einer fremden Adresse oder
+Coinbase. Der Lauf kann Stunden dauern (über Nacht ist ok); danach liegen
+die Bäume im Cache und die Oberfläche reagiert schnell. Vorher braucht es
+einen UTXO-Bestand. Abbruch lässt bereits fertige Bäume stehen.</p>
+
+<div class="hinweis warn">
+  <div class="kopf">Umfang der Auswertung</div>
+  <p>Grundlage sind die aktuell <strong>unverbrauchten</strong> UTXOs aus dem
+  Cache. Ein bereits ausgegebenes UTXO steht dort nicht mehr und fehlt
+  entsprechend. Für zurückliegende Jahre ist die Auswertung deshalb eine
+  Bestandsaufnahme des heutigen Guthabens, <strong>keine lückenlose
+  Historie</strong>. Dieser Hinweis steht in der Ansicht und in jedem Export.</p>
+</div>
+
+<h3 id="export">4.4 On-Chain-Aufstellung exportieren</h3>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Format</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><strong>CSV</strong></td>
+        <td>Tabellenkalkulation und Steuerberatung. Semikolon als Trenner,
+            UTF-8 mit BOM und Dezimalkomma — damit Excel unter Windows die
+            Spalten, Umlaute und Zahlen ohne Nacharbeit richtig liest.</td></tr>
+    <tr><td><strong>Bericht</strong></td>
+        <td>Druckbare HTML-Datei ohne externe Ressourcen. Im Browser öffnen und
+            über „Drucken → Als PDF sichern" in ein PDF wandeln — auf allen
+            drei Plattformen gleich, ohne Zusatzsoftware.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Beide enthalten Stichtag, Haltefrist, Erstellungsdatum, die Herkunft der
+Daten und die Grundlage je Zeile.</p>
+
+<div class="hinweis acht">
+  <div class="kopf">Keine Steuerberatung</div>
+  <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Dieser Hinweis steht auch in jedem Export.</p>
+</div>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="sanktionen">
+<h2><span class="nr">5</span>Sanktions- und Blacklists</h2>
+
+<p>Abgeglichen wird gegen lokal gespeicherte Listen. <strong>Vor der ersten
+Nutzung</strong> müssen sie heruntergeladen werden — in der Web-Oberfläche
+unter <strong>Einstellungen → Sanktions- und Blacklists</strong>, im Menü über
+<code>7 Einstellungen → 7</code>. Die OFAC-SDN-XML allein ist etwa 125 MB.</p>
+
+<h3>Drei Zustände</h3>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Anzeige</th><th>Bedeutung</th></tr></thead>
+  <tbody>
+    <tr><td><span class="gruen">kein Treffer</span></td>
+        <td>Abgeglichen, nichts gefunden</td></tr>
+    <tr><td><span class="rot">n Treffer</span></td>
+        <td>Mindestens eine Adresse steht auf einer Liste</td></tr>
+    <tr><td><span class="gelb">nicht geprüft</span></td>
+        <td>Keine Listen im Cache — es wurde gar nicht nachgesehen</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Der dritte Zustand ist der wichtigste: „nichts gefunden" und „nicht
+nachgesehen" dürfen sich nie gleich anfühlen. Ohne heruntergeladene Listen ist
+ein leeres Ergebnis kein Freibrief.</p>
+
+<div class="hinweis warn">
+  <div class="kopf">Grenze des Abgleichs</div>
+  <p>Geprüft wird, ob eine Adresse <em>selbst</em> gelistet ist. Ob die Sats
+  aus gelisteter Quelle <em>stammen</em>, beantwortet erst die
+  Herkunftsanalyse — ein UTXO auf unauffälliger Adresse kann trotzdem belastet
+  sein.</p>
+</div>
+
+<h3>Sanktionscheck der Vorgeschichte</h3>
+
+<p>Der Bereich <strong>Sanktionscheck</strong> prüft die externe Vorgeschichte
+der UTXOs — dasselbe wie Menüpunkt 6.1 im CLI. Gewählt werden Wallet (oder
+alle) und die Zahl <strong>externer Hops</strong> (1–20, Standard 3). Treffer
+nennen Hop, Adresse, Betrag und die Herkunfts-UTXO.</p>
+
+<p>Ein Lauf über mehrere Hops dauert Minuten und kostet hunderte bis tausende
+Tx-Abrufe. Er wird deshalb <strong>nicht</strong> bei jedem Seitenaufruf
+wiederholt: Das Ergebnis liegt in
+<code>sanctioned_cache/letzter_vorgeschichte_check.json</code> und erscheint
+beim Öffnen wieder — mit Datum, Hop-Tiefe und der Zahl der Listenadressen.</p>
+
+<p>Das Ergebnis <strong>altert</strong>: Die Listen ändern sich, und UTXOs, die
+seither dazugekommen sind, stecken nicht darin. Nach Wallet-Änderungen also neu
+prüfen oder über <strong>Ergebnis verwerfen</strong> löschen.</p>
+
+<h3>Wohin die Abfragen gehen</h3>
+
+<p>Sanktionsabfragen laufen über den <strong>eigenen Server, wenn er privat
+adressiert ist</strong> (LAN/Loopback — schnell, und die Anfragen nach
+gelisteten Fremdadressen verlassen das eigene Netz nicht), sonst über
+<strong>Clearnet-Fulcrum</strong>, unabhängig von der Wallet-Datenquelle.</p>
+
+<p>Öffentlich konfigurierte eigene Server und Tor werden bewusst übersprungen:
+Sanktionsabfragen sollen nicht mit der eigenen Identität verknüpft werden.
+Der Lauf verteilt die UTXOs auf alle Verbindungen des Pools — wer selbst
+hostet, wird nicht mit einem seriellen Lauf bestraft.</p>
+
+<h3>Quellen</h3>
+<ul>
+  <li>OFAC SDN (0xB10C-Flatliste + treasury.gov SDN-XML)</li>
+  <li>OpenSanctions: Israel NBCTF, US FBI Lazarus Group, ransomwhe.re</li>
+  <li>Badd-Boyz Bitcoin Scammers</li>
+</ul>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="labels">
+<h2><span class="nr">6</span>Adress-Labels</h2>
+
+<p>Beim Verfolgen der Herkunft endet ein Zweig irgendwann bei einer fremden
+Adresse. „Fremd" allein sagt wenig — ob die Sats von einer Börse, einem
+Mining-Pool oder einem Darknet-Markt kamen, ist die eigentlich interessante
+Auskunft. Dafür lässt sich ein lokaler Datenbestand laden, der bekannte
+Adressen benennt.</p>
+
+<p>Geladen wird unter <strong>Einstellungen → Adress-Labels</strong>, wahlweise
+als <strong>Kernbestand</strong> (1,7&nbsp;MB, rund 187.000 benannte Adressen)
+oder <strong>Vollbestand</strong> (37&nbsp;MB, rund 276.000). Danach findet
+jede Zuordnung ausschließlich auf diesem Rechner statt.</p>
+
+<div class="hinweis">
+  <div class="kopf">Warum heruntergeladen und nicht abgefragt</div>
+  <p>Eine Online-Abfrage „wem gehört diese Adresse" würde einem Dritten genau
+  das verraten, was das Werkzeug sonst schützt: welche Adressen dich
+  interessieren. Der Bestand wird deshalb einmal geladen und danach nur noch
+  lokal gelesen — rund 8&nbsp;Mikrosekunden je Adresse.</p>
+</div>
+
+<h3>Wo die Labels erscheinen</h3>
+
+<ul>
+  <li><strong>Herkunft tracen</strong> — am externen Ende eines Zweigs, also
+      dort, wo die Verfolgung aufhört.</li>
+  <li><strong>UTXO-Liste</strong> — an der Zeile, sobald die Herkunft ermittelt
+      ist; beschriftet wird der letzte externe Zufluss.</li>
+</ul>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Anzeige</th><th>Bedeutung</th></tr></thead>
+  <tbody>
+    <tr><td><code>Börse · Kraken</code></td>
+        <td>Zuordnung zu einem Dienst. Der Hilfetext nennt Sitzland, Quelle
+            und Dateidatum.</td></tr>
+    <tr><td><code>auf BitcoinTalk erwähnt</code></td>
+        <td><em>Keine</em> Zuordnung: Die Adresse wurde dort öffentlich
+            gepostet. Wem sie gehört, sagt das nicht.</td></tr>
+    <tr><td><code>bekannter Dienst</code></td>
+        <td>Im Bestand enthalten, aber ohne Namen.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="hinweis warn">
+  <div class="kopf">Datenstand — die wichtigste Einschränkung</div>
+  <p>Die Massendaten gehen auf eine Erhebung von WalletExplorer aus
+  <strong>April 2018</strong> zurück. Börsen vergeben pro Einzahlung neue
+  Adressen; ein Zufluss aus den letzten Jahren steht dort meist
+  <strong>nicht</strong>. Nützlich ist der Bestand bei alten Herkunftsketten,
+  Mining-Pools und historischen Diensten wie BTC-e oder Mt.&nbsp;Gox.</p>
+  <p>Ein Treffer ist damit ein begründeter Hinweis, keine Feststellung — und
+  ein fehlender Treffer erst recht kein Beleg für irgendetwas.</p>
+</div>
+
+<h3>Genauigkeit</h3>
+
+<p>Der Bestand besteht aus zwei Teilen, die unterschiedlich irren. Der
+<strong>Namensindex</strong> bildet Adressen auf 4-Byte-Hashes ab: Eine
+unbekannte Adresse trifft mit etwa 1:15.000 zufällig einen fremden Eintrag und
+bekäme dessen Namen. Der <strong>Bloom-Filter</strong> hat eine Fehlerrate von
+0,1&nbsp;%, benennt dafür nichts — er liefert nur „gehört zu einem erfassten
+Dienst".</p>
+
+<p>Gefragt wird zuerst der Index, der Filter nur ergänzend. Das ist bewusst so
+herum: Beim Vollbestand des Anbieters stammen beide Teile aus verschiedenen
+Läufen und widersprechen sich — von 321 bekannten Beispieladressen kennt der
+Index 203, der Filter nur 2. Vorgeschaltet würde er fast alle Namen wegwerfen,
+die daneben stehen.</p>
+
+<h3>Quelle und Lizenz</h3>
+
+<p>Die Dateien stammen aus dem Projekt <strong>am-i.exposed</strong>
+(<code>github.com/Copexit/am-i-exposed</code>, MIT). Sie werden bewusst
+<strong>nicht mitgeliefert</strong>, sondern auf Knopfdruck nachgeladen: Die
+zugrunde liegende Sammlung hat keine ausgewiesene Lizenz, und eine
+Weiterverbreitung wäre eine Frage, die nicht dieses Projekt beantworten
+sollte. Über <strong>Entfernen</strong> lässt sich der Bestand jederzeit wieder
+löschen; er liegt in <code>label_cache/</code>.</p>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="menue">
+<h2><span class="nr">7</span>Menü und CLI (Legacy / Fallback)</h2>
+
+<p><strong>Empfohlen</strong> ist die Web-GUI (<code>py server.py</code>). Das
+Terminal-Menü bleibt für Umgebungen ohne Browser. Beim Start ohne
+<code>--txid</code>, <code>--address</code> oder <code>--cli</code> erscheint
+das Menü mit Statuszeile: gewählte Datenquelle samt Privatsphäre-Hinweis,
+Anzahl und Namen der XPUBs, <code>[C]</code> = UTXO-Cache vorhanden.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Nr.</th><th>Funktion</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Tracen: TxID oder UTXO — woher kamen die Sats, wann rein/raus</td></tr>
+    <tr><td>2</td><td>UTXO-Rangfolge eines Wallets</td></tr>
+    <tr><td>3</td><td>UTXO-Rangfolge aller Wallets</td></tr>
+    <tr><td>4</td><td>Gespeicherte Herkunfts-Analysen zu Outputs (auch bereits ausgegebene)</td></tr>
+    <tr><td>5</td><td>UTXO-Konsolidierung (Dust zusammenführen, PSBT erzeugen)</td></tr>
+    <tr><td>6</td><td>Prüfe Sanktionsliste</td></tr>
+    <tr><td>7</td><td>Einstellungen</td></tr>
+    <tr><td>8</td><td>Quit</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Schnellstart</h3>
+
+<pre><code># Interaktives Menü (Legacy/Fallback) — empfohlen: python3 server.py
+python3 main.py
+python3 main.py --xpubs zpub6DeinXPUB... --wallet-names "Mein Wallet"
+
+# Transaktion analysieren (direkt, ohne Menü)
+python3 main.py --xpubs zpub6... --txid &lt;txid&gt;
+
+# Adresse / einzelnes UTXO
+python3 main.py --xpubs zpub6... --address bc1q...
+python3 main.py --xpubs zpub6... --address bc1q... --utxo &lt;txid&gt;:&lt;vout&gt;
+
+# Klassischer CLI-Modus: Top-UTXOs ohne Menü
+python3 main.py --xpubs zpub6... --cli --top-utxos 10</code></pre>
+
+<p>Stehen die Wallets bereits als <code>WALLET_0_XPUB</code>-Block in
+<code>.env</code>, reicht schlicht <code>python3 main.py</code>. Ohne
+Anzeigenamen wird pro XPUB ein SHA256-Hex des Keys verwendet.</p>
+
+<h3>UTXO-Konsolidierung (Menü 5)</h3>
+
+<p>Führt Dust-UTXOs unterhalb eines wählbaren Limits zu einer signierbaren
+<strong>PSBT</strong> zusammen, abgelegt unter <code>psbt_out/</code>. Die PSBT
+kann anschließend in eine Wallet- oder Hardware-Wallet-Software zum Signieren
+importiert werden.</p>
+
+<h3>Einstellungen (Menü 7)</h3>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Nr.</th><th>Funktion</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Datenquelle: Bitcoin Core (BIP-158) / Fulcrum / Esplora</td></tr>
+    <tr><td>2</td><td>BIP-158 Start-Blockhöhe (Vorgabe 850 000) oder Startdatum</td></tr>
+    <tr><td>3</td><td>Top-N-Limit für Ranglisten</td></tr>
+    <tr><td>4</td><td>Verbose (j/n) — volle TxIDs/Adressen</td></tr>
+    <tr><td>5</td><td><code>.env</code> im Editor öffnen</td></tr>
+    <tr><td>6</td><td><code>check_fulcrum_tor.py</code> in externem Terminal</td></tr>
+    <tr><td>7</td><td>Sanktions- und Blacklists aktualisieren</td></tr>
+    <tr><td>8</td><td>Zurück</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Wichtige CLI-Optionen</h3>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Option</th><th>Beschreibung</th></tr></thead>
+  <tbody>
+    <tr><td><code>--xpubs XPUB […]</code></td>
+        <td>Extended Public Keys (sonst <code>WALLET_0_XPUB</code>… aus <code>.env</code>)</td></tr>
+    <tr><td><code>--wallet-names NAME […]</code></td><td>Anzeigenamen</td></tr>
+    <tr><td><code>--txid TXID</code></td><td>Spending-Tx analysieren (ohne Menü)</td></tr>
+    <tr><td><code>--address ADDR</code></td><td>Unspent UTXOs + Herkunft</td></tr>
+    <tr><td><code>--utxo TXID:VOUT</code></td><td>Einzelnes UTXO (mit <code>--address</code>)</td></tr>
+    <tr><td><code>--cli</code></td><td>Klassischer Modus: Top-UTXOs statt Menü</td></tr>
+    <tr><td><code>--top-utxos N</code></td><td>Top-N (Vorgabe 10)</td></tr>
+    <tr><td><code>--max-addresses N</code></td><td>Abgeleitete Adressen pro XPUB (Vorgabe 50)</td></tr>
+    <tr><td><code>--max-addresses-per-xpub N […]</code></td><td>Individuelles Limit pro XPUB</td></tr>
+    <tr><td><code>--script-types TYP […]</code></td>
+        <td><code>auto</code>|<code>legacy</code>|<code>nested</code>|<code>segwit</code>|<code>taproot</code></td></tr>
+    <tr><td><code>--rescan</code></td><td>Full-Rescan aller XPUBs</td></tr>
+    <tr><td><code>--cache-dir DIR</code></td><td>UTXO-Cache-Verzeichnis</td></tr>
+    <tr><td><code>--immutable-cache-dir DIR</code></td><td>Cache unveränderlicher Daten</td></tr>
+    <tr><td><code>--bip158</code></td><td>Bitcoin Core RPC + BIP-158 erzwingen</td></tr>
+    <tr><td><code>--bip158-start HEIGHT</code></td><td>Erster Scan-Block (Vorgabe 850 000)</td></tr>
+    <tr><td><code>--rpc-only</code></td><td>Fulcrum erzwingen</td></tr>
+    <tr><td><code>--esplora [URL]</code></td><td>Esplora erzwingen</td></tr>
+    <tr><td><code>--no-verbose</code></td><td>Gekürzte TxIDs/Adressen erzwingen</td></tr>
+    <tr><td><code>--fulcrum-host</code>, <code>--fulcrum-port</code>,
+            <code>--fulcrum-no-ssl</code></td><td>Fulcrum-Verbindung</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Vollständige Liste: <code>python3 main.py --help</code></p>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="datenquellen">
+<h2><span class="nr">8</span>Datenquellen und Privatsphäre</h2>
+
+<div class="tabelle">
+<table>
+  <thead><tr>
+    <th>Quelle</th><th>Aktivierung</th><th>Privatsphäre</th><th>Verhalten</th>
+  </tr></thead>
+  <tbody>
+    <tr><td><strong>Eigener Electrum-Server</strong></td>
+        <td>automatisch, Priorität 1</td>
+        <td><span class="gruen">hoch</span></td>
+        <td><code>FULCRUM_HOST</code>/<code>FULCRUM_TOR</code> in <code>.env</code></td></tr>
+    <tr><td><strong>Bitcoin Core · BIP-158</strong></td>
+        <td><code>--bip158</code> oder manuelle Wahl</td>
+        <td><span class="gruen">hoch</span></td>
+        <td>Eigener Node, BIP-158-Filter + RPC. Benötigt <code>blockfilterindex=1</code>.</td></tr>
+    <tr><td><strong>Öffentliche Onions</strong></td>
+        <td>automatisch oder <code>--rpc-only</code></td>
+        <td><span class="gelb">mäßig</span></td>
+        <td>Rotation <code>FULCRUM_TOR_0</code>…<code>9</code> über Tor</td></tr>
+    <tr><td><strong>Clearnet-Electrum</strong></td>
+        <td>automatisch (letzte Stufe)</td>
+        <td><span class="gelb">mäßig</span></td>
+        <td>Server aus <code>electrum_servers.json</code></td></tr>
+    <tr><td><strong>Esplora</strong></td>
+        <td><code>--esplora [URL]</code> oder manuelle Wahl</td>
+        <td><span class="rot">gering</span></td>
+        <td>HTTP-API (Vorgabe mempool.space), Rate-Limit-Schutz</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Automatische Priorität</strong> beim Start, wenn weder CLI-Flag noch
+manuelle Wahl gesetzt ist:</p>
+
+<p style="text-align:center; font-size:.95rem">
+eigener Electrum-Server → BIP-158 → öffentliche Onions → Clearnet
+</p>
+
+<p><code>BITCOIN_BIP158=1</code> und <code>ESPLORA_URL</code> in
+<code>.env</code> erzwingen <strong>keine</strong> Quelle — nur
+<code>--bip158</code>, <code>--rpc-only</code>, <code>--esplora</code> oder die
+manuelle Wahl unter Einstellungen.</p>
+
+<h3>Warum „Electrum-Server" und nicht „Fulcrum"</h3>
+
+<p>Das Werkzeug spricht das <strong>Electrum-Protokoll</strong>. Fulcrum ist nur
+eine Implementierung davon; electrs und ElectrumX funktionieren genauso. Die
+<code>.env</code>-Schlüssel heißen weiterhin <code>FULCRUM_*</code>, damit
+bestehende Konfigurationen unverändert weiterlaufen — nur die Bezeichnungen in
+der Oberfläche sind richtiggestellt.</p>
+
+<h3>Verbindung testen</h3>
+
+<pre><code>py check_fulcrum_tor.py
+py check_fulcrum_tor.py --onion-list-only   # nur öffentliche Server scannen</code></pre>
+
+<p>Erreichbare Onions werden als <code>FULCRUM_TOR_0=…</code> ausgegeben und
+lassen sich direkt in die <code>.env</code> übernehmen.</p>
+
+<div class="hinweis">
+  <div class="kopf">Kein TLS im LAN?</div>
+  <p>Viele selbst gehostete Nodes laufen im LAN <strong>ohne TLS</strong>.
+  Erkennbar an <code>[SSL: WRONG_VERSION_NUMBER] wrong version number</code>.
+  Dann <code>FULCRUM_SSL=false</code> setzen oder testweise
+  <code>--fulcrum-no-ssl</code>.</p>
+</div>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="konfiguration">
+<h2><span class="nr">9</span>Konfiguration (<code>.env</code>)</h2>
+
+<p>Auszug — die vollständige Vorlage steht in <code>.env.example</code>.</p>
+
+<pre><code># Wallets — ein Block je Wallet, fortlaufend ab 0, ohne Lücke
+# WALLET_0_NAME=Mein Wallet                 # Leerzeichen erlaubt
+# WALLET_0_XPUB=zpub6DeinXPUB
+# WALLET_0_SCRIPT=segwit                    # auto|legacy|nested|segwit|taproot
+# WALLET_0_MAX_ADDRESSES=50                 # optional
+# WALLET_1_NAME=Zweites Wallet
+# WALLET_1_XPUB=xpub6ZweiterXPUB
+
+# Multisig: _XPUBS statt _XPUB, dazu _M für die nötigen Unterschriften
+# WALLET_2_NAME=Tresor
+# WALLET_2_M=2
+# WALLET_2_SCRIPT=wsh                       # wsh|sh-wsh
+# WALLET_2_XPUBS=xpub6A xpub6B xpub6C
+
+# Eigener Electrum-Server (Fulcrum, electrs, ElectrumX)
+FULCRUM_HOST=192.168.1.100
+FULCRUM_TOR=deinnode.onion
+FULCRUM_PORT=50002
+FULCRUM_SSL=true
+FULCRUM_TOR_PROXY=127.0.0.1:9150
+
+# Öffentliche Onion-Rotation (höchstens 10)
+# FULCRUM_TOR_0=beispiel.onion
+
+# Sanktionslisten — eigener Server mit privater Adresse wird automatisch
+# zuerst genutzt; leer oder öffentlich = schnellste Clearnet-Server
+# FULCRUM_SANCTIONS_HOST=fulcrum.beispiel.org
+# FULCRUM_SANCTIONS_PORT=50002
+# FULCRUM_SANCTIONS_SSL=true
+
+# Bitcoin Core RPC (BIP-158)
+NODE_IP=192.168.1.100
+RPCPORT=8332
+RPCUSER=bitcoin
+RPCPASSWORD=...
+# BIP158_START_HEIGHT=850000
+
+# Esplora (nur bei manueller Wahl oder --esplora)
+# ESPLORA_URL=https://mempool.space/api
+
+# Eigene mempool.space-Instanz für die ↗-Verweise
+# MEMPOOL_URL=http://umbrel.local:3006
+
+# Verbose: volle TxIDs/Adressen (Vorgabe: aus)
+# VERBOSE=1
+
+# Assistent — lokal ohne Key; Cloud nur mit Opt-in und eigenem Key
+# LLM_BASE_URL=http://127.0.0.1:11434/v1
+# LLM_MODELL=qwen2.5:7b
+# LLM_ANBIETER=ollama
+# LLM_API_KEY=
+# LLM_REMOTE_OPT_IN=0</code></pre>
+
+<p><strong>Start9 über Tor:</strong> <code>NODE_IP=&lt;rpc-onion&gt;.onion</code>,
+<code>RPCPORT=443</code>, <code>FULCRUM_TOR_PROXY=127.0.0.1:9150</code>
+(Tor Browser).</p>
+
+<div class="hinweis acht">
+  <div class="kopf">Niemals committen</div>
+  <p><code>.env</code> enthält XPUBs und gegebenenfalls RPC-Zugangsdaten. Die
+  Datei steht in <code>.gitignore</code> und gehört niemals in ein
+  Repository.</p>
+</div>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="caches">
+<h2><span class="nr">10</span>Caches</h2>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Cache</th><th>Ort</th><th>Inhalt</th></tr></thead>
+  <tbody>
+    <tr><td>UTXO-Cache</td><td><code>utxo_cache/</code></td>
+        <td>Pro XPUB eine JSON-Datei mit UTXOs, Scan-Fortschritt und dem
+            Wallet-Alter (<code>first_seen_height</code>/<code>_ts</code>) —
+            <strong>veränderlich</strong>, wird bei Rescans aktualisiert</td></tr>
+    <tr><td>Adress-Auflösung</td><td><code>external_addresses.json</code></td>
+        <td>Beschleunigt die Trace-Zuordnung</td></tr>
+    <tr><td>Immutable-Cache</td><td><code>immutable_cache/</code></td>
+        <td>Transaktionen (<code>tx/</code>), Blockzeiten
+            (<code>block_header/</code>), Herkunfts-Metadaten
+            (<code>utxo_ingress/</code>) und verfolgte Herkunftsbäume
+            (<code>utxo_trace/</code>) — unveränderlich, quellenunabhängig</td></tr>
+    <tr><td>Sanktions-Cache</td><td><code>sanctioned_cache/</code></td>
+        <td>Heruntergeladene Blacklists und das letzte Prüfergebnis</td></tr>
+    <tr><td>Label-Cache</td><td><code>label_cache/</code></td>
+        <td>Bestand der Adress-Labels (Bloom-Filter, Namensindex,
+            Entitätsangaben) — siehe Kapitel 6</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Unter <strong>Einstellungen → Danger Zone!!!!</strong> lässt sich der
+Analyse-Cache eines einzelnen Wallets oder aller Wallets auf einmal löschen
+(UTXO-Bestand, Verlauf, Herkunftsbäume). Gemeinsame Transaktionsdateien,
+Sanktionslisten und Adress-Labels bleiben. Danach müssen die betroffenen
+Wallets neu gescannt werden.</p>
+
+<h3>Ablauf bei vorhandenem UTXO-Cache</h3>
+<ol>
+  <li>Salden noch prüfen?</li>
+  <li>Check der gecachten UTXOs + 5 Lookahead-Adress-Indizes</li>
+  <li>Stimmt alles → Cache nutzen</li>
+  <li>Abweichung → Light-Rescan (nächste Batch) oder Full-Rescan (ab Index #0)</li>
+</ol>
+
+<p>Ein <strong>Light-Rescan</strong> setzt am gespeicherten
+<code>scan_end_index</code> fort (etwa #25–#49 bei Vorgabe 50).</p>
+
+<pre><code>python3 main.py --xpubs zpub6... --rescan                  # Full-Rescan erzwingen
+python3 main.py --xpubs zpub6... --cache-dir ./mein_cache   # eigenes Verzeichnis</code></pre>
+
+<p>Unter <strong>5 % freiem Speicherplatz</strong> am Cache-Laufwerk werden neue
+Schreibvorgänge pausiert (Warnung einmalig).</p>
+
+<div class="hinweis warn">
+  <div class="kopf">Beim Teilen aufpassen</div>
+  <p><code>immutable_cache/utxo_ingress/</code> und
+  <code>immutable_cache/utxo_trace/</code> enthalten
+  <strong>Wallet-Anzeigenamen</strong> — die Bäume zusätzlich die Adressen
+  deiner Vorgänger-Transaktionen. Bei Backups oder beim Teilen des Ordners
+  neutrale Namen verwenden; versioniert wird der Ordner ohnehin nicht.</p>
+</div>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="sicherheit">
+<h2><span class="nr">11</span>Sicherheit und Datenschutz</h2>
+
+<ul>
+  <li><strong>XPUBs erlauben das Ableiten aller Wallet-Adressen</strong> —
+      wie sensible Daten behandeln, nicht in Issues oder Screenshots teilen.</li>
+  <li><strong>Wallet-Namen</strong> in <code>.env</code>,
+      <code>utxo_cache/</code> und <code>immutable_cache/</code> können
+      persönliche Bezeichnungen enthalten.</li>
+  <li><strong>Eigener Node</strong> (BIP-158 oder eigener Electrum-Server) —
+      beste Privatsphäre.</li>
+  <li><strong>Öffentliche Electrum-Server</strong> — Rotation mildert das Risiko
+      einzelner Server, bleibt aber <span class="gelb">mäßig</span>.</li>
+  <li><strong>Esplora</strong> — Adressen und TxIDs gehen an den API-Anbieter,
+      <span class="rot">geringste</span> Privatsphäre.</li>
+  <li><strong>Sanktions-Scans</strong> nutzen für die Listen-Adressen den
+      eigenen privaten Server oder Clearnet — nie die eigenen Wallet-XPUBs.</li>
+  <li>Die Web-Oberfläche schreibt <strong>keine Zugriffsprotokolle</strong> und
+      bindet nur an <code>127.0.0.1</code>.</li>
+  <li><strong>Assistent / Cloud-LLM</strong> — ohne Opt-in kein Remote.
+      Der API-Key steht nur in der <code>.env</code>, nie in Status oder Chat.
+      An die Cloud gehen höchstens Aggregate, keine XPUBs.</li>
+</ul>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="technik">
+<h2><span class="nr">12</span>Technischer Teil</h2>
+
+<h3 id="architektur">11.1 Architektur</h3>
+
+<p>Der Grundsatz: <strong>eine Engine, mehrere Oberflächen</strong>. Die
+Kernlogik liegt einmal vor und wird von Web-GUI und CLI gleichermaßen
+aufgerufen — nichts davon ist doppelt implementiert. Die Web-GUI
+(<code>server.py</code>) ist die empfohlene Oberfläche; das interaktive
+Terminal-Menü (<code>menu.py</code>) gilt als <strong>Legacy /
+Fallback</strong> (SSH, kein Browser).</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Schicht</th><th>Dateien</th><th>Verantwortung</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Engine</strong></td>
+        <td><code>main.py</code>, <code>analyze.py</code>,
+            <code>fulcrum.py</code>, <code>trace_engine.py</code>,
+            <code>bip158_scanner.py</code>, <code>sanctioned.py</code></td>
+        <td>Adressableitung, Datenquellen, Herkunfts-Trace, Caches,
+            Sanktionslisten</td></tr>
+    <tr><td><strong>Kernschicht</strong></td>
+        <td><code>core/</code></td>
+        <td>Liefert Daten statt Text — ruft die Engine auf, rechnet sie nicht
+            nach</td></tr>
+    <tr><td><strong>Oberflächen</strong></td>
+        <td><code>server.py</code> + <code>web/</code> ·
+            <code>menu.py</code>/<code>display.py</code> (Legacy)</td>
+        <td>Web-GUI (empfohlen); Terminal-Menü als Fallback</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Modul in <code>core/</code></th><th>Verantwortung</th></tr></thead>
+  <tbody>
+    <tr><td><code>config.py</code></td><td><code>.env</code> strukturerhaltend lesen und schreiben</td></tr>
+    <tr><td><code>wallets.py</code></td><td>Übersicht, Cache-Zustand, Skripttyp-Erkennung</td></tr>
+    <tr><td><code>utxos.py</code></td><td>Rangfolge als Daten</td></tr>
+    <tr><td><code>source.py</code></td><td>Datenquellen-Beschreibung ohne Prompts</td></tr>
+    <tr><td><code>trace.py</code></td><td>Herkunftsbaum als Daten</td></tr>
+    <tr><td><code>trace_cache.py</code></td>
+        <td>Verfolgte Bäume ablegen und wiederfinden, samt Fingerabdruck der Adressmenge</td></tr>
+    <tr><td><code>tax.py</code></td><td>Haltefristen, Stichtage, Zeitstrahl, CSV- und Berichtsexport</td></tr>
+    <tr><td><code>sanctions.py</code></td><td>Abgleich gegen die lokalen Listen</td></tr>
+    <tr><td><code>jobs.py</code></td><td>Hintergrund-Vorgänge mit Fortschritt und Abbruch</td></tr>
+    <tr><td><code>paths.py</code></td><td>Pfade für Skriptlauf und eingefrorene Executable</td></tr>
+  </tbody>
+</table>
+</div>
+
+<blockquote>
+  <p><strong>Regel für <code>core/</code>: kein <code>print()</code>.</strong>
+  Die Module geben Daten zurück, Fortschritt läuft über Callbacks. Nur so
+  lassen sie sich von CLI und Server gleichermaßen benutzen.</p>
+</blockquote>
+
+<h4>Der Ingress-Cache — Bindeglied zwischen Herkunft und Steuer</h4>
+
+<p>Die Herkunftsanalyse in <code>analyze.py</code> schreibt je Output eine Datei
+nach <code>immutable_cache/utxo_ingress/</code>. Sie enthält beides: den
+jüngsten <em>Wallet</em>-Eingang und den jüngsten <em>externen</em> Zufluss.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Feld</th><th>Bedeutung</th></tr></thead>
+  <tbody>
+    <tr><td><code>youngest_time_ts</code></td>
+        <td>jüngster Wallet-Eingang (zählt interne Überträge mit)</td></tr>
+    <tr><td><code>external_time_ts</code></td>
+        <td><strong>jüngster externer Zufluss</strong> — Bezug der On-Chain-Haltedauer (nicht automatisch der steuerliche Erwerb)</td></tr>
+    <tr><td><code>external_sats</code>, <code>external_address</code></td>
+        <td>Betrag und Adresse dieses Zuflusses</td></tr>
+    <tr><td><code>external_untergrenze</code></td>
+        <td>true, wenn externe Vorgänger unaufgelöst blieben — Datum kann zu alt sein</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><code>core/tax.py</code> liest genau diese Datei über
+<code>main.load_utxo_ingress_cache()</code> und leitet daraus das
+Anschaffungsdatum ab. Die Steuerauswertung führt also keine eigene
+Blockchain-Logik — sie interpretiert nur, was die Engine ohnehin erhoben hat.</p>
+
+<h3 id="api">11.2 API</h3>
+
+<p>Alle Endpunkte unter <code>/api/</code> verlangen den Header
+<code>X-Satsage-Token</code>. Die beiden Export-Endpunkte akzeptieren das Token
+auch als <code>?t=</code> in der Adresse, weil ein Download-Fenster keinen
+Header mitschicken kann.</p>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Endpunkt</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /api/config</code></td><td>Wallets (maskiert), Datenquellen, Skripttypen</td></tr>
+    <tr><td><code>PUT /api/config/wallets</code></td><td>Wallet-Liste speichern</td></tr>
+    <tr><td><code>PUT /api/config/source</code></td><td>Felder einer Datenquelle speichern</td></tr>
+    <tr><td><code>PUT /api/config/mempool</code></td><td>Adresse der eigenen mempool-Instanz</td></tr>
+    <tr><td><code>POST /api/wallets/probe</code></td><td>Skripttyp erkennen</td></tr>
+    <tr><td><code>GET /api/wallets/{id}/utxos</code></td><td>Rangfolge und Adressgruppen aus dem Cache</td></tr>
+    <tr><td><code>GET /api/utxos</code></td><td>UTXOs aller Wallets — Einstieg der Herkunftsansicht</td></tr>
+    <tr><td><code>GET /api/source/status</code></td><td>Prioritätskette (<code>?check=1</code> testet den eigenen Node)</td></tr>
+    <tr><td><code>GET /api/sanctions</code></td><td>Zustand der lokalen Listen</td></tr>
+    <tr><td><code>POST /api/sanctions/update</code></td><td>Listen herunterladen (Job)</td></tr>
+    <tr><td><code>POST /api/sanctions/check</code></td><td>Vorgeschichte prüfen (Job, <code>max_hops</code> 1–20)</td></tr>
+    <tr><td><code>GET /api/sanctions/check</code></td><td>Zuletzt gespeichertes Ergebnis</td></tr>
+    <tr><td><code>DELETE /api/sanctions/check</code></td><td>Ergebnis verwerfen</td></tr>
+    <tr><td><code>GET /api/labels</code></td><td>Zustand des Labelbestands</td></tr>
+    <tr><td><code>POST /api/labels</code></td><td>Bestand laden (Job, <code>variante</code> kern/voll)</td></tr>
+    <tr><td><code>DELETE /api/labels</code></td><td>Bestand entfernen</td></tr>
+    <tr><td><code>GET /api/trace</code></td>
+        <td>Bereits verfolgten Baum liefern (<code>?target=txid:vout</code>) — ohne Job</td></tr>
+    <tr><td><code>POST /api/trace</code></td><td>Herkunftsanalyse starten (überschreibt den gespeicherten Baum)</td></tr>
+    <tr><td><code>POST /api/verlauf</code></td>
+        <td>Vollständigen Verlauf aller Wallets erheben (auch ausgegebene Outputs)</td></tr>
+    <tr><td><code>POST /api/config/deskriptor</code></td>
+        <td>Deskriptor oder Wallet-Export prüfen; liefert Skripttyp, Schlüssel und erste Adresse</td></tr>
+    <tr><td><code>POST /api/trace/alle</code></td><td>Herkunft aller offenen UTXOs (Job)</td></tr>
+    <tr><td><code>GET /api/tax</code></td><td>Steuerjahr-Auswertung (<code>?jahr=2026&amp;frist=1</code>)</td></tr>
+    <tr><td><code>GET /api/tax/export.csv</code></td><td>CSV-Download</td></tr>
+    <tr><td><code>GET /api/tax/bericht.html</code></td><td>Druckbarer Bericht</td></tr>
+    <tr><td><code>GET /api/llm/status</code></td><td>Anbindung, Pille, Banner (<code>?check=1</code> prüft Erreichbarkeit; kein Key)</td></tr>
+    <tr><td><code>PUT /api/config/llm</code></td><td>Assistent speichern; <code>XAI_API_KEY</code> im Körper wird abgelehnt</td></tr>
+    <tr><td><code>GET /api/llm/context/…</code></td><td>Cache-Reader: <code>luecken</code>, <code>wallets</code>, <code>steuer</code>, <code>export</code> — nur GET</td></tr>
+    <tr><td><code>POST /api/llm/chat</code></td><td>Freitext; Remote nur mit Opt-in; startet keine Jobs</td></tr>
+    <tr><td><code>POST /api/jobs/rescan</code></td><td>Rescan starten</td></tr>
+    <tr><td><code>GET /api/jobs/{id}</code></td><td>Fortschritt und Ergebnis</td></tr>
+    <tr><td><code>DELETE /api/jobs/{id}</code></td><td>Abbrechen</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="tests">11.3 Tests</h3>
+
+<pre><code>python3 -m unittest discover -s tests</code></pre>
+
+<p>Läuft offline, ohne Node, in unter zwei Sekunden. Die Testdaten sind
+synthetisch; die eigene <code>.env</code> wird weder gelesen noch
+beschrieben.</p>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
+<!-- ================================================================= -->
+<section id="anhang">
+<h2><span class="nr">13</span>Anhang: Stolpersteine und Vorgemerktes</h2>
+
+<h3>Häufige Meldungen</h3>
+
+<div class="tabelle">
+<table>
+  <thead><tr><th>Meldung</th><th>Ursache und Abhilfe</th></tr></thead>
+  <tbody>
+    <tr><td><code>ModuleNotFoundError: No module named 'embit'</code></td>
+        <td>Umgebung nicht aktiviert — siehe Startbefehle in Abschnitt 2.5</td></tr>
+    <tr><td><code>No module named venv</code></td>
+        <td>Linux: <code>sudo apt install python3-venv</code></td></tr>
+    <tr><td><code>pip: command not found</code></td>
+        <td>Linux: <code>sudo apt install python3-pip</code></td></tr>
+    <tr><td><code>'py' wird nicht als Befehl erkannt</code></td>
+        <td>Windows: Python ohne <em>„Add to PATH"</em> installiert —
+            Installation wiederholen</td></tr>
+    <tr><td><code>Die Ausführung von Skripts ist deaktiviert</code></td>
+        <td>PowerShell: <code>Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass</code></td></tr>
+    <tr><td><code>Address already in use</code></td>
+        <td>Es läuft bereits ein Server: <code>py server.py --port 8731</code></td></tr>
+    <tr><td><code>[SSL: WRONG_VERSION_NUMBER]</code></td>
+        <td>Der Port spricht kein TLS — <code>FULCRUM_SSL=false</code></td></tr>
+    <tr><td>Wallet zeigt 0 UTXO trotz Guthaben</td>
+        <td>Skripttyp stimmt nicht — siehe Abschnitt 3.3</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Noch nicht in der Web-Oberfläche</h3>
+
+<p>UTXO-Konsolidierung und der Sanktions-Scan über <em>fremde</em>
+Listenadressen (Menüpunkt 6.2) sind weiterhin nur im Menü verfügbar.</p>
+
+<h3>Vorgemerkte Verbesserungen</h3>
+
+<p>Ohne Reihenfolge und ohne Zeitplan — einfach nicht vergessen:</p>
+
+<ul>
+  <li><strong>Grafischer UTXO-Flow.</strong> Ein aufklappbarer Herkunftsbaum als
+      Grafik. Die Rückwärtsrichtung ist gut machbar — <code>core/trace.py</code>
+      liefert bereits einen Baum mit stabilen Knoten-Kennungen
+      (<code>0</code>, <code>0.0</code>, <code>0.0.1</code> …), es fehlen nur
+      Koordinaten. Die Vorwärtsrichtung ist der eigentliche Aufwand: zusätzliche
+      Abfragen und eine offene Datenschutzfrage. Empfehlung: in zwei Stufen,
+      rückwärts zuerst, ohne externe Bibliothek.</li>
+  <li><strong>Verlauf ausgegebener UTXOs.</strong> Bereits verkaufte Coins
+      nachträglich tracen — für Steuernachweise. Über einen Electrum-Server
+      wäre das die Adress-Historie; über BIP-158 sogar günstig, weil der
+      Blockfilter-Scan ohnehin <em>alle</em> je empfangenen Outputs sieht und
+      erst ein späterer <code>gettxout</code> über „noch unspent?" entscheidet.
+      Persistieren statt verwerfen würde reichen.</li>
+  <li><strong>CI-Smoke-Test für die Executables.</strong> Aktuell prüft der
+      Build nur, ob PyInstaller durchläuft — nicht, ob die Datei startet und
+      antwortet. Nach dem Build kurz starten
+      (<code>--no-browser --port &lt;frei&gt;</code>), per HTTP auf
+      <code>/</code> prüfen, beenden.</li>
+  <li><strong>SHA256-Summen für Releases.</strong> Die Executables sind
+      unsigniert; Prüfsummen in den Release-Notes sind kostenlos und geben
+      wenigstens eine Möglichkeit, die Integrität zu prüfen.</li>
+  <li><strong>Update-Hinweis.</strong> Wer eine Executable statt eines
+      Git-Checkouts nutzt, merkt neue Versionen nicht. Ein dezenter,
+      einmaliger Check gegen die Releases-API — kein Auto-Update.</li>
+</ul>
+
+<h3>Lizenz</h3>
+<p><em>Jeder macht was er will damit. Erwähnung wäre nett.</em></p>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+<footer>
+  <p>SatSage — Handbuch. Erzeugt für den lokalen Gebrauch; enthält keine
+  externen Ressourcen und lässt sich offline lesen sowie über
+  „Drucken → Als PDF sichern" in ein PDF wandeln.</p>
+</footer>
+
+</div>

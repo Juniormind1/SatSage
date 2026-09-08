@@ -1,0 +1,74 @@
+{% extends "satsage/base.jinja" %}
+
+{% block satsage_content %}
+<section>
+    <h2>Analyse</h2>
+    {% if session_source %}
+        <p>Backend: <b>{{ session_source }}</b> · UTXOs/XPUBs aus Specter, Trace über Node/Cache.</p>
+    {% else %}
+        <p style="opacity:0.85;">Session startet beim ersten Analyse-Lauf (kann bei BIP-158 etwas dauern).</p>
+    {% endif %}
+</section>
+
+<section style="margin-top: 1.25rem;">
+    <h3>Transaktion tracen</h3>
+    {# GET: vermeidet Specter CSRF/POST-Redirects; Analyse ist lesend #}
+    <form method="get" action="{{ url_for(service.id + '_endpoint.analyze') }}">
+        <input type="hidden" name="mode" value="tx"/>
+        <label>TxID
+            <input name="txid" type="text" style="width:100%; max-width:40rem;" placeholder="64 hex chars" required/>
+        </label>
+        <button type="submit" class="btn action">Tx analysieren</button>
+    </form>
+</section>
+
+<section style="margin-top: 1.5rem;">
+    <h3>UTXO tracen</h3>
+    <form method="get" action="{{ url_for(service.id + '_endpoint.analyze') }}">
+        <input type="hidden" name="mode" value="utxo"/>
+        <label>UTXO (txid:vout)
+            <input name="utxo" type="text" style="width:100%; max-width:40rem;" placeholder="abcd…:0" required/>
+        </label>
+        <label>Adresse (optional, wenn nicht in Specter-UTXOs)
+            <input name="address" type="text" style="width:100%; max-width:40rem;" placeholder="bc1q…"/>
+        </label>
+        <button type="submit" class="btn action">UTXO analysieren</button>
+    </form>
+</section>
+
+<section style="margin-top: 1.5rem;">
+    <h3>UTXO-Rangfolge (aus Specter)</h3>
+    <form method="get" action="{{ url_for(service.id + '_endpoint.analyze') }}">
+        <input type="hidden" name="mode" value="rank"/>
+        <label>Wallet
+            <select name="wallet_alias">
+                <option value="">— alle Wallets —</option>
+                {% for w in wallets %}
+                <option value="{{ w.alias }}">{{ w.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" class="btn action">Rangliste</button>
+    </form>
+</section>
+
+<section style="margin-top: 1.5rem;">
+    <h3>Top-UTXOs tracen</h3>
+    <form method="get" action="{{ url_for(service.id + '_endpoint.analyze') }}">
+        <input type="hidden" name="mode" value="trace_top"/>
+        <label>Wallet
+            <select name="wallet_alias">
+                <option value="">— alle —</option>
+                {% for w in wallets %}
+                <option value="{{ w.alias }}">{{ w.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Anzahl
+            <input name="limit" type="number" min="1" max="15" value="3" style="width:4rem;"/>
+        </label>
+        <button type="submit" class="btn action">Top-N tracen</button>
+    </form>
+    <p style="opacity:0.75; font-size:0.9rem;">Hinweis: Trace kann je nach Tiefe und BIP-158-Cache Minuten dauern.</p>
+</section>
+{% endblock %}

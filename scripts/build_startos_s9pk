@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Build the StartOS x86_64 sideload package (satsage_x86_64.s9pk).
+#
+# Package root: packaging/
+# Full guide:   doc/START9-packaging.md
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PKG="$ROOT/packaging"
+export PATH="${HOME}/.local/bin:${PATH}"
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing: $1" >&2
+    echo "see doc/START9-packaging.md (toolchain)" >&2
+    exit 1
+  fi
+}
+
+need docker
+need make
+need node
+need npm
+need jq
+need mksquashfs
+need start-cli
+
+if ! docker info >/dev/null 2>&1; then
+  echo "docker is installed but the daemon is not reachable." >&2
+  exit 1
+fi
+
+NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "Node.js 22+ required (have $(node --version))" >&2
+  exit 1
+fi
+
+# start-cli signs with the nearest .startos/ walking up from packaging/.
+# A workspace at the repo root is enough; do not commit .startos/ (signing key).
+if [ ! -d "$ROOT/.startos" ] && [ ! -f "$ROOT/.startos/build.key.pem" ]; then
+  parent="$(dirname "$ROOT")"
+  if [ -d "$parent/.startos" ]; then
+    echo "using workspace at $parent/.startos"
+  else
+    echo "no Start9 workspace found. Creating one at repo root (.startos/ is gitignored)."
+    (cd "$ROOT" && start-cli s9pk init-workspace .)
+  fi
+fi
+
+cd "$PKG"
+if [ ! -d node_modules/@start9labs/start-sdk ]; then
+  echo "npm ci in packaging/"
+  npm ci
+fi
+
+echo "make x86"
+make x86
+
+S9PK="$(ls -1t "$PKG"/satsage_x86_64*.s9pk 2>/dev/null | head -n 1 || true)"
+if [ -z "$S9PK" ]; then
+  echo "build finished but no satsage_x86_64*.s9pk in packaging/" >&2
+  exit 1
+fi
+
+SUM="$S9PK.sha256"
+sha256sum "$(basename "$S9PK")" > "$SUM" 2>/dev/null || sha256sum "$S9PK" > "$SUM"
+echo
+echo "package: $S9PK"
+echo "sha256:  $(cut -d' ' -f1 "$SUM")"
+echo "sideload this file in StartOS (top bar → Sideload)."
+echo "publish: ./scripts/publish_startos_release"

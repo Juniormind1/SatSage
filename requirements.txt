@@ -1,0 +1,3 @@
+embit>=0.8.0
+chiabip158>=1.5.0
+argon2-cffi>=23.1.0

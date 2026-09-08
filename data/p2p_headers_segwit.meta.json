@@ -1,0 +1,12 @@
+{
+  "format": "XPQH1",
+  "anchor_height": 481824,
+  "tip_height": 963198,
+  "tip_hash": "000000000000000000005345627bd198b4cd326c828df813416db44026583170",
+  "headers": 481374,
+  "uncompressed_sha256": "9606e34556c60f8d01f1be2840b25a4f51294413757920446c257e9050ae3553",
+  "bytes": 38509961,
+  "gzip_bytes": 32378943,
+  "created": "2026-08-20",
+  "note": "Mainnet-Header ab SegWit. Lokal nach immutable_cache/p2p_headers.bin entpacken; Tip per P2P nachziehen."
+}

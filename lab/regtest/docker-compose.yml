@@ -1,0 +1,45 @@
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:27.0
+    container_name: satsage-bitcoind-regtest
+    ports:
+      - "127.0.0.1:18443:18443"
+    volumes:
+      - ./.data/bitcoin:/home/bitcoin/.bitcoin
+    command:
+      - -regtest=1
+      - -server=1
+      - -listen=1
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcuser=bitcoin
+      - -rpcpassword=secret
+      - -rpcport=18443
+      - -fallbackfee=0.0001
+      - -txindex=1
+      - -blockfilterindex=1
+      - -printtoconsole=1
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=bitcoin", "-rpcpassword=secret", "getblockchaininfo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  electrs:
+    image: getumbrel/electrs:v0.10.9
+    container_name: satsage-electrs-regtest
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:50001:50001"
+    volumes:
+      - ./.data/bitcoin:/bitcoin:ro
+      - ./.data/electrs:/electrs-data
+    command:
+      - --network=regtest
+      - --daemon-dir=/bitcoin
+      - --daemon-rpc-addr=bitcoind:18443
+      - --daemon-p2p-addr=bitcoind:18444
+      - --electrum-rpc-addr=0.0.0.0:50001
+      - --db-dir=/electrs-data
