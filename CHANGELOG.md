@@ -5,6 +5,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **README · Marke:** Logo (`web/img/logo.jpg`) und Slogan oben; Kurz-Badges und Feature-Tabelle statt nackter Fließtext-Einstieg.
+- **CI · keine Auto-Releases:** Workflow `build-executables.yml` entfernt (hatte macOS/Linux/Windows ungeprüft an `v*`-Tags gehängt). StartOS-Workflow nur noch manuell (`workflow_dispatch`), ohne Release-Attach — Veröffentlichung nach Test per `scripts/publish_startos_release`.
+- **README · Oberflächen:** Kein Legacy-CLI-Hauptmenü mehr beschrieben. Stattdessen: Zusammenspiel von Terminal-Steuerung (`py server.py`, Tasten 1/2/3) und Browser-GUI; `main.py` nur noch für Einmal-Analysen.
 - **Windows-Build · Splash:** PyInstaller-Splash mit `max_img_size=(1200, 900)` statt `None` — 6.22 crasht sonst beim Vergleich `tuple > None`.
 - **Windows · Terminal-Menü:** Feste ANSI-Fußzeile (VT-Modus), Logs scrollen darüber — Menü bleibt stehen. Tasten 1/2/3 ohne Enter; bei Beenden j/n. Fallback `Auswahl [1-3]:` wenn VT fehlt. `--plain-console` = ohne Menü. Abschalten: `SATSAGE_ANSI_MENU=0` / `SATSAGE_TERMINAL_MENU=0`.
 - **Windows · Browser-Start / Server-Halt:** Auto-Browser wieder an (nach Menü/HTTP, verzögert per `os.startfile`). Kein Tk-Splash in der CLI (opt-in `SATSAGE_SPLASH=1`). HTTP in Daemon-Thread, bei Abbruch Neustart; Menü-Beenden setzt Stop-Flag zuerst.
