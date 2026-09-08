@@ -5,6 +5,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Git · Identitäts-Härtung:** `githooks/pre-commit` und `pre-push` erzwingen `Juniormind1 <juniormind@proton.me>`; persönliche Autor-Daten werden abgelehnt. Aktivierung: `git config core.hooksPath githooks`. In `AGENTS.md` verankert.
 - **README · Marke:** Logo (`web/img/logo.jpg`) und Slogan oben; Kurz-Badges und Feature-Tabelle statt nackter Fließtext-Einstieg.
 - **CI · keine Auto-Releases:** Workflow `build-executables.yml` entfernt (hatte macOS/Linux/Windows ungeprüft an `v*`-Tags gehängt). StartOS-Workflow nur noch manuell (`workflow_dispatch`), ohne Release-Attach — Veröffentlichung nach Test per `scripts/publish_startos_release`.
 - **README · Oberflächen:** Kein Legacy-CLI-Hauptmenü mehr beschrieben. Stattdessen: Zusammenspiel von Terminal-Steuerung (`py server.py`, Tasten 1/2/3) und Browser-GUI; `main.py` nur noch für Einmal-Analysen.
