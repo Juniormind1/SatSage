@@ -1,19 +1,19 @@
 # SatSage – know your sats
 
+Der Name ist Absicht als Wortspiel: **Sat Sage** (Sat-Weiser) und **Sats Age** (Alter der Sats) — passend zum Slogan *know your sats* und zur Frage, wie alt die Bestände on-chain schon sind.
+
 **Version 0.9** — steht in der Datei [`VERSION`](VERSION) (einzige Quelle). Neue Nummern setzen nur Maintainer; Builds und UI lesen sie nur. In der Web-GUI erscheint sie in der Fußzeile.
 
 **Sprache:** Web-Oberfläche Deutsch oder Englisch (Einstellungen → Sprache; optional ``UI_LANG`` in ``.env``). Job-Log und viele Server-Meldungen können weiterhin Deutsch sein. Das Handbuch bleibt vorerst nur auf Deutsch.
 
-Der Name ist Absicht als Wortspiel: **Sat Sage** (Sat-Weiser) und **Sats Age** (Alter der Sats) — passend zum Slogan *know your sats* und zur Frage, wie alt die Bestände on-chain schon sind.
+XPUB-Single- und Multisig-Analyzer für Bitcoin-Wallets.  
+Analysiert Transaktionen und UTXOs und zeigt, **woher die Sats wann kamen** — insbesondere wann sie ein xPub-Wallet betraten oder es wieder verließen. Daraus lässt sich die On-Chain-Haltedauer ablesen. Das ersetzt keine Börsenhistorie und keine Kaufbelege.
 
-Multi-XPUB- und Taproot-Analyzer für Wasabi- und Standard-Wallets.  
-Analysiert Transaktionen und unspent UTXOs und zeigt, **woher die Sats wann kamen** — insbesondere wann sie ein xPub-Wallet betraten oder es wieder verließen. Daraus lässt sich die On-Chain-Haltedauer ablesen. Das ersetzt keine Börsenhistorie und keine Kaufbelege.
+Technische IDs laufen unter `satsage` (Binary `satsage-webgui`, Specter-Extension `satsage.specterext.satsage`).
 
-Früherer Projektname: xPubQuery. Technische IDs laufen unter `satsage` (Binary `satsage-webgui`, Specter-Extension `satsage.specterext.satsage`).
+**Datenquellen:** eigener Electrum-Server (electrs/Fulcrum), Compact Filter über Bitcoin-P2P (`--bip158`), öffentliche Onions, Clearnet. Beim Start ohne explizite Wahl: eigener Electrum-Server → P2P-BIP-158; öffentliche Onions/Clearnet erst nach Bestätigung. Lokaler Pruned-Node für schnellen UTXO-Scan wird erkannt und genutzt.
 
-**Datenquellen:** eigener Electrum-Server (electrs/Fulcrum), Compact Filter über Bitcoin-P2P (`--bip158`), öffentliche Onions, Clearnet. Beim Start ohne explizite Wahl: eigener Electrum-Server → P2P-BIP-158; öffentliche Onions/Clearnet erst nach Bestätigung.
-
-**Oberflächen:** Web (`py server.py`, empfohlen); interaktives CLI-Menü (`py main.py`) als **Legacy/Fallback** (Terminal/SSH ohne Browser); Specter-Plugin; StartOS-Sideload (`.s9pk`, x86_64) — Bau: [`doc/START9-packaging.md`](doc/START9-packaging.md). Direktmodi `--txid` / `--address` / `--cli` bleiben für Einmal-Analysen nützlich. Nutzerhandbuch: [`doc/handbuch.html`](doc/handbuch.html) (in der Web-GUI unter „Handbuch“).
+**Oberflächen:** Web (`py server.py`, empfohlen); Specter-Plugin; StartOS-Sideload (`.s9pk`, x86_64) — Bau: [`doc/START9-packaging.md`](doc/START9-packaging.md). Direktmodi `--txid` / `--address` / `--cli` bleiben für Einmal-Analysen nützlich. Nutzerhandbuch: [`doc/handbuch.html`](doc/handbuch.html) (in der Web-GUI unter „Handbuch“).
 
 ## Was das ist — und was nicht
 
@@ -24,7 +24,6 @@ SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreic
 ## Features
 
 - **Web-Oberfläche** (`py server.py`) — Wallets, UTXO-/Verlaufsscan, Herkunft, Steuerjahr, Assistent (Cache-only), Einstellungen; nur localhost mit Sitzungs-Token
-- **Interaktives Hauptmenü** (Legacy/Fallback: CLI ohne `--txid` / `--address` / `--cli`; empfohlen ist die Web-GUI)
 - **Mehrere XPUBs** gleichzeitig (zpub, xpub, ypub, Taproot, Multisig-Deskriptor) mit Anzeigenamen
 - **Tx-Trace** — TxID, UTXO (`txid:vout`) oder Adresse
 - **Steuerjahr** — Haltefrist (Vorgabe 1 Jahr, Deutschland) und optionaler Stichtag; Chart und Export
@@ -123,65 +122,11 @@ Ausführlich: [`doc/handbuch.html`](doc/handbuch.html). Offene Lücke (gründlic
 
 ---
 
-## Hauptmenü (Legacy / Fallback)
-
-**Empfohlen:** Web-GUI (`py server.py`). Das Terminal-Menü bleibt für Umgebungen ohne Browser (SSH, Server-Konsole) und schnelle Checks.
-
-Beim Start ohne `--txid`, `--address` oder `--cli` erscheint das Menü mit Statuszeile:
-
-- Gewählte **Datenquelle** inkl. **Privatsphäre-Hinweis**
-- Anzahl und **Namen** der XPUBs; `[C]` = UTXO-Cache vorhanden
-
-| Nr. | Funktion |
-|-----|----------|
-| 1 | Tracen: TxID oder UTXO |
-| 2 | UTXO-Rangfolge eines Wallets (nummerierte Auswahl) |
-| 3 | UTXO-Rangfolge aller Wallets |
-| 4 | Gespeicherte Herkunfts-Analysen zu Outputs (auch ausgegebene; `immutable_cache/utxo_ingress/`) |
-| 5 | UTXO-Konsolidierung |
-| 6 | Prüfe Sanktionsliste |
-| 7 | Einstellungen |
-| 8 | Quit |
-
-### Sanktionsliste (Menü 6)
-
-| Nr. | Funktion |
-|-----|----------|
-| 1 | Wallet-UTXOs gegen Sanktionslisten prüfen |
-| 2 | UTXOs auf sanktionierten Adressen scannen |
-| 3 | **Sanktionslisten-Überblick** — pro Quelle: Entitäten, Adressen, Listungsdatum, Adress-Standards; danach Online-Aktualitätsprüfung (j/N zum Aktualisieren) |
-| 4 | Adress-Gruppen (Person, Grund, Quelle) |
-
-Sanktions-UTXO-Abfragen laufen immer über **Clearnet-Fulcrum** (unabhängig von der Wallet-Datenquelle).
-
 **Quellen** (in `sanctioned_cache/`):
 
 - OFAC SDN (0xB10C Flatliste + treasury.gov SDN-XML)
 - OpenSanctions: Israel NBCTF, US FBI Lazarus Group, ransomwhe.re
 - Badd-Boyz Bitcoin Scammers
-
-### Einstellungen (Menü 7)
-
-| Nr. | Funktion |
-|-----|----------|
-| 1 | Datenquelle: BIP-158 / Fulcrum |
-| 2 | BIP-158 Start-Blockhöhe (Default: 850 000) oder Startdatum |
-| 3 | Top-N-Limit für Ranglisten |
-| 4 | Verbose (j/n) — volle TxIDs/Adressen (Default: nein) |
-| 5 | `.env` im Editor öffnen |
-| 6 | `check_fulcrum_tor.py` in externem Terminal |
-| 7 | Sanktions- & Blacklists aktualisieren |
-| 8 | Zurück |
-
----
-
-## Datenquellen
-
-| Modus | CLI / Menü | Privatsphäre | Verhalten |
-|-------|------------|--------------|-----------|
-| **Eigener Electrum-Server** | Auto (Priorität 1) | hoch | electrs/Fulcrum: `FULCRUM_HOST` / `FULCRUM_TOR` |
-| **Bitcoin-P2P Compact Filter** | `--bip158`, Auto (2) | hoch | BIP 157/158, Filter lokal, Block nur bei Treffer. Kein Core-RPC. Scheitert Clearnet, folgt Tor (laufender Browser oder Autostart). |
-| **Fulcrum (öffentlich)** | nach Bestätigung, `--oeffentliche-electrum` oder `--rpc-only` | mäßig | Electrum-Protokoll: Rotation `FULCRUM_TOR_0`…`9` oder Clearnet |
 
 **Automatische Priorität** beim Start (wenn weder CLI-Flag noch manuelle Menüwahl gesetzt):
 
