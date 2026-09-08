@@ -192,11 +192,31 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 **Der Benutzer entscheidet selber, wann er git commit und push machen will.**
 
+### Commit-Identität (hart)
+
+Dieses öffentliche Repo darf **nur** unter der Projekt-Identität committen/pushen:
+
+- `user.name=Juniormind1`
+- `user.email=juniormind@proton.me`
+
+Persönliche Namen/Mails (z. B. Klarname, private GitHub-Logins, private Proton-Adressen) sind **verboten** — sie erscheinen öffentlich in der Commit-Historie und auf GitHub.
+
+Pflicht pro Clone/Worktree:
+
+```bash
+git config user.name Juniormind1
+git config user.email juniormind@proton.me
+git config core.hooksPath githooks
+```
+
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten. Assistenten müssen vor jedem Commit prüfen, dass die **lokale** Repo-Config (nicht nur global) auf Juniormind1 steht.
+
 Assistenten sollen:
 
-- Ã„nderungen vorstellen und testen, aber **nicht** automatisch committen oder pushen
-- Nicht nach jedem Task â€žSoll ich committen/pushen?â€œ fragen
-- Auf ausdrÃ¼ckliche Anweisung des Benutzers warten (`commit`, `push`, o. Ã¤.)
+- Änderungen vorstellen und testen, aber **nicht** automatisch committen oder pushen
+- Nicht nach jedem Task „Soll ich committen/pushen?“ fragen
+- Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
+- Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 
 ## Sicherheit & Datenschutz
 
