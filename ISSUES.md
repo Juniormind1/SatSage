@@ -4,17 +4,19 @@ Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
 
 ## Start9 · Fulcrum als Electrum-Datenquelle (neben electrs)
 
-**Stand:** 2026-09-09 · **offen** · Bezug: [doc/START9-packaging.md](doc/START9-packaging.md), [doc/START9-hardening.md](doc/START9-hardening.md)
+**Stand:** 2026-09-09 · **in Arbeit (Vorbereitung)** · Bezug: [`doc/START9-fulcrum-indexer.md`](doc/START9-fulcrum-indexer.md), [`doc/START9-packaging.md`](doc/START9-packaging.md)
 
 Der Start9-Build-/Package-Prozess soll **Fulcrum** können, nicht nur `electrs-startos`.
 
-**Soll (Orientierung):**
+**Soll:**
 
-- Am besten **automatisch erkennen**, welcher Indexer auf dem StartOS-Gerät läuft (electrs und/oder Fulcrum), und SatSage daran anbinden.
-- Alternativ bzw. ergänzend: in der **StartOS-GUI auswählbar**, analog zur Mempool-Dependency-Auswahl (User wählt die Electrum-Datenquelle beim Install/Config).
-- Manifest/Dependencies und Bridge-Env (`ELECTRS_HOST` / Fulcrum-Aliase) so erweitern, dass beide Pfade sauber konfigurierbar sind — ohne Doppel-Edit in der SatSage-UI im Managed-Modus.
+- In der **StartOS-GUI auswählbar** (Action **Select Indexer**), analog Mempool — Fulcrum oder Electrs.
+- Manifest: beide Deps optional; zur Laufzeit genau eine aktiv.
+- Bridge-Env → `FULCRUM_*` + `SATSAGE_ELECTRUM_INDEXER`; SatSage-UI bleibt für Bridge-Quellen read-only.
 
-**Heute:** Packaging importiert typischerweise `bitcoin-core-startos` + `electrs-startos`; Fulcrum fehlt als First-Class-Option.
+**Erledigt in Vorbereitung (ohne `.s9pk`-Bau):** Design-Doku; Packaging (`store.indexer`, `selectIndexer`, conditional deps, Bridge electrs/`electrum` oder fulcrum/`main`); App-`managed_hint` / `electrum_indexer`; Unit-Tests.
+
+**Offen bis Sideload:** `npm ci` + `./scripts/build_startos_s9pk` auf Build-Host; Geräte-Test Fulcrum-Wahl; optional Task „Indexer wählen“ erzwingen; Auto-Detect nur als spätere Stufe.
 
 ---
 

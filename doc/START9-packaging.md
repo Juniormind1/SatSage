@@ -20,7 +20,7 @@ Fertiges x86_64-Beispiel: GitHub-Release-Asset `satsage_x86_64-tls11.s9pk` (sieh
 | `doc/START9-hardening.md` | App-HÃ¤rtung S0â€“S3 (Bind, Auth, Outbound) |
 | `doc/START9-backlog.md` | Tickets; S4 = dieses Packaging |
 
-Die Python-App bleibt im Repo-Root. `packaging/startos` importiert `bitcoin-core-startos` und `electrs-startos` (npm, GitHub). Nur **x86_64** ist im Manifest deklariert.
+Die Python-App bleibt im Repo-Root. `packaging/startos` importiert `bitcoin-core-startos` und `electrs-startos` (npm, GitHub). Electrum-Indexer zur Laufzeit: **electrs oder Fulcrum** (Action Select Indexer; Bridge-Host-IDs literal wie Mempool — kein npm-Import von `fulcrum-startos` nötig). Design: [`START9-fulcrum-indexer.md`](START9-fulcrum-indexer.md). Nur **x86_64** ist im Manifest deklariert.
 
 `master` hat dieses Packaging **nicht**. Arbeiten und Releases laufen Ã¼ber **`main`**.
 
@@ -115,7 +115,8 @@ CI: Workflow „Build StartOS s9pk“ nur manuell (`workflow_dispatch`) — Arti
 | `make` / pack: no workspace / no key | `start-cli s9pk init-workspace .` im Repo-Root |
 | Docker permission denied | User in Gruppe `docker`, Daemon lÃ¤uft |
 | Healthcheck rot | Bind/Proxy: Daemon setzt `SATSAGE_BIND=0.0.0.0`; Check gegen `127.0.0.1:8730/api/health` |
-| App ohne Node | StartOS-Deps `bitcoind` + `electrs` mÃ¼ssen running sein |
+| App ohne Node | StartOS-Deps `bitcoind` + gewÃ¤hlter Indexer (`electrs` **oder** `fulcrum`) mÃ¼ssen running sein |
+| Fulcrum statt Electrs | Action **Select Indexer** in SatSage; Fulcrum-Paket installieren/starten; siehe [`START9-fulcrum-indexer.md`](START9-fulcrum-indexer.md) |
 | `gh: not logged in` | `gh auth login`; privates Repo |
 
 App-Start im Container (schon im Entrypoint): `--env /data/.env`, Caches unter `/data`, `SATSAGE_MANAGED_BY=start9`, Cookie `/mnt/bitcoind/.cookie`. Das nicht in `server.py` â€žneu erfindenâ€œ.

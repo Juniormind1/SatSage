@@ -11,9 +11,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
   }
 
   const bridges = await getBridgeHosts(effects)
-  if (!bridges.bitcoind || !bridges.electrs) {
+  if (!bridges.bitcoind || !bridges.electrum) {
     throw new Error(
-      'bitcoind and electrs bridge addresses are not available yet',
+      `bitcoind and ${bridges.indexer} bridge addresses are not available yet`,
     )
   }
 
@@ -53,10 +53,14 @@ export const main = sdk.setupMain(async ({ effects }) => {
         BITCOIND_HOST: bridges.bitcoind.host,
         NODE_IP: bridges.bitcoind.host,
         RPCPORT: bridges.bitcoind.port,
-        ELECTRS_HOST: bridges.electrs.host,
-        FULCRUM_HOST: bridges.electrs.host,
-        FULCRUM_PORT: bridges.electrs.port,
+        // Electrum protocol always via FULCRUM_* (app name); source package is
+        // electrs or fulcrum — see SATSAGE_ELECTRUM_INDEXER / doc/START9-fulcrum-indexer.md
+        SATSAGE_ELECTRUM_INDEXER: bridges.indexer,
+        FULCRUM_HOST: bridges.electrum.host,
+        FULCRUM_PORT: bridges.electrum.port,
         FULCRUM_SSL: 'false',
+        // Legacy alias for older AppState mapping (ELECTRS_HOST → FULCRUM_HOST).
+        ELECTRS_HOST: bridges.electrum.host,
         SATSAGE_OUTBOUND_PUBLIC_OPT_IN: '0',
       },
     },

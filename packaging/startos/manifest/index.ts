@@ -32,14 +32,27 @@ export const manifest = setupManifest({
         icon: 'https://raw.githubusercontent.com/Start9Labs/bitcoin-core-startos/refs/heads/30.x/dep-icon.svg',
       },
     },
+    // Exactly one of electrs / fulcrum is required at runtime (Select Indexer).
     electrs: {
-      optional: false,
+      optional: true,
       description: {
-        en_US: 'Electrum index for address history and UTXO lookups',
+        en_US:
+          'Electrum index (electrs). Use Select Indexer to choose electrs or Fulcrum.',
       },
       metadata: {
         title: 'Electrs',
         icon: 'https://raw.githubusercontent.com/Start9-Community/electrs-startos/refs/heads/next/icon.svg',
+      },
+    },
+    fulcrum: {
+      optional: true,
+      description: {
+        en_US:
+          'Electrum index (Fulcrum). Use Select Indexer to choose Fulcrum or electrs.',
+      },
+      metadata: {
+        title: 'Fulcrum',
+        icon: 'https://raw.githubusercontent.com/Start9Labs/fulcrum-startos/master/icon.png',
       },
     },
   },
