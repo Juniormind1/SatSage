@@ -86,6 +86,41 @@ _immutable_tx_lock = threading.Lock()
 _xpub_address_positive_cache: set[tuple[str, str]] = set()
 _xpub_address_negative_cache: set[tuple[str, str, int]] = set()
 
+# SQLite-Hinweis für tx/ / utxo_ingress/ — siehe ISSUES.md (nach CoinJoin-Verfolgung).
+_SQLITE_FLATFILE_HINT_THRESHOLD = 10_000
+_SQLITE_FLATFILE_RECOUNT_EVERY = 500
+_sqlite_flatfile_hint_emitted = False
+_sqlite_flatfile_save_ticks: dict[str, int] = {}
+_sqlite_flatfile_last_count: dict[str, int] = {}
+
+
+def _maybe_log_sqlite_flatfile_hint(subdir: Path, *, kind: str) -> None:
+    """Einmaliger Log-Hinweis, wenn Winz-JSON-Caches die SQLite-Schwelle erreichen."""
+    global _sqlite_flatfile_hint_emitted
+    if _sqlite_flatfile_hint_emitted:
+        return
+    key = str(subdir.resolve()) if subdir.exists() else str(subdir)
+    ticks = _sqlite_flatfile_save_ticks.get(key, 0) + 1
+    _sqlite_flatfile_save_ticks[key] = ticks
+    # Nicht bei jedem Write den Ordner zählen — nur beim ersten Write und periodisch.
+    if ticks != 1 and ticks % _SQLITE_FLATFILE_RECOUNT_EVERY != 0:
+        n = _sqlite_flatfile_last_count.get(key, 0)
+    else:
+        try:
+            n = sum(1 for p in subdir.iterdir() if p.suffix == ".json")
+        except OSError:
+            return
+        _sqlite_flatfile_last_count[key] = n
+    if n < _SQLITE_FLATFILE_HINT_THRESHOLD:
+        return
+    _sqlite_flatfile_hint_emitted = True
+    print(
+        f"Cache wächst — sqlite ab jetzt sinnvoll "
+        f"({kind}: {n:,} Dateien unter {subdir}). "
+        f"Falls das stört: GitHub-Issue an SatSage — wir prüfen die Schwelle.",
+        flush=True,
+    )
+
 
 def set_chain_network(name: str | None) -> None:
     """Setzt das Adress-Netz aus ``NETWORK`` (main/regtest/test/signet)."""
@@ -597,6 +632,7 @@ def save_cached_tx(
     tmp.replace(path)
     with _immutable_tx_lock:
         _immutable_tx_memory[key] = tx
+    _maybe_log_sqlite_flatfile_hint(path.parent, kind="tx")
     return path
 
 
@@ -876,6 +912,7 @@ def save_utxo_ingress_cache(
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(_dump_cache_json(payload), encoding="utf-8")
     tmp.replace(path)
+    _maybe_log_sqlite_flatfile_hint(path.parent, kind="utxo_ingress")
     return path
 
 

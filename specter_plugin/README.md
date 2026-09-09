@@ -33,6 +33,8 @@ Falls der Browser das iframe blockiert: Link „In neuem Tab öffnen“.
 
 **Managed-GUI:** `GET /api/config` meldet `managed_by=specter`; Wallets und Datenquelle sind in der GUI schreibgeschützt/ausgeblendet. Mempool bleibt unter Einstellungen editierbar; Steuer, LLM, Mail und Sprache bleiben lokal änderbar.
 
+**Cache-Seed:** Beim GUI-Start schreibt `specter_seed.py` Specter-`full_utxo` in den UTXO-Cache, merged Receive-Historie in den Verlaufs-Cache, übernimmt Adress-Labels (`specter_address_labels.json`) und setzt `max_addresses` / `scan_end_index` aus Specters Adressindizes.
+
 **Privatsphäre:** Im Plugin laufen Abfragen **in-process** über Specters Node — kein Extra-Leak an öffentliche Esplora/Fulcrum-Server, solange Specter selbst auf deinen Node zeigt.
 
 ## Schnellstart (macOS)

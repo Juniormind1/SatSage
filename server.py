@@ -1024,9 +1024,27 @@ def _start9_electrum_indexer(werte: dict | None) -> str:
     return "electrs"
 
 
+def _specter_labels_for_api(state: AppState) -> dict[str, str]:
+    """Nutzer-Labels aus Specter-Seed (``utxo_cache/specter_address_labels.json``)."""
+    path = Path(state.cache_dir) / "specter_address_labels.json"
+    if not path.is_file():
+        return {}
+    try:
+        roh = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(roh, dict):
+        return {}
+    return {str(k): str(v) for k, v in roh.items() if k and v}
+
+
 def _managed_hint(state: AppState, werte: dict | None) -> str | None:
     if state.managed_by == "specter":
-        return "Wallets und Datenquelle kommen aus Specter."
+        return (
+            "Wallets (XPUBs/Deskriptoren) und Node/Electrum kommen aus Specter — "
+            "hier nicht doppelt pflegen. UTXOs, Verlauf und Labels werden aus "
+            "Specters Cache gesedet; Herkunft läuft weiter über SatSage."
+        )
     if state.managed_by == "start9":
         indexer = _start9_electrum_indexer(werte)
         label = "Fulcrum" if indexer == "fulcrum" else "Electrs"
@@ -1118,6 +1136,9 @@ def api_config(state: AppState, query: dict) -> dict:
         "managed_hint": _managed_hint(state, werte),
         "electrum_indexer": (
             _start9_electrum_indexer(werte) if state.managed_by == "start9" else None
+        ),
+        "specter_labels": (
+            _specter_labels_for_api(state) if state.managed_by == "specter" else None
         ),
     }
 
