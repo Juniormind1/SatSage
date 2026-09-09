@@ -53,7 +53,7 @@ Legende Status: `todo` Â· `doing` Â· `done` Â· `blocked`
 | S4-3 | done | Interfaces: UI mit `addSsl.auth`; interne Ports bridge-only | Kein Roh-RPC exportiert |
 | S4-4 | done | Health: Prozess + optional Electrs-Dependency-Health | StartOS zeigt grÃ¼n wenn nutzbar |
 | S4-5 | done | `README.md` + `instructions.md` (kein â€žist auf Torâ€œ) | Review-Checkliste Docs |
-| S4-6 | doing | E2E auf StartOS: Install, Login, Wallet-Scan gegen Electrs-Dep, Backup/Restore, Uninstall â€” Runbook ready; device E2E pending user sideload; no prod XPUB | Protokoll abgehakt |
+| S4-6 | done | E2E auf StartOS: Install, Login, Wallet-Scan gegen Electrs-Dep, Backup/Restore, Uninstall â€” Maintainer-Sideload mit Release **0.9** durchgeklickt (Passwort einmal via StartOS Basic Auth / Proxy-Session; Electrs+Core-Bridge auto; Bridge-Einstellungen gesperrt/ausgeblendet) | Protokoll abgehakt; GerÃ¤tetest 2026-09 |
 | S4-7 | todo | Einreichung `submissions@start9.com` â†’ Community-Fork â†’ beta â†’ promote | Package in community-beta |
 
 ## Phase 5 â€” Nice-to-have
@@ -96,4 +96,4 @@ Legende Status: `todo` Â· `doing` Â· `done` Â· `blocked`
 
 - S4-1: wrapper is `packaging/` in this repo on `main` (not a sibling `satsage-startos`). `make x86` still needs Docker, Node 22, `start-cli`, and a `.startos/` workspace key.
 - S4-2 through S4-5: Dockerfile/entrypoint, UI+Basic-auth, health, instructions.md; only x86_64 until an ARM image exists.
-- S4-6 is doing: Runbook ready; device E2E pending user sideload; no prod XPUB. S4-7 remains todo and is intentionally not submitted.
+- S4-6 **done** (2026-09): Maintainer E2E on device with GitHub/App **0.9** sideload — single password gate (StartOS `addSsl` Basic Auth + `X-Forwarded-User` → SatSage session), bitcoind/electrs bridges from StartOS deps, UI/API locks for `own_fulcrum`/`own_core`. S4-7 remains todo (Community submission not started).

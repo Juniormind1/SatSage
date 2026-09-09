@@ -3,6 +3,8 @@
 Alle nennenswerten Änderungen an SatSage.  
 Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 
+**Herkunft:** Die datierten Abschnitte ab `2026-07-08` stammen aus dem privaten Vorgängerprojekt **xPubQuery** (lokale Kopie unter PyCharmProjects) und wurden unverändert übernommen — in der gesamten Changelog-Historie dort kamen **keine** Klarname-Einträge ( o. Ä.) vor; Maintainer-Bezug ist durchgängig die Projekt-Identität **Juniormind1**. Ab dem Marker **2026-09-08** gilt die öffentliche SatSage-Historie.
+
 ## [Unveröffentlicht]
 
 - **Lab · Sanktions-Hops:** Pseudo-Liste + Ketten 1/10/25/100 Hops (und Clean) im Regtest; `SANKTION_MAX_HOPS_CAP` für Lab bis 100; GUI mit `--sanctions-dir` unter `.data/sanctioned_cache`. On-Chain-Verify grün (TP bei exakter Hop-Tiefe, Clean ohne False Positives).
@@ -28,6 +30,12 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **Bereits ausgegeben · EUR:** ≈ € zum **Tageskurs am Ausgabedatum** (lokale Historie), nicht zum Spot. Fehlt der Tag, Spot-Fallback **gelb** mit Tooltip-Warnung. API: ``GET /api/price/history?series=1``.
 - **Designhinweis · Node-Anbindung:** `doc/design-node-anbindung.md` — Node verbinden so einfach und fehlertolerant wie möglich (Apple-Leitbild); in `AGENTS.md` verankert.
 - **TLS · LAN vs. Clearnet:** Fulcrum/Core prüfen Zertifikate nur noch bei **öffentlichen** Hosts. Private/LAN/Loopback/Onion behalten die alte Self-Signed-Praxis (keine CA-Prüfung) — Desktop-`.env` gegen Start9-LAN funktioniert wieder ohne `SATSAGE_TLS_INSECURE`. Der Start9-Sideload spricht Electrs ohnehin ohne TLS über die Bridge. `SATSAGE_TLS_INSECURE=1` bleibt die Ausnahme für öffentliche Self-Signed-Ziele.
+
+## 2026-09-08 — Öffentlicher Start (SatSage Open Source)
+
+- **Public Release:** Erstes öffentliches GitHub-Repository unter dem Namen **SatSage – know your sats** (MIT, Maintainer `Juniormind1 <juniormind@proton.me>`). Commit-Marke im öffentlichen Tree: `d8d3601` (*Initial public release of SatSage*).
+- **Vorgeschichte:** Alles **unterhalb** dieses Abschnitts (`2026-09-07` … `2026-07-08`) ist die private xPubQuery-/SatSage-Entwicklung vor der Freigabe — inhaltlich deckungsgleich mit `PyCharmProjects/xPubQuery/CHANGELOG.md` (Stand Abgleich 2026-09-09); kein nachträgliches Umschreiben von Klarnamen nötig.
+- **Danach:** Einträge in `[Unveröffentlicht]` bzw. neueren Datumsabschnitten gehören zur öffentlichen Weiterentwicklung (u. a. Identitäts-Hooks, Lab-Sanktions-Hops, README/CI).
 
 ## 2026-09-07
 
