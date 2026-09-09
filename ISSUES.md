@@ -42,7 +42,7 @@ Das Specter-Plugin soll **Node-Connections** und **Wallets** aus der Specter-Umg
 - Tickets/Phasen: [`doc/START9-backlog.md`](doc/START9-backlog.md)
 - Specter-Plugin-Testplan (paralleler Distributionsweg): [`doc/testplan-specter-plugin.md`](doc/testplan-specter-plugin.md)
 
-Kurz: Loopback+Token-URL reichen nicht fÃ¼r LAN/Tor hinter StartOS. S0â€“S3 sind im Code; der Wrapper liegt in **`packaging/`** (Branch `main`). Bauen/Sideload/Release: [`doc/START9-packaging.md`](doc/START9-packaging.md). Community-Einreichung (S4-7) bleibt offen.
+Kurz: Loopback+Token-URL reichen nicht fÃ¼r LAN/Tor hinter StartOS. S0â€“S3 sind im Code; der Wrapper liegt in **`packaging/`** (Branch `main`). Bauen/Sideload/Release: [`doc/START9-packaging.md`](doc/START9-packaging.md). **S4-6** (GerÃ¤te-E2E mit Release 0.9) erledigt; **Community-Einreichung (S4-7)** bleibt offen.
 
 ---
 
