@@ -52,6 +52,24 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
 
 Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Dazu kommen zwei absichtlich strukturelle CoinJoin-ähnliche Transaktionen mit jeweils **24 Inputs und 28 Outputs** (gleichartige Outputs plus Change). Das ist keine Coordinator- oder WabiSabi-Implementierung, sondern reproduzierbares On-Chain-Testmaterial.
 
+### Pseudo-Sanktionslisten & Hop-Traces
+
+Nach den Basis-Szenarien legt `scripts/generate_sanctions_scenarios.py` (von `run_scenarios.ps1` mit aufgerufen) an:
+
+- Core-Wallets `lab-sanctioned` / `lab-relay` / `lab-clean-source` (**nicht** in SatSage `WALLET_*`)
+- True-Positive-Ketten: **1 / 10 / 25 / 100** externe Hops → Alpha / Beta / Change / Gamma (plus Hop-1 Cross an Gamma)
+- Clean-Ketten gleicher/ähnlicher Länge ohne Listen-Adresse (False-Positive-Check)
+- Pseudo-Liste unter `.data/sanctioned_cache/` (nur `bcrt1…`)
+- Expectations: `.data/scenario-report-sanctions.json`
+
+GUI-Lab setzt `--sanctions-dir lab/regtest/.data/sanctioned_cache` und `SANKTION_MAX_HOPS_CAP=100` (Produkt-Default bleibt 20). Das testet die **externe Vorgeschichte** (`scan_external_sanction_hops`), nicht den Listen-UTXO-Bestandsscan.
+
+Verify (Lab muss laufen):
+
+```bash
+py -3 lab/regtest/scripts/verify_sanctions_hops.py
+```
+
 ## Linux-Bot-Host
 
 Auf einem Linux-Host ist der Docker-Ablauf identisch und ebenfalls empfohlen:

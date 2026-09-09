@@ -503,7 +503,9 @@ def _menu_sanctions_wallet(session: MenuSession) -> None:
         if not raw_hops.strip().isdigit() or int(raw_hops.strip()) < 1:
             print(f"  ⚠️  {t('cli.warn.positiveNumber')}", flush=True)
             return
-        max_hops = min(int(raw_hops.strip()), 20)
+        from core.sanctions import clamp_sanktion_max_hops
+
+        max_hops = clamp_sanktion_max_hops(int(raw_hops.strip()), default=3)
 
     if index == 0:
         targets = [
