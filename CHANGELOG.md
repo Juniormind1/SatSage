@@ -5,6 +5,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Lab · Sanktions-Hops:** Pseudo-Liste + Ketten 1/10/25/100 Hops (und Clean) im Regtest; `SANKTION_MAX_HOPS_CAP` für Lab bis 100; GUI mit `--sanctions-dir` unter `.data/sanctioned_cache`.
 - **Git · Identitäts-Härtung:** `githooks/pre-commit` und `pre-push` erlauben ausschließlich `Juniormind1 <juniormind@proton.me>` (Allowlist). Aktivierung: `git config core.hooksPath githooks`. In `AGENTS.md` verankert.
 - **README · Marke:** Logo (`web/img/logo.jpg`) und Slogan oben; Kurz-Badges und Feature-Tabelle statt nackter Fließtext-Einstieg.
 - **CI · keine Auto-Releases:** Workflow `build-executables.yml` entfernt (hatte macOS/Linux/Windows ungeprüft an `v*`-Tags gehängt). StartOS-Workflow nur noch manuell (`workflow_dispatch`), ohne Release-Attach — Veröffentlichung nach Test per `scripts/publish_startos_release`.

@@ -1060,6 +1060,8 @@ class TestSanktionsCheck(ApiTestBasis):
         self.assertEqual(status, 404)
 
     def test_max_hops_wird_begrenzt(self):
+        from core.sanctions import DEFAULT_SANKTION_MAX_HOPS_CAP
+
         self.listen_hinterlegen()
         status, körper = self.anfrage(
             "/api/sanctions/check", methode="POST", daten={"max_hops": 99}
@@ -1067,8 +1069,8 @@ class TestSanktionsCheck(ApiTestBasis):
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         # Ohne erreichbaren Sanktions-Server scheitert der Lauf — aber das
-        # Job-Label zeigt: die Hops wurden auf 20 gedeckelt.
-        self.assertIn("20 Hops", job["label"])
+        # Job-Label zeigt: die Hops wurden auf den Cap gedeckelt.
+        self.assertIn(f"{DEFAULT_SANKTION_MAX_HOPS_CAP} Hops", job["label"])
 
     def test_ohne_server_scheitert_der_job_ohne_netzzugriff(self):
         self.listen_hinterlegen()

@@ -1056,6 +1056,7 @@ def api_config(state: AppState, query: dict) -> dict:
             {"value": t, "label": wallets_mod.SCRIPT_TYPE_LABELS[t]}
             for t in main.SCRIPT_TYPE_CHOICES
         ],
+        "sanktion_max_hops_cap": sanctions_mod.sanktion_max_hops_cap(),
         "env_path": str(state.env_path),
         "cache_dir": str(state.cache_dir),
         "rpc_password_set": bool((werte.get("RPCUSER") or "").strip() and (werte.get("RPCPASSWORD") or "").strip()),
@@ -2510,7 +2511,9 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
         max_hops = int(payload.get("max_hops", 3))
     except (TypeError, ValueError):
         max_hops = 3
-    max_hops = max(1, min(max_hops, 20))
+    from core.sanctions import clamp_sanktion_max_hops
+
+    max_hops = clamp_sanktion_max_hops(max_hops, default=3)
 
     eigene = set(wallet_ctx.address_to_wallet)
 

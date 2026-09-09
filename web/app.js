@@ -6020,7 +6020,8 @@ async function starteSanktionsCheck() {
 
   let hops = parseInt($("#sank-hops").value, 10);
   if (Number.isNaN(hops) || hops < 1) hops = 3;
-  hops = Math.min(hops, 20);
+  const hopCap = Number((Zustand.config || {}).sanktion_max_hops_cap) || 20;
+  hops = Math.min(hops, hopCap);
 
   const daten = { max_hops: hops };
   const walletId = $("#sank-wallet").value;
@@ -8351,6 +8352,11 @@ async function ladeConfig() {
   zeichneChatAnbindung();
   zeichneNav();
   zeichneFussVersion();
+  const hopFeld = $("#sank-hops");
+  if (hopFeld) {
+    const cap = Number(Zustand.config?.sanktion_max_hops_cap) || 20;
+    hopFeld.max = String(cap);
+  }
 }
 
 async function start() {

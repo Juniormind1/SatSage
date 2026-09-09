@@ -36,7 +36,8 @@ $batBody = @"
 set PYTHONUNBUFFERED=1
 set SATSAGE_SESSION_FILE=$session
 cd /d "$repo"
-"$py" server.py --env lab\regtest\.data\.regtest.env --cache-dir lab\regtest\.data\utxo_cache --immutable-cache-dir lab\regtest\.data\immutable_cache --no-browser >> "$outLog" 2>> "$errLog"
+set SANKTION_MAX_HOPS_CAP=100
+"$py" server.py --env lab\regtest\.data\.regtest.env --cache-dir lab\regtest\.data\utxo_cache --immutable-cache-dir lab\regtest\.data\immutable_cache --sanctions-dir lab\regtest\.data\sanctioned_cache --no-browser >> "$outLog" 2>> "$errLog"
 "@
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($bat, $batBody, $utf8)

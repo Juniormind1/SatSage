@@ -18,10 +18,40 @@ enthalten Fehler, veralten und decken sich nicht zwischen Rechtsräumen.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import sanctioned
+
+#: Produkt-Default und harte Obergrenze für Sanktions-Hop-Checks.
+#: Lab darf per ``SANKTION_MAX_HOPS_CAP`` anheben (z. B. 100), nicht die
+#: normale Oberfläche.
+DEFAULT_SANKTION_MAX_HOPS_CAP = 20
+_ABS_MAX_SANKTION_HOPS_CAP = 500
+
+
+def sanktion_max_hops_cap() -> int:
+    """Erlaubte Maximal-Hop-Tiefe (Default 20; Lab-Override per Env)."""
+    roh = (os.environ.get("SANKTION_MAX_HOPS_CAP") or "").strip()
+    if not roh:
+        return DEFAULT_SANKTION_MAX_HOPS_CAP
+    try:
+        wert = int(roh)
+    except ValueError:
+        return DEFAULT_SANKTION_MAX_HOPS_CAP
+    return max(1, min(wert, _ABS_MAX_SANKTION_HOPS_CAP))
+
+
+def clamp_sanktion_max_hops(wert: int, *, default: int = 3) -> int:
+    """Normiert eine Nutzer-Angabe auf 1…cap."""
+    try:
+        hops = int(wert)
+    except (TypeError, ValueError):
+        hops = default
+    if hops < 1:
+        hops = default if default >= 1 else 1
+    return max(1, min(hops, sanktion_max_hops_cap()))
 
 HINWEIS_UMFANG = (
     "Geprüft wird, ob eine Adresse selbst gelistet ist. Ob die Sats aus "
