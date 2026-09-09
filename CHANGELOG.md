@@ -5,7 +5,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Lab · Sanktions-Hops:** Pseudo-Liste + Ketten 1/10/25/100 Hops (und Clean) im Regtest; `SANKTION_MAX_HOPS_CAP` für Lab bis 100; GUI mit `--sanctions-dir` unter `.data/sanctioned_cache`.
+- **Lab · Sanktions-Hops:** Pseudo-Liste + Ketten 1/10/25/100 Hops (und Clean) im Regtest; `SANKTION_MAX_HOPS_CAP` für Lab bis 100; GUI mit `--sanctions-dir` unter `.data/sanctioned_cache`. On-Chain-Verify grün (TP bei exakter Hop-Tiefe, Clean ohne False Positives).
+- **Lab · bitcoind-Start:** Windows startet bitcoind per WMI (`Win32_Process.Create`), damit der Node das Shell-Job-Object überlebt — sonst war die Chain nach Generator-Abbruch weg.
+- **Sanktionen · Regtest-Adressen:** Listen-Parser akzeptiert `bcrt1`/`tb1` neben `bc1` (Lab-Pseudo-OFAC).
+- **Sanktionen · eigener Node:** Pool-Öffnung prüft nicht mehr Mainnet-Höhe 500k — Regtest/LAN-Fulcrum fällt sonst fälschlich auf Clearnet zurück.
+- **Lab · Hop-Generator:** `raw_spend` ohne Change → Fee = Rest; Ketten reichen jetzt Input−kleine Fee weiter (kein `maxfeerate`-Abbruch). Mining gebündelt.
 - **Git · Identitäts-Härtung:** `githooks/pre-commit` und `pre-push` erlauben ausschließlich `Juniormind1 <juniormind@proton.me>` (Allowlist). Aktivierung: `git config core.hooksPath githooks`. In `AGENTS.md` verankert.
 - **README · Marke:** Logo (`web/img/logo.jpg`) und Slogan oben; Kurz-Badges und Feature-Tabelle statt nackter Fließtext-Einstieg.
 - **CI · keine Auto-Releases:** Workflow `build-executables.yml` entfernt (hatte macOS/Linux/Windows ungeprüft an `v*`-Tags gehängt). StartOS-Workflow nur noch manuell (`workflow_dispatch`), ohne Release-Attach — Veröffentlichung nach Test per `scripts/publish_startos_release`.

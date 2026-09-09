@@ -1780,19 +1780,24 @@ def _open_own_sanctions_pool(
     anderen Server; ein eigener Fulcrum im LAN verträgt die Last dagegen
     problemlos selbst, also werden mehrere Verbindungen dorthin geöffnet.
 
-    Die erste entscheidet, ob der Server überhaupt taugt (listunspent und
-    Block-Historie). Schlägt eine weitere fehl, läuft der Pool eben
-    schmaler — das ist kein Grund, auf Clearnet auszuweichen.
+    Die erste Verbindung muss listunspent können. Die Mainnet-Historie-Sonde
+    (Höhe 500k) entfällt hier — Regtest/Testnet und frische LAN-Nodes hätten
+    sonst fälschlich Clearnet als Fallback.
     """
     from fulcrum import SanctionsClearnetPool, connect_fulcrum
 
-    hit = _probe_clearnet_fulcrum(
-        host, port, use_ssl, SANCTIONS_CLEARNET_PROBE_TIMEOUT
+    started = time.monotonic()
+    erster, _fehler = connect_fulcrum(
+        host,
+        port,
+        use_ssl=use_ssl,
+        timeout=SANCTIONS_CLEARNET_PROBE_TIMEOUT,
+        require_listunspent=True,
     )
-    if not hit:
+    if not erster:
         return None, 0.0
+    latency = time.monotonic() - started
 
-    erster, latency = hit
     clients = [erster]
     for _ in range(max(0, workers - 1)):
         weiterer, _fehler = connect_fulcrum(

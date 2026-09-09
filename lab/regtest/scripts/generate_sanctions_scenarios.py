@@ -71,6 +71,10 @@ CLEAN_MATRIX = (
     ("gamma", 10),  # 100 clean wäre unnötig teuer; 10 reicht FP-Check
 )
 
+# raw_spend legt keinen Change an — Rest = Fee. Deshalb nur winzige Fee lassen,
+# sonst trifft Core maxfeerate (Fehler -25).
+HOP_FEE_BTC = 0.0001
+
 
 def _fund_address(rpc: Rpc, address: str, amount: float, faucet_addr: str) -> None:
     rpc.call(
@@ -83,11 +87,21 @@ def _fund_address(rpc: Rpc, address: str, amount: float, faucet_addr: str) -> No
 
 
 def _utxo_for_address(rpc: Rpc, wallet: str, address: str) -> dict[str, Any]:
-    rows = [u for u in unspent(rpc, wallet) if u.get("address") == address]
+    # minconf=0: erlaubt Hop-Ketten mit gebündeltem Mining (Mempool-UTXOs).
+    rows = [
+        u
+        for u in rpc.json("listunspent", "0", "999999", wallet=wallet)
+        if u.get("address") == address
+    ]
     if not rows:
         raise RuntimeError(f"Kein UTXO für {address} in {wallet}")
     rows.sort(key=lambda row: (-float(row["amount"]), row["txid"], int(row["vout"])))
     return rows[0]
+
+
+def _fund_for_hops(hops: int, amount: float) -> float:
+    """Startbetrag: Zielbetrag + Hop-Fees + Puffer (kein Fee-Burn über maxfeerate)."""
+    return round(amount + hops * HOP_FEE_BTC + 0.001, 8)
 
 
 def build_hop_chain(
@@ -110,18 +124,22 @@ def build_hop_chain(
     try:
         current = _utxo_for_address(rpc, start_wallet, start_addr)
     except RuntimeError:
-        _fund_address(rpc, start_addr, max(amount + 0.01, 0.02), faucet_addr)
+        _fund_address(rpc, start_addr, _fund_for_hops(hops, amount), faucet_addr)
         current = _utxo_for_address(rpc, start_wallet, start_addr)
 
     current_wallet = start_wallet
     path_addrs = [start_addr]
     hop_txids: list[str] = []
 
-    # hops-1 Intermediate-Schritte, dann final an Sink
+    # hops-1 Intermediate-Schritte, dann final an Sink.
+    # Je Schritt: Input − HOP_FEE weiterreichen (kein Change in raw_spend).
+    # Mining gebündelt (alle 10 Hops + Final), damit bitcoind bei 100 Hops
+    # nicht an Dauer-generatetoaddress stirbt.
+    mine_every = 10
     for step in range(hops - 1):
         next_addr = new_address(rpc, relay_wallet)
         path_addrs.append(next_addr)
-        send_amt = round(min(float(current["amount"]) - 0.0001, amount), 8)
+        send_amt = round(float(current["amount"]) - HOP_FEE_BTC, 8)
         if send_amt <= 0:
             raise RuntimeError(f"{name}: Betrag zu klein bei Hop-Schritt {step}")
         rec = raw_spend(
@@ -132,11 +150,12 @@ def build_hop_chain(
             [current_wallet],
         )
         hop_txids.append(rec["txid"])
-        mine(rpc, 1, faucet_addr)
+        if (step + 1) % mine_every == 0:
+            mine(rpc, 1, faucet_addr)
         current_wallet = relay_wallet
         current = _utxo_for_address(rpc, relay_wallet, next_addr)
 
-    send_amt = round(min(float(current["amount"]) - 0.0001, amount), 8)
+    send_amt = round(float(current["amount"]) - HOP_FEE_BTC, 8)
     if send_amt <= 0:
         raise RuntimeError(f"{name}: Betrag zu klein beim Final-Hop")
     final = raw_spend(
@@ -237,23 +256,29 @@ def run(rpc: Rpc) -> dict[str, Any]:
         label: receive_addresses(rpc, wallet, 100)
         for label, wallet in zip(LABELS, WALLETS)
     }
+    # Lab-Wallets nach Ableitung entladen — weniger I/O während langer Hop-Ketten.
+    for wallet in WALLETS:
+        try:
+            rpc.call("unloadwallet", wallet)
+        except RuntimeError:
+            pass
 
     chains: list[dict[str, Any]] = []
     listed: list[str] = []
 
-    def _new_listed_start() -> str:
+    def _new_listed_start(hops: int) -> str:
         addr = new_address(rpc, "lab-sanctioned")
-        _fund_address(rpc, addr, 0.05, faucet)
+        _fund_address(rpc, addr, _fund_for_hops(hops, 0.002), faucet)
         listed.append(addr)
         return addr
 
-    def _new_clean_start() -> str:
+    def _new_clean_start(hops: int) -> str:
         addr = new_address(rpc, "lab-clean-source")
-        _fund_address(rpc, addr, 0.05, faucet)
+        _fund_address(rpc, addr, _fund_for_hops(hops, 0.002), faucet)
         return addr
 
     for label, hops in TP_MATRIX:
-        sanc_addr = _new_listed_start()
+        sanc_addr = _new_listed_start(hops)
         sink = addresses[label][SINK_INDEX[label]]
         chain = build_hop_chain(
             rpc,
@@ -274,7 +299,7 @@ def run(rpc: Rpc) -> dict[str, Any]:
         chains.append(chain)
 
     # Cross-Check: Hop-1 auch an Gamma
-    sanc_addr = _new_listed_start()
+    sanc_addr = _new_listed_start(1)
     sink = addresses["gamma"][SINK_INDEX["gamma_cross"]]
     chain = build_hop_chain(
         rpc,
@@ -295,7 +320,7 @@ def run(rpc: Rpc) -> dict[str, Any]:
     chains.append(chain)
 
     for label, hops in CLEAN_MATRIX:
-        clean_addr = _new_clean_start()
+        clean_addr = _new_clean_start(hops)
         sink = addresses[label][SINK_INDEX[f"{label}_clean"]]
         chain = build_hop_chain(
             rpc,
