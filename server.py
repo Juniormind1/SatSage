@@ -1003,6 +1003,216 @@ def api_cache_unreferenziert_loeschen(state: AppState) -> dict:
     }
 
 
+def _cache_baum_stats(pfad: Path) -> dict:
+    """Dateien und Bytes unter *pfad* (rekursiv). Fehlender Ordner → 0."""
+    dateien = 0
+    bytes_anzahl = 0
+    if not pfad.is_dir():
+        return {
+            "dateien": 0,
+            "bytes": 0,
+            "groesse_label": format_dateigroesse(0),
+        }
+    for wurzel, _dirs, namen in os.walk(pfad):
+        for name in namen:
+            kind = Path(wurzel) / name
+            try:
+                bytes_anzahl += int(kind.stat().st_size)
+            except OSError:
+                continue
+            dateien += 1
+    return {
+        "dateien": dateien,
+        "bytes": bytes_anzahl,
+        "groesse_label": format_dateigroesse(bytes_anzahl),
+    }
+
+
+def _cache_datei_stats(pfad: Path) -> dict:
+    groesse = _datei_groesse(pfad)
+    return {
+        "vorhanden": pfad.is_file(),
+        "bytes": groesse,
+        "groesse_label": format_dateigroesse(groesse),
+    }
+
+
+def _platte_cache_stats(cache_dir: Path) -> dict:
+    """Belegung der Platte, auf der die Caches liegen (kein Zugriffszähler)."""
+    try:
+        ziel = main._cache_disk_target(cache_dir)
+        usage = shutil.disk_usage(ziel)
+    except OSError:
+        return {
+            "free_bytes": None,
+            "total_bytes": None,
+            "free_ratio": None,
+            "free_label": "—",
+            "total_label": "—",
+            "write_blocked": bool(main.is_cache_disk_write_blocked()),
+            "ampel": "warn",
+        }
+    free = int(usage.free)
+    total = int(usage.total)
+    ratio = (free / total) if total > 0 else 0.0
+    blocked = free < main.MIN_FREE_DISK_BYTES and ratio < main.MIN_FREE_DISK_RATIO
+    if blocked or main.is_cache_disk_write_blocked():
+        ampel = "krit"
+    elif free < 2 * main.MIN_FREE_DISK_BYTES or ratio < 0.10:
+        ampel = "warn"
+    else:
+        ampel = "gut"
+    return {
+        "free_bytes": free,
+        "total_bytes": total,
+        "free_ratio": round(ratio, 4),
+        "free_label": format_dateigroesse(free),
+        "total_label": format_dateigroesse(total),
+        "write_blocked": bool(blocked or main.is_cache_disk_write_blocked()),
+        "ampel": ampel,
+        "schwelle_ratio": main.MIN_FREE_DISK_RATIO,
+        "schwelle_bytes": main.MIN_FREE_DISK_BYTES,
+    }
+
+
+def _wallet_cache_belegung(state: AppState, entry) -> dict:
+    """Belegung eines Wallets: Dateigrößen und Abdeckung, keine Hits."""
+    schluessel = entry.analyse_schluessel
+    zusammen = wallets_mod.summarize([entry], state.cache_dir)[0]
+    utxo_pfad = main._xpub_cache_path(schluessel, state.cache_dir)
+    verlauf_pfad = main._xpub_verlauf_cache_path(schluessel, state.cache_dir)
+    alter_pfad = main._xpub_alter_path(schluessel, state.cache_dir)
+    verlauf = main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or []
+    utxos = utxos_mod.load_cached_utxos(schluessel, state.cache_dir) or []
+
+    gesehen: set[tuple[str, int]] = set()
+    herkunft_treffer = 0
+    herkunft_bytes = 0
+    for eintrag in list(utxos) + list(verlauf):
+        paar = _cache_utxo_schluessel(eintrag)
+        if paar is None or paar in gesehen:
+            continue
+        gesehen.add(paar)
+        txid, vout = paar
+        try:
+            ingress = main._utxo_ingress_cache_path(
+                txid, vout, state.immutable_cache_dir
+            )
+        except (TypeError, ValueError):
+            continue
+        if ingress.is_file():
+            herkunft_treffer += 1
+            herkunft_bytes += _datei_groesse(ingress)
+
+    referenzen = len(gesehen)
+    tip = _header_tip(state)
+    scan_tip = zusammen.scan_tip_height
+    tip_lag = None
+    if tip is not None and scan_tip is not None:
+        tip_lag = max(0, int(tip) - int(scan_tip))
+
+    max_addr = int(entry.max_addresses or 0)
+    scan_end = zusammen.scan_end_index
+    gap_ratio = None
+    if max_addr > 0 and scan_end is not None:
+        try:
+            gap_ratio = min(1.0, max(0.0, int(scan_end) / float(max_addr)))
+        except (TypeError, ValueError):
+            gap_ratio = None
+
+    utxo_bytes = _datei_groesse(utxo_pfad)
+    verlauf_bytes = _datei_groesse(verlauf_pfad)
+    alter_bytes = _datei_groesse(alter_pfad)
+    eigen_bytes = utxo_bytes + verlauf_bytes + alter_bytes + herkunft_bytes
+
+    return {
+        "wallet_id": wallets_mod.eintrag_id(entry),
+        "wallet_name": entry.display_name,
+        "has_cache": zusammen.has_cache,
+        "utxo_count": zusammen.utxo_count,
+        "total_sats": zusammen.total_sats,
+        "utxo_bytes": utxo_bytes,
+        "verlauf_count": len(verlauf),
+        "verlauf_bytes": verlauf_bytes,
+        "alter_vorhanden": alter_pfad.is_file(),
+        "alter_bytes": alter_bytes,
+        "first_seen_height": zusammen.first_seen_height,
+        "first_seen_ts": zusammen.first_seen_ts,
+        "scan_end_index": scan_end,
+        "max_addresses": max_addr,
+        "gap_ratio": gap_ratio,
+        "scan_tip_height": scan_tip,
+        "header_tip": tip,
+        "tip_lag": tip_lag,
+        "herkunft_referenzen": referenzen,
+        "herkunft_treffer": herkunft_treffer,
+        "herkunft_bytes": herkunft_bytes,
+        "herkunft_ratio": (
+            round(herkunft_treffer / referenzen, 4) if referenzen else None
+        ),
+        "bytes": eigen_bytes,
+        "groesse_label": format_dateigroesse(eigen_bytes),
+    }
+
+
+def api_cache_stats(state: AppState) -> dict:
+    """
+    Cache-Belegung fürs Dashboard (Größe/Abdeckung, keine Zugriffe).
+
+    Pro Wallet und Summe; Schwellen für Platte und Flatfile-Warnung.
+    """
+    utxo = _cache_baum_stats(state.cache_dir)
+    immutable = _cache_baum_stats(state.immutable_cache_dir)
+    tx = _cache_baum_stats(state.immutable_cache_dir / main.TX_IMMUTABLE_CACHE_SUBDIR)
+    ingress = _cache_baum_stats(
+        state.immutable_cache_dir / main.UTXO_INGRESS_CACHE_SUBDIR
+    )
+    block_header = _cache_baum_stats(
+        state.immutable_cache_dir / main.BLOCK_HEADER_CACHE_SUBDIR
+    )
+    headers = _cache_datei_stats(_header_pfad(state))
+    price = _cache_baum_stats(state.immutable_cache_dir / "btc_price")
+    external = _cache_datei_stats(state.cache_dir / "external_addresses.json")
+    sanktionen_dir = state.sanctions_dir
+    if sanktionen_dir is None:
+        sanktionen_dir = state.cache_dir.parent / "sanctioned_cache"
+    sanktionen = _cache_baum_stats(sanktionen_dir)
+
+    schwelle = int(main._SQLITE_FLATFILE_HINT_THRESHOLD)
+    tx_n = int(tx["dateien"])
+    ingress_n = int(ingress["dateien"])
+    if tx_n >= schwelle or ingress_n >= schwelle:
+        flat_ampel = "krit"
+    elif tx_n >= max(1000, schwelle // 5) or ingress_n >= max(1000, schwelle // 5):
+        flat_ampel = "warn"
+    else:
+        flat_ampel = "gut"
+
+    wallets = [_wallet_cache_belegung(state, e) for e in state.entries]
+    summe = (
+        int(utxo["bytes"])
+        + int(immutable["bytes"])
+        + int(sanktionen["bytes"])
+    )
+    platte = _platte_cache_stats(state.cache_dir)
+    return {
+        "ok": True,
+        "platte": platte,
+        "summe_bytes": summe,
+        "summe_label": format_dateigroesse(summe),
+        "utxo_cache": utxo,
+        "immutable_cache": immutable,
+        "tx": {**tx, "schwelle": schwelle, "ampel": flat_ampel},
+        "utxo_ingress": {**ingress, "schwelle": schwelle, "ampel": flat_ampel},
+        "block_header": block_header,
+        "p2p_headers": {**headers, "tip": _header_tip(state)},
+        "btc_price": price,
+        "external_addresses": external,
+        "sanctioned_cache": sanktionen,
+        "wallets": wallets,
+    }
+
+
 def _wallets_config_gesperrt(state: AppState) -> None:
     """Verhindert lokale Wallet-Änderungen im Specter-Modus."""
     if state.managed_by == "specter":
@@ -4859,6 +5069,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_cache_unreferenziert(state)
         if teile == ["cache", "unreferenziert"] and methode == "DELETE":
             return 200, api_cache_unreferenziert_loeschen(state)
+        if teile == ["cache", "stats"] and methode == "GET":
+            return 200, api_cache_stats(state)
         if teile == ["cache"] and methode == "DELETE":
             return 200, api_cache_leeren(state)
         if len(teile) == 2 and teile[0] == "cache" and methode == "DELETE":

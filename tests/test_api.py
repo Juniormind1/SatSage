@@ -1822,6 +1822,36 @@ class TestCacheLeeren(ApiTestBasis):
         self.assertEqual(körper["utxo_eintraege"], 0)
         self.assertEqual(körper["immutable_eintraege"], 0)
 
+    def test_cache_stats_belegung(self):
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(1_000)], self.cache, "test",
+            first_seen={"height": 700_000, "time_ts": 1_600_000_000},
+            scan_end_index=12,
+        )
+        main.save_xpub_verlauf_cache(
+            BIP84_ZPUB, [utxo(500, marker="hist")], self.cache
+        )
+        (self.immutable / "tx").mkdir()
+        (self.immutable / "tx" / ("a" * 64 + ".json")).write_text(
+            '{"txid":"aa"}', encoding="utf-8"
+        )
+        (self.sanktionen / "liste.json").write_text("{}", encoding="utf-8")
+
+        status, körper = self.anfrage("/api/cache/stats")
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["ok"])
+        self.assertIn("platte", körper)
+        self.assertGreater(körper["utxo_cache"]["bytes"], 0)
+        self.assertGreaterEqual(körper["tx"]["dateien"], 1)
+        self.assertEqual(körper["tx"]["schwelle"], 10_000)
+        wallets = {w["wallet_id"]: w for w in körper["wallets"]}
+        kennung = self.wallet_id(BIP84_ZPUB)
+        self.assertIn(kennung, wallets)
+        self.assertEqual(wallets[kennung]["utxo_count"], 1)
+        self.assertEqual(wallets[kennung]["verlauf_count"], 1)
+        self.assertTrue(wallets[kennung]["alter_vorhanden"])
+        self.assertGreater(körper["summe_bytes"], 0)
+
     def test_loescht_nur_dieses_wallet(self):
         main.save_xpub_utxo_cache(
             BIP84_ZPUB, [utxo(1_000)], self.cache, "test",
