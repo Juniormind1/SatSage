@@ -1,13 +1,15 @@
 #!/bin/sh
-# SatSage: refuse pushes that would publish non-Juniormind1 tip authorship.
+# SatSage: refuse pushes whose tip is not authored as Juniormind1.
 # Activate once per clone: git config core.hooksPath githooks
 
 set -e
 
+REQUIRED_NAME="Juniormind1"
+REQUIRED_EMAIL="juniormind@proton.me"
+
 remote="$1"
 url="$2"
 
-# Only guard pushes to GitHub SatSage remotes.
 case "$url" in
   *Juniormind1/SatSage*|*juniormind1/satsage*) ;;
   *) exit 0 ;;
@@ -16,7 +18,6 @@ esac
 while read -r local_ref local_sha remote_ref remote_sha
 do
   [ -z "$local_sha" ] && continue
-  # deleting a ref
   zeros=0000000000000000000000000000000000000000
   if [ "$local_sha" = "$zeros" ]; then
     continue
@@ -24,21 +25,12 @@ do
 
   name="$(git -c log.showSignature=false log -1 --format='%an' "$local_sha")"
   email="$(git -c log.showSignature=false log -1 --format='%ae' "$local_sha")"
-  blob="$(printf '%s %s' "$name" "$email" | tr '[:upper:]' '[:lower:]')"
 
-  case "$blob" in
-    *haukehess*|*hauke\ hess*|*"hauke hess"*|*@protonmail.com*)
-      echo "ERROR: refusing push: tip commit uses personal identity ($name <$email>)." >&2
-      echo "Rewrite before push, e.g.:" >&2
-      echo "  git commit --amend --reset-author --no-edit" >&2
-      echo "  (with user.name=Juniormind1 user.email=juniormind@proton.me)" >&2
-      exit 1
-      ;;
-  esac
-
-  if [ "$email" != "juniormind@proton.me" ] || [ "$name" != "Juniormind1" ]; then
-    echo "ERROR: refusing push: tip author must be Juniormind1 <juniormind@proton.me>." >&2
+  if [ "$email" != "$REQUIRED_EMAIL" ] || [ "$name" != "$REQUIRED_NAME" ]; then
+    echo "ERROR: refusing push: tip author must be $REQUIRED_NAME <$REQUIRED_EMAIL>." >&2
     echo "Current tip: $name <$email> ($local_sha)" >&2
+    echo "Rewrite before push, e.g.:" >&2
+    echo "  git commit --amend --reset-author --no-edit" >&2
     exit 1
   fi
 done
