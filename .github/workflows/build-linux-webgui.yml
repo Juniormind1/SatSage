@@ -1,0 +1,175 @@
+name: Build Linux webgui (x86_64)
+
+# PyInstaller Onefile auf ubuntu-latest (x86_64). Hängt Assets an ein
+# bestehendes Release an — erzeugt kein neues Release.
+#
+# Hinweis am Binary: GitHub-Build für Linux, ungetestet.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Bestehendes Release-Tag (Assets anhängen)"
+        required: true
+        default: "v0.9"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Systemabhängigkeiten (Tk für Splash)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-tk tcl tk libtk8.6
+
+      - name: Linux-Binary bauen
+        run: |
+          chmod +x scripts/build_satsage_linux
+          ./scripts/build_satsage_linux
+          test -x dist/satsage-webgui
+          file dist/satsage-webgui
+
+      - name: Release-Assets benennen
+        id: assets
+        run: |
+          set -euo pipefail
+          NAME=satsage-webgui-linux-x86_64
+          cp -f dist/satsage-webgui "dist/${NAME}"
+          chmod +x "dist/${NAME}"
+          HASH="$(sha256sum "dist/${NAME}" | awk '{print $1}')"
+          printf '%s  %s\n' "$HASH" "$NAME" > "dist/${NAME}.sha256"
+          cat > "dist/${NAME}.README.txt" <<EOF
+SatSage Web-GUI — Linux x86_64 (GitHub Actions / ubuntu-latest)
+
+Datei: ${NAME}
+SHA-256: ${HASH}
+
+Hinweis: GitHub-Build für Linux, ungetestet.
+Auf einem eigenen Linux-x86_64-Rechner prüfen, bevor du dich darauf verlässt.
+
+Start:
+  chmod +x ${NAME}
+  ./${NAME}
+
+.env und Caches neben das Binary legen (Vorlage: .env.example im Repo).
+Lauscht lokal unter 127.0.0.1:8730.
+EOF
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+          ls -lh "dist/${NAME}" "dist/${NAME}.sha256" "dist/${NAME}.README.txt"
+          cat "dist/${NAME}.sha256"
+
+      - name: An bestehendes Release anhängen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          NAME: ${{ steps.assets.outputs.name }}
+          HASH: ${{ steps.assets.outputs.hash }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null
+          gh release upload "$TAG" \
+            "dist/${NAME}" \
+            "dist/${NAME}.sha256" \
+            "dist/${NAME}.README.txt" \
+            --clobber
+
+          gh release view "$TAG" --json body -q .body > /tmp/release-body-old.md
+          python3 <<'PY'
+          import os, re
+          from pathlib import Path
+
+          name = os.environ["NAME"]
+          digest = os.environ["HASH"]
+          body = Path("/tmp/release-body-old.md").read_text(encoding="utf-8")
+          block = (
+              f"### Linux Web-GUI (x86_64)\n"
+              f"- `{name}` (Onefile, GitHub Actions / ubuntu-latest)\n"
+              f"- SHA-256: `{digest}`\n"
+              f"- **Hinweis: GitHub-Build für Linux, ungetestet.**\n"
+              f"- Lauscht lokal unter `127.0.0.1:8730`. `.env` und Caches neben das Binary legen.\n"
+          )
+
+          pat = re.compile(r"### Linux Web-GUI.*?(?=\n### |\n## |\Z)", re.S)
+          if pat.search(body):
+              body = pat.sub(block.rstrip() + "\n\n", body, count=1)
+          else:
+              inserted = False
+              for marker in (
+                  "### macOS Web-GUI (Apple Silicon)",
+                  "### macOS Web-GUI",
+                  "### Windows Web-GUI",
+              ):
+                  idx = body.find(marker)
+                  if idx < 0:
+                      continue
+                  rest = body[idx + 1 :]
+                  m = re.search(r"\n### |\n## ", rest)
+                  if m:
+                      end = idx + 1 + m.start()
+                      body = (
+                          body[:end].rstrip()
+                          + "\n\n"
+                          + block.rstrip()
+                          + "\n\n"
+                          + body[end:].lstrip("\n")
+                      )
+                  else:
+                      body = body.rstrip() + "\n\n" + block
+                  inserted = True
+                  break
+              if not inserted:
+                  body = body.rstrip() + "\n\n" + block
+
+          eng = (
+              "Windows onefile GUI, macOS Apple Silicon onefile GUI, "
+              "and StartOS"
+          )
+          eng_new = (
+              "Windows onefile GUI, macOS Apple Silicon onefile GUI, "
+              "Linux x86_64 onefile GUI (untested GitHub build), and StartOS"
+          )
+          if eng in body and "Linux x86_64 onefile GUI" not in body:
+              body = body.replace(eng, eng_new, 1)
+          elif (
+              "public binaries:" in body
+              and "Linux x86_64" not in body
+              and "and StartOS x86_64 sideload package." in body
+          ):
+              body = body.replace(
+                  "and StartOS x86_64 sideload package.",
+                  "Linux x86_64 onefile GUI (untested GitHub build), "
+                  "and StartOS x86_64 sideload package.",
+                  1,
+              )
+
+          if not body.endswith("\n"):
+              body += "\n"
+          Path("/tmp/release-body.md").write_text(body, encoding="utf-8")
+          PY
+
+          TITLE="SatSage ${TAG#v} – Windows, macOS, Linux & StartOS"
+          # Tag schon mit v: Anzeigename ohne doppeltes v
+          case "$TAG" in
+            v*) TITLE="SatSage ${TAG} – Windows, macOS, Linux & StartOS" ;;
+          esac
+          gh release edit "$TAG" --title "$TITLE" --notes-file /tmp/release-body.md
+          echo "Uploaded to https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: satsage-webgui-linux-x86_64
+          path: |
+            dist/satsage-webgui-linux-x86_64
+            dist/satsage-webgui-linux-x86_64.sha256
+            dist/satsage-webgui-linux-x86_64.README.txt
+          if-no-files-found: error

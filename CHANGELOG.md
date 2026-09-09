@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **CI · Linux-Webgui:** Manueller Workflow `build-linux-webgui.yml` (ubuntu-latest, x86_64) baut PyInstaller-Onefile und hängt es an ein bestehendes Release an — mit Hinweis *GitHub-Build für Linux, ungetestet*.
 - **Prozess · Release Notes:** Nur bei Version/`main`/Tag aus `[Unveröffentlicht]` datieren; nicht bei jedem Push auf `dev-juniormind` (in `AGENTS.md` verankert).
 - **Desktop · lokaler Bitcoin Core:** Erkennt Default-Datadir/Cookie + Loopback-RPC; Opt-in per Datenquellen-Banner oder `LOCAL_CORE_OPT_IN=1` (kein stilles Verbinden). Setzt RPC **und** `BIP158_HOST` (P2P Prefer-Peer). Pruned bleibt für scantxoutset nutzbar. Sonderfälle in `ISSUES.md`.
 - **Cache · SQLite-Hinweis:** Ab 10 000 JSON-Dateien in `immutable_cache/tx` oder `utxo_ingress` einmalig im Log: *Cache wächst — sqlite ab jetzt sinnvoll* (GitHub-Issue erbeten). SQLite-Umbau weiter zurückgestellt bis nach CoinJoin-Verfolgung.
