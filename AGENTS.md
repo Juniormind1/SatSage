@@ -205,7 +205,7 @@ Dieses öffentliche Repo darf **nur** unter der Projekt-Identität committen/pus
 - `user.name=Juniormind1`
 - `user.email=juniormind@proton.me`
 
-Persönliche Namen/Mails (z. B. Klarname, private GitHub-Logins, private Proton-Adressen) sind **verboten** — sie erscheinen öffentlich in der Commit-Historie und auf GitHub.
+Nur die Projekt-Identität ist erlaubt. Jede andere Autor-/Committer-Angabe ist **verboten** — sie erscheint öffentlich in der Commit-Historie und auf GitHub.
 
 Pflicht pro Clone/Worktree:
 
