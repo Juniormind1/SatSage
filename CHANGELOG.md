@@ -3,10 +3,13 @@
 Alle nennenswerten Änderungen an SatSage.  
 Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 
+**Release Notes:** GitHub-/Tag-Release-Texte entstehen nur bei Version-Bump, Merge nach `main` oder Tag — Inhalt = der dann datierte Block aus `[Unveröffentlicht]` (nicht bei jedem Dev-Push).
+
 **Herkunft:** Die datierten Abschnitte ab `2026-07-08` stammen aus dem privaten Vorgängerprojekt **xPubQuery** (lokale Kopie unter PyCharmProjects) und wurden unverändert übernommen — in der gesamten Changelog-Historie dort kamen **keine** Klarname-Einträge (Hauke/Hess o. Ä.) vor; Maintainer-Bezug ist durchgängig die Projekt-Identität **Juniormind1**. Ab dem Marker **2026-09-08** gilt die öffentliche SatSage-Historie.
 
 ## [Unveröffentlicht]
 
+- **Prozess · Release Notes:** Nur bei Version/`main`/Tag aus `[Unveröffentlicht]` datieren; nicht bei jedem Push auf `dev-juniormind` (in `AGENTS.md` verankert).
 - **Desktop · lokaler Bitcoin Core:** Erkennt Default-Datadir/Cookie + Loopback-RPC; Opt-in per Datenquellen-Banner oder `LOCAL_CORE_OPT_IN=1` (kein stilles Verbinden). Setzt RPC **und** `BIP158_HOST` (P2P Prefer-Peer). Pruned bleibt für scantxoutset nutzbar. Sonderfälle in `ISSUES.md`.
 - **Cache · SQLite-Hinweis:** Ab 10 000 JSON-Dateien in `immutable_cache/tx` oder `utxo_ingress` einmalig im Log: *Cache wächst — sqlite ab jetzt sinnvoll* (GitHub-Issue erbeten). SQLite-Umbau weiter zurückgestellt bis nach CoinJoin-Verfolgung.
 - **Specter-Plugin · Cache-Seed:** Aus Specter kommen Node/Electrum und Wallets (managed); zusätzlich UTXOs, Verlaufs-Merge, Adress-Labels und Scan-Indizes in die SatSage-Caches (`specter_seed.py`) — ohne doppelte Einrichtung.

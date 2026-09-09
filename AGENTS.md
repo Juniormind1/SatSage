@@ -167,14 +167,15 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 - **Secrets:** `.env`, XPUBs, RPC-PasswÃ¶rter, persÃ¶nliche Wallet-Namen nie committen oder in Ausgaben wiederholen
 - **Tests:** `py` statt `python` auf Windows; bei Netzwerk-Tests `.env` laden via `_load_dotenv()`
 - **TemporÃ¤re Skripte:** `_patch_*.py`, `_test_*.py`, `_profile_*.py` sind Entwicklungs-Hilfen â€” nicht committen
-- **Changelog:** `CHANGELOG.md` bei nennenswerten Ã„nderungen nachziehen â€” spÃ¤testens zusammen mit dem Commit. Neue Punkte unter `[UnverÃ¶ffentlicht]`; beim Commit das Datum als Abschnitt setzen und UnverÃ¶ffentlicht leeren. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
+- **Changelog:** CHANGELOG.md bei nennenswerten Änderungen nachziehen — spätestens zusammen mit dem Commit. Neue Punkte unter [Unveröffentlicht]. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
+- **Release Notes:** Nicht bei jedem Push auf dev-juniormind. Nur bei **Version-Bump** / Merge nach **main** / **Git-Tag** (…, StartOS-Tag): Abschnitt [Unveröffentlicht] als datierten Block setzen und leeren; optional GitHub-Release-Body = dieser Abschnitt (Inhalt = Changelog seit dem letzten Release). StartOS: wie doc/START9-packaging.md + publish_startos_release.
 
 ## Version
 
 - **Datei:** `VERSION` im Repo-Root (aktuell `0.9`) â€” einzige Quelle
 - **Lesen:** `core.version.version()`, Web Ã¼ber `GET /api/config` â†’ `version`, FuÃŸzeile `vâ€¦`
 - **PyInstaller:** `VERSION` in `packaging/satsage-webgui.spec` als data bundeln
-- **Bump:** nur Maintainer entscheiden und die Datei Ã¤ndern; kein Auto-Increment in Scripts/CI. Changelog-Eintrag zum Bump mitziehen.
+- **Bump:** nur Maintainer entscheiden und die Datei ändern; kein Auto-Increment in Scripts/CI. Changelog-Eintrag zum Bump mitziehen; dabei Release Notes wie oben (datierter Abschnitt, Unveröffentlicht leeren).
 
 ## Standalone-Build (PyInstaller)
 
