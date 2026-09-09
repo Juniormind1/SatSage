@@ -192,6 +192,12 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 **Der Benutzer entscheidet selber, wann er git commit und push machen will.**
 
+### Branches
+
+- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung.
+- dev-juniormind — laufende Entwicklung von Juniormind1; hier committen/pushen für Work-in-Progress.
+- Andere Contributor-Branches/PRs: nach Review in main mergen, wenn stabil; nicht ungeprüft aus dev-* übernehmen.
+
 ### Commit-Identität (hart)
 
 Dieses öffentliche Repo darf **nur** unter der Projekt-Identität committen/pushen:
