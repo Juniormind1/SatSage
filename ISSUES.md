@@ -2,6 +2,30 @@
 
 Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
 
+## Lokal Bitcoin Core erkennen (Desktop, ohne Start9/Specter)
+
+**Stand:** 2026-09-09 · **MVP umgesetzt** (Opt-in) · Sonderfälle offen
+
+Wenn SatSage **standalone** auf derselben Maschine wie ein laufendes `bitcoind` startet (nicht Start9/Specter-managed), findet es Default-Datadir + `.cookie` + Loopback-RPC und bietet **Opt-in** (Datenquellen-Banner / `LOCAL_CORE_OPT_IN=1`) — kein stilles Verbinden.
+
+**MVP (Ist):**
+
+- `core/local_bitcoind.py`: Standard-Datadirs (Win/macOS/Linux), main/test/signet/regtest, Cookie, `getblockchaininfo`.
+- Log-Hinweis beim GUI-Start; API `local_core` + `POST /api/source/local-core`.
+- Opt-in schreibt RPC **und** `BIP158_HOST=<host>:<p2p-port>` (+ `BIP158_P2P=1`) — Compact Filter bevorzugt den lokalen Node (braucht `peerblockfilters=1`).
+- Pruned wird nicht verworfen (scantxoutset bleibt sinnvoll).
+- Managed-Modi unberührt.
+
+**Sonderfälle (noch offen):**
+
+- Custom `-datadir` / Flatpak / Dienst-User (Cookie nicht unter Default-Pfad)
+- Mehrere lokalen Nodes → Auswahl-UI
+- `rpcbind` nur auf LAN-IP, nicht `127.0.0.1`
+- Feinere Priorität archival/txindex vs. Electrs-LAN in der Auto-Kette
+- Stille Auto-Connect (bewusst nicht im MVP)
+
+---
+
 ## Immutable-Cache · SQLite statt Winz-JSONs (tx / utxo_ingress)
 
 **Stand:** 2026-09-09 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)

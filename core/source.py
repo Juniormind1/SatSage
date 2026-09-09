@@ -358,13 +358,15 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         node = main._normalize_fulcrum_host(node)
     rpc_port = _int(values, "RPCPORT", 8332)
     rpc_user = values.get("RPCUSER", "").strip()
+    rpc_cookie = values.get("RPC_COOKIE_FILE", "").strip()
     rpc_ssl = _flag(values, "RPC_SSL", False)
     # Start9-Tor-RPC oft Port 443 + TLS.
     if rpc_port == 443 and "RPC_SSL" not in values:
         rpc_ssl = True
-    core_ok = bool(node and rpc_user)
+    core_ok = bool(node and (rpc_user or rpc_cookie))
     core_detail = (
         f"{node}:{rpc_port} · {'TLS' if rpc_ssl else 'ohne TLS'}"
+        + (" · Cookie" if rpc_cookie and not rpc_user else "")
         if core_ok else "nicht eingetragen"
     )
     quellen.append(SourceInfo(
@@ -381,8 +383,10 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
             "oder BIP-158."
             if core_ok else
             "UTXO-Bestand per scantxoutset: Host (LAN oder .onion), Port, "
-            "RPC-Benutzer und Passwort. Ideal mit -txindex=1. Electrs im "
-            "LAN bleibt schneller und hat Vorrang."
+            "RPC-Benutzer und Passwort (oder Cookie-Datei). Ideal mit "
+            "-txindex=1. Electrs im LAN bleibt schneller und hat Vorrang. "
+            "Lokaler bitcoind auf derselben Maschine: Opt-in unter "
+            "Datenquellen bzw. LOCAL_CORE_OPT_IN=1."
         ),
         felder=[
             Feld("NODE_IP", "Host", "text", node,
@@ -394,6 +398,8 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
             Feld("RPCPASSWORD", "Passwort", "geheim", "",
                  "Leer lassen behält das gespeicherte Passwort",
                  gesetzt=bool(values.get("RPCPASSWORD", "").strip())),
+            Feld("RPC_COOKIE_FILE", "Cookie-Datei", "text", rpc_cookie,
+                 "Optional: Pfad zu bitcoind .cookie statt User/Passwort"),
             Feld("RPC_SSL", "TLS verwenden", "schalter",
                  "true" if rpc_ssl else "false",
                  "LAN meist nein; Onion hinter TLS-Terminator oft ja"),
