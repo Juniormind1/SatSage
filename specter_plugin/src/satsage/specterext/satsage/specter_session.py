@@ -96,6 +96,9 @@ def convert_specter_utxo(
         out["xpub"] = xpub
     if block_time_i is not None:
         out["blocktime"] = block_time_i
+    label = raw.get("label")
+    if label:
+        out["label"] = str(label).strip()
     return out
 
 
@@ -322,34 +325,17 @@ def _setup_session(specter: Any, *, max_addresses: int = 200) -> SatSageSession:
         )
 
     specter_utxos = collect_specter_utxos(specter)
-    # Cache pro XPUB aus Specter-UTXOs speichern (Light-Seed, kein Full-Rescan)
-    by_xpub: dict[str, list[dict]] = {x: [] for x in args.xpubs}
-    for u in specter_utxos:
-        xp = u.get("xpub")
-        if xp and xp in by_xpub:
-            by_xpub[xp].append(u)
-        else:
-            # Adresse → xpub
-            addr = u.get("address")
-            mapped = wallet_ctx.xpub_for_address(addr) if addr else None
-            if mapped and mapped in by_xpub:
-                by_xpub[mapped].append(u)
-            elif args.xpubs:
-                by_xpub[args.xpubs[0]].append(u)
+    try:
+        from .specter_seed import seed_caches_from_specter
 
-    for xpub, utxos in by_xpub.items():
-        if not utxos:
-            continue
-        try:
-            xq_main.save_xpub_utxo_cache(
-                xpub,
-                utxos,
-                Path(args.cache_dir),
-                source=f"specter+{source}",
-                max_addresses=args.max_addresses,
-            )
-        except Exception as exc:  # pragma: no cover
-            logger.warning("UTXO-Cache speichern fehlgeschlagen: %s", exc)
+        seed_caches_from_specter(
+            specter,
+            ctx,
+            Path(args.cache_dir),
+            source_tag=f"specter+{source}",
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning("Specter-Cache-Seed fehlgeschlagen: %s", exc)
 
     return SatSageSession(
         ctx=ctx,

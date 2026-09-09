@@ -2,6 +2,30 @@
 
 Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
 
+## Immutable-Cache · SQLite statt Winz-JSONs (tx / utxo_ingress)
+
+**Stand:** 2026-09-09 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
+
+### Entscheidungsgrundlage (nicht vorab bauen)
+
+Punktzugriff per TxID / `(txid, vout)` ist mit Flatfiles schon O(1). SQLite lohnt wegen Syscall-/AV-/Glob-Kosten, nicht wegen Lookup-Komplexität.
+
+| Dateien in `tx/` **oder** `utxo_ingress/` | Haltung |
+|------------------------------------------|---------|
+| < ~1 000 | Flatfiles behalten |
+| ~2 000–5 000 | Grauzone — messen (Walk-Zeit, Windows); SQLite wenn Batch-Walks/Reports stocken |
+| ≥ ~10 000 | SQLite sinnvoll bis geboten |
+
+**Wachstumstreiber:** Herkunft in der Breite (viele UTXOs → `utxo_ingress/`) und/oder Tiefe/Breite des Graphen (viele `get_tx` → `tx/`), v. a. „Herkunft vollständig“, hohe `max_hops`, aufgelöste große Sammel-/CoinJoin-Txs. Reiner UTXO-/Specter-Seed füllt diese Ordner nicht.
+
+**Scope später:** nur `immutable_cache/tx` + `utxo_ingress` (zwei Tabellen, PK); XPUB-UTXO/Verlauf-JSON bleiben. Optional lazy Migration / Schwellwert-Opt-in. Windows/StartOS + Antivirus stärker betroffen als warmer Linux-Page-Cache.
+
+**Laufzeit-Hinweis:** Ab ≥10 000 JSON-Dateien in `tx/` oder `utxo_ingress/` schreibt SatSage einmalig ins Log: *Cache wächst — sqlite ab jetzt sinnvoll* (+ Bitte um GitHub-Issue). Zählung nur alle 500 Writes, damit das Zählen selbst nicht teuer wird.
+
+**Abgrenzung:** Kein Drive-by vor CoinJoin-Hybrid-Walk — CJ-Auflösung treibt `tx/` voraussichtlich erst richtig in die Tausender.
+
+---
+
 ## Start9 · Fulcrum als Electrum-Datenquelle (neben electrs)
 
 **Stand:** 2026-09-09 · **in Arbeit (Vorbereitung)** · Bezug: [`doc/START9-fulcrum-indexer.md`](doc/START9-fulcrum-indexer.md), [`doc/START9-packaging.md`](doc/START9-packaging.md)
@@ -22,17 +46,21 @@ Der Start9-Build-/Package-Prozess soll **Fulcrum** können, nicht nur `electrs-s
 
 ## Specter-Plugin · Node & Wallets aus Specter übernehmen (read-only)
 
-**Stand:** 2026-09-09 · **offen**
+**Stand:** 2026-09-09 · **umgesetzt (Kern + Cache-Seed)** · manuelle Abnahme in Specter-UI noch offen
 
-Das Specter-Plugin soll **Node-Connections** und **Wallets** aus der Specter-Umgebung übernehmen (Bridge/Session), nicht parallel in SatSage neu konfigurieren.
+Das Specter-Plugin übernimmt **Node-Connections** und **Wallets** aus Specter (Bridge/Session), ohne Doppelpflege in SatSage.
 
-**Soll:**
+**Soll / Ist:**
 
-- Aktiver Specter-Node (RPC/Electrs bzw. die von Specter genutzte Datenquelle) und Specter-Wallets/XPUBs sind die maßgebliche Quelle.
-- In der Plugin-UI (bzw. eingebetteten SatSage-GUI) die entsprechenden Einstellungen für **Wallets** und **Node-/Electrs-Datenquellen** als **read-only** darstellen — Anzeige zur Orientierung, keine eigene Editierbarkeit, solange Specter hostet.
-- Änderungen an Wallets/Node laufen über Specter; SatSage-Plugin liest nach (Reload/Session).
+- Specter-Node (Core → BIP-158/RPC, Electrum/Spectrum → `FULCRUM_*`) und Wallets/XPUBs/Deskriptoren → Plugin-`.env` (`managed_by=specter`); UI/API Wallets + Datenquellen gesperrt/ausgeblendet.
+- **UTXO-Seed** aus `full_utxo` → `utxo_cache` (`source=specter`), Scan-Fenster aus Specter-Indizes (`address_index` / `change_index`).
+- **Verlaufs-Merge** aus Specter-UTXOs + Receive-Txs → `merke_bip158_verlauf`.
+- **Labels** → `utxo_cache/specter_address_labels.json`, API `specter_labels` / UTXO-Feld `label`.
+- Änderungen in Specter: Fingerprint-Reload + erneuter Seed.
 
-**Abgrenzung:** Standalone-`server.py` / Lab behalten volle Editierbarkeit. Nur der Specter-hosted Pfad ist read-only angebunden.
+**Modul:** `specter_plugin/.../specter_seed.py`. Tests: `tests/test_specter_seed.py`.
+
+**Abgrenzung:** Standalone-`server.py` / Lab bleiben editierbar. PSBT/Devices/Explorer-URL aus Specter = Folge-Issues.
 
 ---
 
@@ -259,6 +287,7 @@ Export â†’ A fehlt? â†’ Dialog A â†’ Cache
 ## Ideensammlung: CoinJoins rÃ¼ckverfolgen kÃ¶nnen
 
 **Stand:** 2026-09-02 Â· **nur notiert, noch nicht umsetzen** (Hybrid-Walk fÃ¼r Wasabi skizziert)  
+**Danach:** Immutable-Cache SQLite (tx/ingress) — Entscheidungsgrundlage siehe Issue oben; nicht parallel vorziehen.
 **Ort:** Herkunftsanalyse (`trace_engine.py`, `analyze.py`, Web-Herkunft / CLI), Einstellungen, Steuerbericht; abhÃ¤ngig von â€žServer bleibt nach Browser-SchlieÃŸungâ€œ und Status-Mails
 ### Ist-Zustand
 

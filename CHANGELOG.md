@@ -7,6 +7,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Cache · SQLite-Hinweis:** Ab 10 000 JSON-Dateien in `immutable_cache/tx` oder `utxo_ingress` einmalig im Log: *Cache wächst — sqlite ab jetzt sinnvoll* (GitHub-Issue erbeten). SQLite-Umbau weiter zurückgestellt bis nach CoinJoin-Verfolgung.
+- **Specter-Plugin · Cache-Seed:** Aus Specter kommen Node/Electrum und Wallets (managed); zusätzlich UTXOs, Verlaufs-Merge, Adress-Labels und Scan-Indizes in die SatSage-Caches (`specter_seed.py`) — ohne doppelte Einrichtung.
 - **Start9 · Fulcrum-Indexer (Vorbereitung):** Action **Select Indexer** (Electrs oder Fulcrum), conditional Dependencies, Bridge auf Port 50001; App meldet `electrum_indexer` / Hinweis. Design: `doc/START9-fulcrum-indexer.md`. Sideload-Bau/Geräte-Verify noch offen.
 - **Lab · Sanktions-Hops:** Pseudo-Liste + Ketten 1/10/25/100 Hops (und Clean) im Regtest; `SANKTION_MAX_HOPS_CAP` für Lab bis 100; GUI mit `--sanctions-dir` unter `.data/sanctioned_cache`. On-Chain-Verify grün (TP bei exakter Hop-Tiefe, Clean ohne False Positives).
 - **Lab · bitcoind-Start:** Windows startet bitcoind per WMI (`Win32_Process.Create`), damit der Node das Shell-Job-Object überlebt — sonst war die Chain nach Generator-Abbruch weg.
