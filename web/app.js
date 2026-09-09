@@ -5067,7 +5067,55 @@ function zeichneAppEinstellungen() {
   setzeEnvPfad(Zustand.config?.env_path);
 }
 
+function zeichneLocalCoreHinweis() {
+  const kasten = $("#local-core-hinweis");
+  const text = $("#local-core-hinweis-text");
+  const knopf = $("#local-core-uebernehmen");
+  if (!kasten || !text) return;
+  const stand = Zustand.config?.local_core;
+  const zeigen = Boolean(stand?.needs_opt_in && stand?.hit);
+  kasten.hidden = !zeigen;
+  if (!zeigen) return;
+  const hit = stand.hit;
+  const art = hit.pruned ? "pruned (scantxoutset trotzdem nützlich)" : "vollständig";
+  const p2p = hit.p2p_port || 8333;
+  const p2pHinweis = hit.p2p_tcp_open === false
+    ? ` P2P :${p2p} derzeit nicht offen — BIP-158 Prefer-Peer wird trotzdem gesetzt (peerblockfilters=1 nötig).`
+    : ` Opt-in setzt auch BIP158_HOST=${hit.host}:${p2p} (Compact Filter zuerst lokal).`;
+  text.textContent =
+    `Lokaler Bitcoin Core erkannt: ${hit.host}:${hit.port} `
+    + `(${hit.chain || hit.network}, ${art}, ~${Number(hit.blocks || 0).toLocaleString("de-DE")} Blöcke). `
+    + `Nicht still verbunden — „Lokalen Core übernehmen“ schreibt RPC + BIP-158-Prefer-Peer `
+    + `(LOCAL_CORE_OPT_IN=1).`
+    + p2pHinweis;
+  if (knopf && !knopf.dataset.bound) {
+    knopf.dataset.bound = "1";
+    knopf.addEventListener("click", async () => {
+      knopf.disabled = true;
+      try {
+        const antwort = await api("/source/local-core", { method: "POST", body: {} });
+        if (antwort?.sources) {
+          Zustand.config = {
+            ...(Zustand.config || {}),
+            sources: antwort.sources,
+            local_core: antwort.local_core,
+          };
+        } else {
+          await ladeConfig();
+        }
+        zeichneDatenquellenAnsicht();
+        logZeile("Lokaler Bitcoin Core übernommen.");
+      } catch (fehler) {
+        logZeile(String(fehler?.message || fehler), "krit");
+      } finally {
+        knopf.disabled = false;
+      }
+    });
+  }
+}
+
 function zeichneDatenquellenAnsicht() {
+  zeichneLocalCoreHinweis();
   zeichneQuellen(Zustand.config?.sources || []);
   zeichneMempoolStatus();
   ladeKursHistorie();

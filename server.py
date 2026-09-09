@@ -538,6 +538,9 @@ class AppState:
                 env.runtime_values["RPCUSER"] = cookie_user
             if cookie_password and not (values.get("RPCPASSWORD") or "").strip():
                 env.runtime_values["RPCPASSWORD"] = cookie_password
+        elif self.managed_by not in ("specter", "start9"):
+            # Desktop: lokaler bitcoind nur nach Opt-in (LOCAL_CORE_OPT_IN).
+            _apply_local_core_runtime(env)
         return env
 
     def reload(self) -> None:
@@ -1038,6 +1041,96 @@ def _specter_labels_for_api(state: AppState) -> dict[str, str]:
     return {str(k): str(v) for k, v in roh.items() if k and v}
 
 
+_local_core_probe_cache: tuple[float, object | None] | None = None
+_local_core_hint_logged = False
+
+
+def _apply_local_core_runtime(env) -> None:
+    """Wenn Opt-in gesetzt und Core noch nicht konfiguriert: Cookie/Loopback nutzen."""
+    from core import local_bitcoind as local_core
+
+    values = env.values()
+    if not local_core.local_core_opt_in_enabled(values):
+        return
+    if local_core.core_already_configured(values):
+        return
+    hit = _discover_local_core_cached(values)
+    if hit is None:
+        return
+    for key, val in local_core.env_updates_from_hit(hit).items():
+        if key == "LOCAL_CORE_OPT_IN":
+            continue
+        if not (values.get(key) or "").strip():
+            env.runtime_values[key] = val
+
+
+def _discover_local_core_cached(werte: dict | None = None):
+    """Kurzes Cache-TTL, damit api_config nicht bei jedem Poll neu scannt."""
+    global _local_core_probe_cache
+    import time
+
+    from core import local_bitcoind as local_core
+
+    now = time.monotonic()
+    if _local_core_probe_cache is not None:
+        ts, hit = _local_core_probe_cache
+        if now - ts < 30.0:
+            return hit
+    preferred = None
+    if werte:
+        preferred = (werte.get("NETWORK") or "").strip() or None
+    hit = local_core.discover_local_bitcoind(preferred_network=preferred)
+    _local_core_probe_cache = (now, hit)
+    return hit
+
+
+def _local_core_status_for_api(state: AppState) -> dict | None:
+    """Erkennung für die Datenquellen-UI — ohne Secrets, ohne Managed-Modi."""
+    if state.managed_by in ("specter", "start9"):
+        return None
+    from core import local_bitcoind as local_core
+
+    werte = state.env().values()
+    configured = local_core.core_already_configured(werte)
+    opt_in = local_core.local_core_opt_in_enabled(werte)
+    hit = _discover_local_core_cached(werte)
+    if hit is None and not configured:
+        return {
+            "detected": False,
+            "configured": configured,
+            "opt_in": opt_in,
+        }
+    out: dict = {
+        "detected": hit is not None,
+        "configured": configured,
+        "opt_in": opt_in,
+        "needs_opt_in": bool(hit is not None and not configured and not opt_in),
+    }
+    if hit is not None:
+        out["hit"] = hit.as_public_dict()
+    return out
+
+
+def _log_local_core_hint_once(state: AppState) -> None:
+    global _local_core_hint_logged
+    if _local_core_hint_logged:
+        return
+    status = _local_core_status_for_api(state)
+    if not status or not status.get("needs_opt_in"):
+        return
+    _local_core_hint_logged = True
+    hit = status.get("hit") or {}
+    pruned = "pruned" if hit.get("pruned") else "vollständig"
+    p2p = hit.get("p2p_port") or 8333
+    print(
+        f"Lokaler Bitcoin Core erkannt ({hit.get('host')}:{hit.get('port')}, "
+        f"{hit.get('chain')}, {pruned}, ~{hit.get('blocks')} Blöcke). "
+        f"Nicht still verbunden — Opt-in unter Datenquellen oder "
+        f"LOCAL_CORE_OPT_IN=1 setzt RPC und BIP158_HOST={hit.get('host')}:{p2p}.",
+        flush=True,
+    )
+
+
 def _managed_hint(state: AppState, werte: dict | None) -> str | None:
     if state.managed_by == "specter":
         return (
@@ -1140,6 +1233,7 @@ def api_config(state: AppState, query: dict) -> dict:
         "specter_labels": (
             _specter_labels_for_api(state) if state.managed_by == "specter" else None
         ),
+        "local_core": _local_core_status_for_api(state),
     }
 
 
@@ -2700,6 +2794,40 @@ def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
     return {
         "saved": True,
         "erlaubt": erlauben,
+        "sources": [
+            q.as_dict() for q in source_mod.describe_sources(state.env().values())
+        ],
+    }
+
+
+def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
+    """Übernimmt erkannten Loopback-bitcoind nach Opt-in in die .env."""
+    _datenquellen_config_gesperrt(state)
+    if state.managed_by in ("specter", "start9"):
+        raise ApiError(403, "Im Managed-Modus kommt Core von Start9/Specter.")
+    from core import local_bitcoind as local_core
+
+    hit = _discover_local_core_cached(state.env().values())
+    if hit is None:
+        raise ApiError(404, "Kein lokaler Bitcoin Core (Cookie/RPC) gefunden.")
+    env = state.env()
+    env.apply(local_core.env_updates_from_hit(hit))
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    global _local_core_probe_cache
+    _local_core_probe_cache = None
+    state.reload()
+    print(
+        f"Lokaler Bitcoin Core übernommen: RPC {hit.host}:{hit.port}, "
+        f"BIP-158 Prefer-Peer {hit.host}:{hit.p2p_port} "
+        f"({hit.chain}, {'pruned' if hit.pruned else 'vollständig'}).",
+        flush=True,
+    )
+    return {
+        "saved": True,
+        "local_core": _local_core_status_for_api(state),
         "sources": [
             q.as_dict() for q in source_mod.describe_sources(state.env().values())
         ],
@@ -4697,6 +4825,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_source_status(state, query)
         if teile == ["source", "oeffentlich"] and methode == "POST":
             return 200, api_oeffentliche_electrum(state, self._body())
+        if teile == ["source", "local-core"] and methode == "POST":
+            return 200, api_local_core_accept(state, self._body())
         if teile == ["llm", "status"] and methode == "GET":
             return 200, api_llm_status(state, query)
         if teile == ["price"] and methode == "GET":
@@ -4958,6 +5088,11 @@ def starte_im_hintergrund(
         name="satsage-webgui",
     )
     thread.start()
+
+    try:
+        _log_local_core_hint_once(state)
+    except Exception:
+        pass
 
     if header_vorab:
         starte_header_vorab(state)
