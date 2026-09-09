@@ -32,7 +32,7 @@ Legende Status: `todo` Â· `doing` Â· `done` Â· `blocked`
 | ID | Status | Aufgabe | Akzeptanz |
 |----|--------|---------|-----------|
 | S2-1 | done | Allowlist-Policy fÃ¼r Fulcrum/Mempool/LLM/SMTP (loopback / .onion / private / public+Opt-in) | Public ohne Opt-in abgelehnt |
-| S2-2 | partial | Start9-Dependencies: `bitcoind` + `electrs` (oder Fulcrum) per Bridge; Cookie RO-Mount | Kein freier RPC-Host nÃ¶tig im Default-Pfad |
+| S2-2 | partial | Start9-Dependencies: `bitcoind` + `electrs` **oder Fulcrum** per Bridge; Cookie RO-Mount — Vorbereitung: Select Indexer + conditional deps ([`START9-fulcrum-indexer.md`](START9-fulcrum-indexer.md)); Sideload-Verify offen | Kein freier RPC-Host nÃ¶tig im Default-Pfad; Indexer wÃ¤hlbar |
 | S2-3 | done | Config-UI: im Start9-Modus Node-Felder read-only / ausgeblendet, Status aus Dependency | User Ã¤ndert Backend nur Ã¼ber StartOS-Deps |
 | S2-4 | done | LLM: Default loopback; Remote nur mit Opt-in (bereits teilweise) â€” Tests + Start9-Hinweise | Gleiches Verhalten wie Desktop, dokumentiert |
 

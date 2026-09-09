@@ -87,6 +87,44 @@ class TestStart9ManagedMode(unittest.TestCase):
                 server.api_save_source(state, {"source": "own_core", "values": {"NODE_IP": "127.0.0.1"}})
             self.assertEqual(raised.exception.status, 403)
 
+    def test_start9_fulcrum_indexer_env_nicht_von_electrs_ueberschrieben(self):
+        """Daemon setzt FULCRUM_* auf die gewählte Bridge (auch wenn Package = fulcrum)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("SATSAGE_MANAGED_BY=start9\n", encoding="utf-8")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SATSAGE_MANAGED_BY": "start9",
+                    "SATSAGE_ELECTRUM_INDEXER": "fulcrum",
+                    "FULCRUM_HOST": "10.0.3.9",
+                    "FULCRUM_PORT": "50001",
+                    "FULCRUM_SSL": "false",
+                    "ELECTRS_HOST": "10.0.3.9",
+                    "BITCOIND_HOST": "10.0.3.1",
+                },
+                clear=False,
+            ):
+                state = server.AppState(
+                    env_path=env_path,
+                    cache_dir=Path(tmp) / "cache",
+                    immutable_cache_dir=Path(tmp) / "immutable",
+                )
+                werte = state.env().values()
+                self.assertEqual(werte["FULCRUM_HOST"], "10.0.3.9")
+                self.assertEqual(werte["FULCRUM_PORT"], "50001")
+                self.assertEqual(server._start9_electrum_indexer(werte), "fulcrum")
+                hint = server._managed_hint(state, werte)
+                self.assertIn("Fulcrum", hint)
+                self.assertIn("fulcrum", hint)
+
+    def test_start9_indexer_default_electrs(self):
+        self.assertEqual(server._start9_electrum_indexer({}), "electrs")
+        self.assertEqual(
+            server._start9_electrum_indexer({"SATSAGE_ELECTRUM_INDEXER": "ELECTRS"}),
+            "electrs",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

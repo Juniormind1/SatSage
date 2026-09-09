@@ -511,6 +511,7 @@ class AppState:
                 "FULCRUM_HOST",
                 "FULCRUM_PORT",
                 "FULCRUM_SSL",
+                "SATSAGE_ELECTRUM_INDEXER",
                 "MEMPOOL_URL",
                 "LLM_BASE_URL",
                 "LLM_ANBIETER",
@@ -520,6 +521,8 @@ class AppState:
                 if proc and key not in env.values():
                     env.runtime_values[key] = proc
             values = env.values()
+            # Prefer explicit FULCRUM_* from the StartOS daemon (electrs or Fulcrum
+            # package). Only fall back to ELECTRS_HOST when FULCRUM_HOST is empty.
             if not (values.get("FULCRUM_HOST") or "").strip():
                 bridge = (values.get("ELECTRS_HOST") or "electrs").strip()
                 if bridge:
@@ -1012,6 +1015,29 @@ _START9_BRIDGE_SCHLUESSEL = frozenset((
 ))
 
 
+def _start9_electrum_indexer(werte: dict | None) -> str:
+    """``electrs`` oder ``fulcrum`` aus StartOS-Daemon-Env (Select Indexer)."""
+    roh = str((werte or {}).get("SATSAGE_ELECTRUM_INDEXER") or "").strip().lower()
+    if roh in ("fulcrum", "electrs"):
+        return roh
+    # Legacy: nur ELECTRS_HOST / FULCRUM_HOST ohne Indexer-Flag → electrs-Default.
+    return "electrs"
+
+
+def _managed_hint(state: AppState, werte: dict | None) -> str | None:
+    if state.managed_by == "specter":
+        return "Wallets und Datenquelle kommen aus Specter."
+    if state.managed_by == "start9":
+        indexer = _start9_electrum_indexer(werte)
+        label = "Fulcrum" if indexer == "fulcrum" else "Electrs"
+        return (
+            f"{label} und Core RPC kommen aus Start9-Dependencies "
+            f"(Indexer: {indexer}; Wechsel über StartOS-Action „Select Indexer“); "
+            "Wallets und übrige Einstellungen werden hier konfiguriert."
+        )
+    return None
+
+
 def _datenquellen_config_gesperrt(
     state: AppState,
     *,
@@ -1089,11 +1115,9 @@ def api_config(state: AppState, query: dict) -> dict:
         "ui_lang": _ui_lang_aus_env(werte),
         "ui_theme": _ui_theme_aus_env(werte),
         "managed_by": state.managed_by,
-        "managed_hint": (
-            "Wallets und Datenquelle kommen aus Specter."
-            if state.managed_by == "specter" else
-            "Electrs und Core RPC kommen aus Start9-Dependencies; Wallets und übrige Einstellungen werden hier konfiguriert."
-            if state.managed_by == "start9" else None
+        "managed_hint": _managed_hint(state, werte),
+        "electrum_indexer": (
+            _start9_electrum_indexer(werte) if state.managed_by == "start9" else None
         ),
     }
 

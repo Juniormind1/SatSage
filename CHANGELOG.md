@@ -7,6 +7,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Start9 · Fulcrum-Indexer (Vorbereitung):** Action **Select Indexer** (Electrs oder Fulcrum), conditional Dependencies, Bridge auf Port 50001; App meldet `electrum_indexer` / Hinweis. Design: `doc/START9-fulcrum-indexer.md`. Sideload-Bau/Geräte-Verify noch offen.
 - **Lab · Sanktions-Hops:** Pseudo-Liste + Ketten 1/10/25/100 Hops (und Clean) im Regtest; `SANKTION_MAX_HOPS_CAP` für Lab bis 100; GUI mit `--sanctions-dir` unter `.data/sanctioned_cache`. On-Chain-Verify grün (TP bei exakter Hop-Tiefe, Clean ohne False Positives).
 - **Lab · bitcoind-Start:** Windows startet bitcoind per WMI (`Win32_Process.Create`), damit der Node das Shell-Job-Object überlebt — sonst war die Chain nach Generator-Abbruch weg.
 - **Sanktionen · Regtest-Adressen:** Listen-Parser akzeptiert `bcrt1`/`tb1` neben `bc1` (Lab-Pseudo-OFAC).
