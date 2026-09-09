@@ -30,17 +30,17 @@ if (-not $btcProc) {
 }
 if (-not $btcProc) {
     Write-Host "Starte bitcoind (regtest, datadir=$BitcoinData)..."
-    foreach ($f in @($BitcoindOut, $BitcoindErr)) {
-        if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    # Win32_Process.Create: ausserhalb des Shell-Job-Objects, sonst stirbt
+    # bitcoind mit dem aufrufenden PowerShell/Grok-Terminal und die Chain ist weg.
+    $cmd = "`"$Bitcoind`" -datadir=`"$BitcoinData`" -conf=`"$BitcoinConf`" -regtest -printtoconsole=0"
+    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = $cmd
     }
-    $p = Start-Process -FilePath $Bitcoind `
-        -ArgumentList @("-datadir=$BitcoinData", "-conf=$BitcoinConf", "-regtest") `
-        -RedirectStandardOutput $BitcoindOut `
-        -RedirectStandardError $BitcoindErr `
-        -WindowStyle Hidden `
-        -PassThru
-    Set-Content -Path $BitcoindPidFile -Value $p.Id
-    Write-Host "  PID $($p.Id); debug: $BitcoinData\regtest\debug.log"
+    if ($null -eq $created -or [int]$created.ReturnValue -ne 0 -or -not $created.ProcessId) {
+        throw "bitcoind Start fehlgeschlagen (WMI ReturnValue=$($created.ReturnValue))"
+    }
+    Set-Content -Path $BitcoindPidFile -Value $created.ProcessId
+    Write-Host "  PID $($created.ProcessId); debug: $BitcoinData\regtest\debug.log"
 } else {
     Write-Host "bitcoind laeuft bereits (PID $($btcProc.Id))"
 }
@@ -113,17 +113,16 @@ if (-not $SkipFulcrum) {
     }
     if (-not $fulProc) {
         Write-Host "Starte Fulcrum (Protokoll-Port 127.0.0.1:$ElectrumPort)..."
-        foreach ($f in @($FulcrumOut, $FulcrumErr)) {
-            if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+        # Wie bitcoind: WMI-Create ausserhalb des Shell-Job-Objects.
+        $cmd2 = "`"$FulcrumExe`" `"$FulcrumConf`""
+        $created2 = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine = $cmd2
         }
-        $p2 = Start-Process -FilePath $FulcrumExe `
-            -ArgumentList @($FulcrumConf) `
-            -RedirectStandardOutput $FulcrumOut `
-            -RedirectStandardError $FulcrumErr `
-            -WindowStyle Hidden `
-            -PassThru
-        Set-Content -Path $FulcrumPidFile -Value $p2.Id
-        Write-Host "  PID $($p2.Id); log: $FulcrumOut / $FulcrumErr"
+        if ($null -eq $created2 -or [int]$created2.ReturnValue -ne 0 -or -not $created2.ProcessId) {
+            throw "Fulcrum Start fehlgeschlagen (WMI ReturnValue=$($created2.ReturnValue))"
+        }
+        Set-Content -Path $FulcrumPidFile -Value $created2.ProcessId
+        Write-Host "  PID $($created2.ProcessId)"
     } else {
         Write-Host "Fulcrum laeuft bereits (PID $($fulProc.Id))"
     }

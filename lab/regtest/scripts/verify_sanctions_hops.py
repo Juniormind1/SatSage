@@ -53,7 +53,7 @@ def main() -> int:
     for k, v in werte.items():
         os.environ.setdefault(k, v)
 
-    listed = frozenset(load_sanctioned_xbt_addresses(SANCTIONS_DIR) or [])
+    listed, _meta = load_sanctioned_xbt_addresses(cache_dir=SANCTIONS_DIR)
     if not listed:
         print("Pseudo-Liste leer", file=sys.stderr)
         return 1
@@ -62,7 +62,9 @@ def main() -> int:
     if client is None:
         print("Kein Electrum/Fulcrum für get_tx", file=sys.stderr)
         return 1
-    get_tx = getattr(client, "get_tx", client)
+    cache_root = HERE / ".data" / "immutable_cache"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    get_tx = satsage_main.make_cached_fulcrum_get_tx(client, cache_root)
     print(f"get_tx Quelle: {quelle}")
 
     report = json.loads(REPORT.read_text(encoding="utf-8"))

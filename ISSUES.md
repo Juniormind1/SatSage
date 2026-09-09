@@ -1,6 +1,38 @@
-﻿# Offene Punkte
+# Offene Punkte
 
 Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
+
+## Start9 · Fulcrum als Electrum-Datenquelle (neben electrs)
+
+**Stand:** 2026-09-09 · **offen** · Bezug: [doc/START9-packaging.md](doc/START9-packaging.md), [doc/START9-hardening.md](doc/START9-hardening.md)
+
+Der Start9-Build-/Package-Prozess soll **Fulcrum** können, nicht nur `electrs-startos`.
+
+**Soll (Orientierung):**
+
+- Am besten **automatisch erkennen**, welcher Indexer auf dem StartOS-Gerät läuft (electrs und/oder Fulcrum), und SatSage daran anbinden.
+- Alternativ bzw. ergänzend: in der **StartOS-GUI auswählbar**, analog zur Mempool-Dependency-Auswahl (User wählt die Electrum-Datenquelle beim Install/Config).
+- Manifest/Dependencies und Bridge-Env (`ELECTRS_HOST` / Fulcrum-Aliase) so erweitern, dass beide Pfade sauber konfigurierbar sind — ohne Doppel-Edit in der SatSage-UI im Managed-Modus.
+
+**Heute:** Packaging importiert typischerweise `bitcoin-core-startos` + `electrs-startos`; Fulcrum fehlt als First-Class-Option.
+
+---
+
+## Specter-Plugin · Node & Wallets aus Specter übernehmen (read-only)
+
+**Stand:** 2026-09-09 · **offen**
+
+Das Specter-Plugin soll **Node-Connections** und **Wallets** aus der Specter-Umgebung übernehmen (Bridge/Session), nicht parallel in SatSage neu konfigurieren.
+
+**Soll:**
+
+- Aktiver Specter-Node (RPC/Electrs bzw. die von Specter genutzte Datenquelle) und Specter-Wallets/XPUBs sind die maßgebliche Quelle.
+- In der Plugin-UI (bzw. eingebetteten SatSage-GUI) die entsprechenden Einstellungen für **Wallets** und **Node-/Electrs-Datenquellen** als **read-only** darstellen — Anzeige zur Orientierung, keine eigene Editierbarkeit, solange Specter hostet.
+- Änderungen an Wallets/Node laufen über Specter; SatSage-Plugin liest nach (Reload/Session).
+
+**Abgrenzung:** Standalone-`server.py` / Lab behalten volle Editierbarkeit. Nur der Specter-hosted Pfad ist read-only angebunden.
+
+---
 
 ## Start9 Community Package â€” HÃ¤rtung
 
