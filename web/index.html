@@ -704,6 +704,27 @@
           </button>
         </div>
 
+        <div class="karte" id="cache-dashboard">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="wallets.cacheDashTitle">Cache-Belegung</span>
+            <span id="cache-dash-zusatz" class="karte-zusatz"></span>
+            <button type="button" id="cache-dash-aktualisieren" class="knopf knopf-klein"
+                    data-i18n="wallets.cacheDashRefresh"
+                    data-i18n-title="wallets.cacheDashRefreshTitle"
+                    title="Misst erneut Dateigrößen und Abdeckung — keine Netzwerkzugriffe.">
+              Aktualisieren
+            </button>
+          </div>
+          <p class="meta cache-dash-intro" data-i18n="wallets.cacheDashIntro">
+            Größe und Abdeckung der lokalen Caches — keine Zugriffszähler.
+          </p>
+          <div id="cache-dash-platte" class="cache-dash-platte"></div>
+          <div id="cache-dash-balken" class="cache-dash-balken" aria-hidden="true"></div>
+          <div id="cache-dash-kacheln" class="cache-dash-kacheln"></div>
+          <div id="cache-dash-wallets" class="cache-dash-wallets"></div>
+          <p id="cache-dash-meldung" class="meta" hidden></p>
+        </div>
+
         <div class="karte karte-gefahr">
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="wallets.dangerTitle">Danger Zone!!!!</span>

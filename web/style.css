@@ -1127,6 +1127,67 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .kennzahl-wert.warn { color: var(--warn); }
 .kennzahl-zusatz { font-size: 11px; color: var(--gedaempft); }
 
+/* ---------- Cache-Dashboard (Belegung) ---------- */
+
+.cache-dash-intro { padding: 8px 13px 0; margin: 0; }
+.cache-dash-platte {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 13px 4px; font-size: 12px;
+}
+.cache-dash-ampel {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--blass); flex: none;
+}
+.cache-dash-ampel.gut { background: var(--gut); }
+.cache-dash-ampel.warn { background: var(--warn); }
+.cache-dash-ampel.krit { background: var(--krit); }
+.cache-dash-balken {
+  display: flex; height: 10px; margin: 6px 13px 10px;
+  border-radius: 3px; overflow: hidden; background: var(--flaeche-3);
+  border: 1px solid var(--linie-zart);
+}
+.cache-dash-balken span { display: block; height: 100%; min-width: 0; }
+.cache-dash-balken .seg-utxo { background: var(--gut); }
+.cache-dash-balken .seg-immutable { background: var(--warn); }
+.cache-dash-balken .seg-sanctioned { background: var(--krit); opacity: 0.75; }
+.cache-dash-kacheln {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px; padding: 0 13px 12px;
+}
+.cache-dash-kachel {
+  border: 1px solid var(--linie-zart); border-radius: 4px;
+  padding: 8px 10px; background: var(--flaeche-2);
+}
+.cache-dash-kachel .titel {
+  font-size: 10px; color: var(--blass); text-transform: uppercase;
+  letter-spacing: 0.03em; margin-bottom: 4px;
+}
+.cache-dash-kachel .wert {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 600;
+}
+.cache-dash-kachel .wert.warn { color: var(--warn); }
+.cache-dash-kachel .wert.krit { color: var(--krit); }
+.cache-dash-kachel .meta { font-size: 11px; color: var(--gedaempft); margin-top: 2px; }
+.cache-dash-wallets { padding: 0 13px 12px; overflow-x: auto; }
+.cache-dash-wallets table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.cache-dash-wallets th,
+.cache-dash-wallets td {
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid var(--linie-zart);
+  white-space: nowrap;
+}
+.cache-dash-wallets th {
+  font-size: 10px; color: var(--blass); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.02em;
+}
+.cache-dash-wallets td.zahl,
+.cache-dash-wallets th.zahl { text-align: right; font-variant-numeric: tabular-nums; }
+.cache-dash-wallets td.mono { font-family: var(--mono); font-size: 11px; }
+#cache-dash-meldung { padding: 0 13px 12px; }
+
 /* ---------- Haltedauer-Balken ---------- */
 
 .haltedauer { display: flex; align-items: center; gap: 8px; white-space: nowrap; }

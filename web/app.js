@@ -4982,6 +4982,7 @@ function zeichneWalletVerwaltung() {
   );
   setzeEnvPfad(Zustand.config?.env_path);
   ladeUnreferenziertenCache();
+  ladeCacheDashboard();
 }
 
 function setzeZeileAktualisieren(zeile, wallet) {
@@ -5049,12 +5050,236 @@ async function loescheUnreferenziertenCache() {
     meldung(text, "gut");
     logZeile(text);
     zeichneUnreferenziertenCache({ vorhanden: false, dateien: 0, bytes: 0 });
+    await ladeCacheDashboard();
   } catch (fehler) {
     meldung(`Aufräumen fehlgeschlagen — ${fehler.message}`, "krit");
   } finally {
     if (knopf) knopf.disabled = false;
     await ladeUnreferenziertenCache();
   }
+}
+
+async function ladeCacheDashboard() {
+  const karte = $("#cache-dashboard");
+  if (!karte) return;
+  const meldungEl = $("#cache-dash-meldung");
+  try {
+    const stand = await api("/cache/stats");
+    zeichneCacheDashboard(stand);
+    if (meldungEl) meldungEl.hidden = true;
+  } catch (fehler) {
+    if (meldungEl) {
+      setzeText(meldungEl, t("wallets.cacheDashError", { error: fehler.message }));
+      meldungEl.hidden = false;
+    }
+  }
+}
+
+function _cacheDashKachel(titel, wert, meta, ampel) {
+  const kachel = document.createElement("div");
+  kachel.className = "cache-dash-kachel";
+  const tEl = document.createElement("div");
+  tEl.className = "titel";
+  tEl.textContent = titel;
+  const wEl = document.createElement("div");
+  wEl.className = "wert" + (ampel === "warn" || ampel === "krit" ? ` ${ampel}` : "");
+  wEl.textContent = wert;
+  kachel.append(tEl, wEl);
+  if (meta) {
+    const m = document.createElement("div");
+    m.className = "meta";
+    m.textContent = meta;
+    kachel.append(m);
+  }
+  return kachel;
+}
+
+function zeichneCacheDashboard(stand) {
+  const zusatz = $("#cache-dash-zusatz");
+  const platte = $("#cache-dash-platte");
+  const balken = $("#cache-dash-balken");
+  const kacheln = $("#cache-dash-kacheln");
+  const wallets = $("#cache-dash-wallets");
+  if (!platte || !balken || !kacheln || !wallets) return;
+
+  if (zusatz) {
+    setzeText(zusatz, t("wallets.cacheDashSum", { size: stand.summe_label || "0 MB" }));
+  }
+
+  platte.replaceChildren();
+  const ampel = document.createElement("span");
+  const platteStand = stand.platte || {};
+  ampel.className = `cache-dash-ampel ${platteStand.ampel || ""}`;
+  const text = document.createElement("span");
+  if (platteStand.free_bytes == null) {
+    text.textContent = t("wallets.cacheDashDiskUnknown");
+  } else {
+    const pct = Math.round((Number(platteStand.free_ratio) || 0) * 1000) / 10;
+    text.textContent = t("wallets.cacheDashDisk", {
+      free: platteStand.free_label || "—",
+      total: platteStand.total_label || "—",
+      pct,
+    });
+  }
+  platte.append(ampel, text);
+  if (platteStand.write_blocked) {
+    const warn = document.createElement("span");
+    warn.className = "meta";
+    warn.textContent = t("wallets.cacheDashDiskBlocked");
+    platte.append(warn);
+  }
+
+  const utxoB = Number(stand.utxo_cache?.bytes || 0);
+  const immB = Number(stand.immutable_cache?.bytes || 0);
+  const sankB = Number(stand.sanctioned_cache?.bytes || 0);
+  const sumB = Math.max(1, utxoB + immB + sankB);
+  balken.replaceChildren();
+  const segs = [
+    ["seg-utxo", utxoB],
+    ["seg-immutable", immB],
+    ["seg-sanctioned", sankB],
+  ];
+  for (const [cls, bytes] of segs) {
+    if (bytes <= 0) continue;
+    const seg = document.createElement("span");
+    seg.className = cls;
+    seg.style.flex = String(bytes / sumB);
+    seg.title = `${cls.replace("seg-", "")}: ${format_dateigroesse_client(bytes)}`;
+    balken.append(seg);
+  }
+
+  const flatAmpel = stand.tx?.ampel || stand.utxo_ingress?.ampel || "gut";
+  kacheln.replaceChildren(
+    _cacheDashKachel(
+      t("wallets.cacheDashTileUtxo"),
+      stand.utxo_cache?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.utxo_cache?.dateien || 0) }),
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileImmutable"),
+      stand.immutable_cache?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.immutable_cache?.dateien || 0) }),
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileTx"),
+      stand.tx?.groesse_label || "0 MB",
+      `${t("wallets.cacheDashFiles", { n: formatZahl(stand.tx?.dateien || 0) })} · ${t("wallets.cacheDashSchwelle", { n: formatZahl(stand.tx?.schwelle || 10000) })}`,
+      flatAmpel,
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileIngress"),
+      stand.utxo_ingress?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.utxo_ingress?.dateien || 0) }),
+      flatAmpel,
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileHeaders"),
+      stand.p2p_headers?.groesse_label || "0 MB",
+      stand.p2p_headers?.tip != null
+        ? t("wallets.cacheDashHeaderTip", { tip: formatZahl(stand.p2p_headers.tip) })
+        : "—",
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileSanctions"),
+      stand.sanctioned_cache?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.sanctioned_cache?.dateien || 0) }),
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileExternal"),
+      stand.external_addresses?.groesse_label || "0 MB",
+      stand.external_addresses?.vorhanden ? "JSON" : "—",
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTilePrice"),
+      stand.btc_price?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.btc_price?.dateien || 0) }),
+    ),
+  );
+
+  wallets.replaceChildren();
+  const liste = Array.isArray(stand.wallets) ? stand.wallets : [];
+  if (liste.length === 0) {
+    const leer = document.createElement("p");
+    leer.className = "meta";
+    leer.textContent = t("wallets.cacheDashEmpty");
+    wallets.append(leer);
+    return;
+  }
+
+  const tabelle = document.createElement("table");
+  const kopf = document.createElement("tr");
+  const spalten = [
+    ["wallets.cacheDashColWallet", false],
+    ["wallets.cacheDashColUtxo", true],
+    ["wallets.cacheDashColSats", true],
+    ["wallets.cacheDashColTip", true],
+    ["wallets.cacheDashColGap", true],
+    ["wallets.cacheDashColVerlauf", true],
+    ["wallets.cacheDashColHerkunft", true],
+    ["wallets.cacheDashColSize", true],
+  ];
+  for (const [key, zahl] of spalten) {
+    const th = document.createElement("th");
+    if (zahl) th.className = "zahl";
+    th.textContent = t(key);
+    kopf.append(th);
+  }
+  tabelle.append(kopf);
+
+  for (const w of liste) {
+    const zeile = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = w.wallet_name || w.wallet_id || "—";
+    zeile.append(name);
+
+    const zelle = (text, zahl = true) => {
+      const td = document.createElement("td");
+      if (zahl) td.className = "zahl mono";
+      td.textContent = text;
+      zeile.append(td);
+    };
+
+    zelle(formatZahl(w.utxo_count || 0));
+    zelle(formatSats(w.total_sats || 0));
+    if (w.tip_lag == null) zelle("—");
+    else if (Number(w.tip_lag) <= 0) zelle(t("wallets.cacheDashLagOk"));
+    else zelle(t("wallets.cacheDashLag", { n: formatZahl(w.tip_lag) }));
+
+    if (w.scan_end_index == null || !w.max_addresses) zelle("—");
+    else zelle(`${formatZahl(w.scan_end_index)}/${formatZahl(w.max_addresses)}`);
+
+    zelle(formatZahl(w.verlauf_count || 0));
+
+    if (w.herkunft_referenzen) {
+      const pct = Math.round((Number(w.herkunft_ratio) || 0) * 100);
+      zelle(`${formatZahl(w.herkunft_treffer || 0)}/${formatZahl(w.herkunft_referenzen)} (${pct} %)`);
+    } else {
+      zelle("—");
+    }
+    zelle(w.groesse_label || "0 MB");
+    tabelle.append(zeile);
+  }
+  wallets.append(tabelle);
+}
+
+function format_dateigroesse_client(bytes) {
+  const n = Number(bytes) || 0;
+  if (n <= 0) return "0 MB";
+  const mb = n / (1024 * 1024);
+  if (mb >= 0.1) {
+    return `${mb.toLocaleString(formatLocale(), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })} MB`;
+  }
+  if (n >= 1024) {
+    const kb = n / 1024;
+    return `${kb.toLocaleString(formatLocale(), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })} KB`;
+  }
+  return `${n} B`;
 }
 
 function zeichneAppEinstellungen() {
@@ -8706,6 +8931,12 @@ async function start() {
   const unrefLoeschen = $("#cache-unreferenziert-loeschen");
   if (unrefLoeschen) {
     unrefLoeschen.addEventListener("click", loescheUnreferenziertenCache);
+  }
+  const cacheDashRefresh = $("#cache-dash-aktualisieren");
+  if (cacheDashRefresh) {
+    cacheDashRefresh.addEventListener("click", () => {
+      ladeCacheDashboard();
+    });
   }
   $("#privatsphaere-entfernen").addEventListener("click", verwerfeErstenXpub);
   $("#privatsphaere-ok").addEventListener("click", akzeptiereOhneSicherenNode);
