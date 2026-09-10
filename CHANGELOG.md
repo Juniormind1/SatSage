@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · P2P an + öffentlich:** Nach erfolgreichem P2P-Aufbau Dialog „Höhere Privatsphäre?“ — optional öffentliche Electrum-Nutzung kappen (langsamerer Fallback). Solange geprüft wird: Pille **Verbindung im Aufbau…**, danach verbunden/nicht erreichbar. Bei aktiver höherer Quelle kein stale „verbunden“ an Onion/Clearnet.
+- **Datenquellen · P2P-Papierkorb:** Schaltet „P2P aufbauen“ wirklich aus (`BIP158_P2P=false`), räumt Live-Peer-Anzeige und `sources_last` — gleichwertig zum manuellen Schalter; nächste Quelle (z. B. Onion) greift.
+- **P2P · Abbruch vs. Turbo:** UTXO-Zwischenstände nach abgebrochenem BIP-158-Scan deaktivieren Turbo-Erstscan nicht mehr. Flag `bip158_fullscan_ok` erst nach vollständigem Fullscan; bis dahin gilt wieder Turbo + Gap-Historie.
 - **P2P · Startdatum-Dialog:** Fragt wieder bei BIP-158-Erstscan ohne First-seen — auch wenn ein eigener Electrum/Core nur *konfiguriert*, aber nicht verbunden ist (früher blockierte `autoQuelle` den Dialog).
 - **P2P · Erstscan (TurboSync):** Ohne used-Keys zuerst nur das Turbo-Fenster (~2016 Blöcke) mit voller Lookahead-Menge, danach Historie nur mit Gap/Hits — nicht mehr alle Keys × SegWit…Tip. cfilter-Disk-Cache unter `immutable_cache/cfilter/` (Höhe+Blockhash). Filter-Match und Block-Download entkoppelt (eigene Block-Worker bei ≥2 Peers). Start: First-seen − Reorg-Puffer; SegWit nur als Default ohne besseren Hinweis.
 - **Datenquellen · Status:** Grüne Pille heißt jetzt **verbunden** (EN: *Connected*) statt „erreichbar“. Privatsphäre mäßig/gering bleibt grau, solange nur die Serverliste geladen ist; gelb/rot erst bei bestehender und genutzter Verbindung (nicht von Hoch-Privatsphäre verdrängt). Papierkorb hinter „Von Electrum laden“ löscht Onion-/Clearnet-Listen, Opt-in bleibt.

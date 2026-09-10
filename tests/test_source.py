@@ -408,6 +408,45 @@ class TestCheckReachable(unittest.TestCase):
         pruefe.assert_not_called()
         self.assertTrue(any("Bestätigung fehlt" in z for z in gesehen))
 
+    def test_p2p_ok_raeumt_oeffentliche_verbunden_stand(self):
+        """Mit P2P-Peers kein stale „verbunden“ an Onion/Clearnet."""
+        from unittest import mock
+
+        from core.source import SourceInfo, PRIVACY_HIGH, PRIVACY_MEDIUM
+
+        p2p = SourceInfo(
+            rank=3, key="bip158", name="P2P", detail="", privacy=PRIVACY_HIGH,
+            configured=True, reachable=True, peer_count=3,
+            peer_hosts=["a:8333"],
+        )
+        onion = SourceInfo(
+            rank=4, key="public_onion", name="Onion", detail="",
+            privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+            peer_count=2, peer_hosts=["x.onion:50002"],
+        )
+        clear = SourceInfo(
+            rank=5, key="clearnet", name="Clear", detail="",
+            privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+            peer_count=1, peer_hosts=["e.example:50002"],
+        )
+        logs: list[str] = []
+        with mock.patch(
+            "core.source._pruefe_p2p_peers", return_value=p2p,
+        ), mock.patch(
+            "core.source._pruefe_oeffentliche_electrum",
+        ) as pruefe_oeff:
+            out = {
+                q.key: q
+                for q in check_sources(
+                    [p2p, onion, clear], {}, timeout=1, on_log=logs.append,
+                )
+            }
+        pruefe_oeff.assert_not_called()
+        self.assertIsNone(out["public_onion"].reachable)
+        self.assertEqual(out["public_onion"].peer_count, 0)
+        self.assertIsNone(out["clearnet"].reachable)
+        self.assertTrue(any("Öffentliche Electrum" in z for z in logs))
+
     def test_verbindungstest_fragt_oeffentliche_nach_bestaetigung(self):
         from unittest import mock
 

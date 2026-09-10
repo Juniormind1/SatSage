@@ -1423,6 +1423,7 @@ def api_config(state: AppState, query: dict) -> dict:
         "wallets_immer_aktuell": (
             main.resolve_wallets_beim_start_aktualisieren(werte)
         ),
+        "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
         "wallet_watch": _wallet_watch_status(),
 
         "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
@@ -3302,12 +3303,22 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
     elif name == "bip158":
-        # Explizit 0 — fehlender Schlüssel bedeutet sonst wieder „an“ (Default 1).
-        env.apply({"BIP158_P2P": "0"})
+        # Wie Checkbox „P2P aufbauen“ aus (fehlender Key = Default an).
+        env.apply({"BIP158_P2P": "false"})
+        env.runtime_values.pop("BIP158_P2P", None)
         try:
             sicherung = env.save()
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
+        # Laufende Header/Filter-Peers nicht weiter als „P2P an“ anzeigen.
+        state.header_job_id = None
+        try:
+            import bip158_scanner as _bip
+
+            with _bip._LIVE_FILTER_LOCK:
+                _bip._LIVE_FILTER_PEERS.clear()
+        except Exception:
+            pass
     elif name == "public_onion":
         updates: dict[str, str | None] = {}
         for i in range(main.MAX_PUBLIC_ONION_SERVERS):
@@ -3335,11 +3346,19 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
 
     state.reload()
     werte = state.env().values()
+    quellen = [
+        q.as_dict()
+        for q in source_mod.anreichere_live_p2p(
+            source_mod.describe_sources(werte)
+        )
+    ]
+    # Letzter Check-Stand darf „P2P an/verbunden“ nicht über den Papierkorb retten.
+    state.sources_last = quellen
     return {
         "saved": True,
         "cleared": name,
         "backup": str(sicherung) if sicherung else None,
-        "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
+        "sources": quellen,
     }
 
 

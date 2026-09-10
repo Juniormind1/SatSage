@@ -43,6 +43,79 @@ class TestTurboPasses(unittest.TestCase):
         self.assertEqual(histo[3], frozenset(gap))
         self.assertNotEqual(histo[3], frozenset(alle))
 
+    def test_abbruch_zwischenstand_deaktiviert_turbo_nicht(self):
+        """Partial-Cache ohne Fullscan-Flag → used leer → Turbo-Erstscan."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import main
+        from bip158_scanner import _used_scripts_aus_cache
+
+        self.assertFalse(main.bip158_fullscan_ist_fertig({}))
+        self.assertFalse(
+            main.bip158_fullscan_ist_fertig(
+                {"bip158_fullscan_ok": False, "utxos": [{"address": "x"}]}
+            )
+        )
+        self.assertTrue(main.bip158_fullscan_ist_fertig({"bip158_fullscan_ok": True}))
+        self.assertTrue(main.bip158_fullscan_ist_fertig({"scan_tip_height": 800_000}))
+        self.assertFalse(main.bip158_fullscan_ist_fertig({"scan_tip_height": 0}))
+
+        xpub = (
+            "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3N"
+            "o2dFDFGTsxxpG5uJh7n7epu4trkrX7x7DogT5Uf1nxASY"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            # Zwischenstand nach Abbruch: UTXOs da, Fullscan nicht ok.
+            main.save_xpub_utxo_cache(
+                xpub,
+                [{
+                    "txid": "ab" * 32,
+                    "vout": 0,
+                    "value": 1000,
+                    "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+                }],
+                cache,
+                "bip158",
+                bip158_fullscan_ok=False,
+            )
+            self.assertEqual(_used_scripts_aus_cache(xpub, cache), set())
+            # Fertig: Flag + Tip → used aus Cache (Mock der Adress→Script-Map).
+            main.save_xpub_utxo_cache(
+                xpub,
+                [{
+                    "txid": "ab" * 32,
+                    "vout": 0,
+                    "value": 1000,
+                    "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+                }],
+                cache,
+                "bip158",
+                scan_tip_height=900_000,
+                bip158_fullscan_ok=True,
+            )
+            with patch(
+                "bip158_scanner.addresses_to_script_pubkeys",
+                return_value={b"\x01\x02": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"},
+            ):
+                self.assertEqual(_used_scripts_aus_cache(xpub, cache), {b"\x01\x02"})
+            # Zwischenstand nach Fullscan behält ok.
+            main.schreibe_utxo_zwischenstand(
+                xpub,
+                [{
+                    "txid": "cd" * 32,
+                    "vout": 0,
+                    "value": 500,
+                    "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+                }],
+                cache,
+                "bip158",
+            )
+            ein = main.load_xpub_cache_entry(xpub, cache)
+            self.assertTrue(ein["raw"].get("bip158_fullscan_ok"))
+
     def test_erstscan_ohne_gap_historie_leer(self):
         alle = {b"\x01", b"\x02"}
         passe = plane_filter_passes(481_824, 900_000, alle, set())

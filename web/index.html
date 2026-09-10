@@ -159,6 +159,35 @@
   </div>
 </div>
 
+<!-- P2P an, öffentliche Electrum noch erlaubt: höhere Privatsphäre anbieten. -->
+<div id="p2p-privatsphaere-dialog" class="einrichtung" hidden>
+  <div class="einrichtung-karte" role="dialog" aria-modal="true"
+       aria-labelledby="p2p-privatsphaere-titel">
+    <h1 id="p2p-privatsphaere-titel" data-i18n="dialog.p2pPrivacy.title">Höhere Privatsphäre?</h1>
+    <p data-i18n="dialog.p2pPrivacy.body">
+      P2P Compact Filter sind verbunden. Öffentliche Electrum-Server
+      (Onion/Clearnet) können als Fallback weiter Adressen sehen.
+      Öffentliche Verbindungen kappen? Scans können dann langsamer werden,
+      wenn P2P ausfällt.
+    </p>
+    <div class="einrichtung-knoepfe">
+      <button type="button" id="p2p-privatsphaere-ja" class="knopf knopf-primaer"
+              autofocus
+              data-i18n="dialog.p2pPrivacy.yes"
+              data-i18n-title="dialog.p2pPrivacy.yesTitle"
+              title="Öffentliche Electrum-Nutzung beenden. Nur noch eigener Node und P2P.">
+        Ja, öffentlich kappen
+      </button>
+      <button type="button" id="p2p-privatsphaere-nein" class="knopf"
+              data-i18n="dialog.p2pPrivacy.no"
+              data-i18n-title="dialog.p2pPrivacy.noTitle"
+              title="Öffentliche Server bleiben als Notfall-Fallback erlaubt.">
+        Nein, Fallback behalten
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- BIP-158 ohne First-seen: ohne Datum Start = SegWit (481824) bzw. Env. -->
 <div id="scan-datum-dialog" class="einrichtung" hidden>
   <div class="einrichtung-karte" role="dialog" aria-modal="true"
