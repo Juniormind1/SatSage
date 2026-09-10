@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Bereits ausgegeben · Beschriftung:** Die Satoshi-Summe heißt jetzt **Gesamtvolumen** (kein Saldo) — z. B. „42 Vorgänge · Gesamtvolumen 1,23 BTC“. Tooltip erklärt: Summe der Nennwerte ausgegebener Outputs. In der Kopfzeile **kein Spot-€** mehr auf dem Brutto-Volumen (sonst wirken alte Ausgaben wie heutiger Reichtum); € zum Tageskurs am Ausgabedatum bleibt an den Adress-/UTXO-Zeilen.
 - **Steuerjahr · Phantom-Unspent:** Verlaufseinträge ohne `spent`, die nicht im aktuellen UTXO-Cache stehen, zählen nicht mehr zum Bestand (häufig Ursache für aufgeblähtes „außerhalb Haltefrist“). Abgänge bleiben; Hinweis in der Auswertung.
 - **Steuerjahr · Bestand gesamt:** Ausgegebene Verlaufs-Outputs ohne Abgangsdatum (`spent` ohne `spent_time_ts`) zählen nicht mehr zum Bestand — verhindert aufgeblähte Summen (z. B. 1,89 BTC aus Historie). Hinweis in der Auswertung.
 - **Electrum-UTXO-Scan · Tip:** Nach erfolgreichem Fulcrum-/Electrum-Fullscan wird `scan_tip_height` (Chain-Tip) und „Bestand am Tip“ (`bip158_fullscan_ok`) gesetzt — Folgeläufe per P2P können Tip-Nachzug statt Erstscan.
