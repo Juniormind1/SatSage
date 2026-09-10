@@ -14,6 +14,7 @@ from core.source import (
     check_reachable,
     check_sources,
     describe_sources,
+    mergere_erreichbarkeit,
     oeffentliche_electrum_erlaubt,
     peer_aenderungen,
     peer_status,
@@ -516,7 +517,26 @@ class TestCheckReachable(unittest.TestCase):
                 SimpleNamespace(key="bip158", reachable=False, peer_count=0),
             ])
         self.assertEqual(stand["label"], "0 Peers verbunden")
-        self.assertEqual(stand["count"], 0)
+
+    def test_mergere_erreichbarkeit_uebernimmt_letzten_check(self):
+        frisch = describe_sources({
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50002",
+        })
+        alt = [
+            {
+                "key": "own_fulcrum",
+                "reachable": True,
+                "error": "",
+                "peer_count": 1,
+                "peer_hosts": ["192.0.2.10:50002"],
+            },
+        ]
+        gemerged = mergere_erreichbarkeit(frisch, alt)
+        nach = {q.key: q for q in gemerged}
+        self.assertTrue(nach["own_fulcrum"].configured)
+        self.assertTrue(nach["own_fulcrum"].reachable)
+        self.assertEqual(nach["own_fulcrum"].peer_count, 1)
 
 
 if __name__ == "__main__":

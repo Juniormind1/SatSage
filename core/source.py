@@ -129,6 +129,56 @@ class SourceInfo:
         }
 
 
+def mergere_erreichbarkeit(
+    frisch: list[SourceInfo],
+    alt: list[dict] | None,
+) -> list[SourceInfo]:
+    """
+    Übernimmt ``reachable``/Peers aus dem letzten Check in frische describe-Daten.
+
+    Damit ``GET /api/config`` (ohne Netzprobe) denselben Stand zeigen kann wie
+    nach dem letzten ``?check=1`` — Browser-Reload muss Verbindungen nicht
+    optisch „neu aufbauen“.
+    """
+    if not alt:
+        return list(frisch)
+    nach: dict[str, dict] = {}
+    for eintrag in alt:
+        if isinstance(eintrag, dict) and eintrag.get("key"):
+            nach[str(eintrag["key"])] = eintrag
+    out: list[SourceInfo] = []
+    for q in frisch:
+        alt_q = nach.get(q.key)
+        if not alt_q:
+            out.append(q)
+            continue
+        if not q.configured:
+            out.append(
+                replace(
+                    q,
+                    reachable=None,
+                    error="",
+                    peer_count=0,
+                    peer_hosts=[],
+                )
+            )
+            continue
+        if q.reachable is not None:
+            out.append(q)
+            continue
+        hosts = list(alt_q.get("peer_hosts") or [])
+        out.append(
+            replace(
+                q,
+                reachable=alt_q.get("reachable"),
+                error=str(alt_q.get("error") or ""),
+                peer_count=int(alt_q.get("peer_count") or 0),
+                peer_hosts=hosts,
+            )
+        )
+    return out
+
+
 def anreichere_live_p2p(quellen: list) -> list:
     """
     Hängt gerade offene BIP-158-Scan-Peers an die bip158-Quelle.
@@ -805,11 +855,8 @@ def _pruefe_p2p_peers(
         if on_log:
             on_log(text)
 
-    log("Prüfe Compact-Filter-Peers…")
     fest = p2p_peers_from_env(values)
-    if fest:
-        log(f"Zuerst {fest[0][0]}:{fest[0][1]}, ohne Filter weitere Peers.")
-
+    # Kein Vorlauf-Log — Erfolg kommt als eine Zeile je neuem Peer aus p2p.
     hosts = zaehle_compact_filter_peers(
         timeout=min(float(timeout), 4.0),
         tor_proxy=None,
@@ -818,7 +865,6 @@ def _pruefe_p2p_peers(
         dns_fallback=True,
     )
     if not hosts:
-        log("Clearnet-P2P ohne Compact-Filter-Peer — versuche über Tor…")
         tor_proxy = stelle_p2p_tor_bereit(values, on_log=log)
         if tor_proxy:
             hosts = zaehle_compact_filter_peers(

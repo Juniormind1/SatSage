@@ -198,6 +198,9 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('t("privacy.pillHigh")', self.js)
         self.assertIn('t("privacy.pillMedium")', self.js)
         self.assertIn('t("privacy.pillNone")', self.js)
+        self.assertIn('t("privacy.pillUnclear")', self.js)
+        self.assertIn("T_FALLBACK", self.js)
+        self.assertIn("pruefePeersLeise()", self.js)
         self.assertIn("kopfQuelleAufbau", self.js)
         self.assertIn("kopfQuelleFehler", self.js)
         self.assertNotIn("kopfQuelleStufe", self.js)
@@ -208,6 +211,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('"header.sourceElectrumOwn": "Electrum privat"', de)
         self.assertIn('"header.sourceElectrumPublic": "Electrum öffentlich"', de)
         self.assertIn('"privacy.pillNone": "keine Privatsphäre"', de)
+        self.assertIn('"privacy.pillUnclear": "Privatsphäre unklar"', de)
         # Nach Scan: /config ohne Check darf grüne Pillen nicht rot blitzen.
         self.assertIn("function uebernehmeQuellenErreichbarkeit", self.js)
         self.assertIn("behaltePositivBeiNegativ", self.js)

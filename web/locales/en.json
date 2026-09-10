@@ -309,6 +309,7 @@
   "privacy.pillHigh": "Privacy high",
   "privacy.pillMedium": "Privacy medium",
   "privacy.pillNone": "no privacy",
+  "privacy.pillUnclear": "privacy unclear",
   "privacy.sourceCorePrivate": "Source: Core RPC private · Privacy high",
   "privacy.sourceElectrumPrivate": "Source: Electrum private · Privacy high",
   "privacy.sourceElectrumPublic": "Source: Electrum public · Privacy low",

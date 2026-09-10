@@ -720,11 +720,33 @@ function formatLocale() {
   return "de-DE";
 }
 
+/** Fallback bevor locales geladen sind — Kopf-Pillen nie als Roh-Keys. */
+const T_FALLBACK = {
+  "header.p2pPeers": "P2P {n}",
+  "header.sourceCore": "Core",
+  "header.sourceElectrumOwn": "Electrum privat",
+  "header.sourceElectrumPublic": "Electrum öffentlich",
+  "privacy.pillHigh": "Privatsphäre hoch",
+  "privacy.pillMedium": "Privatsphäre mittel",
+  "privacy.pillNone": "keine Privatsphäre",
+  "privacy.pillUnclear": "Privatsphäre unklar",
+};
+
 function t(key, vars) {
+  let text;
   if (window.SatSageI18n && typeof window.SatSageI18n.t === "function") {
-    return window.SatSageI18n.t(key, vars);
+    text = window.SatSageI18n.t(key, vars);
+    // Catalog noch leer / Key fehlt → Roh-Key vermeiden.
+    if (text === key && T_FALLBACK[key]) text = T_FALLBACK[key];
+  } else {
+    text = T_FALLBACK[key] || key;
   }
-  return key;
+  if (vars && typeof vars === "object" && text.indexOf("{") >= 0) {
+    for (const [name, wert] of Object.entries(vars)) {
+      text = text.split(`{${name}}`).join(String(wert));
+    }
+  }
+  return text;
 }
 
 
@@ -7393,6 +7415,11 @@ function peerAenderungen(alt, neu) {
     if (alt.n || neu.n) return [`Wechsel: ${alt.label} → ${neu.label}`];
     return [];
   }
+  // P2P-/Public-Probe-Peers wechseln oft — kein Ausgefallen/Neu-Spam pro Host.
+  if (alt.kind === "p2p" || alt.kind === "public") {
+    if (alt.n !== neu.n) return [`Wechsel: ${alt.label} → ${neu.label}`];
+    return [];
+  }
   const vorher = new Set(alt.peers || []);
   const nachher = new Set(neu.peers || []);
   const zeilen = [];
@@ -7812,7 +7839,7 @@ function zeichneKopfStatus(quellen) {
     privText = t("privacy.pillHigh");
     privStufe = "gut";
   } else if (privateAufbau) {
-    privText = t("privacy.pillMedium");
+    privText = t("privacy.pillUnclear");
     privStufe = "warn";
   } else {
     // Nichts live verbunden — nur Cache: kein Leak.
@@ -8616,6 +8643,10 @@ async function ladeConfig() {
   Zustand.config.sources = uebernehmeQuellenErreichbarkeit(
     altQuellen, Zustand.config.sources,
   );
+  // Offene Server-Peers sofort in die Pille — ohne erneute Netzprobe.
+  if (Array.isArray(Zustand.config.live_p2p_peers) && Zustand.config.live_p2p_peers.length) {
+    nimmLiveP2pPeers(Zustand.config.live_p2p_peers);
+  }
   Zustand.entwurf = Zustand.config.wallets.map((w) => ({ ...w }));
   setzeEnvPfad(Zustand.config.env_path);
   Zustand.llmStatus = Zustand.config.llm || Zustand.llmStatus;
@@ -8686,6 +8717,8 @@ async function start() {
       zeichneUiLang();
       // Haltefrist-Optionen wurden in ladeConfig vor dem Catalog befüllt (Roh-Keys).
       zeichneSteuerEinstellungen();
+      // Kopf nach Catalog nochmal — ladeConfig kann vor initI18n gelaufen sein.
+      zeichneKopfStatus(Zustand.config?.sources || []);
     }
     const langWahl = $("#ui-lang");
     if (langWahl) {
@@ -9034,7 +9067,8 @@ async function start() {
   }
 
   einrichtungBeimStart();
-  pruefeNodeStatus();
+  // Still nachladen: Server hält Connections; lauter Neu-Test nur über Knopf.
+  pruefePeersLeise();
 
   // Sprachumschalter oben rechts
   const deBtn = $("#lang-de");

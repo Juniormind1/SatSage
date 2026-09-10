@@ -245,7 +245,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 - **Verbose:** Default `nein` (`VERBOSE` in `.env` oder Einstellungen [4]); gekÃ¼rzte TxIDs/Adressen
 - **BetrÃ¤ge:** `format_sats` â€” â‰¤100â€¯000 sats als sats, darÃ¼ber BTC mit 2 Dezimalstellen
 - **Lange Listen:** `cancellable_output` â€” `q` zum Abbrechen (nur interaktives TTY)
-- **Log-Bereich (Web):** Eine Zeile kÃ¼ndigt den nÃ¤chsten Schritt an, **bevor** er loslÃ¤uft â€” nicht danach. Zweck ist Erwartungsmanagement (â€žjetzt startet Torâ€œ), keine Forensik hinterher. Die Zeile muss im Log stehen, bevor die Arbeit beginnt (SOCKS-Probe, Binary-Suche, Tor-Start, Connect). Ergebniszeilen (`Verbunden.`, Fehler) kommen zusÃ¤tzlich nach dem Schritt. Neue Logs Ã¼ber denselben Strom schreiben (`on_log` / NDJSON), nicht erst im fertigen JSON-Block. Nach zehn Sekunden ohne neue Zeile: â€žMoment nochâ€œ, nicht dieselbe Arbeitszeile nochmal. Wallet-bezogene Aktionen nennen den Wallet-Namen nach der Uhrzeit.
+- **Log-Bereich (Web):** Sparsam, wenn Verbindungen stehen und das Tool arbeitsbereit ist; gesprächig bei Hochfahren, Problemen, Verbindungsabbrüchen unter kritische Werte (z. B. < 3 Compact-Filter-Peers) oder Privatsphäre-Änderung. Eine Zeile kündigt den nächsten Schritt an, **bevor** er losläuft (Erwartungsmanagement, z. B. Tor) — Ergebnis danach. Gleicher Strom (`on_log` / NDJSON); nach ~10 s Stille: „Moment noch“. Wallet-Aktionen: Name nach der Uhrzeit. Richtlinie: [`doc/logging-richtlinie.md`](doc/logging-richtlinie.md).
 - **Web-UI prÃ¼fen:** Ã„nderungen an `web/` oder gerenderten API-Daten im Browser durchklicken, nicht nur am Render festhalten.
 
 ## Specter Desktop Plugin (Testumgebung)
