@@ -3498,12 +3498,72 @@ def _alle_gecachten_verlaeufe(state: AppState) -> list[dict]:
     return gesammelt
 
 
+def _utxo_schluessel(eintrag: dict) -> tuple[str, int] | None:
+    txid = str(eintrag.get("txid") or "").strip().lower()
+    if not txid:
+        return None
+    try:
+        vout = int(eintrag.get("vout", 0))
+    except (TypeError, ValueError):
+        return None
+    return (txid, vout)
+
+
+def _steuer_verlauf_ohne_phantom_unspent(
+    verlauf: list[dict],
+    bestand: list[dict] | None,
+) -> tuple[list[dict], int]:
+    """
+    Verlauf für Steuer: echte Abgänge behalten, Phantom-„unspent“ streichen.
+
+    Phantom = im Verlauf ``spent`` falsch/fehlend (wirkt unspent), aber
+    ``txid:vout`` steht nicht (mehr) im aktuellen UTXO-Cache — typisch nach
+    Konsolidierung/Ausgaben, wenn der Verlauf ``spent`` nicht gesetzt hat.
+    Ohne UTXO-Cache kein Abgleich möglich → Verlauf unverändert.
+    """
+    if not bestand:
+        return list(verlauf), 0
+    live = set()
+    for u in bestand:
+        key = _utxo_schluessel(u)
+        if key:
+            live.add(key)
+    gefiltert: list[dict] = []
+    phantome = 0
+    gesehen: set[tuple[str, int]] = set()
+    for eintrag in verlauf:
+        key = _utxo_schluessel(eintrag)
+        if eintrag.get("spent"):
+            gefiltert.append(eintrag)
+            if key:
+                gesehen.add(key)
+            continue
+        if key is None:
+            continue
+        if key in live:
+            gefiltert.append(eintrag)
+            gesehen.add(key)
+        else:
+            phantome += 1
+    # UTXOs, die der Verlauf noch nicht kennt (frischer Empfang).
+    for u in bestand:
+        key = _utxo_schluessel(u)
+        if key is None or key in gesehen:
+            continue
+        neu = dict(u)
+        neu.setdefault("spent", False)
+        gefiltert.append(neu)
+        gesehen.add(key)
+    return gefiltert, phantome
+
+
 def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     """
     Woraus die Steuerauswertung rechnet — **je Wallet** entschieden.
 
-    Der Verlauf gewinnt, wo er vorliegt: Er enthält die unverbrauchten Outputs
-    ebenso wie die längst ausgegebenen. Wo er fehlt, bleibt der UTXO-Bestand.
+    Der Verlauf gewinnt, wo er vorliegt (Abgänge + Empfänge). Unspent-Zeilen
+    aus dem Verlauf, die nicht im aktuellen UTXO-Cache stehen, werden als
+    Phantom verworfen. Wo kein Verlauf da ist, bleibt der UTXO-Bestand.
 
     Die Entscheidung darf nicht global fallen. Sonst verschwänden alle Wallets
     ohne Verlauf aus der Aufstellung, sobald ein einziges einen hat — in einer
@@ -3514,23 +3574,36 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     """
     eintraege: list[dict] = []
     ohne_verlauf: list[str] = []
+    phantome_gesamt = 0
 
     for entry in state.analyse_entries:
         schluessel = entry.analyse_schluessel
         verlauf = main.load_xpub_verlauf_cache(schluessel, state.cache_dir)
-        if verlauf:
-            eintraege.extend(verlauf)
-            continue
-        # Auch bei leerem Verlauf: Eine leere Liste kann ein abgebrochener
-        # Lauf sein. Sie als „dieses Wallet ist leer" zu lesen wäre falsch.
-        ohne_verlauf.append(entry.display_name)
         gecacht = utxos_mod.load_cached_utxos(
             schluessel,
             state.cache_dir,
             immutable_cache_dir=state.immutable_cache_dir,
         )
+        if verlauf:
+            bereinigt, phantome = _steuer_verlauf_ohne_phantom_unspent(
+                verlauf, gecacht,
+            )
+            phantome_gesamt += phantome
+            eintraege.extend(bereinigt)
+            continue
+        # Auch bei leerem Verlauf: Eine leere Liste kann ein abgebrochener
+        # Lauf sein. Sie als „dieses Wallet ist leer" zu lesen wäre falsch.
+        ohne_verlauf.append(entry.display_name)
         if gecacht:
             eintraege.extend(gecacht)
+
+    if phantome_gesamt and hasattr(state, "_steuer_phantome"):
+        state._steuer_phantome = phantome_gesamt
+    else:
+        try:
+            state._steuer_phantome = phantome_gesamt  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     return eintraege, ohne_verlauf
 
@@ -3575,6 +3648,14 @@ def _steuer_auswertung(state: AppState, query: dict) -> dict:
     )
     auswertung["verfuegbare_jahre"] = jahre
     auswertung["ohne_verlauf"] = ohne_verlauf
+    phantome = int(getattr(state, "_steuer_phantome", 0) or 0)
+    auswertung["phantom_unspent_count"] = phantome
+    if phantome:
+        auswertung["hinweise"].insert(0, (
+            f"{phantome} Verlaufs-Einträge wirkten unspent, fehlen aber im "
+            "aktuellen UTXO-Bestand (Phantom) — für „Bestand gesamt“ ignoriert. "
+            "Verlaufsscan erneut aktualisiert spent-Flags."
+        ))
     if ohne_verlauf:
         # Eine gemischte Grundlage muss auffallen: Für die einen Wallets sind
         # Veräußerungen erfasst, für die anderen nur der heutige Bestand.

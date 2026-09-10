@@ -446,6 +446,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="p2p-privatsphaere-dialog"', self.html)
         self.assertIn("frageP2pPrivatsphaereKappen", self.js)
         self.assertIn("sources.connecting", self.js)
+        self.assertIn("function quelleZeigtVerbindungsaufbau", self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn('"sources.connecting": "Verbindung im Aufbau…"', de)
         self.assertIn('"dialog.p2pPrivacy.title"', de)

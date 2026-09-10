@@ -305,6 +305,12 @@ HINWEIS_EIGENUEBERTRAG = (
     "Netzwerkgebühr."
 )
 
+HINWEIS_SPENT_OHNE_ABGANGSDATUM = (
+    "{anzahl} ausgegebene Outputs ohne Abgangsdatum wurden nicht dem "
+    "Bestand zugerechnet (sonst würde „Bestand gesamt“ historische Empfänge "
+    "aufblasen). Verlaufsscan erneut bzw. Herkunft kann Zeiten nachziehen."
+)
+
 
 def _abgang_je_transaktion(utxos: list[dict]) -> dict[str, int]:
     """
@@ -374,7 +380,11 @@ def _abgang_zeitpunkt(utxo: dict) -> datetime | None:
     """Wann dieser Output ausgegeben wurde — None, wenn er noch liegt."""
     if not utxo.get("spent"):
         return None
-    stempel = utxo.get("spent_time_ts")
+    stempel = (
+        utxo.get("spent_time_ts")
+        or utxo.get("spent_block_time")
+        or (utxo.get("status") or {}).get("spent_time_ts")
+    )
     if not stempel:
         return None
     try:
@@ -569,6 +579,7 @@ def auswerten(
     eintraege: list[Eingang] = []
     abgaenge: list[dict] = []
     ohne_datum = 0
+    spent_ohne_abgang = 0
     mit_verlauf = _hat_verlauf(utxos)
     jahresbeginn = datetime(jahr, 1, 1)
     # Je ausgebender Transaktion: Was ist netto abgeflossen? Nur das ist eine
@@ -607,7 +618,14 @@ def auswerten(
         # Ausgegeben: Was vor dem Stichtag abging, lag dort nicht mehr im
         # Wallet und gehört nicht in den Bestand. Steuerlich ist gerade die
         # Veräußerung der maßgebliche Vorgang — sie wird eigens ausgewiesen.
+        #
+        # spent=True ohne Datum: trotzdem nicht als Bestand zählen — sonst
+        # bläht „Bestand gesamt“ alle jemals empfangenen Outputs auf
+        # (typisch nach Verlaufsscan mit fehlendem spent_time_ts).
         abgang = _abgang_zeitpunkt(utxo)
+        if utxo.get("spent") and abgang is None:
+            spent_ohne_abgang += 1
+            continue
         if abgang is not None and abgang <= ende:
             spender = utxo.get("spent_txid") or ""
             netto = netto_je_tx.get(spender, int(utxo.get("value", 0)))
@@ -709,6 +727,10 @@ def auswerten(
         hinweise.insert(0, HINWEIS_EIGENUEBERTRAG.format(
             anzahl=len(eigenuebertraege)
         ))
+    if spent_ohne_abgang:
+        hinweise.insert(0, HINWEIS_SPENT_OHNE_ABGANGSDATUM.format(
+            anzahl=spent_ohne_abgang
+        ))
     if stichtag:
         hinweise.insert(0, (
             f"Stichtagsregel: Anschaffungen nach dem {format_stichtag(stichtag)} "
@@ -743,6 +765,7 @@ def auswerten(
             "offen_count": len(offen),
             "offen_sats": sum(e.value_sats for e in offen),
             "ohne_datum": ohne_datum,
+            "spent_ohne_abgang_count": spent_ohne_abgang,
             "naechste_frist": naechste.strftime("%d.%m.%Y") if naechste else "",
             # Wie viel der Aufstellung auf dem bloßen Output-Datum beruht und
             # damit eine zu kurze Haltefrist ausweisen kann.

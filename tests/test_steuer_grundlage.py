@@ -84,23 +84,41 @@ class TestGrundlage(GrundlageBasis):
         """
         self.bestand(BIP84_ZPUB, "a1", 100_000)
         self.bestand(ZWEITER_ALS_XPUB, "b1", 200_000)
-        self.verlauf(BIP84_ZPUB, [verlaufs_eintrag("c1", 50_000)])
+        # Unspent im Verlauf muss zum UTXO-Cache passen (sonst Phantom).
+        self.verlauf(BIP84_ZPUB, [verlaufs_eintrag("a1", 100_000)])
 
         grundlage = self.grundlage()
         self.assertEqual(len(grundlage), 2)
         betraege = sorted(e["value"] for e in grundlage)
-        self.assertEqual(betraege, [50_000, 200_000])
+        self.assertEqual(betraege, [100_000, 200_000])
 
     def test_verlauf_ersetzt_den_bestand_desselben_wallets(self):
-        """Für dasselbe Wallet gilt der Verlauf — er enthält den Bestand mit."""
-        self.bestand(BIP84_ZPUB, "a1", 100_000)
+        """Echter Unspent im Verlauf + Abgang; Bestand muss zum Unspent passen."""
+        self.bestand(BIP84_ZPUB, "c1", 50_000)
         self.verlauf(BIP84_ZPUB, [
             verlaufs_eintrag("c1", 50_000),
             verlaufs_eintrag("c2", 70_000, ausgegeben=True),
         ])
         grundlage = self.grundlage()
         self.assertEqual(len(grundlage), 2)
-        self.assertNotIn(100_000, [e["value"] for e in grundlage])
+        betraege = sorted(e["value"] for e in grundlage)
+        self.assertEqual(betraege, [50_000, 70_000])
+
+    def test_phantom_unspent_im_verlauf_wird_gestrichen(self):
+        """
+        Verlauf sagt unspent, UTXO-Cache kennt txid:vout nicht → Phantom,
+        zählt nicht zur Steuer-Grundlage (sonst aufgeblähtes „außerhalb Haltefrist“).
+        """
+        self.bestand(BIP84_ZPUB, "live", 100_000)
+        self.verlauf(BIP84_ZPUB, [
+            verlaufs_eintrag("live", 100_000),
+            verlaufs_eintrag("alt", 1_890_000_000),  # Phantom-Unspent
+            verlaufs_eintrag("weg", 50_000, ausgegeben=True),
+        ])
+        grundlage = self.grundlage()
+        betraege = sorted(e["value"] for e in grundlage)
+        self.assertEqual(betraege, [50_000, 100_000])
+        self.assertNotIn(1_890_000_000, betraege)
 
     def test_verlauf_fuer_beide(self):
         self.verlauf(BIP84_ZPUB, [verlaufs_eintrag("c1", 10_000)])

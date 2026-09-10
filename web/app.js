@@ -5592,6 +5592,22 @@ function quellePrivacyStufe(quelle, quellen) {
   return ({ "mäßig": "warn", gering: "krit" }[quelle.privacy] || "neutral");
 }
 
+/**
+ * Gelbe „Verbindung im Aufbau…“-Pille nur während eines echten Checks
+ * für Quellen, die der Check gerade anfasst — nicht bei idle reachable=null
+ * und nicht bei öffentlich, wenn P2P/Eigen Vorrang hat oder Opt-in aus ist.
+ */
+function quelleZeigtVerbindungsaufbau(quelle, quellen) {
+  if (!quelle || !quelle.configured) return false;
+  if (!Zustand.peerCheckLaeuft) return false;
+  if (quelle.reachable === true || quelle.reachable === false) return false;
+  if (quelle.key === "public_onion" || quelle.key === "clearnet") {
+    if (!Zustand.config?.oeffentliche_electrum) return false;
+    if (quelleHochVerdraengt(quellen)) return false;
+  }
+  return true;
+}
+
 function zeichneQuellen(quellen) {
   const behaelter = $("#quellen-liste");
   if (!behaelter) return;
@@ -5625,13 +5641,11 @@ function zeichneQuellen(quellen) {
       rechts.append(pille("gut", t("sources.reachable")));
     } else if (quelle.configured && quelle.reachable === false) {
       rechts.append(pille("krit", t("sources.unreachable")));
-    } else if (
-      quelle.configured
-      && (Zustand.peerCheckLaeuft || quelle.reachable == null)
-    ) {
-      // Noch kein Ergebnis — während des Checks und vor dem ersten Probe.
+    } else if (quelleZeigtVerbindungsaufbau(quelle, liste)) {
       rechts.append(pille("warn", t("sources.connecting")));
     }
+    // Sonst keine Status-Pille: Liste geladen, aber gerade nicht genutzt
+    // (z. B. öffentlich nach „P2P / kappen“) → grau über Notiz/Privatsphäre.
     rechts.append(pille(quellePrivacyStufe(quelle, liste), privacyLabel(quelle.privacy)));
 
     const formular = document.createElement("div");
@@ -7939,7 +7953,8 @@ function frageP2pPrivatsphaereKappen() {
             daten: { erlauben: false },
           });
           if (Zustand.config) Zustand.config.oeffentliche_electrum = false;
-          // Stale „verbunden“ an Onion/Clearnet entfernen.
+          Zustand.peerCheckLaeuft = false;
+          // Stale „verbunden“/„im Aufbau“ an Onion/Clearnet entfernen.
           Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
             if (q.key !== "public_onion" && q.key !== "clearnet") return q;
             return {

@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Phantom-Unspent:** Verlaufseinträge ohne `spent`, die nicht im aktuellen UTXO-Cache stehen, zählen nicht mehr zum Bestand (häufig Ursache für aufgeblähtes „außerhalb Haltefrist“). Abgänge bleiben; Hinweis in der Auswertung.
+- **Steuerjahr · Bestand gesamt:** Ausgegebene Verlaufs-Outputs ohne Abgangsdatum (`spent` ohne `spent_time_ts`) zählen nicht mehr zum Bestand — verhindert aufgeblähte Summen (z. B. 1,89 BTC aus Historie). Hinweis in der Auswertung.
+- **Electrum-UTXO-Scan · Tip:** Nach erfolgreichem Fulcrum-/Electrum-Fullscan wird `scan_tip_height` (Chain-Tip) und „Bestand am Tip“ (`bip158_fullscan_ok`) gesetzt — Folgeläufe per P2P können Tip-Nachzug statt Erstscan.
+- **Datenquellen · öffentlich nach P2P-Kappen:** Keine gelbe „Verbindung im Aufbau…“ mehr an Onion/Clearnet, wenn Opt-in aus oder Hoch-Privatsphäre Vorrang hat — nur noch grau/ungenutzt.
 - **Verlaufsscan · kein Doppel-Gap:** Liegt ein frischer UTXO-Cache vor (≤2 h, kein unvollständiger BIP-158-Lauf), überspringt der Verlauf den erneuten Bestands-Scan und nutzt den Cache — Log: „UTXO-Cache frisch — Gap-Scan übersprungen“.
 - **Doku · Testprotokoll Datenquellen-Wechsel:** `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — Härtung gegen Quellenwechsel während UTXO-/Verlaufs-Scans (P2P ↔ Electrum, Queue, Cache-Flags, GUI).
 - **Clearnet-Electrum · Opt-in:** `OEFFENTLICHE_ELECTRUM=1` (Dialog-Bestätigung) gilt auch als Outbound-Freigabe für Fulcrum-Clearnet — sonst blockierte die Allowlist alle öffentlichen IPs trotz erlaubter Electrum-Nutzung.

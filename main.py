@@ -4597,10 +4597,12 @@ def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
 
 def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
     """
-    True erst nach erfolgreich abgeschlossenem BIP-158-UTXO-Fullscan.
+    True, wenn der UTXO-Bestand am Chain-Tip bekannt ist.
 
-    Zwischenstände (Abbruch) dürfen Turbo-Erstscan nicht deaktivieren.
-    Alt-Caches ohne Flag: ``scan_tip_height`` gilt als fertig.
+    Gesetzt nach erfolgreichem BIP-158-Fullscan **oder** Electrum-/Fulcrum-
+    Fullscan (Gap liefert den Stand am Tip). Zwischenstände (Abbruch) dürfen
+    Turbo-Erstscan nicht deaktivieren. Alt-Caches ohne Flag: vorhandenes
+    ``scan_tip_height`` gilt als fertig.
     """
     if not roh:
         return False
@@ -5784,17 +5786,30 @@ def _scan_xpub_utxos(
         except TypeError:
             fetch_kwargs.pop("on_utxos_update", None)
             utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
+        # Electrum/Fulcrum liefert den Bestand am Tip — Höhe mitschreiben,
+        # damit späterer P2P-Lauf Tip-Nachzug machen kann.
+        if fulcrum is not None and not is_list_abort_requested():
+            try:
+                from fulcrum import get_chain_tip_height
+
+                tip_hoehe = int(get_chain_tip_height(fulcrum, force=True))
+            except Exception:
+                tip_hoehe = None
     if is_list_abort_requested() and not utxos:
         return list(zwischen) if zwischen else utxos
-    # BIP-158: Fullscan-Flag + Tip erst nach normalem Abschluss.
-    # Abbruch/Zwischenstand: kein Tip, fullscan_ok=False → nächster Lauf Turbo.
+    # Bestand am Tip: BIP-158-Fullscan oder erfolgreicher Electrum-Gap.
+    # Abbruch: kein Tip / fullscan_ok=False → nächster P2P-Lauf Turbo-Erstscan.
     full_ok = None
-    if source == "bip158":
-        if is_list_abort_requested():
+    if is_list_abort_requested():
+        if source == "bip158":
             full_ok = False
             tip_hoehe = None
-        else:
-            full_ok = True
+    elif source == "bip158":
+        full_ok = True
+    elif tip_hoehe and tip_hoehe > 0:
+        # Fulcrum/Electrum (und Core+Fulcrum-Tip): Flag heißt historisch
+        # bip158_fullscan_ok, meint aber „UTXO-Stand am Tip bekannt“.
+        full_ok = True
     cache_path = save_xpub_utxo_cache(
         xpub,
         utxos,
