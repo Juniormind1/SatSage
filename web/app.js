@@ -7667,28 +7667,31 @@ async function erlaubeOeffentlicheElectrum() {
 }
 
 /**
- * Kopfzeile rechts: vier Quellen-Pillen, danach Privatsphäre.
- *
- * Core RPC privat / Electrs privat: ohne Konfig neutral; konfiguriert aber
- * nicht verbunden rot; verbunden grün. P2P BIP-158: immer sichtbar, neutral
- * Label „n P2Peers anonym“: 0 grau, 1–2 gelb, >2 grün. Electrs öffentlich:
- * neutral unverbunden, rot verbunden — Privatsphäre-Pille dann „niedrig“.
+ * Kopfzeile: nur aktive/im Aufbau/fehlerhafte Quellen + eine Privatsphäre-Pille.
+ * Kein Katalog ungenutzter Quellen. Cache-only → Privatsphäre hoch.
  */
-function kopfQuelleStufe(quelle, { verbunden, brauchtKonfig, verbundenStufe = "gut" }) {
-  if (brauchtKonfig && !(quelle && quelle.configured)) return "neutral";
-  if (verbunden) return verbundenStufe;
-  // Vor dem ersten Check nicht rot aufblitzen: unbekannter Stand = neutral.
-  if (!Zustand.peersGeprueft && !(quelle && quelle.reachable === false)) {
-    return "neutral";
-  }
-  if (brauchtKonfig) return "krit";
-  return "neutral";
-}
-
 function kopfQuelleVerbunden(quelle) {
   if (!quelle || !quelle.configured) return false;
   if (quelle.reachable === true) return true;
   return (quelle.peer_count || 0) > 0;
+}
+
+/** konfiguriert, noch kein Check → Aufbau; nach Check unerreichbar → Fehler. */
+function kopfQuelleAufbau(quelle) {
+  if (!quelle || !quelle.configured) return false;
+  if (kopfQuelleVerbunden(quelle)) return false;
+  if (quelle.reachable === false) return false;
+  return !Zustand.peersGeprueft || quelle.reachable == null;
+}
+
+function kopfQuelleFehler(quelle) {
+  return Boolean(
+    quelle
+    && quelle.configured
+    && !kopfQuelleVerbunden(quelle)
+    && Zustand.peersGeprueft
+    && quelle.reachable === false,
+  );
 }
 
 function zeichneKopfStatus(quellen) {
@@ -7703,8 +7706,6 @@ function zeichneKopfStatus(quellen) {
 
   const coreVerbunden = kopfQuelleVerbunden(core);
   const electrsVerbunden = kopfQuelleVerbunden(electrs);
-  // Anzahl wie bisher bei „n Peers verbunden“ — aus der BIP-158-Quelle,
-  // sonst dem P2P-Peer-Stand (wenn gerade Compact Filter die aktive Sorte ist).
   const liveN = Array.isArray(Zustand.liveP2pPeers)
     ? Zustand.liveP2pPeers.length
     : 0;
@@ -7713,25 +7714,25 @@ function zeichneKopfStatus(quellen) {
     liveN,
   );
   if (
-    !p2pAnzahl &&
-    Zustand.peerStatus &&
-    Zustand.peerStatus.kind === "p2p"
+    !p2pAnzahl
+    && Zustand.peerStatus
+    && Zustand.peerStatus.kind === "p2p"
   ) {
     p2pAnzahl = Number(Zustand.peerStatus.n || Zustand.peers || 0);
   }
-  const p2pVerbunden =
-    p2pAnzahl > 0
-    || kopfQuelleVerbunden(p2p)
-    || (Zustand.peerStatus && Zustand.peerStatus.kind === "p2p");
+  const p2pAktiv =
+    (Zustand.peerStatus && Zustand.peerStatus.kind === "p2p")
+    || liveN > 0;
+  const p2pVerbunden = p2pAnzahl > 0 || p2pAktiv;
+  const p2pAufbau =
+    Boolean(p2p?.configured)
+    && !p2pVerbunden
+    && (!Zustand.peersGeprueft || Zustand.peerCheckLaeuft);
   const oeffentlichVerbunden =
-    kopfQuelleVerbunden(oeffentlichOnion) ||
-    kopfQuelleVerbunden(oeffentlichClear) ||
-    (Zustand.peerStatus && Zustand.peerStatus.kind === "public");
-  const p2pLabel = t("header.p2pPeers", { n: p2pAnzahl });
-  // 0 = grau, 1–2 = gelb, ab 3 = grün (mehr Peers = robuster).
-  // Während aktivem Filter-Scan: mindestens gelb, wenn Peers da sind.
-  const p2pStufe =
-    p2pAnzahl > 2 ? "gut" : p2pAnzahl > 0 ? "warn" : "neutral";
+    kopfQuelleVerbunden(oeffentlichOnion)
+    || kopfQuelleVerbunden(oeffentlichClear)
+    || (Zustand.peerStatus && Zustand.peerStatus.kind === "public");
+
   const p2pHosts = [
     ...new Set([
       ...(p2p?.peer_hosts || []),
@@ -7742,66 +7743,81 @@ function zeichneKopfStatus(quellen) {
     (liveN > 0
       ? `Aktiv für Filter/Tip-Sync: ${liveN} Peer(s). `
       : "")
-    + "Verbundene Bitcoin-Nodes, die BIP-158 Blockfilter teilen. "
-    + "Hohe Anonymität, nur die Blöcke von Interesse könnten verfolgt werden, "
-    + "nicht welche Tx in den Blöcken für xPubTracing relevant war."
-    + (p2pHosts.length ? ` · ${p2pHosts.slice(0, 6).join(", ")}` : "");
+    + "Bitcoin-P2P mit BIP-158 Compact Filters. "
+    + (p2pHosts.length ? p2pHosts.slice(0, 6).join(", ") : "");
 
-  const eintraege = [
-    {
+  const eintraege = [];
+
+  if (coreVerbunden || kopfQuelleAufbau(core) || kopfQuelleFehler(core)) {
+    eintraege.push({
       key: "own_core",
       label: t("header.sourceCore"),
-      stufe: kopfQuelleStufe(core, { verbunden: coreVerbunden, brauchtKonfig: true }),
-      title:
-        "Bitcoin Node mit RPC Zugang, hohe Privatsphäre bei eigenem Node",
-    },
-    {
+      stufe: coreVerbunden ? "gut" : (kopfQuelleAufbau(core) ? "warn" : "krit"),
+      title: core?.error
+        || "Bitcoin Core RPC (scantxoutset / Lookups), hohe Privatsphäre",
+    });
+  }
+
+  if (p2pVerbunden || p2pAufbau) {
+    const n = p2pVerbunden ? p2pAnzahl : 0;
+    eintraege.push({
       key: "bip158",
-      label: p2pLabel,
-      stufe: p2pStufe,
-      title: p2pTitle,
-    },
-    {
+      label: t("header.p2pPeers", { n }),
+      stufe: p2pAufbau
+        ? "warn"
+        : (p2pAnzahl > 2 ? "gut" : (p2pAnzahl > 0 ? "warn" : "krit")),
+      title: p2pTitle || t("header.p2pPeers", { n }),
+    });
+  }
+
+  if (electrsVerbunden || kopfQuelleAufbau(electrs) || kopfQuelleFehler(electrs)) {
+    eintraege.push({
       key: "own_fulcrum",
       label: t("header.sourceElectrumOwn"),
-      stufe: kopfQuelleStufe(electrs, {
-        verbunden: electrsVerbunden,
-        brauchtKonfig: true,
-      }),
-      title:
-        "eigener Electrum-Server gemäß Zugangsdaten unter Datenquellen",
-    },
-    {
+      stufe: electrsVerbunden
+        ? "gut"
+        : (kopfQuelleAufbau(electrs) ? "warn" : "krit"),
+      title: electrs?.error
+        || "Eigener Electrum-Server (Fulcrum/electrs) gemäß Datenquellen",
+    });
+  }
+
+  if (oeffentlichVerbunden) {
+    eintraege.push({
       key: "public",
       label: t("header.sourceElectrumPublic"),
-      stufe: kopfQuelleStufe(null, {
-        verbunden: oeffentlichVerbunden,
-        brauchtKonfig: false,
-        verbundenStufe: "krit",
-      }),
-      title:
-        "Öffentliche Electrum-Server gemäß Liste von Electrum, keine Privatsphäre",
-    },
-  ];
+      stufe: "krit",
+      title: "Öffentliche Electrum-Server — keine Privatsphäre",
+    });
+  }
 
-  // Aktive Quelle = dieselbe Kaskade wie Fußzeile (nicht „Electrs privat“ als Default).
+  const privateVerbunden =
+    coreVerbunden || electrsVerbunden || (p2pVerbunden && p2pAnzahl > 0);
+  const privateAufbau =
+    kopfQuelleAufbau(core)
+    || kopfQuelleAufbau(electrs)
+    || p2pAufbau;
+
   let privText;
   let privStufe;
   if (oeffentlichVerbunden) {
-    privText = t("privacy.sourceElectrumPublic");
+    privText = t("privacy.pillNone");
     privStufe = "krit";
-  } else if (electrsVerbunden) {
-    privText = t("privacy.sourceElectrumPrivate");
+  } else if (privateVerbunden && p2pVerbunden && p2pAnzahl === 1
+    && !coreVerbunden && !electrsVerbunden) {
+    // Nur ein P2P-Peer: privat, aber schwach.
+    privText = t("privacy.pillMedium");
+    privStufe = "warn";
+  } else if (privateVerbunden) {
+    privText = t("privacy.pillHigh");
     privStufe = "gut";
-  } else if (coreVerbunden) {
-    privText = t("privacy.sourceCorePrivate");
-    privStufe = "gut";
-  } else if (p2pVerbunden) {
-    privText = t("privacy.sourceP2P", { label: p2pLabel });
-    privStufe = p2pStufe === "neutral" ? "gut" : p2pStufe;
+  } else if (privateAufbau) {
+    privText = t("privacy.pillMedium");
+    privStufe = "warn";
   } else {
-    privText = t("privacy.noneConnected");
-    privStufe = "neutral";
+    // Nichts live verbunden — nur Cache: kein Leak.
+    privText = t("privacy.pillHigh");
+    privStufe = "gut";
   }
 
   setzeText($("#fuss-quelle"), privText);
@@ -7919,7 +7935,7 @@ function aktualisiereFiatAnzeigen() {
     return;
   }
   if (Zustand.ansicht === "steuerjahr") {
-    const jahr = $("#steuer-jahr");
+    const jahr = $("#jahr-wahl");
     if (jahr && typeof ladeSteuerjahr === "function") {
       ladeSteuerjahr().catch(() => {});
     }

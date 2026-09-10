@@ -123,23 +123,63 @@ def doppelte_deklarationen(quelle: str) -> list[tuple[int, str]]:
 
     Genau dieser Fehler macht die Datei unparsebar, und zwar vollständig — die
     Oberfläche zeigt dann gar nichts mehr.
+
+    ``for (const x of …) { … }`` bindet *x* an die Schleife, nicht an die
+    umgebende Funktion — zwei solche Schleifen mit gleichem Namen sind legal.
     """
     sauber = ohne_texte_und_kommentare(quelle)
     stapel = [set()]
     funde = []
     zeile = 1
+    for_header: set[str] | None = None
+    for_paren = 0
 
     i = 0
     while i < len(sauber):
         zeichen = sauber[i]
         if zeichen == "\n":
             zeile += 1
+        elif for_header is not None and for_paren > 0:
+            if zeichen == "(":
+                for_paren += 1
+            elif zeichen == ")":
+                for_paren -= 1
+            else:
+                treffer = _DEKLARATION.match(sauber, i)
+                if treffer:
+                    for name in _namen(treffer.group(1).strip()):
+                        if name in for_header:
+                            funde.append((zeile, name))
+                        for_header.add(name)
+                    i = treffer.end()
+                    zeile += sauber.count("\n", treffer.start(), treffer.end())
+                    continue
         elif zeichen == "{":
-            stapel.append(set())
+            neu: set[str] = set()
+            if for_header is not None:
+                neu.update(for_header)
+                for_header = None
+            stapel.append(neu)
         elif zeichen == "}":
             if len(stapel) > 1:
                 stapel.pop()
+        elif zeichen == ";" and for_header is not None and for_paren == 0:
+            for_header = None
         else:
+            if (
+                sauber.startswith("for", i)
+                and (i == 0 or not (sauber[i - 1].isalnum() or sauber[i - 1] in "_$"))
+            ):
+                j = i + 3
+                while j < len(sauber) and sauber[j] in " \t\n\r":
+                    if sauber[j] == "\n":
+                        zeile += 1
+                    j += 1
+                if j < len(sauber) and sauber[j] == "(":
+                    for_header = set()
+                    for_paren = 1
+                    i = j + 1
+                    continue
             treffer = _DEKLARATION.match(sauber, i)
             if treffer:
                 for name in _namen(treffer.group(1).strip()):
@@ -211,6 +251,15 @@ class TestPrueferSelbst(unittest.TestCase):
         }
         """
         self.assertTrue(doppelte_deklarationen(quelle))
+
+    def test_for_of_bindungen_sind_pro_schleife_erlaubt(self):
+        quelle = """
+        function f() {
+          for (const w of a) { use(w); }
+          for (const w of b) { use(w); }
+        }
+        """
+        self.assertEqual(doppelte_deklarationen(quelle), [])
 
     def test_gleicher_name_in_getrennten_bloecken_ist_erlaubt(self):
         quelle = """

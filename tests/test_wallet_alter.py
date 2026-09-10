@@ -10,6 +10,7 @@ Erhoben wird das einmalig: Die älteste Transaktion eines Wallets kann sich
 nicht mehr ändern.
 """
 import unittest
+from unittest import mock
 
 import fulcrum
 
@@ -156,12 +157,15 @@ class TestAlsZeitpunkt(unittest.TestCase):
         fulcrum._HEADER_TIME_CACHE.update(self._sicherung)
 
     def test_liefert_hoehe_und_zeit(self):
+        # Unrunde Höhe: 800_000 stünde oft im Immutable-Cache der Platte.
+        hoehe = 799_991
         client = FakeClient(
-            {A: [{"tx_hash": "aa", "height": 800_000}]},
-            zeiten={800_000: 1_690_000_000},
+            {A: [{"tx_hash": "aa", "height": hoehe}]},
+            zeiten={hoehe: 1_690_000_000},
         )
-        ergebnis = fulcrum.first_seen_fulcrum(client, [A])
-        self.assertEqual(ergebnis["height"], 800_000)
+        with mock.patch("main.load_cached_block_time", return_value=None):
+            ergebnis = fulcrum.first_seen_fulcrum(client, [A])
+        self.assertEqual(ergebnis["height"], hoehe)
         self.assertEqual(ergebnis["time_ts"], 1_690_000_000)
 
     def test_ohne_benutzte_adresse_nichts(self):

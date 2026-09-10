@@ -38,6 +38,10 @@ class TestStart9PhaseS3(unittest.TestCase):
             unpack_zip_limited(buffer.getvalue())
 
     def test_env_und_backup_werden_auf_0600_korrigiert(self):
+        import sys
+
+        if sys.platform == "win32":
+            self.skipTest("chmod 0600 greift unter Windows nicht zuverlässig")
         with TemporaryDirectory() as tmp:
             env = Path(tmp) / ".env"
             backup = Path(tmp) / ".env.bak"

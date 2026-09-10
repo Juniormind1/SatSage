@@ -34,14 +34,16 @@ class TestSpecterPhaseA(unittest.TestCase):
 
     def test_recv_descriptor_is_written_as_desc_wallet(self):
         from satsage.specterext.satsage.bridge import SatSageContext, SpecterWalletInfo
-        from satsage.specterext.satsage import gui_server
+        from satsage.specterext.satsage import specter_seed
 
         descriptor = "wpkh(xpub661MyMwAqRbcFh9x7sYJfP7B6v9h5x7fR7aQ4fVY8y3dL5uW7mL4wB7dT4fL8qQ9vM2nT5kP3rF6sV8xY2zA4bC6dE8fG0hJ2kL4mN6pQ8rS0tV2wX4yZ6/84h/0h/0h/0/*)"
         wallet = SpecterWalletInfo(name="Descriptor", alias="desc", recv_descriptor=descriptor)
-        with mock.patch.object(gui_server, "ensure_satsage_on_path"), mock.patch(
+        with mock.patch.object(specter_seed, "ensure_satsage_on_path"), mock.patch(
             "core.config.WalletEntry.is_valid", return_value=True
-        ):
-            entries = gui_server._wallet_entries_aus_kontext(SatSageContext(wallets=[wallet]))
+        ), mock.patch.object(specter_seed, "collect_wallets", return_value=[]):
+            entries = specter_seed.wallet_entries_with_specter_limits(
+                SatSageContext(wallets=[wallet]), specter=None
+            )
         self.assertEqual(entries[0].descriptor, descriptor)
         self.assertTrue(entries[0].is_multisig)
 

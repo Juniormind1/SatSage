@@ -1,5 +1,6 @@
 import json
 import stat
+import sys
 import urllib.error
 import urllib.request
 
@@ -55,18 +56,25 @@ class TestStart9PhaseS1(ApiTestBasis):
         )
         self.assertEqual(status, 200)
 
-    def test_query_bootstrap_setzt_cookie_und_entfernt_token(self):
-        status, _, headers = self.request("/?t=" + self.state.token)
-        self.assertEqual(status, 303)
-        self.assertEqual(headers.get("Location"), "/")
-        self.assertIn("satsage_session=", headers.get("Set-Cookie", ""))
+    def test_query_bootstrap_laesst_token_in_der_url(self):
+        """Client entfernt ?t= per history.replaceState — kein 303 mehr."""
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/?t={self.state.token}"
+        )
+        request.add_header("Host", f"127.0.0.1:{self.port}")
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(request, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            body = response.read()
+        self.assertTrue(body.startswith(b"<!DOCTYPE html>") or b"<html" in body[:200])
 
     def test_setup_speichert_hash_und_remote_braucht_login(self):
         status, _, headers = self.setup_password()
         self.assertEqual(status, 201)
         password_file = self.env_pfad.parent / ".satsage-password"
         self.assertTrue(password_file.is_file())
-        self.assertEqual(stat.S_IMODE(password_file.stat().st_mode), 0o600)
+        if sys.platform != "win32":
+            self.assertEqual(stat.S_IMODE(password_file.stat().st_mode), 0o600)
         self.assertNotIn("test-passwort", password_file.read_text())
 
         status, _, _ = self.request("/api/config", host="remote.example")

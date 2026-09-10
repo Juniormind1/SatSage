@@ -40,7 +40,9 @@ class TestSlashBlockliste(unittest.TestCase):
         js = (WEB / "app.js").read_text(encoding="utf-8")
         for befehl in BLOCKLISTE:
             self.assertIn(f'"{befehl}"', js, befehl)
-        self.assertIn("ist gesperrt", js)
+        self.assertIn('t("dock.blocked"', js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("ist gesperrt", de)
         self.assertNotIn("/v1/chat/completions", js)
 
 

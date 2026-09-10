@@ -57,10 +57,11 @@ def socks_erreichbar(
 
 
 def _autostart_erlaubt(env: dict[str, str] | None) -> bool:
-    raw = ""
-    if env:
+    # Explizites env-Dict (auch leer) sticht os.environ — sonst ziehen
+    # Tests/Aufrufer mit env={} versehentlich TOR_AUTOSTART aus der Shell.
+    if env is not None:
         raw = (env.get("TOR_AUTOSTART") or "").strip()
-    if not raw:
+    else:
         raw = os.environ.get("TOR_AUTOSTART", "").strip()
     if not raw:
         return True
