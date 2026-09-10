@@ -480,6 +480,8 @@ class AppState:
         self.scan_queue = ScanQueue(self.jobs)
         self.header_job_id: str | None = None
         self.wallet_sync_job_id: str | None = None
+        # Letzter Quellen-Check (dicts) — fuer /api/config ohne erneute Probe.
+        self.sources_last: list[dict] | None = None
         #: monotonic: nächster erlaubter Header-Tip-Check (Cooldown-Spam).
         self.header_vorab_naechstes: float = 0.0
         self._lock = threading.Lock()
@@ -1395,7 +1397,12 @@ def api_config(state: AppState, query: dict) -> dict:
     entries = state.entries
     zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
     werte = state.env().values()
-    quellen = source_mod.anreichere_live_p2p(source_mod.describe_sources(werte))
+    quellen = source_mod.anreichere_live_p2p(
+        source_mod.mergere_erreichbarkeit(
+            source_mod.describe_sources(werte),
+            getattr(state, "sources_last", None),
+        )
+    )
     return {
         "version": app_version(),
         "wallets": [z.as_dict() for z in zusammenfassung],
@@ -3244,11 +3251,14 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         )
     quellen = source_mod.anreichere_live_p2p(quellen)
     stand = source_mod.peer_status(quellen, werte)
-    # Tip-Nachzug: starte_header_vorab drosselt selbst (15 Min Cooldown).
-    # Peer-Takt darf das nicht alle paar Sekunden neu starten.
-    starte_header_vorab(state, nur_wenn_leer=False)
+    # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
+    # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
+    # Header laufen über Start, /headers und eigenen Cooldown.
+    sources_dicts = [q.as_dict() for q in quellen]
+    if query.get("check", ["0"])[0] in ("1", "true", "ja"):
+        state.sources_last = sources_dicts
     return {
-        "sources": [q.as_dict() for q in quellen],
+        "sources": sources_dicts,
         "peers": stand["count"],
         "peer_status": stand,
         "live_p2p_peers": _live_p2p_peers(),
@@ -5618,7 +5628,10 @@ def starte_header_vorab(state: AppState, *, nur_wenn_leer: bool = False) -> None
                 print(text, flush=True)
 
             tip = vorab_block_header(
-                env, cache_dir=state.cache_dir, on_log=log,
+                env,
+                cache_dir=state.cache_dir,
+                immutable_dir=state.immutable_cache_dir,
+                on_log=log,
             )
             # Auch bei unverändertem Tip: lange Pause bis zum nächsten Check.
             state.header_vorab_naechstes = (

@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Kopf · Pillen-Texte:** Keine Roh-i18n-Keys mehr beim Start (`P2P n` / Fallbacks); während Verbindungsaufbau **Privatsphäre unklar**. Letzter Quellen-Check bleibt im Server für `/api/config` — Browser neu öffnen baut die Pillen nicht mehr „von null“ auf; stiller Peer-Nachcheck statt lautem Verbindungstest.
+- **Log · P2P-Peers:** Pro neu entdecktem Compact-Filter-Peer eine Zeile `Verbunden. Compact-Filter-Peer …` (pro Serverlauf); kein Kandidaten-/Fehlschlag-/Summen-Spam beim Peer-Check.
+- **Log · Header/Peers:** Peer-Takt startet keinen Header-Nachzug mehr. Unveränderter Tip bleibt still. Peer-Erfolge werden bis **3** Peers gemeldet (danach Stille); vor Tor-Fallback klare Ankündigung, damit die GUI nicht „eingefroren“ wirkt.
+- **Prozess · Log-Richtlinie:** `doc/logging-richtlinie.md` — sparsam wenn arbeitsbereit, gesprächig bei Problemen/Privatsphäre-Wechsel; in `AGENTS.md` verankert (Vertrauen für Erstnutzer + Fehlersuche).
 - **Prozess · Merge-Dealbreaker:** Liste in `doc/merge-dealbreakers.md` (Malware/Trust, Secrets, CI, Produkt); in `AGENTS.md` verankert. Contributor-IDs erlaubt; Juniormind1-Pflicht nur für Maintainer-/Agent-Clones.
 - **CI · Unittests:** Workflow `.github/workflows/test.yml` läuft auf Push/PR nach `main` und `dev-juniormind` (sowie manuell) — `unittest discover` unter `tests/`, ohne Regtest/E2E/Chaos. Suite an i18n-/Tor-/Peer-/Windows-chmod-Verhalten angepasst (grüne Suite vor CI-Schutz).
 - **Tests · Isolation:** Peer-Status-Tests blenden Live-BIP-158-Peers aus; Tor-Autostart respektiert leeres `env={}`; eingebetteter Server weicht bei belegt wirkendem Port auch unter Windows aus; Ollama-Live nur mit `qwen2.5:7b`.

@@ -1040,14 +1040,16 @@ class BIP158Scanner:
             )
         )
 
-    def _ensure_peer(self):
-        return self._ensure_peers(limit=1)[0]
+    def _ensure_peer(self, *, still: bool = False):
+        return self._ensure_peers(limit=1, still=still)[0]
 
-    def _ensure_peers(self, limit: int | None = None):
+    def _ensure_peers(self, limit: int | None = None, *, still: bool = False):
         from core.p2p import FILTER_PEERS_MAX, verbinde_compact_filter_peers
 
         # Über Tor weniger Parallelität — sonst reißen Peers und stecken
         # die Queue mit toten Sockets zu.
+        # still: nur Header-Fortschritt dämpfen — Peer/Tor-Log bis 3 Peers bleibt.
+        _ = still
         vorgabe = 2 if self._tor_proxy else FILTER_PEERS_MAX
         ziel = vorgabe if limit is None else max(1, min(limit, vorgabe if self._tor_proxy else limit))
         if self._peer is not None and self._peer not in self._pool:
@@ -1055,6 +1057,8 @@ class BIP158Scanner:
         if len(self._pool) >= ziel:
             return self._pool[:ziel]
         exclude = {(p.host, p.port) for p in self._pool}
+        if not self._pool:
+            self._log("Suche Compact-Filter-Peers…")
         frisch = verbinde_compact_filter_peers(
             timeout=self._timeout,
             tor_proxy=self._tor_proxy,
@@ -1068,6 +1072,7 @@ class BIP158Scanner:
         if not self._pool and self._tor_proxy is None:
             from core.p2p import stelle_p2p_tor_bereit
 
+            # Ankündigung VOR dem langen SOCKS-/Binary-Schritt.
             self._log(
                 "Clearnet-P2P ohne Compact-Filter-Peer — versuche über Tor…"
             )
@@ -1303,15 +1308,19 @@ def create_bip158_client_from_env(
     progress_callback: ProgressCallback | None = None,
     verbose: bool = True,
     cache_dir: Path | None = None,
+    immutable_dir: Path | None = None,
 ) -> Bip158Client:
     """P2P-Client: Clearnet zuerst, bei Fehlschlag Tor wie beim eigenen Node."""
-    from core.p2p import SEGWIT_HEIGHT, p2p_peers_from_env
+    from core.p2p import SEGWIT_HEIGHT, p2p_headers_path, p2p_peers_from_env
     from core.paths import app_dir
 
     peers = p2p_peers_from_env(env)
-    header_path = app_dir() / "immutable_cache" / "p2p_headers.bin"
-    if cache_dir is not None:
+    if immutable_dir is not None:
+        header_path = p2p_headers_path(immutable_dir)
+    elif cache_dir is not None:
         header_path = Path(cache_dir).parent / "immutable_cache" / "p2p_headers.bin"
+    else:
+        header_path = app_dir() / "immutable_cache" / "p2p_headers.bin"
     scanner = BIP158Scanner(
         peers=peers,
         header_path=header_path,
@@ -1328,6 +1337,7 @@ def vorab_block_header(
     env: dict[str, str],
     *,
     cache_dir: Path | None = None,
+    immutable_dir: Path | None = None,
     on_log=None,
 ) -> int:
     """
@@ -1349,27 +1359,43 @@ def vorab_block_header(
         return 0
 
     client = create_bip158_client_from_env(
-        env, start_height=SEGWIT_HEIGHT, cache_dir=cache_dir,
+        env,
+        start_height=SEGWIT_HEIGHT,
+        cache_dir=cache_dir,
+        immutable_dir=immutable_dir,
     )
     path = client.scanner._header_path
     tip_bisher = header_datei_tip(path)
-    if tip_bisher is not None and tip_bisher > SEGWIT_HEIGHT:
-        _log(
-            f"Header-Cache bei Block {tip_bisher:,} — prüfe Chain-Tip…"
-            .replace(",", ".")
-        )
-    else:
+    tip_schon_da = tip_bisher is not None and tip_bisher > SEGWIT_HEIGHT
+    if not tip_schon_da:
         _log(
             "Lade Block-Header ab SegWit (Block 481.824, August 2017) — "
             "einmalig, für alle späteren Wallets."
         )
-    peer = client.scanner._ensure_peer()
+    # Tip schon da: Peer/Tor still — nur bei echtem Höhenzuwachs melden.
+    peer = client.scanner._ensure_peer(still=tip_schon_da)
     try:
-        chain = hole_header(path, SEGWIT_HEIGHT, peer, on_log=_log)
+        def _log_fortschritt(text: str) -> None:
+            if tip_schon_da and (
+                text.startswith("Frage Block-Header")
+                or text.startswith("Header bis Block")
+                or text.startswith("Header-Cache aktuell")
+            ):
+                return
+            _log(text)
+
+        chain = hole_header(
+            path,
+            SEGWIT_HEIGHT,
+            peer,
+            on_log=_log_fortschritt if tip_schon_da else _log,
+        )
         tip = chain.tip_height()
         if tip_bisher is not None and tip <= tip_bisher:
+            pass
+        elif tip_schon_da:
             _log(
-                f"Header-Cache unverändert bis Block {tip:,}.".replace(",", ".")
+                f"Header-Cache nachgezogen bis Block {tip:,}.".replace(",", ".")
             )
         else:
             _log(

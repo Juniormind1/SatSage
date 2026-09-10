@@ -503,7 +503,10 @@ class TestP2pCodec(unittest.TestCase):
     def test_zaehle_compact_filter_peers(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import zaehle_compact_filter_peers
+
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
 
         def fake_verbinde(host, port, **kwargs):
             if host.endswith(".1"):
@@ -519,17 +522,12 @@ class TestP2pCodec(unittest.TestCase):
                 on_log=logs.append,
             )
         self.assertEqual(n, ["192.0.2.2:8333", "192.0.2.3:8333"])
-        self.assertIn("Feste Peer-Liste: 3 Einträge", logs)
-        self.assertIn("Verbinde mit 192.0.2.1:8333", logs)
-        self.assertTrue(
-            any(z.startswith("Verbindung fehlgeschlagen 192.0.2.1:8333") for z in logs)
-        )
-        self.assertIn("Verbunden. Compact Filter 192.0.2.2:8333", logs)
-        self.assertIn("Verbunden. 2 Compact-Filter-Peers.", logs)
-        self.assertLess(
-            logs.index("Verbinde mit 192.0.2.1:8333"),
-            next(i for i, z in enumerate(logs) if z.startswith("Verbunden.")),
-        )
+        # Knapp: nur Erfolgszeilen je neuem Peer, kein Kandidaten-/Fehler-Spam.
+        self.assertFalse(any("Verbinde mit" in z for z in logs), logs)
+        self.assertFalse(any("fehlgeschlagen" in z for z in logs), logs)
+        self.assertIn("Verbunden. Compact-Filter-Peer 192.0.2.2:8333.", logs)
+        self.assertIn("Verbunden. Compact-Filter-Peer 192.0.2.3:8333.", logs)
+        self.assertEqual(len([z for z in logs if z.startswith("Verbunden.")]), 2)
 
     def test_timeouts_an_wenigen_hosts_sind_firewall(self):
         from unittest.mock import patch
@@ -636,16 +634,25 @@ class TestP2pCodec(unittest.TestCase):
         self.assertEqual(n, [])
         dns.assert_not_called()
         verb.assert_not_called()
-        self.assertIn("Keine P2P-Adressen gefunden.", logs)
+        self.assertEqual(logs, [])
         reset_clearnet_port_block_cache()
 
     def test_verbinde_ruhig_unterdrueckt_hostzeilen(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import verbinde_compact_filter_peers
 
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
         logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()), patch(
+
+        def fake_peer(host, port, **kwargs):
+            m = MagicMock()
+            m.host = host
+            m.port = port
+            return m
+
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
             "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
         ):
             live = verbinde_compact_filter_peers(
@@ -664,18 +671,30 @@ class TestP2pCodec(unittest.TestCase):
         self.assertEqual(len(live), 4)
         self.assertFalse(any("Verbinde mit" in z for z in logs), logs)
         self.assertFalse(any("DNS-Seed" in z for z in logs), logs)
-        self.assertTrue(
-            any("4 Compact-Filter-Peers für den Scan" in z for z in logs), logs
+        # Unter 3 Peers Log, ab 3 Stille — bei 4 Treffern also genau 3 Zeilen.
+        self.assertEqual(
+            len([z for z in logs if z.startswith("Verbunden. Compact-Filter-Peer ")]),
+            3,
+            logs,
         )
         self.assertFalse(any(z.startswith("Nur ") for z in logs), logs)
 
     def test_verbinde_ruhig_warnt_unter_drei_peers(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import verbinde_compact_filter_peers
 
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
         logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()), patch(
+
+        def fake_peer(host, port, **kwargs):
+            m = MagicMock()
+            m.host = host
+            m.port = port
+            return m
+
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
             "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
         ):
             live = verbinde_compact_filter_peers(
@@ -698,36 +717,43 @@ class TestP2pCodec(unittest.TestCase):
     def test_verbinde_log_sagt_ueber_tor(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import zaehle_compact_filter_peers
 
-        logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()):
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        with patch("core.p2p.verbinde_peer", return_value=MagicMock()) as verb:
             zaehle_compact_filter_peers(
                 peers=[("198.51.100.9", 8333)],
                 versuche=1,
                 dns_fallback=False,
                 tor_proxy=("127.0.0.1", 9150),
-                on_log=logs.append,
+                on_log=None,
             )
-        self.assertIn("Verbinde mit 198.51.100.9:8333 über Tor", logs)
-        self.assertFalse(any(z == "Verbinde mit 198.51.100.9:8333" for z in logs))
+        verb.assert_called()
+        kwargs = verb.call_args.kwargs
+        self.assertEqual(kwargs.get("tor_proxy"), ("127.0.0.1", 9150))
 
     def test_lan_peer_auch_mit_tor_proxy_direkt(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import zaehle_compact_filter_peers
 
-        logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()):
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        with patch("core.p2p.verbinde_peer", return_value=MagicMock()) as verb:
             zaehle_compact_filter_peers(
                 peers=[("192.168.1.50", 8333)],
                 versuche=1,
                 dns_fallback=False,
                 tor_proxy=("127.0.0.1", 9150),
-                on_log=logs.append,
+                on_log=None,
             )
-        self.assertIn("Verbinde mit 192.168.1.50:8333", logs)
-        self.assertFalse(any("über Tor" in z for z in logs))
+        verb.assert_called()
+        # LAN bleibt direkt — tor_proxy wird an verbinde_peer durchgereicht,
+        # die Peer-Klasse verbindet LAN trotzdem ohne Tor (host_ist_lan).
+        self.assertEqual(
+            verb.call_args.kwargs.get("tor_proxy"), ("127.0.0.1", 9150),
+        )
 
     def test_stelle_p2p_tor_prueft_laufenden_socks(self):
         from unittest.mock import patch

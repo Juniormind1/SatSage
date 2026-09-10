@@ -309,6 +309,7 @@
   "privacy.pillHigh": "Privatsphäre hoch",
   "privacy.pillMedium": "Privatsphäre mittel",
   "privacy.pillNone": "keine Privatsphäre",
+  "privacy.pillUnclear": "Privatsphäre unklar",
   "privacy.sourceCorePrivate": "Quelle: Core RPC privat · Privatsphäre hoch",
   "privacy.sourceElectrumPrivate": "Quelle: Electrs privat · Privatsphäre hoch",
   "privacy.sourceElectrumPublic": "Quelle: Electrs öffentlich · Privatsphäre niedrig",
