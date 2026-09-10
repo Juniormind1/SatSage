@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallets immer aktuell:** Electrs-Watch reconnectet nach Verbindungsabbruch wieder (früher beendete `on_disconnect` den Watcher dauerhaft → über Nacht „vor N Std. −M Blöcke“). Tip-Nachzug während laufendem Job wird vorgemerkt; Electrs-Light setzt `scan_tip_height` auf den **Live**-Electrs-Tip (`force`), nicht nur auf ggf. veraltete `p2p_headers.bin`.
 - **Wallets · Cache-Dashboard:** Vor der Danger Zone zeigt die Oberfläche Belegung (Platte, UTXO/Immutable/Tx/Herkunft/Header/Sanktionen) und pro Wallet UTXOs, Tip-Lag, Gap, Verlauf und Herkunfts-Abdeckung — nur Größen/Abdeckung, keine Zugriffszähler (`GET /api/cache/stats`).
 - **CI · Linux-Webgui:** Manueller Workflow `build-linux-webgui.yml` (ubuntu-latest, x86_64) baut PyInstaller-Onefile und hängt es an ein bestehendes Release an — mit Hinweis *GitHub-Build für Linux, ungetestet*.
 - **Prozess · Release Notes:** Nur bei Version/`main`/Tag aus `[Unveröffentlicht]` datieren; nicht bei jedem Push auf `dev-juniormind` (in `AGENTS.md` verankert).
