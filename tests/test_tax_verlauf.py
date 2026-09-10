@@ -128,6 +128,24 @@ class TestAbgaenge(unittest.TestCase):
         self.assertEqual(auswertung["kennzahlen"]["abgang_count"], 1)
         self.assertEqual(auswertung["kennzahlen"]["abgang_sats"], 200_000)
 
+    def test_spent_ohne_abgangsdatum_blaht_bestand_nicht_auf(self):
+        """
+        Verlaufseintrag spent=True ohne spent_time_ts darf nicht als
+        „Bestand gesamt“ zählen — sonst Summen wie 1,89 BTC aus Historie.
+        """
+        roh = eingang("a", "01.03.2022", sats=189_000_000)
+        roh["spent"] = True
+        roh["spent_txid"] = "f" * 64
+        # absichtlich kein spent_time_ts
+        roh.pop("spent_time_ts", None)
+        auswertung = tax.auswerten([roh], 2024, jetzt=STICHTAG_2024)
+        self.assertEqual(auswertung["kennzahlen"]["gesamt_count"], 0)
+        self.assertEqual(auswertung["kennzahlen"]["gesamt_sats"], 0)
+        self.assertEqual(auswertung["kennzahlen"]["spent_ohne_abgang_count"], 1)
+        self.assertTrue(
+            any("Abgangsdatum" in h for h in auswertung["hinweise"]),
+        )
+
 
 class TestHinweise(unittest.TestCase):
 
