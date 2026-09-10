@@ -3069,10 +3069,13 @@ function zeichneAusgegeben(daten) {
   const zusatz = document.createElement("span");
   zusatz.className = "zart";
   const pendingN = Number(verlauf.pending_count || daten.pending_spends || 0);
+  // Nur BTC/sats — kein Spot-€ auf dem Brutto-Volumen (alte Ausgaben
+  // würden sonst zum heutigen Kurs zu „Reichtum“). € je Vorgang steht
+  // an den Adress-/UTXO-Zeilen zum Tageskurs am Ausgabedatum.
   zusatz.textContent =
     t("wallet.spentSummary", {
       count: verlauf.total_count,
-      sats: formatSats(verlauf.total_sats),
+      sats: formatSatsBasis(verlauf.total_sats),
     }) +
     (pendingN > 0
       ? ` · ${t("wallet.spentPendingCount", { n: pendingN })}`
