@@ -208,6 +208,26 @@
     "en": "Connected. $1 public Electrum peers."
   },
   {
+    "re": "^Verbunden\\. (.+ onion-electrs.*)\\.$",
+    "en": "Connected. $1."
+  },
+  {
+    "re": "^Verbunden\\. (.+ clearnet-electrs.*)\\.$",
+    "en": "Connected. $1."
+  },
+  {
+    "re": "^Nur (.+ onion-electrs.*)\\.$",
+    "en": "Only $1."
+  },
+  {
+    "re": "^Nur (.+ clearnet-electrs.*)\\.$",
+    "en": "Only $1."
+  },
+  {
+    "re": "^Wechsel: (.+) → (.+)$",
+    "en": "Switch: $1 → $2"
+  },
+  {
     "re": "^Verbunden\\. (\\d+) Compact-Filter-(Peer|Peers) für den Scan\\.$",
     "en": "Connected. $1 compact-filter $2 for the scan."
   },

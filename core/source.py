@@ -236,15 +236,28 @@ def anreichere_live_p2p(quellen: list) -> list:
     return out
 
 
+def oeffentliche_electrum_label(onion_n: int, clear_n: int) -> str:
+    """UI/Log: öffentliche Electrum nicht als „Peers“, sondern onion-/clearnet-electrs."""
+    teile: list[str] = []
+    if onion_n > 0:
+        teile.append(f"{onion_n} onion-electrs")
+    if clear_n > 0:
+        teile.append(f"{clear_n} clearnet-electrs")
+    if not teile:
+        return "0 electrs verbunden"
+    return f"{' · '.join(teile)} verbunden"
+
+
 def peer_status(
     quellen: list[SourceInfo],
     values: dict[str, str] | None = None,
 ) -> dict:
     """
-    Kopfzeilen-Pille: welche Sorte Peer und wie viele.
+    Kopfzeilen-Pille: welche Sorte und wie viele.
 
     Eigener Electrum-Server sticht Compact Filter, die wieder öffentliche
     Server. Die Zahl ist nur die der gewählten Sorte, nicht die Summe.
+    Öffentliche Electrum: onion-electrs / clearnet-electrs (nicht „Peers“).
     """
     quellen = anreichere_live_p2p(quellen)
     nach = {q.key: q for q in quellen}
@@ -287,23 +300,22 @@ def peer_status(
                 "peers": _hosts(p2p),
             }
         else:
-            public_hosts: list[str] = []
-            public = 0
-            for key in ("public_onion", "clearnet"):
-                q = nach.get(key)
-                if q:
-                    public += getattr(q, "peer_count", 0) or 0
-                    public_hosts.extend(_hosts(q))
+            onion_q = nach.get("public_onion")
+            clear_q = nach.get("clearnet")
+            onion_n = int(getattr(onion_q, "peer_count", 0) or 0) if onion_q else 0
+            clear_n = int(getattr(clear_q, "peer_count", 0) or 0) if clear_q else 0
+            public = onion_n + clear_n
             if public > 0:
+                public_hosts: list[str] = []
+                public_hosts.extend(_hosts(onion_q))
+                public_hosts.extend(_hosts(clear_q))
                 stand = {
                     "kind": "public",
                     "count": public,
-                    "label": (
-                        "1 öffentlicher Peer verbunden"
-                        if public == 1
-                        else f"{public} öffentliche Peers verbunden"
-                    ),
+                    "label": oeffentliche_electrum_label(onion_n, clear_n),
                     "peers": public_hosts,
+                    "onion_electrs": onion_n,
+                    "clearnet_electrs": clear_n,
                 }
     stand["braucht_oeffentliche"] = (
         stand["count"] == 0
@@ -895,7 +907,11 @@ def _pruefe_oeffentliche_electrum(
         )
     gesamt = len(onion_hosts) + len(clear_hosts)
     if gesamt:
-        log(f"Verbunden. {gesamt} öffentliche Electrum-Peers.")
+        log(
+            "Verbunden. "
+            + oeffentliche_electrum_label(len(onion_hosts), len(clear_hosts))
+            + "."
+        )
     else:
         log("Verbindung fehlgeschlagen: keine öffentlichen Electrum-Server")
     return gefunden

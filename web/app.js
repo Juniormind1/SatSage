@@ -452,18 +452,40 @@ function chainTipHoehe() {
 }
 
 function walletSyncLaeuftFuer(walletId) {
+  if (!walletId) return false;
   const jobs = Zustand.jobsNav?.jobs || [];
   for (const job of jobs) {
-    if (job.kind !== "wallet_sync" || job.status !== "running") continue;
+    if (job.kind !== "wallet_sync") continue;
+    if (!(job.running || job.status === "running" || job.status === "queued")) {
+      continue;
+    }
     const ids = job.meta?.wallet_ids;
     if (Array.isArray(ids) && ids.length) {
       if (ids.includes(walletId)) return true;
       continue;
     }
-    // Sync ohne explizite Liste: alle Caches
-    return true;
+    // Sync ohne explizite Wallet-Liste: Tip-Knopf darf global warten,
+    // UTXO-Scan dieses Portfolios nicht pauschal sperren.
+    if (job.meta?.wallet_id === walletId) return true;
   }
   return false;
+}
+
+/** Job-ID noch wirklich laufend/in Queue laut jobsNav (sonst stale GUI-Bindung). */
+function jobNochAktiv(jobId) {
+  if (!jobId) return false;
+  const jobs = Zustand.jobsNav?.jobs || [];
+  const j = jobs.find((x) => x && x.id === jobId);
+  if (!j) {
+    // Nav noch nicht da / älterer Server: lokale Bindung nur kurz vertrauen
+    return Boolean(Zustand.rescanTimer);
+  }
+  return Boolean(
+    j.running
+    || j.status === "running"
+    || j.status === "queued"
+    || j.queue_status === "queued",
+  );
 }
 
 /**
@@ -2158,6 +2180,7 @@ function scanArtVonKind(kind) {
 }
 
 function schonGeplant(ziel) {
+  if (!ziel || !ziel.id) return false;
   const artKind = ziel.art === "verlauf" ? "verlauf" : "rescan";
   const pipe = scanPipeline();
   const cur = pipe.current;
@@ -2166,12 +2189,14 @@ function schonGeplant(ziel) {
     && cur.wallet_id === ziel.id
     && (cur.kind === artKind || scanArtVonKind(cur.kind) === ziel.art)
   ) {
-    return true;
+    // Pipeline-Eintrag nur zählen, wenn der Job noch aktiv ist.
+    if (!cur.job_id || jobNochAktiv(cur.job_id)) return true;
   }
   if (
     Zustand.rescanJob
     && Zustand.scanWalletId === ziel.id
     && Zustand.scanArt === ziel.art
+    && jobNochAktiv(Zustand.rescanJob)
   ) {
     return true;
   }
@@ -2219,20 +2244,22 @@ function setzeWalletScanGesperrt() {
   const tipSync = $("#tip-sync-knopf");
   const tief = $("#herkunft-tief-knopf");
   const wid = Zustand.walletId;
-  const utxoGeplant = wid && schonGeplant({ id: wid, art: "utxo" });
-  const verlaufGeplant = wid && schonGeplant({ id: wid, art: "verlauf" });
-  const tipLaeuft = wid && walletSyncLaeuftFuer(wid);
-  const tiefLaeuft = wid && herkunftTiefLaeuftFuer(wid);
+  // UTXO/Verlauf nur sperren, wenn wirklich dieses Portfolio scannt/wartet —
+  // nicht wegen fremdem Wallet, stale rescanJob oder globalem Tip-Nachzug.
+  const utxoGeplant = Boolean(wid && schonGeplant({ id: wid, art: "utxo" }));
+  const verlaufGeplant = Boolean(wid && schonGeplant({ id: wid, art: "verlauf" }));
+  const tipLaeuft = Boolean(wid && walletSyncLaeuftFuer(wid));
+  const tiefLaeuft = Boolean(wid && herkunftTiefLaeuftFuer(wid));
   if (rescan) {
     if (!rescan.dataset.titel) rescan.dataset.titel = rescan.title || "";
-    rescan.disabled = Boolean(utxoGeplant || tipLaeuft);
+    rescan.disabled = utxoGeplant;
     rescan.title = rescan.disabled
       ? t("nav.jobAlreadyRunning")
       : rescan.dataset.titel;
   }
   if (verlauf) {
     if (!verlauf.dataset.titel) verlauf.dataset.titel = verlauf.title || "";
-    verlauf.disabled = Boolean(verlaufGeplant);
+    verlauf.disabled = verlaufGeplant;
     verlauf.title = verlauf.disabled
       ? t("nav.jobAlreadyRunning")
       : verlauf.dataset.titel;
@@ -2923,12 +2950,20 @@ function setzeJobsTakt() {
 
 async function brichRescanAb() {
   if (!Zustand.rescanJob) return;
+  const scanId = Zustand.scanWalletId;
+  const art = scanArtName();
   setzeText($("#rescan-text"), "Abbruch angefordert…");
   try {
     await api(`/jobs/${Zustand.rescanJob}`, { methode: "DELETE" });
   } catch (_) {
     /* Vorgang war bereits beendet */
   }
+  // Knopf sofort freigeben — nicht auf den nächsten Poll warten
+  // (sonst bleibt UTXO-Scan nach Abbruch/Quellenwechsel tot).
+  beendeRescan(`${art} abgebrochen.`, false);
+  await erfrischeWalletNachScan(scanId);
+  await ladeJobsNav();
+  setzeWalletScanGesperrt();
 }
 
 // ---------------------------------------------------------------------------
@@ -7509,8 +7544,9 @@ function peerStatusAusQuellen(quellen, apiStand) {
       gut: true,
     };
   }
-  const pub =
-    (nach.public_onion?.peer_count || 0) + (nach.clearnet?.peer_count || 0);
+  const onionN = nach.public_onion?.peer_count || 0;
+  const clearN = nach.clearnet?.peer_count || 0;
+  const pub = onionN + clearN;
   if (pub > 0) {
     const hosts = [
       ...(nach.public_onion?.peer_hosts || []),
@@ -7519,15 +7555,23 @@ function peerStatusAusQuellen(quellen, apiStand) {
     return {
       n: pub,
       kind: "public",
-      label:
-        pub === 1
-          ? "1 öffentlicher Peer verbunden"
-          : `${pub} öffentliche Peers verbunden`,
+      label: oeffentlicheElectrumLabel(onionN, clearN),
       peers: hosts,
+      onion_electrs: onionN,
+      clearnet_electrs: clearN,
       gut: true,
     };
   }
   return { n: 0, kind: "none", label: "0 Peers verbunden", peers: [], gut: false };
+}
+
+/** Öffentliche Electrum: onion-electrs / clearnet-electrs — nicht „Peers“. */
+function oeffentlicheElectrumLabel(onionN, clearN) {
+  const teile = [];
+  if (onionN > 0) teile.push(`${onionN} onion-electrs`);
+  if (clearN > 0) teile.push(`${clearN} clearnet-electrs`);
+  if (!teile.length) return "0 electrs verbunden";
+  return `${teile.join(" · ")} verbunden`;
 }
 
 function peerAenderungen(alt, neu) {
@@ -7553,14 +7597,19 @@ function peerAenderungen(alt, neu) {
   return zeilen;
 }
 
-/** Während eines UTXO-Scans: keine Host-Liste, nur Wechsel und < 3 Peers. */
+/** Während eines UTXO-Scans: keine Host-Liste, nur Wechsel und < 3 Peers/electrs. */
 function peerAenderungenFuerLog(alt, neu, scanLaeuft) {
   const roh = peerAenderungen(alt, neu);
   if (!scanLaeuft) return roh;
   const zeilen = roh.filter((z) => z.startsWith("Wechsel:"));
   if (neu.n < 3 && alt.n !== neu.n) {
-    const wort = neu.n === 1 ? "Peer" : "Peers";
-    zeilen.push(`Nur ${neu.n} ${wort} verbunden.`);
+    if (neu.kind === "public") {
+      // Label schon „n onion-electrs · m clearnet-electrs verbunden“
+      zeilen.push(`Nur ${neu.label}.`);
+    } else {
+      const wort = neu.n === 1 ? "Peer" : "Peers";
+      zeilen.push(`Nur ${neu.n} ${wort} verbunden.`);
+    }
   }
   return zeilen;
 }
