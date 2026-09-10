@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Selbstanzeige-Kandidaten:** Beim Öffnen der Ansicht und beim Jahreswechsel automatisch aus dem Cache geladen (kurzer Log-Hinweis). Der frühere Pflicht-Knopf „Kandidaten laden“ heißt jetzt **Aktualisieren** (z. B. nach Verlaufsscan oder mit Einzahl-TxID-Filter).
 - **Bereits ausgegeben · Beschriftung:** Die Satoshi-Summe heißt jetzt **Gesamtvolumen** (kein Saldo) — z. B. „42 Vorgänge · Gesamtvolumen 1,23 BTC“. Tooltip erklärt: Summe der Nennwerte ausgegebener Outputs. In der Kopfzeile **kein Spot-€** mehr auf dem Brutto-Volumen (sonst wirken alte Ausgaben wie heutiger Reichtum); € zum Tageskurs am Ausgabedatum bleibt an den Adress-/UTXO-Zeilen.
 - **Steuerjahr · Phantom-Unspent:** Verlaufseinträge ohne `spent`, die nicht im aktuellen UTXO-Cache stehen, zählen nicht mehr zum Bestand (häufig Ursache für aufgeblähtes „außerhalb Haltefrist“). Abgänge bleiben; Hinweis in der Auswertung.
 - **Steuerjahr · Bestand gesamt:** Ausgegebene Verlaufs-Outputs ohne Abgangsdatum (`spent` ohne `spent_time_ts`) zählen nicht mehr zum Bestand — verhindert aufgeblähte Summen (z. B. 1,89 BTC aus Historie). Hinweis in der Auswertung.

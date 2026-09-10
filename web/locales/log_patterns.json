@@ -76,6 +76,18 @@
     "en": "Starting history for all wallets…"
   },
   {
+    "re": "^Selbstanzeige: Kandidaten aus Cache…$",
+    "en": "Self-report: loading candidates from cache…"
+  },
+  {
+    "re": "^Selbstanzeige: (\\d+) Abfluss-Kandidat\\(en\\) · (\\d+) UTXO\\(s\\) Was-wäre-wenn\\.$",
+    "en": "Self-report: $1 outflow candidate(s) · $2 UTXO(s) what-if."
+  },
+  {
+    "re": "^Selbstanzeige: Kandidaten fehlgeschlagen — (.+)$",
+    "en": "Self-report: candidates failed — $1"
+  },
+  {
     "re": "^Starte Herkunft aller UTXOs…$",
     "en": "Starting origin for all UTXOs…"
   },

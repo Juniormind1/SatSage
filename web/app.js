@@ -4421,7 +4421,7 @@ async function verlaufErheben() {
       setzeText(kasten, meldung);
       kasten.hidden = false;
     }
-    ladeSteuerjahr();
+    ladeSteuerjahrMitKandidaten();
   };
 
   logZeile("Starte Verlauf aller Wallets…");
@@ -4496,7 +4496,7 @@ async function herkunftAllerUtxos(ziele = {
   text: "#herkunft-text",
   abbruch: "#herkunft-abbruch",
   meldung: "#steuer-meldung",
-  danach: ladeSteuerjahr,
+  danach: ladeSteuerjahrMitKandidaten,
 }) {
   const knopf = $(ziele.knopf);
   knopf.disabled = true;
@@ -4616,11 +4616,17 @@ Zustand.saUtxos = [];
 Zustand.saVerlauf = null;
 Zustand.saStichtag = "";
 
-async function ladeSelbstanzeigeKandidaten() {
+/**
+ * Selbstanzeige-Kandidaten aus dem Cache (kein Netz).
+ * *opts.auto*: kurzer Log-Hinweis — beim Öffnen der Steuerjahr-Ansicht.
+ */
+async function ladeSelbstanzeigeKandidaten(opts = {}) {
+  const auto = Boolean(opts.auto);
   const jahr = $("#jahr-wahl").value;
   const txid = ($("#sa-txid")?.value || "").trim();
   const liste = $("#sa-liste");
   if (!liste) return;
+  if (auto) logZeile("Selbstanzeige: Kandidaten aus Cache…");
   liste.textContent = t("common.loading");
   try {
     let pfad = `/tax/selbstanzeige/kandidaten?jahr=${encodeURIComponent(jahr)}`;
@@ -4631,9 +4637,23 @@ async function ladeSelbstanzeigeKandidaten() {
     Zustand.saVerlauf = daten.verlauf || null;
     Zustand.saStichtag = daten.stichtag_hypothese || "";
     zeichneSelbstanzeigeKandidaten();
+    if (auto) {
+      const n = Zustand.saKandidaten.length;
+      const u = Zustand.saUtxos.length;
+      logZeile(
+        `Selbstanzeige: ${n} Abfluss-Kandidat(en) · ${u} UTXO(s) Was-wäre-wenn.`,
+      );
+    }
   } catch (fehler) {
     liste.textContent = t("common.errorPrefix", { msg: fehler.message });
+    if (auto) logZeile(`Selbstanzeige: Kandidaten fehlgeschlagen — ${fehler.message}`);
   }
+}
+
+/** Steuerjahr öffnen bzw. Jahr gewechselt: Auswertung + Kandidaten. */
+async function ladeSteuerjahrMitKandidaten() {
+  await ladeSteuerjahr();
+  await ladeSelbstanzeigeKandidaten({ auto: true });
 }
 
 function saAbschnitt(titel, zusatz, {
@@ -6696,7 +6716,7 @@ async function speichereSteuerEinstellungen() {
       ergebnis.steuer.haltefrist_jahre_auswahl,
     );
     meldung(t("settings.taxSaved"), "gut");
-    if (Zustand.ansicht === "steuerjahr") ladeSteuerjahr();
+    if (Zustand.ansicht === "steuerjahr") ladeSteuerjahrMitKandidaten();
   } catch (fehler) {
     meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
   } finally {
@@ -9128,7 +9148,7 @@ async function start() {
     .querySelector('[data-ansicht="steuerjahr"]')
     .addEventListener("click", () => {
       zeigeAnsicht("steuerjahr");
-      ladeSteuerjahr();
+      ladeSteuerjahrMitKandidaten();
     });
   document
     .querySelector('[data-ansicht="sanktionen"]')
@@ -9162,7 +9182,7 @@ async function start() {
   $("#trace-ziel").addEventListener("keydown", (e) => {
     if (e.key === "Enter") starteTrace();
   });
-  $("#jahr-wahl").addEventListener("change", ladeSteuerjahr);
+  $("#jahr-wahl").addEventListener("change", () => ladeSteuerjahrMitKandidaten());
   $("#frist-wahl").addEventListener("change", async () => {
     try {
       const ergebnis = await api("/config/steuer", {
