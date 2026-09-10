@@ -201,6 +201,8 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('t("privacy.pillUnclear")', self.js)
         self.assertIn("T_FALLBACK", self.js)
         self.assertIn("pruefePeersLeise()", self.js)
+        self.assertIn("setzeStatus: false", self.js)
+        self.assertIn("const altStand = Zustand.peerStatus", self.js)
         self.assertIn("kopfQuelleAufbau", self.js)
         self.assertIn("kopfQuelleFehler", self.js)
         self.assertNotIn("kopfQuelleStufe", self.js)
@@ -219,6 +221,16 @@ class TestVertragMitDerApi(unittest.TestCase):
             "uebernehmeQuellenErreichbarkeit(\n    altQuellen, Zustand.config.sources",
             self.js,
         )
+        self.assertIn("function quellePrivacyStufe", self.js)
+        self.assertIn("function quelleHochVerdraengt", self.js)
+        self.assertIn("loescheElectrumListe", self.js)
+        self.assertIn("sources.disableP2pTitle", self.js)
+        self.assertIn("feld.typ === \"checkbox\"", self.js)
+        self.assertIn('"sources.reachable": "verbunden"', de)
+        self.assertIn('"sources.clearListTitle"', de)
+        self.assertIn('"sources.field.BIP158_P2P.label": "P2P aufbauen"', de)
+        en = (WEB / "locales" / "en.json").read_text(encoding="utf-8")
+        self.assertIn('"sources.reachable": "Connected"', en)
 
     def test_assistent_dock_und_pille_phase1(self):
         """Phase 1: Log|Chat-Leiste, Kopf-Pille, Einstellungen — kein Chat-Call."""
@@ -423,6 +435,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("brauchtBip158Startdatum", self.js)
         self.assertIn("frageScanDatum", self.js)
         self.assertIn("2017-08-24", self.js)
+        # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
+        # konfiguriertem, aber unerreichbarem eigenem Electrum.
+        self.assertIn("q.reachable === true", self.js)
+        self.assertIn('nach.bip158', self.js)
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)

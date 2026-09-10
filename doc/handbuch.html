@@ -1561,6 +1561,14 @@ manuelle Wahl gesetzt ist:</p>
 eigener Electrum-Server → BIP-158 → öffentliche Onions → Clearnet
 </p>
 
+<p><strong>P2P-BIP-158 Erstscan:</strong> Zuerst das jüngste Fenster
+(~2016 Blöcke, TurboSync) mit der vollen Lookahead-Menge — danach die Historie
+nur mit bereits getroffenen Adressen plus kleiner Gap, nicht mit allen
+ungenutzten Lookahead-Keys seit SegWit. Compact Filter liegen unter
+<code>immutable_cache/cfilter/</code> (Schlüssel: Höhe + Blockhash) und werden
+beim nächsten Wallet oder Rescan wiederverwendet. Blöcke nur bei Filter-Treffer;
+Filter-Download und Block-Download laufen entkoppelt.</p>
+
 <p><code>BITCOIN_BIP158=1</code> und <code>ESPLORA_URL</code> in
 <code>.env</code> erzwingen <strong>keine</strong> Quelle — nur
 <code>--bip158</code>, <code>--rpc-only</code>, <code>--esplora</code> oder die

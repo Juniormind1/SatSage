@@ -29,7 +29,8 @@ EDITIERBARE_FELDER: dict[str, tuple[str, ...]] = {
     # scantxoutset am eigenen bitcoind — schneller UTXO-Bestand, kein Verlauf.
     "own_core": ("NODE_IP", "RPCPORT", "RPCUSER", "RPCPASSWORD", "RPC_SSL",
                  "FULCRUM_TOR_PROXY"),
-    "bip158": ("BIP158_START_HEIGHT", "BIP158_PEERS", "FULCRUM_TOR_PROXY"),
+    "bip158": ("BIP158_P2P", "BIP158_START_HEIGHT", "BIP158_PEERS",
+               "FULCRUM_TOR_PROXY"),
     "public_onion": ("FULCRUM_TOR_LISTE", "FULCRUM_TOR_PROXY"),
 }
 
@@ -104,8 +105,8 @@ class SourceInfo:
 
     @property
     def verwerfbar(self) -> bool:
-        """Eigene Nodes lassen sich aus der .env streichen."""
-        return self.key in ("own_fulcrum", "own_core") and self.configured
+        """Eigene Nodes streichen oder P2P ausschalten (BIP158_P2P=0)."""
+        return self.key in ("own_fulcrum", "own_core", "bip158") and self.configured
 
     def as_dict(self) -> dict:
         return {
@@ -475,16 +476,35 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         rank=3,
         key="bip158",
         name="Bitcoin-P2P · Compact Filter",
-        detail=" · ".join(p2p_teile),
+        detail=(
+            " · ".join(p2p_teile)
+            if p2p_an
+            else "aus — öffentliche Listen können greifen"
+        ),
         privacy=PRIVACY_HIGH,
         configured=p2p_an,
         note=(
-            "Zuerst der Node im LAN (P2P-Port 8333), dann extra Peers, "
-            "dann DNS-Seeds. Ohne Compact Filter am eigenen Node werden "
-            "andere Filter-Peers gesucht — nicht gleich öffentliche "
-            "Electrum-Server. Adressen bleiben lokal."
+            (
+                "Zuerst der Node im LAN (P2P-Port 8333), dann extra Peers, "
+                "dann DNS-Seeds. Ohne Compact Filter am eigenen Node werden "
+                "andere Filter-Peers gesucht — nicht gleich öffentliche "
+                "Electrum-Server. Adressen bleiben lokal."
+            )
+            if p2p_an
+            else (
+                "P2P ist aus. Wenn Onion- oder Clearnet-Listen geladen sind "
+                "und öffentliche Electrum erlaubt ist, greifen die."
+            )
         ),
         felder=[
+            Feld(
+                "BIP158_P2P",
+                "P2P aufbauen",
+                "checkbox",
+                "true" if p2p_an else "false",
+                "Nur wenn aktiv: Compact Filter über Bitcoin-P2P. "
+                "Sonst können geladene öffentliche Listen greifen.",
+            ),
             Feld("BIP158_START_HEIGHT", "Erster Scan-Block", "port", str(start),
                  "Vorgabe SegWit (481824). Blöcke davor werden nicht durchsucht."),
             Feld("BIP158_PEERS", "P2P-Peers", "text", peers,

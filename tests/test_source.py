@@ -266,17 +266,21 @@ class TestCheckReachable(unittest.TestCase):
             "Header-Tip wird nur selten nachgezogen.",
         )
 
-    def test_nur_electrum_ist_verwerfbar(self):
+    def test_electrum_und_p2p_sind_verwerfbar(self):
         leer = {q.key: q for q in describe_sources({})}
         self.assertFalse(leer["own_fulcrum"].verwerfbar)
-        self.assertFalse(leer["bip158"].verwerfbar)
+        # P2P ist standardmäßig an → Papierkorb sichtbar.
+        self.assertTrue(leer["bip158"].verwerfbar)
         self.assertFalse(leer["public_onion"].verwerfbar)
         gesetzt = {q.key: q for q in describe_sources({
             "FULCRUM_HOST": "192.0.2.1",
         })}
         self.assertTrue(gesetzt["own_fulcrum"].verwerfbar)
-        self.assertFalse(gesetzt["bip158"].verwerfbar)
+        self.assertTrue(gesetzt["bip158"].verwerfbar)
         self.assertTrue(gesetzt["own_fulcrum"].as_dict()["verwerfbar"])
+        aus = {q.key: q for q in describe_sources({"BIP158_P2P": "0"})}
+        self.assertFalse(aus["bip158"].verwerfbar)
+        self.assertFalse(aus["bip158"].configured)
 
     def test_p2p_bip158_ist_standard_konfiguriert(self):
         quelle = next(q for q in describe_sources({}) if q.key == "bip158")
@@ -284,6 +288,20 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(quelle.name, "Bitcoin-P2P · Compact Filter")
         self.assertNotIn("NODE_IP", [f.key for f in quelle.felder])
         self.assertIn("DNS-Seeds", quelle.detail)
+        felder = {f.key: f for f in quelle.felder}
+        self.assertEqual(felder["BIP158_P2P"].typ, "checkbox")
+        self.assertEqual(felder["BIP158_P2P"].value, "true")
+
+    def test_p2p_aus_zeigt_hinweis_auf_oeffentliche_listen(self):
+        quelle = next(
+            q for q in describe_sources({"BIP158_P2P": "false"}) if q.key == "bip158"
+        )
+        self.assertFalse(quelle.configured)
+        self.assertIn("öffentliche Listen", quelle.detail)
+        self.assertEqual(
+            next(f for f in quelle.felder if f.key == "BIP158_P2P").value,
+            "false",
+        )
 
     def test_p2p_nennt_node_im_lan_und_dns_fallback(self):
         quelle = next(

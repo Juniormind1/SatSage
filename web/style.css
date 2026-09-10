@@ -826,7 +826,13 @@ select { font-family: var(--mono); font-size: 11px; }
   display: flex; flex-direction: column; gap: 10px;
 }
 .feld-zeile { display: flex; flex-direction: column; gap: 3px; max-width: 52ch; }
-.feld-zeile input,
+.feld-zeile .feld-checkbox {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 2px 0 0;
+  accent-color: var(--akzent);
+}
+.feld-zeile input:not(.feld-checkbox),
 .feld-zeile select,
 .feld-zeile textarea {
   background: var(--flaeche); border: 1px solid var(--linie);
