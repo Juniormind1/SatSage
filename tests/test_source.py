@@ -370,7 +370,12 @@ class TestCheckReachable(unittest.TestCase):
             stand = peer_status([own, p2p, onion, clear])
         self.assertEqual(stand["kind"], "public")
         self.assertEqual(stand["count"], 5)
-        self.assertEqual(stand["label"], "5 öffentliche Peers verbunden")
+        self.assertEqual(
+            stand["label"],
+            "2 onion-electrs · 3 clearnet-electrs verbunden",
+        )
+        self.assertEqual(stand.get("onion_electrs"), 2)
+        self.assertEqual(stand.get("clearnet_electrs"), 3)
         self.assertFalse(stand["braucht_oeffentliche"])
 
     def test_peer_status_fragt_oeffentliche_nur_ohne_bestaetigung(self):

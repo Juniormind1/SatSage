@@ -674,8 +674,23 @@ select { font-family: var(--mono); font-size: 11px; }
 .hinweis-gut  { background: var(--gut-bg);  color: var(--gut); }
 .hinweis-warn { background: var(--warn-bg); color: var(--warn); }
 .hinweis-krit { background: var(--krit-bg); color: var(--krit); }
-.hinweis-lauf { background: var(--flaeche-2); color: var(--gedaempft);
-                border: 1px solid var(--linie); }
+.hinweis-lauf {
+  background: var(--flaeche-2); color: var(--gedaempft);
+  border: 1px solid var(--linie);
+  /* Abbrechen rechts fest — Textlänge ändert sich, Knopf springt nicht. */
+  width: 100%;
+  box-sizing: border-box;
+}
+.hinweis-lauf > span:not(.spinner) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hinweis-lauf > .knopf {
+  margin-left: auto;
+  flex: none;
+}
 .hinweis-lauf.hinweis-fremd {
   background: var(--warn-bg); color: var(--warn); border-color: transparent;
 }
