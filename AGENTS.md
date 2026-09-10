@@ -199,16 +199,14 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 - dev-juniormind — laufende Entwicklung von Juniormind1; hier committen/pushen für Work-in-Progress.
 - Andere Contributor-Branches/PRs: nach Review in main mergen, wenn stabil; nicht ungeprüft aus dev-* übernehmen.
 
-### Commit-Identität (hart)
+### Commit-Identität (Maintainer / Assistent)
 
-Dieses öffentliche Repo darf **nur** unter der Projekt-Identität committen/pushen:
+**Maintainer-Clones und Assistenten-Worktrees** committen/pushen nur unter der Projekt-Identität:
 
 - `user.name=Juniormind1`
 - `user.email=juniormind@proton.me`
 
-Nur die Projekt-Identität ist erlaubt. Jede andere Autor-/Committer-Angabe ist **verboten** — sie erscheint öffentlich in der Commit-Historie und auf GitHub.
-
-Pflicht pro Clone/Worktree:
+Pflicht in diesen Clones:
 
 ```bash
 git config user.name Juniormind1
@@ -216,7 +214,9 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten. Assistenten müssen vor jedem Commit prüfen, dass die **lokale** Repo-Config (nicht nur global) auf Juniormind1 steht.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **in diesen Worktrees**. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
+
+**Fremde Contributor-Commits und PRs:** eigene Autor-/Committer-IDs sind erlaubt (übliche OSS-Praxis). CI verlangt nicht „jeder Commit = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
 Assistenten sollen:
 
@@ -225,13 +225,18 @@ Assistenten sollen:
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 
+### Merge-Dealbreaker
+
+Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Produkt-Semantik): [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Assistenten und Reviews sollen diese Liste kennen; CI deckt sie schrittweise ab (zuerst u. a. Unittests).
+
 ## Sicherheit & Datenschutz
 
-- XPUBs erlauben Ableitung aller Wallet-Adressen â€” sensibel behandeln
-- Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` kÃ¶nnen Klarnamen enthalten â€” nicht committen
-- Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` Ã¶ffentlich sichtbar
-- Fulcrum (Ã¶ffentliche Onions/Clearnet): mÃ¤ÃŸig (Rotation mildert Risiko)
-- Eigener Node (BIP-158 / eigener Fulcrum): PrivatsphÃ¤re **hoch** (`privacy_notice_for_source`, `is_own_fulcrum_backend`)
+- XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
+- Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen
+- Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` öffentlich sichtbar
+- Fulcrum (öffentliche Onions/Clearnet): mäßig (Rotation mildert Risiko); öffentliche Server und Remote-LLM nur nach Opt-in
+- Eigener Node (BIP-158 / eigener Fulcrum): Privatsphäre **hoch** (`privacy_notice_for_source`, `is_own_fulcrum_backend`)
+- Keine Telemetrie / kein XPUB-Upload an Fremde; Web-UI ohne Remote-JS (Dealbreaker T3/T6)
 - Sanktions-UTXO-Scans nutzen Clearnet-Fulcrum (nur Listen-Adressen, nicht Wallet-XPUBs)
 
 ## UI-Konventionen

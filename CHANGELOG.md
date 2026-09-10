@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Prozess · Merge-Dealbreaker:** Liste in `doc/merge-dealbreakers.md` (Malware/Trust, Secrets, CI, Produkt); in `AGENTS.md` verankert. Contributor-IDs erlaubt; Juniormind1-Pflicht nur für Maintainer-/Agent-Clones.
 - **CI · Unittests:** Workflow `.github/workflows/test.yml` läuft auf Push/PR nach `main` und `dev-juniormind` (sowie manuell) — `unittest discover` unter `tests/`, ohne Regtest/E2E/Chaos. Suite an i18n-/Tor-/Peer-/Windows-chmod-Verhalten angepasst (grüne Suite vor CI-Schutz).
 - **Tests · Isolation:** Peer-Status-Tests blenden Live-BIP-158-Peers aus; Tor-Autostart respektiert leeres `env={}`; eingebetteter Server weicht bei belegt wirkendem Port auch unter Windows aus; Ollama-Live nur mit `qwen2.5:7b`.
 - **Kopf · Quellen-Pillen:** Kein Katalog ungenutzter Quellen mehr — nur aktive, im Aufbau oder fehlerhafte Verbindungen (Core / P2P n / Electrum privat / Electrum öffentlich). Privatsphäre als eigene Pille (hoch / mittel / keine Privatsphäre); ohne Live-Verbindung (nur Cache) zählt als hoch.
