@@ -1,0 +1,37 @@
+name: Tests
+
+# Schnelle Suite: unittest unter tests/ (gemockt, ohne Regtest/E2E/Chaos).
+# Entspricht Blind-Spot #1 in ISSUES.md.
+on:
+  push:
+    branches: [main, dev-juniormind]
+  pull_request:
+    branches: [main, dev-juniormind]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhängigkeiten
+        run: pip install -r requirements.txt
+
+      - name: Unittest (tests/)
+        env:
+          # Keine Tor-/Node-Autostarts und keine GUI-Nebenwirkungen in CI.
+          TOR_AUTOSTART: "0"
+          SATSAGE_ANSI_MENU: "0"
+          SATSAGE_TERMINAL_MENU: "0"
+          SATSAGE_SPLASH: "0"
+        run: python -m unittest discover -s tests -t . -v

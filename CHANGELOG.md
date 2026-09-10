@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **CI · Unittests:** Workflow `.github/workflows/test.yml` läuft auf Push/PR nach `main` und `dev-juniormind` (sowie manuell) — `unittest discover` unter `tests/`, ohne Regtest/E2E/Chaos. Suite an i18n-/Tor-/Peer-/Windows-chmod-Verhalten angepasst (grüne Suite vor CI-Schutz).
+- **Tests · Isolation:** Peer-Status-Tests blenden Live-BIP-158-Peers aus; Tor-Autostart respektiert leeres `env={}`; eingebetteter Server weicht bei belegt wirkendem Port auch unter Windows aus; Ollama-Live nur mit `qwen2.5:7b`.
+- **Kopf · Quellen-Pillen:** Kein Katalog ungenutzter Quellen mehr — nur aktive, im Aufbau oder fehlerhafte Verbindungen (Core / P2P n / Electrum privat / Electrum öffentlich). Privatsphäre als eigene Pille (hoch / mittel / keine Privatsphäre); ohne Live-Verbindung (nur Cache) zählt als hoch.
 - **Wallets immer aktuell:** Electrs-Watch reconnectet nach Verbindungsabbruch wieder (früher beendete `on_disconnect` den Watcher dauerhaft → über Nacht „vor N Std. −M Blöcke“). Tip-Nachzug während laufendem Job wird vorgemerkt; Electrs-Light setzt `scan_tip_height` auf den **Live**-Electrs-Tip (`force`), nicht nur auf ggf. veraltete `p2p_headers.bin`.
 - **Wallets · Cache-Dashboard:** Vor der Danger Zone zeigt die Oberfläche Belegung (Platte, UTXO/Immutable/Tx/Herkunft/Header/Sanktionen) und pro Wallet UTXOs, Tip-Lag, Gap, Verlauf und Herkunfts-Abdeckung — nur Größen/Abdeckung, keine Zugriffszähler (`GET /api/cache/stats`).
 - **CI · Linux-Webgui:** Manueller Workflow `build-linux-webgui.yml` (ubuntu-latest, x86_64) baut PyInstaller-Onefile und hängt es an ein bestehendes Release an — mit Hinweis *GitHub-Build für Linux, ungetestet*.

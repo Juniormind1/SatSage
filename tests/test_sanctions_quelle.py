@@ -21,14 +21,16 @@ class TestSanctionsPrioritaet(unittest.TestCase):
         Führt resolve_sanctions_preferred_client mit gefälschten Probes aus.
         probierte_hosts sammelt die angefragten Hosts in Reihenfolge.
         """
-        def fake_probe(host, port, use_ssl, timeout):
+        def fake_open(host, port, use_ssl, workers):
             probierte_hosts.append(host)
-            return None  # nie erreichbar — zwingt den Fallback
+            return None, 0.0  # nie erreichbar — zwingt den Fallback
 
         class FakePool:
             primary = object()
 
-        with mock.patch.object(main, "_probe_clearnet_fulcrum", fake_probe), \
+        main._sanctions_own_pool = None
+        main._sanctions_own_cache_key = None
+        with mock.patch.object(main, "_open_own_sanctions_pool", fake_open), \
              mock.patch.object(
                  main, "resolve_sanctions_clearnet_pool",
                  return_value=(FakePool() if pool_ok else None, False),
@@ -124,8 +126,10 @@ class TestPortAusEnv(unittest.TestCase):
 
     def test_serverwahl_ueberlebt_leeren_port(self):
         """Der eigentliche Regressionsfall: kein Absturz in der Serverwahl."""
+        main._sanctions_own_pool = None
+        main._sanctions_own_cache_key = None
         with mock.patch.object(
-            main, "_probe_clearnet_fulcrum", lambda *a, **k: None
+            main, "_open_own_sanctions_pool", return_value=(None, 0.0)
         ), mock.patch.object(
             main, "resolve_sanctions_clearnet_pool", return_value=(None, False)
         ):
@@ -155,21 +159,20 @@ class TestEigenerNodePool(unittest.TestCase):
 
         class FakeClient:
             host = "192.168.1.10"
+            port = 50002
+            use_ssl = True
 
             def close(self):
                 pass
 
-        def fake_probe(host, port, use_ssl, timeout):
-            return FakeClient(), 0.004
-
         def fake_connect(host, port, **kw):
             self.verbunden.append((host, port))
-            if len(self.verbunden) > verbindungen:
+            # Erste Verbindung immer; *verbindungen* = zusätzliche Erfolge.
+            if len(self.verbunden) > verbindungen + 1:
                 return None, "zu viele"
             return FakeClient(), None
 
-        with mock.patch.object(main, "_probe_clearnet_fulcrum", fake_probe), \
-             mock.patch("fulcrum.connect_fulcrum", fake_connect):
+        with mock.patch("fulcrum.connect_fulcrum", fake_connect):
             return main.resolve_sanctions_preferred_pool(env)
 
     def test_eigener_node_liefert_mehrere_verbindungen(self):

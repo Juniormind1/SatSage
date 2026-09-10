@@ -35,6 +35,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import threading
 import time
 import webbrowser
@@ -5264,6 +5265,17 @@ class EingebetteterServer:
             self.httpd.server_close()
 
 
+def _port_erreichbar(bind: str, port: int, *, timeout: float = 0.2) -> bool:
+    """True, wenn unter *bind*:*port* schon etwas annimmt (Windows: SO_REUSEADDR)."""
+    if int(port) <= 0:
+        return False
+    try:
+        with socket.create_connection((bind, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def starte_im_hintergrund(
     state: AppState | None = None,
     *,
@@ -5287,8 +5299,13 @@ def starte_im_hintergrund(
     bind = _bind_host(bind, state=state, args=args)
     Handler.state = state
 
+    ziel = int(port)
+    # HTTPServer.allow_reuse_address ist unter Windows oft wirkungslos gegen
+    # „Port belegt“ — erst verbinden, dann ggf. auf Port 0 ausweichen.
+    if ziel > 0 and _port_erreichbar(bind, ziel):
+        ziel = 0
     try:
-        httpd = QuietThreadingHTTPServer((bind, int(port)), Handler)
+        httpd = QuietThreadingHTTPServer((bind, ziel), Handler)
     except OSError:
         httpd = QuietThreadingHTTPServer((bind, 0), Handler)
 

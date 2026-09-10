@@ -31,7 +31,9 @@ class TestVertragMitDerApi(unittest.TestCase):
     def test_uebernehmen_loest_node_test_aus(self):
         """Sonst speichert der Benutzer neue Verbindungsdaten und sieht nicht, ob sie greifen."""
         self.assertIn("testeEigenenNode", self.js)
-        self.assertIn("Übernommen — teste Verbindung", self.js)
+        self.assertIn('t("sources.appliedTesting")', self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("teste Verbindung", de)
 
     def test_electrum_hat_einen_papierkorb(self):
         """Sonst bleibt eine Onion in der .env und der Node-Test startet Tor."""
@@ -151,12 +153,19 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("log-wallet", self.js)
         self.assertIn("log-zeit", self.js)
         self.assertIn('logZeile("Starte Verbindungstest…")', self.js)
-        self.assertIn("const wallet = scanWalletName();", self.js)
+        self.assertIn("function scanWalletName()", self.js)
         self.assertIn("undefined, wallet", self.js)
+        # Wallet-Name nur bei Scan/Herkunft — Verbindungstest ohne dritten Arg.
+        self.assertRegex(
+            self.js,
+            r'logZeile\(\s*`Starte \$\{scanArtName',
+        )
 
     def test_wallet_nav_zeigt_cache_datum(self):
-        self.assertIn("Cache vom", self.js)
+        self.assertIn('t("wallet.cacheFrom"', self.js)
         self.assertIn("cacheHinweis", self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Cache vom", de)
 
     def test_kopfzeile_zeigt_peer_status(self):
         self.assertIn("peerStatusAusQuellen", self.js)
@@ -178,19 +187,27 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("liesKursCsvDatei", self.js)
         self.assertIn("formatEurAusSats", self.js)
         self.assertIn("aktualisiereFiatAnzeigen", self.js)
-        self.assertIn("(≈ ${fiat})", self.js)
+        self.assertIn("(≈ ${info.text})", self.js)
         self.assertIn("PEER_TAKT_RUHE_MS", self.js)
         self.assertIn("eigeneNodesBeideErreichbar", self.js)
         self.assertIn("setzePeerTakt", self.js)
-        self.assertIn("Core RPC privat", self.js)
-        self.assertIn("P2Peers anonym", self.js)
-        self.assertIn("Electrs privat", self.js)
-        self.assertIn("Electrs öffentlich", self.js)
-        self.assertIn("Privatsphäre niedrig", self.js)
-        self.assertIn("Privatsphäre hoch", self.js)
-        self.assertIn("kopfQuelleStufe", self.js)
-        self.assertIn("BIP-158 Blockfilter teilen", self.js)
+        self.assertIn('t("header.sourceCore")', self.js)
+        self.assertIn('t("header.sourceElectrumOwn")', self.js)
+        self.assertIn('t("header.sourceElectrumPublic")', self.js)
+        self.assertIn('t("header.p2pPeers"', self.js)
+        self.assertIn('t("privacy.pillHigh")', self.js)
+        self.assertIn('t("privacy.pillMedium")', self.js)
+        self.assertIn('t("privacy.pillNone")', self.js)
+        self.assertIn("kopfQuelleAufbau", self.js)
+        self.assertIn("kopfQuelleFehler", self.js)
+        self.assertNotIn("kopfQuelleStufe", self.js)
         self.assertIn("keine Privatsphäre", self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn('"header.sourceCore": "Core"', de)
+        self.assertIn('"header.p2pPeers": "P2P {n}"', de)
+        self.assertIn('"header.sourceElectrumOwn": "Electrum privat"', de)
+        self.assertIn('"header.sourceElectrumPublic": "Electrum öffentlich"', de)
+        self.assertIn('"privacy.pillNone": "keine Privatsphäre"', de)
         # Nach Scan: /config ohne Check darf grüne Pillen nicht rot blitzen.
         self.assertIn("function uebernehmeQuellenErreichbarkeit", self.js)
         self.assertIn("behaltePositivBeiNegativ", self.js)
@@ -239,9 +256,12 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("/llm/context/steuer", self.js)
         self.assertIn("markdown", self.js)
         self.assertIn("brief", self.js)
-        self.assertIn("/scan", self.js)
-        self.assertIn("/exec", self.js)
-        self.assertIn("ist gesperrt", self.js)
+        self.assertIn("SLASH_BLOCK", self.js)
+        self.assertIn('"scan"', self.js)
+        self.assertIn('"exec"', self.js)
+        self.assertIn('t("dock.blocked"', self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("ist gesperrt", de)
         self.assertIn('"/llm/chat"', self.js)
         self.assertIn("frageAssistent", self.js)
         self.assertNotIn("/v1/chat/completions", self.js)
@@ -250,11 +270,13 @@ class TestVertragMitDerApi(unittest.TestCase):
         """Opt-in: Cache bis Tip nachziehen, kein Fullscan."""
         html = (WEB / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="start-sync"', html)
-        self.assertIn("Wallets beim Start aktualisieren", html)
+        self.assertIn('data-i18n="settings.start.sync"', html)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Wallets immer aktuell", de)
         self.assertIn("speichereStartSync", self.js)
         self.assertIn('"/config/start-sync"', self.js)
         self.assertIn("folgeWalletSyncJob", self.js)
-        self.assertIn("wallets_beim_start_aktualisieren", self.js)
+        self.assertIn("wallets_immer_aktuell", self.js)
 
     def test_filter_treffer_log_wird_in_place_aktualisiert(self):
         """Ergebnis überschreibt „hole Block…“, hängt keine zweite Zeile an."""
@@ -294,7 +316,11 @@ class TestVertragMitDerApi(unittest.TestCase):
 
     def test_leere_kette_heisst_keine_quelle(self):
         """Fußzeile darf Esplora nicht als aktiv ausgeben, wenn nichts gewählt ist."""
-        self.assertIn('"Keine Quelle verbunden"', self.js)
+        # Leer = kind none / 0 Peers; Cache-only → Privatsphäre hoch, kein Leak.
+        self.assertIn('kind: "none"', self.js)
+        self.assertIn("0 Peers verbunden", self.js)
+        self.assertIn('t("privacy.pillHigh")', self.js)
+        self.assertNotIn("esplora", self.js.lower())
         self.assertIn("public_onion", self.js)
         self.assertRegex(
             self.js,
@@ -336,13 +362,15 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_multisig_feld_erklaert_warum_kein_hinzufuegen(self):
         self.assertIn('id="deskriptor-hinweis"', self.html)
-        self.assertIn("Erst Adresse prüfen, dann übernehmen.", self.html)
-        self.assertIn("Cosigner vertauscht", self.html)
+        self.assertIn('data-i18n="wallets.descriptorHint"', self.html)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Erst Adresse prüfen, dann übernehmen", de)
+        self.assertIn("Cosigner vertauscht", de)
         self.assertIn("wallet-einfuegen", self.html)
         self.assertIn('id="deskriptor-import"', self.html)
-        self.assertRegex(self.html, r'id="deskriptor-import"[^>]*>\s*Import\s*<')
-        self.assertIn("Sparrow-JSON", self.html)
-        self.assertIn("listdescriptors", self.html)
+        self.assertIn('data-i18n="common.import"', self.html)
+        self.assertIn("Sparrow-JSON", de)
+        self.assertIn("listdescriptors", de)
         self.assertIn("liesDeskriptorDatei", self.js)
         css = (WEB / "style.css").read_text(encoding="utf-8")
         self.assertIn("grid-template-columns: minmax(0, 1fr) 10.5rem", css)
@@ -461,7 +489,9 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("sichereHeaderVorab", self.js)
         self.assertIn("header_job_id", self.js)
         self.assertIn('"/headers"', self.js)
-        self.assertIn("erspart den einmaligen Block-Header-Download", self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("erspart den einmaligen Block-Header-Download", de)
+        self.assertIn('t("setup.step.electrumText")', self.js)
 
     def test_alle_knoepfe_haben_einen_hilfetext(self):
         """Im Rest der Oberfläche hat jeder Knopf einen — hier auch."""
@@ -524,9 +554,10 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_utxo_zeit_heisst_ankunft(self):
         """Sonst liest man die Output-Zeit als Eingang beim Vor-Dienst."""
-        self.assertIn("function formatAnkunft", self.js);
-        self.assertIn("Ankunft am:", self.js);
-        self.assertIn("um:", self.js);
+        self.assertIn("function formatAnkunft", self.js)
+        self.assertIn('t("trace.arrival"', self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Ankunft am:", de)
         self.assertIn("ankunft-link", self.js)
         self.assertNotIn("Herkunft →", self.js)
 
@@ -543,13 +574,14 @@ class TestOberflaeche(unittest.TestCase):
         self.assertNotIn(
             "utxo.verfolgt_ts = utxo.verfolgt_ts ||", self.js
         )
-        self.assertIn("jüngste sats vom", self.js)
-        self.assertIn("um ${uhr}", self.js)
+        self.assertIn('t("trace.youngestSats"', self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("jüngste sats vom", de)
         self.assertIn("verfolgt_vollstaendig", self.js)
         # Adressgruppe: jüngste sats nur für voll verfolgte UTXOs — Vorbehalt.
         self.assertIn("function gruppeOhneHerkunftstraceMarke", self.js)
-        self.assertIn("ohne Herkunftstrace", self.js)
         self.assertIn("ohne-herkunft-marke", self.js)
+        self.assertIn("ohne Herkunftstrace", de)
         self.assertIn("haengeGruppenJuengsteAn", self.js)
         self.assertIn("function aktualisiereAdressgruppenJuengste", self.js)
         self.assertIn("gruppeAusTraceListe", self.js)
@@ -623,11 +655,11 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_scan_schlange_ist_duenn(self):
         """Ein Klick während eines Scans stellt an, startet nicht parallel."""
-        self.assertIn("scanSchlange", self.js);
-        self.assertIn("stelleScanAn", self.js);
-        self.assertIn("starteNaechstenScan", self.js);
-        self.assertIn("angestellt", self.js);
-        self.assertIn("Als Nächstes", self.js);
+        self.assertIn("stelleScanAn", self.js)
+        self.assertIn("schonGeplant", self.js)
+        self.assertIn("starteScanFuer", self.js)
+        self.assertIn("Warteschlange", self.js)
+        self.assertIn("queue_status", self.js)
 
     def test_wallet_hinzufuegen_speichert_sofort(self):
         """Name sichtbar vor dem Klick; Hinzufügen schreibt die .env."""
@@ -650,11 +682,14 @@ class TestOberflaeche(unittest.TestCase):
     def test_drei_schritte_werden_beschrieben(self):
         abschnitt = re.search(r"function einrichtungsSchritte\(.*?\n}",
                               self.js, re.S).group(0)
-        titel = re.findall(r'titel: "([^"]+)"', abschnitt)
-        self.assertEqual(len(titel), 3, f"Schritte: {titel}")
-        self.assertIn("Wallets eintragen", titel)
-        self.assertIn("Eigener Electrum-Server", titel)
-        self.assertIn("Block-Explorer", titel)
+        keys = re.findall(r't\("(setup\.step\.[^"]+)"', abschnitt)
+        self.assertIn("setup.step.wallets", keys)
+        self.assertIn("setup.step.electrum", keys)
+        self.assertIn("setup.step.explorer", keys)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Wallets eintragen", de)
+        self.assertIn("Eigener Electrum-Server", de)
+        self.assertIn("Block-Explorer", de)
 
     def test_explorer_pfeil_faerbt_nach_netz(self):
         """Grün im eigenen Netz, Gelb bei öffentlichem/fremdem Explorer."""
@@ -667,8 +702,11 @@ class TestOberflaeche(unittest.TestCase):
             self.css.index(".extern-link-lokal:hover"),
             "lokale Hover-Farbe muss die allgemeine überschreiben",
         )
-        self.assertIn("Privaten Blockexplorer öffnen", self.js)
-        self.assertIn("Öffentlichen Blockexplorer öffnen", self.js)
+        self.assertIn('t("sources.mempool.openPrivate")', self.js)
+        self.assertIn('t("sources.mempool.openPublic")', self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Privaten Blockexplorer öffnen", de)
+        self.assertIn("Öffentlichen Blockexplorer öffnen", de)
         self.assertNotIn("in der eigenen Instanz öffnen", self.js)
 
 

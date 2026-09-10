@@ -8,6 +8,7 @@ und as_dict() enthält die Property editierbar sowie felder als rohe dicts —
 beides keine Konstruktor-Argumente.
 """
 import unittest
+from unittest import mock
 
 from core.source import (
     check_reachable,
@@ -18,6 +19,14 @@ from core.source import (
     peer_status,
     source_needs_tor,
 )
+
+
+def _ohne_live_p2p():
+    """Suite kann parallele BIP-158-Peers halten — Tests brauchen Isolation."""
+    return mock.patch(
+        "core.source.anreichere_live_p2p",
+        side_effect=lambda quellen: list(quellen),
+    )
 
 
 class TestCheckReachable(unittest.TestCase):
@@ -119,7 +128,7 @@ class TestCheckReachable(unittest.TestCase):
         self.assertIn("own_core", leer)
         self.assertEqual(leer["own_core"].rank, 2)
         self.assertFalse(leer["own_core"].configured)
-        self.assertIn("schnelleren UTXO-Scan", leer["own_core"].note)
+        self.assertIn("scantxoutset", leer["own_core"].note)
 
         werte = {
             "NODE_IP": "https://abcdefghijklmnop.onion",
@@ -135,7 +144,7 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(pwd.typ, "geheim")
         self.assertEqual(pwd.value, "")
         self.assertTrue(pwd.gesetzt)
-        self.assertIn("schnelleren UTXO-Scan", core.note)
+        self.assertIn("scantxoutset", core.note)
         host = next(f for f in core.felder if f.key == "NODE_IP")
         self.assertTrue(host.value.endswith(".onion"))
         self.assertFalse(host.value.startswith("http"))
@@ -306,19 +315,17 @@ class TestCheckReachable(unittest.TestCase):
         self.assertIsNone(kwargs.get("tor_proxy"))
 
     def test_verbindungstest_zaehlt_compact_filter_peers(self):
-        from unittest import mock
-
         with mock.patch(
             "core.p2p.zaehle_compact_filter_peers",
             return_value=["192.0.2.2:8333", "192.0.2.3:8333", "192.0.2.4:8333"],
-        ) as zaehl:
+        ) as zaehl, _ohne_live_p2p():
             ergebnis = check_sources(describe_sources({}), {}, timeout=1)
-        nach = {q.key: q for q in ergebnis}
-        self.assertEqual(nach["bip158"].peer_count, 3)
-        self.assertTrue(nach["bip158"].reachable)
-        zaehl.assert_called()
-        self.assertEqual(nach["bip158"].as_dict()["peer_count"], 3)
-        stand = peer_status(ergebnis)
+            nach = {q.key: q for q in ergebnis}
+            self.assertEqual(nach["bip158"].peer_count, 3)
+            self.assertTrue(nach["bip158"].reachable)
+            zaehl.assert_called()
+            self.assertEqual(nach["bip158"].as_dict()["peer_count"], 3)
+            stand = peer_status(ergebnis)
         self.assertEqual(stand["kind"], "p2p")
         self.assertEqual(stand["label"], "3 Peers verbunden")
 
@@ -328,7 +335,8 @@ class TestCheckReachable(unittest.TestCase):
         own = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
         p2p = SimpleNamespace(key="bip158", reachable=True, peer_count=4)
         pub = SimpleNamespace(key="public_onion", reachable=True, peer_count=7)
-        stand = peer_status([own, p2p, pub])
+        with _ohne_live_p2p():
+            stand = peer_status([own, p2p, pub])
         self.assertEqual(stand["label"], "Eigener Peer verbunden")
         self.assertEqual(stand["kind"], "own")
 
@@ -339,7 +347,8 @@ class TestCheckReachable(unittest.TestCase):
         p2p = SimpleNamespace(key="bip158", reachable=False, peer_count=0)
         onion = SimpleNamespace(key="public_onion", reachable=True, peer_count=2)
         clear = SimpleNamespace(key="clearnet", reachable=True, peer_count=3)
-        stand = peer_status([own, p2p, onion, clear])
+        with _ohne_live_p2p():
+            stand = peer_status([own, p2p, onion, clear])
         self.assertEqual(stand["kind"], "public")
         self.assertEqual(stand["count"], 5)
         self.assertEqual(stand["label"], "5 öffentliche Peers verbunden")
@@ -351,15 +360,16 @@ class TestCheckReachable(unittest.TestCase):
         own = SimpleNamespace(key="own_fulcrum", reachable=False, peer_count=0)
         p2p = SimpleNamespace(key="bip158", reachable=False, peer_count=0)
         werte = {"FULCRUM_TOR_0": "abc.onion"}
-        stand = peer_status([own, p2p], werte)
-        self.assertTrue(stand["braucht_oeffentliche"])
-        self.assertFalse(oeffentliche_electrum_erlaubt(werte))
-        stand = peer_status(
-            [own, p2p], {**werte, "OEFFENTLICHE_ELECTRUM": "1"}
-        )
-        self.assertFalse(stand["braucht_oeffentliche"])
-        own_ok = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
-        stand = peer_status([own_ok, p2p], werte)
+        with _ohne_live_p2p():
+            stand = peer_status([own, p2p], werte)
+            self.assertTrue(stand["braucht_oeffentliche"])
+            self.assertFalse(oeffentliche_electrum_erlaubt(werte))
+            stand = peer_status(
+                [own, p2p], {**werte, "OEFFENTLICHE_ELECTRUM": "1"}
+            )
+            self.assertFalse(stand["braucht_oeffentliche"])
+            own_ok = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
+            stand = peer_status([own_ok, p2p], werte)
         self.assertFalse(stand["braucht_oeffentliche"])
 
     def test_verbindungstest_fragt_oeffentliche_nicht_ohne_bestaetigung(self):
@@ -500,10 +510,11 @@ class TestCheckReachable(unittest.TestCase):
     def test_peer_status_keiner(self):
         from types import SimpleNamespace
 
-        stand = peer_status([
-            SimpleNamespace(key="own_fulcrum", reachable=False, peer_count=0),
-            SimpleNamespace(key="bip158", reachable=False, peer_count=0),
-        ])
+        with _ohne_live_p2p():
+            stand = peer_status([
+                SimpleNamespace(key="own_fulcrum", reachable=False, peer_count=0),
+                SimpleNamespace(key="bip158", reachable=False, peer_count=0),
+            ])
         self.assertEqual(stand["label"], "0 Peers verbunden")
         self.assertEqual(stand["count"], 0)
 

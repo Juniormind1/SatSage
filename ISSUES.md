@@ -2,18 +2,38 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
-## Kopf · Pillen entschlacken (Electrs privat / öffentlich)
+## Tests · Blind spots (vs. Specter / LNbits / Jam)
 
-**Stand:** 2026-09-10 · **nur notiert** · UI-Kopfzeile / Peer-Status-Pillen
+**Stand:** 2026-09-10 · **teilweise** · Vergleich Python-Server + Browser-UI
 
-**Ist:** Mehrere Pillen/Hinweise zu Electrs (privat vs. öffentlich) neben „Quelle“.
+Kurzanalyse: SatSage hat starke Domain-/API-Unittests und Chaos/Session-Helfer; gegenüber Specter (pytest+Cypress), LNbits (unit/api/regtest/e2e-Playwright) und Jam (Vitest+Playwright) fehlen vor allem deterministische Browser-E2E (CI-Unittest ist da).
 
-**Soll (Entschlackung):**
+| # | Punkt | Status |
+|---|--------|--------|
+| 1 | **CI: Unittest-Suite** auf Push/PR (`dev-juniormind` / `main`), nur schnelle Tests (kein Regtest/E2E/Chaos) | **umgesetzt** (Suite grün vorausgesetzt; lokal 1202 OK) |
+| 2 | **Browser-E2E-Smoke** (Playwright): Spawn → Token → Kernansichten / Kopf-Pillen — deterministisch, optional CI | offen |
+| 3 | **Test-Marker / Schichten** (`fast` vs. `regtest` vs. `e2e`) statt einer flachen `tests/`-Liste | offen |
+| 4 | Weniger **String-Suche in `app.js`**, mehr API+DOM-Verhalten | offen |
+| 5 | Stabile UI-Selektoren (`data-cy` o. Ä.) für Chaos/E2E | offen |
+| 6 | Coverage-/Lint-Gates in CI (Python; JS optional ohne npm-Zwang) | offen |
 
-- **Electrs privat** nicht extra zeigen, wenn die Verbindung steht — das geht aus **Quelle** schon hervor.
-- **Electrs öffentlich** nicht zeigen, solange **Electrs privat grün** ist (öffentliche Server sind dann irrelevant).
+Chaos-Harness und GUI-Session-Protokoll bleiben Vorsprung — nicht durch E2E ersetzen, sondern ergänzen.
 
-Kein Umbau in diesem Eintrag — nur merken.
+---
+
+## Web-UI · Mobile-Darstellung für Tablet
+
+**Stand:** 2026-09-10 · **offen** · nur notiert
+
+Desktop-GUI auf Tablet-Viewport brauchbar machen (Kopf-Pillen, Nav, Inhalt, Dock). Handy optional später — Fokus zuerst Tablet. Bisher nur schmaler Viewport-Check der Quellen-Pillen, kein Responsive-Umbau.
+
+---
+
+## Kopf · Pillen entschlacken (Electrs privat / öffentlich) — erledigt
+
+**Stand:** 2026-09-10 · **umgesetzt** · UI-Kopfzeile
+
+Nur noch aktive / Aufbau- / Fehler-Quellen plus Privatsphäre-Pille (hoch/mittel/keine); Labels Core / P2P n / Electrum privat / öffentlich. Cache-only → Privatsphäre hoch. Siehe CHANGELOG [Unveröffentlicht].
 
 ---
 
