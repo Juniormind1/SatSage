@@ -1,6 +1,21 @@
 # Offene Punkte
 
-Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
+Bekannte Lücken, noch ohne Lösung. Neueste oben.
+
+## Kopf · Pillen entschlacken (Electrs privat / öffentlich)
+
+**Stand:** 2026-09-10 · **nur notiert** · UI-Kopfzeile / Peer-Status-Pillen
+
+**Ist:** Mehrere Pillen/Hinweise zu Electrs (privat vs. öffentlich) neben „Quelle“.
+
+**Soll (Entschlackung):**
+
+- **Electrs privat** nicht extra zeigen, wenn die Verbindung steht — das geht aus **Quelle** schon hervor.
+- **Electrs öffentlich** nicht zeigen, solange **Electrs privat grün** ist (öffentliche Server sind dann irrelevant).
+
+Kein Umbau in diesem Eintrag — nur merken.
+
+---
 
 ## Lokal Bitcoin Core erkennen (Desktop, ohne Start9/Specter)
 
