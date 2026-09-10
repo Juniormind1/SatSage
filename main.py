@@ -4595,6 +4595,29 @@ def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
     return gefunden
 
 
+def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
+    """
+    True erst nach erfolgreich abgeschlossenem BIP-158-UTXO-Fullscan.
+
+    Zwischenstände (Abbruch) dürfen Turbo-Erstscan nicht deaktivieren.
+    Alt-Caches ohne Flag: ``scan_tip_height`` gilt als fertig.
+    """
+    if not roh:
+        return False
+    flag = roh.get("bip158_fullscan_ok")
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    tip = roh.get("scan_tip_height")
+    if tip is None:
+        return False
+    try:
+        return int(tip) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def save_xpub_utxo_cache(
     xpub: str,
     utxos: list[dict],
@@ -4604,6 +4627,8 @@ def save_xpub_utxo_cache(
     max_addresses: int = DEFAULT_MAX_ADDRESSES,
     first_seen: dict | None = None,
     scan_tip_height: int | None = None,
+    *,
+    bip158_fullscan_ok: bool | None = None,
 ) -> Path:
     """
     Speichert UTXOs eines XPUB als JSON-Flatfile.
@@ -4615,6 +4640,10 @@ def save_xpub_utxo_cache(
 
     *scan_tip_height* (BIP-158): bis zu welcher Chain-Höhe der Filter-Scan
     ging. Fehlt der Wert, bleibt ein bereits gespeicherter Tip erhalten.
+
+    *bip158_fullscan_ok*: nur ``True`` nach komplettem BIP-158-Fullscan.
+    ``None`` = bisherigen Wert behalten (Zwischenstand darf nicht auf fertig
+    setzen). Explizit ``False`` markiert unvollständig.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = _xpub_cache_path(xpub, cache_dir)
@@ -4645,6 +4674,10 @@ def save_xpub_utxo_cache(
         payload["first_seen_ts"] = first_seen.get("time_ts")
     if scan_tip_height is not None:
         payload["scan_tip_height"] = int(scan_tip_height)
+    if bip158_fullscan_ok is not None:
+        payload["bip158_fullscan_ok"] = bool(bip158_fullscan_ok)
+    elif "bip158_fullscan_ok" in roh_bisher:
+        payload["bip158_fullscan_ok"] = bool(roh_bisher["bip158_fullscan_ok"])
     if not cache_disk_write_allowed(cache_dir):
         # Früher: still return path — Scan meldete Erfolg, UI zeigte keinen Cache.
         raise CacheDiskFullError(_cache_disk_full_meldung(cache_dir))
@@ -4665,10 +4698,18 @@ def schreibe_utxo_zwischenstand(
 
     ``scan_end_index`` und ``scan_tip_height`` bleiben unverändert (bzw. 0),
     damit ein Abbruch keinen unfertigen Lauf als Tip-Sync-fertig markiert.
+    ``bip158_fullscan_ok`` wird nicht auf True gesetzt (Abbruch ≠ Fullscan).
     First-seen wird nicht neu erhoben — nur übernommen, falls schon da.
     """
     entry = load_xpub_cache_entry(xpub, cache_dir)
     scan_end = int(entry["scan_end_index"] or 0) if entry else 0
+    # BIP-158-Zwischenstand: explizit unvollständig, falls noch nie fertig.
+    # War schon ein Fullscan ok, Flag behalten (Rescan-Abbruch).
+    full_ok = None
+    if source == "bip158":
+        roh = (entry or {}).get("raw") or {}
+        if not bip158_fullscan_ist_fertig(roh):
+            full_ok = False
     return save_xpub_utxo_cache(
         xpub,
         utxos,
@@ -4680,6 +4721,7 @@ def schreibe_utxo_zwischenstand(
             if entry
             else max_addresses
         ),
+        bip158_fullscan_ok=full_ok,
     )
 
 
@@ -5682,6 +5724,15 @@ def _scan_xpub_utxos(
             utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
     if is_list_abort_requested() and not utxos:
         return list(zwischen) if zwischen else utxos
+    # BIP-158: Fullscan-Flag + Tip erst nach normalem Abschluss.
+    # Abbruch/Zwischenstand: kein Tip, fullscan_ok=False → nächster Lauf Turbo.
+    full_ok = None
+    if source == "bip158":
+        if is_list_abort_requested():
+            full_ok = False
+            tip_hoehe = None
+        else:
+            full_ok = True
     cache_path = save_xpub_utxo_cache(
         xpub,
         utxos,
@@ -5698,6 +5749,7 @@ def _scan_xpub_utxos(
             utxos=utxos,
         ),
         scan_tip_height=tip_hoehe,
+        bip158_fullscan_ok=full_ok,
     )
     print(
         f"  → {len(utxos)} UTXO(s) gecacht in {cache_path.name}",

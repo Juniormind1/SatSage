@@ -186,6 +186,8 @@ def anreichere_live_p2p(quellen: list) -> list:
 
     Tip-Nachzug / Filter-Walk halten Connections, die der periodische
     Erreichbarkeits-Check nicht sieht — die Pille soll sie trotzdem zählen.
+    Nur wenn P2P konfiguriert/an ist (``BIP158_P2P``), sonst bleibt die
+    Quelle nach Papierkorb/Schalter-Aus grau und ohne „verbunden“.
     """
     try:
         from bip158_scanner import live_filter_peer_hosts
@@ -198,6 +200,10 @@ def anreichere_live_p2p(quellen: list) -> list:
     out: list = []
     for q in quellen:
         if getattr(q, "key", None) != "bip158":
+            out.append(q)
+            continue
+        # P2P aus (Papierkorb / Schalter): keine Live-Peers anzeigen.
+        if not getattr(q, "configured", False):
             out.append(q)
             continue
         alt_hosts = list(getattr(q, "peer_hosts", None) or [])
@@ -712,8 +718,45 @@ def check_sources(
                 "Öffentliche Electrum-Server nicht angefragt "
                 "(Bestätigung fehlt)."
             )
+    else:
+        # Höhere Quelle aktiv: öffentliche „verbunden“-Reste nicht stehen lassen.
+        gefunden = _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=log)
 
     return [gefunden[q.key] for q in quellen]
+
+
+def _oeffentliche_electrum_als_ungenutzt(
+    gefunden: dict[str, SourceInfo],
+    *,
+    on_log=None,
+) -> dict[str, SourceInfo]:
+    """Löscht stale Peer-Stand bei Onion/Clearnet, wenn P2P/Eigen aktiv ist."""
+    note = "Nicht genutzt — höhere Privatsphäre-Quelle ist aktiv."
+    geaendert = False
+    for key in ("public_onion", "clearnet"):
+        info = gefunden.get(key)
+        if info is None:
+            continue
+        if not info.configured:
+            continue
+        if (
+            info.reachable is None
+            and not info.peer_count
+            and not (info.peer_hosts or [])
+        ):
+            continue
+        gefunden[key] = replace(
+            info,
+            reachable=None,
+            peer_count=0,
+            peer_hosts=[],
+            error="",
+            note=note,
+        )
+        geaendert = True
+    if geaendert and on_log:
+        on_log("Öffentliche Electrum-Verbindung nicht mehr aktiv (höhere Quelle).")
+    return gefunden
 
 
 def _oeffentliche_onion_endpunkte(values: dict[str, str]) -> list[tuple[str, int, bool]]:

@@ -5590,6 +5590,12 @@ function zeichneQuellen(quellen) {
       rechts.append(pille("gut", t("sources.reachable")));
     } else if (quelle.configured && quelle.reachable === false) {
       rechts.append(pille("krit", t("sources.unreachable")));
+    } else if (
+      quelle.configured
+      && (Zustand.peerCheckLaeuft || quelle.reachable == null)
+    ) {
+      // Noch kein Ergebnis — während des Checks und vor dem ersten Probe.
+      rechts.append(pille("warn", t("sources.connecting")));
     }
     rechts.append(pille(quellePrivacyStufe(quelle, liste), privacyLabel(quelle.privacy)));
 
@@ -5685,14 +5691,42 @@ async function verwerfeQuelle(quelle) {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
     });
+    // Zuerst Server-Antwort (P2P-Schalter aus), dann Config — sonst hält
+    // uebernehmeQuellenErreichbarkeit kurz den alten „an“-Stand.
+    if (Zustand.config && Array.isArray(ergebnis.sources)) {
+      Zustand.config.sources = ergebnis.sources;
+    }
     await ladeConfig();
-    zeichneQuellen(ergebnis.sources || Zustand.config.sources);
+    // Nach ladeConfig nochmals DELETE-Stand für bip158 erzwingen, falls Merge
+    // reachable/peers aus Altlasten mischt — configured kommt aus .env.
+    if (Array.isArray(ergebnis.sources)) {
+      const nach = Object.create(null);
+      for (const q of ergebnis.sources) {
+        if (q && q.key) nach[q.key] = q;
+      }
+      Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+        const frisch = nach[q.key];
+        if (!frisch) return q;
+        if (q.key === "bip158" || !frisch.configured) {
+          return {
+            ...frisch,
+            reachable: frisch.configured ? q.reachable : null,
+            peer_count: frisch.configured ? (q.peer_count || 0) : 0,
+            peer_hosts: frisch.configured ? (q.peer_hosts || []) : [],
+          };
+        }
+        return q;
+      });
+    }
+    zeichneDatenquellenAnsicht();
+    zeichneKopfStatus(Zustand.config.sources);
     meldung(
       quelle.key === "bip158"
         ? t("sources.p2pDisabled")
         : t("sources.discarded", { name: quelleName(quelle) }),
       "warn",
     );
+    // Node-Check nachziehen (nächste Quelle), P2P nicht wieder „an“ malen.
     pruefeNodeStatus();
   } catch (fehler) {
     meldung(fehler.message, "krit");
@@ -5825,12 +5859,17 @@ function quellenFormular(quelle, behaelter) {
         ? (eingabe.checked ? "true" : "false")
         : eingabe.value;
     }
+    const p2pWirdAn = quelle.key === "bip158"
+      && String(werte.BIP158_P2P || "").toLowerCase() === "true";
+    const hatteOeffentlich = oeffentlicheElectrumNochAktiv();
     try {
       const ergebnis = await api("/config/source", {
         methode: "PUT",
         daten: { source: quelle.key, values: werte },
       });
       await ladeConfig();
+      // Während des Tests „im Aufbau“ zeigen.
+      Zustand.peerCheckLaeuft = true;
       zeichneQuellen(ergebnis.sources || Zustand.config.sources);
       meldung(t("sources.appliedTesting"), "warn");
       try {
@@ -5839,6 +5878,9 @@ function quellenFormular(quelle, behaelter) {
           t("sources.appliedResult", { stand: stand.label }),
           stand.gut ? "gut" : "krit",
         );
+        if (p2pWirdAn && hatteOeffentlich && p2pQuelleVerbunden()) {
+          await frageP2pPrivatsphaereKappen();
+        }
       } catch (testFehler) {
         meldung(t("sources.appliedTestFailed", { msg: testFehler.message }), "krit");
       }
@@ -7791,11 +7833,102 @@ async function erlaubeOeffentlicheElectrum() {
       methode: "POST",
       daten: { erlauben: true },
     });
+    if (Zustand.config) Zustand.config.oeffentliche_electrum = true;
     await testeEigenenNode();
   } catch (fehler) {
     Zustand.oeffentlicheGefragt = false;
     logZeile(`Öffentliche Server: ${fehler.message}`, true);
   }
+}
+
+function oeffentlicheElectrumNochAktiv() {
+  if (Zustand.config?.oeffentliche_electrum) return true;
+  const liste = Zustand.config?.sources || [];
+  return liste.some(
+    (q) =>
+      q
+      && (q.key === "public_onion" || q.key === "clearnet")
+      && q.configured
+      && (q.reachable === true || (q.peer_count || 0) > 0),
+  );
+}
+
+function p2pQuelleVerbunden() {
+  const p2p = (Zustand.config?.sources || []).find((q) => q && q.key === "bip158");
+  return Boolean(
+    p2p
+    && p2p.configured
+    && (p2p.reachable === true || (p2p.peer_count || 0) > 0),
+  );
+}
+
+/**
+ * Nach P2P-Aktivierung: optional öffentliche Electrum-Nutzung kappen.
+ * @returns {Promise<"kappen"|"behalten"|undefined>}
+ */
+function frageP2pPrivatsphaereKappen() {
+  return new Promise((resolve) => {
+    const dlg = $("#p2p-privatsphaere-dialog");
+    if (!dlg) {
+      resolve(undefined);
+      return;
+    }
+    const ja = $("#p2p-privatsphaere-ja");
+    const nein = $("#p2p-privatsphaere-nein");
+    dlg.hidden = false;
+    if (ja) ja.focus();
+
+    const fertig = async (wahl) => {
+      ja?.removeEventListener("click", onJa);
+      nein?.removeEventListener("click", onNein);
+      dlg.removeEventListener("keydown", onTaste);
+      dlg.hidden = true;
+      if (wahl === "kappen") {
+        try {
+          await api("/source/oeffentlich", {
+            methode: "POST",
+            daten: { erlauben: false },
+          });
+          if (Zustand.config) Zustand.config.oeffentliche_electrum = false;
+          // Stale „verbunden“ an Onion/Clearnet entfernen.
+          Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+            if (q.key !== "public_onion" && q.key !== "clearnet") return q;
+            return {
+              ...q,
+              reachable: null,
+              peer_count: 0,
+              peer_hosts: [],
+            };
+          });
+          zeichneDatenquellenAnsicht();
+          zeichneKopfStatus(Zustand.config.sources);
+          logZeile("Öffentliche Electrum-Nutzung gekappt (höhere Privatsphäre).");
+          meldung(t("sources.publicCut"), "gut");
+        } catch (fehler) {
+          logZeile(`Öffentlich kappen: ${fehler.message}`, true);
+          meldung(fehler.message, "krit");
+        }
+      } else if (wahl === "behalten") {
+        logZeile("Öffentliche Electrum bleiben als Fallback erlaubt.");
+      }
+      resolve(wahl);
+    };
+    const onJa = () => fertig("kappen");
+    const onNein = () => fertig("behalten");
+    const onTaste = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        onNein();
+      }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        onJa();
+      }
+    };
+    ja?.addEventListener("click", onJa);
+    nein?.addEventListener("click", onNein);
+    dlg.addEventListener("keydown", onTaste);
+  });
 }
 
 /**
@@ -8534,11 +8667,18 @@ async function testeEigenenNode(knopf) {
     logZeile("Starte Verbindungstest…");
   }
   Zustand.peerCheckLaeuft = true;
+  // Sofort „Verbindung im Aufbau…“ in Datenquellen, solange der Check läuft.
+  if ($("#quellen-liste")?.childElementCount) {
+    zeichneQuellen(Zustand.config?.sources || []);
+  }
   try {
     const ergebnis = await apiSourceCheck();
     return nimmPeerStand(ergebnis, false);
   } finally {
     Zustand.peerCheckLaeuft = false;
+    if ($("#quellen-liste")?.childElementCount) {
+      zeichneQuellen(Zustand.config?.sources || []);
+    }
     if (knopf) {
       knopf.disabled = false;
       knopf.textContent = vorher || "Eigenen Node testen";

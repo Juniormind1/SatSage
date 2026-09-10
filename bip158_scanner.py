@@ -462,7 +462,12 @@ def addresses_to_script_pubkeys(addresses: Sequence[str]) -> dict[bytes, str]:
     """Convert base58/bech32 addresses to scriptPubKey bytes."""
     mapping: dict[bytes, str] = {}
     for address in addresses:
-        spk = bytes(address_to_scriptpubkey(address).data)
+        if not address:
+            continue
+        try:
+            spk = bytes(address_to_scriptpubkey(address).data)
+        except Exception:
+            continue
         mapping[spk] = address
     return mapping
 
@@ -1810,6 +1815,12 @@ def verify_p2p_filters(client: Bip158Client) -> int:
 
 
 def _used_scripts_aus_cache(xpub: str, cache_dir: Path | None) -> set[bytes]:
+    """
+    Used-Keys für TurboSync-Historie — nur nach abgeschlossenem Fullscan.
+
+    Zwischenstände nach Abbruch (UTXOs ohne ``bip158_fullscan_ok``) liefern
+    absichtlich leer, damit der nächste Lauf wieder Turbo-Erstscan macht.
+    """
     if cache_dir is None:
         return set()
     try:
@@ -1819,6 +1830,8 @@ def _used_scripts_aus_cache(xpub: str, cache_dir: Path | None) -> set[bytes]:
     except Exception:
         return set()
     roh = (eintrag or {}).get("raw") or {}
+    if not main_mod.bip158_fullscan_ist_fertig(roh):
+        return set()
     adressen: list[str] = []
     for utxo in roh.get("utxos") or []:
         addr = utxo.get("address")
@@ -2176,10 +2189,16 @@ def fetch_wallet_utxos_bip158(
         seed_out: dict[str, MatchedOutput] = {}
         seed_verlauf: dict[str, dict[str, Any]] = {}
         start_grund = "konfiguriert"
+        unvollstaendig = False
         if client.cache_dir is not None:
             entry = main_mod.load_xpub_cache_entry(xpub, client.cache_dir)
             roh = (entry or {}).get("raw") or {}
-            prev_tip = roh.get("scan_tip_height")
+            fertig = main_mod.bip158_fullscan_ist_fertig(roh)
+            unvollstaendig = bool(
+                (roh.get("utxos") or roh.get("bip158_fullscan_ok") is False)
+                and not fertig
+            )
+            prev_tip = roh.get("scan_tip_height") if fertig else None
             if prev_tip is not None:
                 try:
                     prev_tip_i = int(prev_tip)
@@ -2218,6 +2237,8 @@ def fetch_wallet_utxos_bip158(
             keys_txt = "ab Wallet-Beginn"
         elif used:
             keys_txt = f"{len(used)} used Keys"
+        elif unvollstaendig:
+            keys_txt = "Erstscan (letzter Lauf unvollständig — Turbo)"
         else:
             keys_txt = "Erstscan"
         anfang = (

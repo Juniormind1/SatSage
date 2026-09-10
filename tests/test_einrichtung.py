@@ -438,7 +438,15 @@ class TestOberflaeche(unittest.TestCase):
         # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
         # konfiguriertem, aber unerreichbarem eigenem Electrum.
         self.assertIn("q.reachable === true", self.js)
-        self.assertIn('nach.bip158', self.js)
+        self.assertIn("nach.bip158", self.js)
+
+    def test_p2p_privatsphaere_dialog_und_verbindungsaufbau(self):
+        self.assertIn('id="p2p-privatsphaere-dialog"', self.html)
+        self.assertIn("frageP2pPrivatsphaereKappen", self.js)
+        self.assertIn("sources.connecting", self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn('"sources.connecting": "Verbindung im Aufbau…"', de)
+        self.assertIn('"dialog.p2pPrivacy.title"', de)
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)

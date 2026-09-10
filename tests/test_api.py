@@ -827,12 +827,24 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
         self.assertEqual(körper["cleared"], "bip158")
+        # Wie manuelle Checkbox: false in .env, Feld und configured aus.
         self.assertEqual(
-            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "0",
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "false",
         )
         nach_key = {q["key"]: q for q in körper["sources"]}
         self.assertFalse(nach_key["bip158"]["configured"])
         self.assertFalse(nach_key["bip158"]["verwerfbar"])
+        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
+        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
+        # GET /config darf P2P nicht wieder als an zeigen.
+        status2, cfg = self.anfrage("/api/config")
+        self.assertEqual(status2, 200)
+        bip = next(q for q in cfg["sources"] if q["key"] == "bip158")
+        self.assertFalse(bip["configured"])
+        self.assertEqual(
+            next(f["value"] for f in bip["felder"] if f["key"] == "BIP158_P2P"),
+            "false",
+        )
 
     def test_p2p_aufbauen_schalter_schreibt_env(self):
         status, körper = self.anfrage(
