@@ -5318,6 +5318,15 @@ def starte_im_hintergrund(
     )
 
 
+def tip_sync_laeuft(state: AppState) -> bool:
+    """Ob gerade ein Tip-Nachzug-Job läuft (Watcher darf dann nachziehen)."""
+    jid = state.wallet_sync_job_id
+    if not jid:
+        return False
+    job = state.jobs.get(jid)
+    return bool(job is not None and job.status == "running")
+
+
 def starte_wallet_aktualisierung(
     state: AppState,
     *,
@@ -5337,10 +5346,8 @@ def starte_wallet_aktualisierung(
         werte
     ):
         return None
-    if state.wallet_sync_job_id:
-        laufend = state.jobs.get(state.wallet_sync_job_id)
-        if laufend is not None and laufend.status == "running":
-            return None
+    if tip_sync_laeuft(state):
+        return None
 
     # Auch leerer Cache (0 UTXOs) zählt — Scan-Stand zum Fortsetzen.
     eintraege = [
@@ -5472,6 +5479,12 @@ def starte_wallet_aktualisierung(
         finally:
             halt.set()
             stand.close()
+            try:
+                from core import wallet_watch
+
+                wallet_watch.get_watch_service().tip_nachzug_job_beendet()
+            except Exception:
+                pass
 
     namen = ", ".join(e.display_name for e in eintraege[:3])
     if len(eintraege) > 3:
@@ -5516,10 +5529,8 @@ def api_wallet_tip_sync(state: AppState, payload: dict | None = None) -> dict:
                 "Kein UTXO-Cache — zuerst UTXO-Scan (Fullscan), "
                 "danach Tip-Nachzug.",
             )
-    if state.wallet_sync_job_id:
-        laufend = state.jobs.get(state.wallet_sync_job_id)
-        if laufend is not None and laufend.status == "running":
-            raise ApiError(409, "Tip-Nachzug läuft bereits.")
+    if tip_sync_laeuft(state):
+        raise ApiError(409, "Tip-Nachzug läuft bereits.")
     daten = starte_wallet_aktualisierung(
         state, erzwingen=True, wallet_ids=ids,
     )

@@ -234,6 +234,45 @@ class TestWalletsBeimStart(unittest.TestCase):
             main.try_bip158_fetch_for_tip_sync(args, env, None)
         )
 
+    def test_electrs_light_hebt_tip_auf_live_electrs(self):
+        """Ohne Aktivität: scan_tip_height folgt dem Electrs-Tip (force)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            alt = _utxo(100, "a")
+            main.save_xpub_utxo_cache(
+                BIP84_ZPUB, [alt], cache, "fulcrum",
+                scan_end_index=2, scan_tip_height=900_000,
+            )
+
+            class FakeFulcrum:
+                pass
+
+            def fetch_addr(addr, **_kw):
+                return [dict(alt)] if addr == alt["address"] else []
+
+            with mock.patch(
+                "fulcrum.get_chain_tip_height", return_value=912_345
+            ) as tip_fn, mock.patch(
+                "core.p2p.header_datei_tip", return_value=900_100
+            ), mock.patch(
+                "main.discover_wallet_scan_addresses",
+                return_value=(set(), 2),
+            ):
+                out = main.sync_xpub_zum_tip(
+                    BIP84_ZPUB,
+                    lambda *_a, **_k: [],
+                    fetch_addr,
+                    None,
+                    cache,
+                    "fulcrum",
+                    fulcrum=FakeFulcrum(),
+                )
+            self.assertIsNotNone(out)
+            tip_fn.assert_called()
+            self.assertTrue(tip_fn.call_args.kwargs.get("force"))
+            entry = main.load_xpub_cache_entry(BIP84_ZPUB, cache)
+            self.assertEqual(entry["raw"].get("scan_tip_height"), 912_345)
+
 
 if __name__ == "__main__":
     unittest.main()

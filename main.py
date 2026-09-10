@@ -5975,11 +5975,19 @@ def sync_xpub_zum_tip(
     merged = _merge_utxo_lists(merged, extra_utxos)
     merged = _merge_utxo_lists(merged, extra_window)
     old_n = len(alt)
-    # Electrs light liefert keinen Filter-Tip — Header-Cache-Tip merken,
-    # damit der nächste Start-Sync BIP-158 multi-peer ab Tip nutzen kann.
-    # Electrs light: Tip auf Header-Cache anheben (auch wenn schon ein
-    # älterer scan_tip_height stand — sonst bleibt „−N Blöcke“ hängen).
+    # Electrs light: Tip auf Live-Electrs (bevorzugt) bzw. Header-Datei
+    # anheben — sonst bleibt „−N Blöcke“ hängen, wenn p2p_headers hinter
+    # dem Node liegt oder stundenlang nicht nachgezogen wurde.
     tip_fuer_cache = tip_i
+    if fulcrum is not None:
+        try:
+            from fulcrum import get_chain_tip_height
+
+            et = int(get_chain_tip_height(fulcrum, force=True))
+            if tip_fuer_cache is None or et > int(tip_fuer_cache):
+                tip_fuer_cache = et
+        except Exception:
+            pass
     try:
         from core.p2p import header_datei_tip, p2p_headers_path
 

@@ -1668,12 +1668,17 @@ def _tip_height_via_binary_search(client) -> int:
     return lo
 
 
-def get_chain_tip_height(client: FulcrumClient) -> int:
-    """Aktuelle Chain-Tip-Höhe (subscribe, sonst Binärsuche auf block.header)."""
+def get_chain_tip_height(client: FulcrumClient, *, force: bool = False) -> int:
+    """Aktuelle Chain-Tip-Höhe (subscribe, sonst Binärsuche auf block.header).
+
+    *force*: Cache ignorieren — nötig für Tip-Nachzug über Stunden, sonst
+    bleibt der Prozess auf dem ersten Tip der Session kleben.
+    """
     cache_key = _fulcrum_client_cache_key(client)
-    cached = _TIP_HEIGHT_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
+    if not force:
+        cached = _TIP_HEIGHT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
     try:
         result = client.request("blockchain.headers.subscribe")
