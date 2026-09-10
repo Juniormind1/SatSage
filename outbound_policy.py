@@ -72,6 +72,10 @@ def public_opt_in(values: dict[str, str] | None = None, service: str = "") -> bo
         keys.insert(0, f"SATSAGE_{service_key}_PUBLIC_OPT_IN")
     if service_key == "LLM":
         keys.append("LLM_REMOTE_OPT_IN")
+    # Öffentliche Electrum (Onion/Clearnet) nach UI-Bestätigung —
+    # sonst blockiert die Allowlist Clearnet-IPs trotz OEFFENTLICHE_ELECTRUM=1.
+    if service_key in ("", "FULCRUM", "ELECTRUM"):
+        keys.append("OEFFENTLICHE_ELECTRUM")
     return any(_truthy(_setting(values, key)) for key in keys)
 
 
