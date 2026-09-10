@@ -143,6 +143,10 @@ function quelleDetail(quelle) {
     (_, n) => t("sources.detail.extraPeers", { n }),
   );
   d = d
+    .replace(
+      /\baus — öffentliche Listen können greifen\b/g,
+      t("sources.detail.p2pOff"),
+    )
     .replace(/\bnicht eingetragen\b/g, t("sources.detail.notSet"))
     .replace(/\bkeine eingetragen\b/g, t("sources.detail.noneSet"))
     .replace(/\bkeine Liste\b/g, t("sources.detail.noList"))
@@ -2330,11 +2334,31 @@ function stelleScanAn(art) {
   starteScanFuer(ziel);
 }
 
+/**
+ * BIP-158-Startdatum fragen, wenn das Wallet kein First-seen hat und der
+ * UTXO-Scan über Compact Filter laufen wird (oder dorthin fällt).
+ *
+ * Früher: nur wenn autoQuelle() === bip158. autoQuelle nimmt aber die erste
+ * *konfigurierte* Quelle (z. B. eigenen Electrum-Host), auch wenn der nicht
+ * erreichbar ist und der Scan real über P2P geht — dann fehlte der Dialog.
+ */
 function brauchtBip158Startdatum(walletId) {
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   if (!wallet || wallet.first_seen_height) return false;
-  const aktiv = autoQuelle(Zustand.config?.sources);
-  return Boolean(aktiv && aktiv.key === "bip158");
+
+  const liste = Zustand.config?.sources || [];
+  const nach = {};
+  for (const q of liste) nach[q.key] = q;
+
+  const bip = nach.bip158;
+  if (!bip || !bip.configured) return false;
+
+  // Eigener Node wirklich verbunden → Gap-Scan ohne BIP-158-Geburtstag.
+  for (const key of ["own_fulcrum", "own_core"]) {
+    const q = nach[key];
+    if (q && q.configured && q.reachable === true) return false;
+  }
+  return true;
 }
 
 function vorschlagScanDatum(wallet) {
@@ -5495,26 +5519,42 @@ function aktualisiereSpeicherleiste() {
 }
 
 /**
+ * Hoch-private Quelle verdrängt mäßig/gering (Auto-Vorrang), solange sie
+ * nicht nachweislich unerreichbar ist.
+ */
+function quelleHochVerdraengt(quellen) {
+  return (quellen || []).some(
+    (q) => q && q.privacy === "hoch" && q.configured && q.reachable !== false,
+  );
+}
+
+/**
  * Farbe der Erläuterungsnotiz unter einer Datenquelle.
  * - grün: konfiguriert und Privatsphäre hoch
- * - grau: nicht konfiguriert; oder mäßig/gering und aktuell nicht genutzt,
- *   weil eine hoch-private Quelle konfiguriert/verbunden ist (Auto-Vorrang)
- * - gelb: mäßig/gering und relevant (keine bessere Hoch-Privatsphäre aktiv)
+ * - grau: nicht konfiguriert; Liste geladen aber unverbunden; oder mäßig/gering
+ *   und von einer Hoch-Privatsphäre-Quelle verdrängt
+ * - gelb: mäßig/gering mit bestehender und genutzter Verbindung
  */
 function quelleNotizKlasse(quelle, quellen) {
   if (!quelle.configured) return "quelle-notiz notiz-inaktiv";
   if (quelle.privacy === "hoch") return "quelle-notiz notiz-hoch";
+  // Nur gelb bei echter, genutzter Verbindung — geladene Liste allein bleibt grau.
+  if (quelle.reachable !== true || quelleHochVerdraengt(quellen)) {
+    return "quelle-notiz notiz-inaktiv";
+  }
+  return "quelle-notiz";
+}
 
-  const bessere = (quellen || []).filter(
-    (q) => q && q.privacy === "hoch" && q.configured,
-  );
-  if (!bessere.length) return "quelle-notiz";
-
-  // Verbunden oder ungetestet: Hoch-Privatsphäre hat Auto-Vorrang.
-  // Nur wenn alle besseren Quellen nachweislich unerreichbar sind, bleibt
-  // die mäßige/geringe Quelle relevant (gelb).
-  const verdrängt = bessere.some((q) => q.reachable !== false);
-  return verdrängt ? "quelle-notiz notiz-inaktiv" : "quelle-notiz";
+/**
+ * Privatsphäre-Pille: mäßig/gering erst bei genutzter Verbindung färben.
+ */
+function quellePrivacyStufe(quelle, quellen) {
+  if (!quelle.configured) return "neutral";
+  if (quelle.privacy === "hoch") return "gut";
+  if (quelle.reachable !== true || quelleHochVerdraengt(quellen)) {
+    return "neutral";
+  }
+  return ({ "mäßig": "warn", gering: "krit" }[quelle.privacy] || "neutral");
 }
 
 function zeichneQuellen(quellen) {
@@ -5551,12 +5591,7 @@ function zeichneQuellen(quellen) {
     } else if (quelle.configured && quelle.reachable === false) {
       rechts.append(pille("krit", t("sources.unreachable")));
     }
-    // Privatsphäre-Farbe nur wenn die Quelle wirklich konfiguriert ist —
-    // sonst wäre „hoch“ nur hypothetisch und wirkt fälschlich aktiv (grün).
-    const stufe = !quelle.configured
-      ? "neutral"
-      : ({ hoch: "gut", "mäßig": "warn", gering: "krit" }[quelle.privacy] || "neutral");
-    rechts.append(pille(stufe, privacyLabel(quelle.privacy)));
+    rechts.append(pille(quellePrivacyStufe(quelle, liste), privacyLabel(quelle.privacy)));
 
     const formular = document.createElement("div");
     formular.className = "quelle-formular";
@@ -5590,7 +5625,9 @@ function zeichneQuellen(quellen) {
       korb.textContent = "🗑";
       korb.title = bridgeManaged
         ? t("sources.start9BridgeHint")
-        : t("sources.discardTitle", { name: anzeigename });
+        : (quelle.key === "bip158"
+          ? t("sources.disableP2pTitle")
+          : t("sources.discardTitle", { name: anzeigename }));
       korb.disabled = bridgeManaged;
       korb.addEventListener("click", () => verwerfeQuelle(quelle));
       rechts.append(korb);
@@ -5604,6 +5641,16 @@ function zeichneQuellen(quellen) {
       laden.title = t("sources.loadElectrumTitle", { url: quelle.laden_url });
       laden.addEventListener("click", () => ladeElectrumServer(quelle, laden));
       rechts.append(laden);
+      // Papierkorb hinter dem Laden-Knopf: nur die Serverliste, nicht Opt-in.
+      if (quelle.configured) {
+        const listeKorb = document.createElement("button");
+        listeKorb.type = "button";
+        listeKorb.className = "stift papierkorb";
+        listeKorb.textContent = "🗑";
+        listeKorb.title = t("sources.clearListTitle", { name: anzeigename });
+        listeKorb.addEventListener("click", () => loescheElectrumListe(quelle));
+        rechts.append(listeKorb);
+      }
     }
 
     zeile.append(rang, name, detail, rechts);
@@ -5629,7 +5676,9 @@ function zeichneQuellen(quellen) {
 
 async function verwerfeQuelle(quelle) {
   const ok = window.confirm(
-    t("sources.confirmDiscard", { name: quelleName(quelle) }),
+    quelle.key === "bip158"
+      ? t("sources.confirmDisableP2p")
+      : t("sources.confirmDiscard", { name: quelleName(quelle) }),
   );
   if (!ok) return;
   try {
@@ -5638,7 +5687,12 @@ async function verwerfeQuelle(quelle) {
     });
     await ladeConfig();
     zeichneQuellen(ergebnis.sources || Zustand.config.sources);
-    meldung(t("sources.discarded", { name: quelleName(quelle) }), "warn");
+    meldung(
+      quelle.key === "bip158"
+        ? t("sources.p2pDisabled")
+        : t("sources.discarded", { name: quelleName(quelle) }),
+      "warn",
+    );
     pruefeNodeStatus();
   } catch (fehler) {
     meldung(fehler.message, "krit");
@@ -5665,6 +5719,24 @@ async function ladeElectrumServer(quelle, knopf) {
   }
 }
 
+async function loescheElectrumListe(quelle) {
+  const ok = window.confirm(
+    t("sources.confirmClearList", { name: quelleName(quelle) }),
+  );
+  if (!ok) return;
+  try {
+    const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
+      methode: "DELETE",
+    });
+    await ladeConfig();
+    zeichneQuellen(ergebnis.sources || Zustand.config.sources);
+    meldung(t("sources.listCleared", { name: quelleName(quelle) }), "warn");
+    pruefeNodeStatus();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  }
+}
+
 /** Baut das Bearbeitungsformular einer Datenquelle. */
 function quellenFormular(quelle, behaelter) {
   const form = document.createElement("div");
@@ -5681,7 +5753,12 @@ function quellenFormular(quelle, behaelter) {
     zeile.append(titel);
 
     let eingabe;
-    if (feld.typ === "schalter") {
+    if (feld.typ === "checkbox") {
+      eingabe = document.createElement("input");
+      eingabe.type = "checkbox";
+      eingabe.checked = feld.value === "true";
+      eingabe.className = "feld-checkbox";
+    } else if (feld.typ === "schalter") {
       eingabe = document.createElement("select");
       for (const [wert, text] of [["true", t("common.yes")], ["false", t("common.no")]]) {
         const option = document.createElement("option");
@@ -5744,7 +5821,9 @@ function quellenFormular(quelle, behaelter) {
     meldungsfeld.textContent = "";
     const werte = {};
     for (const [key, eingabe] of eingaben) {
-      werte[key] = eingabe.value;
+      werte[key] = eingabe.type === "checkbox"
+        ? (eingabe.checked ? "true" : "false")
+        : eingabe.value;
     }
     try {
       const ergebnis = await api("/config/source", {
@@ -7466,8 +7545,13 @@ function peerTaktMs(quellen) {
 /**
  * Live-Peers aus Job/Config in die BIP-158-Quelle und Kopf-Pille schreiben.
  * Ohne Netzprobe — die Connections hält der Scan bereits.
+ *
+ * @param {{ setzeStatus?: boolean }} opts  setzeStatus=false: nur Quellen/Pille,
+ *   peerStatus setzt der Aufrufer (nimmPeerStand) — sonst überschreibt die
+ *   kurze Tor-Probe (oft 2 Peers) den Live-Stand und erzeugt „Wechsel: 2 → N“.
  */
-function nimmLiveP2pPeers(hosts) {
+function nimmLiveP2pPeers(hosts, opts = {}) {
+  const setzeStatus = opts.setzeStatus !== false;
   const liste = Array.isArray(hosts)
     ? hosts.map((h) => String(h || "").trim()).filter(Boolean)
     : [];
@@ -7480,18 +7564,17 @@ function nimmLiveP2pPeers(hosts) {
       // Scan vorbei: Live-Markierung fallen lassen, Check-Stand behalten.
       return q;
     }
-    const alt = Array.isArray(q.peer_hosts) ? q.peer_hosts : [];
-    const hostsMerged = [...new Set([...alt, ...uniq])];
+    // Nur aktuelle Live-Hosts — nicht unbegrenzt mit alten Probe-Hosts mergen.
     return {
       ...q,
       reachable: true,
-      peer_count: Math.max(Number(q.peer_count) || 0, hostsMerged.length),
-      peer_hosts: hostsMerged,
+      peer_count: uniq.length,
+      peer_hosts: uniq,
       error: "",
     };
   });
   Zustand.config.sources = sources;
-  if (uniq.length) {
+  if (uniq.length && setzeStatus) {
     Zustand.peerStatus = {
       n: uniq.length,
       kind: "p2p",
@@ -7608,6 +7691,7 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
 }
 
 function nimmPeerStand(ergebnis, still) {
+  const altStand = Zustand.peerStatus;
   const quellen = uebernehmeQuellenErreichbarkeit(
     Zustand.config?.sources,
     ergebnis.sources || [],
@@ -7622,21 +7706,40 @@ function nimmPeerStand(ergebnis, still) {
       Zustand.config.header_tip = ergebnis.header_tip;
     }
   }
-  if (Array.isArray(ergebnis.live_p2p_peers) && ergebnis.live_p2p_peers.length) {
-    nimmLiveP2pPeers(ergebnis.live_p2p_peers);
+  const liveHosts = Array.isArray(ergebnis.live_p2p_peers)
+    ? [...new Set(
+      ergebnis.live_p2p_peers.map((h) => String(h || "").trim()).filter(Boolean),
+    )]
+    : [];
+  if (liveHosts.length) {
+    // Quellen aktualisieren, peerStatus noch nicht — sonst steht der Vergleich
+    // immer auf der kurzen Live-/Tor-Probe (oft 2) statt dem letzten Stand.
+    nimmLiveP2pPeers(liveHosts, { setzeStatus: false });
   }
-  const stand = peerStatusAusQuellen(
+  let stand = peerStatusAusQuellen(
     Zustand.config?.sources || quellen,
     ergebnis.peer_status,
   );
+  // Aktive Filter-Peers des Scans schlagen die Erreichbarkeits-Probe
+  // (Probe über Tor oft max. 2, Scan-Pool kann anders zählen).
+  if (liveHosts.length && (Zustand.rescanJob || stand.kind === "p2p" || stand.kind === "none")) {
+    stand = {
+      n: liveHosts.length,
+      kind: "p2p",
+      label:
+        liveHosts.length === 1
+          ? "1 Peer verbunden"
+          : `${liveHosts.length} Peers verbunden`,
+      peers: liveHosts,
+      gut: true,
+    };
+  }
   const ruhig = eigeneNodesBeideErreichbar(ergebnis.sources);
   // Bei Electrs+Core kein Log über ausfallende P2P-/Wechsel-Peers —
   // der stille Takt reicht alle 10 Min für den Header-Tip.
-  if (still && Zustand.peerStatus && !ruhig) {
+  if (still && altStand && !ruhig) {
     const scanLaeuft = Boolean(Zustand.rescanJob);
-    for (const zeile of peerAenderungenFuerLog(
-      Zustand.peerStatus, stand, scanLaeuft,
-    )) {
+    for (const zeile of peerAenderungenFuerLog(altStand, stand, scanLaeuft)) {
       logZeile(zeile, true);
     }
   }
@@ -7644,11 +7747,13 @@ function nimmPeerStand(ergebnis, still) {
   Zustand.peers = stand.n;
   Zustand.peerLabel = stand.label;
   Zustand.peersGeprueft = true;
-  zeichneKopfStatus(quellen);
+  zeichneKopfStatus(Zustand.config?.sources || quellen);
   aktualisiereDatenquellenNav();
   const liste = $("#quellen-liste");
-  if (liste && liste.childElementCount) zeichneQuellen(quellen);
-  setzePeerTakt(quellen);
+  if (liste && liste.childElementCount) {
+    zeichneQuellen(Zustand.config?.sources || quellen);
+  }
+  setzePeerTakt(Zustand.config?.sources || quellen);
   if (
     !still &&
     ergebnis.peer_status &&

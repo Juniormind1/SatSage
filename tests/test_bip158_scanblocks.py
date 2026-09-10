@@ -25,15 +25,30 @@ from core.p2p import (
 
 class TestTurboPasses(unittest.TestCase):
 
-    def test_erstscan_ohne_used_ist_ein_historien_pass(self):
+    def test_erstscan_ohne_used_ist_turbo_dann_historie(self):
+        """Wasabi-Erstscan: Turbo(all) zuerst, Historie nur Gap — kein Full-All-Keys."""
         alle = {b"\x01", b"\x02", b"\x03"}
+        gap = {b"\x01"}
+        tip = 900_000
+        passe = plane_filter_passes(481_824, tip, alle, set(), gap_scripts=gap)
+        self.assertEqual(len(passe), 2)
+        turbo, histo = passe
+        self.assertEqual(turbo[0], "turbo")
+        self.assertEqual(turbo[1], tip - TURBO_WINDOW + 1)
+        self.assertEqual(turbo[2], tip)
+        self.assertEqual(turbo[3], frozenset(alle))
+        self.assertEqual(histo[0], "historie")
+        self.assertEqual(histo[1], 481_824)
+        self.assertEqual(histo[2], turbo[1] - 1)
+        self.assertEqual(histo[3], frozenset(gap))
+        self.assertNotEqual(histo[3], frozenset(alle))
+
+    def test_erstscan_ohne_gap_historie_leer(self):
+        alle = {b"\x01", b"\x02"}
         passe = plane_filter_passes(481_824, 900_000, alle, set())
-        self.assertEqual(len(passe), 1)
-        name, von, bis, scripts = passe[0]
-        self.assertEqual(name, "historie")
-        self.assertEqual(von, 481_824)
-        self.assertEqual(bis, 900_000)
-        self.assertEqual(scripts, frozenset(alle))
+        self.assertEqual(passe[0][0], "turbo")
+        self.assertEqual(passe[1][0], "historie")
+        self.assertEqual(passe[1][3], frozenset())
 
     def test_used_keys_historie_lookahead_nur_turbo(self):
         used = {b"\x01"}
@@ -60,7 +75,7 @@ class TestTurboPasses(unittest.TestCase):
 
     def test_filter_umfang_ist_nach_den_paessen_bekannt(self):
         alle = {b"\x01"}
-        erst = plane_filter_passes(481_824, 900_000, alle, set())
+        erst = plane_filter_passes(481_824, 900_000, alle, set(), gap_scripts=alle)
         self.assertEqual(_filter_umfang(erst), 900_000 - 481_824 + 1)
         zwei = plane_filter_passes(481_824, 900_000, alle, {b"\x01"})
         self.assertEqual(
@@ -148,6 +163,39 @@ class TestFilterParallel(unittest.TestCase):
     def test_filter_treffer_loggt_bevor_der_block_kommt(self):
         from unittest.mock import patch
 
+        from bip158_scanner import _BLOCK_PENDING, _lade_cfilter_chunk
+        import queue
+
+        logs: list[str] = []
+        q: queue.Queue = queue.Queue()
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(b"\x11" * 32, b"\x01")]
+
+            def fetch_block(self, block_hash):
+                raise AssertionError("async: kein Sync-Fetch im Filter-Worker")
+
+        peer = FakePeer()
+        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            zeilen = _lade_cfilter_chunk(
+                peer, 850_123, 850_123, b"\x22" * 32,
+                frozenset({b"\x01"}), on_log=logs.append,
+                block_queue=q,
+            )
+        self.assertTrue(
+            any("Filter-Treffer Block 850.123 — hole Block" in z for z in logs),
+            logs,
+        )
+        self.assertIs(zeilen[0][3], _BLOCK_PENDING)
+        hoehe, bhash = q.get_nowait()
+        self.assertEqual(hoehe, 850_123)
+        self.assertEqual(bhash, b"\x11" * 32)
+
+    def test_filter_treffer_sync_ohne_queue(self):
+        from unittest.mock import patch
+
         from bip158_scanner import _lade_cfilter_chunk
 
         logs: list[str] = []
@@ -168,16 +216,87 @@ class TestFilterParallel(unittest.TestCase):
                 peer, 850_123, 850_123, b"\x22" * 32,
                 frozenset({b"\x01"}), on_log=logs.append,
             )
-        self.assertTrue(
-            any("Filter-Treffer Block 850.123 — hole Block" in z for z in logs),
-            logs,
-        )
-        self.assertTrue(
-            any("hole Block" in z for z in peer.gesehen),
-            peer.gesehen,
-        )
+        self.assertTrue(any("hole Block" in z for z in peer.gesehen), peer.gesehen)
         self.assertEqual(peer.hash, b"\x11" * 32)
         self.assertIsNotNone(zeilen[0][3])
+        self.assertIsNot(zeilen[0][3], object())
+
+    def test_cfilter_cache_zweiter_scan_ohne_netz(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from bip158_scanner import _lade_cfilter_chunk
+        from core.cfilter_cache import speichere_cfilter_blob
+
+        hoehe = 850_100
+        bhash = b"\xab" * 32
+        blob = b"\x01\x02\x03"
+
+        class FakePeer:
+            def __init__(self):
+                self.fetches = 0
+
+            def fetch_cfilters(self, start, stop, expect):
+                self.fetches += 1
+                raise AssertionError("Cache warm — kein getcfilters")
+
+            def fetch_block(self, block_hash):
+                raise AssertionError("kein Match")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            speichere_cfilter_blob(root, hoehe, bhash, blob)
+            peer = FakePeer()
+            stats = {"geholt": 0, "gecacht": 0}
+            with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+                matcher.return_value.match_any.return_value = False
+                zeilen = _lade_cfilter_chunk(
+                    peer, hoehe, hoehe, bhash,
+                    frozenset({b"\x01"}),
+                    hash_at=lambda h: bhash,
+                    cache_dir=root,
+                    stats=stats,
+                )
+            self.assertEqual(peer.fetches, 0)
+            self.assertEqual(stats["gecacht"], 1)
+            self.assertEqual(stats["geholt"], 0)
+            self.assertEqual(zeilen[0][2], blob)
+
+    def test_filter_hit_enqueued_block_fetch_async(self):
+        """Treffer geht in die Queue; Block-Worker holt nach Filter-Match."""
+        import threading
+        import time
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+
+        fetch_block_calls: list = []
+        filter_done = threading.Event()
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                time.sleep(0.02)
+                filter_done.set()
+                return [(b"\x11" * 32, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, block_hash):
+                fetch_block_calls.append((block_hash, filter_done.is_set()))
+                time.sleep(0.05)
+                return b"\x00" * 80
+
+        peer = FakePeer()
+        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [peer],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0][0][3], b"\x00" * 80)
+        self.assertEqual(len(fetch_block_calls), 1)
+        self.assertTrue(fetch_block_calls[0][1], "Filter-Match vor Block-Fetch")
 
     def test_beschreibe_block_treffer_nennt_utxos_und_fp(self):
         from bip158_scanner import MatchedOutput, _beschreibe_block_treffer

@@ -3279,27 +3279,60 @@ def _live_p2p_peers() -> list[str]:
 
 def api_clear_source(state: AppState, quelle: str) -> dict:
     """
-    Streicht einen eigenen Node (Electrum oder Bitcoin Core) aus der .env.
+    Streicht einen eigenen Node aus der .env, schaltet P2P aus
+    (``BIP158_P2P=0``), oder löscht nur die geladene öffentliche
+    Electrum-Liste (Onion-Rotation / electrum_servers.json).
+    Opt-in ``OEFFENTLICHE_ELECTRUM`` bleibt unberührt.
     """
     name = (quelle or "").strip()
     _datenquellen_config_gesperrt(state, quelle=name, aktion="verwerfen")
-    if name not in ("own_fulcrum", "own_core"):
+    env = state.env()
+    sicherung = None
+
+    if name in ("own_fulcrum", "own_core"):
+        erlaubt = source_mod.EDITIERBARE_FELDER[name]
+        # Tor-Proxy teilen sich mehrere Quellen — nicht mit Core löschen.
+        loeschen = [
+            k for k in erlaubt
+            if not (name == "own_core" and k == "FULCRUM_TOR_PROXY")
+        ]
+        env.apply({schluessel: None for schluessel in loeschen})
+        try:
+            sicherung = env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+    elif name == "bip158":
+        # Explizit 0 — fehlender Schlüssel bedeutet sonst wieder „an“ (Default 1).
+        env.apply({"BIP158_P2P": "0"})
+        try:
+            sicherung = env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+    elif name == "public_onion":
+        updates: dict[str, str | None] = {}
+        for i in range(main.MAX_PUBLIC_ONION_SERVERS):
+            updates[f"FULCRUM_TOR_{i}"] = None
+            updates[f"FULCRUM_PORT_{i}"] = None
+            updates[f"FULCRUM_SSL_{i}"] = None
+        env.apply(updates)
+        try:
+            sicherung = env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+    elif name == "clearnet":
+        ziel = main.ELECTRUM_SERVERS_FILE
+        if ziel.is_file():
+            try:
+                ziel.unlink()
+            except OSError as exc:
+                raise ApiError(500, "Interner Serverfehler.") from exc
+    else:
         raise ApiError(
             400,
-            "Nur eigener Electrum-Server oder Bitcoin Core können verworfen werden.",
+            "Nur eigener Electrum-Server, Bitcoin Core, P2P oder öffentliche "
+            "Electrum-Listen können verworfen werden.",
         )
-    erlaubt = source_mod.EDITIERBARE_FELDER[name]
-    env = state.env()
-    # Tor-Proxy teilen sich mehrere Quellen — nicht mit Core löschen.
-    loeschen = [
-        k for k in erlaubt
-        if not (name == "own_core" and k == "FULCRUM_TOR_PROXY")
-    ]
-    env.apply({schluessel: None for schluessel in loeschen})
-    try:
-        sicherung = env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
+
     state.reload()
     werte = state.env().values()
     return {

@@ -822,17 +822,86 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(nach_key["own_fulcrum"]["configured"])
         self.assertFalse(nach_key["own_fulcrum"]["verwerfbar"])
 
-    def test_p2p_laesst_sich_nicht_verwerfen(self):
+    def test_p2p_laesst_sich_ausschalten(self):
         status, körper = self.anfrage("/api/config/source/bip158", methode="DELETE")
-        self.assertEqual(status, 400)
-        self.assertIn("verworfen", körper["error"])
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["saved"])
+        self.assertEqual(körper["cleared"], "bip158")
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "0",
+        )
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["bip158"]["configured"])
+        self.assertFalse(nach_key["bip158"]["verwerfbar"])
 
-    def test_fremde_quelle_laesst_sich_nicht_verwerfen(self):
+    def test_p2p_aufbauen_schalter_schreibt_env(self):
         status, körper = self.anfrage(
-            "/api/config/source/public_onion", methode="DELETE",
+            "/api/config/source",
+            methode="PUT",
+            daten={
+                "source": "bip158",
+                "values": {
+                    "BIP158_P2P": "false",
+                    "BIP158_START_HEIGHT": "481824",
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "false",
+        )
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["bip158"]["configured"])
+        # Checkbox-Feld ist im Formular.
+        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
+        self.assertEqual(felder["BIP158_P2P"]["typ"], "checkbox")
+        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
+
+    def test_unbekannte_quelle_laesst_sich_nicht_loeschen(self):
+        status, körper = self.anfrage(
+            "/api/config/source/mempool", methode="DELETE",
         )
         self.assertEqual(status, 400)
         self.assertIn("verworfen", körper["error"])
+
+    def test_oeffentliche_onion_liste_laesst_sich_loeschen(self):
+        self.anfrage(
+            "/api/config/source",
+            methode="PUT",
+            daten={
+                "source": "public_onion",
+                "values": {"FULCRUM_TOR_LISTE": "aaa.onion\nbbb.onion\n"},
+            },
+        )
+        vor = main._load_dotenv(self.env_pfad)
+        self.assertEqual(vor.get("FULCRUM_TOR_0"), "aaa.onion")
+        status, körper = self.anfrage(
+            "/api/config/source/public_onion", methode="DELETE",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["saved"])
+        self.assertEqual(körper["cleared"], "public_onion")
+        nach = main._load_dotenv(self.env_pfad)
+        self.assertNotIn("FULCRUM_TOR_0", nach)
+        self.assertNotIn("FULCRUM_TOR_1", nach)
+        # Opt-in und Proxy bleiben unberührt, wenn gesetzt.
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["public_onion"]["configured"])
+
+    def test_clearnet_liste_laesst_sich_loeschen(self):
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text('{"s1.example": {"t": "50001"}}', encoding="utf-8")
+        with mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            self.assertTrue(ziel.is_file())
+            status, körper = self.anfrage(
+                "/api/config/source/clearnet", methode="DELETE",
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["saved"])
+        self.assertEqual(körper["cleared"], "clearnet")
+        self.assertFalse(ziel.is_file())
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["clearnet"]["configured"])
 
     def test_source_status_ohne_check_bleibt_json(self):
         status, körper = self.anfrage("/api/source/status")
