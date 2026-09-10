@@ -18,6 +18,7 @@ Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diese
 - **Design Â· Node-Anbindung:** `doc/design-node-anbindung.md` â€” schick, minimalistisch, fehlertolerant; Konfigurationsfehler mÃ¶glichst von der App abfangen (nicht vom Nutzer)
 - **Grok-Bot (remote, z.â€¯B. nur iPhone + GitHub):** `GROK_BOT.md` â€” hart: keine Secrets/Heim-Node; **Mainnet nie**; Lab/CI: **Regtest â†’ Signet â†’ Testnet nur Ausnahme**; Lab-Env getrennt von Prod-`.env` (kein eingebauter Multi-Chain-Schalter)
 - **Web-GUI-StabilitÃ¤t (Rumgeklicke):** Protokoll `doc/testprotokoll-webgui-stabilitaet.md`; halbautomatisch `scripts/webgui_chaos_run.py` + `scripts/webgui_chaos_harness.js` (optional Playwright)
+- **Datenquellen-Wechsel waehrend Scan:** Protokoll `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — P2P vs Electrum, Job-Snapshot, Cache-Flags, Queue
 - **GUI-Tests Â· Token:** Nie Token aus Logs greppen. Session-JSON `tmp/satsage-gui-session.json` bzw. Zeile `SATSAGE_SESSION {â€¦}`; Helfer `scripts/webgui_test_ready.py spawn|attach|url`; Protokoll `doc/gui-test-protokoll.md`. Chaos: `--spawn`.
 - **StartOS-Sideload (`.s9pk`):** Wrapper liegt in **`packaging/`** auf Branch `main` â€” nicht auf `master`, nicht in einem Sibling-Repo. Bau-Anleitung fÃ¼r Bots: [`doc/START9-packaging.md`](doc/START9-packaging.md). Kurz: `./scripts/build_startos_s9pk` (x86_64). Vorhandenes Release: Tag `startos-tls11`.
 

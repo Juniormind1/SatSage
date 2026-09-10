@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Verlaufsscan · kein Doppel-Gap:** Liegt ein frischer UTXO-Cache vor (≤2 h, kein unvollständiger BIP-158-Lauf), überspringt der Verlauf den erneuten Bestands-Scan und nutzt den Cache — Log: „UTXO-Cache frisch — Gap-Scan übersprungen“.
+- **Doku · Testprotokoll Datenquellen-Wechsel:** `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — Härtung gegen Quellenwechsel während UTXO-/Verlaufs-Scans (P2P ↔ Electrum, Queue, Cache-Flags, GUI).
+- **Clearnet-Electrum · Opt-in:** `OEFFENTLICHE_ELECTRUM=1` (Dialog-Bestätigung) gilt auch als Outbound-Freigabe für Fulcrum-Clearnet — sonst blockierte die Allowlist alle öffentlichen IPs trotz erlaubter Electrum-Nutzung.
+- **Verlaufsscan · öffentliche Onion:** Feinerer Fortschritt (Adresse n/m · get_history/Tx i/j), Socket-Timeout auch nach Connect, Rotation wechselt bei Timeout zum nächsten Server — weniger stummes „Moment noch“ bei hängendem Peer.
 - **Wallet · UTXO-Scan-Knopf:** Nur gesperrt, wenn wirklich dieses Portfolio scannt oder in der Queue steht — nicht wegen abgebrochenem Lauf, stale Job-Bindung oder globalem Tip-Nachzug. Abbrechen gibt den Knopf sofort frei.
 - **Wallet · Scan-Abbrechen:** Knopf rechtsbündig in der Lauf-Leiste — springt nicht mehr mit der Textlänge.
 - **Datenquellen · Bezeichnung:** Öffentliche Electrum nicht mehr als „Peers“, sondern **onion-electrs** / **clearnet-electrs** (Kopf, Wechsel-Log, Verbindungstest).

@@ -4618,6 +4618,68 @@ def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
         return False
 
 
+#: Nach frischem UTXO-Scan: Verlauf braucht keinen zweiten Gap-Scan.
+VERLAUF_UTXO_CACHE_MAX_ALTER_S = 2 * 3600
+
+
+def _parse_scanned_at(stempel: object) -> datetime | None:
+    if not stempel:
+        return None
+    text = str(stempel).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def utxo_cache_frisch_genug(
+    xpubs: list[str],
+    cache_dir: Path,
+    *,
+    max_alter_s: int = VERLAUF_UTXO_CACHE_MAX_ALTER_S,
+) -> tuple[list[dict] | None, str]:
+    """
+    Liefert (alle UTXOs, Grund), wenn jeder XPUB einen frischen Cache hat.
+
+    Sonst ``(None, grund)`` — Verlaufs-Job soll Gap-Scan nachziehen.
+    Partial-BIP-158 (``bip158_fullscan_ok=false``) zählt nicht als frisch.
+    """
+    if not xpubs:
+        return None, "keine XPUBs"
+    jetzt = datetime.now(UTC)
+    alle: list[dict] = []
+    aeltest_s = 0
+    for xpub in xpubs:
+        entry = load_xpub_cache_entry(xpub, cache_dir)
+        if entry is None:
+            return None, "UTXO-Cache fehlt"
+        roh = entry.get("raw") or {}
+        if roh.get("bip158_fullscan_ok") is False:
+            return None, "BIP-158-Scan unvollständig"
+        stempel = _parse_scanned_at(roh.get("scanned_at"))
+        if stempel is None:
+            return None, "kein scanned_at"
+        if stempel.tzinfo is None:
+            stempel = stempel.replace(tzinfo=UTC)
+        alter = (jetzt - stempel.astimezone(UTC)).total_seconds()
+        if alter < 0:
+            alter = 0
+        if alter > max_alter_s:
+            return None, f"Cache {int(alter // 60)} Min. alt"
+        aeltest_s = max(aeltest_s, int(alter))
+        alle.extend(entry.get("utxos") or [])
+    minuten = max(1, aeltest_s // 60) if aeltest_s >= 60 else 0
+    if minuten:
+        grund = f"UTXO-Cache ≤{minuten} Min. alt — Gap-Scan übersprungen"
+    else:
+        grund = "UTXO-Cache frisch — Gap-Scan übersprungen"
+    return alle, grund
+
+
 def save_xpub_utxo_cache(
     xpub: str,
     utxos: list[dict],

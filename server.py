@@ -4042,43 +4042,52 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
             gesamt = sum(len(v) for v in ergebnis.values())
             stand.phase(f"{gesamt} Ein- und Ausgänge erfasst")
 
-            # Bestand mitziehen — ohne UTXOs ist ein Verlaufsscan in der GUI
-            # sinnlos (Salden bleiben 0). Reiner UTXO-Scan bleibt separat.
-            stand.phase("Erfasse UTXO-Bestand…")
-            hol_utxo = fetchers.get("fetch_wallet_utxos")
-            if hol_utxo is None:
-                raise RuntimeError(
-                    f"Verlauf: Datenquelle {quelle} liefert keine UTXOs."
-                )
-
-            def on_utxos_update(stand_utxos: list) -> None:
-                job.result = {
-                    "eintraege": gesamt,
-                    "wallets": len(ergebnis),
-                    "utxo_count": len(stand_utxos),
-                    "partial": True,
-                }
-                wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
-                stand.tick(f"{len(stand_utxos)} {wort} bisher…")
-
-            gefunden = main.resolve_wallet_utxos(
-                xpubs,
-                hol_utxo,
-                fetchers["fetch_address_utxos"],
-                fetchers.get("fetch_addresses_utxos"),
-                state.cache_dir,
-                quelle,
-                rescan=True,
-                max_addresses=max(e.max_addresses for e in ziele),
-                wallet=wallet_ctx,
-                verify_utxo_spent=fetchers.get("verify_utxo_spent"),
-                fulcrum=fetchers.get("fulcrum"),
-                on_missing_xpubs=lambda fehlend: True,
-                on_progress=lambda text, *, sofort=False: (
-                    stand.phase(text) if sofort else stand.tick(text)
-                ),
-                on_utxos_update=on_utxos_update,
+            # Bestand: nur nachziehen wenn kein frischer UTXO-Cache da ist
+            # (sonst doppelte Gap-Arbeit direkt nach UTXO-Scan).
+            frisch, frisch_grund = main.utxo_cache_frisch_genug(
+                xpubs, state.cache_dir,
             )
+            if frisch is not None:
+                stand.phase(frisch_grund)
+                gefunden = frisch
+            else:
+                stand.phase(
+                    f"Erfasse UTXO-Bestand… ({frisch_grund})"
+                )
+                hol_utxo = fetchers.get("fetch_wallet_utxos")
+                if hol_utxo is None:
+                    raise RuntimeError(
+                        f"Verlauf: Datenquelle {quelle} liefert keine UTXOs."
+                    )
+
+                def on_utxos_update(stand_utxos: list) -> None:
+                    job.result = {
+                        "eintraege": gesamt,
+                        "wallets": len(ergebnis),
+                        "utxo_count": len(stand_utxos),
+                        "partial": True,
+                    }
+                    wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
+                    stand.tick(f"{len(stand_utxos)} {wort} bisher…")
+
+                gefunden = main.resolve_wallet_utxos(
+                    xpubs,
+                    hol_utxo,
+                    fetchers["fetch_address_utxos"],
+                    fetchers.get("fetch_addresses_utxos"),
+                    state.cache_dir,
+                    quelle,
+                    rescan=True,
+                    max_addresses=max(e.max_addresses for e in ziele),
+                    wallet=wallet_ctx,
+                    verify_utxo_spent=fetchers.get("verify_utxo_spent"),
+                    fulcrum=fetchers.get("fulcrum"),
+                    on_missing_xpubs=lambda fehlend: True,
+                    on_progress=lambda text, *, sofort=False: (
+                        stand.phase(text) if sofort else stand.tick(text)
+                    ),
+                    on_utxos_update=on_utxos_update,
+                )
             job.raise_if_cancelled()
             wort = "UTXO" if len(gefunden) == 1 else "UTXOs"
             stand.phase(
@@ -4089,6 +4098,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                 "wallets": len(ergebnis),
                 "utxo_count": len(gefunden),
                 "partial": False,
+                "utxo_from_cache": frisch is not None,
             }
         finally:
             halt.set()

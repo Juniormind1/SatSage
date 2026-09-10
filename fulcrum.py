@@ -146,8 +146,22 @@ class FulcrumClient:
         self._request_id = 0
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _outbound_values() -> dict[str, str] | None:
+        """`.env` für Outbound-Allowlist (OEFFENTLICHE_ELECTRUM u. a.)."""
+        try:
+            import main as main_mod
+
+            return main_mod._load_dotenv()
+        except Exception:
+            return None
+
     def connect(self) -> None:
-        outbound_policy.ensure_resolves_to_allowed_host(self.host, service="fulcrum")
+        outbound_policy.ensure_resolves_to_allowed_host(
+            self.host,
+            service="fulcrum",
+            values=self._outbound_values(),
+        )
         if self.tor_proxy:
             proxy_host, proxy_port = self.tor_proxy
             raw = _socks5_connect(
@@ -160,6 +174,12 @@ class FulcrumClient:
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
         else:
             self._sock = raw
+        # Connect-Timeout gilt sonst nicht zuverlässig für spätere recv —
+        # ohne das hängt get_history über Tor minutenlang ohne Abbruch.
+        try:
+            self._sock.settimeout(float(self.timeout))
+        except OSError:
+            pass
 
     def close(self) -> None:
         if self._sock:
@@ -274,7 +294,11 @@ class FulcrumNotifySession:
                 pass
 
     def connect(self) -> None:
-        outbound_policy.ensure_resolves_to_allowed_host(self.host, service="fulcrum")
+        outbound_policy.ensure_resolves_to_allowed_host(
+            self.host,
+            service="fulcrum",
+            values=FulcrumClient._outbound_values(),
+        )
         if self.tor_proxy:
             proxy_host, proxy_port = self.tor_proxy
             raw = _socks5_connect(
@@ -473,11 +497,12 @@ class RotatingFulcrumPool:
         return f"rotation({len(self._clients)} Server)"
 
     def request(self, method: str, params: list | None = None) -> Any:
-        last_exc: RuntimeError | None = None
-        for _ in range(len(self._clients)):
+        last_exc: BaseException | None = None
+        n = len(self._clients)
+        for _ in range(n):
             with self._lock:
                 client = self._clients[self._index]
-                self._index = (self._index + 1) % len(self._clients)
+                self._index = (self._index + 1) % n
             try:
                 return client.request(method, params)
             except RuntimeError as exc:
@@ -485,8 +510,24 @@ class RotatingFulcrumPool:
                     last_exc = exc
                     continue
                 raise
+            except (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError) as exc:
+                # Nächster Onion/Clearnet-Server — sonst hängt der Verlauf
+                # minutenlang auf einem toten Peer bei „noch 59 von 59“.
+                last_exc = exc
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                try:
+                    client.connect()
+                except Exception:
+                    pass
+                continue
         if last_exc is not None:
-            raise last_exc
+            raise TimeoutError(
+                f"Fulcrum-Rotation: alle {n} Server für {method} gescheitert "
+                f"({last_exc})"
+            ) from last_exc
         raise RuntimeError("kein Fulcrum-Server verfügbar")
 
     def close(self) -> None:
@@ -1416,6 +1457,8 @@ def _walk_address_history(
     client: FulcrumClient,
     address: str,
     scripthash: str,
+    *,
+    on_step=None,
 ) -> tuple[dict[tuple[str, int], dict[str, int]], dict[tuple[str, int], str]]:
     """
     Geht die Historie einer Adresse durch.
@@ -1426,15 +1469,28 @@ def _walk_address_history(
     Gemeinsame Grundlage für zwei Sichten — die unverbrauchte Teilmenge
     (UTXO-Fallback für Server ohne listunspent) und den vollständigen Verlauf.
     Beide aus einem Walk, damit sie sich nicht widersprechen können.
+
+    *on_step(text)*: Zwischenstand (get_history / Tx i/n) für lange Tor-Läufe.
     """
+    if on_step:
+        try:
+            on_step("get_history…")
+        except Exception:
+            pass
     history = client.request("blockchain.scripthash.get_history", [scripthash]) or []
     if not history:
         return {}, {}
 
     received: dict[tuple[str, int], dict[str, int]] = {}
     spent_by: dict[tuple[str, int], dict] = {}
+    anzahl = len(history)
 
-    for entry in history:
+    for index, entry in enumerate(history, start=1):
+        if on_step:
+            try:
+                on_step(f"Tx {index}/{anzahl}")
+            except Exception:
+                pass
         txid = str(entry["tx_hash"])
         height = int(entry.get("height", 0))
         tx = fetch_tx_fulcrum(client, txid)
@@ -1479,6 +1535,8 @@ def fetch_address_history_fulcrum(
     client: FulcrumClient,
     address: str,
     scripthash: str,
+    *,
+    on_step=None,
 ) -> list[dict]:
     """
     Alle je auf einer Adresse empfangenen Outputs — auch längst ausgegebene.
@@ -1487,10 +1545,18 @@ def fetch_address_history_fulcrum(
     Steuerjahre deshalb nicht: Was 2023 empfangen und 2024 ausgegeben wurde,
     steht dort nicht mehr. Hier steht es, mit ``spent`` und ``spent_txid``.
     """
-    received, spent_by = _walk_address_history(client, address, scripthash)
+    received, spent_by = _walk_address_history(
+        client, address, scripthash, on_step=on_step,
+    )
 
     eintraege: list[dict] = []
-    for (txid_key, vout_idx), info in received.items():
+    n_rec = len(received)
+    for index, ((txid_key, vout_idx), info) in enumerate(received.items(), start=1):
+        if on_step and n_rec:
+            try:
+                on_step(f"Zeiten {index}/{n_rec}")
+            except Exception:
+                pass
         abgang = spent_by.get((txid_key, vout_idx))
         eintrag = {
             "txid": txid_key,
@@ -1509,13 +1575,25 @@ def fetch_address_history_fulcrum(
     return eintraege
 
 
-def _verlauf_fortschritt(rest: int, gesamt: int, bisher: int) -> str:
+def _verlauf_fortschritt(
+    rest: int,
+    gesamt: int,
+    bisher: int,
+    *,
+    adresse_nr: int | None = None,
+    detail: str = "",
+) -> str:
     """Statuszeile: Restadressen zuerst, dann schon erfasste Einträge."""
     wort = "Eintrag" if bisher == 1 else "Einträge"
-    return (
+    text = (
         f"Frage Verlauf für {gesamt} Adressen — noch {rest} von {gesamt} Adressen"
         f" · bisher {bisher} {wort}"
     )
+    if adresse_nr is not None:
+        text += f" · Adresse {adresse_nr}/{gesamt}"
+    if detail:
+        text += f" · {detail}"
+    return text
 
 
 def fetch_wallet_history_fulcrum(
@@ -1547,10 +1625,19 @@ def fetch_wallet_history_fulcrum(
     gesamt = len(adressliste)
     erledigt_basis = gesamt - len(offen)
 
-    def _melde(rest_offen: int, *, sofort: bool = False) -> None:
+    def _melde(
+        rest_offen: int,
+        *,
+        sofort: bool = False,
+        adresse_nr: int | None = None,
+        detail: str = "",
+    ) -> None:
         if not on_progress:
             return
-        text = _verlauf_fortschritt(rest_offen, gesamt, len(eintraege))
+        text = _verlauf_fortschritt(
+            rest_offen, gesamt, len(eintraege),
+            adresse_nr=adresse_nr, detail=detail,
+        )
         try:
             on_progress(text, sofort=sofort)
         except TypeError:
@@ -1563,7 +1650,15 @@ def fetch_wallet_history_fulcrum(
         if is_list_abort_requested():
             return eintraege
         rest = len(offen) - nummer + 1
-        _melde(rest, sofort=(nummer == 1 and not erledigt_basis))
+        adresse_nr = erledigt_basis + nummer
+        # Erste Adresse / jede 5.: sofort ins Log — sonst nur „Moment noch“,
+        # während Tor an get_history oder den Tx-Downloads hängt.
+        _melde(
+            rest,
+            sofort=(nummer == 1 or nummer % 5 == 1),
+            adresse_nr=adresse_nr,
+            detail="get_history…",
+        )
         neu: list[dict] = []
         try:
             scripthash = address_to_scripthash(address)
@@ -1571,12 +1666,25 @@ def fetch_wallet_history_fulcrum(
             if on_address_done:
                 on_address_done(address, [])
             continue
-        for eintrag in fetch_address_history_fulcrum(client, address, scripthash):
+
+        def _schritt(detail: str, *, _rest=rest, _nr=adresse_nr) -> None:
+            # Text ändert sich (Tx 3/12…) → tick schreibt nach ~10s Stille.
+            _melde(_rest, sofort=False, adresse_nr=_nr, detail=detail)
+
+        for eintrag in fetch_address_history_fulcrum(
+            client, address, scripthash, on_step=_schritt,
+        ):
             eintrag["address"] = address
             neu.append(eintrag)
             eintraege.append(eintrag)
         if on_address_done:
             on_address_done(address, neu)
+        # Nach Adresse: Rest zählt runter (tick, nicht jede Adresse phase).
+        _melde(
+            max(0, rest - 1),
+            sofort=(nummer % 5 == 0 or nummer == len(offen)),
+            adresse_nr=adresse_nr,
+        )
         if on_progress is None and (
             (erledigt_basis + nummer) % 25 == 0 or nummer == len(offen)
         ):
