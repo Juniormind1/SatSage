@@ -555,11 +555,11 @@
             </span>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="tax.selfReportHint">
-            Für Nachmeldung / Selbstanzeige: Abflüsse aus dem Verlauf markieren
-            (z. B. Börsen-Einzahlung). Fehlen Ausgaben, kannst du offene UTXOs
-            als Hypothese „Was wäre wenn ich die zum Jahresende ausgebe“
-            durchrechnen. Personendaten sind vorerst Platzhalter
-            (Donald Duck / 0/8/15 / Entenhausen). Keine Steuerberatung.
+            Für Nachmeldung / Selbstanzeige: Abflüsse und Was-wäre-wenn-UTXOs
+            werden beim Öffnen aus dem Cache geladen — markieren
+            (z. B. Börsen-Einzahlung) und Report erzeugen. Personendaten sind
+            vorerst Platzhalter (Donald Duck / 0/8/15 / Entenhausen). Keine
+            Steuerberatung.
           </p>
           <div class="karte-fuss steuer-einstellungen">
             <label class="feld" style="flex: 1 1 22rem;">
@@ -572,9 +572,9 @@
                      title="Wenn gesetzt: diese Tx wird ausgewählt und ihre Inputs aus deinen Wallets angezeigt.">
             </label>
             <button type="button" id="sa-laden" class="knopf"
-                    data-i18n="tax.loadCandidates" data-i18n-title="tax.loadCandidatesTitle"
-                    title="Lädt Abflüsse des Steuerjahres und offene UTXOs als Was-wäre-wenn.">
-              Kandidaten laden
+                    data-i18n="tax.refreshCandidates" data-i18n-title="tax.refreshCandidatesTitle"
+                    title="Neu aus dem Cache laden — z. B. nach Verlaufsscan oder mit Einzahl-TxID-Filter. Beim Öffnen der Ansicht passiert das automatisch.">
+              Aktualisieren
             </button>
             <button type="button" id="sa-html" class="knopf knopf-primaer"
                     data-i18n="tax.reportHtml" data-i18n-title="tax.reportHtmlTitle"

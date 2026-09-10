@@ -2,6 +2,47 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Datenquellen · Onion-Electrs zu langsam → früh BIP-158 / Abbruch
+
+**Stand:** 2026-09-10 · **offen** · nur notiert
+
+Wenn Clearnet-Electrs (Firewall) ausfällt und nur **öffentliches Onion-Electrs** bleibt, kann der Scan scheußlich langsam sein. In der Auto-Priorität steht **BIP-158 schon vor** öffentlichem Onion — hängen bleibt man typisch, wenn BIP-158-Peer-Aufbau vorher scheiterte (8333 zu und keine Compact-Filter-Peers über Tor).
+
+**Beobachtung:** BIP-158 (Clearnet-P2P, lokaler Prefer-Peer, ggf. Tor-P2P) ist für Tip/Turbo/UTXO oft schneller als Onion-`get_history`; voller Blockwalk kann trotzdem lang werden. Heute: Connect-Timeouts (Onion ~30 s) + Rotation + „Moment noch“ — **kein** Latenz-Gate, **kein** Quellenwechsel nach Setup (Mid-Scan-Hop bewusst unerwünscht).
+
+**Soll:**
+- Beim Job-Setup kurzes **Latenz-Gate** (z. B. `server.version` + eine Probe-`get_history`); bei Überschreitung Onion für die Session als unbrauchbar markieren.
+- Sind BIP-158-Peers erreichbar → Job an BIP-158 binden + klare Logzeile.
+- Sonst: ehrlich „Onion einzige Option, wird langsam“ + Abbrechen anbieten — nicht erst nach Extremverzögerung.
+- Optional Setup-Race: BIP-158-Peer-Hunt ‖ Onion-Probe (vor allem schnelleres BIP-158-*Fail*).
+- Kein Mid-Scan-Quellenwechsel (Cache/Konsistenz; siehe Testprotokoll Datenquellen-Wechsel).
+
+---
+
+## Marke · Sherlock-Satoshi-Kopf statt Sat-Symbol
+
+**Stand:** 2026-09-10 · **offen** · nur notiert
+
+Kleine Marke ist heute das Sat-Symbol (`web/img/sat-logo.png` — Kopf, Login, Favicon, Packaging). Wunsch: **Kopf vom Sherlock-Satoshi** (mit Hut) aus dem Splash / vollen Logo (`web/img/logo.jpg` / Quelle `SatSage final.jpg`) als Marken-Icon.
+
+- Ableitung über `scripts/prepare_brand_assets.py` anpassen (Crop Kopf+Hut, nicht ganzes Artwork).
+- Einsatzorte: Web-Kopf, Login, Favicon, ggf. Packaging-Icon — Splash/Windows kann weiter das volle Logo zeigen.
+- Eigenes Thema — nicht an Core-/Datenquellen-Umbau koppeln.
+
+---
+
+## Core-Rollen · UTXO-Set vs. Tx/Block-Lookup (+ lokaler pruned Qt)
+
+**Stand:** 2026-09-10 · **geplant** · Pause vor Umsetzung
+
+Desktop: lokaler pruned bitcoin-qt (RPC an) neben bereits konfiguriertem Start9-Core. Heute ein RPC-Slot (`NODE_IP`/`RPC*`); Local-Opt-in würde Start9 überschreiben.
+
+Ziel (Session-Plan): **UTXO-Set-Quelle** (scantxoutset, pruned ok → lokal) und **Block-History/Lookup-Quelle** (`getrawtransaction`/`getblock` → Start9) getrennt speicherbar; lokaler Qt auto für UTXO-Slot wenn erreichbar. Adress-Verlauf bleibt Electrs/BIP-158.
+
+Siehe Session-Plan (Grok): getrennte Core-Rollen + lokaler bitcoin-qt. Sonderfälle unter „Lokal Bitcoin Core erkennen“ bleiben relevant.
+
+---
+
 ## Tests · Blind spots (vs. Specter / LNbits / Jam)
 
 **Stand:** 2026-09-10 · **teilweise** · Vergleich Python-Server + Browser-UI
