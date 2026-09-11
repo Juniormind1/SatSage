@@ -26,7 +26,7 @@ Latenz-Gate beim Setup öffentlicher Onion-Electrs (Auto-Priorität): Probe-`get
 
 **Stand:** 2026-09-11 · **umgesetzt**
 
-Marke aus Splash-Clipping `satsage-head.png`: Ausschnitt auf die **stilisierte Pfeife** (Mund→Rauch-Geometrie), Hut bewusst weitgehend weg — das liest sich als Sherlock stärker als die Hutkrone. Ableitung: `scripts/prepare_brand_assets.py` → `web/img/sat-logo.png`, Favicon, `logo-mark`, Packaging-Icon. Splash/Windows weiter volles `logo.jpg`.
+Marke aus `Pfeiffe-Icon.jpg` (S/W, Schwarz = Vordergrund) → transparente `web/img/pfeiffe-icon.png` und Ableitungen (`sat-logo`, Favicon, `logo-mark`, Packaging) über `scripts/prepare_brand_assets.py`. Fallback: Splash-Ausschnitt `satsage-head.png`. Splash/Windows weiter volles `logo.jpg`.
 
 ---
 
