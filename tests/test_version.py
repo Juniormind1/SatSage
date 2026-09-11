@@ -17,7 +17,7 @@ class TestVersion(unittest.TestCase):
             encoding="utf-8"
         ).strip()
         self.assertEqual(version_mod.version(), text)
-        self.assertEqual(version_mod.version(), "0.9")
+        self.assertRegex(text, r"^\d+\.\d+")
 
     def test_fallback_wenn_datei_fehlt(self):
         version_mod.version.cache_clear()

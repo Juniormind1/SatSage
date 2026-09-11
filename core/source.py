@@ -995,6 +995,9 @@ def _pruefe_p2p_peers(
         dns_fallback=True,
     )
     if not hosts:
+        # Erwartungsmanagement: Tor-Schritt ankündigen, bevor SOCKS/Autostart
+        # läuft (sonst wirkt die GUI „eingefroren“).
+        log("Clearnet-P2P ohne Compact-Filter-Peer — versuche über Tor…")
         tor_proxy = stelle_p2p_tor_bereit(values, on_log=log)
         if tor_proxy:
             hosts = zaehle_compact_filter_peers(
