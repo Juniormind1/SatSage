@@ -58,6 +58,25 @@ class TestWalletsBeimStart(unittest.TestCase):
             )
         )
 
+
+    def test_nur_bekannte_env_flag(self):
+        self.assertFalse(main.resolve_wallets_nur_bekannte_utxos({}))
+        self.assertFalse(
+            main.resolve_wallets_nur_bekannte_utxos(
+                {"WALLETS_NUR_BEKANNTE_UTXOS": "0"}
+            )
+        )
+        self.assertTrue(
+            main.resolve_wallets_nur_bekannte_utxos(
+                {"WALLETS_NUR_BEKANNTE_UTXOS": "1"}
+            )
+        )
+        self.assertTrue(
+            main.resolve_wallets_nur_bekannte_utxos(
+                {"WALLETS_NUR_BEKANNTE_UTXOS": "ja"}
+            )
+        )
+
     def test_ohne_cache_nichts(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache = Path(tmp)
@@ -109,6 +128,51 @@ class TestWalletsBeimStart(unittest.TestCase):
             geladen = main.load_xpub_utxo_cache(BIP84_ZPUB, cache)
             self.assertEqual(len(geladen), 1)
             self.assertEqual(geladen[0]["value"], 9000)
+
+
+    def test_nur_bekannte_ueberspringt_gap_discover(self):
+        """nur_bekannte: kein discover_wallet_scan_addresses, bekannte Adresse bleibt."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            alt = _utxo(5000, "old")
+            main.save_xpub_utxo_cache(
+                BIP84_ZPUB, [alt], cache, "fulcrum",
+                scan_end_index=50, scan_tip_height=900_000,
+            )
+            abgefragt: list[str] = []
+
+            def fetch_addr(addr, **_kw):
+                abgefragt.append(addr)
+                return [dict(alt)] if addr == alt["address"] else []
+
+            def fetch_batch(addrs, **_kw):
+                for a in addrs:
+                    abgefragt.append(a)
+                return [dict(alt)] if alt["address"] in set(addrs) else []
+
+            class FakeFulcrum:
+                pass
+
+            with mock.patch.object(
+                main, "discover_wallet_scan_addresses",
+                side_effect=AssertionError("Gap darf nicht laufen"),
+            ):
+                out = main.sync_xpub_zum_tip(
+                    BIP84_ZPUB,
+                    lambda *_a, **_k: [],
+                    fetch_addr,
+                    fetch_batch,
+                    cache,
+                    "fulcrum",
+                    fulcrum=FakeFulcrum(),
+                    nur_bekannte=True,
+                )
+            self.assertIsNotNone(out)
+            self.assertEqual(len(out), 1)
+            self.assertEqual(out[0]["value"], 5000)
+            self.assertIn(BIP84_RECEIVE_0, abgefragt)
+            entry = main.load_xpub_cache_entry(BIP84_ZPUB, cache)
+            self.assertEqual(int(entry["scan_end_index"]), 50)
 
     def test_bip158_ohne_tip_laesst_cache(self):
         with tempfile.TemporaryDirectory() as tmp:

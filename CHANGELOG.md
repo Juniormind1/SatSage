@@ -9,6 +9,15 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.2] - 2026-09-11
+
+- **Version:** 0.9.2 — Wallet-Öffnen/Tip-Sync schneller, „Nur bekannte UTXOs“, Bisq-Soft-Labels, Wallet-Einstellungen klarer.
+- **Wallets · Einstellungen:** Dickere Trennlinie zwischen Wallet-Zeilen; Namensfeld „Name (optional)“ mit Akzent-Hintergrund/Rahmen — klarer Einstieg fürs nächste Wallet trotz XPUB-Balken darunter. Bereits konfigurierte Wallet-Namen fett (`font-weight: 700`).
+- **Herkunft · Bisq:** Soft-Labels „Wahrscheinlich Bisq-Auszahlung“ / „Bisq-Deposit (Escrow)“ — Payout: 1 Input → 2 Outs mit Deposit-Verhältnis (~15–50 %); Deposit: ≥2 Ins, Escrow+`OP_RETURN` (Contract-Hash). OP_RETURN am Prevout verstärkt den Payout, wenn Eigentum noch unklar ist. Kein Mix/Own-only-Walk. Form-Icon (Amber, P2P-Escrow 2→1→2) wie bei den CoinJoin-Icons an Herkunftszeile und Adressgruppe.
+- **Aktualität · Nur bekannte UTXOs:** Unteroption zu „Wallets immer aktuell halten“ — Tip-Nachzug (Start, neuer Block, „Bis Tip“) prüft nur bekannte UTXOs/Adressen, **kein Gap-Scan**. Neue Empfangsadressen dann per manuellem UTXO-Scan. `.env`: `WALLETS_NUR_BEKANNTE_UTXOS`.
+- **Wallets · Öffnen:** Mempool-Pending-Check über eigenen Electrs prüft nur noch die geöffnete Wallet — nicht mehr `listunspent` über alle Adressen aller anderen Wallets. Öffnen eines kleinen Wallets (z. B. 1 UTXO) blieb sonst ~2 s hinter dem Querschnitt stecken; Herkunft (alle UTXOs) unverändert.
+- **Wallets · Erst-Paint:** Wallet-Ansicht lädt zuerst nur den Cache (`mempool=0`), zeichnet sofort, und zieht Pending/Mempool danach im Hintergrund nach — Wallets mit vielen Adressen (z. B. 9× `listunspent`) blockieren den Wechsel nicht mehr ~1 s.
+- **Wallets · Sync-Hinweis:** Gelber Kurztext während Tip-Nachzug heißt jetzt „aktualisiere…“ statt „aktualisiert…“ — klar als laufender Vorgang, nicht als fertiger Zustand.
 - **UTXO-Scan · xpub+auto:** Gap-Scan prüft pro Index alle Skriptformen (Legacy/Nested/SegWit/Taproot), nicht nur die erste (Legacy). Sonst findet z. B. Wasabi-SegWit unter generischem `xpub` keine UTXOs, obwohl welche da sind. `scantxoutset` splittet Mehrpfad-Deskriptoren `…/<0;1>/*` in Empfang/Change.
 - **Wallets · Wasabi WPKH-Policy:** Single-Sig-Deskriptoren (`wpkh([…/84h/…]xpub/<0;1>/*)`, auch mit Prüfsumme) werden als normales Wallet gespeichert und analysiert — nicht mehr fälschlich als Multisig ohne Bestand. Paste ins XPUB-Feld wird erkannt und in den Deskriptor-Import umgeleitet; Specter-DIY `/{0,1}/*` wird auf Core `/<0;1>/*` normalisiert.
 - **Herkunftsbaum · lazy Rendern:** Erste Ebene unter dem UTXO bleibt sofort sichtbar; tiefere Zweige werden erst beim Aufklappen ins DOM gebaut (große CoinJoin-/Remix-Bäume sonst tausende Knoten auf einmal).

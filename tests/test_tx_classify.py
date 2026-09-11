@@ -104,6 +104,108 @@ class TestFanOutPayJoinExchange(unittest.TestCase):
         self.assertFalse(c.walk_own_inputs_only)
 
 
+def _op_return_vout(n: int, *, data_len: int = 20) -> dict:
+    """OP_RETURN mit direktem Push von *data_len* Bytes."""
+    payload = "ab" * data_len
+    return {
+        "n": n,
+        "value": 0.0,
+        "scriptPubKey": {
+            "asm": f"OP_RETURN {payload}",
+            "hex": f"6a{data_len:02x}{payload}",
+            "type": "nulldata",
+        },
+    }
+
+
+class TestBisqForms(unittest.TestCase):
+    def test_bisq_deposit(self):
+        vins = [
+            core_vin(txid("bd0"), 0),
+            core_vin(txid("bd1"), 0),
+        ]
+        for v in vins:
+            v["prevout"] = {
+                "value": 0.3,
+                "scriptPubKey": {"address": EXTERN_A},
+            }
+        outs = [
+            core_vout(0, EXTERN_B, 0.55),
+            _op_return_vout(1, data_len=20),
+        ]
+        t = core_tx(txid("bdep"), vins, outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "bisq_deposit")
+        self.assertFalse(c.walk_own_inputs_only)
+
+    def test_bisq_payout_receive(self):
+        """Buyer: Trade+Deposit, Seller: Deposit — Ratio ~0,2 bei 25 %."""
+        deposit_txid = txid("bdep2")
+        vin = core_vin(deposit_txid, 0)
+        vin["prevout"] = {
+            "value": 1.25,
+            "scriptPubKey": {"address": EXTERN_A},
+        }
+        # Trade 1.0 + deposit 0.25 → buyer 1.25; seller 0.25 → ratio 0.2
+        outs = [
+            core_vout(0, BIP84_RECEIVE_0, 1.25),
+            core_vout(1, EXTERN_B, 0.25),
+        ]
+        t = core_tx(txid("bpayout"), [vin], outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "bisq_payout")
+        self.assertEqual(
+            c.soft_label_de, "Wahrscheinlich Bisq-Auszahlung"
+        )
+        self.assertFalse(c.is_coinjoin)
+
+    def test_bisq_payout_op_return_verstaerkt_ohne_eingebettetes_prevout(self):
+        """Prevout fehlt am vin — get_tx liefert Deposit mit OP_RETURN."""
+        deposit_txid = txid("bdep3")
+        deposit = core_tx(
+            deposit_txid,
+            [core_vin(txid("x0"), 0), core_vin(txid("x1"), 0)],
+            [
+                core_vout(0, EXTERN_A, 0.6),
+                _op_return_vout(1, data_len=20),
+            ],
+        )
+        vin = core_vin(deposit_txid, 0)
+        outs = [
+            core_vout(0, BIP84_RECEIVE_0, 0.48),
+            core_vout(1, EXTERN_B, 0.12),
+        ]
+        t = core_tx(txid("bp2"), [vin], outs)
+        get_tx = make_get_tx({deposit_txid: deposit})
+        c = tx_classify.classify_tx(t, EIGENE, get_tx=get_tx)
+        self.assertEqual(c.kind, "bisq_payout")
+
+    def test_payout_form_ohne_get_tx_bleibt_unknown_wenn_input_unklar(self):
+        vin = core_vin(txid("orphan"), 0)
+        outs = [
+            core_vout(0, BIP84_RECEIVE_0, 1.25),
+            core_vout(1, EXTERN_B, 0.25),
+        ]
+        t = core_tx(txid("bp3"), [vin], outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "unknown")
+
+    def test_zwei_outs_ohne_deposit_ratio_kein_bisq(self):
+        vin = core_vin(txid("z0"), 0)
+        vin["prevout"] = {
+            "value": 1.0,
+            "scriptPubKey": {"address": EXTERN_A},
+        }
+        # Ratio 0.01 — kein typisches Bisq-Deposit
+        outs = [
+            core_vout(0, BIP84_RECEIVE_0, 0.99),
+            core_vout(1, EXTERN_B, 0.01),
+        ]
+        t = core_tx(txid("nobisq"), [vin], outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "unknown")
+
+
 class TestCoinJoinForms(unittest.TestCase):
     def _cj_like(
         self,

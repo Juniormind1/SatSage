@@ -191,13 +191,21 @@ function softTxClassLabel(knotenOderErgebnis) {
   return knotenOderErgebnis.tx_class_label || knotenOderErgebnis.note || "";
 }
 
-/** Mempool-artige Form-Icons für Mix-Soft-Labels (kein Markenlogo). */
+/** Mempool-artige Form-Icons für Soft-Labels (kein Markenlogo). */
 const TX_CLASS_ICON = {
   whirlpool: "img/tx-class/whirlpool.svg",
   wasabi_classic: "img/tx-class/wasabi-classic.svg",
   wabisabi: "img/tx-class/wabisabi.svg",
   joinmarket: "img/tx-class/joinmarket.svg",
+  bisq_payout: "img/tx-class/bisq.svg",
+  bisq_deposit: "img/tx-class/bisq.svg",
 };
+
+/** Icon-/Leisten-Schlüssel: Deposit und Payout teilen dasselbe Bisq-Icon. */
+function txClassIconKind(kind) {
+  if (kind === "bisq_deposit") return "bisq_payout";
+  return kind || "";
+}
 
 function softTxClassKind(knotenOderErgebnis) {
   const kind = (knotenOderErgebnis && knotenOderErgebnis.tx_class) || "";
@@ -217,7 +225,7 @@ function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
   }
   rechts.hidden = false;
   rechts.title = text;
-  const iconSrc = TX_CLASS_ICON[kind];
+  const iconSrc = TX_CLASS_ICON[txClassIconKind(kind)] || TX_CLASS_ICON[kind];
   if (iconSrc) {
     const img = document.createElement("img");
     img.className = "tx-class-icon";
@@ -241,37 +249,39 @@ const MIX_ICON_ORDER = [
   "wasabi_classic",
   "wabisabi",
   "joinmarket",
+  "bisq_payout",
 ];
 
-/** Mix-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
+function _merkeTxClassIcon(gesehen, kind) {
+  const k = txClassIconKind(kind);
+  if (k && TX_CLASS_ICON[k]) gesehen.add(k);
+}
+
+/** Mix-/Form-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
 function mixArtenAusErgebnis(ergebnis) {
   const gesehen = new Set();
   if (!ergebnis || !ergebnis.found) return [];
   const stapel = [];
   if (ergebnis.root) stapel.push(ergebnis.root);
   for (const k of ergebnis.children || []) stapel.push(k);
-  if (ergebnis.tx_class && TX_CLASS_ICON[ergebnis.tx_class]) {
-    gesehen.add(ergebnis.tx_class);
-  }
+  _merkeTxClassIcon(gesehen, ergebnis.tx_class);
   while (stapel.length) {
     const knoten = stapel.pop();
     if (!knoten || typeof knoten !== "object") continue;
-    if (knoten.tx_class && TX_CLASS_ICON[knoten.tx_class]) {
-      gesehen.add(knoten.tx_class);
-    }
+    _merkeTxClassIcon(gesehen, knoten.tx_class);
     for (const kind of knoten.children || []) stapel.push(kind);
   }
   return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
 }
 
-/** Mix-Arten einer Adressgruppe aus schon gespeicherten Traces (ohne Extra-Job). */
+/** Form-Arten einer Adressgruppe aus schon gespeicherten Traces (ohne Extra-Job). */
 function mixArtenDerGruppe(gruppe) {
   const gesehen = new Set();
   for (const u of gruppe.utxos || []) {
     for (const k of u.mix_arten || []) {
-      if (TX_CLASS_ICON[k]) gesehen.add(k);
+      _merkeTxClassIcon(gesehen, k);
     }
-    if (u.tx_class && TX_CLASS_ICON[u.tx_class]) gesehen.add(u.tx_class);
+    _merkeTxClassIcon(gesehen, u.tx_class);
   }
   return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
 }
@@ -282,6 +292,7 @@ const MIX_ICON_KURZ = {
   wasabi_classic: "Wasabi",
   wabisabi: "WabiSabi",
   joinmarket: "JoinMarket",
+  bisq_payout: "Bisq",
 };
 
 /** Nur Icons, kein Text — Tooltip: „Im Verlauf …-Muster erkannt.“ */
@@ -1131,10 +1142,10 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
   if (root.time_label) {
     utxo.time_label = root.time_label;
   }
-  if (root.tx_class && TX_CLASS_ICON[root.tx_class]) {
+  if (root.tx_class && (TX_CLASS_ICON[root.tx_class] || TX_CLASS_ICON[txClassIconKind(root.tx_class)])) {
     utxo.tx_class = root.tx_class;
     const arten = new Set(utxo.mix_arten || []);
-    arten.add(root.tx_class);
+    _merkeTxClassIcon(arten, root.tx_class);
     utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
   }
   // Auch Mix-Formen tiefer im Baum (Remix-Hops).
@@ -1988,27 +1999,40 @@ function ladeHinweisVonQuelle(key) {
 
 async function zeigeWallet(walletId) {
   Zustand.walletId = walletId;
+  Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
+  const ladeGen = Zustand.walletLadeGen;
   zeigeAnsicht("wallet");
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   setzeText($("#wallet-titel"), wallet ? wallet.name : t("common.wallet"));
-  // Dieser GET liest nur den lokalen Cache — nie Electrum/P2P/Core.
+  // Erst Cache (schnell), Mempool-Pending danach im Hintergrund.
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
   $("#wallet-leer").hidden = true;
 
   const limit = $("#limit-wahl").value;
   const sort = $("#sort-wahl")?.value || "betrag";
+  const basis =
+    `/wallets/${walletId}/utxos?limit=${limit}&sort=${encodeURIComponent(sort)}`;
   try {
-    const daten = await api(
-      `/wallets/${walletId}/utxos?limit=${limit}&sort=${encodeURIComponent(sort)}`,
-    );
+    const daten = await api(`${basis}&mempool=0`);
+    if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeichneUtxos(daten, wallet);
   } catch (fehler) {
+    if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeigeLeer(t("wallet.loadFailed", { msg: fehler.message }), "");
     setzeText($("#wallet-meta"), "");
   }
   aktualisiereScanAnzeige();
+
+  // Pending über eigenen Electrs — blockiert den Erst-Paint nicht.
+  api(basis)
+    .then((frisch) => {
+      if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
+      zeichneUtxos(frisch, wallet);
+      aktualisiereScanAnzeige();
+    })
+    .catch(() => {});
 }
 
 function zeigeLeer(titel, text) {
@@ -7203,26 +7227,56 @@ function zeichneSteuerEinstellungen() {
   }
 }
 
+function setzeKnownOnlySichtbarkeit(parentAn = undefined) {
+  const zeile = $("#start-sync-known-only-zeile");
+  const box = $("#start-sync-known-only");
+  if (!zeile || !box) return;
+  const an = parentAn === undefined
+    ? Boolean(
+      Zustand.config?.wallets_immer_aktuell
+      ?? Zustand.config?.wallets_beim_start_aktualisieren,
+    )
+    : Boolean(parentAn);
+  zeile.hidden = !an;
+  box.disabled = !an;
+  if (!an) box.checked = false;
+}
+
 function zeichneStartSync() {
   const box = $("#start-sync");
   if (!box) return;
-  box.checked = Boolean(
+  const an = Boolean(
     Zustand.config?.wallets_immer_aktuell
     ?? Zustand.config?.wallets_beim_start_aktualisieren,
   );
-  setzeTipSyncSichtbarkeit();
+  box.checked = an;
+  const known = $("#start-sync-known-only");
+  if (known) {
+    known.checked = an && Boolean(Zustand.config?.wallets_nur_bekannte_utxos);
+  }
+  setzeKnownOnlySichtbarkeit(an);
+  setzeTipSyncSichtbarkeit(an);
 }
 
-async function speichereStartSync() {
+async function speichereStartSync(ereignis) {
   const box = $("#start-sync");
   if (!box) return;
   const an = box.checked;
+  const knownBox = $("#start-sync-known-only");
+  const nurBekannte = an && Boolean(knownBox?.checked);
+  const vonKnownOnly = Boolean(
+    ereignis && knownBox && ereignis.target === knownBox,
+  );
   // Hide/show immediately; the config response below remains authoritative.
+  setzeKnownOnlySichtbarkeit(an);
   setzeTipSyncSichtbarkeit(an);
   try {
     const ergebnis = await api("/config/start-sync", {
       methode: "PUT",
-      daten: { enabled: an },
+      daten: {
+        enabled: an,
+        nur_bekannte_utxos: nurBekannte,
+      },
     });
     if (Zustand.config) {
       const v = Boolean(
@@ -7231,15 +7285,14 @@ async function speichereStartSync() {
       );
       Zustand.config.wallets_immer_aktuell = v;
       Zustand.config.wallets_beim_start_aktualisieren = v;
+      Zustand.config.wallets_nur_bekannte_utxos = Boolean(
+        ergebnis.wallets_nur_bekannte_utxos,
+      );
       if (ergebnis.wallet_watch) {
         Zustand.config.wallet_watch = ergebnis.wallet_watch;
       }
     }
-    box.checked = Boolean(
-      Zustand.config?.wallets_immer_aktuell
-      ?? Zustand.config?.wallets_beim_start_aktualisieren,
-    );
-    setzeTipSyncSichtbarkeit();
+    zeichneStartSync();
     // Tip-Nachzug sofort mitverfolgen (ohne Server-Neustart).
     const jobId = ergebnis.wallet_sync_job_id || ergebnis.job?.id;
     if (an && jobId) {
@@ -7247,21 +7300,22 @@ async function speichereStartSync() {
         Zustand.config.wallet_sync_job_id = jobId;
       }
       folgeWalletSyncJob(jobId);
-      logZeile(t("settings.startSyncStarted"));
+      if (!vonKnownOnly) logZeile(t("settings.startSyncStarted"));
       await ladeJobsNav();
     }
-    meldung(
-      an
-        ? t("settings.startSyncOn")
-        : t("settings.startSyncOff"),
-      "gut",
-    );
+    let text = t("settings.startSyncOff");
+    if (an && vonKnownOnly) {
+      text = nurBekannte
+        ? t("settings.startSyncKnownOnlyOn")
+        : t("settings.startSyncKnownOnlyOff");
+    } else if (an && nurBekannte) {
+      text = t("settings.startSyncKnownOnlyOn");
+    } else if (an) {
+      text = t("settings.startSyncOn");
+    }
+    meldung(text, "gut");
   } catch (fehler) {
-    box.checked = Boolean(
-      Zustand.config?.wallets_immer_aktuell
-      ?? Zustand.config?.wallets_beim_start_aktualisieren,
-    );
-    setzeTipSyncSichtbarkeit();
+    zeichneStartSync();
     meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
   }
 }
@@ -9814,6 +9868,10 @@ async function start() {
   const startSync = $("#start-sync");
   if (startSync) {
     startSync.addEventListener("change", speichereStartSync);
+  }
+  const startSyncKnown = $("#start-sync-known-only");
+  if (startSyncKnown) {
+    startSyncKnown.addEventListener("change", speichereStartSync);
   }
   const llmKnopf = $("#llm-uebernehmen");
   if (llmKnopf) {

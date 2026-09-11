@@ -861,17 +861,25 @@
               Electrs-Subscribe + Tip-Nachzug
             </span>
           </div>
-          <div class="karte-fuss">
+          <div class="karte-fuss start-sync-fuss">
             <label class="check-zeile"
                    data-i18n-title="settings.start.syncTitle"
                    title="Wenn an: Tip-Nachzug beim Start und Dauer-Watch über eigenen Electrs (Adress-Subscribe). Kein Fullscan. Ohne eigenen Electrs nur Start-Nachzug.">
               <input type="checkbox" id="start-sync">
               <span data-i18n="settings.start.sync">Wallets immer aktuell halten?</span>
             </label>
+            <label class="check-zeile check-zeile-unter"
+                   id="start-sync-known-only-zeile"
+                   data-i18n-title="settings.start.knownOnlyTitle"
+                   title="Tip-Nachzug prüft nur bekannte UTXOs/Adressen — kein Gap-Scan. Neue Empfangsadressen nur per manuellem UTXO-Scan.">
+              <input type="checkbox" id="start-sync-known-only">
+              <span data-i18n="settings.start.knownOnly">Nur bekannte UTXOs überwachen</span>
+            </label>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.start.hint">
             Mit eigenem Electrs: bekannte Adressen per Subscribe, bei Aktivität
             gezieltes listunspent; neue Blöcke → leichter Tip-Nachzug.
+            „Nur bekannte UTXOs“: kein Gap — neue Adressen per UTXO-Scan.
             Ohne eigenen Electrs nur Nachzug beim Start. Kein Fullscan.
           </p>
         </div>

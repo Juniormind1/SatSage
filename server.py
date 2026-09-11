@@ -1478,6 +1478,9 @@ def api_config(state: AppState, query: dict) -> dict:
         "wallets_immer_aktuell": (
             main.resolve_wallets_beim_start_aktualisieren(werte)
         ),
+        "wallets_nur_bekannte_utxos": (
+            main.resolve_wallets_nur_bekannte_utxos(werte)
+        ),
         "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
         "wallet_watch": _wallet_watch_status(),
 
@@ -1830,29 +1833,53 @@ def api_save_mempool(state: AppState, payload: dict) -> dict:
     return {"saved": True, "mempool": mempool_info(url)}
 
 
+def _payload_bool(payload: dict, *keys, default: bool | None = None) -> bool | None:
+    """Erstes gesetztes Bool-Feld aus *payload*; None wenn keines der Keys da ist."""
+    for key in keys:
+        if key not in payload:
+            continue
+        roh = payload.get(key)
+        if isinstance(roh, str):
+            return roh.strip().lower() in ("1", "true", "ja", "yes", "on")
+        return bool(roh)
+    return default
+
+
 def api_save_start_sync(state: AppState, payload: dict) -> dict:
     """
-    Speichert „Wallets immer aktuell halten“ in der .env.
+    Speichert „Wallets immer aktuell halten“ (+ Unteroption) in der .env.
 
     Bei ja: Tip-Nachzug beim Start + Electrs-Subscribe (eigener Node).
+    ``nur_bekannte_utxos``: Tip-Nachzug ohne Gap — nur bekannte UTXOs.
     """
-    roh = payload.get(
+    an = _payload_bool(
+        payload,
         "enabled",
-        payload.get(
-            "wallets_immer_aktuell",
-            payload.get("wallets_beim_start_aktualisieren"),
-        ),
+        "wallets_immer_aktuell",
+        "wallets_beim_start_aktualisieren",
+        default=False,
     )
-    if isinstance(roh, str):
-        an = roh.strip().lower() in ("1", "true", "ja", "yes", "on")
-    else:
-        an = bool(roh)
+    assert an is not None
+    nur_bekannte = _payload_bool(
+        payload,
+        "nur_bekannte_utxos",
+        "known_only",
+        "wallets_nur_bekannte_utxos",
+        default=None,
+    )
+    if not an:
+        nur_bekannte = False
+    elif nur_bekannte is None:
+        nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
+            state.env().values()
+        )
 
     env = state.env()
     # Beide Keys: UI-Name neu, Legacy bleibt lesbar.
     env.apply({
         "WALLETS_IMMER_AKTUELL": "1" if an else "0",
         "WALLETS_BEIM_START_AKTUALISIEREN": "1" if an else "0",
+        "WALLETS_NUR_BEKANNTE_UTXOS": "1" if nur_bekannte else "0",
     })
     try:
         env.save()
@@ -1865,6 +1892,9 @@ def api_save_start_sync(state: AppState, payload: dict) -> dict:
         from core import wallet_watch
 
         if an:
+            # Alten Gap-Lauf stoppen, damit die neue Option (z. B. nur bekannte)
+            # nicht hinter einem noch laufenden Tip-Nachzug stecken bleibt.
+            _tip_sync_abbrechen(state)
             # 1) Tip-Nachzug jetzt (wie beim Start)
             sync_job = starte_wallet_aktualisierung(state, erzwingen=True)
             # 2) Electrs-Subscribe für Live-Updates
@@ -1872,6 +1902,7 @@ def api_save_start_sync(state: AppState, payload: dict) -> dict:
                 state, on_log=lambda t: print(f"  {t}", flush=True),
             )
         else:
+            _tip_sync_abbrechen(state)
             wallet_watch.stoppe_wallet_watch()
     except Exception:
         pass
@@ -1880,6 +1911,7 @@ def api_save_start_sync(state: AppState, payload: dict) -> dict:
         "saved": True,
         "wallets_beim_start_aktualisieren": an,
         "wallets_immer_aktuell": an,
+        "wallets_nur_bekannte_utxos": bool(nur_bekannte),
         "wallet_watch": _wallet_watch_status(),
     }
     if isinstance(sync_job, dict) and sync_job.get("id"):
@@ -2398,6 +2430,11 @@ def _mit_mempool_pending(
       unter ausgegeben als pending.
     * **Bestätigt** (ein XPUB): Cache settlen — UTXO raus, Verlauf spent,
       listunspent der Adresse (Change) — kein Fullscan.
+
+    Mit ``xpub`` (einzelne Wallet-Ansicht) nur diese Wallet prüfen — sonst
+    ``listunspent`` über alle Adressen aller Wallets und spürbare Wartezeit
+    schon beim Öffnen eines 1-UTXO-Wallets. Querschnitt bleibt bei
+    Herkunft ``/api/utxos`` (``xpub is None``).
     """
 
     client = _eigener_fulcrum_client(state)
@@ -2434,31 +2471,33 @@ def _mit_mempool_pending(
         })
     ziel_keys = {f"{str(u.get('txid') or '').lower()}:{int(u.get('vout') or 0)}" for u in kandidaten}
     ziel_adressen = {u.get("address") for u in kandidaten if u.get("address")}
-    for entry_anderes in state.analyse_entries:
-        if xpub and entry_anderes.analyse_schluessel == xpub:
-            continue
-        try:
-            cache_anderes = main.load_xpub_cache_entry(entry_anderes.analyse_schluessel, state.cache_dir)
-            andere_utxos = (cache_anderes or {}).get("utxos") or []
-        except Exception:
-            andere_utxos = []
-        for u in andere_utxos:
-            key = f"{str(u.get('txid') or '').lower()}:{int(u.get('vout') or 0)}"
-            if key not in gesehen_k:
+    # Herkunft: alle Wallets in den Electrs-Check. Einzel-Wallet: nicht —
+    # die Ergebnisse würden ohnehin auf ziel_keys gefiltert, die Roundtrips
+    # kosten aber ~100 ms je Adresse.
+    if xpub is None:
+        for entry_anderes in state.analyse_entries:
+            try:
+                cache_anderes = main.load_xpub_cache_entry(entry_anderes.analyse_schluessel, state.cache_dir)
+                andere_utxos = (cache_anderes or {}).get("utxos") or []
+            except Exception:
+                andere_utxos = []
+            for u in andere_utxos:
+                key = f"{str(u.get('txid') or '').lower()}:{int(u.get('vout') or 0)}"
+                if key not in gesehen_k:
+                    gesehen_k.add(key)
+                    kandidaten.append(u)
+            try:
+                verlauf_anderes = main.load_xpub_verlauf_cache(entry_anderes.analyse_schluessel, state.cache_dir) or []
+            except Exception:
+                verlauf_anderes = []
+            for e in verlauf_anderes:
+                if not e.get("spent_pending"):
+                    continue
+                key = f"{str(e.get('txid') or '').lower()}:{int(e.get('vout') or 0)}"
+                if key in gesehen_k:
+                    continue
                 gesehen_k.add(key)
-                kandidaten.append(u)
-        try:
-            verlauf_anderes = main.load_xpub_verlauf_cache(entry_anderes.analyse_schluessel, state.cache_dir) or []
-        except Exception:
-            verlauf_anderes = []
-        for e in verlauf_anderes:
-            if not e.get("spent_pending"):
-                continue
-            key = f"{str(e.get('txid') or '').lower()}:{int(e.get('vout') or 0)}"
-            if key in gesehen_k:
-                continue
-            gesehen_k.add(key)
-            kandidaten.append({"txid": e.get("txid"), "vout": e.get("vout"), "value": int(e.get("value") or 0), "address": e.get("address"), "status": e.get("status") or {}})
+                kandidaten.append({"txid": e.get("txid"), "vout": e.get("vout"), "value": int(e.get("value") or 0), "address": e.get("address"), "status": e.get("status") or {}})
     try:
         from fulcrum import eigene_mempool_empfaenge, klassifiziere_utxo_spends
 
@@ -2615,6 +2654,14 @@ def _mit_mempool_pending(
     return markiert, anhang
 
 
+def _query_flag(query: dict, name: str, *, default: bool = True) -> bool:
+    """Query-Flag: fehlt → default; 0/false/off/no → aus, sonst an."""
+    roh = (query.get(name) or [None])[0]
+    if roh is None or str(roh).strip() == "":
+        return default
+    return str(roh).strip().lower() not in ("0", "false", "no", "off")
+
+
 def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     entry = wallets_mod.find_entry(state.entries, kennung)
     if entry is None:
@@ -2625,6 +2672,8 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     except (ValueError, TypeError):
         limit = None
     sort = _sortierung(query)
+    # mempool=0: nur Cache (schneller Erst-Paint). Default: Pending über Electrs.
+    mempool = _query_flag(query, "mempool", default=True)
 
     anhang = _verlaufs_anhang(state, [entry], limit=limit, sort=sort)
     gecacht = utxos_mod.load_cached_utxos(
@@ -2642,17 +2691,19 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
             "shown_count": 0,
             "shown_sats": 0,
             "utxos": [],
+            "mempool_checked": False,
             **anhang,
         }
 
-    gecacht, anhang = _mit_mempool_pending(
-        state,
-        gecacht,
-        anhang,
-        limit=limit,
-        sort=sort,
-        xpub=entry.analyse_schluessel,
-    )
+    if mempool:
+        gecacht, anhang = _mit_mempool_pending(
+            state,
+            gecacht,
+            anhang,
+            limit=limit,
+            sort=sort,
+            xpub=entry.analyse_schluessel,
+        )
 
     ergebnis = utxos_mod.rank_wallet_utxos(
         gecacht,
@@ -2669,6 +2720,7 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
         "wallet": entry.display_name,
         "wallet_id": kennung,
         "has_cache": True,
+        "mempool_checked": bool(mempool),
         **anhang,
     })
     return ergebnis
@@ -5677,7 +5729,32 @@ def tip_sync_laeuft(state: AppState) -> bool:
     if not jid:
         return False
     job = state.jobs.get(jid)
-    return bool(job is not None and job.status == "running")
+    if job is None or job.status != "running":
+        return False
+    # Abbruch angefordert: neuer Start darf den Slot übernehmen.
+    if getattr(job, "cancelled", False):
+        return False
+    return True
+
+
+def _tip_sync_abbrechen(state: AppState, *, warte_s: float = 3.0) -> None:
+    """Bricht laufenden Tip-Nachzug ab und gibt den Slot frei."""
+    jid = state.wallet_sync_job_id
+    if not jid:
+        return
+    job = state.jobs.get(jid)
+    if job is not None and job.status == "running":
+        try:
+            state.jobs.cancel(jid)
+        except Exception:
+            pass
+        deadline = time.monotonic() + max(0.0, warte_s)
+        while time.monotonic() < deadline:
+            job = state.jobs.get(jid)
+            if job is None or job.status != "running":
+                break
+            time.sleep(0.05)
+    state.wallet_sync_job_id = None
 
 
 def starte_wallet_aktualisierung(
@@ -5725,8 +5802,12 @@ def starte_wallet_aktualisierung(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
         try:
+            nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
+                state.env().values()
+            )
             stand.phase(
-                f"Aktualisiere {len(eintraege)} Wallet(s) bis Chain-Tip…"
+                f"Aktualisiere {len(eintraege)} Wallet(s) bis Chain-Tip"
+                + (" (nur bekannte UTXOs, kein Gap)…" if nur_bekannte else "…")
             )
             args = state.args_namespace()
             args.xpubs = [e.analyse_schluessel for e in eintraege]
@@ -5743,6 +5824,7 @@ def starte_wallet_aktualisierung(
             #   Subscribe hält danach aktuell).
             # * Nur BIP-158 / kein Electrs → Filter inkrementell.
             # * Öffentliches Electrum → BIP-158 wenn Tip da (Privatsphäre).
+            # * nur_bekannte → kein Gap / kein BIP-158-Walk.
             bip158_fetch = None
             fulcrum = fetchers.get("fulcrum")
             electrs_eigen = (
@@ -5758,7 +5840,12 @@ def starte_wallet_aktualisierung(
                 is not None
                 for x in schluessel
             )
-            if electrs_eigen:
+            if nur_bekannte:
+                stand.phase(
+                    "Tip-Nachzug: nur bekannte UTXOs "
+                    "(kein Gap — neue Adressen per UTXO-Scan)"
+                )
+            elif electrs_eigen:
                 stand.phase(
                     "Tip-Nachzug: eigener Electrs (listunspent/Gap) — "
                     "ohne BIP-158; Subscribe übernimmt Live-Updates"
@@ -5819,6 +5906,7 @@ def starte_wallet_aktualisierung(
                 bip158_fetch_wallet_utxos=bip158_fetch,
                 on_progress=on_progress,
                 on_wallet_done=on_done,
+                nur_bekannte=nur_bekannte,
             )
             job.raise_if_cancelled()
             stand.phase(

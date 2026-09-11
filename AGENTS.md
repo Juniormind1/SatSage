@@ -160,6 +160,7 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 # VERBOSE=1                                # volle TxIDs/Adressen (Default: aus)
 # WALLETS_IMMER_AKTUELL=1                 # Dauer-Watch (Electrs-Subscribe) + Tip-Nachzug beim Start
 # WALLETS_BEIM_START_AKTUALISIEREN=1     # Legacy-Alias fÃ¼r WALLETS_IMMER_AKTUELL
+# WALLETS_NUR_BEKANNTE_UTXOS=1           # Tip-Nachzug nur bekannte UTXOs (kein Gap; neue Adressen → UTXO-Scan)
 # STEUER_HALTEFRIST_JAHRE=1                # Vorgabe 1 (DE); 0 = keine Frist
 # STEUER_STICHTAG=                         # leer = Frist fÃ¼r alle Anschaffungen
 ```
@@ -180,7 +181,7 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 
 ## Version
 
-- **Datei:** `VERSION` im Repo-Root (aktuell `0.9`) â€” einzige Quelle
+- **Datei:** `VERSION` im Repo-Root (aktuell `0.9.2`) â€” einzige Quelle
 - **Lesen:** `core.version.version()`, Web Ã¼ber `GET /api/config` â†’ `version`, FuÃŸzeile `vâ€¦`
 - **PyInstaller:** `VERSION` in `packaging/satsage-webgui.spec` als data bundeln
 - **Bump:** nur Maintainer entscheiden und die Datei ändern; kein Auto-Increment in Scripts/CI. Changelog-Eintrag zum Bump mitziehen; dabei Release Notes wie oben (datierter Abschnitt, Unveröffentlicht leeren).
