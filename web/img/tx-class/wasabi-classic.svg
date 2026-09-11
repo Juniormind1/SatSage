@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+  <!-- Wasabi Classic · Wasabi-Grün (Marke ~#94FF0B, hier gedämpft für Kontrast) -->
+  <g fill="#5CBB3A">
+    <rect x="2.5" y="3" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="5.4" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="7.8" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="10.2" width="8" height="1.6" rx="0.5" opacity="0.55"/>
+    <rect x="2.5" y="12.6" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="15" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="17.4" width="8" height="1.6" rx="0.5" opacity="0.55"/>
+    <rect x="2.5" y="19.8" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="22.2" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="24.6" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="2.5" y="27" width="8" height="1.6" rx="0.5" opacity="0.35"/>
+    <rect x="21.5" y="3" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="5.4" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="7.8" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="10.2" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="12.6" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="15" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="17.4" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="19.8" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="22.2" width="8" height="1.6" rx="0.5"/>
+    <rect x="21.5" y="24.8" width="5" height="1.6" rx="0.5" opacity="0.65"/>
+    <rect x="21.5" y="27.2" width="4" height="1.6" rx="0.5" opacity="0.5"/>
+  </g>
+  <path d="M12.5 16h6" stroke="#5CBB3A" stroke-width="1.3" stroke-linecap="round" opacity="0.75"/>
+</svg>

@@ -175,6 +175,40 @@ def select(rpc: Rpc, wallet: str, count: int) -> list[dict[str, Any]]:
         raise RuntimeError(f"Zu wenige UTXOs in {wallet}: {len(rows)} < {count}")
     return rows[:count]
 
+
+def select_near(
+    rpc: Rpc,
+    wallet: str,
+    count: int,
+    *,
+    target: float = 0.05,
+    lo: float = 0.01,
+    hi: float = 0.08,
+) -> list[dict[str, Any]]:
+    """
+    Wählt UTXOs nahe *target* — nie Faucet-Coinbase-Wale.
+
+    Sonst explodiert die Fee (maxtxfee), sobald ein Mix-Szenario große
+    Miner-Outputs mit 0,05-Lab-Coins mischt.
+    """
+    rows = [
+        u for u in unspent(rpc, wallet)
+        if lo <= float(u["amount"]) <= hi
+    ]
+    rows.sort(
+        key=lambda row: (
+            abs(float(row["amount"]) - target),
+            row["txid"],
+            int(row["vout"]),
+        )
+    )
+    if len(rows) < count:
+        raise RuntimeError(
+            f"Zu wenige UTXOs ~{target} BTC in {wallet}: {len(rows)} < {count} "
+            f"(Range {lo}–{hi})"
+        )
+    return rows[:count]
+
 def raw_spend(rpc: Rpc, name: str, inputs: list[dict[str, Any]],
               outputs: list[tuple[str, float]], signers: list[str]) -> dict[str, Any]:
     input_json = json.dumps([{"txid": u["txid"], "vout": int(u["vout"])} for u in inputs], separators=(",", ":"))
@@ -211,6 +245,8 @@ def write_env(rpc: Rpc) -> None:
         "RPCPORT=18443",
         "RPCUSER=bitcoin",
         "RPCPASSWORD=secret",
+        # Lokaler mempool.space-Explorer (docker: mempool-web auf :18080).
+        "MEMPOOL_URL=http://127.0.0.1:18080",
         # Assistent: lokales Ollama (Loopback). Modell muss auf dem Host liegen
         # (z. B. ollama pull qwen2.5:0.5b) — sonst Pille grau / unreachable.
         "LLM_BASE_URL=http://127.0.0.1:11434/v1",
@@ -257,54 +293,89 @@ def run(rpc: Rpc) -> None:
     records.append(raw_spend(rpc, "Beta-aged-fanout", old, fanout, [beta]))
     mine(rpc, 2, faucet)
 
-    # Wasabi-Classic-ähnlich: 4 Wallets × 6 Ins; je 6 gleiche Mix-Outs + 1 Change.
-    # (früher CoinJoin-like-round-1 — Alias bleibt im Report-Feld alias)
-    cj1_inputs: list[dict[str, Any]] = []
-    cj1_signers: list[str] = []
-    cj1_outputs: list[tuple[str, float]] = []
-    for label, wallet in zip(LABELS, WALLETS):
-        chosen = select(rpc, wallet, 6)
-        cj1_inputs += chosen
-        cj1_signers += [wallet] * 6
-        cj1_outputs += [(addresses[label][20 + i], .045) for i in range(6)]
-        cj1_outputs.append((addresses[label][32], .029))
-    cj1 = raw_spend(rpc, "Wasabi-classic-like", cj1_inputs, cj1_outputs, cj1_signers)
-    cj1["alias"] = "CoinJoin-like-round-1"
-    cj1["expected_kind"] = "wasabi_classic"
-    cj1["viewer_wallet"] = "lab-alpha"
-    records.append(cj1)
-    mine(rpc, 3, faucet)
+    # ------------------------------------------------------------------
+    # CoinJoin-Fixtures: Fremd-Peers = lab-faucet (Funding-Quelle aller Lab-
+    # Sats). lab-faucet steht bewusst NICHT in SatSage WALLET_* → in SatSage
+    # sind das fremde Inputs. Lab-Wallets = nur Viewer-Anteile (eigene Ins).
+    # Kein Multisig — alles Einzelsignatur (P2WPKH).
+    # ------------------------------------------------------------------
 
-    cj2_inputs: list[dict[str, Any]] = []
-    cj2_signers: list[str] = []
-    cj2_outputs: list[tuple[str, float]] = []
-    for label, wallet in zip(LABELS, WALLETS):
-        equal_addresses = set(addresses[label][20:26])
-        rows = [u for u in unspent(rpc, wallet) if u["txid"] == cj1["txid"] and u.get("address") in equal_addresses]
-        if len(rows) != 6:
-            raise RuntimeError(f"Wasabi-classic-like: {label} outputs fehlen")
-        cj2_inputs += rows
-        cj2_signers += [wallet] * 6
-        cj2_outputs += [(addresses[label][28 + i], .039) for i in range(6)]
-        cj2_outputs.append((addresses[label][39], .034))
-    cj2 = raw_spend(rpc, "Wasabi-classic-remix", cj2_inputs, cj2_outputs, cj2_signers)
-    cj2["alias"] = "CoinJoin-like-round-2"
-    cj2["expected_kind"] = "wasabi_classic"
-    cj2["viewer_wallet"] = "lab-alpha"
-    records.append(cj2)
-    mine(rpc, 3, faucet)
-
-    # Extra-Faucet für weitere Klassifikations-Fixtures (Fremd-Peers + Empfang).
+    # Extra-Funding: Lab-Wallets + viele kleine Faucet-Peer-UTXOs für Mixes.
     for index in range(30, 50):
         payouts = {addresses[label][index]: 0.05 for label in LABELS}
         rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
         mine(rpc, 1, faucet)
 
-    # Whirlpool-like 5×5: 1× Alpha + 4× Faucet-fremd, 5 gleiche Outs.
-    wp_own = select(rpc, alpha, 1)
-    wp_foreign = select(rpc, "lab-faucet", 4)
+    peer_addrs = [new_address(rpc, "lab-faucet") for _ in range(60)]
+    for i in range(0, len(peer_addrs), 12):
+        chunk = peer_addrs[i : i + 12]
+        rpc.call(
+            "sendmany",
+            "",
+            json.dumps({a: 0.05 for a in chunk}, separators=(",", ":")),
+            wallet="lab-faucet",
+        )
+        mine(rpc, 1, faucet)
+
+    # Wasabi-Classic-ähnlich: 6× Alpha (eigen) + 18× Faucet (fremd);
+    # 24 gleiche Mix-Outs + 4 Changes (1× Alpha, 3× Faucet).
+    cj1_own = select_near(rpc, alpha, 6)
+    cj1_foreign = select_near(rpc, "lab-faucet", 18)
+    cj1_ins = cj1_own + cj1_foreign
+    cj1_signers = [alpha] * 6 + ["lab-faucet"] * 18
+    cj1_in_sum = sum(float(u["amount"]) for u in cj1_ins)
+    cj1_equal = round((cj1_in_sum - 0.001) * 0.90 / 24, 8)
+    cj1_change = round((cj1_in_sum - 24 * cj1_equal - 0.0005) / 4, 8)
+    if cj1_equal <= 0 or cj1_change <= 0:
+        raise RuntimeError("Wasabi-classic-like: Beträge ungültig")
+    cj1_outputs = (
+        [(addresses["alpha"][20 + i], cj1_equal) for i in range(6)]
+        + [(new_address(rpc, "lab-faucet"), cj1_equal) for _ in range(18)]
+        + [(addresses["alpha"][32], cj1_change)]
+        + [(new_address(rpc, "lab-faucet"), cj1_change) for _ in range(3)]
+    )
+    cj1 = raw_spend(rpc, "Wasabi-classic-like", cj1_ins, cj1_outputs, cj1_signers)
+    cj1["alias"] = "CoinJoin-like-round-1"
+    cj1["expected_kind"] = "wasabi_classic"
+    cj1["viewer_wallet"] = "lab-alpha"
+    cj1["foreign_wallet"] = "lab-faucet"
+    records.append(cj1)
+    mine(rpc, 3, faucet)
+
+    # Remix: nur Alpha-Equal-Outs aus Round 1 + neue Faucet-Peers.
+    equal_alpha = set(addresses["alpha"][20:26])
+    cj2_own = [
+        u for u in unspent(rpc, alpha)
+        if u["txid"] == cj1["txid"] and u.get("address") in equal_alpha
+    ]
+    if len(cj2_own) != 6:
+        raise RuntimeError(f"Wasabi-classic-like: Alpha-Equal-Outs fehlen ({len(cj2_own)})")
+    cj2_foreign = select_near(rpc, "lab-faucet", 18)
+    cj2_ins = cj2_own + cj2_foreign
+    cj2_signers = [alpha] * 6 + ["lab-faucet"] * 18
+    cj2_sum = sum(float(u["amount"]) for u in cj2_ins)
+    cj2_equal = round((cj2_sum - 0.001) * 0.90 / 24, 8)
+    cj2_change = round((cj2_sum - 24 * cj2_equal - 0.0005) / 4, 8)
+    cj2_outputs = (
+        [(addresses["alpha"][28 + i], cj2_equal) for i in range(6)]
+        + [(new_address(rpc, "lab-faucet"), cj2_equal) for _ in range(18)]
+        + [(addresses["alpha"][39], cj2_change)]
+        + [(new_address(rpc, "lab-faucet"), cj2_change) for _ in range(3)]
+    )
+    cj2 = raw_spend(rpc, "Wasabi-classic-remix", cj2_ins, cj2_outputs, cj2_signers)
+    cj2["alias"] = "CoinJoin-like-round-2"
+    cj2["expected_kind"] = "wasabi_classic"
+    cj2["viewer_wallet"] = "lab-alpha"
+    cj2["foreign_wallet"] = "lab-faucet"
+    records.append(cj2)
+    mine(rpc, 3, faucet)
+
+    # Whirlpool-like 5×5: 1× Alpha + 4× Faucet-fremd.
+    wp_own = select_near(rpc, alpha, 1)
+    wp_foreign = select_near(rpc, "lab-faucet", 4)
     wp_ins = wp_own + wp_foreign
-    wp_denom = round(min(float(u["amount"]) for u in wp_ins) - 0.001, 8)
+    wp_sum = sum(float(u["amount"]) for u in wp_ins)
+    wp_denom = round((wp_sum - 0.0002) / 5, 8)
     if wp_denom <= 0:
         raise RuntimeError("Whirlpool-like: Inputs zu klein")
     wp_outs = [(addresses["alpha"][50], wp_denom)] + [
@@ -315,16 +386,17 @@ def run(rpc: Rpc) -> None:
     )
     wp["expected_kind"] = "whirlpool"
     wp["viewer_wallet"] = "lab-alpha"
+    wp["foreign_wallet"] = "lab-faucet"
     records.append(wp)
     mine(rpc, 2, faucet)
 
     # JoinMarket-like: 1 eigen + 3 fremd; 4 gleiche CJ-Outs + 3 Changes.
-    jm_own = select(rpc, beta, 1)
-    jm_foreign = select(rpc, "lab-faucet", 3)
+    jm_own = select_near(rpc, beta, 1)
+    jm_foreign = select_near(rpc, "lab-faucet", 3)
     jm_ins = jm_own + jm_foreign
     jm_in_sum = sum(float(u["amount"]) for u in jm_ins)
-    jm_equal = round(jm_in_sum * 0.18, 8)  # 4× ≈ 72 %
-    jm_change = round((jm_in_sum - 4 * jm_equal - 0.001) / 3, 8)
+    jm_equal = round(jm_in_sum * 0.18, 8)
+    jm_change = round((jm_in_sum - 4 * jm_equal - 0.0002) / 3, 8)
     if jm_equal <= 0 or jm_change <= 0:
         raise RuntimeError("JoinMarket-like: Beträge ungültig")
     jm_outs = (
@@ -338,43 +410,40 @@ def run(rpc: Rpc) -> None:
     )
     jm["expected_kind"] = "joinmarket"
     jm["viewer_wallet"] = "lab-beta"
+    jm["foreign_wallet"] = "lab-faucet"
     records.append(jm)
     mine(rpc, 2, faucet)
 
-    # WabiSabi-like: große n:m, ungleiche Out-Beträge (Zerlegung).
-    ws_ins: list[dict[str, Any]] = []
-    ws_signers: list[str] = []
-    for wallet in WALLETS:
-        chosen = select(rpc, wallet, 4)
-        ws_ins += chosen
-        ws_signers += [wallet] * 4
+    # WabiSabi-like: 2× Alpha eigen + 14× Faucet fremd; 16 ungleiche Outs.
+    ws_own = select_near(rpc, alpha, 2)
+    ws_foreign = select_near(rpc, "lab-faucet", 14)
+    ws_ins = ws_own + ws_foreign
+    ws_signers = [alpha] * 2 + ["lab-faucet"] * 14
     ws_in_sum = sum(float(u["amount"]) for u in ws_ins)
-    # 16 ungleiche Anteile (Summe 1.0), skaliert auf Input abzgl. Fee.
     ws_weights = [
         31, 22, 17, 11, 9, 7, 5, 4,
         28, 19, 14, 8, 6, 3, 2, 1,
     ]
     wsum = float(sum(ws_weights))
-    budget = ws_in_sum - 0.002
+    budget = ws_in_sum - 0.0005
     ws_amounts = [round(budget * (w / wsum), 8) for w in ws_weights]
-    # Rundungsrest in letztem Out auffangen.
     ws_amounts[-1] = round(budget - sum(ws_amounts[:-1]), 8)
+    # 2 eigene Empfänge (Alpha), Rest Faucet — in SatSage nur Alpha „eigen“.
     ws_outs: list[tuple[str, float]] = [
         (addresses["alpha"][53], ws_amounts[0]),
-        (addresses["beta"][53], ws_amounts[1]),
-        (addresses["change"][53], ws_amounts[2]),
-        (addresses["gamma"][53], ws_amounts[3]),
+        (addresses["alpha"][54], ws_amounts[1]),
     ]
-    for amt in ws_amounts[4:]:
+    for amt in ws_amounts[2:]:
         ws_outs.append((new_address(rpc, "lab-faucet"), amt))
     ws = raw_spend(rpc, "Wabisabi-like", ws_ins, ws_outs, ws_signers)
     ws["expected_kind"] = "wabisabi"
     ws["viewer_wallet"] = "lab-alpha"
+    ws["foreign_wallet"] = "lab-faucet"
     records.append(ws)
     mine(rpc, 2, faucet)
 
     # PayJoin-like: 1 eigen (Gamma) + 1 Faucet; 2 Outs.
-    pj_ins = select(rpc, gamma, 1) + select(rpc, "lab-faucet", 1)
+    pj_ins = select_near(rpc, gamma, 1) + select_near(rpc, "lab-faucet", 1)
     pj_sum = sum(float(u["amount"]) for u in pj_ins)
     pj_outs = [
         (addresses["gamma"][54], round(pj_sum * 0.55, 8)),
@@ -387,10 +456,10 @@ def run(rpc: Rpc) -> None:
     mine(rpc, 2, faucet)
 
     # Exchange-batch-like: Faucet-Fan-out, genau 1 Out an Alpha (0 eigene Ins).
-    ex_ins = select(rpc, "lab-faucet", 1)
+    ex_ins = select_near(rpc, "lab-faucet", 1)
     ex_sum = float(ex_ins[0]["amount"])
     ex_main = round(ex_sum * 0.40, 8)
-    ex_rest = round((ex_sum - ex_main - 0.001) / 5, 8)
+    ex_rest = round((ex_sum - ex_main - 0.0002) / 5, 8)
     ex_outs = [(addresses["alpha"][55], ex_main)] + [
         (new_address(rpc, "lab-faucet"), ex_rest) for _ in range(5)
     ]

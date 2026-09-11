@@ -1753,7 +1753,19 @@ class TestHerkunftVollstaendig(ApiTestBasis):
         # Route liefert 202 wie andere Jobs; bei nichts_zu_tun startet kein Job.
         self.assertIn(status, (200, 202))
         self.assertTrue(körper.get("nichts_zu_tun"))
+        self.assertTrue(körper.get("keine_utxos"))
         self.assertEqual(körper.get("offen"), 0)
+
+    def test_trace_alle_ohne_utxos_markiert_keine_utxos(self):
+        status, körper = self.anfrage(
+            "/api/trace/alle",
+            methode="POST",
+            daten={},
+        )
+        self.assertIn(status, (200, 202))
+        self.assertTrue(körper.get("nichts_zu_tun"))
+        self.assertTrue(körper.get("keine_utxos"))
+        self.assertEqual(körper.get("utxos"), 0)
 
     def test_offen_tief_nimmt_unvollstaendige(self):
         from core import trace_cache

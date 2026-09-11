@@ -142,8 +142,8 @@ body{
 }
 .marke{display:flex;align-items:center;gap:12px;margin:0 0 22px}
 .marke-logo{
-  width:44px;height:44px;border-radius:10px;object-fit:cover;flex-shrink:0;
-  box-shadow:0 0 0 1px var(--linie);
+  width:44px;height:44px;border-radius:10px;object-fit:contain;flex-shrink:0;
+  box-shadow:0 0 0 1px var(--linie);background:#F0F3F0;
 }
 .marke-text{display:flex;flex-direction:column;gap:2px;line-height:1.15}
 .marke-name{font-family:var(--mono);font-weight:700;letter-spacing:-.01em;font-size:18px}
@@ -4008,6 +4008,17 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
 
     eigene_jetzt = _eigene_adressen(state)
     utxos = _utxos_fuer_trace(state, wallet_id=wallet_id)
+    if not utxos:
+        # Leerer Bestand ≠ „alles schon getracet“ — sonst wirkt „Herkunft aller
+        # UTXOs“ nach frischem Lab/Cache fälschlich fertig (grüner Hinweis).
+        return {
+            "nichts_zu_tun": True,
+            "keine_utxos": True,
+            "offen": 0,
+            "utxos": 0,
+            "vollstaendig": vollstaendig,
+            "wallet_id": wallet_id,
+        }
     if vollstaendig:
         offen = _trace_offen_tief(state, utxos, eigene_jetzt)
     else:
@@ -4016,7 +4027,9 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     if not offen:
         return {
             "nichts_zu_tun": True,
+            "keine_utxos": False,
             "offen": 0,
+            "utxos": len(utxos),
             "vollstaendig": vollstaendig,
             "wallet_id": wallet_id,
         }

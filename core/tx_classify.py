@@ -318,7 +318,9 @@ def classify_tx(
     Detektor-Reihenfolge:
     1. Eigentum klären
     2. 0 eigene Ins + eigene Outs → Exchange-Batch (bei Fan-out-Form)
-    3. alle Ins eigen → Fan-Out (eigen)
+    3. alle Ins eigen → Fan-Out (eigen), **außer** die Form ist klar Mix
+       (Wasabi/WabiSabi/Whirlpool/…) — Soft-Label der Form bleibt nützlich,
+       auch wenn alle Teilnehmer eigene XPUBs sind (Lab / Multi-Wallet)
     4. wenige Ins, wenige Fremd → PayJoin
     5. Whirlpool → Wasabi Classic → WabiSabi → JoinMarket → coinjoin
     """
@@ -347,14 +349,21 @@ def classify_tx(
     ):
         return _classification("exchange_batch", own)
 
+    # Mix-Form früh: auch bei rein eigenen Inputs (Multi-Wallet / Lab).
+    form_kind = None
+    if own.own_input_count >= 1 and own.own_output_count >= 1:
+        form_kind = _form_coinjoin_kind(n_in, n_out, values)
+
     # 3. Fan-Out (eigen): alle Inputs eigen — Soft-Label nur bei erkennbarer
-    # Auszahlungs-/Konsolidierungsform (sonst normale Spende → unknown).
+    # Auszahlungs-/Konsolidierungsform, nicht bei klarer Mix-Struktur.
     if (
         own.ownership_complete
         and own.own_input_count == n_in
         and n_in >= 1
         and own.foreign_input_count == 0
     ):
+        if form_kind:
+            return _classification(form_kind, own)
         if n_out >= 3 or n_in >= 2:
             return _classification("fan_out_own", own)
         return _classification("unknown", own)
@@ -372,11 +381,10 @@ def classify_tx(
         if equal_n < 3 and n_out <= 6:
             return _classification("payjoin", own)
 
-    # 5. CoinJoin-Form — nur wenn mindestens ein eigener Input und Output.
+    # 5. CoinJoin-Form — mindestens ein eigener Input und Output.
     if own.own_input_count >= 1 and own.own_output_count >= 1:
-        kind = _form_coinjoin_kind(n_in, n_out, values)
-        if kind:
-            return _classification(kind, own)
+        if form_kind:
+            return _classification(form_kind, own)
         # Kleiner Mix-Verdacht (z. B. 3–14 Ins) mit Gleichbeträgen → generic.
         _b, equal_n, andere = _equal_output_stats(values)
         if (

@@ -163,10 +163,10 @@ function privacyLabel(stufe) {
 
 function knotenNotiz(knoten) {
   if (!knoten) return "";
-  const klasse = softTxClassLabel(knoten);
-  if (klasse) return klasse;
+  // Soft-Label und „Extern“ sitzen in der TxID-/Zeit-Zeile, nicht als Extra-Band.
+  if (softTxClassLabel(knoten)) return "";
+  if (knoten.type === "external") return "";
   if (!knoten.note) return "";
-  if (knoten.type === "external") return t("trace.noteExternalNotFollowed");
   if (knoten.type === "external_unresolved") {
     return t("trace.noteUnresolvedInputs", { count: knoten.input_count || 0 });
   }
@@ -174,6 +174,9 @@ function knotenNotiz(knoten) {
   if (knoten.note === "Keine Herkunft ermittelbar.") {
     return t("trace.errorNoOriginDetermined");
   }
+  // Backend-Notiz „Externe Zweige…“ / Soft-Label nicht nochmal als Band.
+  if (knoten.note === "Externe Zweige werden nicht weiterverfolgt.") return "";
+  if (knoten.tx_class_label && knoten.note === knoten.tx_class_label) return "";
   return knoten.note;
 }
 
@@ -186,6 +189,48 @@ function softTxClassLabel(knotenOderErgebnis) {
   const uebersetzt = t(key);
   if (uebersetzt !== key) return uebersetzt;
   return knotenOderErgebnis.tx_class_label || knotenOderErgebnis.note || "";
+}
+
+/** Mempool-artige Form-Icons für Mix-Soft-Labels (kein Markenlogo). */
+const TX_CLASS_ICON = {
+  whirlpool: "img/tx-class/whirlpool.svg",
+  wasabi_classic: "img/tx-class/wasabi-classic.svg",
+  wabisabi: "img/tx-class/wabisabi.svg",
+  joinmarket: "img/tx-class/joinmarket.svg",
+};
+
+function softTxClassKind(knotenOderErgebnis) {
+  const kind = (knotenOderErgebnis && knotenOderErgebnis.tx_class) || "";
+  if (!kind || kind === "unknown") return "";
+  return kind;
+}
+
+/** Füllt .knoten-unten-rechts mit optionalem Icon + Soft-Label-Text. */
+function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
+  if (!rechts) return;
+  const text = softTxClassLabel(knotenOderErgebnis);
+  const kind = softTxClassKind(knotenOderErgebnis);
+  rechts.replaceChildren();
+  if (!text) {
+    rechts.hidden = true;
+    return;
+  }
+  rechts.hidden = false;
+  const iconSrc = TX_CLASS_ICON[kind];
+  if (iconSrc) {
+    const img = document.createElement("img");
+    img.className = "tx-class-icon";
+    img.src = iconSrc;
+    img.alt = "";
+    img.width = 18;
+    img.height = 18;
+    img.decoding = "async";
+    rechts.append(img);
+  }
+  const span = document.createElement("span");
+  span.className = "tx-class-text";
+  span.textContent = text;
+  rechts.append(span);
 }
 
 function quelleFeldLabel(feld, quelleKey) {
@@ -955,6 +1000,9 @@ function gruppeAusTraceListe(address, keyHinweis) {
 /**
  * Nach einem frischen Trace: Listendaten und Kopfzeilen nachziehen.
  * Sonst sähe man „jüngste sats" und das Verfolgt-Datum erst nach Refresh.
+ *
+ * Bei gezielter Tx-Suche startet die Kopfzeile oft mit 0 sats / leerer
+ * Adresse — hier kommen Output-Betrag und Adresse aus dem Trace-Root.
  */
 function merkeTraceAmUtxo(utxo, ergebnis) {
   if (!utxo || !ergebnis || !ergebnis.found) return;
@@ -969,6 +1017,21 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
   utxo.verfolgt_vollstaendig = Boolean(voll);
   if (ergebnis.juengste_sats_ts) {
     utxo.juengste_sats_ts = ergebnis.juengste_sats_ts;
+  }
+  const root = ergebnis.root || {};
+  if (root.amount_sats != null && Number(root.amount_sats) >= 0) {
+    utxo.value_sats = Number(root.amount_sats) || 0;
+  }
+  if (root.address && !utxo.address) {
+    utxo.address = root.address;
+  }
+  if (root.wallet) {
+    utxo.wallet = root.wallet;
+  } else if (root.address && !utxo.wallet) {
+    utxo.wallet = t("trace.targetedWallet");
+  }
+  if (root.time_label) {
+    utxo.time_label = root.time_label;
   }
   // Dieselbe Instanz in der Trace-Liste nachziehen (findeTraceUtxo kann
   // ein anderes Objekt geliefert haben als die Gruppenzeile).
@@ -986,11 +1049,88 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
         if (utxo.juengste_sats_ts) {
           eintrag.juengste_sats_ts = utxo.juengste_sats_ts;
         }
+        if (utxo.value_sats != null) eintrag.value_sats = utxo.value_sats;
+        if (utxo.address) eintrag.address = utxo.address;
+        if (utxo.wallet) eintrag.wallet = utxo.wallet;
+        if (utxo.time_label) eintrag.time_label = utxo.time_label;
         if (!utxo.address && gruppe.address) utxo.address = gruppe.address;
       }
     }
   }
+  aktualisiereTraceWurzelKopf(utxo);
   zeichneJuengsteSatsNach(utxo);
+}
+
+/**
+ * Betrag/Adresse/Wallet in der UTXO-Kopfzeile nachziehen.
+ * *wurzelEl*: optional der konkrete Block (zuverlässiger als data-key-Suche).
+ */
+function aktualisiereTraceWurzelKopf(utxo, wurzelEl = null) {
+  if (!utxo || !utxo.key) return;
+  let block = wurzelEl && wurzelEl.classList?.contains("utxo-wurzel")
+    ? wurzelEl
+    : null;
+  if (!block && wurzelEl?.closest) {
+    block = wurzelEl.closest(".utxo-wurzel");
+  }
+  if (!block) {
+    block = document.querySelector(
+      `.utxo-wurzel[data-key="${CSS.escape(utxo.key)}"]`,
+    );
+  }
+  if (!block) return;
+  const oben = block.querySelector(".utxo-kopf .knoten-oben");
+  if (!oben) return;
+
+  const betrag = oben.querySelector(".betrag");
+  if (betrag && utxo.value_sats != null) {
+    betrag.classList.remove("zart");
+    if (utxo.spent || utxo.spent_pending) {
+      setzeSatsBetrag(betrag, utxo.value_sats, {
+        atTs: spentZeitstempel(utxo) || undefined,
+        spentUtxos: [utxo],
+      });
+    } else {
+      betrag.textContent = formatSats(utxo.value_sats);
+    }
+  }
+
+  // Wallet-Label: zweites Kind nach .betrag (nicht Marken).
+  let wer = null;
+  for (const el of oben.children) {
+    if (el.classList.contains("betrag")) continue;
+    if (el.classList.contains("mono")) continue;
+    if (el.classList.contains("verfolgt-marke")) continue;
+    wer = el;
+    break;
+  }
+  if (wer && utxo.wallet) wer.textContent = utxo.wallet;
+
+  let adresse = oben.querySelector("span.mono.zart");
+  if (!adresse) {
+    // Fallback: erstes mono ohne betrag
+    adresse = [...oben.querySelectorAll("span.mono")].find(
+      (el) => !el.classList.contains("betrag"),
+    );
+  }
+  if (adresse && utxo.address) {
+    adresse.textContent = kuerze(utxo.address, 12, 6);
+    macheKopierbar(adresse, utxo.address, "Adresse");
+  }
+
+  const unten = block.querySelector(".utxo-kopf .knoten-unten-links");
+  if (unten && (utxo.time_label || utxo.key)) {
+    const ankunft = formatAnkunft(utxo);
+    unten.replaceChildren();
+    const utxoKennung = document.createElement("span");
+    utxoKennung.className = "mono";
+    utxoKennung.textContent = kuerze(utxo.key, 12, 8);
+    macheKopierbar(utxoKennung, utxo.key, "UTXO (txid:vout)");
+    unten.append(utxoKennung);
+    if (ankunft) {
+      unten.append(document.createTextNode(` · ${ankunft}`));
+    }
+  }
 }
 
 /** Marke „verfolgt · Datum" in der UTXO-Kopfzeile an den aktuellen Stand anpassen. */
@@ -3230,7 +3370,10 @@ function zeichneTraceWurzel(utxo) {
   oben.className = "knoten-oben";
   const betrag = document.createElement("span");
   betrag.className = "betrag";
-  if (utxo.spent || utxo.spent_pending) {
+  if (utxo.value_sats == null) {
+    betrag.textContent = t("trace.amountPending");
+    betrag.classList.add("zart");
+  } else if (utxo.spent || utxo.spent_pending) {
     setzeSatsBetrag(betrag, utxo.value_sats, {
       atTs: spentZeitstempel(utxo) || undefined,
       spentUtxos: [utxo],
@@ -3242,8 +3385,10 @@ function zeichneTraceWurzel(utxo) {
   wer.textContent = utxo.wallet || t("wallet.unknownWallet");
   const adresse = document.createElement("span");
   adresse.className = "mono zart";
-  adresse.textContent = kuerze(utxo.address, 12, 6);
-  macheKopierbar(adresse, utxo.address, "Adresse");
+  adresse.textContent = utxo.address
+    ? kuerze(utxo.address, 12, 6)
+    : t("trace.addressPending");
+  if (utxo.address) macheKopierbar(adresse, utxo.address, "Adresse");
   oben.append(betrag, wer, adresse);
 
   // Vor dem Aufklappen sichtbar machen, ob eine Analyse vorliegt: Dann geht
@@ -3312,15 +3457,22 @@ function zeichneTraceWurzel(utxo) {
 
   const unten = document.createElement("span");
   unten.className = "knoten-unten";
+  const links = document.createElement("span");
+  links.className = "knoten-unten-links";
   const utxoKennung = document.createElement("span");
   utxoKennung.className = "mono";
   utxoKennung.textContent = kuerze(utxo.key, 12, 8);
   macheKopierbar(utxoKennung, utxo.key, "UTXO (txid:vout)");
-  unten.append(utxoKennung);
+  links.append(utxoKennung);
   const ankunftText = formatAnkunft(utxo);
   if (ankunftText) {
-    unten.append(document.createTextNode(` · ${ankunftText}`));
+    links.append(document.createTextNode(` · ${ankunftText}`));
   }
+  unten.append(links);
+  const rechts = document.createElement("span");
+  rechts.className = "knoten-unten-rechts";
+  rechts.hidden = true;
+  unten.append(rechts);
 
   info.append(oben, unten);
   zeile.append(klapp, punkt, info);
@@ -3387,6 +3539,8 @@ async function ladeGespeichertenZweig(utxo, zweig, klapp) {
     if (gespeichert && gespeichert.vorhanden) {
       zweig.dataset.geladen = "ja";
       zeichneZweig(gespeichert.ergebnis, zweig, utxo, klapp);
+      merkeTraceAmUtxo(utxo, gespeichert.ergebnis);
+      aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
       zweig.prepend(gespeicherterKopf(gespeichert, utxo, zweig, klapp));
       return true;
     }
@@ -3511,6 +3665,8 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
         zweig.dataset.geladen = "ja";
         zeichneZweig(job.result, zweig, utxo, klapp);
         merkeTraceAmUtxo(utxo, job.result);
+        // Kopfzeile am konkreten Block (gezielte Suche startet oft mit „…“).
+        aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
         // Stand-Zeile wie nach Cache-Laden — sonst fehlt sie bis zum Refresh.
         if (job.result.found) {
           zweig.prepend(gespeicherterKopf({
@@ -3597,6 +3753,21 @@ function zeichneFolgeBand(ergebnis, zweig, utxo, klapp) {
   zweig.append(band);
 }
 
+function setzeWurzelTxClass(zweig, ergebnis) {
+  /** Soft-Label (+ Icon) rechts neben Timestamp in der UTXO-Wurzelzeile. */
+  const wurzel = zweig && zweig.closest(".utxo-wurzel");
+  if (!wurzel) return;
+  const unten = wurzel.querySelector(".utxo-kopf .knoten-unten");
+  if (!unten) return;
+  let rechts = unten.querySelector(".knoten-unten-rechts");
+  if (!rechts) {
+    rechts = document.createElement("span");
+    rechts.className = "knoten-unten-rechts";
+    unten.append(rechts);
+  }
+  fuelleTxClassRechts(rechts, ergebnis.root || ergebnis);
+}
+
 function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   zweig.replaceChildren();
 
@@ -3607,12 +3778,7 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   }
 
   const klasseHinweis = softTxClassLabel(ergebnis.root || ergebnis);
-  if (klasseHinweis) {
-    const band = document.createElement("div");
-    band.className = "zweig-status tx-class-hinweis";
-    band.textContent = klasseHinweis;
-    zweig.append(band);
-  }
+  setzeWurzelTxClass(zweig, ergebnis);
 
   if (ergebnis.children.length === 0) {
     zweig.append(hinweisZeile(
@@ -3637,29 +3803,76 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
 
 /** Gezielte Suche nach TxID oder UTXO — Ergebnis erscheint oben in der Liste. */
 async function starteTrace() {
-  const ziel = $("#trace-ziel").value.trim();
-  if (!ziel) return;
+  const roh = $("#trace-ziel").value.trim();
+  if (!roh) return;
 
   $("#trace-start").disabled = true;
   $("#trace-meldung").hidden = true;
 
-  const gesucht = {
-    key: ziel.includes(":") ? ziel : `${ziel}:0`,
-    value_sats: 0,
+  // Reine TxID → Output #0 (explizit im Key und im Feld).
+  const key = roh.includes(":") ? roh : `${roh}:0`;
+  if (!roh.includes(":")) {
+    $("#trace-ziel").value = key;
+  }
+
+  // Schon offene gezielte Suche zum selben UTXO wiederverwenden — sonst
+  // stapeln sich Blöcke und der alte bleibt bei „0 sats“ / „…“.
+  let block = document.querySelector(
+    `#trace-liste .trace-suche .utxo-wurzel[data-key="${CSS.escape(key)}"]`,
+  );
+  let utxo = null;
+  if (block) {
+    utxo = {
+      key,
+      value_sats: null,
+      address: "",
+      wallet: t("trace.targetedWallet"),
+      time_label: "",
+    };
+    const zweig = block.querySelector(".utxo-zweig");
+    const klapp = block.querySelector(".klapp");
+    if (zweig) {
+      zweig.dataset.geladen = "";
+      zweig.replaceChildren();
+      zweig.hidden = false;
+      if (klapp) klapp.textContent = "▾";
+      // Frisch laden (Cache oder Job) und Kopfzeile danach setzen.
+      await oeffneZweig(utxo, zweig, klapp);
+      aktualisiereTraceWurzelKopf(utxo, block);
+    }
+    block.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    $("#trace-start").disabled = false;
+    return;
+  }
+
+  utxo = {
+    key,
+    value_sats: null,
     address: "",
     wallet: t("trace.targetedWallet"),
     time_label: "",
   };
 
-  // Steht ohne Adressgruppe ganz oben: Das gesuchte UTXO muss nicht in der
-  // Liste vorkommen — es kann längst ausgegeben sein.
-  const block = zeichneTraceWurzel(gesucht);
+  // Steht ohne Adressgruppe ganz oben: Das UTXO muss nicht in der Liste
+  // vorkommen — es kann längst ausgegeben sein.
+  block = zeichneTraceWurzel(utxo);
   const huelle = document.createElement("div");
   huelle.className = "trace-suche";
   huelle.append(block);
 
   $("#trace-liste").prepend(huelle);
-  block.querySelector(".klapp").click();
+  const zweig = block.querySelector(".utxo-zweig");
+  const klapp = block.querySelector(".klapp");
+  // Direkt öffnen (nicht nur click) — sonst läuft der Trace ohne await und
+  // die Kopfzeile wird nicht zuverlässig nachgezogen.
+  if (zweig && klapp) {
+    const zeile = block.querySelector(".utxo-kopf");
+    if (zeile) zeile.setAttribute("aria-expanded", "true");
+    zweig.hidden = false;
+    klapp.textContent = "▾";
+    await oeffneZweig(utxo, zweig, klapp);
+    aktualisiereTraceWurzelKopf(utxo, block);
+  }
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
   $("#trace-start").disabled = false;
 }
@@ -3835,25 +4048,40 @@ function zeichneKnoten(knoten) {
 
   info.append(oben);
 
-  if (knoten.from_utxo || knoten.time_label) {
+  const klasseText = softTxClassLabel(knoten);
+  const externKurz =
+    knoten.type === "external" ? t("trace.externalInput") : "";
+  const ankunftText = knoten.time_label ? formatAnkunft(knoten) : "";
+  if (knoten.from_utxo || ankunftText || klasseText || externKurz) {
     const unten = document.createElement("span");
     unten.className = "knoten-unten";
+    const links = document.createElement("span");
+    links.className = "knoten-unten-links";
     if (knoten.from_utxo) {
       const utxoKennung = document.createElement("span");
       utxoKennung.className = "mono";
       utxoKennung.textContent = kuerze(knoten.from_utxo, 12, 8);
       macheKopierbar(utxoKennung, knoten.from_utxo, "UTXO (txid:vout)");
-      unten.append(utxoKennung);
+      links.append(utxoKennung);
     }
-    if (knoten.time_label) {
-      const ankunftText = formatAnkunft(knoten);
-      if (ankunftText) {
-        unten.append(
-          document.createTextNode(
-            (knoten.from_utxo ? " · " : "") + ankunftText,
-          ),
-        );
-      }
+    if (externKurz) {
+      links.append(
+        document.createTextNode((knoten.from_utxo ? " · " : "") + externKurz),
+      );
+    }
+    if (ankunftText) {
+      links.append(
+        document.createTextNode(
+          (knoten.from_utxo || externKurz ? " · " : "") + ankunftText,
+        ),
+      );
+    }
+    unten.append(links);
+    if (klasseText) {
+      const rechts = document.createElement("span");
+      rechts.className = "knoten-unten-rechts";
+      fuelleTxClassRechts(rechts, knoten);
+      unten.append(rechts);
     }
     info.append(unten);
   }
@@ -4350,7 +4578,11 @@ async function starteHerkunftVollstaendig() {
       daten: { wallet_id: wid, vollstaendig: true },
     });
     if (antwort.nichts_zu_tun) {
-      await fertig(t("wallet.originDeepNothing"), "gut");
+      if (antwort.keine_utxos) {
+        await fertig(t("wallet.originDeepNeedCache"), "warn");
+      } else {
+        await fertig(t("wallet.originDeepNothing"), "gut");
+      }
       return;
     }
     jobId = antwort.id;
@@ -4517,6 +4749,117 @@ async function erfrischeHerkunftZwischenstand() {
   }
 }
 
+/** Wartet, bis ein Hintergrundjob fertig ist (done / cancelled / error). */
+async function warteAufJobEnde(jobId, {
+  onTick = null,
+  sollAbbrechen = () => false,
+  intervallMs = 900,
+} = {}) {
+  while (true) {
+    if (sollAbbrechen()) {
+      try {
+        await api(`/jobs/${jobId}`, { methode: "DELETE" });
+      } catch (_) {
+        /* schon weg */
+      }
+      const err = new Error("abgebrochen");
+      err.abgebrochen = true;
+      throw err;
+    }
+    const job = await api(`/jobs/${jobId}`);
+    if (typeof onTick === "function") onTick(job);
+    if (job.running) {
+      await new Promise((r) => setTimeout(r, intervallMs));
+      continue;
+    }
+    if (job.status === "done") return job;
+    if (job.status === "cancelled") {
+      const err = new Error("abgebrochen");
+      err.abgebrochen = true;
+      throw err;
+    }
+    throw new Error(job.error || t("common.failed"));
+  }
+}
+
+/**
+ * UTXO-Scan für jedes konfigurierte Wallet — Voraussetzung für
+ * „Herkunft aller UTXOs“ bei leerem Cache.
+ */
+async function scanneAlleWalletsUtxo({
+  textEl = null,
+  sollAbbrechen = () => false,
+  logStand = null,
+} = {}) {
+  const wallets = (Zustand.config?.wallets || []).filter((w) => w && w.id);
+  if (!wallets.length) {
+    throw new Error(t("wallets.emptyList"));
+  }
+  let scanAb = "";
+  for (let i = 0; i < wallets.length; i += 1) {
+    const wallet = wallets[i];
+    if (sollAbbrechen()) {
+      const err = new Error("abgebrochen");
+      err.abgebrochen = true;
+      throw err;
+    }
+    if (textEl) {
+      setzeText(textEl, t("trace.allOriginsScanning", {
+        aktuell: i + 1,
+        gesamt: wallets.length,
+        name: wallet.name || wallet.id,
+      }));
+    }
+    logZeile(
+      t("trace.allOriginsScanning", {
+        aktuell: i + 1,
+        gesamt: wallets.length,
+        name: wallet.name || wallet.id,
+      }),
+      undefined,
+      wallet.name,
+    );
+
+    let datum = scanAb;
+    if (brauchtBip158Startdatum(wallet.id)) {
+      const gewählt = await frageScanDatum(wallet);
+      if (gewählt === undefined) {
+        const err = new Error("abgebrochen");
+        err.abgebrochen = true;
+        throw err;
+      }
+      datum = gewählt || "";
+      scanAb = datum;
+    }
+
+    const job = await api("/jobs/rescan", {
+      methode: "POST",
+      daten: { wallet_id: wallet.id, scan_ab: datum || "" },
+    });
+    const jid = job.id || job.job_id;
+    if (!jid) {
+      throw new Error(t("wallet.utxoScan") + " — " + t("common.failed"));
+    }
+    // Pipeline kann „queued“ liefern — trotzdem auf diese Job-ID warten.
+    await warteAufJobEnde(jid, {
+      sollAbbrechen,
+      onTick: (j) => {
+        if (logStand) nimmJobLogAb(j, logStand, wallet.name);
+        if (textEl && j.message) {
+          setzeText(
+            textEl,
+            t("trace.allOriginsScanning", {
+              aktuell: i + 1,
+              gesamt: wallets.length,
+              name: wallet.name || wallet.id,
+            }) + ` · ${übersetzeLogText(j.message)}`,
+          );
+        }
+      },
+    });
+  }
+}
+
 async function herkunftAllerUtxos(ziele = {
   knopf: "#herkunft-alle",
   lauf: "#herkunft-lauf",
@@ -4536,6 +4879,7 @@ async function herkunftAllerUtxos(ziele = {
   let zuletztVerfolgt = -1;
   let refreshUm = 0;
   let refreshLaeuft = false;
+  let abbruchWunsch = false;
 
   const fertig = (meldung, art) => {
     clearInterval(timer);
@@ -4550,28 +4894,63 @@ async function herkunftAllerUtxos(ziele = {
     ziele.danach();
   };
 
+  $(ziele.abbruch).onclick = async () => {
+    abbruchWunsch = true;
+    setzeText($(ziele.text), "Abbruch angefordert…");
+    if (jobId) {
+      try {
+        await api(`/jobs/${jobId}`, { methode: "DELETE" });
+      } catch (_) {
+        /* schon beendet */
+      }
+    }
+  };
+
   logZeile("Starte Herkunft aller UTXOs…");
   try {
-    const antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    let antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    if (antwort.nichts_zu_tun && antwort.keine_utxos) {
+      // Bestand fehlt: nach Bestätigung erst alle Wallets scannen, dann Trace.
+      knopf.disabled = false;
+      $(ziele.lauf).hidden = true;
+      if (!window.confirm(t("trace.allOriginsNeedUtxoConfirm"))) {
+        fertig(t("trace.allOriginsScanAbort"), "warn");
+        return;
+      }
+      knopf.disabled = true;
+      $(ziele.lauf).hidden = false;
+      abbruchWunsch = false;
+      await scanneAlleWalletsUtxo({
+        textEl: $(ziele.text),
+        sollAbbrechen: () => abbruchWunsch,
+        logStand,
+      });
+      if (abbruchWunsch) {
+        fertig(t("trace.allOriginsScanAbort"), "warn");
+        return;
+      }
+      setzeText($(ziele.text), t("trace.allOriginsScanDone"));
+      await ladeConfig();
+      antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    }
     if (antwort.nichts_zu_tun) {
-      fertig("Für alle UTXOs liegt bereits eine Herkunftsanalyse vor.", "gut");
+      if (antwort.keine_utxos) {
+        fertig(t("trace.allOriginsNeedUtxo"), "warn");
+      } else {
+        fertig(t("trace.allOriginsNothing"), "gut");
+      }
       return;
     }
     jobId = antwort.id;
     nimmJobLogAb(antwort, logStand);
   } catch (fehler) {
+    if (fehler && fehler.abgebrochen) {
+      fertig(t("trace.allOriginsScanAbort"), "warn");
+      return;
+    }
     fertig(`Analyse fehlgeschlagen: ${fehler.message}`, "krit");
     return;
   }
-
-  $(ziele.abbruch).onclick = async () => {
-    setzeText($(ziele.text), "Abbruch angefordert…");
-    try {
-      await api(`/jobs/${jobId}`, { methode: "DELETE" });
-    } catch (_) {
-      /* war bereits beendet */
-    }
-  };
 
   timer = setInterval(async () => {
     try {

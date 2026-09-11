@@ -40,36 +40,39 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
    ./scripts/generate_scenarios.py
    ```
 
-   Docker ist der bevorzugte Mac-Weg. RPC ist nur unter `127.0.0.1:18443` erreichbar, Electrum nur unter `127.0.0.1:50001`.
-3. Die generierte Datei `lab/regtest/.data/.regtest.env` kann lokal als SatSage-Lab-Konfiguration verwendet werden. Die Platzhalter-Vorlage ist [`.regtest.env.example`](.regtest.env.example).
+   Docker ist der bevorzugte Mac-Weg. RPC nur `127.0.0.1:18443`, Electrum `127.0.0.1:50001`, **mempool.space-Explorer** `http://127.0.0.1:18080` (nach dem Start kurz warten, bis der Index steht).
+3. Die generierte Datei `lab/regtest/.data/.regtest.env` kann lokal als SatSage-Lab-Konfiguration verwendet werden (`MEMPOOL_URL` zeigt auf den lokalen Explorer). Die Platzhalter-Vorlage ist [`.regtest.env.example`](.regtest.env.example).
 4. Status und Logs:
 
    ```bash
    docker compose -f docker-compose.yml ps
    docker compose -f docker-compose.yml logs -f electrs
+   docker compose -f docker-compose.yml logs -f mempool-api
    ./scripts/stop.sh
    ```
+
+   Tx im Explorer: `http://127.0.0.1:18080/tx/<txid>` (z. B. Whirlpool-Lab-Tx).
 
 Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Für die **Tx-Klassifikation / Herkunft**:
 
 | Szenario | Erwartetes Label |
 |----------|------------------|
-| `Wasabi-classic-like` (+ Remix) | `wasabi_classic` — 24 in / 28 out, viele equal Mix-Outs + Change |
-| `Wabisabi-like` | `wabisabi` — große n:m, ungleiche Outs |
-| `Whirlpool-like-5x5` | `whirlpool` |
-| `JoinMarket-like` | `joinmarket` |
+| `Wasabi-classic-like` (+ Remix) | `wasabi_classic` — 6× Lab-Viewer + 18× **lab-faucet** (fremd); 24 equal + Change |
+| `Wabisabi-like` | `wabisabi` — 2× Alpha + 14× Faucet; ungleiche Outs |
+| `Whirlpool-like-5x5` | `whirlpool` — 1× Alpha + 4× Faucet |
+| `JoinMarket-like` | `joinmarket` — 1× Beta + 3× Faucet |
 | `PayJoin-like` | `payjoin` |
 | `Beta-aged-fanout` / Fan-out-own | `fan_out_own` |
 | `Exchange-batch-like` | `exchange_batch` |
 
-Das ist keine Coordinator-/WabiSabi-Implementierung, sondern reproduzierbares On-Chain-Testmaterial. Expectations: `.data/scenario-report-txclass.json`.
+**Fremd-Peers:** `lab-faucet` finanziert alle Lab-Sats und stellt Mix-Peer-Inputs. Die Faucet-XPUB steht **nicht** in SatSage `WALLET_*` — in der App sind das fremde Inputs. Alles Einzelsignatur (kein Multisig). Keine Coordinator-/echte WabiSabi-Implementierung, nur On-Chain-Form. Expectations: `.data/scenario-report-txclass.json`.
 
 ```bash
 ./scripts/generate_scenarios.py
 python3 lab/regtest/scripts/verify_tx_classify.py
 ```
 
-**GUI-Abnahme Herkunft:** UTXO aus einem CJ-Szenario tracen — Soft-Label der CoinJoin-Art am Zweig; nur eigene Ins/Outs im Baum; keine Peer-Liste „von extern“.
+**GUI-Abnahme Herkunft:** UTXO aus einem CJ-Szenario tracen — Soft-Label der CoinJoin-Art; nur **eigene** Ins weiter; Faucet-Peers nicht als Herkunft „von extern“ auflisten. Auch mit allen vier Lab-Wallets bleiben Faucet-Ins fremd.
 
 ### Pseudo-Sanktionslisten & Hop-Traces
 
