@@ -198,8 +198,11 @@ button, input, select { font: inherit; color: inherit; }
 .marke { display: flex; align-items: center; gap: 10px; }
 .marke-logo {
   width: 36px; height: 36px; border-radius: 8px;
-  object-fit: cover; flex-shrink: 0;
+  /* contain: Hut + Pfeife nicht am Rand abschneiden */
+  object-fit: contain; flex-shrink: 0;
   box-shadow: 0 0 0 1px var(--linie);
+  /* Helle Platte: dunkle Sherlock-Silhouette lesbar in Light und Dark */
+  background: #F0F3F0;
 }
 .marke-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
 .marke-name { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; }
@@ -1031,6 +1034,11 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .utxo-wurzel > .baum-knoten { align-items: center; }
 .utxo-zweig { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie); }
+.tx-class-hinweis {
+  color: var(--text);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
 .zweig-status {
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; color: var(--gedaempft); padding: 6px 0;

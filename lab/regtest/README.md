@@ -50,7 +50,26 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
    ./scripts/stop.sh
    ```
 
-Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Dazu kommen zwei absichtlich strukturelle CoinJoin-ähnliche Transaktionen mit jeweils **24 Inputs und 28 Outputs** (gleichartige Outputs plus Change). Das ist keine Coordinator- oder WabiSabi-Implementierung, sondern reproduzierbares On-Chain-Testmaterial.
+Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Für die **Tx-Klassifikation / Herkunft**:
+
+| Szenario | Erwartetes Label |
+|----------|------------------|
+| `Wasabi-classic-like` (+ Remix) | `wasabi_classic` — 24 in / 28 out, viele equal Mix-Outs + Change |
+| `Wabisabi-like` | `wabisabi` — große n:m, ungleiche Outs |
+| `Whirlpool-like-5x5` | `whirlpool` |
+| `JoinMarket-like` | `joinmarket` |
+| `PayJoin-like` | `payjoin` |
+| `Beta-aged-fanout` / Fan-out-own | `fan_out_own` |
+| `Exchange-batch-like` | `exchange_batch` |
+
+Das ist keine Coordinator-/WabiSabi-Implementierung, sondern reproduzierbares On-Chain-Testmaterial. Expectations: `.data/scenario-report-txclass.json`.
+
+```bash
+./scripts/generate_scenarios.py
+python3 lab/regtest/scripts/verify_tx_classify.py
+```
+
+**GUI-Abnahme Herkunft:** UTXO aus einem CJ-Szenario tracen — Soft-Label der CoinJoin-Art am Zweig; nur eigene Ins/Outs im Baum; keine Peer-Liste „von extern“.
 
 ### Pseudo-Sanktionslisten & Hop-Traces
 

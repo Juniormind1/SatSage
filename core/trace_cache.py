@@ -207,6 +207,18 @@ def _blaetter_ohne_luecke(knoten: list) -> bool:
         if typ in ("external", "coinbase"):
             hat_ende = True
             continue
+        # CoinJoin: absichtlich nur eigene Ins — Blatt mit Soft-Label und
+        # ohne Peer-Externals zählt als abgeschlossenes Mix-Ende, nicht als Lücke.
+        if aktuell.get("coinjoin_noise_skipped") and aktuell.get("tx_class"):
+            hat_ende = True
+            continue
+        if (
+            typ == "internal"
+            and aktuell.get("tx_class")
+            and aktuell.get("coinjoin_noise_skipped")
+        ):
+            hat_ende = True
+            continue
         # internal ohne Kinder, external_unresolved, cycle, error, unknown, …
         return False
     return hat_ende

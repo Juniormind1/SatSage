@@ -231,6 +231,8 @@ def iter_trace_funding_inputs(
     wallet: WalletContext | None = None,
     progress: ProgressCallback | None = None,
     alle_eigenen_inputs: bool = False,
+    own_inputs_only: bool = False,
+    own_prevouts: set[str] | None = None,
 ) -> Iterator[FundingEdge | CoinbaseFunding | UnresolvedExternalBatch]:
     """
     Trace-Variante: Deferred-Inputs ohne inline-prevout werden bei kleinen
@@ -242,6 +244,11 @@ def iter_trace_funding_inputs(
     auflösen und alle eigenen weitergeben. Fremde kommen als externe Kanten
     mit Blockzeit (keine Untergrenze durch Abbruch).
 
+    *own_inputs_only*: CoinJoin-/Mix-Hybrid — nur eigene Inputs weitergeben;
+    Fremde sind Rauschen (kein ``external``, kein ``UnresolvedExternalBatch``).
+    Bekannte Outpoints aus dem Verlauf (*own_prevouts*) werden ohne
+    Prevout-Resolve als eigen erkannt; Lücken werden gezielt nachgeladen.
+
     Inline gelieferte Prevouts (Esplora) tragen keine Blockzeit. Bei kleinen
     Transaktionen (und bei *alle_eigenen_inputs*) wird sie für **externe**
     Eingänge nachgeholt; interne Eingänge verfolgt der Aufrufer weiter.
@@ -251,8 +258,36 @@ def iter_trace_funding_inputs(
     except Exception:
         return
 
+    known_own = {
+        str(p).strip().lower() for p in (own_prevouts or ()) if p
+    }
+
+    def _is_own_edge(edge: FundingEdge) -> bool:
+        if edge.prevout.key.lower() in known_own:
+            return True
+        return match_own_address(edge.addresses, own_addresses, wallet) is not None
+
+    def _is_own_vin(vin: dict) -> bool | None:
+        """True/False wenn klar, None wenn Prevout fehlt."""
+        if "txid" not in vin or "vout" not in vin:
+            return None
+        key = utxo_ref(str(vin["txid"]), int(vin["vout"])).lower()
+        if key in known_own:
+            return True
+        prev = vin.get("prevout")
+        if not prev:
+            return None
+        addrs = tuple(_chain()._extract_addresses(prev))
+        return match_own_address(addrs, own_addresses, wallet) is not None
+
+    # CoinJoin: alle eigenen finden; Fremde nie als Zufluss ausgeben.
+    if own_inputs_only:
+        voll_cj = True
+    else:
+        voll_cj = False
+
     klein = len(tx.get("vin", [])) <= FULL_RESOLUTION_INPUT_LIMIT
-    voll = klein or alle_eigenen_inputs
+    voll = klein or alle_eigenen_inputs or voll_cj
 
     deferred: list[dict] = []
     inline: list[FundingEdge] = []
@@ -261,6 +296,24 @@ def iter_trace_funding_inputs(
             yield CoinbaseFunding(spending_txid=creator_txid)
             continue
         if "txid" not in vin or "vout" not in vin:
+            continue
+        if own_inputs_only:
+            klar = _is_own_vin(vin)
+            if klar is False:
+                continue  # Fremd = Rauschen
+            if klar is True and vin.get("prevout"):
+                try:
+                    edge = _funding_edge_from_vin(vin, vin["prevout"], creator_txid)
+                except Exception:
+                    deferred.append(vin)
+                    continue
+                yield edge
+                continue
+            if klar is True and not vin.get("prevout"):
+                deferred.append(vin)
+                continue
+            # Unklar: Prevout nachladen (Stufe 2).
+            deferred.append(vin)
             continue
         prev_out = vin.get("prevout")
         if prev_out:
@@ -271,10 +324,11 @@ def iter_trace_funding_inputs(
         else:
             deferred.append(vin)
 
-    for edge in inline:
-        if voll and not match_own_address(edge.addresses, own_addresses, wallet):
-            edge = _mit_vorgaengerzeit(get_tx, edge, progress=progress)
-        yield edge
+    if not own_inputs_only:
+        for edge in inline:
+            if voll and not match_own_address(edge.addresses, own_addresses, wallet):
+                edge = _mit_vorgaengerzeit(get_tx, edge, progress=progress)
+            yield edge
 
     if not deferred:
         return
@@ -291,13 +345,25 @@ def iter_trace_funding_inputs(
             pass
 
     if voll:
-        # Alle Eingänge auflösen — bei Opt-in auch jenseits des 20er-Limits.
+        # Alle Eingänge auflösen — bei Opt-in / CJ auch jenseits des 20er-Limits.
         for vin in deferred:
             try:
+                if own_inputs_only:
+                    key = utxo_ref(str(vin["txid"]), int(vin["vout"])).lower()
+                    if key in known_own:
+                        prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
+                        if not prev_out:
+                            continue
+                        yield _funding_edge_from_vin(vin, prev_out, creator_txid)
+                        continue
                 prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
                 if not prev_out:
                     continue
                 edge = _funding_edge_from_vin(vin, prev_out, creator_txid)
+                if own_inputs_only:
+                    if _is_own_edge(edge):
+                        yield edge
+                    continue
                 if not match_own_address(edge.addresses, own_addresses, wallet):
                     edge = _mit_vorgaengerzeit(get_tx, edge, progress=progress)
                 yield edge
