@@ -70,9 +70,14 @@ class BtcPreis:
     source: str
     kind: str  # "spot" | "day"
     day: str | None = None
+    #: Kurzer Hinweis fürs Log, wenn Spot aus Historie kommt.
+    warning: str | None = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if not d.get("warning"):
+            d.pop("warning", None)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> BtcPreis:
@@ -83,6 +88,7 @@ class BtcPreis:
             source=str(data["source"]),
             kind=str(data["kind"]),
             day=data.get("day"),
+            warning=data.get("warning"),
         )
 
 
@@ -251,6 +257,9 @@ def parse_kurs_csv(text: str) -> dict[str, float]:
     for roh in text.splitlines():
         s = roh.strip()
         if not s or s.startswith("#"):
+            continue
+        # CryptoDataDownload: erste Zeile oft die Portal-URL ohne „#“.
+        if s.lower().startswith("http://") or s.lower().startswith("https://"):
             continue
         zeilen.append(roh)
     if not zeilen:
@@ -735,65 +744,133 @@ def spot_preis(
     jetzt: int | None = None,
 ) -> BtcPreis:
     """
-    Aktueller BTC-Kurs: Cache → eigene Mempool-URL → mempool.space → Coinbase.
+    Aktueller BTC-Kurs: Spot-Cache → Live (Mempool/Coinbase) →
+    Tageskurs für heute (Historie-API/CSV) → letzter lokaler Tageskurs.
+
+    Live-Fehler werden nicht als lange Pipe-Meldung ausgeworfen; bei
+    Historie-Fallback setzt ``warning`` eine kurze Logzeile.
     """
     w = normalisiere_waehrung(currency)
     cache_root = Path(immutable_cache_dir) if immutable_cache_dir else None
+    jetzt_ts = int(time.time() if jetzt is None else jetzt)
+    heute = datetime.fromtimestamp(jetzt_ts, tz=timezone.utc).date()
 
     if cache_root is not None:
-        cached = lade_spot_cache(cache_root, w, ttl=ttl, jetzt=jetzt)
+        cached = lade_spot_cache(cache_root, w, ttl=ttl, jetzt=jetzt_ts)
         if cached is not None:
             return cached
 
-    fehler: list[str] = []
+    preis: BtcPreis | None = None
     kandidaten: list[str | None] = []
     konfiguriert = (mempool_url or "").strip().rstrip("/")
     if konfiguriert and konfiguriert != MEMPOOL_PRICE_DEFAULT:
         kandidaten.append(konfiguriert)
     kandidaten.append(MEMPOOL_PRICE_DEFAULT)
 
-    preis: BtcPreis | None = None
     for basis in kandidaten:
         try:
             preis = hole_spot_mempool(
                 w, base_url=basis, timeout=timeout, fetch=fetch,
             )
             break
-        except PriceError as e:
-            fehler.append(str(e))
+        except PriceError:
+            continue
 
     if preis is None:
         try:
             preis = hole_spot_coinbase(w, timeout=timeout, fetch=fetch)
-        except PriceError as e:
-            fehler.append(str(e))
-            # Lokaler Tageskurs (Bundle/Import) als Rettung — besser als Hänger.
-            heute = datetime.now(timezone.utc).date()
-            lokal = lade_tageskurs_csv(cache_root, heute, w)
-            if lokal is None and heute.day > 1:
-                # Wochenende/Feiertag: letzter bekannter Tag rückwärts suchen
-                lokal = _letzter_tageskurs_csv(cache_root, w, bis=heute)
-            if lokal is not None:
-                preis = BtcPreis(
-                    amount=lokal.amount,
-                    currency=w,
-                    time=int(time.time() if jetzt is None else jetzt),
-                    source=f"{lokal.source}-day",
-                    kind="spot",
-                    day=lokal.day,
-                )
-            else:
-                raise PriceError(
-                    "Kein Spotkurs verfügbar: " + " | ".join(fehler)
-                ) from e
+        except PriceError:
+            preis = None
+
+    if preis is None:
+        # Heutiger Tag als Historie-Lücke — gleiche Quellen wie tageskurs().
+        try:
+            tag_preis = tageskurs(
+                heute,
+                w,
+                immutable_cache_dir=cache_root,
+                mempool_url=mempool_url,
+                timeout=timeout,
+                fetch=fetch,
+            )
+            preis = BtcPreis(
+                amount=tag_preis.amount,
+                currency=w,
+                time=jetzt_ts,
+                source=f"{tag_preis.source}-day",
+                kind="spot",
+                day=tag_preis.day or heute.isoformat(),
+                warning=(
+                    f"aktueller Kurs nicht beschaffbar, "
+                    f"Tageskurs aus Historie von {tag_preis.day or heute.isoformat()} "
+                    f"wird verwendet"
+                ),
+            )
+        except PriceError:
+            preis = None
+
+    if preis is None:
+        # Letzter bekannter Bundle-/Import-Tag — auch wenn älter als 14 Tage.
+        lokal = _neuester_tageskurs_csv(cache_root, w, bis=heute)
+        if lokal is None:
+            lokal = _letzter_tageskurs_csv(
+                cache_root, w, bis=heute, max_tage=14,
+            )
+        if lokal is not None:
+            preis = BtcPreis(
+                amount=lokal.amount,
+                currency=w,
+                time=jetzt_ts,
+                source=f"{lokal.source}-day",
+                kind="spot",
+                day=lokal.day,
+                warning=(
+                    f"aktueller Kurs nicht beschaffbar, "
+                    f"letzter Kurs aus Historie von {lokal.day} wird verwendet"
+                ),
+            )
+
+    if preis is None:
+        raise PriceError("aktueller Kurs nicht beschaffbar")
 
     if cache_root is not None:
         _schreibe_cache(
             _spot_pfad(preis_cache_dir(cache_root), w),
             preis,
-            fetched_at=jetzt if jetzt is not None else int(time.time()),
+            fetched_at=jetzt_ts,
         )
     return preis
+
+
+def _neuester_tageskurs_csv(
+    immutable_cache_dir: Path | str | None,
+    currency: str,
+    *,
+    bis: date,
+) -> BtcPreis | None:
+    """Neuester Tageskurs in der CSV an oder vor *bis* (UTC), ohne Tageslimit."""
+    if currency.upper() not in HISTORIE_WAEHRUNGEN:
+        return None
+    path, source = historie_lesepfad(immutable_cache_dir, currency)
+    if path is None:
+        return None
+    try:
+        serie = _serie_aus_pfad(path)
+    except (PriceError, OSError):
+        return None
+    bis_s = bis.isoformat()
+    treffer = [d for d in serie if d <= bis_s]
+    if not treffer:
+        return None
+    tag = max(treffer)
+    return BtcPreis(
+        amount=float(serie[tag]),
+        currency=normalisiere_historie_waehrung(currency),
+        time=unix_tagesbeginn(date.fromisoformat(tag)),
+        source=source,
+        kind="day",
+        day=tag,
+    )
 
 
 def _letzter_tageskurs_csv(
@@ -803,7 +880,7 @@ def _letzter_tageskurs_csv(
     bis: date,
     max_tage: int = 14,
 ) -> BtcPreis | None:
-    """Nächster vorhandener Tageskurs an oder vor *bis* (UTC)."""
+    """Nächster vorhandener Tageskurs an oder vor *bis* (UTC), max. *max_tage* zurück."""
     if currency.upper() not in HISTORIE_WAEHRUNGEN:
         return None
     path, source = historie_lesepfad(immutable_cache_dir, currency)

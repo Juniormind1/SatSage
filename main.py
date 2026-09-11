@@ -5555,26 +5555,21 @@ def _fulcrum_transport_ist_lan(fulcrum) -> bool:
     return True
 
 
-def _utxo_scan_scantxoutset_vorrang(fulcrum=None) -> bool:
+def _utxo_scan_scantxoutset_vorrang(fulcrum=None, env: dict[str, str] | None = None) -> bool:
     """
     Wann Bitcoin Core ``scantxoutset`` vor dem Electrum-Gap-Scan steht.
 
-    Reihenfolge für den **reinen UTXO-Bestand** (Geschwindigkeit, gleiche
-    Privatsphäre bei eigenem Node):
+    Reihenfolge für den **reinen UTXO-Bestand** (Alltag = Tempo):
 
-    1. Electrs/Fulcrum im LAN — Gap-Scan nur über genutzte Adressen
-    2. Core RPC im LAN — ``scantxoutset`` über das ganze UTXO-Set (~1 Min)
-    3. Core RPC über Onion — dasselbe, plus Tor-Latenz
-    4. Electrs über Onion
-    5. BIP-158 Compact Filter (Header/Filter-Walk)
+    1. Electrs/Fulcrum **im LAN** — Gap-Scan nur über genutzte Adressen
+    2. Core ``scantxoutset`` — bevorzugt ``UTXO_RPC_*`` (lokaler Node),
+       sonst Lookup-``NODE_IP`` (z. B. Start9)
+    3. Electrs Onion / BIP-158 / öffentlich
 
-    Öffentliche Electrum-Server bleiben dahinter (schlechtere Privatsphäre).
-
-    Ist Electrs im LAN die aktive Quelle, entfällt Core: der Gap-Scan ist
-    für typische Wallets deutlich schneller als ein voller Set-Durchlauf.
-    Fehlt LAN-Electrs, bleibt Core (LAN oder Onion) vor Onion-Electrs und
-    BIP-158.
+    Lokaler scantxoutset bleibt Fallback (Vollständigkeit ohne Gap-Policy,
+    Privatsphäre), nicht der Default neben schnellem LAN-Electrs.
     """
+    _ = env  # reserviert (Tests/Caller); Priorität hängt am Fulcrum-Transport
     if _fulcrum_transport_ist_lan(fulcrum):
         return False
     return True
@@ -5595,7 +5590,8 @@ def _try_scantxoutset_xpub(
     None = absichtlich übersprungen, Core fehlt/unerreichbar → Caller nutzt
     Electrum/BIP-158. Siehe ``_utxo_scan_scantxoutset_vorrang``.
     """
-    if not _utxo_scan_scantxoutset_vorrang(fulcrum):
+    env = _load_dotenv()
+    if not _utxo_scan_scantxoutset_vorrang(fulcrum, env=env):
         msg = (
             "scantxoutset übersprungen — Electrs/Fulcrum im LAN ist für den "
             "UTXO-Bestand typischerweise schneller (Gap-Scan)."
@@ -5608,7 +5604,6 @@ def _try_scantxoutset_xpub(
                 on_progress(msg)
         return None
 
-    env = _load_dotenv()
     from core.bitcoind_rpc import try_scantxoutset_for_xpubs
 
     scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)

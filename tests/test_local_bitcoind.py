@@ -59,14 +59,33 @@ class TestLocalBitcoindDiscovery(unittest.TestCase):
             updates = local_core.env_updates_from_hit(hit)
             self.assertEqual(updates["LOCAL_CORE_OPT_IN"], "1")
             self.assertEqual(updates["NODE_IP"], "127.0.0.1")
+            self.assertEqual(updates["UTXO_RPC_HOST"], "127.0.0.1")
+            self.assertIn("UTXO_RPC_COOKIE_FILE", updates)
             self.assertIn("RPC_COOKIE_FILE", updates)
             self.assertEqual(updates["BIP158_HOST"], "127.0.0.1:8333")
-            self.assertEqual(updates["BIP158_P2P"], "1")
+            self.assertNotIn("BIP158_P2P", updates)
             self.assertEqual(hit.p2p_port, 8333)
+            only_utxo = local_core.env_updates_from_hit(
+                hit, lookup_core_already=True
+            )
+            self.assertIn("UTXO_RPC_HOST", only_utxo)
+            self.assertNotIn("NODE_IP", only_utxo)
+            self.assertNotIn("BIP158_P2P", only_utxo)
 
     def test_opt_in_flag(self):
         self.assertTrue(local_core.local_core_opt_in_enabled({"LOCAL_CORE_OPT_IN": "1"}))
         self.assertFalse(local_core.local_core_opt_in_enabled({}))
+
+    def test_utxo_rpc_dedicated(self):
+        self.assertFalse(local_core.utxo_rpc_dedicated({}))
+        self.assertTrue(
+            local_core.utxo_rpc_dedicated({"UTXO_RPC_HOST": "127.0.0.1"})
+        )
+        self.assertTrue(
+            local_core.utxo_rpc_dedicated(
+                {"UTXO_RPC_COOKIE_FILE": "/tmp/.cookie"}
+            )
+        )
 
 
 if __name__ == "__main__":

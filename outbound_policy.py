@@ -76,6 +76,9 @@ def public_opt_in(values: dict[str, str] | None = None, service: str = "") -> bo
     # sonst blockiert die Allowlist Clearnet-IPs trotz OEFFENTLICHE_ELECTRUM=1.
     if service_key in ("", "FULCRUM", "ELECTRUM"):
         keys.append("OEFFENTLICHE_ELECTRUM")
+    # Kurs-Historie-Nachzug (Bitstamp/CDD) — eigener Schalter.
+    if service_key in ("", "PRICEHISTORY", "MEMPOOL", "PRICE"):
+        keys.append("SATSAGE_PRICE_HISTORY_OPT_IN")
     return any(_truthy(_setting(values, key)) for key in keys)
 
 

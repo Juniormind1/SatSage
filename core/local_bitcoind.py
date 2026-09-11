@@ -55,7 +55,7 @@ class LocalCoreHit:
                 else "wird mit Opt-in als Prefer-Peer gesetzt."
             )
         )
-        d["hint"] = tip + " Opt-in nötig — nicht still verbunden."
+        d["hint"] = tip + " UTXO-Set-Slot wird still genutzt; Lookup-NODE_IP bleibt unangetastet."
         return d
 
 
@@ -225,22 +225,52 @@ def local_core_opt_in_enabled(env: dict[str, str]) -> bool:
     return raw in ("1", "true", "yes", "ja", "on")
 
 
-def env_updates_from_hit(hit: LocalCoreHit) -> dict[str, str]:
-    """Werte für ``.env`` / Runtime nach Opt-in.
+def env_updates_utxo_slot_from_hit(hit: LocalCoreHit) -> dict[str, str]:
+    """Nur UTXO-Set-Slot + Prefer-Peer — überschreibt keinen Lookup-Core (NODE_IP).
 
-    RPC für scantxoutset/Lookups **und** ``BIP158_HOST`` als Prefer-Peer
-    für Compact Filter (P2P-Port, nicht RPC-Port).
+    ``BIP158_P2P`` wird bewusst nicht gesetzt (Schalter nicht erzwingen).
     """
     return {
-        "NODE_IP": hit.host,
-        "RPCPORT": str(hit.port),
-        "RPCUSER": hit.user,
-        "RPCPASSWORD": hit.password,
-        "RPC_COOKIE_FILE": hit.cookie_path,
-        "RPC_SSL": "false",
+        "UTXO_RPC_HOST": hit.host,
+        "UTXO_RPCPORT": str(hit.port),
+        "UTXO_RPCUSER": hit.user,
+        "UTXO_RPCPASSWORD": hit.password,
+        "UTXO_RPC_COOKIE_FILE": hit.cookie_path,
+        "UTXO_RPC_SSL": "false",
         "LOCAL_CORE_OPT_IN": "1",
         "NETWORK": hit.network,
-        # P2P Compact Filter — LAN/Loopback zuerst (core/p2p.p2p_peers_from_env).
         "BIP158_HOST": f"{hit.host}:{int(hit.p2p_port)}",
-        "BIP158_P2P": "1",
     }
+
+
+def env_updates_from_hit(
+    hit: LocalCoreHit,
+    *,
+    lookup_core_already: bool = False,
+) -> dict[str, str]:
+    """Werte für ``.env`` / Runtime nach Opt-in bzw. Still-Fill.
+
+    *lookup_core_already*: Start9 o. Ä. bleibt Lookup — nur UTXO-Slot + Prefer-Peer.
+    Sonst zusätzlich ``NODE_IP``/``RPC*`` (Desktop ohne anderen Core).
+    """
+    updates = env_updates_utxo_slot_from_hit(hit)
+    if lookup_core_already:
+        return updates
+    updates.update(
+        {
+            "NODE_IP": hit.host,
+            "RPCPORT": str(hit.port),
+            "RPCUSER": hit.user,
+            "RPCPASSWORD": hit.password,
+            "RPC_COOKIE_FILE": hit.cookie_path,
+            "RPC_SSL": "false",
+        }
+    )
+    return updates
+
+
+def utxo_rpc_dedicated(env: dict[str, str]) -> bool:
+    """True, wenn ein eigener UTXO-Set-RPC konfiguriert ist (nicht nur Lookup)."""
+    host = (env.get("UTXO_RPC_HOST") or "").strip()
+    cookie = (env.get("UTXO_RPC_COOKIE_FILE") or "").strip()
+    return bool(host or cookie)

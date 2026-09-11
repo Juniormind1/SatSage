@@ -2,6 +2,18 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Kurs-Historie · Bundle veraltet / Lücken bis „heute“ — teilweise gelöst
+
+**Stand:** 2026-09-11 · **umgesetzt (MVP)** · Feinschliff offen
+
+Täglicher Job + Opt-in ``SATSAGE_PRICE_HISTORY_OPT_IN`` lädt Bitstamp/CDD bei Lücke; Overlap/Smoothing wie geplant. Bundle selbst wird nicht überschrieben (Cache darunter). Lauf **nach** GUI/„Server bereit“ (~45 s), nicht im Splash.
+
+**Offen/Feinschliff:** Live-Test hinter Firewall; UI-Texte EN durchklicken.
+
+**Release bis Tip:** ``scripts/refresh_btc_price_bundle.py`` in Build-Scripts + CI (Linux-webgui, StartOS); Bundle wird vor dem Packen aus Bitstamp/CDD aktualisiert.
+
+---
+
 ## Datenquellen · Onion-Electrs zu langsam → früh BIP-158 / Abbruch
 
 **Stand:** 2026-09-10 · **offen** · nur notiert
@@ -33,13 +45,11 @@ Kleine Marke ist heute das Sat-Symbol (`web/img/sat-logo.png` — Kopf, Login, F
 
 ## Core-Rollen · UTXO-Set vs. Tx/Block-Lookup (+ lokaler pruned Qt)
 
-**Stand:** 2026-09-10 · **geplant** · Pause vor Umsetzung
+**Stand:** 2026-09-11 · **teilweise umgesetzt** (Phase 0–1 + UI-Karten)
 
-Desktop: lokaler pruned bitcoin-qt (RPC an) neben bereits konfiguriertem Start9-Core. Heute ein RPC-Slot (`NODE_IP`/`RPC*`); Local-Opt-in würde Start9 überschreiben.
+**Ist:** `UTXO_RPC_*` vs. `NODE_IP`/`RPC*`; Still-Fill UTXO-Slot + `BIP158_HOST`; Accept überschreibt Lookup nicht; scantxoutset über UTXO-Slot (Vorrang vor Electrs-LAN wenn Slot gesetzt); Datenquellen-Karten „UTXO-Set-Quelle“ / „Tx/Block-Lookup“.
 
-Ziel (Session-Plan): **UTXO-Set-Quelle** (scantxoutset, pruned ok → lokal) und **Block-History/Lookup-Quelle** (`getrawtransaction`/`getblock` → Start9) getrennt speicherbar; lokaler Qt auto für UTXO-Slot wenn erreichbar. Adress-Verlauf bleibt Electrs/BIP-158.
-
-Siehe Session-Plan (Grok): getrennte Core-Rollen + lokaler bitcoin-qt. Sonderfälle unter „Lokal Bitcoin Core erkennen“ bleiben relevant.
+**Noch offen:** Block-Fetch lokal bis `pruneheight`, darunter Lookup-Core; Electrs → Core-Blöcke nur Ausnahme; Handbuch/`AGENTS.md`-Prioritätstabelle nachziehen; Prefer-Peer braucht `peerblockfilters=1` am Qt (Hinweis).
 
 ---
 

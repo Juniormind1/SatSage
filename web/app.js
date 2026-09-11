@@ -5492,6 +5492,8 @@ async function ladeKursHistorie() {
     const stand = await api("/price/history");
     Zustand.kursHistorie = stand;
     zeichneKursHistorie(stand);
+    const opt = $("#kurs-historie-opt-in");
+    if (opt) opt.checked = Boolean(stand.price_history_opt_in);
   } catch (fehler) {
     const kasten = $("#kurs-historie-status");
     if (kasten) {
@@ -5501,6 +5503,35 @@ async function ladeKursHistorie() {
           : `${t("sources.rates")}: ${übersetzeServerMeldung(fehler.message)}`,
       ));
     }
+  }
+}
+
+async function speichereKursHistorieOptInUndSync() {
+  const opt = $("#kurs-historie-opt-in");
+  const an = Boolean(opt && opt.checked);
+  logZeile(
+    an
+      ? "Kurs-Historie: Opt-in an — prüfe Lücken (Bitstamp)…"
+      : "Kurs-Historie: Opt-in aus — nur Lücken-Hinweis.",
+  );
+  try {
+    const stand = await api("/price/history/sync", {
+      methode: "POST",
+      daten: { opt_in: an },
+    });
+    for (const zeile of stand.log || []) logZeile(zeile);
+    Zustand.kursHistorie = {
+      histories: stand.histories || [],
+      price_history_opt_in: stand.price_history_opt_in,
+    };
+    zeichneKursHistorie(Zustand.kursHistorie);
+    if (opt) opt.checked = Boolean(stand.price_history_opt_in);
+    meldung(
+      stand.ok ? t("sources.ratesSyncDone") : t("sources.ratesSyncPartial"),
+      stand.ok ? "gut" : "warn",
+    );
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
   }
 }
 
@@ -8259,13 +8290,26 @@ async function ladeSpotkurs({ laut = false } = {}) {
   try {
     // Kurz timeout: sonst blockiert der Start bei Netz-/SSL-Problemen.
     Zustand.kurs = await api("/price?currency=EUR", { timeoutMs: 8000 });
-    if (laut) {
+    const warn = (Zustand.kurs && Zustand.kurs.warning) || "";
+    if (warn) {
+      // Historie-Fallback: eine kurze Zeile statt Pipe aus Netzfehlern.
+      logZeile(`Kurs: ${warn}.`, true);
+    } else if (laut) {
       const label = formatKursLabel(Zustand.kurs);
       const quelle = Zustand.kurs.source || "?";
       logZeile(`Kurs: ${label} (${quelle}).`, true);
     }
   } catch (fehler) {
-    if (laut) logZeile(`Kurs: ${fehler.message}`, true);
+    const msg = String(fehler.message || fehler || "");
+    // Keine mehrzeilige Opt-in-/Pipe-Forensik in der Kopfzeile.
+    if (laut || /nicht beschaffbar/i.test(msg)) {
+      logZeile(
+        msg.length > 120 || msg.includes(" | ")
+          ? "Kurs: aktueller Kurs nicht beschaffbar."
+          : `Kurs: ${msg}`,
+        true,
+      );
+    }
   }
   zeichneKursPille();
   if (Zustand.kurs && Number(Zustand.kurs.amount) > 0) {
@@ -9370,6 +9414,14 @@ async function start() {
   if (kursUsd) kursUsd.addEventListener("click", () => starteKursImport("USD"));
   const kursDatei = $("#kurs-csv-datei");
   if (kursDatei) kursDatei.addEventListener("change", liesKursCsvDatei);
+  const kursOpt = $("#kurs-historie-opt-in");
+  if (kursOpt) {
+    kursOpt.addEventListener("change", () => speichereKursHistorieOptInUndSync());
+  }
+  const kursSync = $("#kurs-historie-sync");
+  if (kursSync) {
+    kursSync.addEventListener("click", () => speichereKursHistorieOptInUndSync());
+  }
   $("#mempool-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") speichereMempool();
   });

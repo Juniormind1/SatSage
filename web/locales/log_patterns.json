@@ -76,6 +76,22 @@
     "en": "Starting history for all wallets…"
   },
   {
+    "re": "^Kurs: aktueller Kurs nicht beschaffbar, letzter Kurs aus Historie von (.+) wird verwendet\\.$",
+    "en": "Price: current rate unavailable, using last history rate from $1."
+  },
+  {
+    "re": "^Kurs: aktueller Kurs nicht beschaffbar, Tageskurs aus Historie von (.+) wird verwendet\\.$",
+    "en": "Price: current rate unavailable, using history day rate from $1."
+  },
+  {
+    "re": "^Kurs: aktueller Kurs nicht beschaffbar\\.$",
+    "en": "Price: current rate unavailable."
+  },
+  {
+    "re": "^Hole Bitcoin-Kurs…$",
+    "en": "Fetching Bitcoin price…"
+  },
+  {
     "re": "^Selbstanzeige: Kandidaten aus Cache…$",
     "en": "Self-report: loading candidates from cache…"
   },
