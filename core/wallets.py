@@ -52,10 +52,8 @@ class WalletSummary:
             "name": self.entry.display_name,
             "xpub_masked": self.entry.masked_xpub(),
             "prefix": self.entry.prefix,
-            # Multisig: gespeichert und sichtbar, aber ohne Ableitung. Die
-            # Oberfläche zeigt sie schreibgeschützt und schickt sie über die
-            # Kennung unverändert zurück, damit ein Speichern sie nicht
-            # verliert.
+            # Multisig: schreibgeschützt in der Oberfläche (Cosigner/.env).
+            # Single-Sig-Deskriptoren (wpkh/…) sind normal analysierbar.
             "is_multisig": self.entry.is_multisig,
             "threshold": self.entry.threshold,
             "cosigner_count": self.entry.cosigner_count,

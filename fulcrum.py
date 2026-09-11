@@ -692,13 +692,22 @@ def collect_used_chain_indices_fulcrum(
         if is_list_abort_requested():
             break
         next_index = i + 1
-        address = derive_address_at_index(xpub, change, i)
-        if not address:
+        roh = derive_address_at_index(xpub, change, i)
+        # Eine Adresse (alt) oder alle Skript-Varianten (xpub+auto).
+        if isinstance(roh, (list, tuple, set)):
+            adressen = [a for a in roh if a]
+        elif roh:
+            adressen = [roh]
+        else:
+            adressen = []
+        if not adressen:
             break
         utxo_zahl = 0
-        if address_has_received_fulcrum(client, address):
-            used.add(i)
-            gap = 0
+        getroffen = False
+        for address in adressen:
+            if not address_has_received_fulcrum(client, address):
+                continue
+            getroffen = True
             # Anzahl jetzt, nicht erst im späteren listunspent-Lauf —
             # die History sagt nur „je benutzt“, nicht wie viel noch liegt.
             try:
@@ -706,9 +715,12 @@ def collect_used_chain_indices_fulcrum(
                 for utxo in addr_utxos:
                     utxo["address"] = address
                 gefunden.extend(addr_utxos)
-                utxo_zahl = len(addr_utxos)
+                utxo_zahl += len(addr_utxos)
             except Exception:
-                utxo_zahl = 0
+                pass
+        if getroffen:
+            used.add(i)
+            gap = 0
             bisher += utxo_zahl
             if on_utxos_update and utxo_zahl > 0:
                 on_utxos_update(list(gefunden))

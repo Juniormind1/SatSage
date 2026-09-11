@@ -7796,15 +7796,19 @@ function deskriptorKarte(treffer, feld) {
   const kopf = document.createElement("div");
   kopf.className = "knoten-oben";
   kopf.append(pille("gut", scriptTypLabel(treffer.script_type, treffer.script_type_label)));
-  if (treffer.threshold) {
+  if (treffer.is_multisig && treffer.threshold) {
     const art = document.createElement("span");
     art.textContent = t("wallets.thresholdOf", { m: treffer.threshold, n: treffer.cosigner_count });
     kopf.append(art);
-  } else {
+  } else if (treffer.is_multisig) {
     // Bei Policies mit mehreren Ausgabepfaden gibt es kein „m von n" — eine
     // Zahl zu erfinden wäre schlimmer als keine.
     const art = document.createElement("span");
     art.textContent = `${treffer.cosigner_count} Schlüssel`;
+    kopf.append(art);
+  } else {
+    const art = document.createElement("span");
+    art.textContent = "Single-Sig · Deskriptor";
     kopf.append(art);
   }
   if (treffer.bereits_vorhanden) {
@@ -7871,20 +7875,26 @@ function liesDeskriptorDatei(ereignis) {
 function uebernimmDeskriptor(treffer) {
   const nameFeld = $("#neuer-deskriptor-name");
   const name = (nameFeld && nameFeld.value.trim()) || "";
+  const multisig = !!treffer.is_multisig;
   Zustand.entwurf.push({
     descriptor: treffer.descriptor,
     name,
-    prefix: treffer.script_type,
+    prefix: (treffer.xpubs_masked && treffer.xpubs_masked[0]
+      ? String(treffer.xpubs_masked[0]).slice(0, 4)
+      : treffer.script_type || "?"
+    ).toLowerCase(),
     script_type: treffer.script_type,
     script_type_label: treffer.script_type_label,
     max_addresses: 50,
     has_cache: false,
     utxo_count: 0,
     is_new: true,
-    is_multisig: true,
-    threshold: treffer.threshold,
+    is_multisig: multisig,
+    threshold: multisig ? treffer.threshold : null,
     cosigner_count: treffer.cosigner_count,
     xpubs_masked: treffer.xpubs_masked,
+    xpub_masked: (!multisig && treffer.xpubs_masked && treffer.xpubs_masked[0])
+      || "",
   });
   if (nameFeld) nameFeld.value = "";
   zeichneEinstellungen();
@@ -7898,6 +7908,19 @@ function fuegeWalletHinzu() {
   const xpub = feld.value.trim();
   if (!xpub) return;
   const name = (nameFeld && nameFeld.value.trim()) || "";
+
+  // Wasabi WPKH-Policy / Output-Deskriptor versehentlich im XPUB-Feld:
+  // denselben Importweg nutzen wie beim Deskriptor-Kasten.
+  if (/\b(sh|wsh|tr|wpkh|pkh|combo)\s*\(/i.test(xpub)) {
+    const deskFeld = $("#neuer-deskriptor");
+    const deskName = $("#neuer-deskriptor-name");
+    if (deskFeld) deskFeld.value = xpub;
+    if (deskName && name) deskName.value = name;
+    feld.value = "";
+    if (nameFeld) nameFeld.value = "";
+    pruefeDeskriptor();
+    return;
+  }
 
   Zustand.entwurf.push({
     xpub,

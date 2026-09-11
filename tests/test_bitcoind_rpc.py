@@ -135,6 +135,22 @@ class TestBitcoindRpc(unittest.TestCase):
                 paths.add(1)
         self.assertEqual(paths, {0, 1})
 
+    def test_multipath_deskriptor_wird_fuer_scantxoutset_gesplittet(self):
+        try:
+            from tests.fixtures import BIP84_AS_XPUB
+            from embit.descriptor.checksum import add_checksum
+        except Exception:
+            self.skipTest("no fixture")
+        policy = add_checksum(
+            f"wpkh([abcd1234/84h/0h/0h]{BIP84_AS_XPUB}/<0;1>/*)"
+        )
+        objs = descriptors_for_key(policy, max_index=20)
+        self.assertEqual(len(objs), 2)
+        pfade = {o["desc"].split("#")[0] for o in objs}
+        self.assertTrue(any("/0/*)" in p for p in pfade))
+        self.assertTrue(any("/1/*)" in p for p in pfade))
+        self.assertFalse(any("<0;1>" in p for p in pfade))
+
     def test_unspent_mapping(self):
         u = _unspent_to_utxo({
             "txid": "ab" * 32,

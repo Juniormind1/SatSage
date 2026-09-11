@@ -453,9 +453,18 @@ def descriptors_for_key(
     span = [0, ende]
 
     if ist_deskriptor(schluessel):
-        desc = schluessel.strip()
-        # Prüfsumme anhängen wenn fehlt — Core mag beides, mit # sicherer
-        return [{"desc": desc, "range": span}]
+        # Mehrpfad ``/<0;1>/*`` für scantxoutset in Empfang/Change zerlegen —
+        # ältere Core-Versionen und manche Nodes liefern sonst 0 Treffer.
+        roh = schluessel.strip().split("#", 1)[0]
+        if "/<0;1>/*" in roh or "/<0;1>" in roh:
+            out: list[dict[str, Any]] = []
+            for chain in (0, 1):
+                zweig = roh.replace("/<0;1>/*", f"/{chain}/*")
+                if "/<0;1>" in zweig:
+                    zweig = zweig.replace("/<0;1>", f"/{chain}")
+                out.append({"desc": _desc_mit_checksum(zweig), "range": span})
+            return out
+        return [{"desc": _desc_mit_checksum(schluessel.strip()), "range": span}]
 
     xpub = _xpub_to_core_xpub(schluessel)
     chosen = normalize_script_type(script_type or script_type_for_xpub(schluessel))
@@ -834,8 +843,13 @@ def try_scantxoutset_for_xpubs(
     addr_to_xpub: dict[str, str] = {}
     for x in xpubs:
         mx = max_by.get(x, default_max)
-        # max_addresses = 2 * indices roughly
-        addrs = derive_addresses(x, max_addresses=max(mx * 2, 2))
+        # max_addresses = 2 * indices roughly; Skripttyp mitgeben, sonst
+        # landet ein ausdrücklich als SegWit markiertes xpub-Wallet ggf.
+        # falsch (oder der Gap-Scan-Pfad prüft nur Legacy).
+        st = type_by.get(x) if type_by else None
+        addrs = derive_addresses(
+            x, max_addresses=max(mx * 2, 2), script_type=st
+        )
         for a in addrs:
             addr_to_xpub[a] = x
 

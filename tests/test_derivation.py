@@ -92,6 +92,17 @@ class TestSkripttypUeberschreiben(unittest.TestCase):
             "xpub-Automatik lässt natives SegWit aus — Befund 3 ist offen",
         )
 
+    def test_gap_scan_index_sieht_segwit_trotz_legacy_erster_form(self):
+        """
+        derive_address_at_index liefert bei xpub+auto die Legacy-Form zuerst.
+        Der Gap-Scan muss alle Varianten prüfen — sonst 0 UTXOs bei Wasabi.
+        """
+        nur_erste = main.derive_address_at_index(BIP84_AS_XPUB, 0, 0)
+        self.assertTrue(nur_erste.startswith("1"), nur_erste)
+        self.assertNotEqual(nur_erste, BIP84_RECEIVE_0)
+        varianten = main.derive_addresses_at_index(BIP84_AS_XPUB, 0, 0)
+        self.assertIn(BIP84_RECEIVE_0, varianten)
+
     def test_expliziter_typ_schlaegt_prefix(self):
         """Ein zpub, der ausdrücklich als Legacy geführt wird, liefert Legacy."""
         addresses = main.derive_addresses(
