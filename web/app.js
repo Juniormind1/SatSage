@@ -7965,7 +7965,9 @@ function fuegeWalletHinzu() {
 
   // Wasabi WPKH-Policy / Output-Deskriptor versehentlich im XPUB-Feld:
   // denselben Importweg nutzen wie beim Deskriptor-Kasten.
-  if (/\b(sh|wsh|tr|wpkh|pkh|combo)\s*\(/i.test(xpub)) {
+  // RegExp als String: ein Literal mit `\(` würde die Klammerbilanz der
+  // statischen JS-Prüfung (ohne Regex-Literale) falsch negativ machen.
+  if (new RegExp("\\b(sh|wsh|tr|wpkh|pkh|combo)\\s*\\(", "i").test(xpub)) {
     const deskFeld = $("#neuer-deskriptor");
     const deskName = $("#neuer-deskriptor-name");
     if (deskFeld) deskFeld.value = xpub;

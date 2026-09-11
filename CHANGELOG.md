@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Tests · CI:** Vier Unittests nach dem WPKH-/Gap-Scan-Fix wieder grün — Skripttyp-Registry vor Ableitungstests leeren, Sofort-Speichern-Prüfung an Deskriptor-Umleitung anpassen, Specter-`wpkh` als Single-Sig erwarten, Regex-Literal in `fuegeWalletHinzu` ohne falsche Klammerbilanz.
+
 ## [0.9.2] - 2026-09-11
 
 - **Version:** 0.9.2 — Wallet-Öffnen/Tip-Sync schneller, „Nur bekannte UTXOs“, Bisq-Soft-Labels, Wallet-Einstellungen klarer.

@@ -72,6 +72,16 @@ class TestSkripttypUeberschreiben(unittest.TestCase):
     Schlüssel keine UTXOs, obwohl Guthaben vorhanden ist.
     """
 
+    def setUp(self):
+        # Andere Tests können denselben XPUB in der Registry als SegWit
+        # hinterlassen — dann wäre die „erste Form“ nicht mehr Legacy.
+        self._sicherung = dict(main._script_type_by_xpub)
+        main._script_type_by_xpub.clear()
+
+    def tearDown(self):
+        main._script_type_by_xpub.clear()
+        main._script_type_by_xpub.update(self._sicherung)
+
     def test_xpub_mit_segwit_findet_dieselben_adressen_wie_zpub(self):
         erwartet = main.derive_addresses(BIP84_ZPUB, max_addresses=6)
         tatsaechlich = main.derive_addresses(

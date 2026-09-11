@@ -711,9 +711,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("function fuegeWalletHinzu", self.js)
         self.assertIn("speichereWallets(false)", self.js)
         # Sofort speichern, nicht nur in den Entwurf schieben.
+        # Fenster größer als früher: Deskriptor-Umleitung im XPUB-Feld liegt dazwischen.
         self.assertRegex(
             self.js,
-            r"function fuegeWalletHinzu\(\)[\s\S]{0,800}?speichereWallets\(false\)",
+            r"function fuegeWalletHinzu\(\)[\s\S]{0,1600}?speichereWallets\(false\)",
         )
         self.assertIn(
             'haken.addEventListener("click", () => speichereWallets(false))',
