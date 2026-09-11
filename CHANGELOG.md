@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.2] - 2026-09-11
+
+- **Version:** 0.9.2 — Wallet-Öffnen/Tip-Sync schneller, „Nur bekannte UTXOs“, Bisq-Soft-Labels, Wallet-Einstellungen klarer.
 - **Wallets · Einstellungen:** Dickere Trennlinie zwischen Wallet-Zeilen; Namensfeld „Name (optional)“ mit Akzent-Hintergrund/Rahmen — klarer Einstieg fürs nächste Wallet trotz XPUB-Balken darunter. Bereits konfigurierte Wallet-Namen fett (`font-weight: 700`).
 - **Herkunft · Bisq:** Soft-Labels „Wahrscheinlich Bisq-Auszahlung“ / „Bisq-Deposit (Escrow)“ — Payout: 1 Input → 2 Outs mit Deposit-Verhältnis (~15–50 %); Deposit: ≥2 Ins, Escrow+`OP_RETURN` (Contract-Hash). OP_RETURN am Prevout verstärkt den Payout, wenn Eigentum noch unklar ist. Kein Mix/Own-only-Walk. Form-Icon (Amber, P2P-Escrow 2→1→2) wie bei den CoinJoin-Icons an Herkunftszeile und Adressgruppe.
 - **Aktualität · Nur bekannte UTXOs:** Unteroption zu „Wallets immer aktuell halten“ — Tip-Nachzug (Start, neuer Block, „Bis Tip“) prüft nur bekannte UTXOs/Adressen, **kein Gap-Scan**. Neue Empfangsadressen dann per manuellem UTXO-Scan. `.env`: `WALLETS_NUR_BEKANNTE_UTXOS`.
