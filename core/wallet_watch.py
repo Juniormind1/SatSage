@@ -46,6 +46,8 @@ class WalletWatchService:
         self._script_timer: threading.Timer | None = None
         self._header_timer: threading.Timer | None = None
         self._on_log: Callable[[str], None] | None = None
+        #: Header kam während laufendem Tip-Nachzug — danach nochmal.
+        self._tip_nachzug_offen = False
 
     @property
     def laeuft(self) -> bool:
@@ -165,6 +167,9 @@ class WalletWatchService:
             self._log(
                 f"Wallet-Watch: Electrs-Subscribe {host}:{port}…"
             )
+            # Absicht: on_disconnect setzt _stop *nicht*. Sonst stirbt der
+            # Watcher bei kurzem Electrs-Hänger endgültig — über Nacht typisch
+            # „vor N Std. −M Blöcke“ trotz WALLETS_IMMER_AKTUELL.
             session = FulcrumNotifySession(
                 host,
                 port,
@@ -173,7 +178,7 @@ class WalletWatchService:
                 on_scripthash=self._on_scripthash,
                 on_header=self._on_header,
                 on_log=self._log,
-                on_disconnect=lambda: self._stop.set(),
+                on_disconnect=None,
             )
             self._session = session
             try:
@@ -189,10 +194,12 @@ class WalletWatchService:
                     f"Wallet-Watch: {n} Adresse(n) abonniert — "
                     "Wallets bleiben aktuell."
                 )
-                # Läuft bis stop oder disconnect
+                # Läuft bis stop oder Reader-Ende (dann Reconnect unten).
                 while not self._stop.is_set():
                     if not session._reader or not session._reader.is_alive():
                         break
+                    if self._tip_nachzug_offen:
+                        self._versuch_offenen_tip_nachzug()
                     time.sleep(0.5)
             except Exception as exc:
                 self._log(f"Wallet-Watch abgebrochen: {exc}")
@@ -351,12 +358,49 @@ class WalletWatchService:
             return
         self._log("Wallet-Watch: neuer Block — leichter Tip-Nachzug…")
         try:
-            # erzwingen=False würde Option prüfen — wir laufen nur wenn an
-            from server import starte_wallet_aktualisierung
+            # erzwingen=True: Option ist schon an (sonst liefe der Watcher nicht).
+            from server import starte_wallet_aktualisierung, tip_sync_laeuft
 
-            starte_wallet_aktualisierung(state, erzwingen=True)
+            job = starte_wallet_aktualisierung(state, erzwingen=True)
+            if job is None and tip_sync_laeuft(state):
+                # Header während laufendem Job — nicht verwerfen.
+                self._tip_nachzug_offen = True
+                self._log(
+                    "Wallet-Watch: Tip-Nachzug läuft schon — "
+                    "erneuter Lauf vorgemerkt."
+                )
+            elif job is not None:
+                self._tip_nachzug_offen = False
         except Exception as exc:
+            self._tip_nachzug_offen = True
             self._log(f"Wallet-Watch Tip-Nachzug: {exc}")
+
+    def _versuch_offenen_tip_nachzug(self) -> None:
+        """Startet vorgemerkten Tip-Nachzug, sobald kein Job mehr läuft."""
+        if not self._tip_nachzug_offen or self._stop.is_set():
+            return
+        state = self._state
+        if state is None:
+            return
+        try:
+            from server import starte_wallet_aktualisierung, tip_sync_laeuft
+
+            if tip_sync_laeuft(state):
+                return
+            job = starte_wallet_aktualisierung(state, erzwingen=True)
+            if job is not None:
+                self._tip_nachzug_offen = False
+                self._log("Wallet-Watch: nachgezogener Tip-Nachzug gestartet…")
+            else:
+                # Nichts zu tun (kein Cache) — Flag nicht ewig drehen.
+                self._tip_nachzug_offen = False
+        except Exception as exc:
+            self._log(f"Wallet-Watch nachgezogener Tip-Nachzug: {exc}")
+
+    def tip_nachzug_job_beendet(self) -> None:
+        """Vom Sync-Job: offenen Header-Nachzug anstoßen."""
+        if self._tip_nachzug_offen and not self._stop.is_set():
+            self._versuch_offenen_tip_nachzug()
 
     def _update_adressen(
         self,

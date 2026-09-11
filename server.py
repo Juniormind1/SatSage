@@ -35,6 +35,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import threading
 import time
 import webbrowser
@@ -141,8 +142,8 @@ body{
 }
 .marke{display:flex;align-items:center;gap:12px;margin:0 0 22px}
 .marke-logo{
-  width:44px;height:44px;border-radius:10px;object-fit:cover;flex-shrink:0;
-  box-shadow:0 0 0 1px var(--linie);
+  width:44px;height:44px;border-radius:10px;object-fit:contain;flex-shrink:0;
+  box-shadow:0 0 0 1px var(--linie);background:#F0F3F0;
 }
 .marke-text{display:flex;flex-direction:column;gap:2px;line-height:1.15}
 .marke-name{font-family:var(--mono);font-weight:700;letter-spacing:-.01em;font-size:18px}
@@ -479,6 +480,8 @@ class AppState:
         self.scan_queue = ScanQueue(self.jobs)
         self.header_job_id: str | None = None
         self.wallet_sync_job_id: str | None = None
+        # Letzter Quellen-Check (dicts) — fuer /api/config ohne erneute Probe.
+        self.sources_last: list[dict] | None = None
         #: monotonic: nächster erlaubter Header-Tip-Check (Cooldown-Spam).
         self.header_vorab_naechstes: float = 0.0
         self._lock = threading.Lock()
@@ -511,6 +514,7 @@ class AppState:
                 "FULCRUM_HOST",
                 "FULCRUM_PORT",
                 "FULCRUM_SSL",
+                "SATSAGE_ELECTRUM_INDEXER",
                 "MEMPOOL_URL",
                 "LLM_BASE_URL",
                 "LLM_ANBIETER",
@@ -520,6 +524,8 @@ class AppState:
                 if proc and key not in env.values():
                     env.runtime_values[key] = proc
             values = env.values()
+            # Prefer explicit FULCRUM_* from the StartOS daemon (electrs or Fulcrum
+            # package). Only fall back to ELECTRS_HOST when FULCRUM_HOST is empty.
             if not (values.get("FULCRUM_HOST") or "").strip():
                 bridge = (values.get("ELECTRS_HOST") or "electrs").strip()
                 if bridge:
@@ -535,6 +541,9 @@ class AppState:
                 env.runtime_values["RPCUSER"] = cookie_user
             if cookie_password and not (values.get("RPCPASSWORD") or "").strip():
                 env.runtime_values["RPCPASSWORD"] = cookie_password
+        elif self.managed_by not in ("specter", "start9"):
+            # Desktop: lokaler bitcoind → UTXO-Slot (still); Lookup nur wenn leer.
+            _apply_local_core_runtime(env)
         return env
 
     def reload(self) -> None:
@@ -997,6 +1006,216 @@ def api_cache_unreferenziert_loeschen(state: AppState) -> dict:
     }
 
 
+def _cache_baum_stats(pfad: Path) -> dict:
+    """Dateien und Bytes unter *pfad* (rekursiv). Fehlender Ordner → 0."""
+    dateien = 0
+    bytes_anzahl = 0
+    if not pfad.is_dir():
+        return {
+            "dateien": 0,
+            "bytes": 0,
+            "groesse_label": format_dateigroesse(0),
+        }
+    for wurzel, _dirs, namen in os.walk(pfad):
+        for name in namen:
+            kind = Path(wurzel) / name
+            try:
+                bytes_anzahl += int(kind.stat().st_size)
+            except OSError:
+                continue
+            dateien += 1
+    return {
+        "dateien": dateien,
+        "bytes": bytes_anzahl,
+        "groesse_label": format_dateigroesse(bytes_anzahl),
+    }
+
+
+def _cache_datei_stats(pfad: Path) -> dict:
+    groesse = _datei_groesse(pfad)
+    return {
+        "vorhanden": pfad.is_file(),
+        "bytes": groesse,
+        "groesse_label": format_dateigroesse(groesse),
+    }
+
+
+def _platte_cache_stats(cache_dir: Path) -> dict:
+    """Belegung der Platte, auf der die Caches liegen (kein Zugriffszähler)."""
+    try:
+        ziel = main._cache_disk_target(cache_dir)
+        usage = shutil.disk_usage(ziel)
+    except OSError:
+        return {
+            "free_bytes": None,
+            "total_bytes": None,
+            "free_ratio": None,
+            "free_label": "—",
+            "total_label": "—",
+            "write_blocked": bool(main.is_cache_disk_write_blocked()),
+            "ampel": "warn",
+        }
+    free = int(usage.free)
+    total = int(usage.total)
+    ratio = (free / total) if total > 0 else 0.0
+    blocked = free < main.MIN_FREE_DISK_BYTES and ratio < main.MIN_FREE_DISK_RATIO
+    if blocked or main.is_cache_disk_write_blocked():
+        ampel = "krit"
+    elif free < 2 * main.MIN_FREE_DISK_BYTES or ratio < 0.10:
+        ampel = "warn"
+    else:
+        ampel = "gut"
+    return {
+        "free_bytes": free,
+        "total_bytes": total,
+        "free_ratio": round(ratio, 4),
+        "free_label": format_dateigroesse(free),
+        "total_label": format_dateigroesse(total),
+        "write_blocked": bool(blocked or main.is_cache_disk_write_blocked()),
+        "ampel": ampel,
+        "schwelle_ratio": main.MIN_FREE_DISK_RATIO,
+        "schwelle_bytes": main.MIN_FREE_DISK_BYTES,
+    }
+
+
+def _wallet_cache_belegung(state: AppState, entry) -> dict:
+    """Belegung eines Wallets: Dateigrößen und Abdeckung, keine Hits."""
+    schluessel = entry.analyse_schluessel
+    zusammen = wallets_mod.summarize([entry], state.cache_dir)[0]
+    utxo_pfad = main._xpub_cache_path(schluessel, state.cache_dir)
+    verlauf_pfad = main._xpub_verlauf_cache_path(schluessel, state.cache_dir)
+    alter_pfad = main._xpub_alter_path(schluessel, state.cache_dir)
+    verlauf = main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or []
+    utxos = utxos_mod.load_cached_utxos(schluessel, state.cache_dir) or []
+
+    gesehen: set[tuple[str, int]] = set()
+    herkunft_treffer = 0
+    herkunft_bytes = 0
+    for eintrag in list(utxos) + list(verlauf):
+        paar = _cache_utxo_schluessel(eintrag)
+        if paar is None or paar in gesehen:
+            continue
+        gesehen.add(paar)
+        txid, vout = paar
+        try:
+            ingress = main._utxo_ingress_cache_path(
+                txid, vout, state.immutable_cache_dir
+            )
+        except (TypeError, ValueError):
+            continue
+        if ingress.is_file():
+            herkunft_treffer += 1
+            herkunft_bytes += _datei_groesse(ingress)
+
+    referenzen = len(gesehen)
+    tip = _header_tip(state)
+    scan_tip = zusammen.scan_tip_height
+    tip_lag = None
+    if tip is not None and scan_tip is not None:
+        tip_lag = max(0, int(tip) - int(scan_tip))
+
+    max_addr = int(entry.max_addresses or 0)
+    scan_end = zusammen.scan_end_index
+    gap_ratio = None
+    if max_addr > 0 and scan_end is not None:
+        try:
+            gap_ratio = min(1.0, max(0.0, int(scan_end) / float(max_addr)))
+        except (TypeError, ValueError):
+            gap_ratio = None
+
+    utxo_bytes = _datei_groesse(utxo_pfad)
+    verlauf_bytes = _datei_groesse(verlauf_pfad)
+    alter_bytes = _datei_groesse(alter_pfad)
+    eigen_bytes = utxo_bytes + verlauf_bytes + alter_bytes + herkunft_bytes
+
+    return {
+        "wallet_id": wallets_mod.eintrag_id(entry),
+        "wallet_name": entry.display_name,
+        "has_cache": zusammen.has_cache,
+        "utxo_count": zusammen.utxo_count,
+        "total_sats": zusammen.total_sats,
+        "utxo_bytes": utxo_bytes,
+        "verlauf_count": len(verlauf),
+        "verlauf_bytes": verlauf_bytes,
+        "alter_vorhanden": alter_pfad.is_file(),
+        "alter_bytes": alter_bytes,
+        "first_seen_height": zusammen.first_seen_height,
+        "first_seen_ts": zusammen.first_seen_ts,
+        "scan_end_index": scan_end,
+        "max_addresses": max_addr,
+        "gap_ratio": gap_ratio,
+        "scan_tip_height": scan_tip,
+        "header_tip": tip,
+        "tip_lag": tip_lag,
+        "herkunft_referenzen": referenzen,
+        "herkunft_treffer": herkunft_treffer,
+        "herkunft_bytes": herkunft_bytes,
+        "herkunft_ratio": (
+            round(herkunft_treffer / referenzen, 4) if referenzen else None
+        ),
+        "bytes": eigen_bytes,
+        "groesse_label": format_dateigroesse(eigen_bytes),
+    }
+
+
+def api_cache_stats(state: AppState) -> dict:
+    """
+    Cache-Belegung fürs Dashboard (Größe/Abdeckung, keine Zugriffe).
+
+    Pro Wallet und Summe; Schwellen für Platte und Flatfile-Warnung.
+    """
+    utxo = _cache_baum_stats(state.cache_dir)
+    immutable = _cache_baum_stats(state.immutable_cache_dir)
+    tx = _cache_baum_stats(state.immutable_cache_dir / main.TX_IMMUTABLE_CACHE_SUBDIR)
+    ingress = _cache_baum_stats(
+        state.immutable_cache_dir / main.UTXO_INGRESS_CACHE_SUBDIR
+    )
+    block_header = _cache_baum_stats(
+        state.immutable_cache_dir / main.BLOCK_HEADER_CACHE_SUBDIR
+    )
+    headers = _cache_datei_stats(_header_pfad(state))
+    price = _cache_baum_stats(state.immutable_cache_dir / "btc_price")
+    external = _cache_datei_stats(state.cache_dir / "external_addresses.json")
+    sanktionen_dir = state.sanctions_dir
+    if sanktionen_dir is None:
+        sanktionen_dir = state.cache_dir.parent / "sanctioned_cache"
+    sanktionen = _cache_baum_stats(sanktionen_dir)
+
+    schwelle = int(main._SQLITE_FLATFILE_HINT_THRESHOLD)
+    tx_n = int(tx["dateien"])
+    ingress_n = int(ingress["dateien"])
+    if tx_n >= schwelle or ingress_n >= schwelle:
+        flat_ampel = "krit"
+    elif tx_n >= max(1000, schwelle // 5) or ingress_n >= max(1000, schwelle // 5):
+        flat_ampel = "warn"
+    else:
+        flat_ampel = "gut"
+
+    wallets = [_wallet_cache_belegung(state, e) for e in state.entries]
+    summe = (
+        int(utxo["bytes"])
+        + int(immutable["bytes"])
+        + int(sanktionen["bytes"])
+    )
+    platte = _platte_cache_stats(state.cache_dir)
+    return {
+        "ok": True,
+        "platte": platte,
+        "summe_bytes": summe,
+        "summe_label": format_dateigroesse(summe),
+        "utxo_cache": utxo,
+        "immutable_cache": immutable,
+        "tx": {**tx, "schwelle": schwelle, "ampel": flat_ampel},
+        "utxo_ingress": {**ingress, "schwelle": schwelle, "ampel": flat_ampel},
+        "block_header": block_header,
+        "p2p_headers": {**headers, "tip": _header_tip(state)},
+        "btc_price": price,
+        "external_addresses": external,
+        "sanctioned_cache": sanktionen,
+        "wallets": wallets,
+    }
+
+
 def _wallets_config_gesperrt(state: AppState) -> None:
     """Verhindert lokale Wallet-Änderungen im Specter-Modus."""
     if state.managed_by == "specter":
@@ -1010,6 +1229,192 @@ _START9_BRIDGE_SCHLUESSEL = frozenset((
     "NODE_IP", "RPCHOST", "BITCOIN_RPC_HOST", "RPCPORT", "RPCUSER",
     "RPCPASSWORD", "RPC_SSL", "RPC_COOKIE_FILE", "BITCOIN_RPC_COOKIE",
 ))
+
+
+def _start9_electrum_indexer(werte: dict | None) -> str:
+    """``electrs`` oder ``fulcrum`` aus StartOS-Daemon-Env (Select Indexer)."""
+    roh = str((werte or {}).get("SATSAGE_ELECTRUM_INDEXER") or "").strip().lower()
+    if roh in ("fulcrum", "electrs"):
+        return roh
+    # Legacy: nur ELECTRS_HOST / FULCRUM_HOST ohne Indexer-Flag → electrs-Default.
+    return "electrs"
+
+
+def _specter_labels_for_api(state: AppState) -> dict[str, str]:
+    """Nutzer-Labels aus Specter-Seed (``utxo_cache/specter_address_labels.json``)."""
+    path = Path(state.cache_dir) / "specter_address_labels.json"
+    if not path.is_file():
+        return {}
+    try:
+        roh = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(roh, dict):
+        return {}
+    return {str(k): str(v) for k, v in roh.items() if k and v}
+
+
+_local_core_probe_cache: tuple[float, object | None] | None = None
+_local_core_hint_logged = False
+
+
+_local_core_runtime_logged = False
+
+
+def _apply_local_core_runtime(env) -> None:
+    """Lokalen Qt still in den UTXO-Slot legen; Lookup-Core (Start9) nicht anfassen.
+
+    Nur Desktop (Aufrufer schließt Specter/Start9 aus).
+
+    - Immer: leere ``UTXO_RPC_*`` + ``BIP158_HOST`` aus Discovery.
+    - Nur wenn kein Lookup-Core: zusätzlich ``NODE_IP``/``RPC*`` (leere Keys).
+    - ``BIP158_P2P`` wird nicht erzwungen.
+    - **Persistenz in die .env**, damit Scan-Jobs (``main._load_dotenv``) den
+      UTXO-Slot sehen — Runtime allein reicht nicht.
+    """
+    global _local_core_runtime_logged
+    from core import local_bitcoind as local_core
+
+    values = env.values()
+    hit = _discover_local_core_cached(values)
+    if hit is None:
+        return
+    already = local_core.core_already_configured(values)
+    updates = local_core.env_updates_from_hit(hit, lookup_core_already=already)
+    schreiben: dict[str, str] = {}
+    for key, val in updates.items():
+        if key == "BIP158_P2P":
+            continue
+        if key == "LOCAL_CORE_OPT_IN":
+            # Merker setzen, auch wenn schon andere Keys da sind.
+            if (values.get(key) or "").strip():
+                continue
+            schreiben[key] = val
+            continue
+        if (values.get(key) or "").strip():
+            continue
+        schreiben[key] = val
+    if not schreiben:
+        return
+    env.apply(schreiben)
+    try:
+        env.save(backup=True)
+    except OSError as exc:
+        print(f"Lokaler Bitcoin Core: .env nicht speicherbar — {exc}", flush=True)
+        # Fallback: wenigstens Runtime für API/Config.
+        for key, val in schreiben.items():
+            env.runtime_values[key] = val
+        return
+    if not _local_core_runtime_logged:
+        _local_core_runtime_logged = True
+        basis = (
+            f"{hit.host}:{hit.port} ({hit.chain}, "
+            f"{'pruned' if hit.pruned else 'vollständig'}, ~{hit.blocks} Blöcke)"
+        )
+        if already:
+            print(
+                f"Lokaler Bitcoin Core → UTXO-Set-Slot in .env (+ Prefer-Peer): "
+                f"{basis}. Lookup-NODE_IP unverändert. "
+                f"Nächster UTXO-Scan nutzt scantxoutset lokal.",
+                flush=True,
+            )
+        else:
+            print(
+                f"Lokaler Bitcoin Core → UTXO-Set- und Lookup-Slot in .env "
+                f"(+ Prefer-Peer): {basis}.",
+                flush=True,
+            )
+
+
+def _discover_local_core_cached(werte: dict | None = None):
+    """Kurzes Cache-TTL, damit api_config nicht bei jedem Poll neu scannt."""
+    global _local_core_probe_cache
+    import time
+
+    from core import local_bitcoind as local_core
+
+    now = time.monotonic()
+    if _local_core_probe_cache is not None:
+        ts, hit = _local_core_probe_cache
+        if now - ts < 30.0:
+            return hit
+    preferred = None
+    if werte:
+        preferred = (werte.get("NETWORK") or "").strip() or None
+    hit = local_core.discover_local_bitcoind(preferred_network=preferred)
+    _local_core_probe_cache = (now, hit)
+    return hit
+
+
+def _local_core_status_for_api(state: AppState) -> dict | None:
+    """Erkennung für die Datenquellen-UI — ohne Secrets, ohne Managed-Modi."""
+    if state.managed_by in ("specter", "start9"):
+        return None
+    from core import local_bitcoind as local_core
+
+    werte = state.env().values()
+    configured = local_core.core_already_configured(werte)
+    opt_in = local_core.local_core_opt_in_enabled(werte)
+    hit = _discover_local_core_cached(werte)
+    if hit is None and not configured:
+        return {
+            "detected": False,
+            "configured": configured,
+            "opt_in": opt_in,
+        }
+    utxo_slot = local_core.utxo_rpc_dedicated(werte)
+    out: dict = {
+        "detected": hit is not None,
+        "configured": configured,
+        "opt_in": opt_in,
+        "utxo_slot": utxo_slot,
+        # Persistenz-Hinweis: Runtime-Fill reicht; Banner nur wenn nichts greift.
+        "needs_opt_in": bool(
+            hit is not None and not utxo_slot and not configured and not opt_in
+        ),
+    }
+    if hit is not None:
+        out["hit"] = hit.as_public_dict()
+    return out
+
+
+def _log_local_core_hint_once(state: AppState) -> None:
+    global _local_core_hint_logged
+    if _local_core_hint_logged:
+        return
+    status = _local_core_status_for_api(state)
+    if not status or not status.get("needs_opt_in"):
+        return
+    _local_core_hint_logged = True
+    hit = status.get("hit") or {}
+    pruned = "pruned" if hit.get("pruned") else "vollständig"
+    p2p = hit.get("p2p_port") or 8333
+    print(
+        f"Lokaler Bitcoin Core erkannt ({hit.get('host')}:{hit.get('port')}, "
+        f"{hit.get('chain')}, {pruned}, ~{hit.get('blocks')} Blöcke). "
+        f"UTXO-Set-Slot wird still genutzt; Prefer-Peer "
+        f"BIP158_HOST={hit.get('host')}:{p2p} "
+        f"(P2P-Schalter unverändert). Lookup-NODE_IP bleibt, falls gesetzt.",
+        flush=True,
+    )
+
+
+def _managed_hint(state: AppState, werte: dict | None) -> str | None:
+    if state.managed_by == "specter":
+        return (
+            "Wallets (XPUBs/Deskriptoren) und Node/Electrum kommen aus Specter — "
+            "hier nicht doppelt pflegen. UTXOs, Verlauf und Labels werden aus "
+            "Specters Cache gesedet; Herkunft läuft weiter über SatSage."
+        )
+    if state.managed_by == "start9":
+        indexer = _start9_electrum_indexer(werte)
+        label = "Fulcrum" if indexer == "fulcrum" else "Electrs"
+        return (
+            f"{label} und Core RPC kommen aus Start9-Dependencies "
+            f"(Indexer: {indexer}; Wechsel über StartOS-Action „Select Indexer“); "
+            "Wallets und übrige Einstellungen werden hier konfiguriert."
+        )
+    return None
 
 
 def _datenquellen_config_gesperrt(
@@ -1047,7 +1452,12 @@ def api_config(state: AppState, query: dict) -> dict:
     entries = state.entries
     zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
     werte = state.env().values()
-    quellen = source_mod.anreichere_live_p2p(source_mod.describe_sources(werte))
+    quellen = source_mod.anreichere_live_p2p(
+        source_mod.mergere_erreichbarkeit(
+            source_mod.describe_sources(werte),
+            getattr(state, "sources_last", None),
+        )
+    )
     return {
         "version": app_version(),
         "wallets": [z.as_dict() for z in zusammenfassung],
@@ -1056,6 +1466,7 @@ def api_config(state: AppState, query: dict) -> dict:
             {"value": t, "label": wallets_mod.SCRIPT_TYPE_LABELS[t]}
             for t in main.SCRIPT_TYPE_CHOICES
         ],
+        "sanktion_max_hops_cap": sanctions_mod.sanktion_max_hops_cap(),
         "env_path": str(state.env_path),
         "cache_dir": str(state.cache_dir),
         "rpc_password_set": bool((werte.get("RPCUSER") or "").strip() and (werte.get("RPCPASSWORD") or "").strip()),
@@ -1067,6 +1478,7 @@ def api_config(state: AppState, query: dict) -> dict:
         "wallets_immer_aktuell": (
             main.resolve_wallets_beim_start_aktualisieren(werte)
         ),
+        "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
         "wallet_watch": _wallet_watch_status(),
 
         "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
@@ -1088,12 +1500,14 @@ def api_config(state: AppState, query: dict) -> dict:
         "ui_lang": _ui_lang_aus_env(werte),
         "ui_theme": _ui_theme_aus_env(werte),
         "managed_by": state.managed_by,
-        "managed_hint": (
-            "Wallets und Datenquelle kommen aus Specter."
-            if state.managed_by == "specter" else
-            "Electrs und Core RPC kommen aus Start9-Dependencies; Wallets und übrige Einstellungen werden hier konfiguriert."
-            if state.managed_by == "start9" else None
+        "managed_hint": _managed_hint(state, werte),
+        "electrum_indexer": (
+            _start9_electrum_indexer(werte) if state.managed_by == "start9" else None
         ),
+        "specter_labels": (
+            _specter_labels_for_api(state) if state.managed_by == "specter" else None
+        ),
+        "local_core": _local_core_status_for_api(state),
     }
 
 
@@ -2510,7 +2924,9 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
         max_hops = int(payload.get("max_hops", 3))
     except (TypeError, ValueError):
         max_hops = 3
-    max_hops = max(1, min(max_hops, 20))
+    from core.sanctions import clamp_sanktion_max_hops
+
+    max_hops = clamp_sanktion_max_hops(max_hops, default=3)
 
     eigene = set(wallet_ctx.address_to_wallet)
 
@@ -2658,6 +3074,52 @@ def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
     }
 
 
+def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
+    """Übernimmt erkannten Loopback-bitcoind in die .env (UTXO-Slot; Lookup nur wenn leer)."""
+    _datenquellen_config_gesperrt(state)
+    if state.managed_by in ("specter", "start9"):
+        raise ApiError(403, "Im Managed-Modus kommt Core von Start9/Specter.")
+    from core import local_bitcoind as local_core
+
+    werte = state.env().values()
+    hit = _discover_local_core_cached(werte)
+    if hit is None:
+        raise ApiError(404, "Kein lokaler Bitcoin Core (Cookie/RPC) gefunden.")
+    already = local_core.core_already_configured(werte)
+    env = state.env()
+    env.apply(local_core.env_updates_from_hit(hit, lookup_core_already=already))
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    global _local_core_probe_cache
+    _local_core_probe_cache = None
+    state.reload()
+    if already:
+        print(
+            f"Lokaler Bitcoin Core → UTXO-Set-Slot gespeichert: "
+            f"{hit.host}:{hit.port}, Prefer-Peer {hit.host}:{hit.p2p_port} "
+            f"({hit.chain}, {'pruned' if hit.pruned else 'vollständig'}). "
+            f"Lookup-NODE_IP unverändert.",
+            flush=True,
+        )
+    else:
+        print(
+            f"Lokaler Bitcoin Core übernommen: RPC {hit.host}:{hit.port}, "
+            f"BIP-158 Prefer-Peer {hit.host}:{hit.p2p_port} "
+            f"({hit.chain}, {'pruned' if hit.pruned else 'vollständig'}).",
+            flush=True,
+        )
+    return {
+        "saved": True,
+        "lookup_preserved": already,
+        "local_core": _local_core_status_for_api(state),
+        "sources": [
+            q.as_dict() for q in source_mod.describe_sources(state.env().values())
+        ],
+    }
+
+
 def api_llm_status(state: AppState, query: dict) -> dict:
     """
     Assistenten-Anbindung: Banner-, Pillen- und Privacy-Felder.
@@ -2703,9 +3165,12 @@ def api_price_history(state: AppState, query: dict) -> dict:
     ``?series=1`` liefert zusätzlich die Tag→Preis-Map (für EUR-Umrechnung
     ausgegebener Beträge zum Ausgabedatum).
     """
+    from core import price_history_sync as hist_sync
+
     mit_serie = (query.get("series", ["0"])[0] or "").strip().lower() in (
         "1", "true", "ja", "yes", "on",
     )
+    werte = state.env().values()
     roh = (query.get("currency", [""])[0] or "").strip()
     if roh:
         return {
@@ -2714,6 +3179,7 @@ def api_price_history(state: AppState, query: dict) -> dict:
                     state.immutable_cache_dir, roh, mit_serie=mit_serie,
                 ),
             ],
+            "price_history_opt_in": hist_sync.price_history_opt_in(werte),
         }
     return {
         "histories": [
@@ -2722,7 +3188,85 @@ def api_price_history(state: AppState, query: dict) -> dict:
             )
             for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
         ],
+        "price_history_opt_in": hist_sync.price_history_opt_in(werte),
     }
+
+
+def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict:
+    """Manueller oder erzwungener Historie-Nachzug (Bitstamp/CDD)."""
+    from core import price_history_sync as hist_sync
+
+    payload = payload or {}
+    an = payload.get("opt_in")
+    env = state.env()
+    if an is not None:
+        env.apply({
+            hist_sync.ENV_OPT_IN: "1" if bool(an) else "0",
+        })
+        try:
+            env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+        state.reload()
+    logs: list[str] = []
+    # Manueller API-Lauf: Stamp ignorieren, Opt-in weiter beachten.
+    ergebnisse = hist_sync.historie_nachziehen_alle(
+        state.immutable_cache_dir,
+        values=state.env().values(),
+        on_log=logs.append,
+        force=True,
+    )
+    for zeile in logs:
+        print(zeile, flush=True)
+    return {
+        "ok": all(e.get("ok") for e in ergebnisse),
+        "results": ergebnisse,
+        "log": logs,
+        "price_history_opt_in": hist_sync.price_history_opt_in(
+            state.env().values()
+        ),
+        "histories": [
+            price_mod.historie_status(state.immutable_cache_dir, w)
+            for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
+        ],
+    }
+
+
+def starte_historie_nachzug_taeglich(
+    state: AppState,
+    *,
+    warte_sekunden: float = 45.0,
+) -> None:
+    """Lücken-Check erst *nach* GUI-Start — nicht während Splash/Verbindungsaufbau.
+
+    Einmal pro Prozess; wartet ``warte_sekunden``, damit Browser und
+    Datenquellen-Pillen stehen, bevor Bitstamp ggf. gezogen wird.
+    """
+    import threading
+
+    if getattr(state, "_historie_sync_gestartet", False):
+        return
+    state._historie_sync_gestartet = True  # type: ignore[attr-defined]
+
+    def _lauf() -> None:
+        import time as _time
+
+        from core import price_history_sync as hist_sync
+
+        _time.sleep(max(0.0, float(warte_sekunden)))
+        try:
+            hist_sync.historie_nachziehen_alle(
+                state.immutable_cache_dir,
+                values=state.env().values(),
+                on_log=lambda t: print(t, flush=True),
+                force=False,
+            )
+        except Exception as exc:
+            print(f"Kurs-Historie-Nachzug: {exc}", flush=True)
+
+    threading.Thread(
+        target=_lauf, name="satsage-price-history-sync", daemon=True,
+    ).start()
 
 
 def api_price_import(state: AppState, payload: dict) -> dict:
@@ -2857,11 +3401,14 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         )
     quellen = source_mod.anreichere_live_p2p(quellen)
     stand = source_mod.peer_status(quellen, werte)
-    # Tip-Nachzug: starte_header_vorab drosselt selbst (15 Min Cooldown).
-    # Peer-Takt darf das nicht alle paar Sekunden neu starten.
-    starte_header_vorab(state, nur_wenn_leer=False)
+    # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
+    # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
+    # Header laufen über Start, /headers und eigenen Cooldown.
+    sources_dicts = [q.as_dict() for q in quellen]
+    if query.get("check", ["0"])[0] in ("1", "true", "ja"):
+        state.sources_last = sources_dicts
     return {
-        "sources": [q.as_dict() for q in quellen],
+        "sources": sources_dicts,
         "peers": stand["count"],
         "peer_status": stand,
         "live_p2p_peers": _live_p2p_peers(),
@@ -2882,34 +3429,85 @@ def _live_p2p_peers() -> list[str]:
 
 def api_clear_source(state: AppState, quelle: str) -> dict:
     """
-    Streicht einen eigenen Node (Electrum oder Bitcoin Core) aus der .env.
+    Streicht einen eigenen Node aus der .env, schaltet P2P aus
+    (``BIP158_P2P=0``), oder löscht nur die geladene öffentliche
+    Electrum-Liste (Onion-Rotation / electrum_servers.json).
+    Opt-in ``OEFFENTLICHE_ELECTRUM`` bleibt unberührt.
     """
     name = (quelle or "").strip()
     _datenquellen_config_gesperrt(state, quelle=name, aktion="verwerfen")
-    if name not in ("own_fulcrum", "own_core"):
+    env = state.env()
+    sicherung = None
+
+    if name in ("own_fulcrum", "own_core", "own_utxo_core"):
+        erlaubt = source_mod.EDITIERBARE_FELDER[name]
+        # Tor-Proxy teilen sich mehrere Quellen — nicht mit Core löschen.
+        loeschen = [
+            k for k in erlaubt
+            if not (name == "own_core" and k == "FULCRUM_TOR_PROXY")
+        ]
+        env.apply({schluessel: None for schluessel in loeschen})
+        try:
+            sicherung = env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+    elif name == "bip158":
+        # Wie Checkbox „P2P aufbauen“ aus (fehlender Key = Default an).
+        env.apply({"BIP158_P2P": "false"})
+        env.runtime_values.pop("BIP158_P2P", None)
+        try:
+            sicherung = env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+        # Laufende Header/Filter-Peers nicht weiter als „P2P an“ anzeigen.
+        state.header_job_id = None
+        try:
+            import bip158_scanner as _bip
+
+            with _bip._LIVE_FILTER_LOCK:
+                _bip._LIVE_FILTER_PEERS.clear()
+        except Exception:
+            pass
+    elif name == "public_onion":
+        updates: dict[str, str | None] = {}
+        for i in range(main.MAX_PUBLIC_ONION_SERVERS):
+            updates[f"FULCRUM_TOR_{i}"] = None
+            updates[f"FULCRUM_PORT_{i}"] = None
+            updates[f"FULCRUM_SSL_{i}"] = None
+        env.apply(updates)
+        try:
+            sicherung = env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+    elif name == "clearnet":
+        ziel = main.ELECTRUM_SERVERS_FILE
+        if ziel.is_file():
+            try:
+                ziel.unlink()
+            except OSError as exc:
+                raise ApiError(500, "Interner Serverfehler.") from exc
+    else:
         raise ApiError(
             400,
-            "Nur eigener Electrum-Server oder Bitcoin Core können verworfen werden.",
+            "Nur eigener Electrum-Server, Bitcoin Core, P2P oder öffentliche "
+            "Electrum-Listen können verworfen werden.",
         )
-    erlaubt = source_mod.EDITIERBARE_FELDER[name]
-    env = state.env()
-    # Tor-Proxy teilen sich mehrere Quellen — nicht mit Core löschen.
-    loeschen = [
-        k for k in erlaubt
-        if not (name == "own_core" and k == "FULCRUM_TOR_PROXY")
-    ]
-    env.apply({schluessel: None for schluessel in loeschen})
-    try:
-        sicherung = env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
+
     state.reload()
     werte = state.env().values()
+    quellen = [
+        q.as_dict()
+        for q in source_mod.anreichere_live_p2p(
+            source_mod.describe_sources(werte)
+        )
+    ]
+    # Letzter Check-Stand darf „P2P an/verbunden“ nicht über den Papierkorb retten.
+    state.sources_last = quellen
     return {
         "saved": True,
         "cleared": name,
         "backup": str(sicherung) if sicherung else None,
-        "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
+        "sources": quellen,
     }
 
 
@@ -3049,12 +3647,72 @@ def _alle_gecachten_verlaeufe(state: AppState) -> list[dict]:
     return gesammelt
 
 
+def _utxo_schluessel(eintrag: dict) -> tuple[str, int] | None:
+    txid = str(eintrag.get("txid") or "").strip().lower()
+    if not txid:
+        return None
+    try:
+        vout = int(eintrag.get("vout", 0))
+    except (TypeError, ValueError):
+        return None
+    return (txid, vout)
+
+
+def _steuer_verlauf_ohne_phantom_unspent(
+    verlauf: list[dict],
+    bestand: list[dict] | None,
+) -> tuple[list[dict], int]:
+    """
+    Verlauf für Steuer: echte Abgänge behalten, Phantom-„unspent“ streichen.
+
+    Phantom = im Verlauf ``spent`` falsch/fehlend (wirkt unspent), aber
+    ``txid:vout`` steht nicht (mehr) im aktuellen UTXO-Cache — typisch nach
+    Konsolidierung/Ausgaben, wenn der Verlauf ``spent`` nicht gesetzt hat.
+    Ohne UTXO-Cache kein Abgleich möglich → Verlauf unverändert.
+    """
+    if not bestand:
+        return list(verlauf), 0
+    live = set()
+    for u in bestand:
+        key = _utxo_schluessel(u)
+        if key:
+            live.add(key)
+    gefiltert: list[dict] = []
+    phantome = 0
+    gesehen: set[tuple[str, int]] = set()
+    for eintrag in verlauf:
+        key = _utxo_schluessel(eintrag)
+        if eintrag.get("spent"):
+            gefiltert.append(eintrag)
+            if key:
+                gesehen.add(key)
+            continue
+        if key is None:
+            continue
+        if key in live:
+            gefiltert.append(eintrag)
+            gesehen.add(key)
+        else:
+            phantome += 1
+    # UTXOs, die der Verlauf noch nicht kennt (frischer Empfang).
+    for u in bestand:
+        key = _utxo_schluessel(u)
+        if key is None or key in gesehen:
+            continue
+        neu = dict(u)
+        neu.setdefault("spent", False)
+        gefiltert.append(neu)
+        gesehen.add(key)
+    return gefiltert, phantome
+
+
 def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     """
     Woraus die Steuerauswertung rechnet — **je Wallet** entschieden.
 
-    Der Verlauf gewinnt, wo er vorliegt: Er enthält die unverbrauchten Outputs
-    ebenso wie die längst ausgegebenen. Wo er fehlt, bleibt der UTXO-Bestand.
+    Der Verlauf gewinnt, wo er vorliegt (Abgänge + Empfänge). Unspent-Zeilen
+    aus dem Verlauf, die nicht im aktuellen UTXO-Cache stehen, werden als
+    Phantom verworfen. Wo kein Verlauf da ist, bleibt der UTXO-Bestand.
 
     Die Entscheidung darf nicht global fallen. Sonst verschwänden alle Wallets
     ohne Verlauf aus der Aufstellung, sobald ein einziges einen hat — in einer
@@ -3065,23 +3723,36 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     """
     eintraege: list[dict] = []
     ohne_verlauf: list[str] = []
+    phantome_gesamt = 0
 
     for entry in state.analyse_entries:
         schluessel = entry.analyse_schluessel
         verlauf = main.load_xpub_verlauf_cache(schluessel, state.cache_dir)
-        if verlauf:
-            eintraege.extend(verlauf)
-            continue
-        # Auch bei leerem Verlauf: Eine leere Liste kann ein abgebrochener
-        # Lauf sein. Sie als „dieses Wallet ist leer" zu lesen wäre falsch.
-        ohne_verlauf.append(entry.display_name)
         gecacht = utxos_mod.load_cached_utxos(
             schluessel,
             state.cache_dir,
             immutable_cache_dir=state.immutable_cache_dir,
         )
+        if verlauf:
+            bereinigt, phantome = _steuer_verlauf_ohne_phantom_unspent(
+                verlauf, gecacht,
+            )
+            phantome_gesamt += phantome
+            eintraege.extend(bereinigt)
+            continue
+        # Auch bei leerem Verlauf: Eine leere Liste kann ein abgebrochener
+        # Lauf sein. Sie als „dieses Wallet ist leer" zu lesen wäre falsch.
+        ohne_verlauf.append(entry.display_name)
         if gecacht:
             eintraege.extend(gecacht)
+
+    if phantome_gesamt and hasattr(state, "_steuer_phantome"):
+        state._steuer_phantome = phantome_gesamt
+    else:
+        try:
+            state._steuer_phantome = phantome_gesamt  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     return eintraege, ohne_verlauf
 
@@ -3126,6 +3797,14 @@ def _steuer_auswertung(state: AppState, query: dict) -> dict:
     )
     auswertung["verfuegbare_jahre"] = jahre
     auswertung["ohne_verlauf"] = ohne_verlauf
+    phantome = int(getattr(state, "_steuer_phantome", 0) or 0)
+    auswertung["phantom_unspent_count"] = phantome
+    if phantome:
+        auswertung["hinweise"].insert(0, (
+            f"{phantome} Verlaufs-Einträge wirkten unspent, fehlen aber im "
+            "aktuellen UTXO-Bestand (Phantom) — für „Bestand gesamt“ ignoriert. "
+            "Verlaufsscan erneut aktualisiert spent-Flags."
+        ))
     if ohne_verlauf:
         # Eine gemischte Grundlage muss auffallen: Für die einen Wallets sind
         # Veräußerungen erfasst, für die anderen nur der heutige Bestand.
@@ -3329,6 +4008,17 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
 
     eigene_jetzt = _eigene_adressen(state)
     utxos = _utxos_fuer_trace(state, wallet_id=wallet_id)
+    if not utxos:
+        # Leerer Bestand ≠ „alles schon getracet“ — sonst wirkt „Herkunft aller
+        # UTXOs“ nach frischem Lab/Cache fälschlich fertig (grüner Hinweis).
+        return {
+            "nichts_zu_tun": True,
+            "keine_utxos": True,
+            "offen": 0,
+            "utxos": 0,
+            "vollstaendig": vollstaendig,
+            "wallet_id": wallet_id,
+        }
     if vollstaendig:
         offen = _trace_offen_tief(state, utxos, eigene_jetzt)
     else:
@@ -3337,7 +4027,9 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     if not offen:
         return {
             "nichts_zu_tun": True,
+            "keine_utxos": False,
             "offen": 0,
+            "utxos": len(utxos),
             "vollstaendig": vollstaendig,
             "wallet_id": wallet_id,
         }
@@ -3593,43 +4285,52 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
             gesamt = sum(len(v) for v in ergebnis.values())
             stand.phase(f"{gesamt} Ein- und Ausgänge erfasst")
 
-            # Bestand mitziehen — ohne UTXOs ist ein Verlaufsscan in der GUI
-            # sinnlos (Salden bleiben 0). Reiner UTXO-Scan bleibt separat.
-            stand.phase("Erfasse UTXO-Bestand…")
-            hol_utxo = fetchers.get("fetch_wallet_utxos")
-            if hol_utxo is None:
-                raise RuntimeError(
-                    f"Verlauf: Datenquelle {quelle} liefert keine UTXOs."
-                )
-
-            def on_utxos_update(stand_utxos: list) -> None:
-                job.result = {
-                    "eintraege": gesamt,
-                    "wallets": len(ergebnis),
-                    "utxo_count": len(stand_utxos),
-                    "partial": True,
-                }
-                wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
-                stand.tick(f"{len(stand_utxos)} {wort} bisher…")
-
-            gefunden = main.resolve_wallet_utxos(
-                xpubs,
-                hol_utxo,
-                fetchers["fetch_address_utxos"],
-                fetchers.get("fetch_addresses_utxos"),
-                state.cache_dir,
-                quelle,
-                rescan=True,
-                max_addresses=max(e.max_addresses for e in ziele),
-                wallet=wallet_ctx,
-                verify_utxo_spent=fetchers.get("verify_utxo_spent"),
-                fulcrum=fetchers.get("fulcrum"),
-                on_missing_xpubs=lambda fehlend: True,
-                on_progress=lambda text, *, sofort=False: (
-                    stand.phase(text) if sofort else stand.tick(text)
-                ),
-                on_utxos_update=on_utxos_update,
+            # Bestand: nur nachziehen wenn kein frischer UTXO-Cache da ist
+            # (sonst doppelte Gap-Arbeit direkt nach UTXO-Scan).
+            frisch, frisch_grund = main.utxo_cache_frisch_genug(
+                xpubs, state.cache_dir,
             )
+            if frisch is not None:
+                stand.phase(frisch_grund)
+                gefunden = frisch
+            else:
+                stand.phase(
+                    f"Erfasse UTXO-Bestand… ({frisch_grund})"
+                )
+                hol_utxo = fetchers.get("fetch_wallet_utxos")
+                if hol_utxo is None:
+                    raise RuntimeError(
+                        f"Verlauf: Datenquelle {quelle} liefert keine UTXOs."
+                    )
+
+                def on_utxos_update(stand_utxos: list) -> None:
+                    job.result = {
+                        "eintraege": gesamt,
+                        "wallets": len(ergebnis),
+                        "utxo_count": len(stand_utxos),
+                        "partial": True,
+                    }
+                    wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
+                    stand.tick(f"{len(stand_utxos)} {wort} bisher…")
+
+                gefunden = main.resolve_wallet_utxos(
+                    xpubs,
+                    hol_utxo,
+                    fetchers["fetch_address_utxos"],
+                    fetchers.get("fetch_addresses_utxos"),
+                    state.cache_dir,
+                    quelle,
+                    rescan=True,
+                    max_addresses=max(e.max_addresses for e in ziele),
+                    wallet=wallet_ctx,
+                    verify_utxo_spent=fetchers.get("verify_utxo_spent"),
+                    fulcrum=fetchers.get("fulcrum"),
+                    on_missing_xpubs=lambda fehlend: True,
+                    on_progress=lambda text, *, sofort=False: (
+                        stand.phase(text) if sofort else stand.tick(text)
+                    ),
+                    on_utxos_update=on_utxos_update,
+                )
             job.raise_if_cancelled()
             wort = "UTXO" if len(gefunden) == 1 else "UTXOs"
             stand.phase(
@@ -3640,6 +4341,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                 "wallets": len(ergebnis),
                 "utxo_count": len(gefunden),
                 "partial": False,
+                "utxo_from_cache": frisch is not None,
             }
         finally:
             halt.set()
@@ -4649,12 +5351,16 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_source_status(state, query)
         if teile == ["source", "oeffentlich"] and methode == "POST":
             return 200, api_oeffentliche_electrum(state, self._body())
+        if teile == ["source", "local-core"] and methode == "POST":
+            return 200, api_local_core_accept(state, self._body())
         if teile == ["llm", "status"] and methode == "GET":
             return 200, api_llm_status(state, query)
         if teile == ["price"] and methode == "GET":
             return 200, api_price(state, query)
         if teile == ["price", "history"] and methode == "GET":
             return 200, api_price_history(state, query)
+        if teile == ["price", "history", "sync"] and methode == "POST":
+            return 200, api_price_history_sync(state, self._body())
         if teile == ["price", "import"] and methode == "POST":
             return 200, api_price_import(state, self._body())
         if teile[:2] == ["llm", "context"]:
@@ -4681,6 +5387,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_cache_unreferenziert(state)
         if teile == ["cache", "unreferenziert"] and methode == "DELETE":
             return 200, api_cache_unreferenziert_loeschen(state)
+        if teile == ["cache", "stats"] and methode == "GET":
+            return 200, api_cache_stats(state)
         if teile == ["cache"] and methode == "DELETE":
             return 200, api_cache_leeren(state)
         if len(teile) == 2 and teile[0] == "cache" and methode == "DELETE":
@@ -4874,6 +5582,17 @@ class EingebetteterServer:
             self.httpd.server_close()
 
 
+def _port_erreichbar(bind: str, port: int, *, timeout: float = 0.2) -> bool:
+    """True, wenn unter *bind*:*port* schon etwas annimmt (Windows: SO_REUSEADDR)."""
+    if int(port) <= 0:
+        return False
+    try:
+        with socket.create_connection((bind, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def starte_im_hintergrund(
     state: AppState | None = None,
     *,
@@ -4897,8 +5616,13 @@ def starte_im_hintergrund(
     bind = _bind_host(bind, state=state, args=args)
     Handler.state = state
 
+    ziel = int(port)
+    # HTTPServer.allow_reuse_address ist unter Windows oft wirkungslos gegen
+    # „Port belegt“ — erst verbinden, dann ggf. auf Port 0 ausweichen.
+    if ziel > 0 and _port_erreichbar(bind, ziel):
+        ziel = 0
     try:
-        httpd = QuietThreadingHTTPServer((bind, int(port)), Handler)
+        httpd = QuietThreadingHTTPServer((bind, ziel), Handler)
     except OSError:
         httpd = QuietThreadingHTTPServer((bind, 0), Handler)
 
@@ -4911,6 +5635,11 @@ def starte_im_hintergrund(
     )
     thread.start()
 
+    try:
+        _log_local_core_hint_once(state)
+    except Exception:
+        pass
+
     if header_vorab:
         starte_header_vorab(state)
 
@@ -4921,6 +5650,15 @@ def starte_im_hintergrund(
         bind=bind,
         port=tatsaechlich,
     )
+
+
+def tip_sync_laeuft(state: AppState) -> bool:
+    """Ob gerade ein Tip-Nachzug-Job läuft (Watcher darf dann nachziehen)."""
+    jid = state.wallet_sync_job_id
+    if not jid:
+        return False
+    job = state.jobs.get(jid)
+    return bool(job is not None and job.status == "running")
 
 
 def starte_wallet_aktualisierung(
@@ -4942,10 +5680,8 @@ def starte_wallet_aktualisierung(
         werte
     ):
         return None
-    if state.wallet_sync_job_id:
-        laufend = state.jobs.get(state.wallet_sync_job_id)
-        if laufend is not None and laufend.status == "running":
-            return None
+    if tip_sync_laeuft(state):
+        return None
 
     # Auch leerer Cache (0 UTXOs) zählt — Scan-Stand zum Fortsetzen.
     eintraege = [
@@ -5077,6 +5813,12 @@ def starte_wallet_aktualisierung(
         finally:
             halt.set()
             stand.close()
+            try:
+                from core import wallet_watch
+
+                wallet_watch.get_watch_service().tip_nachzug_job_beendet()
+            except Exception:
+                pass
 
     namen = ", ".join(e.display_name for e in eintraege[:3])
     if len(eintraege) > 3:
@@ -5121,10 +5863,8 @@ def api_wallet_tip_sync(state: AppState, payload: dict | None = None) -> dict:
                 "Kein UTXO-Cache — zuerst UTXO-Scan (Fullscan), "
                 "danach Tip-Nachzug.",
             )
-    if state.wallet_sync_job_id:
-        laufend = state.jobs.get(state.wallet_sync_job_id)
-        if laufend is not None and laufend.status == "running":
-            raise ApiError(409, "Tip-Nachzug läuft bereits.")
+    if tip_sync_laeuft(state):
+        raise ApiError(409, "Tip-Nachzug läuft bereits.")
     daten = starte_wallet_aktualisierung(
         state, erzwingen=True, wallet_ids=ids,
     )
@@ -5195,7 +5935,10 @@ def starte_header_vorab(state: AppState, *, nur_wenn_leer: bool = False) -> None
                 print(text, flush=True)
 
             tip = vorab_block_header(
-                env, cache_dir=state.cache_dir, on_log=log,
+                env,
+                cache_dir=state.cache_dir,
+                immutable_dir=state.immutable_cache_dir,
+                on_log=log,
             )
             # Auch bei unverändertem Tip: lange Pause bis zum nächsten Check.
             state.header_vorab_naechstes = (
@@ -5593,6 +6336,8 @@ def main_cli(argv=None) -> int:
             _splash_timeout_wache(25.0)
         else:
             _splash_schliessen()
+        # GUI/HTTP stehen — Historie-Nachzug erst danach (nicht im Splash).
+        starte_historie_nachzug_taeglich(state)
         try:
             return lauf_steuerung(
                 state,
@@ -5638,6 +6383,8 @@ def main_cli(argv=None) -> int:
     else:
         _splash_schliessen()
     print("  Server bereit — Anfragen werden angenommen (Strg+C beendet).", flush=True)
+    # GUI erreichbar — Lücken-Nachzug nachgelagert (nicht Startpfad).
+    starte_historie_nachzug_taeglich(state)
     try:
         _http_loop_bis_strg_c(httpd)
     finally:

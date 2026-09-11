@@ -197,11 +197,23 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
             knoten["time_label"] = unterbaum.get("time", "")
             knoten["txid"] = unterbaum.get("txid", "")
             knoten["vout"] = unterbaum.get("vout")
+            # Soft-Label der Erzeuger-Tx (CoinJoin-Art am eigenen Hop).
+            if unterbaum.get("tx_class"):
+                knoten["tx_class"] = unterbaum.get("tx_class")
+                knoten["tx_class_label"] = unterbaum.get("tx_class_label") or ""
+                knoten["tx_class_label_en"] = unterbaum.get("tx_class_label_en") or ""
+                if knoten["tx_class_label"]:
+                    knoten["note"] = knoten["tx_class_label"]
             quellen = unterbaum.get("sources") or []
             if quellen:
                 knoten["children"] = _quellen_zu_knoten(
                     unterbaum, wallet, pfad, tiefe + 1
                 )
+            elif unterbaum.get("coinjoin_noise_skipped") and unterbaum.get("tx_class"):
+                # CJ ohne aufgelöste eigene Ins: Soft-Label reicht als Blatt —
+                # absichtlicher Peer-Skip ist keine Herkunftslücke.
+                knoten["children"] = []
+                knoten["coinjoin_noise_skipped"] = True
             else:
                 # cycle/error/unknown ohne Quellen: als Blatt sichtbar machen,
                 # sonst wirkt der interne Knoten fälschlich „fertig grün“.
@@ -444,9 +456,14 @@ def trace_utxo(
     )
 
     summary = _summen(kinder)
-    voll = trace_cache.baum_ist_vollstaendig(
-        {"found": True, "summary": summary, "children": kinder}
-    )
+    baum_probe = {
+        "found": True,
+        "summary": summary,
+        "children": kinder,
+        "tx_class": roh.get("tx_class"),
+        "coinjoin_noise_skipped": bool(roh.get("coinjoin_noise_skipped")),
+    }
+    voll = trace_cache.baum_ist_vollstaendig(baum_probe)
     juengste = None
     if voll:
         extern = analyze._youngest_external_ingress(roh)
@@ -456,24 +473,33 @@ def trace_utxo(
         elif wallet_eingang and wallet_eingang.get("time_ts"):
             juengste = int(wallet_eingang["time_ts"])
 
+    root = {
+        "id": "0",
+        "txid": roh.get("txid", ""),
+        "vout": roh.get("vout", 0),
+        "address": wurzel_adresse,
+        "wallet": wallet.resolve_address(wurzel_adresse) if wallet else None,
+        "amount_sats": int(roh.get("amount_sats", 0) or 0),
+        "time_label": roh.get("time", ""),
+        "type": roh.get("type", "utxo"),
+    }
+    if roh.get("tx_class"):
+        root["tx_class"] = roh.get("tx_class")
+        root["tx_class_label"] = roh.get("tx_class_label") or ""
+        root["tx_class_label_en"] = roh.get("tx_class_label_en") or ""
+        root["note"] = root["tx_class_label"]
+
     ergebnis = {
         "found": True,
         "error": "",
-        "root": {
-            "id": "0",
-            "txid": roh.get("txid", ""),
-            "vout": roh.get("vout", 0),
-            "address": wurzel_adresse,
-            "wallet": wallet.resolve_address(wurzel_adresse) if wallet else None,
-            "amount_sats": int(roh.get("amount_sats", 0) or 0),
-            "time_label": roh.get("time", ""),
-            "type": roh.get("type", "utxo"),
-        },
+        "root": root,
         "children": kinder,
         "summary": summary,
         "verfolgt_vollstaendig": voll,
         "juengste_sats_ts": juengste,
         "max_trace_depth": analyze.MAX_TRACE_DEPTH,
+        "tx_class": roh.get("tx_class"),
+        "tx_class_label": roh.get("tx_class_label") or "",
     }
     ergebnis.update(folge_meta(ergebnis))
     # Done nur bei echtem Blatt-Ende (external/coinbase). Sonst bleibt

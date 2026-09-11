@@ -1,6 +1,165 @@
-﻿# Offene Punkte
+# Offene Punkte
 
-Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
+Bekannte Lücken, noch ohne Lösung. Neueste oben.
+
+## Kurs-Historie · Bundle veraltet / Lücken bis „heute“ — teilweise gelöst
+
+**Stand:** 2026-09-11 · **umgesetzt (MVP)** · **zurückgestellt** (Feinschliff im Büro)
+
+Täglicher Job + Opt-in ``SATSAGE_PRICE_HISTORY_OPT_IN`` lädt Bitstamp/CDD bei Lücke; Overlap/Smoothing wie geplant. Bundle selbst wird nicht überschrieben (Cache darunter). Lauf **nach** GUI/„Server bereit“ (~45 s), nicht im Splash. Release-bis-Tip-Script in Builds/CI ist drin.
+
+**Zurückgestellt bis Büro:** Live-Test hinter Firewall; UI-Texte EN durchklicken (restliche DE-Strings in `app.js` / Log).
+
+---
+
+## Datenquellen · Onion-Electrs zu langsam → früh BIP-158 / Abbruch
+
+**Stand:** 2026-09-11 · **umgesetzt (MVP)** · Feinschliff offen
+
+Latenz-Gate beim Setup öffentlicher Onion-Electrs (Auto-Priorität): Probe-`get_history`, Default 8 s (`PUBLIC_ONION_LATENCY_SECONDS`; `0` = aus). Zu langsam → BIP-158 erneut versuchen und binden; sonst Warnung „einzige Option, wird langsam“ + interaktiv Abbruch. Kein Mid-Scan-Hop; `--rpc-only` überspringt das Gate.
+
+**Offen/Feinschliff:** Live hinter Firewall/Tor messen; optional Setup-Race BIP-158-Peer-Hunt ‖ Onion-Probe (schnelleres BIP-158-Fail).
+
+---
+
+## Marke · Sherlock-Satoshi-Kopf statt Sat-Symbol
+
+**Stand:** 2026-09-11 · **umgesetzt**
+
+Marke aus `Pfeiffe-Icon.jpg` (S/W, Schwarz = Vordergrund) → transparente `web/img/pfeiffe-icon.png` und Ableitungen (`sat-logo`, Favicon, `logo-mark`, Packaging) über `scripts/prepare_brand_assets.py`. Fallback: Splash-Ausschnitt `satsage-head.png`. Splash/Windows weiter volles `logo.jpg`.
+
+---
+
+## Core-Rollen · UTXO-Set vs. Tx/Block-Lookup (+ lokaler pruned Qt)
+
+**Stand:** 2026-09-11 · **umgesetzt** (Morgen-Plan inkl. Block-Fetch)
+
+**Ist:** `UTXO_RPC_*` vs. `NODE_IP`/`RPC*`; Still-Fill in `.env`; Bestand Electrs-LAN vor scantxoutset; Tx/Block: lokal bis `pruneheight`, darunter Lookup-Core; mit Electrs Core nur Fallback wenn Electrs die Tx nicht liefert; UI-Karten; Prefer-Peer `BIP158_HOST`.
+
+**Feinschliff:** `AGENTS.md`/Handbuch-Prioritätstabelle; UI-Hinweis `peerblockfilters=1` am Qt.
+
+---
+
+## Tests · Blind spots (vs. Specter / LNbits / Jam)
+
+**Stand:** 2026-09-10 · **teilweise** · Vergleich Python-Server + Browser-UI
+
+Kurzanalyse: SatSage hat starke Domain-/API-Unittests und Chaos/Session-Helfer; gegenüber Specter (pytest+Cypress), LNbits (unit/api/regtest/e2e-Playwright) und Jam (Vitest+Playwright) fehlen vor allem deterministische Browser-E2E (CI-Unittest ist da).
+
+| # | Punkt | Status |
+|---|--------|--------|
+| 1 | **CI: Unittest-Suite** auf Push/PR (`dev-juniormind` / `main`), nur schnelle Tests (kein Regtest/E2E/Chaos) | **umgesetzt** (Suite grün vorausgesetzt; lokal 1202 OK) |
+| 2 | **Browser-E2E-Smoke** (Playwright): Spawn → Token → Kernansichten / Kopf-Pillen — deterministisch, optional CI | offen |
+| 3 | **Test-Marker / Schichten** (`fast` vs. `regtest` vs. `e2e`) statt einer flachen `tests/`-Liste | offen |
+| 4 | Weniger **String-Suche in `app.js`**, mehr API+DOM-Verhalten | offen |
+| 5 | Stabile UI-Selektoren (`data-cy` o. Ä.) für Chaos/E2E | offen |
+| 6 | Coverage-/Lint-Gates in CI (Python; JS optional ohne npm-Zwang) | offen |
+
+Chaos-Harness und GUI-Session-Protokoll bleiben Vorsprung — nicht durch E2E ersetzen, sondern ergänzen.
+
+---
+
+## Web-UI · Mobile-Darstellung für Tablet
+
+**Stand:** 2026-09-10 · **offen** · nur notiert
+
+Desktop-GUI auf Tablet-Viewport brauchbar machen (Kopf-Pillen, Nav, Inhalt, Dock). Handy optional später — Fokus zuerst Tablet. Bisher nur schmaler Viewport-Check der Quellen-Pillen, kein Responsive-Umbau.
+
+---
+
+## Kopf · Pillen entschlacken (Electrs privat / öffentlich) — erledigt
+
+**Stand:** 2026-09-10 · **umgesetzt** · UI-Kopfzeile
+
+Nur noch aktive / Aufbau- / Fehler-Quellen plus Privatsphäre-Pille (hoch/mittel/keine); Labels Core / P2P n / Electrum privat / öffentlich. Cache-only → Privatsphäre hoch. Siehe CHANGELOG [Unveröffentlicht].
+
+---
+
+## Lokal Bitcoin Core erkennen (Desktop, ohne Start9/Specter)
+
+**Stand:** 2026-09-09 · **MVP umgesetzt** (Opt-in) · Sonderfälle offen
+
+Wenn SatSage **standalone** auf derselben Maschine wie ein laufendes `bitcoind` startet (nicht Start9/Specter-managed), findet es Default-Datadir + `.cookie` + Loopback-RPC und bietet **Opt-in** (Datenquellen-Banner / `LOCAL_CORE_OPT_IN=1`) — kein stilles Verbinden.
+
+**MVP (Ist):**
+
+- `core/local_bitcoind.py`: Standard-Datadirs (Win/macOS/Linux), main/test/signet/regtest, Cookie, `getblockchaininfo`.
+- Log-Hinweis beim GUI-Start; API `local_core` + `POST /api/source/local-core`.
+- Opt-in schreibt RPC **und** `BIP158_HOST=<host>:<p2p-port>` (+ `BIP158_P2P=1`) — Compact Filter bevorzugt den lokalen Node (braucht `peerblockfilters=1`).
+- Pruned wird nicht verworfen (scantxoutset bleibt sinnvoll).
+- Managed-Modi unberührt.
+
+**Sonderfälle (noch offen):**
+
+- Custom `-datadir` / Flatpak / Dienst-User (Cookie nicht unter Default-Pfad)
+- Mehrere lokalen Nodes → Auswahl-UI
+- `rpcbind` nur auf LAN-IP, nicht `127.0.0.1`
+- Feinere Priorität archival/txindex vs. Electrs-LAN in der Auto-Kette
+- Stille Auto-Connect (bewusst nicht im MVP)
+
+---
+
+## Immutable-Cache · SQLite statt Winz-JSONs (tx / utxo_ingress)
+
+**Stand:** 2026-09-09 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
+
+### Entscheidungsgrundlage (nicht vorab bauen)
+
+Punktzugriff per TxID / `(txid, vout)` ist mit Flatfiles schon O(1). SQLite lohnt wegen Syscall-/AV-/Glob-Kosten, nicht wegen Lookup-Komplexität.
+
+| Dateien in `tx/` **oder** `utxo_ingress/` | Haltung |
+|------------------------------------------|---------|
+| < ~1 000 | Flatfiles behalten |
+| ~2 000–5 000 | Grauzone — messen (Walk-Zeit, Windows); SQLite wenn Batch-Walks/Reports stocken |
+| ≥ ~10 000 | SQLite sinnvoll bis geboten |
+
+**Wachstumstreiber:** Herkunft in der Breite (viele UTXOs → `utxo_ingress/`) und/oder Tiefe/Breite des Graphen (viele `get_tx` → `tx/`), v. a. „Herkunft vollständig“, hohe `max_hops`, aufgelöste große Sammel-/CoinJoin-Txs. Reiner UTXO-/Specter-Seed füllt diese Ordner nicht.
+
+**Scope später:** nur `immutable_cache/tx` + `utxo_ingress` (zwei Tabellen, PK); XPUB-UTXO/Verlauf-JSON bleiben. Optional lazy Migration / Schwellwert-Opt-in. Windows/StartOS + Antivirus stärker betroffen als warmer Linux-Page-Cache.
+
+**Laufzeit-Hinweis:** Ab ≥10 000 JSON-Dateien in `tx/` oder `utxo_ingress/` schreibt SatSage einmalig ins Log: *Cache wächst — sqlite ab jetzt sinnvoll* (+ Bitte um GitHub-Issue). Zählung nur alle 500 Writes, damit das Zählen selbst nicht teuer wird.
+
+**Abgrenzung:** Kein Drive-by vor CoinJoin-Hybrid-Walk — CJ-Auflösung treibt `tx/` voraussichtlich erst richtig in die Tausender.
+
+---
+
+## Start9 · Fulcrum als Electrum-Datenquelle (neben electrs)
+
+**Stand:** 2026-09-09 · **in Arbeit (Vorbereitung)** · Bezug: [`doc/START9-fulcrum-indexer.md`](doc/START9-fulcrum-indexer.md), [`doc/START9-packaging.md`](doc/START9-packaging.md)
+
+Der Start9-Build-/Package-Prozess soll **Fulcrum** können, nicht nur `electrs-startos`.
+
+**Soll:**
+
+- In der **StartOS-GUI auswählbar** (Action **Select Indexer**), analog Mempool — Fulcrum oder Electrs.
+- Manifest: beide Deps optional; zur Laufzeit genau eine aktiv.
+- Bridge-Env → `FULCRUM_*` + `SATSAGE_ELECTRUM_INDEXER`; SatSage-UI bleibt für Bridge-Quellen read-only.
+
+**Erledigt in Vorbereitung (ohne `.s9pk`-Bau):** Design-Doku; Packaging (`store.indexer`, `selectIndexer`, conditional deps, Bridge electrs/`electrum` oder fulcrum/`main`); App-`managed_hint` / `electrum_indexer`; Unit-Tests.
+
+**Offen bis Sideload:** `npm ci` + `./scripts/build_startos_s9pk` auf Build-Host; Geräte-Test Fulcrum-Wahl; optional Task „Indexer wählen“ erzwingen; Auto-Detect nur als spätere Stufe.
+
+---
+
+## Specter-Plugin · Node & Wallets aus Specter übernehmen (read-only)
+
+**Stand:** 2026-09-09 · **umgesetzt (Kern + Cache-Seed)** · manuelle Abnahme in Specter-UI noch offen
+
+Das Specter-Plugin übernimmt **Node-Connections** und **Wallets** aus Specter (Bridge/Session), ohne Doppelpflege in SatSage.
+
+**Soll / Ist:**
+
+- Specter-Node (Core → BIP-158/RPC, Electrum/Spectrum → `FULCRUM_*`) und Wallets/XPUBs/Deskriptoren → Plugin-`.env` (`managed_by=specter`); UI/API Wallets + Datenquellen gesperrt/ausgeblendet.
+- **UTXO-Seed** aus `full_utxo` → `utxo_cache` (`source=specter`), Scan-Fenster aus Specter-Indizes (`address_index` / `change_index`).
+- **Verlaufs-Merge** aus Specter-UTXOs + Receive-Txs → `merke_bip158_verlauf`.
+- **Labels** → `utxo_cache/specter_address_labels.json`, API `specter_labels` / UTXO-Feld `label`.
+- Änderungen in Specter: Fingerprint-Reload + erneuter Seed.
+
+**Modul:** `specter_plugin/.../specter_seed.py`. Tests: `tests/test_specter_seed.py`.
+
+**Abgrenzung:** Standalone-`server.py` / Lab bleiben editierbar. PSBT/Devices/Explorer-URL aus Specter = Folge-Issues.
+
+---
 
 ## Start9 Community Package â€” HÃ¤rtung
 
@@ -10,7 +169,7 @@ Bekannte LÃ¼cken, noch ohne LÃ¶sung. Neueste oben.
 - Tickets/Phasen: [`doc/START9-backlog.md`](doc/START9-backlog.md)
 - Specter-Plugin-Testplan (paralleler Distributionsweg): [`doc/testplan-specter-plugin.md`](doc/testplan-specter-plugin.md)
 
-Kurz: Loopback+Token-URL reichen nicht fÃ¼r LAN/Tor hinter StartOS. S0â€“S3 sind im Code; der Wrapper liegt in **`packaging/`** (Branch `main`). Bauen/Sideload/Release: [`doc/START9-packaging.md`](doc/START9-packaging.md). Community-Einreichung (S4-7) bleibt offen.
+Kurz: Loopback+Token-URL reichen nicht fÃ¼r LAN/Tor hinter StartOS. S0â€“S3 sind im Code; der Wrapper liegt in **`packaging/`** (Branch `main`). Bauen/Sideload/Release: [`doc/START9-packaging.md`](doc/START9-packaging.md). **S4-6** (GerÃ¤te-E2E mit Release 0.9) erledigt; **Community-Einreichung (S4-7)** bleibt offen.
 
 ---
 
@@ -222,86 +381,103 @@ Export â†’ A fehlt? â†’ Dialog A â†’ Cache
 
 **Wenn wir wieder drankommen:** Challenge-/Hash-Schema festlegen; Verify in SatSage; UI-Dialoge + Cache; HTML/CSV-Abschnitt; Multisig/BIP-322 spÃ¤ter.
 
-## Ideensammlung: CoinJoins rÃ¼ckverfolgen kÃ¶nnen
+## Ideensammlung: CoinJoins rückverfolgen können
 
-**Stand:** 2026-09-02 Â· **nur notiert, noch nicht umsetzen** (Hybrid-Walk fÃ¼r Wasabi skizziert)  
-**Ort:** Herkunftsanalyse (`trace_engine.py`, `analyze.py`, Web-Herkunft / CLI), Einstellungen, Steuerbericht; abhÃ¤ngig von â€žServer bleibt nach Browser-SchlieÃŸungâ€œ und Status-Mails
+**Stand:** 2026-09-11 · **MVP umgesetzt** (Klassifikation + Soft-Label + Own-only-Walk; ohne Einstellungs-UI A/B/C)  
+**Kurzfassung:** [`doc/issues/coinjoin-herkunft.md`](doc/issues/coinjoin-herkunft.md)  
+**Code:** `core/tx_classify.py`, Own-only in `trace_engine.iter_trace_funding_inputs` / `analyze.trace_utxo_origin`, UI Soft-Label in `web/app.js`, Lab `verify_tx_classify.py`  
+**Offen / Folge:** Whirlpool-Ketten (Remix × n kumuliert); Einstellungen A/B/C; langer WabiSabi-Remix-Job / Status-Mails  
+**Danach:** Immutable-Cache SQLite (tx/ingress) — Entscheidungsgrundlage siehe Issue oben; nicht parallel vorziehen.  
+**Ort:** Herkunftsanalyse (`trace_engine.py`, `analyze.py`, Web-Herkunft / CLI), Einstellungen, Steuerbericht; Hintergrundjob/Status-Mails für lange Walks
+
 ### Ist-Zustand
 
-Bei Sammel-Txs mit mehr als 20 EingÃ¤ngen bricht die Engine nach dem ersten eigenen Input ab (`FULL_RESOLUTION_INPUT_LIMIT`); der Rest erscheint als â€žn EingÃ¤nge gebÃ¼ndeltâ€œ. Das trifft typische Wasabi-/WabiSabi-CoinJoins.
+Bei Sammel-Txs mit mehr als 20 Eingängen bricht die Engine nach dem ersten eigenen Input ab (`FULL_RESOLUTION_INPUT_LIMIT`); der Rest erscheint als „n Eingänge gebündelt“. Das trifft typische Wasabi-/WabiSabi-CoinJoins. Regtest: zwei CJ-**ähnliche** Txs (24 in / 28 out) — kein echter Coordinator.
 
 | Muster | vs. 20er-Limit | Anschaffungsdatum |
 |--------|----------------|-------------------|
-| Wasabi / WabiSabi (oft â‰«20 Inputs) | bricht ab â†’ gebÃ¼ndelt | unvollstÃ¤ndig / Untergrenze |
-| Whirlpool (typisch 5Ã—5) | unter Limit, schon voll aufgelÃ¶st | Peer-Inputs dÃ¼rfen trotzdem **kein** Datum liefern (nur eigene Zweige; Fremde = Rauschen) |
-| JoinMarket (oft kleinâ€“mittel) | meist unter Limit | wie CoinJoin: nur eigene Zweige |
-| Payjoin (typisch 2â€“wenige Inputs) | **bricht nicht** am Limit | kein Mix â€” fremder Input = Gegenstelle, nicht Peer-Rauschen |
+| Wasabi / WabiSabi (oft ≫20 Inputs) | bricht ab → gebündelt | unvollständig / Untergrenze |
+| Whirlpool (typisch 5×5) | unter Limit, schon voll aufgelöst | Peer-Inputs dürfen trotzdem **kein** Datum liefern (nur eigene Zweige; Fremde = Rauschen) |
+| JoinMarket (oft klein–mittel) | meist unter Limit | wie CoinJoin: nur eigene Zweige |
+| PayJoin (typisch 2–wenige Inputs) | **bricht nicht** am Limit | kein Mix — fremder Input = Gegenstelle, nicht Peer-Rauschen |
 
-Verwandt mit â€žGrÃ¼ndlichere Herkunft in der Web-GUIâ€œ.
+Verwandt mit „Gründlichere Herkunft in der Web-GUI“.
+
+### Klassifikation · Eigentum zuerst (festgeschrieben)
+
+Vor Formheuristik: **alle** `vin`/`vout` gegen konfigurierte XPUBs matchen. Sonst kein Exchange-/PayJoin-Label. Soft: „Wahrscheinlich …“.
+
+| Label | Eigene Inputs | Eigene Outputs | Lesart |
+|--------|---------------|----------------|--------|
+| **Fan-Out (eigen)** | **alle** Ins eigen | 0 oder nur Change | du zahlst aus |
+| **PayJoin** | gemischt; übersichtlich viele Ins, **wenige** Fremd (typisch 1, selten 2) | Sender oft Change; Empfänger oft 1 Netto-Out | kollaborative Zahlung, **kein** Mix |
+| **Exchange-Batch** | **0** eigen | genau 1 (selten mehr) | nur Empfang; **kein** CJ (Risiko gering, wenn Input-Eigentum vollständig) |
+| **CoinJoin** (Wasabi / Whirlpool / JM) | ≥1 eigen | ≥1 eigen | Mix; Fremde = Rauschen |
+
+**Detektor-Reihenfolge:** (1) Eigentum klären → (2) 0 eigene Ins + eigene Outs → Exchange-Batch → (3) alle Ins eigen → Fan-Out → (4) wenige Ins/wenige Fremd → PayJoin → (5) Whirlpool → Wasabi → JoinMarket → unklar.
+
+**Abgrenzung:** Fan-Out = 0 Fremd-Ins; PayJoin = ≥1 Fremd-In bei kleinem Ins-Set (Richtwert ≤5–8 Ins, ≤2 Fremd); Exchange ohne eigenen Input kein CJ. PayJoin/Fan-Out/Exchange **nicht** in die CJ-Stop-/Auflös-Optionen.
 
 ### Umsetzungsstrategie (Reihenfolge)
 
 **1. Einstellung: Behandlung von CoinJoins**
 
-Benutzer regelt in den Einstellungen (Web + `.env`), was bei erkannten CoinJoins passiert. Cache vermerkt Typ (`samourai` / `wasabi`, spÃ¤ter ggf. `joinmarket`):
+Benutzer regelt in den Einstellungen (Web + `.env`), was bei erkannten CoinJoins passiert. Cache vermerkt Typ (`whirlpool` / `wasabi` / `joinmarket`; Exchange/PayJoin/Fan-Out separat):
 
 | Option | Verhalten |
 |--------|-----------|
-| A â€” Scan stoppt am CoinJoin | Herkunft endet am Mix; Cache: â€žCoinJoin erkannt (Samourai\|Wasabi\|â€¦)â€œ; kein Weiterlaufen durch den Mix |
-| B â€” Nur Wasabi stoppt | Whirlpool/Samourai wird aufgelÃ¶st; Wasabi bleibt Markierung + Abbruch |
-| C â€” Beide auflÃ¶sen | Wasabi und Samourai werden durchverfolgt (langsamste Variante) |
+| A — Scan stoppt am CoinJoin | Herkunft endet am Mix; Cache: „CoinJoin erkannt (…)“; kein Weiterlaufen durch den Mix |
+| B — Nur Wasabi stoppt | Whirlpool wird aufgelöst; Wasabi bleibt Markierung + Abbruch |
+| C — Beide auflösen | Wasabi und Whirlpool werden durchverfolgt (langsamste Variante) |
 
-Erkennung vor dem teuren Walk; Abgrenzung zur normalen Sammel-/Konsolidierungs-Tx (dort bleiben unaufgelÃ¶ste eigene Inputs eine echte Untergrenze).
+Erkennung vor dem teuren Walk; Abgrenzung zur normalen Sammel-/Konsolidierungs-Tx (dort bleiben unaufgelöste eigene Inputs eine echte Untergrenze).
 
-**Payjoin gehÃ¶rt nicht in diese Einstellung** (siehe unten).
-
-**2. Whirlpool-Scan (Samourai / Nachfolger z.â€¯B. Ashigaru)**
+**2. Whirlpool-Scan (Samourai / Nachfolger z. B. Ashigaru)**
 
 - Heuristik: starres Muster (typisch 5 In / 5 Out, gleiche Pool-Denomination; Tx0 separat).  
-- n Remix-Runden erkennen und nach MÃ¶glichkeit **kumuliert** darstellen (eine Kette â€žWhirlpool Ã— nâ€œ, nicht n EinzelbÃ¤ume in der UI).  
-- Im **Steuerbericht** die Kette auflÃ¶sen: Anschaffungsdatum Ã¼ber eigene Zweige durchreichen; Peer-Inputs als Rauschen, nicht als externer Zufluss.  
-- Eigene Inputs bevorzugt Ã¼ber Verlauf/`spent_txid`-Index finden, nicht alle Prevouts laden.
+- n Remix-Runden erkennen und nach Möglichkeit **kumuliert** darstellen (eine Kette „Whirlpool × n“, nicht n Einzelbäume in der UI).  
+- Im **Steuerbericht** die Kette auflösen: Anschaffungsdatum über eigene Zweige durchreichen; Peer-Inputs als Rauschen, nicht als externer Zufluss.  
+- Eigene Inputs bevorzugt über Verlauf/`spent_txid`-Index finden, nicht alle Prevouts laden.
 
 **3. Wasabi-/WabiSabi-Scan**
 
-- GroÃŸe n:m-Txs; nur eigene Inputs/Outputs weiterverfolgen, Rest verwerfen (kein Blind-AuflÃ¶sen aller `vin`s).  
-- Erfordert Geduld (viele Abrufe Ã¼ber Remix-Historie). Praktisch erst sinnvoll mit Hintergrundbetrieb: Issue â€žServer bleibt nach Browser-SchlieÃŸungâ€œ + Status-Mails (neutrale Fertigmeldung).  
-- Einstellung C (oder B nur fÃ¼r den Wasabi-Zweig) steuert, ob Ã¼berhaupt durchgelaufen wird.
+- Große n:m-Txs; nur eigene Inputs/Outputs weiterverfolgen, Rest verwerfen (kein Blind-Auflösen aller `vin`s).  
+- Erfordert Geduld (viele Abrufe über Remix-Historie). Praktisch erst sinnvoll mit Hintergrundbetrieb + Status-Mails.  
+- Einstellung C (oder B nur für den Wasabi-Zweig) steuert, ob überhaupt durchgelaufen wird.
 
-#### LÃ¶sungsskizze: Hybrid-Walk (bei Implementation hier ansetzen)
+#### Lösungsskizze: Hybrid-Walk (bei Implementation hier ansetzen)
 
-RÃ¼ckwÃ¤rts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein** externer Zufluss; Anschaffungsdatum nur Ã¼ber **eigene** Vorfahren. Fremde Inputs = Rauschen, nie auflÃ¶sen.
+Rückwärts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein** externer Zufluss; Anschaffungsdatum nur über **eigene** Vorfahren. Fremde Inputs = Rauschen, nie auflösen.
 
-**Auswahlregel = Eigentum, nicht Betrag.** Betragsgleichheit Outputâ†”Inputs ist hÃ¶chstens Priorisierung (WabiSabi zerlegt/rekombiniert; Fees; mehrere eigene Ins/Outs). Weiterverfolgt werden **alle** eigenen Inputs von `C`.
+**Auswahlregel = Eigentum, nicht Betrag.** Betragsgleichheit Output↔Inputs ist höchstens Priorisierung (WabiSabi zerlegt/rekombiniert; Fees; mehrere eigene Ins/Outs). Weiterverfolgt werden **alle** eigenen Inputs von `C`.
 
 | Stufe | Wann | Vorgehen | Kosten |
 |-------|------|----------|--------|
-| **1 Â· Index** | Verlauf/`spent_txid` brauchbar | `eigene_inputs(C) = { Outpoints aus Verlauf \| spent_txid == C }` â€” kein Prevout-Resolve | billig (Cache) |
-| **2 Â· LÃ¼cke** | Verlauf `incomplete`, fehlende `spent_txid`, unsicherer `max_index`/Gap | Ein `get_tx(C)` (alle `vin`s, billig). Dann Outpointâˆ©bekannte eigenen Outpoints und/oder Adressraumâˆ©Vin-Adressen (Receive+Change, alle Script-Typen, Superset bis weit Ã¼ber hÃ¶chstem Index, groÃŸes Gap). Prevouts **nur** fÃ¼r Treffer bzw. fehlende Adressen nachladen â€” nie blind alle Fremden | teuer/zeitaufwÃ¤ndig, **korrekt** wenn Wallets/Deskriptoren stimmen und der Adressraum reicht |
+| **1 · Index** | Verlauf/`spent_txid` brauchbar | eigene Outpoints mit `spent_txid == C` — kein Prevout-Resolve | billig (Cache) |
+| **2 · Lücke** | Verlauf `incomplete`, fehlende `spent_txid`, unsicherer `max_index`/Gap | Ein `get_tx(C)` (alle `vin`s, billig). Dann Outpoint∩bekannte eigenen Outpoints und/oder Adressraum∩Vin-Adressen. Prevouts **nur** für Treffer — nie blind alle Fremden | teuer/zeitaufwändig, **korrekt** wenn Wallets/Deskriptoren stimmen und der Adressraum reicht |
 
-**Deckung:** Stufe 1 und â€žAdressraum âˆ© Vinsâ€œ sind dieselbe Aussage, sobald Cache und Adressraum vollstÃ¤ndig sind. LÃ¼cken werden erkannt â†’ bewusst Stufe 2, nicht raten.
+**Deckung:** Stufe 1 und „Adressraum ∩ Vins“ sind dieselbe Aussage, sobald Cache und Adressraum vollständig sind. Lücken werden erkannt → bewusst Stufe 2, nicht raten.
 
-**Nicht verwechseln:** `FULL_RESOLUTION_INPUT_LIMIT` / â€žgebÃ¼ndeltâ€œ bleibt fÃ¼r **normale** Sammel-/Konsolidierungs-Txs (ohne CJ-Erkennung); dort sind unaufgelÃ¶ste eigene Inputs echte Untergrenze. Beim CJ-Hybrid entfÃ¤llt Blind-Resolve der Fremden.
+**Nicht verwechseln:** `FULL_RESOLUTION_INPUT_LIMIT` / „gebündelt“ bleibt für **normale** Sammel-/Konsolidierungs-Txs (ohne CJ-Erkennung); dort sind unaufgelöste eigene Inputs echte Untergrenze. Beim CJ-Hybrid entfällt Blind-Resolve der Fremden.
 
-**Voraussetzungen fÃ¼r â€žkorrektâ€œ:** alle relevanten XPUBs/Deskriptoren konfiguriert; Scan/Gap deckt Mix-Adressen; bei Stufe 2 Eigentums-Schnittmenge statt Betragsfilter. Remix-Ketten bleiben lang â†’ Hintergrundjob/Mails bleiben Voraussetzung; der Hybrid macht den **einzelnen Hop** billig bzw. die Teuerkeit an erkannte LÃ¼cken gebunden.
+**Voraussetzungen für „korrekt“:** alle relevanten XPUBs/Deskriptoren konfiguriert; Scan/Gap deckt Mix-Adressen; bei Stufe 2 Eigentums-Schnittmenge statt Betragsfilter. Remix-Ketten bleiben lang → Hintergrundjob/Mails bleiben Voraussetzung; der Hybrid macht den **einzelnen Hop** billig bzw. die Teuerkeit an erkannte Lücken gebunden.
 
-**4. JoinMarket (spÃ¤ter, echte CoinJoin-Variante)**
+**4. JoinMarket (später, echte CoinJoin-Variante)**
 
-- P2P Maker/Taker, **kein** zentraler Coordinator; Taker wÃ¤hlt den gleichen Output-Betrag.  
-- On-chain: N+1 **gleiche** CJ-Outputs + meist je Teilnehmer ein Change (auÃŸer Sweep). Kein festes 5Ã—5, keine Pool-Liste â†’ Erkennung **locker**, False Positives mÃ¶glich (normale Tx mit gleichen BetrÃ¤gen). Detektoren prÃ¼fen oft erst Whirlpool/Wasabi, JoinMarket als Fallback.  
-- Mit XPUB: eigene Inputs + typisch ein CJ-Out + ggf. eigenes Change; Fremde = Rauschen (gleiche Semantik wie Whirlpool). Change historisch leichter an eigene Inputs koppelbar als der gleiche CJ-Out.  
-- Tx-GrÃ¶ÃŸe oft unter dem 20er-Limit â†’ teurer Wasabi-Walk selten nÃ¶tig.  
-- In die CoinJoin-Einstellung aufnehmen (stoppen vs. nur eigene Zweige), PrioritÃ¤t hinter Whirlpool/Wasabi; eigene Heuristik, Cache-Typ `joinmarket`.
+- P2P Maker/Taker, **kein** zentraler Coordinator; Taker wählt den gleichen Output-Betrag.  
+- On-chain: N+1 **gleiche** CJ-Outputs + meist je Teilnehmer ein Change (außer Sweep). Kein festes 5×5 → Erkennung **locker**, False Positives möglich. Detektoren: erst Whirlpool/Wasabi, JoinMarket als Fallback.  
+- Mit XPUB: eigene Inputs + typisch ein CJ-Out + ggf. eigenes Change; Fremde = Rauschen.  
+- In die CoinJoin-Einstellung aufnehmen; Cache-Typ `joinmarket`.
 
-**5. Payjoin (BIP78 / BIP77) â€” bewusst ausklammern**
+**5. PayJoin / Fan-Out / Exchange-Batch — eigene Labels, kein CJ**
 
-- **Kein** CoinJoin / keine AnonymitÃ¤tsmenge: kollaborative **Zahlung**, Sender und EmpfÃ¤nger legen Inputs in eine Tx (bricht Common-Input-Ownership fÃ¼r Kettenanalyse).  
-- On-chain absichtlich wie normale Multi-Input-Zahlung â†’ **keine zuverlÃ¤ssige** Erkennungsheuristik; nicht in CJ-Stop-/AuflÃ¶s-Optionen stecken (Fehlalarme).  
-- Typisch 2â€“wenige Inputs â†’ **trifft die 20er-Grenze nicht**; Engine lÃ¶st schon vollstÃ¤ndig auf.  
-- Mit XPUB: fremder Input = Gegenstelle. Sender: Abgang (+ ggf. Change). EmpfÃ¤nger: Nettozufluss bei ggf. mitgegebenem eigenem UTXO â€” eher Empfang/Recycling als Remix.  
-- BerÃ¼hrt eher bestehende Logik â€žfremde Inputs / mehr zurÃ¼ck als eingesetztâ€œ (`tax.py`), nicht â€žScan am Mix abbrechenâ€œ oder â€žn Runden kumulierenâ€œ. SpÃ¤testens weicher Hinweis, keine automatische CJ-Klassifikation.
+- Siehe Tabelle „Klassifikation · Eigentum zuerst“.  
+- PayJoin (BIP78/BIP77): weicher Hinweis möglich; **nicht** in CJ-Stop-/Auflös-Optionen.  
+- Exchange-Batch erst nach vollständigem Input-Eigentum (0 eigene Ins).  
+- Fan-Out (eigen): alle Ins eigen.
 
-**Wenn wir wieder drankommen:** zuerst Einstellungs-Enum + Cache-Felder + Erkennung Whirlpool; dann kumulierter Whirlpool-Pfad inkl. SteuerauflÃ¶sung; danach Wasabi Ã¼ber **Hybrid-Walk** (Stufe Index â†’ LÃ¼cke) an Hintergrund-Jobs/Mails koppeln; JoinMarket als Phase 4 (Heuristik + gleiche Semantik); Payjoin nicht als CoinJoin fÃ¼hren.
+**Erledigt (MVP):** Detektor + Soft-Labels + Own-Input-Walk + Lab-Fixtures.  
+**Wenn wir wieder drankommen:** Einstellungs-Enum A/B/C → Whirlpool-Kette (Remix × n) → Handbuch-Abschnitt Trace-Verhalten.
 
 ## Erledigt: Logo einbinden
 

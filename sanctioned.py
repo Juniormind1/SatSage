@@ -105,7 +105,11 @@ SDN_NS = {
 XBT_FEATURE_LABEL = "Digital Currency Address - XBT"
 
 _USER_AGENT = "SatSage/1.0"
-_ADDRESS_RE = re.compile(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,62}$|^bc1[a-z0-9]{25,90}$")
+# Mainnet + Testnet/Regtest (tb1/bcrt1) — Lab-Pseudo-Listen nutzen bcrt1…
+_ADDRESS_RE = re.compile(
+    r"^[13][a-km-zA-HJ-NP-Z1-9]{25,62}$"
+    r"|^(?:bc1|tb1|bcrt1)[a-z0-9]{25,90}$"
+)
 _ISO_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _EXPORT_ID_RE = re.compile(r"/(\d{14})-")
 

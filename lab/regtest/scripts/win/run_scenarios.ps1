@@ -14,4 +14,9 @@ $script = Join-Path $LabRoot 'scripts\generate_scenarios.py'
 Write-Host "BITCOIN_CLI=$BitcoinCli"
 & py -3 $script --native
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$sanc = Join-Path $LabRoot 'scripts\generate_sanctions_scenarios.py'
+Write-Host "Sanction hop scenarios…"
+& py -3 $sanc --native
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "Env: $(Join-Path $DataDir '.regtest.env')"
+Write-Host "Sanctions: $(Join-Path $DataDir 'sanctioned_cache')"

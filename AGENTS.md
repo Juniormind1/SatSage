@@ -18,6 +18,7 @@ Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diese
 - **Design Â· Node-Anbindung:** `doc/design-node-anbindung.md` â€” schick, minimalistisch, fehlertolerant; Konfigurationsfehler mÃ¶glichst von der App abfangen (nicht vom Nutzer)
 - **Grok-Bot (remote, z.â€¯B. nur iPhone + GitHub):** `GROK_BOT.md` â€” hart: keine Secrets/Heim-Node; **Mainnet nie**; Lab/CI: **Regtest â†’ Signet â†’ Testnet nur Ausnahme**; Lab-Env getrennt von Prod-`.env` (kein eingebauter Multi-Chain-Schalter)
 - **Web-GUI-StabilitÃ¤t (Rumgeklicke):** Protokoll `doc/testprotokoll-webgui-stabilitaet.md`; halbautomatisch `scripts/webgui_chaos_run.py` + `scripts/webgui_chaos_harness.js` (optional Playwright)
+- **Datenquellen-Wechsel waehrend Scan:** Protokoll `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — P2P vs Electrum, Job-Snapshot, Cache-Flags, Queue
 - **GUI-Tests Â· Token:** Nie Token aus Logs greppen. Session-JSON `tmp/satsage-gui-session.json` bzw. Zeile `SATSAGE_SESSION {â€¦}`; Helfer `scripts/webgui_test_ready.py spawn|attach|url`; Protokoll `doc/gui-test-protokoll.md`. Chaos: `--spawn`.
 - **StartOS-Sideload (`.s9pk`):** Wrapper liegt in **`packaging/`** auf Branch `main` â€” nicht auf `master`, nicht in einem Sibling-Repo. Bau-Anleitung fÃ¼r Bots: [`doc/START9-packaging.md`](doc/START9-packaging.md). Kurz: `./scripts/build_startos_s9pk` (x86_64). Vorhandenes Release: Tag `startos-tls11`.
 
@@ -64,16 +65,23 @@ py main.py --txid <txid> --xpubs zpub6...
 3. **Ã–ffentliche Fulcrum-Onions** â€” `FULCRUM_TOR_0`â€¦`9`, nur nach BestÃ¤tigung
 4. **Clearnet-Fulcrum** â€” Ã¶ffentliche Server ohne Tor (`electrum_servers.json`), nur nach BestÃ¤tigung
 
-**UTXO-Bestand** (zusÃ¤tzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
+**UTXO-Bestand** (zusätzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
 
-1. Electrs/Fulcrum **im LAN** (Gap-Scan) â€” typisch am schnellsten  
-2. Core RPC **LAN** (`scantxoutset`) â€” sonst ganzer UTXO-Set-Durchlauf  
-3. Core RPC **Onion**  
-4. Electrs **Onion**  
-5. BIP-158  
-6. Ã¶ffentliche Electrum (schlechtere PrivatsphÃ¤re)
+1. Electrs/Fulcrum **im LAN** (Gap-Scan) — typisch am schnellsten
+2. Core `scantxoutset` — bevorzugt `UTXO_RPC_*` (lokaler Node), sonst Lookup-`NODE_IP` (z. B. Start9)
+3. Electrs **Onion**
+4. BIP-158
+5. öffentliche Electrum (schlechtere Privatsphäre)
 
-Mit Electrs-LAN entfÃ¤llt `scantxoutset`.
+Mit Electrs-LAN entfällt `scantxoutset`. Ohne LAN-Electrs: lokaler pruned Node (`UTXO_RPC_*`) vor remote Lookup-Core.
+
+**Tx/Block-Lookup** (Herkunft ohne Electrs bzw. Electrs-Ausnahme):
+
+1. Lokaler Core (`UTXO_RPC_*`), solange Höhe > `pruneheight` (sonst Block weg)
+2. Lookup-Core (`NODE_IP`, archival / Start9)
+3. P2P `getdata` / Block bei bekannter Höhe
+
+Mit Electrs bleibt Electrs primär für `get_tx`; Core nur wenn Electrs die Tx nicht liefert.
 
 **Verlaufsscan** (`_try_verlauf_priority_chain` / `_setup_verlauf_client`) â€” eigene Kette, Core liefert keinen Verlauf:
 
@@ -167,14 +175,15 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 - **Secrets:** `.env`, XPUBs, RPC-PasswÃ¶rter, persÃ¶nliche Wallet-Namen nie committen oder in Ausgaben wiederholen
 - **Tests:** `py` statt `python` auf Windows; bei Netzwerk-Tests `.env` laden via `_load_dotenv()`
 - **TemporÃ¤re Skripte:** `_patch_*.py`, `_test_*.py`, `_profile_*.py` sind Entwicklungs-Hilfen â€” nicht committen
-- **Changelog:** `CHANGELOG.md` bei nennenswerten Ã„nderungen nachziehen â€” spÃ¤testens zusammen mit dem Commit. Neue Punkte unter `[UnverÃ¶ffentlicht]`; beim Commit das Datum als Abschnitt setzen und UnverÃ¶ffentlicht leeren. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
+- **Changelog:** CHANGELOG.md bei nennenswerten Änderungen nachziehen — spätestens zusammen mit dem Commit. Neue Punkte unter [Unveröffentlicht]. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
+- **Release Notes:** Nicht bei jedem Push auf dev-juniormind. Nur bei **Version-Bump** / Merge nach **main** / **Git-Tag** (…, StartOS-Tag): Abschnitt [Unveröffentlicht] als datierten Block setzen und leeren; optional GitHub-Release-Body = dieser Abschnitt (Inhalt = Changelog seit dem letzten Release). StartOS: wie doc/START9-packaging.md + publish_startos_release.
 
 ## Version
 
 - **Datei:** `VERSION` im Repo-Root (aktuell `0.9`) â€” einzige Quelle
 - **Lesen:** `core.version.version()`, Web Ã¼ber `GET /api/config` â†’ `version`, FuÃŸzeile `vâ€¦`
 - **PyInstaller:** `VERSION` in `packaging/satsage-webgui.spec` als data bundeln
-- **Bump:** nur Maintainer entscheiden und die Datei Ã¤ndern; kein Auto-Increment in Scripts/CI. Changelog-Eintrag zum Bump mitziehen.
+- **Bump:** nur Maintainer entscheiden und die Datei ändern; kein Auto-Increment in Scripts/CI. Changelog-Eintrag zum Bump mitziehen; dabei Release Notes wie oben (datierter Abschnitt, Unveröffentlicht leeren).
 
 ## Standalone-Build (PyInstaller)
 
@@ -192,16 +201,20 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 **Der Benutzer entscheidet selber, wann er git commit und push machen will.**
 
-### Commit-Identität (hart)
+### Branches
 
-Dieses öffentliche Repo darf **nur** unter der Projekt-Identität committen/pushen:
+- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung.
+- dev-juniormind — laufende Entwicklung von Juniormind1; hier committen/pushen für Work-in-Progress.
+- Andere Contributor-Branches/PRs: nach Review in main mergen, wenn stabil; nicht ungeprüft aus dev-* übernehmen.
+
+### Commit-Identität (Maintainer / Assistent)
+
+**Maintainer-Clones und Assistenten-Worktrees** committen/pushen nur unter der Projekt-Identität:
 
 - `user.name=Juniormind1`
 - `user.email=juniormind@proton.me`
 
-Persönliche Namen/Mails (z. B. Klarname, private GitHub-Logins, private Proton-Adressen) sind **verboten** — sie erscheinen öffentlich in der Commit-Historie und auf GitHub.
-
-Pflicht pro Clone/Worktree:
+Pflicht in diesen Clones:
 
 ```bash
 git config user.name Juniormind1
@@ -209,7 +222,9 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten. Assistenten müssen vor jedem Commit prüfen, dass die **lokale** Repo-Config (nicht nur global) auf Juniormind1 steht.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **in diesen Worktrees**. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
+
+**Fremde Contributor-Commits und PRs:** eigene Autor-/Committer-IDs sind erlaubt (übliche OSS-Praxis). CI verlangt nicht „jeder Commit = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
 Assistenten sollen:
 
@@ -218,13 +233,18 @@ Assistenten sollen:
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 
+### Merge-Dealbreaker
+
+Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Produkt-Semantik): [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Assistenten und Reviews sollen diese Liste kennen; CI deckt sie schrittweise ab (zuerst u. a. Unittests).
+
 ## Sicherheit & Datenschutz
 
-- XPUBs erlauben Ableitung aller Wallet-Adressen â€” sensibel behandeln
-- Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` kÃ¶nnen Klarnamen enthalten â€” nicht committen
-- Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` Ã¶ffentlich sichtbar
-- Fulcrum (Ã¶ffentliche Onions/Clearnet): mÃ¤ÃŸig (Rotation mildert Risiko)
-- Eigener Node (BIP-158 / eigener Fulcrum): PrivatsphÃ¤re **hoch** (`privacy_notice_for_source`, `is_own_fulcrum_backend`)
+- XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
+- Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen
+- Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` öffentlich sichtbar
+- Fulcrum (öffentliche Onions/Clearnet): mäßig (Rotation mildert Risiko); öffentliche Server und Remote-LLM nur nach Opt-in
+- Eigener Node (BIP-158 / eigener Fulcrum): Privatsphäre **hoch** (`privacy_notice_for_source`, `is_own_fulcrum_backend`)
+- Keine Telemetrie / kein XPUB-Upload an Fremde; Web-UI ohne Remote-JS (Dealbreaker T3/T6)
 - Sanktions-UTXO-Scans nutzen Clearnet-Fulcrum (nur Listen-Adressen, nicht Wallet-XPUBs)
 
 ## UI-Konventionen
@@ -233,7 +253,7 @@ Assistenten sollen:
 - **Verbose:** Default `nein` (`VERBOSE` in `.env` oder Einstellungen [4]); gekÃ¼rzte TxIDs/Adressen
 - **BetrÃ¤ge:** `format_sats` â€” â‰¤100â€¯000 sats als sats, darÃ¼ber BTC mit 2 Dezimalstellen
 - **Lange Listen:** `cancellable_output` â€” `q` zum Abbrechen (nur interaktives TTY)
-- **Log-Bereich (Web):** Eine Zeile kÃ¼ndigt den nÃ¤chsten Schritt an, **bevor** er loslÃ¤uft â€” nicht danach. Zweck ist Erwartungsmanagement (â€žjetzt startet Torâ€œ), keine Forensik hinterher. Die Zeile muss im Log stehen, bevor die Arbeit beginnt (SOCKS-Probe, Binary-Suche, Tor-Start, Connect). Ergebniszeilen (`Verbunden.`, Fehler) kommen zusÃ¤tzlich nach dem Schritt. Neue Logs Ã¼ber denselben Strom schreiben (`on_log` / NDJSON), nicht erst im fertigen JSON-Block. Nach zehn Sekunden ohne neue Zeile: â€žMoment nochâ€œ, nicht dieselbe Arbeitszeile nochmal. Wallet-bezogene Aktionen nennen den Wallet-Namen nach der Uhrzeit.
+- **Log-Bereich (Web):** Sparsam, wenn Verbindungen stehen und das Tool arbeitsbereit ist; gesprächig bei Hochfahren, Problemen, Verbindungsabbrüchen unter kritische Werte (z. B. < 3 Compact-Filter-Peers) oder Privatsphäre-Änderung. Eine Zeile kündigt den nächsten Schritt an, **bevor** er losläuft (Erwartungsmanagement, z. B. Tor) — Ergebnis danach. Gleicher Strom (`on_log` / NDJSON); nach ~10 s Stille: „Moment noch“. Wallet-Aktionen: Name nach der Uhrzeit. Richtlinie: [`doc/logging-richtlinie.md`](doc/logging-richtlinie.md).
 - **Web-UI prÃ¼fen:** Ã„nderungen an `web/` oder gerenderten API-Daten im Browser durchklicken, nicht nur am Render festhalten.
 
 ## Specter Desktop Plugin (Testumgebung)

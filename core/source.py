@@ -28,13 +28,18 @@ EDITIERBARE_FELDER: dict[str, tuple[str, ...]] = {
                     "FULCRUM_SSL", "FULCRUM_TOR_PROXY"),
     # scantxoutset am eigenen bitcoind — schneller UTXO-Bestand, kein Verlauf.
     "own_core": ("NODE_IP", "RPCPORT", "RPCUSER", "RPCPASSWORD", "RPC_SSL",
-                 "FULCRUM_TOR_PROXY"),
-    "bip158": ("BIP158_START_HEIGHT", "BIP158_PEERS", "FULCRUM_TOR_PROXY"),
+                 "RPC_COOKIE_FILE", "FULCRUM_TOR_PROXY"),
+    "own_utxo_core": (
+        "UTXO_RPC_HOST", "UTXO_RPCPORT", "UTXO_RPCUSER", "UTXO_RPCPASSWORD",
+        "UTXO_RPC_SSL", "UTXO_RPC_COOKIE_FILE",
+    ),
+    "bip158": ("BIP158_P2P", "BIP158_START_HEIGHT", "BIP158_PEERS",
+               "FULCRUM_TOR_PROXY"),
     "public_onion": ("FULCRUM_TOR_LISTE", "FULCRUM_TOR_PROXY"),
 }
 
 #: Schlüssel, deren Wert die Oberfläche nie zu sehen bekommt.
-GEHEIME_FELDER = ("RPCPASSWORD",)
+GEHEIME_FELDER = ("RPCPASSWORD", "UTXO_RPCPASSWORD")
 
 
 def verbindungsversuch_kommentar(erfolg: bool, wann: datetime | None = None) -> str:
@@ -104,8 +109,10 @@ class SourceInfo:
 
     @property
     def verwerfbar(self) -> bool:
-        """Eigene Nodes lassen sich aus der .env streichen."""
-        return self.key in ("own_fulcrum", "own_core") and self.configured
+        """Eigene Nodes streichen oder P2P ausschalten (BIP158_P2P=0)."""
+        return self.key in (
+            "own_fulcrum", "own_core", "own_utxo_core", "bip158",
+        ) and self.configured
 
     def as_dict(self) -> dict:
         return {
@@ -129,12 +136,64 @@ class SourceInfo:
         }
 
 
+def mergere_erreichbarkeit(
+    frisch: list[SourceInfo],
+    alt: list[dict] | None,
+) -> list[SourceInfo]:
+    """
+    Übernimmt ``reachable``/Peers aus dem letzten Check in frische describe-Daten.
+
+    Damit ``GET /api/config`` (ohne Netzprobe) denselben Stand zeigen kann wie
+    nach dem letzten ``?check=1`` — Browser-Reload muss Verbindungen nicht
+    optisch „neu aufbauen“.
+    """
+    if not alt:
+        return list(frisch)
+    nach: dict[str, dict] = {}
+    for eintrag in alt:
+        if isinstance(eintrag, dict) and eintrag.get("key"):
+            nach[str(eintrag["key"])] = eintrag
+    out: list[SourceInfo] = []
+    for q in frisch:
+        alt_q = nach.get(q.key)
+        if not alt_q:
+            out.append(q)
+            continue
+        if not q.configured:
+            out.append(
+                replace(
+                    q,
+                    reachable=None,
+                    error="",
+                    peer_count=0,
+                    peer_hosts=[],
+                )
+            )
+            continue
+        if q.reachable is not None:
+            out.append(q)
+            continue
+        hosts = list(alt_q.get("peer_hosts") or [])
+        out.append(
+            replace(
+                q,
+                reachable=alt_q.get("reachable"),
+                error=str(alt_q.get("error") or ""),
+                peer_count=int(alt_q.get("peer_count") or 0),
+                peer_hosts=hosts,
+            )
+        )
+    return out
+
+
 def anreichere_live_p2p(quellen: list) -> list:
     """
     Hängt gerade offene BIP-158-Scan-Peers an die bip158-Quelle.
 
     Tip-Nachzug / Filter-Walk halten Connections, die der periodische
     Erreichbarkeits-Check nicht sieht — die Pille soll sie trotzdem zählen.
+    Nur wenn P2P konfiguriert/an ist (``BIP158_P2P``), sonst bleibt die
+    Quelle nach Papierkorb/Schalter-Aus grau und ohne „verbunden“.
     """
     try:
         from bip158_scanner import live_filter_peer_hosts
@@ -147,6 +206,10 @@ def anreichere_live_p2p(quellen: list) -> list:
     out: list = []
     for q in quellen:
         if getattr(q, "key", None) != "bip158":
+            out.append(q)
+            continue
+        # P2P aus (Papierkorb / Schalter): keine Live-Peers anzeigen.
+        if not getattr(q, "configured", False):
             out.append(q)
             continue
         alt_hosts = list(getattr(q, "peer_hosts", None) or [])
@@ -179,15 +242,28 @@ def anreichere_live_p2p(quellen: list) -> list:
     return out
 
 
+def oeffentliche_electrum_label(onion_n: int, clear_n: int) -> str:
+    """UI/Log: öffentliche Electrum nicht als „Peers“, sondern onion-/clearnet-electrs."""
+    teile: list[str] = []
+    if onion_n > 0:
+        teile.append(f"{onion_n} onion-electrs")
+    if clear_n > 0:
+        teile.append(f"{clear_n} clearnet-electrs")
+    if not teile:
+        return "0 electrs verbunden"
+    return f"{' · '.join(teile)} verbunden"
+
+
 def peer_status(
     quellen: list[SourceInfo],
     values: dict[str, str] | None = None,
 ) -> dict:
     """
-    Kopfzeilen-Pille: welche Sorte Peer und wie viele.
+    Kopfzeilen-Pille: welche Sorte und wie viele.
 
     Eigener Electrum-Server sticht Compact Filter, die wieder öffentliche
     Server. Die Zahl ist nur die der gewählten Sorte, nicht die Summe.
+    Öffentliche Electrum: onion-electrs / clearnet-electrs (nicht „Peers“).
     """
     quellen = anreichere_live_p2p(quellen)
     nach = {q.key: q for q in quellen}
@@ -230,23 +306,22 @@ def peer_status(
                 "peers": _hosts(p2p),
             }
         else:
-            public_hosts: list[str] = []
-            public = 0
-            for key in ("public_onion", "clearnet"):
-                q = nach.get(key)
-                if q:
-                    public += getattr(q, "peer_count", 0) or 0
-                    public_hosts.extend(_hosts(q))
+            onion_q = nach.get("public_onion")
+            clear_q = nach.get("clearnet")
+            onion_n = int(getattr(onion_q, "peer_count", 0) or 0) if onion_q else 0
+            clear_n = int(getattr(clear_q, "peer_count", 0) or 0) if clear_q else 0
+            public = onion_n + clear_n
             if public > 0:
+                public_hosts: list[str] = []
+                public_hosts.extend(_hosts(onion_q))
+                public_hosts.extend(_hosts(clear_q))
                 stand = {
                     "kind": "public",
                     "count": public,
-                    "label": (
-                        "1 öffentlicher Peer verbunden"
-                        if public == 1
-                        else f"{public} öffentliche Peers verbunden"
-                    ),
+                    "label": oeffentliche_electrum_label(onion_n, clear_n),
                     "peers": public_hosts,
+                    "onion_electrs": onion_n,
+                    "clearnet_electrs": clear_n,
                 }
     stand["braucht_oeffentliche"] = (
         stand["count"] == 0
@@ -351,38 +426,87 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         ],
     ))
 
-    # --- Bitcoin Core (scantxoutset) — schneller UTXO-Bestand ---------------
+    # --- UTXO-Set-Quelle (scantxoutset) — oft lokaler pruned Node ------------
+    utxo_host = (values.get("UTXO_RPC_HOST") or "").strip()
+    if utxo_host:
+        utxo_host = main._normalize_fulcrum_host(utxo_host)
+    utxo_port = _int(values, "UTXO_RPCPORT", 8332)
+    utxo_user = values.get("UTXO_RPCUSER", "").strip()
+    utxo_cookie = values.get("UTXO_RPC_COOKIE_FILE", "").strip()
+    utxo_ssl = _flag(values, "UTXO_RPC_SSL", False)
+    utxo_ok = bool(utxo_host and (utxo_user or utxo_cookie))
+    utxo_detail = (
+        f"{utxo_host}:{utxo_port} · {'TLS' if utxo_ssl else 'ohne TLS'}"
+        + (" · Cookie" if utxo_cookie and not utxo_user else "")
+        if utxo_ok else "nicht eingetragen (Fallback: Tx/Block-Lookup-Core)"
+    )
+    quellen.append(SourceInfo(
+        rank=2,
+        key="own_utxo_core",
+        name="UTXO-Set-Quelle",
+        detail=utxo_detail,
+        privacy=PRIVACY_HIGH,
+        configured=utxo_ok,
+        note=(
+            "scantxoutset am eigenen Node — auch pruned. Lokaler bitcoin-qt "
+            "wird still eingetragen, wenn RPC erreichbar ist. Electrs/Fulcrum "
+            "im LAN hat Vorrang (Gap-Scan schneller); dieser Slot greift ohne "
+            "LAN-Electrs oder als bewusste Alternative."
+            if utxo_ok else
+            "Optional: eigener Core nur für den UTXO-Bestand (scantxoutset). "
+            "Leer = Lookup-Core (NODE_IP). Lokaler Desktop-Node füllt den "
+            "Slot automatisch. Electrs-LAN bleibt bevorzugt."
+        ),
+        felder=[
+            Feld("UTXO_RPC_HOST", "Host", "text", utxo_host,
+                 "z. B. 127.0.0.1 für lokalen bitcoin-qt"),
+            Feld("UTXO_RPCPORT", "RPC-Port", "port", str(utxo_port),
+                 "meist 8332"),
+            Feld("UTXO_RPCUSER", "Benutzer", "text", utxo_user,
+                 "oder Cookie-Datei nutzen"),
+            Feld("UTXO_RPCPASSWORD", "Passwort", "geheim", "",
+                 "Leer lassen behält das gespeicherte Passwort",
+                 gesetzt=bool(values.get("UTXO_RPCPASSWORD", "").strip())),
+            Feld("UTXO_RPC_COOKIE_FILE", "Cookie-Datei", "text", utxo_cookie,
+                 "Pfad zu bitcoind .cookie"),
+            Feld("UTXO_RPC_SSL", "TLS verwenden", "schalter",
+                 "true" if utxo_ssl else "false",
+                 "Loopback/LAN meist nein"),
+        ],
+    ))
+
+    # --- Tx/Block-Lookup (archival / Start9) --------------------------------
     node = (values.get("NODE_IP") or values.get("RPCHOST")
             or values.get("BITCOIN_RPC_HOST") or "").strip()
     if node:
         node = main._normalize_fulcrum_host(node)
     rpc_port = _int(values, "RPCPORT", 8332)
     rpc_user = values.get("RPCUSER", "").strip()
+    rpc_cookie = values.get("RPC_COOKIE_FILE", "").strip()
     rpc_ssl = _flag(values, "RPC_SSL", False)
     # Start9-Tor-RPC oft Port 443 + TLS.
     if rpc_port == 443 and "RPC_SSL" not in values:
         rpc_ssl = True
-    core_ok = bool(node and rpc_user)
+    core_ok = bool(node and (rpc_user or rpc_cookie))
     core_detail = (
         f"{node}:{rpc_port} · {'TLS' if rpc_ssl else 'ohne TLS'}"
+        + (" · Cookie" if rpc_cookie and not rpc_user else "")
         if core_ok else "nicht eingetragen"
     )
     quellen.append(SourceInfo(
-        rank=2,
+        rank=3,
         key="own_core",
-        name="Bitcoin Core · RPC",
+        name="Tx/Block-Lookup",
         detail=core_detail,
         privacy=PRIVACY_HIGH,
         configured=core_ok,
         note=(
-            "UTXO-Bestand per scantxoutset am eigenen bitcoind (LAN vor Onion). "
-            "Electrs im LAN hat Vorrang — Gap-Scan ist oft schneller. Kein "
-            "Verlauf und keine Herkunft aus Core; die bleiben bei Electrum "
-            "oder BIP-158."
+            "getrawtransaction / getblock für Herkunft — ideal full node mit "
+            "txindex (z. B. Start9). Nicht der Adress-Verlaufsscan (Electrs/"
+            "BIP-158). UTXO-Bestand hat einen eigenen Slot darüber."
             if core_ok else
-            "UTXO-Bestand per scantxoutset: Host (LAN oder .onion), Port, "
-            "RPC-Benutzer und Passwort. Ideal mit -txindex=1. Electrs im "
-            "LAN bleibt schneller und hat Vorrang."
+            "Core für Tx/Block-Lookups (Start9 o. Ä.). Pruned Desktop-Node "
+            "gehört in die UTXO-Set-Quelle, nicht hier."
         ),
         felder=[
             Feld("NODE_IP", "Host", "text", node,
@@ -394,6 +518,8 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
             Feld("RPCPASSWORD", "Passwort", "geheim", "",
                  "Leer lassen behält das gespeicherte Passwort",
                  gesetzt=bool(values.get("RPCPASSWORD", "").strip())),
+            Feld("RPC_COOKIE_FILE", "Cookie-Datei", "text", rpc_cookie,
+                 "Optional: Pfad zu bitcoind .cookie statt User/Passwort"),
             Feld("RPC_SSL", "TLS verwenden", "schalter",
                  "true" if rpc_ssl else "false",
                  "LAN meist nein; Onion hinter TLS-Terminator oft ja"),
@@ -416,19 +542,38 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         p2p_teile.append(f"{len(peers.splitlines())} extra Peers")
     p2p_teile.append("DNS-Seeds")
     quellen.append(SourceInfo(
-        rank=3,
+        rank=4,
         key="bip158",
         name="Bitcoin-P2P · Compact Filter",
-        detail=" · ".join(p2p_teile),
+        detail=(
+            " · ".join(p2p_teile)
+            if p2p_an
+            else "aus — öffentliche Listen können greifen"
+        ),
         privacy=PRIVACY_HIGH,
         configured=p2p_an,
         note=(
-            "Zuerst der Node im LAN (P2P-Port 8333), dann extra Peers, "
-            "dann DNS-Seeds. Ohne Compact Filter am eigenen Node werden "
-            "andere Filter-Peers gesucht — nicht gleich öffentliche "
-            "Electrum-Server. Adressen bleiben lokal."
+            (
+                "Zuerst der Node im LAN (P2P-Port 8333), dann extra Peers, "
+                "dann DNS-Seeds. Ohne Compact Filter am eigenen Node werden "
+                "andere Filter-Peers gesucht — nicht gleich öffentliche "
+                "Electrum-Server. Adressen bleiben lokal."
+            )
+            if p2p_an
+            else (
+                "P2P ist aus. Wenn Onion- oder Clearnet-Listen geladen sind "
+                "und öffentliche Electrum erlaubt ist, greifen die."
+            )
         ),
         felder=[
+            Feld(
+                "BIP158_P2P",
+                "P2P aufbauen",
+                "checkbox",
+                "true" if p2p_an else "false",
+                "Nur wenn aktiv: Compact Filter über Bitcoin-P2P. "
+                "Sonst können geladene öffentliche Listen greifen.",
+            ),
             Feld("BIP158_START_HEIGHT", "Erster Scan-Block", "port", str(start),
                  "Vorgabe SegWit (481824). Blöcke davor werden nicht durchsucht."),
             Feld("BIP158_PEERS", "P2P-Peers", "text", peers,
@@ -445,7 +590,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
               and k != "FULCRUM_TOR_PROXY"]
     proxy = values.get("FULCRUM_TOR_PROXY", "").strip() or "127.0.0.1:9050"
     quellen.append(SourceInfo(
-        rank=4,
+        rank=5,
         key="public_onion",
         name="Öffentliche Onions",
         detail=f"{len(onions)} Server · SOCKS {proxy}" if onions else "keine eingetragen",
@@ -476,7 +621,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         except (OSError, ValueError):
             clearnet_datei = False
     quellen.append(SourceInfo(
-        rank=5,
+        rank=6,
         key="clearnet",
         name="Öffentliche Electrum-Server",
         detail=(
@@ -636,8 +781,45 @@ def check_sources(
                 "Öffentliche Electrum-Server nicht angefragt "
                 "(Bestätigung fehlt)."
             )
+    else:
+        # Höhere Quelle aktiv: öffentliche „verbunden“-Reste nicht stehen lassen.
+        gefunden = _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=log)
 
     return [gefunden[q.key] for q in quellen]
+
+
+def _oeffentliche_electrum_als_ungenutzt(
+    gefunden: dict[str, SourceInfo],
+    *,
+    on_log=None,
+) -> dict[str, SourceInfo]:
+    """Löscht stale Peer-Stand bei Onion/Clearnet, wenn P2P/Eigen aktiv ist."""
+    note = "Nicht genutzt — höhere Privatsphäre-Quelle ist aktiv."
+    geaendert = False
+    for key in ("public_onion", "clearnet"):
+        info = gefunden.get(key)
+        if info is None:
+            continue
+        if not info.configured:
+            continue
+        if (
+            info.reachable is None
+            and not info.peer_count
+            and not (info.peer_hosts or [])
+        ):
+            continue
+        gefunden[key] = replace(
+            info,
+            reachable=None,
+            peer_count=0,
+            peer_hosts=[],
+            error="",
+            note=note,
+        )
+        geaendert = True
+    if geaendert and on_log:
+        on_log("Öffentliche Electrum-Verbindung nicht mehr aktiv (höhere Quelle).")
+    return gefunden
 
 
 def _oeffentliche_onion_endpunkte(values: dict[str, str]) -> list[tuple[str, int, bool]]:
@@ -776,7 +958,11 @@ def _pruefe_oeffentliche_electrum(
         )
     gesamt = len(onion_hosts) + len(clear_hosts)
     if gesamt:
-        log(f"Verbunden. {gesamt} öffentliche Electrum-Peers.")
+        log(
+            "Verbunden. "
+            + oeffentliche_electrum_label(len(onion_hosts), len(clear_hosts))
+            + "."
+        )
     else:
         log("Verbindung fehlgeschlagen: keine öffentlichen Electrum-Server")
     return gefunden
@@ -799,11 +985,8 @@ def _pruefe_p2p_peers(
         if on_log:
             on_log(text)
 
-    log("Prüfe Compact-Filter-Peers…")
     fest = p2p_peers_from_env(values)
-    if fest:
-        log(f"Zuerst {fest[0][0]}:{fest[0][1]}, ohne Filter weitere Peers.")
-
+    # Kein Vorlauf-Log — Erfolg kommt als eine Zeile je neuem Peer aus p2p.
     hosts = zaehle_compact_filter_peers(
         timeout=min(float(timeout), 4.0),
         tor_proxy=None,
@@ -812,6 +995,8 @@ def _pruefe_p2p_peers(
         dns_fallback=True,
     )
     if not hosts:
+        # Erwartungsmanagement: Tor-Schritt ankündigen, bevor SOCKS/Autostart
+        # läuft (sonst wirkt die GUI „eingefroren“).
         log("Clearnet-P2P ohne Compact-Filter-Peer — versuche über Tor…")
         tor_proxy = stelle_p2p_tor_bereit(values, on_log=log)
         if tor_proxy:
@@ -873,14 +1058,23 @@ def check_reachable(
 
     if info.key == "bip158":
         return ergebnis
-    if info.key == "own_core":
+    if info.key in ("own_core", "own_utxo_core"):
         if not info.configured:
             return ergebnis
-        from core.bitcoind_rpc import stelle_core_client_bereit, verify_core_rpc
+        from core.bitcoind_rpc import (
+            stelle_core_client_bereit,
+            stelle_utxo_core_client_bereit,
+            verify_core_rpc,
+        )
 
         log(f"Prüfe {info.name}…")
         try:
-            client = stelle_core_client_bereit(
+            bau = (
+                stelle_utxo_core_client_bereit
+                if info.key == "own_utxo_core"
+                else stelle_core_client_bereit
+            )
+            client = bau(
                 values, on_log=log, timeout=float(timeout) + 25.0,
             )
             if client is None:

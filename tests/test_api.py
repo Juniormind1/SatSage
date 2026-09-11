@@ -822,17 +822,98 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(nach_key["own_fulcrum"]["configured"])
         self.assertFalse(nach_key["own_fulcrum"]["verwerfbar"])
 
-    def test_p2p_laesst_sich_nicht_verwerfen(self):
+    def test_p2p_laesst_sich_ausschalten(self):
         status, körper = self.anfrage("/api/config/source/bip158", methode="DELETE")
-        self.assertEqual(status, 400)
-        self.assertIn("verworfen", körper["error"])
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["saved"])
+        self.assertEqual(körper["cleared"], "bip158")
+        # Wie manuelle Checkbox: false in .env, Feld und configured aus.
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "false",
+        )
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["bip158"]["configured"])
+        self.assertFalse(nach_key["bip158"]["verwerfbar"])
+        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
+        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
+        # GET /config darf P2P nicht wieder als an zeigen.
+        status2, cfg = self.anfrage("/api/config")
+        self.assertEqual(status2, 200)
+        bip = next(q for q in cfg["sources"] if q["key"] == "bip158")
+        self.assertFalse(bip["configured"])
+        self.assertEqual(
+            next(f["value"] for f in bip["felder"] if f["key"] == "BIP158_P2P"),
+            "false",
+        )
 
-    def test_fremde_quelle_laesst_sich_nicht_verwerfen(self):
+    def test_p2p_aufbauen_schalter_schreibt_env(self):
         status, körper = self.anfrage(
-            "/api/config/source/public_onion", methode="DELETE",
+            "/api/config/source",
+            methode="PUT",
+            daten={
+                "source": "bip158",
+                "values": {
+                    "BIP158_P2P": "false",
+                    "BIP158_START_HEIGHT": "481824",
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "false",
+        )
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["bip158"]["configured"])
+        # Checkbox-Feld ist im Formular.
+        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
+        self.assertEqual(felder["BIP158_P2P"]["typ"], "checkbox")
+        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
+
+    def test_unbekannte_quelle_laesst_sich_nicht_loeschen(self):
+        status, körper = self.anfrage(
+            "/api/config/source/mempool", methode="DELETE",
         )
         self.assertEqual(status, 400)
         self.assertIn("verworfen", körper["error"])
+
+    def test_oeffentliche_onion_liste_laesst_sich_loeschen(self):
+        self.anfrage(
+            "/api/config/source",
+            methode="PUT",
+            daten={
+                "source": "public_onion",
+                "values": {"FULCRUM_TOR_LISTE": "aaa.onion\nbbb.onion\n"},
+            },
+        )
+        vor = main._load_dotenv(self.env_pfad)
+        self.assertEqual(vor.get("FULCRUM_TOR_0"), "aaa.onion")
+        status, körper = self.anfrage(
+            "/api/config/source/public_onion", methode="DELETE",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["saved"])
+        self.assertEqual(körper["cleared"], "public_onion")
+        nach = main._load_dotenv(self.env_pfad)
+        self.assertNotIn("FULCRUM_TOR_0", nach)
+        self.assertNotIn("FULCRUM_TOR_1", nach)
+        # Opt-in und Proxy bleiben unberührt, wenn gesetzt.
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["public_onion"]["configured"])
+
+    def test_clearnet_liste_laesst_sich_loeschen(self):
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text('{"s1.example": {"t": "50001"}}', encoding="utf-8")
+        with mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            self.assertTrue(ziel.is_file())
+            status, körper = self.anfrage(
+                "/api/config/source/clearnet", methode="DELETE",
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["saved"])
+        self.assertEqual(körper["cleared"], "clearnet")
+        self.assertFalse(ziel.is_file())
+        nach_key = {q["key"]: q for q in körper["sources"]}
+        self.assertFalse(nach_key["clearnet"]["configured"])
 
     def test_source_status_ohne_check_bleibt_json(self):
         status, körper = self.anfrage("/api/source/status")
@@ -1060,6 +1141,8 @@ class TestSanktionsCheck(ApiTestBasis):
         self.assertEqual(status, 404)
 
     def test_max_hops_wird_begrenzt(self):
+        from core.sanctions import DEFAULT_SANKTION_MAX_HOPS_CAP
+
         self.listen_hinterlegen()
         status, körper = self.anfrage(
             "/api/sanctions/check", methode="POST", daten={"max_hops": 99}
@@ -1067,8 +1150,8 @@ class TestSanktionsCheck(ApiTestBasis):
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         # Ohne erreichbaren Sanktions-Server scheitert der Lauf — aber das
-        # Job-Label zeigt: die Hops wurden auf 20 gedeckelt.
-        self.assertIn("20 Hops", job["label"])
+        # Job-Label zeigt: die Hops wurden auf den Cap gedeckelt.
+        self.assertIn(f"{DEFAULT_SANKTION_MAX_HOPS_CAP} Hops", job["label"])
 
     def test_ohne_server_scheitert_der_job_ohne_netzzugriff(self):
         self.listen_hinterlegen()
@@ -1670,7 +1753,19 @@ class TestHerkunftVollstaendig(ApiTestBasis):
         # Route liefert 202 wie andere Jobs; bei nichts_zu_tun startet kein Job.
         self.assertIn(status, (200, 202))
         self.assertTrue(körper.get("nichts_zu_tun"))
+        self.assertTrue(körper.get("keine_utxos"))
         self.assertEqual(körper.get("offen"), 0)
+
+    def test_trace_alle_ohne_utxos_markiert_keine_utxos(self):
+        status, körper = self.anfrage(
+            "/api/trace/alle",
+            methode="POST",
+            daten={},
+        )
+        self.assertIn(status, (200, 202))
+        self.assertTrue(körper.get("nichts_zu_tun"))
+        self.assertTrue(körper.get("keine_utxos"))
+        self.assertEqual(körper.get("utxos"), 0)
 
     def test_offen_tief_nimmt_unvollstaendige(self):
         from core import trace_cache
@@ -1819,6 +1914,36 @@ class TestCacheLeeren(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertEqual(körper["utxo_eintraege"], 0)
         self.assertEqual(körper["immutable_eintraege"], 0)
+
+    def test_cache_stats_belegung(self):
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(1_000)], self.cache, "test",
+            first_seen={"height": 700_000, "time_ts": 1_600_000_000},
+            scan_end_index=12,
+        )
+        main.save_xpub_verlauf_cache(
+            BIP84_ZPUB, [utxo(500, marker="hist")], self.cache
+        )
+        (self.immutable / "tx").mkdir()
+        (self.immutable / "tx" / ("a" * 64 + ".json")).write_text(
+            '{"txid":"aa"}', encoding="utf-8"
+        )
+        (self.sanktionen / "liste.json").write_text("{}", encoding="utf-8")
+
+        status, körper = self.anfrage("/api/cache/stats")
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["ok"])
+        self.assertIn("platte", körper)
+        self.assertGreater(körper["utxo_cache"]["bytes"], 0)
+        self.assertGreaterEqual(körper["tx"]["dateien"], 1)
+        self.assertEqual(körper["tx"]["schwelle"], 10_000)
+        wallets = {w["wallet_id"]: w for w in körper["wallets"]}
+        kennung = self.wallet_id(BIP84_ZPUB)
+        self.assertIn(kennung, wallets)
+        self.assertEqual(wallets[kennung]["utxo_count"], 1)
+        self.assertEqual(wallets[kennung]["verlauf_count"], 1)
+        self.assertTrue(wallets[kennung]["alter_vorhanden"])
+        self.assertGreater(körper["summe_bytes"], 0)
 
     def test_loescht_nur_dieses_wallet(self):
         main.save_xpub_utxo_cache(

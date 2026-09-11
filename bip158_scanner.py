@@ -18,6 +18,7 @@ import queue
 import struct
 import sys
 import threading
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -461,7 +462,12 @@ def addresses_to_script_pubkeys(addresses: Sequence[str]) -> dict[bytes, str]:
     """Convert base58/bech32 addresses to scriptPubKey bytes."""
     mapping: dict[bytes, str] = {}
     for address in addresses:
-        spk = bytes(address_to_scriptpubkey(address).data)
+        if not address:
+            continue
+        try:
+            spk = bytes(address_to_scriptpubkey(address).data)
+        except Exception:
+            continue
         mapping[spk] = address
     return mapping
 
@@ -469,6 +475,9 @@ def addresses_to_script_pubkeys(addresses: Sequence[str]) -> dict[bytes, str]:
 # ---------------------------------------------------------------------------
 # TurboSync (Wasabi): ungenutzte Keys nicht durch die Historie jagen
 # ---------------------------------------------------------------------------
+
+#: Marker: Filter-Treffer, Block wird asynchron geholt.
+_BLOCK_PENDING = object()
 
 
 def plane_filter_passes(
@@ -478,28 +487,134 @@ def plane_filter_passes(
     used_scripts: set[bytes],
     *,
     turbo_window: int = TURBO_WINDOW,
+    gap_scripts: set[bytes] | None = None,
 ) -> list[tuple[str, int, int, frozenset[bytes]]]:
     """
-    Chronologische Filter-Pässe (niedrig → hoch), damit das UTXO-Set stimmt.
+    Filter-Pässe für Compact-Filter-Scan.
 
-    Erstscan (keine used): ein Pass, alle Keys, start…tip.
-    Danach: Historie nur used Keys; Turbo-Fenster alle Keys (neue Empfänge
-    auf frischen Adressen). Ungenutzte Lookahead-Keys erzeugen in alten
-    Filtern nur False Positives.
+    Erstscan (keine used_scripts): Wasabi-Turbo —
+      1. turbo: alle Keys × tip−window…tip (schneller Zwischenstand)
+      2. historie: nur gap_scripts (klein) × start…turbo−1
+    Danach (used gesetzt), chronologisch fürs UTXO-Set:
+      1. historie: nur used Keys
+      2. turbo: alle Keys im Fenster
+    Ungenutzte Lookahead-Keys erzeugen in alten Filtern nur False Positives.
     """
     if tip < start_height:
         return []
     scripts_all = frozenset(all_scripts)
-    if not used_scripts:
-        return [("historie", start_height, tip, scripts_all)]
     turbo_from = max(start_height, tip - turbo_window + 1)
-    passe: list[tuple[str, int, int, frozenset[bytes]]] = []
+    if not used_scripts:
+        # Turbo zuerst (UX); Historie nur mit kleiner Gap-Menge.
+        passe: list[tuple[str, int, int, frozenset[bytes]]] = [
+            ("turbo", turbo_from, tip, scripts_all),
+        ]
+        if start_height < turbo_from:
+            gap = frozenset(gap_scripts or ())
+            passe.append(("historie", start_height, turbo_from - 1, gap))
+        return passe
+    passe = []
     if start_height < turbo_from:
         passe.append(
             ("historie", start_height, turbo_from - 1, frozenset(used_scripts))
         )
     passe.append(("turbo", turbo_from, tip, scripts_all))
     return passe
+
+
+def gap_scripts_anfang(
+    xpub: str,
+    *,
+    gap_limit: int = DEFAULT_GAP_LIMIT,
+    include_change: bool = True,
+) -> set[bytes]:
+    """Erste gap_limit Indizes (Receive + optional Change) — Historie-Seed."""
+    return set(
+        derive_script_pubkeys_from_xpub(
+            xpub, max_index=max(1, int(gap_limit)), include_change=include_change,
+        ).keys()
+    )
+
+
+def scripts_mit_gap_um_treffer(
+    xpub: str,
+    hit_scripts: set[bytes],
+    *,
+    gap_limit: int = DEFAULT_GAP_LIMIT,
+    max_index: int = DEFAULT_MAX_INDEX,
+    include_change: bool = True,
+) -> set[bytes]:
+    """
+    Getroffene Scripts plus lokale Gap (nächste gap_limit Indizes je Chain).
+
+    Pro Receive/Change-Zweig: höchster getroffener Index, dann +gap_limit.
+    """
+    gap_limit = max(1, int(gap_limit))
+    max_index = max(gap_limit, int(max_index))
+    hits = set(hit_scripts or ())
+    # Deskriptor: keine Index-Matrix — Hits + Anfangs-Gap.
+    try:
+        import main as main_mod
+
+        if main_mod.ist_deskriptor(xpub):
+            out = set(hits)
+            out |= gap_scripts_anfang(
+                xpub, gap_limit=gap_limit, include_change=include_change,
+            )
+            return out
+    except Exception:
+        pass
+
+    try:
+        hd = HDKey.from_string(xpub)
+    except Exception:
+        out = set(hits)
+        out |= gap_scripts_anfang(
+            xpub, gap_limit=gap_limit, include_change=include_change,
+        )
+        return out
+
+    chains = (0, 1) if include_change else (0,)
+    # script → (change, index) für alle Encoder (wie derive).
+    index_von: dict[bytes, tuple[int, int]] = {}
+    for encoder in _encoders_for_xpub(xpub):
+        for change in chains:
+            for index in range(max_index):
+                try:
+                    child = hd.derive([change, index])
+                    spk = bytes(encoder(child.key).data)
+                except Exception:
+                    break
+                index_von.setdefault(spk, (change, index))
+
+    max_je_chain: dict[int, int] = {}
+    out = set(hits)
+    for spk in hits:
+        wo = index_von.get(spk)
+        if wo is None:
+            continue
+        change, index = wo
+        prev = max_je_chain.get(change, -1)
+        if index > prev:
+            max_je_chain[change] = index
+
+    for change in chains:
+        basis = max_je_chain.get(change, -1)
+        # Kein Hit auf dem Zweig: Gap ab 0; sonst ab höchstem Hit.
+        start_i = 0 if basis < 0 else basis
+        ende = min(max_index, start_i + gap_limit + (0 if basis < 0 else 1))
+        for encoder in _encoders_for_xpub(xpub):
+            for index in range(start_i, ende):
+                try:
+                    child = hd.derive([change, index])
+                    out.add(bytes(encoder(child.key).data))
+                except Exception:
+                    break
+    if not out:
+        out = gap_scripts_anfang(
+            xpub, gap_limit=gap_limit, include_change=include_change,
+        )
+    return out
 
 
 def _cfilter_chunks(
@@ -608,7 +723,17 @@ def _beschreibe_block_treffer(
 
 def _lade_cfilter_chunk(
     peer, von: int, bis: int, stop_hash: bytes, scripts, on_log=None,
+    *,
+    hash_at=None,
+    cache_dir=None,
+    block_queue: queue.Queue | None = None,
+    stats: dict | None = None,
 ) -> list:
+    """
+    Filter holen/matchen. Blöcke nur bei *block_queue is None* synchron;
+    sonst Treffer als ``_BLOCK_PENDING`` und Auftrag in die Queue.
+    """
+    from core.cfilter_cache import lade_cfilter_blob, speichere_cfilter_blob
     from core.p2p import hash_to_hex
     from display import melde_zwischenstand
 
@@ -617,23 +742,101 @@ def _lade_cfilter_chunk(
         f"Filter Block {von:,}–{bis:,}…".replace(",", "."),
         log=False,
     )
-    filter_liste = peer.fetch_cfilters(von, stop_hash, expect=expect)
-    if len(filter_liste) != expect:
-        raise ConnectionError(
-            f"cfilter: {len(filter_liste)} statt {expect} ab Höhe {von}"
-        )
+
+    # Cache je Höhe (Hash aus Header-Kette, sonst aus Netzantwort).
+    cached: dict[int, tuple[bytes, bytes]] = {}
+    fehlend: list[int] = []
+    for h in range(von, bis + 1):
+        bh = None
+        if hash_at is not None:
+            try:
+                bh = hash_at(h)
+            except Exception:
+                bh = None
+        if bh is not None and cache_dir is not None:
+            blob = lade_cfilter_blob(cache_dir, h, bh)
+            if blob is not None:
+                cached[h] = (bh, blob)
+                if stats is not None:
+                    stats["gecacht"] = int(stats.get("gecacht") or 0) + 1
+                continue
+        fehlend.append(h)
+
+    filter_liste: list[tuple[bytes, bytes]] = []
+    if not fehlend:
+        for h in range(von, bis + 1):
+            filter_liste.append(cached[h])
+    else:
+        # Wire-API ist range-basiert — fehlende Höhen über den Chunk nachladen.
+        netz = peer.fetch_cfilters(von, stop_hash, expect=expect)
+        if len(netz) != expect:
+            raise ConnectionError(
+                f"cfilter: {len(netz)} statt {expect} ab Höhe {von}"
+            )
+        if stats is not None:
+            stats["geholt"] = int(stats.get("geholt") or 0) + len(netz)
+        for offset, (block_hash, blob) in enumerate(netz):
+            h = von + offset
+            if h in cached:
+                filter_liste.append(cached[h])
+                continue
+            if cache_dir is not None and blob:
+                speichere_cfilter_blob(cache_dir, h, block_hash, blob)
+            filter_liste.append((block_hash, blob))
+
+    scripts_list = list(scripts) if not isinstance(scripts, list) else scripts
     zeilen = []
     for offset, (block_hash, blob) in enumerate(filter_liste):
         h = von + offset
         display = hash_to_hex(block_hash)
         matcher = _CoreBasicFilterMatcher(blob, display)
         roh = None
-        if matcher.match_any(scripts):
+        if matcher.match_any(scripts_list):
             if on_log:
                 on_log(f"{_filter_treffer_praefix(h)} — hole Block…")
-            roh = peer.fetch_block(block_hash)
+            if block_queue is not None:
+                block_queue.put((h, block_hash))
+                roh = _BLOCK_PENDING
+            else:
+                roh = peer.fetch_block(block_hash)
         zeilen.append((h, block_hash, blob, roh))
     return zeilen
+
+
+def _block_aus_warteschlange(
+    hoehe: int,
+    block_hash: bytes,
+    *,
+    ergebnisse: dict,
+    wach: threading.Condition,
+    timeout: float = 180.0,
+) -> bytes | None:
+    deadline = time.monotonic() + timeout
+    with wach:
+        while hoehe not in ergebnisse:
+            rest = deadline - time.monotonic()
+            if rest <= 0:
+                raise TimeoutError(
+                    f"Block-Download Timeout Höhe {hoehe}"
+                )
+            wach.wait(timeout=min(1.0, rest))
+        return ergebnisse.pop(hoehe)
+
+
+def _zeilen_bloecke_aufloesen(
+    zeilen: list,
+    *,
+    ergebnisse: dict,
+    wach: threading.Condition,
+) -> list:
+    aufgeloest = []
+    for h, block_hash, blob, roh in zeilen:
+        if roh is _BLOCK_PENDING:
+            roh = _block_aus_warteschlange(
+                h, block_hash, ergebnisse=ergebnisse, wach=wach,
+            )
+        aufgeloest.append((h, block_hash, blob, roh))
+    return aufgeloest
 
 
 def verteile_cfilter_chunks(
@@ -645,13 +848,17 @@ def verteile_cfilter_chunks(
     gesamt: int = 0,
     gezaehlt: list[int] | None = None,
     tor_proxy: tuple[str, int] | None = None,
+    hash_at=None,
+    cache_dir=None,
+    stats: dict | None = None,
+    hole_bloecke: bool = True,
 ):
     """
     Holt Filter-Chunks parallel (ein Auftrag je Peer).
 
-    Liefert Chunks als Iterator in Höhenreihenfolge — der Aufrufer kann
-    UTXOs auswerten, während weitere Filter noch laden.
-    *gesamt* / *gezaehlt* zählen Filter-Höhen für die Prozentanzeige.
+    Liefert Chunks als Iterator in Höhenreihenfolge. Filter-Match und
+    Block-Download sind entkoppelt: 1–2 Block-Worker bedienen eine Queue,
+    False Positives blockieren den nächsten Filter-Batch nicht.
     """
     if not peers:
         raise RuntimeError("keine Compact-Filter-Peers")
@@ -659,152 +866,216 @@ def verteile_cfilter_chunks(
         return
         yield  # macht die Funktion zum Generator
     stand = gezaehlt if gezaehlt is not None else [0]
-    if len(peers) == 1:
-        for von, bis, stop in chunks:
-            zeilen = _lade_cfilter_chunk(
-                peers[0], von, bis, stop, scripts, on_log=on_log,
+    stats = stats if stats is not None else {}
+
+    # Async-Blöcke sobald hole_bloecke: Filter enqueued nur, Block-Worker
+    # holen mit Peer-Lock (Socket nicht parallel getcfilters+getdata).
+    async_blocks = bool(hole_bloecke)
+    block_queue: queue.Queue | None = queue.Queue() if async_blocks else None
+    peer_locks = {id(p): threading.Lock() for p in peers}
+    filter_peers = list(peers)
+
+    block_ergebnisse: dict = {}
+    block_wach = threading.Condition()
+    block_stop = threading.Event()
+    block_threads: list[threading.Thread] = []
+
+    def block_arbeit(peer) -> None:
+        lock = peer_locks[id(peer)]
+        while not block_stop.is_set():
+            try:
+                auftrag = block_queue.get(timeout=0.4) if block_queue else None
+            except queue.Empty:
+                continue
+            if auftrag is None:
+                return
+            hoehe, block_hash = auftrag
+            try:
+                with lock:
+                    roh = peer.fetch_block(block_hash)
+            except Exception:
+                roh = None
+            with block_wach:
+                block_ergebnisse[hoehe] = roh
+                block_wach.notify_all()
+
+    if async_blocks and peers:
+        n_block = min(2, len(peers))
+        for peer in peers[:n_block]:
+            t = threading.Thread(target=block_arbeit, args=(peer,), daemon=True)
+            block_threads.append(t)
+            t.start()
+
+    def _chunk_laden(peer, von, bis, stop):
+        lock = peer_locks[id(peer)]
+        with lock:
+            return _lade_cfilter_chunk(
+                peer, von, bis, stop, scripts, on_log=on_log,
+                hash_at=hash_at, cache_dir=cache_dir,
+                block_queue=block_queue, stats=stats,
             )
-            _tick_filter_stand(von, bis, stand, gesamt)
-            yield zeilen
-        return
 
-    auftraege: queue.Queue = queue.Queue()
-    for index, chunk in enumerate(chunks):
-        auftraege.put((index, chunk, 0))
-    fertig: dict[int, object] = {}
-    sperre = threading.Lock()
-    wach = threading.Condition(sperre)
-    lebendig = len(peers)
-    max_versuche = 5
-    stand_lock = threading.Lock()
-    erledigt = [0]
-
-    def arbeit(peer) -> None:
-        nonlocal lebendig
-        try:
-            while True:
-                try:
-                    index, chunk, versuche = auftraege.get(timeout=0.4)
-                except queue.Empty:
-                    with sperre:
-                        if erledigt[0] >= len(chunks):
-                            return
-                    continue
-                von, bis, stop = chunk
-                try:
-                    zeilen = _lade_cfilter_chunk(
-                        peer, von, bis, stop, scripts, on_log=on_log,
-                    )
-                except Exception as exc:
-                    try:
-                        peer.close()
-                    except Exception:
-                        pass
-                    if versuche + 1 < max_versuche:
-                        if on_log:
-                            on_log(
-                                f"Chunk {von:,}–{bis:,} fehlgeschlagen "
-                                f"({type(exc).__name__}) — "
-                                f"Versuch {versuche + 2}/{max_versuche}"
-                                .replace(",", ".")
-                            )
-                        auftraege.put((index, chunk, versuche + 1))
-                        # Defekten Peer ersetzen; sonst Worker beenden,
-                        # damit kein toter Socket die Queue leersaugt.
-                        try:
-                            from core.p2p import verbinde_compact_filter_peers
-
-                            frisch = verbinde_compact_filter_peers(
-                                limit=1,
-                                tor_proxy=tor_proxy,
-                                ruhig=True,
-                                versuche=12,
-                                dns_fallback=True,
-                            )
-                            if frisch:
-                                peer = frisch[0]
-                                continue
-                        except Exception:
-                            pass
-                        return
-                    with wach:
-                        fertig[index] = exc
-                        erledigt[0] += 1
-                        wach.notify_all()
-                    return
-                with wach:
-                    fertig[index] = zeilen
-                    erledigt[0] += 1
-                    wach.notify_all()
-                _tick_filter_stand(
-                    von, bis, stand, gesamt, sperre=stand_lock,
-                )
-        finally:
-            with wach:
-                lebendig -= 1
-                wach.notify_all()
-
-    if on_log:
-        on_log(f"Filter über {len(peers)} Peers parallel…")
-    threads = [
-        threading.Thread(target=arbeit, args=(peer,), daemon=True)
-        for peer in peers
-    ]
-    for t in threads:
-        t.start()
-
-    def _neuer_worker() -> bool:
-        nonlocal lebendig
-        try:
-            from core.p2p import verbinde_compact_filter_peers
-
-            frisch = verbinde_compact_filter_peers(
-                limit=1,
-                tor_proxy=tor_proxy,
-                ruhig=True,
-                versuche=12,
-                dns_fallback=True,
-            )
-        except Exception:
-            return False
-        if not frisch:
-            return False
-        with wach:
-            lebendig += 1
-        t = threading.Thread(target=arbeit, args=(frisch[0],), daemon=True)
-        threads.append(t)
-        t.start()
-        return True
+    def _chunk_fertig(zeilen):
+        if not async_blocks:
+            return zeilen
+        return _zeilen_bloecke_aufloesen(
+            zeilen, ergebnisse=block_ergebnisse, wach=block_wach,
+        )
 
     try:
-        # Chunkweise in Höhenreihenfolge ausliefern — UTXO-Auswertung
-        # läuft parallel zum weiteren Filter-Download.
-        for index in range(len(chunks)):
+        if len(filter_peers) == 1:
+            for von, bis, stop in chunks:
+                zeilen = _chunk_laden(filter_peers[0], von, bis, stop)
+                _tick_filter_stand(von, bis, stand, gesamt)
+                yield _chunk_fertig(zeilen)
+            return
+
+        auftraege: queue.Queue = queue.Queue()
+        for index, chunk in enumerate(chunks):
+            auftraege.put((index, chunk, 0))
+        fertig: dict[int, object] = {}
+        sperre = threading.Lock()
+        wach = threading.Condition(sperre)
+        lebendig = len(filter_peers)
+        max_versuche = 5
+        stand_lock = threading.Lock()
+        erledigt = [0]
+
+        def arbeit(peer) -> None:
+            nonlocal lebendig
+            try:
+                while True:
+                    try:
+                        index, chunk, versuche = auftraege.get(timeout=0.4)
+                    except queue.Empty:
+                        with sperre:
+                            if erledigt[0] >= len(chunks):
+                                return
+                        continue
+                    von, bis, stop = chunk
+                    try:
+                        zeilen = _chunk_laden(peer, von, bis, stop)
+                    except Exception as exc:
+                        try:
+                            peer.close()
+                        except Exception:
+                            pass
+                        if versuche + 1 < max_versuche:
+                            if on_log:
+                                on_log(
+                                    f"Chunk {von:,}–{bis:,} fehlgeschlagen "
+                                    f"({type(exc).__name__}) — "
+                                    f"Versuch {versuche + 2}/{max_versuche}"
+                                    .replace(",", ".")
+                                )
+                            auftraege.put((index, chunk, versuche + 1))
+                            try:
+                                from core.p2p import verbinde_compact_filter_peers
+
+                                frisch = verbinde_compact_filter_peers(
+                                    limit=1,
+                                    tor_proxy=tor_proxy,
+                                    ruhig=True,
+                                    versuche=12,
+                                    dns_fallback=True,
+                                )
+                                if frisch:
+                                    peer = frisch[0]
+                                    continue
+                            except Exception:
+                                pass
+                            return
+                        with wach:
+                            fertig[index] = exc
+                            erledigt[0] += 1
+                            wach.notify_all()
+                        return
+                    with wach:
+                        fertig[index] = zeilen
+                        erledigt[0] += 1
+                        wach.notify_all()
+                    _tick_filter_stand(
+                        von, bis, stand, gesamt, sperre=stand_lock,
+                    )
+            finally:
+                with wach:
+                    lebendig -= 1
+                    wach.notify_all()
+
+        if on_log:
+            on_log(f"Filter über {len(filter_peers)} Peers parallel…")
+        threads = [
+            threading.Thread(target=arbeit, args=(peer,), daemon=True)
+            for peer in filter_peers
+        ]
+        for t in threads:
+            t.start()
+
+        def _neuer_worker() -> bool:
+            nonlocal lebendig
+            try:
+                from core.p2p import verbinde_compact_filter_peers
+
+                frisch = verbinde_compact_filter_peers(
+                    limit=1,
+                    tor_proxy=tor_proxy,
+                    ruhig=True,
+                    versuche=12,
+                    dns_fallback=True,
+                )
+            except Exception:
+                return False
+            if not frisch:
+                return False
             with wach:
-                while index not in fertig:
-                    if lebendig <= 0 and index not in fertig:
-                        break
-                    wach.wait(timeout=1.0)
-                if index not in fertig:
-                    # Alle Worker tot — einen neuen Peer holen und warten
-                    if not _neuer_worker():
-                        raise RuntimeError("alle Compact-Filter-Peers ausgefallen")
+                lebendig += 1
+            t = threading.Thread(target=arbeit, args=(frisch[0],), daemon=True)
+            threads.append(t)
+            t.start()
+            return True
+
+        try:
+            for index in range(len(chunks)):
+                with wach:
                     while index not in fertig:
                         if lebendig <= 0 and index not in fertig:
+                            break
+                        wach.wait(timeout=1.0)
+                    if index not in fertig:
+                        if not _neuer_worker():
                             raise RuntimeError(
                                 "alle Compact-Filter-Peers ausgefallen"
                             )
-                        wach.wait(timeout=1.0)
-                    if index not in fertig:
-                        raise RuntimeError("alle Compact-Filter-Peers ausgefallen")
-                wert = fertig.pop(index)
-            if isinstance(wert, BaseException):
-                raise wert
-            yield wert
+                        while index not in fertig:
+                            if lebendig <= 0 and index not in fertig:
+                                raise RuntimeError(
+                                    "alle Compact-Filter-Peers ausgefallen"
+                                )
+                            wach.wait(timeout=1.0)
+                        if index not in fertig:
+                            raise RuntimeError(
+                                "alle Compact-Filter-Peers ausgefallen"
+                            )
+                    wert = fertig.pop(index)
+                if isinstance(wert, BaseException):
+                    raise wert
+                # Block-Auflösung außerhalb des Filter-Locks — nächste
+                # Filter-Chunks laufen weiter (False-Positive-Blöcke stoppen nicht).
+                yield _chunk_fertig(wert)
+        finally:
+            with sperre:
+                erledigt[0] = max(erledigt[0], len(chunks))
+            for t in threads:
+                t.join(timeout=2.0)
     finally:
-        with sperre:
-            erledigt[0] = max(erledigt[0], len(chunks))
-        for t in threads:
+        block_stop.set()
+        if block_queue is not None:
+            for _ in block_threads:
+                try:
+                    block_queue.put(None)
+                except Exception:
+                    pass
+        for t in block_threads:
             t.join(timeout=2.0)
 
 
@@ -1040,14 +1311,16 @@ class BIP158Scanner:
             )
         )
 
-    def _ensure_peer(self):
-        return self._ensure_peers(limit=1)[0]
+    def _ensure_peer(self, *, still: bool = False):
+        return self._ensure_peers(limit=1, still=still)[0]
 
-    def _ensure_peers(self, limit: int | None = None):
+    def _ensure_peers(self, limit: int | None = None, *, still: bool = False):
         from core.p2p import FILTER_PEERS_MAX, verbinde_compact_filter_peers
 
         # Über Tor weniger Parallelität — sonst reißen Peers und stecken
         # die Queue mit toten Sockets zu.
+        # still: nur Header-Fortschritt dämpfen — Peer/Tor-Log bis 3 Peers bleibt.
+        _ = still
         vorgabe = 2 if self._tor_proxy else FILTER_PEERS_MAX
         ziel = vorgabe if limit is None else max(1, min(limit, vorgabe if self._tor_proxy else limit))
         if self._peer is not None and self._peer not in self._pool:
@@ -1055,6 +1328,8 @@ class BIP158Scanner:
         if len(self._pool) >= ziel:
             return self._pool[:ziel]
         exclude = {(p.host, p.port) for p in self._pool}
+        if not self._pool:
+            self._log("Suche Compact-Filter-Peers…")
         frisch = verbinde_compact_filter_peers(
             timeout=self._timeout,
             tor_proxy=self._tor_proxy,
@@ -1068,6 +1343,7 @@ class BIP158Scanner:
         if not self._pool and self._tor_proxy is None:
             from core.p2p import stelle_p2p_tor_bereit
 
+            # Ankündigung VOR dem langen SOCKS-/Binary-Schritt.
             self._log(
                 "Clearnet-P2P ohne Compact-Filter-Peer — versuche über Tor…"
             )
@@ -1156,10 +1432,19 @@ class BIP158Scanner:
             seed_outputs=seed_outputs,
             seed_verlauf=seed_verlauf,
             on_utxos_update=on_utxos_update,
+            xpub=xpub,
+            gap_limit=gap_limit,
+            max_index=index_limit,
+            include_change=include_change,
         )
 
     def scan_from_xpub_sync(self, xpub: str, **kwargs) -> ScanResult:
         return self.scan_from_xpub(xpub, **kwargs)
+
+    def _immutable_dir(self) -> Path | None:
+        if self._header_path is not None:
+            return Path(self._header_path).parent
+        return None
 
     def _scan_script_map(
         self,
@@ -1171,6 +1456,10 @@ class BIP158Scanner:
         seed_outputs: dict[str, MatchedOutput] | None = None,
         seed_verlauf: dict[str, dict[str, Any]] | None = None,
         on_utxos_update=None,
+        xpub: str | None = None,
+        gap_limit: int = DEFAULT_GAP_LIMIT,
+        max_index: int = DEFAULT_MAX_INDEX,
+        include_change: bool = True,
     ) -> ScanResult:
         from core.p2p import GETCFILTERS_MAX, hash_to_hex, hole_header
 
@@ -1180,6 +1469,7 @@ class BIP158Scanner:
         tip = 0
         self._log("Synchronisiere Block-Header…")
         letzter_fehler: BaseException | None = None
+        pool: list = []
         for versuch in range(1, 6):
             try:
                 pool = self._ensure_peers()
@@ -1212,25 +1502,152 @@ class BIP158Scanner:
         if end < start:
             return result
 
-        bestaende: dict[str, MatchedOutput] = dict(seed_outputs or {})
-        verlauf: dict[str, dict[str, Any]] = dict(seed_verlauf or {})
-        if bestaende:
+        seed_out = dict(seed_outputs or {})
+        seed_verl = dict(seed_verlauf or {})
+        if seed_out:
             self._log(
                 f"Inkrementell ab Block {start:,}: "
-                f"{len(bestaende)} UTXOs aus dem Cache".replace(",", ".")
+                f"{len(seed_out)} UTXOs aus dem Cache".replace(",", ".")
             )
-        passe = plane_filter_passes(start, end, set(watched), used_scripts)
+
+        erstscan = not used_scripts
+        gap0: set[bytes] = set()
+        if erstscan and xpub:
+            gap0 = gap_scripts_anfang(
+                xpub, gap_limit=gap_limit, include_change=include_change,
+            )
+        elif erstscan:
+            # Ohne XPUB: kleine Teilmenge der Watchlist als Historie-Seed.
+            gap0 = set(list(watched.keys())[: max(1, gap_limit * 2)])
+
+        passe = plane_filter_passes(
+            start, end, set(watched), used_scripts, gap_scripts=gap0,
+        )
         gesamt = _filter_umfang(passe)
         self._filter_gesamt = gesamt
         gezaehlt = [0]
         geprueft = 0
+        filter_stats: dict[str, int] = {"geholt": 0, "gecacht": 0}
+        cache_dir = self._immutable_dir()
+        self._log(
+            f"BIP-158 Start Höhe {start:,}, {len(watched)} Scripts, "
+            f"{gesamt:,} Filter-Höhen"
+            .replace(",", ".")
+        )
         if gesamt:
             self._log(
                 f"Filter {gesamt:,} Blöcke zu prüfen "
                 f"({start:,}–{end:,}).".replace(",", ".")
             )
+
+        # Block-Events für finalen chronologischen UTXO-Merge (Turbo-zuerst).
+        block_events: list[tuple[int, str, bytes]] = []
+        hit_scripts: set[bytes] = set(used_scripts)
+        # Provisorischer Stand für UI nach Turbo.
+        bestaende: dict[str, MatchedOutput] = dict(seed_out)
+        verlauf: dict[str, dict[str, Any]] = dict(seed_verl)
+
+        def _apply_block(
+            h: int, display: str, roh: bytes, phase: str,
+            *, provisional: bool,
+        ) -> None:
+            nonlocal bestaende, verlauf
+            header, txs = parse_raw_block(roh)
+            treffer, neu, spent_by = extract_from_parsed_block(
+                header, txs, watched, h,
+            )
+            for spk_hex in (o.script_pubkey_hex for o in neu.values()):
+                try:
+                    hit_scripts.add(bytes.fromhex(spk_hex))
+                except ValueError:
+                    pass
+            gesehen = set(bestaende) | set(neu)
+            spent_ours = {
+                key: spent_by[key] for key in spent_by if key in gesehen
+            }
+            self._log_block_treffer(h, neu, set(spent_ours))
+            if not treffer and not spent_ours:
+                if display not in result.false_positive_blocks:
+                    result.false_positive_blocks.append(display)
+                self._emit(h, end, geprueft, len(result.matched_blocks), phase)
+                return
+            if display not in result.matched_blocks:
+                result.matched_blocks.append(display)
+            result.transactions.extend(treffer)
+            _uebernehme_block_verlauf(
+                verlauf, neu, spent_ours,
+                hoehe=h, block_time=_header_unixzeit(header),
+            )
+            for key in spent_ours:
+                bestaende.pop(key, None)
+            bestaende.update(neu)
+            if provisional and on_utxos_update and (neu or spent_ours):
+                on_utxos_update([
+                    _matched_output_to_utxo(ausgabe)
+                    for ausgabe in bestaende.values()
+                ])
+            latest = next(iter(neu), None)
+            self._emit(
+                h, end, geprueft, len(result.matched_blocks), "match",
+                utxo_id=latest,
+            )
+
+        def _rebuild_chronologisch() -> None:
+            """Final: Seed + alle Events nach Höhe — korrekt bei Turbo-zuerst."""
+            nonlocal bestaende, verlauf
+            bestaende = dict(seed_out)
+            verlauf = dict(seed_verl)
+            result.matched_blocks.clear()
+            result.false_positive_blocks.clear()
+            result.transactions.clear()
+            for h, display, roh in sorted(block_events, key=lambda e: e[0]):
+                header, txs = parse_raw_block(roh)
+                treffer, neu, spent_by = extract_from_parsed_block(
+                    header, txs, watched, h,
+                )
+                gesehen = set(bestaende) | set(neu)
+                spent_ours = {
+                    key: spent_by[key] for key in spent_by if key in gesehen
+                }
+                if not treffer and not spent_ours:
+                    result.false_positive_blocks.append(display)
+                    continue
+                result.matched_blocks.append(display)
+                result.transactions.extend(treffer)
+                _uebernehme_block_verlauf(
+                    verlauf, neu, spent_ours,
+                    hoehe=h, block_time=_header_unixzeit(header),
+                )
+                for key in spent_ours:
+                    bestaende.pop(key, None)
+                bestaende.update(neu)
+            if on_utxos_update:
+                on_utxos_update([
+                    _matched_output_to_utxo(a) for a in bestaende.values()
+                ])
+
         for name, von, bis, scripts in passe:
             from display import melde_zwischenstand
+
+            # Historie-Pass beim Erstscan: Hits aus Turbo + Gap nachziehen.
+            if name == "historie" and erstscan and xpub:
+                scripts = frozenset(
+                    scripts_mit_gap_um_treffer(
+                        xpub, hit_scripts | gap0,
+                        gap_limit=gap_limit,
+                        max_index=max_index,
+                        include_change=include_change,
+                    )
+                )
+            elif name == "historie" and erstscan:
+                scripts = frozenset(hit_scripts | gap0 | set(scripts))
+
+            if not scripts and name == "historie":
+                self._log(
+                    f"BIP-158 historie übersprungen (keine Keys) "
+                    f"{von:,}–{bis:,}".replace(",", ".")
+                )
+                continue
 
             melde_zwischenstand(
                 f"BIP-158 {name}: Block {von:,}–{bis:,} "
@@ -1243,6 +1660,9 @@ class BIP158Scanner:
                 pool, chunks, scripts, on_log=self._log,
                 gesamt=gesamt, gezaehlt=gezaehlt,
                 tor_proxy=self._tor_proxy,
+                hash_at=chain.hash_at,
+                cache_dir=cache_dir,
+                stats=filter_stats,
             )
             for zeilen in geladen:
                 for h, block_hash, _blob, roh in zeilen:
@@ -1251,38 +1671,25 @@ class BIP158Scanner:
                     if roh is None:
                         self._emit(h, end, geprueft, len(result.matched_blocks), name)
                         continue
-                    header, txs = parse_raw_block(roh)
-                    treffer, neu, spent_by = extract_from_parsed_block(
-                        header, txs, watched, h,
+                    block_events.append((h, display, roh))
+                    # Provisorisch anwenden (Turbo-UX); final rebuild am Ende.
+                    _apply_block(
+                        h, display, roh, name,
+                        provisional=True,
                     )
-                    gesehen = set(bestaende) | set(neu)
-                    spent_ours = {
-                        key: spent_by[key] for key in spent_by if key in gesehen
-                    }
-                    self._log_block_treffer(h, neu, set(spent_ours))
-                    if not treffer and not spent_ours:
-                        result.false_positive_blocks.append(display)
-                        self._emit(h, end, geprueft, len(result.matched_blocks), name)
-                        continue
-                    result.matched_blocks.append(display)
-                    result.transactions.extend(treffer)
-                    _uebernehme_block_verlauf(
-                        verlauf, neu, spent_ours,
-                        hoehe=h, block_time=_header_unixzeit(header),
-                    )
-                    for key in spent_ours:
-                        bestaende.pop(key, None)
-                    bestaende.update(neu)
-                    if on_utxos_update and (neu or spent_ours):
-                        on_utxos_update([
-                            _matched_output_to_utxo(ausgabe)
-                            for ausgabe in bestaende.values()
-                        ])
-                    latest = next(iter(neu), None)
-                    self._emit(
-                        h, end, geprueft, len(result.matched_blocks), "match",
-                        utxo_id=latest,
-                    )
+
+        if erstscan and block_events:
+            _rebuild_chronologisch()
+        elif not erstscan and block_events and any(
+            p[0] == "turbo" for p in passe
+        ) and any(p[0] == "historie" for p in passe):
+            # historie→turbo ist schon chronologisch im Stream; kein Rebuild nötig.
+            pass
+
+        self._log(
+            f"BIP-158 Filter: {filter_stats.get('geholt', 0)} geholt, "
+            f"{filter_stats.get('gecacht', 0)} aus Cache"
+        )
         result.outputs = list(bestaende.values())
         result.verlauf = list(verlauf.values())
         return result
@@ -1303,15 +1710,19 @@ def create_bip158_client_from_env(
     progress_callback: ProgressCallback | None = None,
     verbose: bool = True,
     cache_dir: Path | None = None,
+    immutable_dir: Path | None = None,
 ) -> Bip158Client:
     """P2P-Client: Clearnet zuerst, bei Fehlschlag Tor wie beim eigenen Node."""
-    from core.p2p import SEGWIT_HEIGHT, p2p_peers_from_env
+    from core.p2p import SEGWIT_HEIGHT, p2p_headers_path, p2p_peers_from_env
     from core.paths import app_dir
 
     peers = p2p_peers_from_env(env)
-    header_path = app_dir() / "immutable_cache" / "p2p_headers.bin"
-    if cache_dir is not None:
+    if immutable_dir is not None:
+        header_path = p2p_headers_path(immutable_dir)
+    elif cache_dir is not None:
         header_path = Path(cache_dir).parent / "immutable_cache" / "p2p_headers.bin"
+    else:
+        header_path = app_dir() / "immutable_cache" / "p2p_headers.bin"
     scanner = BIP158Scanner(
         peers=peers,
         header_path=header_path,
@@ -1328,6 +1739,7 @@ def vorab_block_header(
     env: dict[str, str],
     *,
     cache_dir: Path | None = None,
+    immutable_dir: Path | None = None,
     on_log=None,
 ) -> int:
     """
@@ -1349,27 +1761,43 @@ def vorab_block_header(
         return 0
 
     client = create_bip158_client_from_env(
-        env, start_height=SEGWIT_HEIGHT, cache_dir=cache_dir,
+        env,
+        start_height=SEGWIT_HEIGHT,
+        cache_dir=cache_dir,
+        immutable_dir=immutable_dir,
     )
     path = client.scanner._header_path
     tip_bisher = header_datei_tip(path)
-    if tip_bisher is not None and tip_bisher > SEGWIT_HEIGHT:
-        _log(
-            f"Header-Cache bei Block {tip_bisher:,} — prüfe Chain-Tip…"
-            .replace(",", ".")
-        )
-    else:
+    tip_schon_da = tip_bisher is not None and tip_bisher > SEGWIT_HEIGHT
+    if not tip_schon_da:
         _log(
             "Lade Block-Header ab SegWit (Block 481.824, August 2017) — "
             "einmalig, für alle späteren Wallets."
         )
-    peer = client.scanner._ensure_peer()
+    # Tip schon da: Peer/Tor still — nur bei echtem Höhenzuwachs melden.
+    peer = client.scanner._ensure_peer(still=tip_schon_da)
     try:
-        chain = hole_header(path, SEGWIT_HEIGHT, peer, on_log=_log)
+        def _log_fortschritt(text: str) -> None:
+            if tip_schon_da and (
+                text.startswith("Frage Block-Header")
+                or text.startswith("Header bis Block")
+                or text.startswith("Header-Cache aktuell")
+            ):
+                return
+            _log(text)
+
+        chain = hole_header(
+            path,
+            SEGWIT_HEIGHT,
+            peer,
+            on_log=_log_fortschritt if tip_schon_da else _log,
+        )
         tip = chain.tip_height()
         if tip_bisher is not None and tip <= tip_bisher:
+            pass
+        elif tip_schon_da:
             _log(
-                f"Header-Cache unverändert bis Block {tip:,}.".replace(",", ".")
+                f"Header-Cache nachgezogen bis Block {tip:,}.".replace(",", ".")
             )
         else:
             _log(
@@ -1387,6 +1815,12 @@ def verify_p2p_filters(client: Bip158Client) -> int:
 
 
 def _used_scripts_aus_cache(xpub: str, cache_dir: Path | None) -> set[bytes]:
+    """
+    Used-Keys für TurboSync-Historie — nur nach abgeschlossenem Fullscan.
+
+    Zwischenstände nach Abbruch (UTXOs ohne ``bip158_fullscan_ok``) liefern
+    absichtlich leer, damit der nächste Lauf wieder Turbo-Erstscan macht.
+    """
     if cache_dir is None:
         return set()
     try:
@@ -1396,6 +1830,8 @@ def _used_scripts_aus_cache(xpub: str, cache_dir: Path | None) -> set[bytes]:
     except Exception:
         return set()
     roh = (eintrag or {}).get("raw") or {}
+    if not main_mod.bip158_fullscan_ist_fertig(roh):
+        return set()
     adressen: list[str] = []
     for utxo in roh.get("utxos") or []:
         addr = utxo.get("address")
@@ -1575,19 +2011,43 @@ def fetch_tx_p2p_mit_fallback(
     txid: str,
     *,
     core_client=None,
+    local_core=None,
+    archival_core=None,
+    local_pruneheight: int | None = None,
     height: int | None = None,
     on_log=None,
 ) -> dict[str, Any]:
     """
-    Tx-Lookup ohne Electrs: Core-RPC → P2P getdata → Block bei bekannter Höhe.
+    Tx-Lookup ohne Electrs: Core-RPC (lokal/Lookup) → P2P getdata → Block.
 
-    *height* oder ``note_tx_height`` liefern die Höhe für den Block-Fallback.
+    *local_core* / *archival_core*: Rollen-Split (pruned lokal bis pruneheight,
+    sonst Lookup z. B. Start9). *core_client* bleibt als Einzel-Fallback.
+    *height* oder ``note_tx_height`` für Block-Fallback.
     """
     key = (txid or "").strip().lower()
     hoehe = height if (height and int(height) > 0) else tx_height_hint(key)
     fehler: list[str] = []
 
-    if core_client is not None:
+    hat_rollen = local_core is not None or archival_core is not None
+    if hat_rollen:
+        try:
+            from core.bitcoind_rpc import fetch_tx_core_mit_rollen
+
+            tx = fetch_tx_core_mit_rollen(
+                key,
+                local=local_core,
+                archival=archival_core or core_client,
+                local_pruneheight=local_pruneheight,
+                height=hoehe,
+                on_log=on_log,
+            )
+            st = tx.get("status") or {}
+            if st.get("block_height"):
+                note_tx_height(key, st["block_height"])
+            return tx
+        except Exception as exc:
+            fehler.append(f"Core: {exc}")
+    elif core_client is not None:
         try:
             from core.bitcoind_rpc import fetch_tx_core
 
@@ -1746,49 +2206,63 @@ def fetch_wallet_utxos_bip158(
         )
         xpub_max = max(int(konfiguriert), int(max_addresses))
         used = _used_scripts_aus_cache(xpub, client.cache_dir)
-        start = client.start_height
+        from core.p2p import SEGWIT_HEIGHT
+
+        # client.start_height = UI/CLI/Env (kann jünger als SegWit sein).
+        start = int(client.start_height or 0)
         seed_out: dict[str, MatchedOutput] = {}
         seed_verlauf: dict[str, dict[str, Any]] = {}
         start_grund = "konfiguriert"
+        unvollstaendig = False
         if client.cache_dir is not None:
             entry = main_mod.load_xpub_cache_entry(xpub, client.cache_dir)
             roh = (entry or {}).get("raw") or {}
-            prev_tip = roh.get("scan_tip_height")
+            fertig = main_mod.bip158_fullscan_ist_fertig(roh)
+            unvollstaendig = bool(
+                (roh.get("utxos") or roh.get("bip158_fullscan_ok") is False)
+                and not fertig
+            )
+            prev_tip = roh.get("scan_tip_height") if fertig else None
             if prev_tip is not None:
                 try:
                     prev_tip_i = int(prev_tip)
                 except (TypeError, ValueError):
                     prev_tip_i = 0
-                if prev_tip_i >= client.start_height:
-                    start = max(
-                        client.start_height,
-                        prev_tip_i - BIP158_REORG_BUFFER + 1,
-                    )
+                if prev_tip_i > 0:
+                    tip_start = max(0, prev_tip_i - BIP158_REORG_BUFFER + 1)
+                    start = max(start, tip_start) if start > 0 else tip_start
                     seed_out, seed_verlauf = _seed_aus_cache(
                         xpub, client.cache_dir, ab_hoehe=start,
                     )
                     start_grund = "tip"
             if start_grund != "tip":
-                # UTXO-Cache weg, Alter bleibt: ab First-seen statt SegWit.
+                # First-seen − Reorg-Puffer. SegWit-Default weicht dem Alter;
+                # explizit jüngeres UI/CLI (Höhe > First-seen) bleibt.
                 alter_start = main_mod.bip158_start_aus_first_seen(
                     xpub,
                     client.cache_dir,
-                    floor=client.start_height,
+                    floor=None,
                     puffer=BIP158_REORG_BUFFER,
                 )
                 if alter_start is not None:
-                    if alter_start > start:
+                    if start <= 0 or start <= SEGWIT_HEIGHT:
                         start = alter_start
-                        start_grund = "alter"
-                    elif abs(start - alter_start) <= BIP158_REORG_BUFFER:
-                        # Server/CLI hat bip158_start schon aufs Alter gesetzt.
-                        start_grund = "alter"
+                    elif start < alter_start:
+                        # UI älter als First-seen → First-seen (weniger Blindflug)
+                        start = alter_start
+                    # else: start > alter_start → User will ab jüngerer Höhe
+                    start_grund = "alter"
+        if start <= 0:
+            start = SEGWIT_HEIGHT
+            start_grund = "segwit-default"
         if seed_out or start_grund == "tip":
             keys_txt = f"{len(used)} used Keys, inkrementell"
         elif start_grund == "alter":
             keys_txt = "ab Wallet-Beginn"
         elif used:
             keys_txt = f"{len(used)} used Keys"
+        elif unvollstaendig:
+            keys_txt = "Erstscan (letzter Lauf unvollständig — Turbo)"
         else:
             keys_txt = "Erstscan"
         anfang = (

@@ -33,7 +33,18 @@ def _ollama_laeuft(timeout: float = 1.5) -> bool:
         return False
 
 
+def _ollama_hat_modell(name: str = "qwen2.5:7b", timeout: float = 1.5) -> bool:
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=timeout) as ant:
+            daten = json.loads(ant.read() or b"{}")
+        namen = [m.get("name") or m.get("model") for m in daten.get("models") or []]
+        return name in namen
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return False
+
+
 OLLAMA_DA = _ollama_laeuft()
+OLLAMA_QWEN7B = OLLAMA_DA and _ollama_hat_modell("qwen2.5:7b")
 
 
 class TestKlassifikation(unittest.TestCase):
@@ -492,6 +503,7 @@ class TestOllamaLive(unittest.TestCase):
         ok, fehler = llm.probe_erreichbar(cfg)
         self.assertTrue(ok, fehler)
 
+    @unittest.skipUnless(OLLAMA_QWEN7B, "Ollama ohne qwen2.5:7b")
     def test_qwen_ist_geladen(self):
         """Der Hotel-Testlauf erwartet qwen2.5:7b in Ollama — sonst Skip bleibt."""
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3) as ant:
@@ -499,6 +511,7 @@ class TestOllamaLive(unittest.TestCase):
         namen = [m.get("name") or m.get("model") for m in daten.get("models") or []]
         self.assertIn("qwen2.5:7b", namen)
 
+    @unittest.skipUnless(OLLAMA_QWEN7B, "Ollama ohne qwen2.5:7b")
     def test_status_check_gruene_pille(self):
         s = llm.status_dict(
             {
@@ -564,6 +577,7 @@ class TestOllamaLive(unittest.TestCase):
         self.assertEqual(körper["anbieter"], "ollama")
         self.assertFalse(körper["api_key_set"])
 
+    @unittest.skipUnless(OLLAMA_QWEN7B, "Ollama ohne qwen2.5:7b")
     def test_chat_loopback_live(self):
         from core import llm_client as chat_mod
 

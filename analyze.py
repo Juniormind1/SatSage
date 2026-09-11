@@ -237,18 +237,65 @@ def trace_utxo_origin(
     }
 
     progress_cb = progress.update if progress else None
+
+    # CoinJoin-/Mix-Klassifikation: Eigentum (Verlauf-Index + Prevouts), dann Form.
+    # Große Nicht-CJ-Txs nicht blind alle Prevouts fürs Label laden.
+    from core.tx_classify import classify_tx, own_prevouts_for_txid
+    from trace_engine import FULL_RESOLUTION_INPUT_LIMIT
+
+    own_prevouts = own_prevouts_for_txid(
+        creator_txid, wallet=wallet, cache_dir=cache_dir
+    )
+    n_vin = len(tx.get("vin") or [])
+    n_vout = len(tx.get("vout") or [])
+    tx_class = classify_tx(
+        tx,
+        own_addresses,
+        wallet=wallet,
+        get_tx=None,
+        own_prevouts=own_prevouts,
+        progress=progress_cb,
+    )
+    braucht_prevouts = (
+        tx_class.kind == "unknown"
+        and (
+            n_vin <= FULL_RESOLUTION_INPUT_LIMIT
+            or (n_vin >= 15 and n_vout >= 10)
+            or bool(own_prevouts)
+        )
+    )
+    if braucht_prevouts:
+        tx_class = classify_tx(
+            tx,
+            own_addresses,
+            wallet=wallet,
+            get_tx=get_tx,
+            own_prevouts=own_prevouts,
+            progress=progress_cb,
+        )
+    if tx_class.kind != "unknown":
+        node["tx_class"] = tx_class.kind
+        node["tx_class_label"] = tx_class.soft_label_de
+        node["tx_class_label_en"] = tx_class.soft_label_en
+
+    own_only = bool(tx_class.walk_own_inputs_only)
+    # CJ: alle eigenen Inputs; Fremde = Rauschen. Nicht-CJ: Limit unverändert.
     for inp in iter_trace_funding_inputs(
         get_tx,
         creator_txid,
         own_addresses,
         wallet=wallet,
         progress=progress_cb,
-        alle_eigenen_inputs=alle_eigenen_inputs,
+        alle_eigenen_inputs=alle_eigenen_inputs or own_only,
+        own_inputs_only=own_only,
+        own_prevouts=own_prevouts if own_only else None,
     ):
         if isinstance(inp, CoinbaseFunding):
             node["sources"].append({"type": "coinbase", "amount_sats": 0})
             continue
         if isinstance(inp, UnresolvedExternalBatch):
+            # Bei CJ sollte das nicht vorkommen; bei normalen Sammel-Txs bleibt
+            # die Untergrenze sichtbar.
             node["sources"].append({
                 "type": "external_unresolved",
                 "input_count": inp.input_count,
@@ -264,6 +311,11 @@ def trace_utxo_origin(
 
         try:
             own_addr = _match_own_address(prev_addrs, own_addresses, wallet)
+            if not own_addr and own_only and prev_ref.lower() in {
+                p.lower() for p in own_prevouts
+            }:
+                # Index-Treffer ohne Adresse am Prevout — trotzdem intern.
+                own_addr = prev_addrs[0] if prev_addrs else prev_ref
             if own_addr:
                 if progress:
                     wallet_label = (
@@ -305,6 +357,9 @@ def trace_utxo_origin(
                     "from_utxo": prev_ref,
                     "trace": child,
                 })
+            elif own_only:
+                # Fremd-Peer trotz Walk — ignorieren (Rauschen).
+                continue
             else:
                 node["sources"].append({
                     "type": "external",
@@ -317,7 +372,18 @@ def trace_utxo_origin(
             continue
 
     if not node["sources"]:
-        node["type"] = "unknown"
+        if own_only:
+            # Fremde Peers absichtlich übersprungen. Ohne eigene Inputs bleibt
+            # der Soft-Label-Knoten ohne Kinder — Completeness behandelt das
+            # als absichtlichen Skip, nicht als Lücke (siehe core.trace).
+            node["coinjoin_noise_skipped"] = True
+            own_ins = (
+                tx_class.ownership.own_input_count if tx_class.ownership else 0
+            )
+            if own_ins == 0:
+                node["type"] = "unknown"
+        else:
+            node["type"] = "unknown"
 
     # Nur abgeschlossene Knoten cachen — cycle bleibt pfadgebunden.
     memo[utxo_key] = node

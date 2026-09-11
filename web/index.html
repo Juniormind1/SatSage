@@ -159,7 +159,36 @@
   </div>
 </div>
 
-<!-- BIP-158 ohne First-seen: ohne Datum wäre der Start 850000 geraten. -->
+<!-- P2P an, öffentliche Electrum noch erlaubt: höhere Privatsphäre anbieten. -->
+<div id="p2p-privatsphaere-dialog" class="einrichtung" hidden>
+  <div class="einrichtung-karte" role="dialog" aria-modal="true"
+       aria-labelledby="p2p-privatsphaere-titel">
+    <h1 id="p2p-privatsphaere-titel" data-i18n="dialog.p2pPrivacy.title">Höhere Privatsphäre?</h1>
+    <p data-i18n="dialog.p2pPrivacy.body">
+      P2P Compact Filter sind verbunden. Öffentliche Electrum-Server
+      (Onion/Clearnet) können als Fallback weiter Adressen sehen.
+      Öffentliche Verbindungen kappen? Scans können dann langsamer werden,
+      wenn P2P ausfällt.
+    </p>
+    <div class="einrichtung-knoepfe">
+      <button type="button" id="p2p-privatsphaere-ja" class="knopf knopf-primaer"
+              autofocus
+              data-i18n="dialog.p2pPrivacy.yes"
+              data-i18n-title="dialog.p2pPrivacy.yesTitle"
+              title="Öffentliche Electrum-Nutzung beenden. Nur noch eigener Node und P2P.">
+        Ja, öffentlich kappen
+      </button>
+      <button type="button" id="p2p-privatsphaere-nein" class="knopf"
+              data-i18n="dialog.p2pPrivacy.no"
+              data-i18n-title="dialog.p2pPrivacy.noTitle"
+              title="Öffentliche Server bleiben als Notfall-Fallback erlaubt.">
+        Nein, Fallback behalten
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- BIP-158 ohne First-seen: ohne Datum Start = SegWit (481824) bzw. Env. -->
 <div id="scan-datum-dialog" class="einrichtung" hidden>
   <div class="einrichtung-karte" role="dialog" aria-modal="true"
        aria-labelledby="scan-datum-titel">
@@ -432,7 +461,7 @@
             <label class="feld-inline">
               <span data-i18n="sanctions.hops">Externe Hops</span>
               <input type="number" id="sank-hops" min="1" max="20" value="3"
-                     style="width:5em">
+                     data-default-max="20" style="width:5em">
             </label>
             <button type="button" id="sank-start" data-i18n="sanctions.start" data-i18n-title="sanctions.startTitle" title="Prüft die Vorgeschichte der Bestände gegen die Sanktions- und Blacklists — bis zur eingestellten Hop-Tiefe. Dauert je nach Tiefe Minuten." class="knopf knopf-primaer">
               Prüfen
@@ -526,11 +555,11 @@
             </span>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="tax.selfReportHint">
-            Für Nachmeldung / Selbstanzeige: Abflüsse aus dem Verlauf markieren
-            (z. B. Börsen-Einzahlung). Fehlen Ausgaben, kannst du offene UTXOs
-            als Hypothese „Was wäre wenn ich die zum Jahresende ausgebe“
-            durchrechnen. Personendaten sind vorerst Platzhalter
-            (Donald Duck / 0/8/15 / Entenhausen). Keine Steuerberatung.
+            Für Nachmeldung / Selbstanzeige: Abflüsse und Was-wäre-wenn-UTXOs
+            werden beim Öffnen aus dem Cache geladen — markieren
+            (z. B. Börsen-Einzahlung) und Report erzeugen. Personendaten sind
+            vorerst Platzhalter (Donald Duck / 0/8/15 / Entenhausen). Keine
+            Steuerberatung.
           </p>
           <div class="karte-fuss steuer-einstellungen">
             <label class="feld" style="flex: 1 1 22rem;">
@@ -543,9 +572,9 @@
                      title="Wenn gesetzt: diese Tx wird ausgewählt und ihre Inputs aus deinen Wallets angezeigt.">
             </label>
             <button type="button" id="sa-laden" class="knopf"
-                    data-i18n="tax.loadCandidates" data-i18n-title="tax.loadCandidatesTitle"
-                    title="Lädt Abflüsse des Steuerjahres und offene UTXOs als Was-wäre-wenn.">
-              Kandidaten laden
+                    data-i18n="tax.refreshCandidates" data-i18n-title="tax.refreshCandidatesTitle"
+                    title="Neu aus dem Cache laden — z. B. nach Verlaufsscan oder mit Einzahl-TxID-Filter. Beim Öffnen der Ansicht passiert das automatisch.">
+              Aktualisieren
             </button>
             <button type="button" id="sa-html" class="knopf knopf-primaer"
                     data-i18n="tax.reportHtml" data-i18n-title="tax.reportHtmlTitle"
@@ -702,6 +731,27 @@
                   title="Löscht UTXO-/Verlauf-/Altersdateien und nur noch von ihnen referenzierte Herkunftsdaten. Kein Einfluss auf eingetragene Wallets.">
             Unreferenzierte Cachedaten löschen
           </button>
+        </div>
+
+        <div class="karte" id="cache-dashboard">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="wallets.cacheDashTitle">Cache-Belegung</span>
+            <span id="cache-dash-zusatz" class="karte-zusatz"></span>
+            <button type="button" id="cache-dash-aktualisieren" class="knopf knopf-klein"
+                    data-i18n="wallets.cacheDashRefresh"
+                    data-i18n-title="wallets.cacheDashRefreshTitle"
+                    title="Misst erneut Dateigrößen und Abdeckung — keine Netzwerkzugriffe.">
+              Aktualisieren
+            </button>
+          </div>
+          <p class="meta cache-dash-intro" data-i18n="wallets.cacheDashIntro">
+            Größe und Abdeckung der lokalen Caches — keine Zugriffszähler.
+          </p>
+          <div id="cache-dash-platte" class="cache-dash-platte"></div>
+          <div id="cache-dash-balken" class="cache-dash-balken" aria-hidden="true"></div>
+          <div id="cache-dash-kacheln" class="cache-dash-kacheln"></div>
+          <div id="cache-dash-wallets" class="cache-dash-wallets"></div>
+          <p id="cache-dash-meldung" class="meta" hidden></p>
         </div>
 
         <div class="karte karte-gefahr">
@@ -1035,6 +1085,12 @@
               geschrieben. Kommentare und übrige Einträge bleiben erhalten.
             </p>
             <p id="sources-managed-hinweis" class="meta" hidden></p>
+            <div id="local-core-hinweis" class="hinweis hinweis-warn" hidden>
+              <p id="local-core-hinweis-text" class="meta"></p>
+              <button type="button" id="local-core-uebernehmen" class="knopf knopf-klein">
+                Lokalen Core übernehmen
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1081,10 +1137,22 @@
             Mitgeliefert: Bitstamp-Schlusskurse (CryptoDataDownload). Eigene
             CSV (Bloomberg o. Ä.) mit Datum- und Preisspalte überschreibt
             gleiche Tage im Cache. Format z. B. <span class="mono">date,price</span>
-            oder Semikolon; Kopfzeile wird erkannt.
+            oder Semikolon; Kopfzeile wird erkannt. Täglicher Lücken-Nachzug
+            (Bitstamp) nur mit Opt-in.
           </p>
           <div id="kurs-historie-status" class="sanktions-zeile"></div>
-          <div class="karte-fuss" style="gap: 8px; flex-wrap: wrap;">
+          <div class="karte-fuss" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+            <label class="feld feld-klein" style="flex: 0 1 auto;">
+              <input type="checkbox" id="kurs-historie-opt-in"
+                     data-i18n-title="sources.ratesOptInTitle"
+                     title="Erlaubt einmal täglich den Abruf der Bitstamp-Tageskurse von CryptoDataDownload, wenn die lokale Serie hinter gestern zurückliegt. 4 Wochen Überlappung, bei großer Diskrepanz Hinweis im Log.">
+              <span data-i18n="sources.ratesOptIn">Historie täglich nachziehen (Bitstamp)</span>
+            </label>
+            <button type="button" id="kurs-historie-sync" class="knopf knopf-klein"
+                    data-i18n="sources.ratesSync" data-i18n-title="sources.ratesSyncTitle"
+                    title="Jetzt Lücken prüfen und bei Opt-in Bitstamp-CSV nachladen.">
+              Jetzt nachziehen
+            </button>
             <button type="button" id="kurs-import-eur" class="knopf knopf-klein"
                     data-i18n="sources.importEur" data-i18n-title="sources.importEurTitle"
                     title="CSV mit BTC/EUR-Tageskursen wählen. Wird in den lokalen Kurs-Cache geschrieben.">

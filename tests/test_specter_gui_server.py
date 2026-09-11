@@ -50,7 +50,7 @@ class TestGuiServer(unittest.TestCase):
              mock.patch.object(
                  gui_server, "context_fingerprint", return_value="fp-test"
              ), \
-             mock.patch.object(gui_server, "_seed_utxo_cache", return_value=0), \
+             mock.patch.object(gui_server, "_seed_caches", return_value={}), \
              mock.patch.object(gui_server, "_server", None), \
              mock.patch.object(gui_server, "_fingerprint", ""):
             # Modul-Globals zurücksetzen, falls andere Tests liefen.
@@ -79,7 +79,8 @@ class TestGuiServer(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as write_error:
             urllib.request.urlopen(req_write, timeout=5)
         self.assertEqual(write_error.exception.code, 403)
-        self.assertIn("Wallets und Datenquelle", daten["managed_hint"])
+        self.assertIn("Specter", daten["managed_hint"])
+        self.assertIn("Wallets", daten["managed_hint"])
         self.assertIn("Specter Cold", namen)
 
 

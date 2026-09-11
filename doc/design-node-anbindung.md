@@ -15,8 +15,8 @@ Der Nutzer soll **seinen** Bitcoin-Node (Electrs/Fulcrum, Core-RPC, ggf. P2P) mi
 3. **Hinweise statt Hausaufgaben.** Wenn etwas scheitert: eine klare Ursache und **einen** nächsten Schritt. Kein Katalog aus fünf Env-Variablen, die der Nutzer erst googeln muss.
 4. **Produktpfade trennen.** Start9-Sideload (Bridge, managed, oft ohne TLS) und Desktop-`.env` (LAN-IP, Self-Signed) dürfen unterschiedlich verdrahtet sein. Härte und Spezialwege gehören in den jeweiligen Build/Modus — nicht als Kollateralschaden auf den Desktop-Alltag.
 5. **Sicherheit ohne Reibungstheater.** Echte Risiken (öffentliches Clearnet, Opt-in, Secrets) bleiben hart. Typische Heimnetz-Realität (privates LAN, Onion, Loopback) bleibt bedienbar, ohne „Labor-Flag setzen“.
-6. **Minimal sichtbare Komplexität.** Interne Retry-, Probe- und Fallback-Logik darf reich sein; UI und Log bleiben ruhig, verständlich, ohne Forensik-Lärm.
-7. **Vertrauen durch Vorhersehbarkeit.** Eine Zeile kündigt den nächsten Schritt an, bevor er startet; Ergebnis kommt danach. Kein stummes Hängen, kein „du hast etwas falsch konfiguriert“ ohne Beleg.
+6. **Minimal sichtbare Komplexität.** Interne Retry-, Probe- und Fallback-Logik darf reich sein; UI und Log bleiben ruhig, verständlich, ohne Forensik-Lärm — Details: [`logging-richtlinie.md`](logging-richtlinie.md).
+7. **Vertrauen durch Vorhersehbarkeit.** Eine Zeile kündigt den nächsten Schritt an, bevor er startet; Ergebnis kommt danach. Kein stummes Hängen, kein „du hast etwas falsch konfiguriert“ ohne Beleg. Erstnutzer brauchen sichtbare Erfolge; im stabilen Betrieb sparsam, bei Störungen wieder gesprächig.
 
 ## Konkret (Beispiele)
 

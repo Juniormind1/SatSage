@@ -2,12 +2,16 @@ import threading
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from core.bitcoind_rpc import (
     CoreRpcConfig,
+    _core_reihenfolge,
     _unspent_to_utxo,
+    config_from_env,
+    config_utxo_from_env,
     descriptors_for_key,
+    fetch_tx_core_mit_rollen,
     normalize_rpc_host,
     scantxoutset_status_prozent,
     scantxoutset_utxos,
@@ -22,6 +26,92 @@ class TestBitcoindRpc(unittest.TestCase):
             "abc.onion",
         )
         self.assertEqual(normalize_rpc_host("user@192.168.1.5"), "192.168.1.5")
+
+    def test_config_utxo_slot_vor_lookup(self):
+        env = {
+            "NODE_IP": "10.0.0.5",
+            "RPCPORT": "8332",
+            "RPCUSER": "lookup",
+            "RPCPASSWORD": "lpw",
+            "UTXO_RPC_HOST": "127.0.0.1",
+            "UTXO_RPCPORT": "8332",
+            "UTXO_RPCUSER": "__cookie__",
+            "UTXO_RPCPASSWORD": "geheim",
+        }
+        lookup = config_from_env(env)
+        utxo = config_utxo_from_env(env)
+        self.assertEqual(lookup.host, "10.0.0.5")
+        self.assertEqual(utxo.host, "127.0.0.1")
+        self.assertEqual(utxo.user, "__cookie__")
+        # Ohne UTXO-Slot: Fallback auf Lookup
+        nur = {
+            "NODE_IP": "10.0.0.5",
+            "RPCUSER": "lookup",
+            "RPCPASSWORD": "lpw",
+        }
+        self.assertEqual(config_utxo_from_env(nur).host, "10.0.0.5")
+
+    def test_core_reihenfolge_pruneheight(self):
+        lokal = MagicMock()
+        archival = MagicMock()
+        # Jung genug → lokal zuerst
+        ordnung = _core_reihenfolge(
+            local=lokal, archival=archival,
+            local_pruneheight=900_000, height=950_000,
+        )
+        self.assertEqual([n for n, _ in ordnung], ["lokal", "lookup"])
+        # Unter pruneheight → lookup zuerst
+        ordnung = _core_reihenfolge(
+            local=lokal, archival=archival,
+            local_pruneheight=900_000, height=800_000,
+        )
+        self.assertEqual([n for n, _ in ordnung], ["lookup", "lokal"])
+        # Höhe unbekannt → lokal zuerst
+        ordnung = _core_reihenfolge(
+            local=lokal, archival=archival,
+            local_pruneheight=900_000, height=None,
+        )
+        self.assertEqual(ordnung[0][0], "lokal")
+
+    def test_fetch_tx_core_mit_rollen_archival_zuerst_unter_prune(self):
+        lokal = MagicMock()
+        archival = MagicMock()
+        erwartet = {"txid": "ab" * 32, "vin": [], "vout": []}
+
+        with patch(
+            "core.bitcoind_rpc.fetch_tx_core", return_value=erwartet,
+        ) as mock_fetch:
+            out = fetch_tx_core_mit_rollen(
+                "ab" * 32,
+                local=lokal,
+                archival=archival,
+                local_pruneheight=100,
+                height=50,  # → archival zuerst
+            )
+        self.assertEqual(out["txid"], "ab" * 32)
+        self.assertEqual(mock_fetch.call_count, 1)
+        self.assertIs(mock_fetch.call_args.args[0], archival)
+
+    def test_fetch_tx_core_mit_rollen_lokal_fail_dann_lookup(self):
+        lokal = MagicMock()
+        archival = MagicMock()
+        erwartet = {"txid": "cd" * 32, "vin": [], "vout": []}
+
+        with patch(
+            "core.bitcoind_rpc.fetch_tx_core",
+            side_effect=[RuntimeError("not found"), erwartet],
+        ) as mock_fetch:
+            out = fetch_tx_core_mit_rollen(
+                "cd" * 32,
+                local=lokal,
+                archival=archival,
+                local_pruneheight=100,
+                height=200,  # → lokal zuerst, dann lookup
+            )
+        self.assertEqual(out["txid"], "cd" * 32)
+        self.assertEqual(mock_fetch.call_count, 2)
+        self.assertIs(mock_fetch.call_args_list[0].args[0], lokal)
+        self.assertIs(mock_fetch.call_args_list[1].args[0], archival)
 
     def test_descriptors_zpub_wpkh_path_inside(self):
         # zpub from fixtures if available

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,9 +29,10 @@ class TestGuiSession(unittest.TestCase):
             self.assertEqual(data["token"], "abc")
             self.assertEqual(data["port"], 9)
             self.assertTrue(pfad.is_file())
-            # Mode idealerweise 0600 (plattformabhängig)
-            mode = pfad.stat().st_mode & 0o777
-            self.assertEqual(mode & 0o077, 0)  # keine group/other-Rechte
+            # Mode idealerweise 0600 — unter Windows greift chmod oft nicht.
+            if sys.platform != "win32":
+                mode = pfad.stat().st_mode & 0o777
+                self.assertEqual(mode & 0o077, 0)
 
     def test_loesche(self):
         with tempfile.TemporaryDirectory() as tmp:

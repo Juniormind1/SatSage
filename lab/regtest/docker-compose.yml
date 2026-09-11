@@ -10,6 +10,7 @@ services:
       - -regtest=1
       - -server=1
       - -listen=1
+      - -rest=1
       - -rpcbind=0.0.0.0
       - -rpcallowip=0.0.0.0/0
       - -rpcuser=bitcoin
@@ -25,6 +26,8 @@ services:
       timeout: 5s
       retries: 20
 
+  # Auth: bitcoind nutzt rpcuser/rpcpassword (kein Core-.cookie).
+  # scripts/start.sh schreibt deshalb regtest/.cookie als user:pass für electrs.
   electrs:
     image: getumbrel/electrs:v0.10.9
     container_name: satsage-electrs-regtest
@@ -39,7 +42,74 @@ services:
     command:
       - --network=regtest
       - --daemon-dir=/bitcoin
+      - --cookie-file=/bitcoin/regtest/.cookie
       - --daemon-rpc-addr=bitcoind:18443
       - --daemon-p2p-addr=bitcoind:18444
       - --electrum-rpc-addr=0.0.0.0:50001
       - --db-dir=/electrs-data
+    restart: unless-stopped
+
+  # mempool.space — lokale UI zum Prüfen von Lab-Txs (nur Loopback).
+  mempool-db:
+    image: mariadb:10.11
+    container_name: satsage-mempool-db
+    environment:
+      MYSQL_DATABASE: mempool
+      MYSQL_USER: mempool
+      MYSQL_PASSWORD: mempool
+      MYSQL_ROOT_PASSWORD: mempool
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - ./.data/mempool-mysql:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mempool-api:
+    image: mempool/backend:v3.0.1
+    container_name: satsage-mempool-api
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+      electrs:
+        condition: service_started
+      mempool-db:
+        condition: service_healthy
+    environment:
+      MEMPOOL_BACKEND: electrum
+      MEMPOOL_NETWORK: regtest
+      CORE_RPC_HOST: bitcoind
+      CORE_RPC_PORT: "18443"
+      CORE_RPC_USERNAME: bitcoin
+      CORE_RPC_PASSWORD: secret
+      ELECTRUM_HOST: electrs
+      ELECTRUM_PORT: "50001"
+      ELECTRUM_TLS_ENABLED: "false"
+      DATABASE_ENABLED: "true"
+      DATABASE_HOST: mempool-db
+      DATABASE_PORT: "3306"
+      DATABASE_DATABASE: mempool
+      DATABASE_USERNAME: mempool
+      DATABASE_PASSWORD: mempool
+      STATISTICS_ENABLED: "false"
+      LIGHTNING_ENABLED: "false"
+    volumes:
+      - ./.data/mempool-cache:/backend/cache
+    restart: unless-stopped
+
+  mempool-web:
+    image: mempool/frontend:v3.0.1
+    container_name: satsage-mempool-web
+    depends_on:
+      - mempool-api
+    environment:
+      FRONTEND_HTTP_PORT: "8080"
+      BACKEND_MAINNET_HTTP_HOST: mempool-api
+      BACKEND_MAINNET_HTTP_PORT: "8999"
+    ports:
+      # 8080 oft belegt (andere Dev-Tools) — Lab-Explorer auf 18080.
+      - "127.0.0.1:18080:8080"
+    restart: unless-stopped

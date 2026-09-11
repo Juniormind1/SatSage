@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>SatSage · Tx-Class Icons</title>
+  <style>
+    body {
+      margin: 0; padding: 32px;
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #12181C; color: #E8ECEB;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    p { color: #8A949A; margin: 0 0 20px; max-width: 70ch; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .karte {
+      background: #1A2228;
+      border: 1px solid #2A343C;
+      border-radius: 10px;
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .karte.hell {
+      background: #F4F6F5;
+      color: #18222A;
+      border-color: #D5DBDE;
+    }
+    .karte.hell .hint, .karte.hell code { color: #5A656C; }
+    .icon { width: 48px; height: 48px; }
+    .zeile { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .icon-sm { width: 18px; height: 18px; }
+    .label { font-weight: 600; }
+    .hint { font-size: 12px; color: #8A949A; }
+    .swatch {
+      display: inline-block; width: 12px; height: 12px;
+      border-radius: 3px; vertical-align: -1px; margin-right: 4px;
+    }
+    code { font-size: 11px; color: #8A949A; }
+    h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; color: #8A949A; }
+  </style>
+</head>
+<body>
+  <h1>Tx-Class Icons · farbig</h1>
+  <p>
+    Auf Dunkelgrau lesbar. Farben angelehnt an typische Assoziationen
+    (Wasabi-Grün, Pool-Blau, …), nicht 1:1 Marken-Assets.
+  </p>
+
+  <h2>Dunkler Hintergrund (SatSage Dark)</h2>
+  <div class="grid">
+    <div class="karte">
+      <img class="icon" src="./whirlpool.svg" alt="">
+      <div class="label"><span class="swatch" style="background:#5B9FD4"></span>Whirlpool</div>
+      <div class="hint">#5B9FD4 · Pool-Blau</div>
+      <div class="zeile"><img class="icon-sm" src="./whirlpool.svg" alt="">Wahrscheinlich Whirlpool-CoinJoin</div>
+    </div>
+    <div class="karte">
+      <img class="icon" src="./wasabi-classic.svg" alt="">
+      <div class="label"><span class="swatch" style="background:#5CBB3A"></span>Wasabi Classic</div>
+      <div class="hint">#5CBB3A · Wasabi-Grün (Marke #94FF0B, hier gedämpft)</div>
+      <div class="zeile"><img class="icon-sm" src="./wasabi-classic.svg" alt="">Wahrscheinlich Wasabi-CoinJoin (Classic)</div>
+    </div>
+    <div class="karte">
+      <img class="icon" src="./wabisabi.svg" alt="">
+      <div class="label"><span class="swatch" style="background:#2BB0A6"></span>WabiSabi</div>
+      <div class="hint">#2BB0A6 · Teal (von Classic getrennt)</div>
+      <div class="zeile"><img class="icon-sm" src="./wabisabi.svg" alt="">Wahrscheinlich WabiSabi-CoinJoin</div>
+    </div>
+    <div class="karte">
+      <img class="icon" src="./joinmarket.svg" alt="">
+      <div class="label"><span class="swatch" style="background:#8B6CCF"></span>JoinMarket</div>
+      <div class="hint">#8B6CCF · Violett (Marketplace; kein starkes Marken-Hex)</div>
+      <div class="zeile"><img class="icon-sm" src="./joinmarket.svg" alt="">Wahrscheinlich JoinMarket</div>
+    </div>
+  </div>
+
+  <h2>Heller Hintergrund</h2>
+  <div class="grid">
+    <div class="karte hell">
+      <img class="icon" src="./whirlpool.svg" alt="">
+      <div class="label">Whirlpool</div>
+      <div class="hint">gleich lesbar auf Hellgrau</div>
+    </div>
+    <div class="karte hell">
+      <img class="icon" src="./wasabi-classic.svg" alt="">
+      <div class="label">Wasabi Classic</div>
+      <div class="hint">gedämpftes Grün statt Neon-#94FF0B</div>
+    </div>
+    <div class="karte hell">
+      <img class="icon" src="./wabisabi.svg" alt="">
+      <div class="label">WabiSabi</div>
+      <div class="hint">Teal</div>
+    </div>
+    <div class="karte hell">
+      <img class="icon" src="./joinmarket.svg" alt="">
+      <div class="label">JoinMarket</div>
+      <div class="hint">Violett</div>
+    </div>
+  </div>
+</body>
+</html>

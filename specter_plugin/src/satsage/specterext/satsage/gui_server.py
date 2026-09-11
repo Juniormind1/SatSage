@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from .bridge import SatSageContext, build_context
+from .specter_seed import (
+    seed_caches_from_specter,
+    wallet_entries_with_specter_limits,
+)
 from .specter_session import (
     _SATSAGE_ROOT,
-    collect_specter_utxos,
     context_fingerprint,
     ensure_satsage_on_path,
 )
@@ -42,38 +45,7 @@ def _gui_env_path() -> Path:
     return ziel / _SPECTER_ENV_NAME
 
 
-def _wallet_entries_aus_kontext(ctx: SatSageContext):
-    ensure_satsage_on_path()
-    from core.config import WalletEntry
-
-    eintraege = []
-    gesehen: set[str] = set()
-    for w in ctx.wallets:
-        if w.recv_descriptor:
-            eintraege.append(
-                WalletEntry(
-                    name=w.name or w.alias or "Specter-Wallet",
-                    descriptor=w.recv_descriptor,
-                    max_addresses=200,
-                )
-            )
-            continue
-        for xpub in w.xpubs:
-            if not xpub or xpub in gesehen:
-                continue
-            gesehen.add(xpub)
-            eintraege.append(
-                WalletEntry(
-                    xpub=xpub,
-                    name=w.name or xpub[:16],
-                    script_type="auto",
-                    max_addresses=200,
-                )
-            )
-    return eintraege
-
-
-def _schreibe_specter_env(ctx: SatSageContext) -> Path:
+def _schreibe_specter_env(ctx: SatSageContext, specter: Any | None = None) -> Path:
     """Spiegelt Specter-Kontext in die Plugin-.env, nicht in die Desktop-.env."""
     ensure_satsage_on_path()
     import main as xq_main
@@ -83,7 +55,8 @@ def _schreibe_specter_env(ctx: SatSageContext) -> Path:
     if not pfad.is_file():
         pfad.write_text(
             "# SatSage — Specter-Plugin (automatisch gespiegelt)\n"
-            "# NETWORK kommt aus Specter; Core nutzt BIP-158/P2P, Electrum/Spectrum FULCRUM_*.\n",
+            "# Wallets + Node/Electrum kommen aus Specter — hier nicht doppelt pflegen.\n"
+            "# NETWORK aus Specter; Core → BIP-158/P2P + RPC, Electrum/Spectrum → FULCRUM_*.\n",
             encoding="utf-8",
         )
 
@@ -108,47 +81,30 @@ def _schreibe_specter_env(ctx: SatSageContext) -> Path:
     updates = {key: None for key in mapped_node_keys if key in vorhanden}
     updates.update({key: value for key, value in basis.items() if value})
     updates.update({key: value for key, value in ctx.env_like.items() if value})
+    updates["SATSAGE_MANAGED_BY"] = "specter"
     env.apply(updates)
     env.save()
 
-    write_wallets(EnvFile.load(pfad), _wallet_entries_aus_kontext(ctx), bestaetigt=True)
+    eintraege = wallet_entries_with_specter_limits(ctx, specter)
+    write_wallets(EnvFile.load(pfad), eintraege, bestaetigt=True)
     return pfad
 
 
-def _seed_utxo_cache(specter: Any, ctx: SatSageContext, cache_dir: Path) -> int:
-    """Leichter Seed aus Specter-UTXOs — ohne Blockchain-Connect."""
-    ensure_satsage_on_path()
-    import main as xq_main
-
-    utxos = collect_specter_utxos(specter)
-    if not utxos:
-        return 0
-
-    by_xpub: dict[str, list[dict]] = {x: [] for x in ctx.all_xpubs()}
-    for u in utxos:
-        xp = u.get("xpub")
-        if xp and xp in by_xpub:
-            by_xpub[xp].append(u)
-        elif by_xpub:
-            # Fallback: erstes XPUB des Kontexts
-            by_xpub[next(iter(by_xpub))].append(u)
-
-    geschrieben = 0
-    for xpub, liste in by_xpub.items():
-        if not liste:
-            continue
-        try:
-            xq_main.save_xpub_utxo_cache(
-                xpub,
-                liste,
-                cache_dir,
-                source="specter",
-                max_addresses=200,
-            )
-            geschrieben += 1
-        except Exception as exc:
-            logger.warning("UTXO-Seed für Specter-GUI: %s", exc)
-    return geschrieben
+def _seed_caches(specter: Any, ctx: SatSageContext, cache_dir: Path) -> dict[str, int]:
+    """UTXOs + Verlauf + Labels + Scan-Indizes aus Specter."""
+    try:
+        stats = seed_caches_from_specter(specter, ctx, cache_dir, source_tag="specter")
+        logger.info(
+            "Specter-Seed: %s UTXO-Dateien, %s UTXOs, %s Verlauf, %s Labels",
+            stats.get("utxo_files"),
+            stats.get("utxos"),
+            stats.get("verlauf_merged"),
+            stats.get("labels"),
+        )
+        return stats
+    except Exception as exc:
+        logger.warning("Specter-Cache-Seed fehlgeschlagen: %s", exc)
+        return {}
 
 
 def ensure_gui_server(specter: Any) -> dict[str, Any]:
@@ -166,7 +122,7 @@ def ensure_gui_server(specter: Any) -> dict[str, Any]:
     fp = context_fingerprint(ctx)
 
     with _lock:
-        env_pfad = _schreibe_specter_env(ctx)
+        env_pfad = _schreibe_specter_env(ctx, specter)
         _env_path = env_pfad
         cache_dir = _SATSAGE_ROOT / "utxo_cache"
         immutable = _SATSAGE_ROOT / "immutable_cache"
@@ -192,13 +148,10 @@ def ensure_gui_server(specter: Any) -> dict[str, Any]:
         elif fp != _fingerprint:
             _server.state.set_managed_by("specter")
             _server.state.reload()
-            logger.info("SatSage-GUI: Wallets aus Specter neu geladen")
+            logger.info("SatSage-GUI: Wallets/Node aus Specter neu geladen")
 
         _fingerprint = fp
-        try:
-            _seed_utxo_cache(specter, ctx, cache_dir)
-        except Exception as exc:
-            logger.warning("UTXO-Seed übersprungen: %s", exc)
+        seed_stats = _seed_caches(specter, ctx, cache_dir)
 
         return {
             "url": _server.url,
@@ -208,6 +161,7 @@ def ensure_gui_server(specter: Any) -> dict[str, Any]:
             "xpub_count": len(ctx.all_xpubs()),
             "neu_gestartet": neu,
             "env_path": str(env_pfad),
+            "seed": seed_stats,
         }
 
 

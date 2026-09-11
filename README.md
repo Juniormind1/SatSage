@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-0.9-f7931a?style=flat-square" alt="Version 0.9"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-0.9.1-f7931a?style=flat-square" alt="Version 0.9.1"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/UI-localhost%20Web--GUI-111111?style=flat-square" alt="Web-GUI">
@@ -20,7 +20,7 @@
 
 | | |
 |:--|:--|
-| **Version** | [`VERSION`](VERSION) → aktuell **0.9** (einzige Quelle; Fußzeile der Web-GUI) |
+| **Version** | [`VERSION`](VERSION) → aktuell **0.9.1** (einzige Quelle; Fußzeile der Web-GUI) |
 | **Oberfläche** | Web (`py server.py`) + Terminal-Steuerung · Specter-Plugin · StartOS-Sideload |
 | **Sprache** | DE/EN in der UI (`UI_LANG` / Einstellungen); Handbuch vorerst DE |
 | **IDs** | `satsage` · Binary `satsage-webgui` · Specter `satsage.specterext.satsage` |
@@ -121,7 +121,7 @@ Der Server bindet **nur an 127.0.0.1**. Jede API-Anfrage braucht das Sitzungs-To
 | **Einstellungen** | Node, Wallets, Fristen, Status-Mails (SMTP, Opt-in), Sanktionslisten, Danger Zone (Cache) |
 | **Log** | Fortschritt vor dem nächsten Schritt; bei Stillstand „Moment noch“ |
 
-**UTXO-Scan über P2P-BIP-158:** ohne gespeichertes First-seen fragt die Oberfläche nach einem Startdatum (Vorschlag: SegWit 24.08.2017). Filter kommen von Peers, Blöcke nur bei Treffer. Ungenutzte Lookahead-Adressen laufen nur durch das jüngste Fenster (TurboSync).
+**UTXO-Scan über P2P-BIP-158:** ohne gespeichertes First-seen fragt die Oberfläche nach einem Startdatum (Vorschlag: SegWit 24.08.2017). Filter kommen von Peers, Blöcke nur bei Treffer. **Erstscan:** zuerst Turbo-Fenster (~14 Tage) mit voller Lookahead-Menge (Zwischenstand nutzbar), danach Historie nur mit getroffenen Adressen plus kleiner Gap — nicht die ganze Lookahead-Menge seit SegWit. Compact Filter werden unter `immutable_cache/cfilter/` (Höhe + Blockhash) gecacht und beim nächsten Wallet/Rescan wiederverwendet.
 
 Ausführlich: [`doc/handbuch.html`](doc/handbuch.html). Offene Lücke (gründlichere Herkunft / Sammel-Txs): [`ISSUES.md`](ISSUES.md).
 

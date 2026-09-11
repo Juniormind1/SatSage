@@ -32,7 +32,7 @@ Legende Status: `todo` Â· `doing` Â· `done` Â· `blocked`
 | ID | Status | Aufgabe | Akzeptanz |
 |----|--------|---------|-----------|
 | S2-1 | done | Allowlist-Policy fÃ¼r Fulcrum/Mempool/LLM/SMTP (loopback / .onion / private / public+Opt-in) | Public ohne Opt-in abgelehnt |
-| S2-2 | partial | Start9-Dependencies: `bitcoind` + `electrs` (oder Fulcrum) per Bridge; Cookie RO-Mount | Kein freier RPC-Host nÃ¶tig im Default-Pfad |
+| S2-2 | partial | Start9-Dependencies: `bitcoind` + `electrs` **oder Fulcrum** per Bridge; Cookie RO-Mount — Vorbereitung: Select Indexer + conditional deps ([`START9-fulcrum-indexer.md`](START9-fulcrum-indexer.md)); Sideload-Verify offen | Kein freier RPC-Host nÃ¶tig im Default-Pfad; Indexer wÃ¤hlbar |
 | S2-3 | done | Config-UI: im Start9-Modus Node-Felder read-only / ausgeblendet, Status aus Dependency | User Ã¤ndert Backend nur Ã¼ber StartOS-Deps |
 | S2-4 | done | LLM: Default loopback; Remote nur mit Opt-in (bereits teilweise) â€” Tests + Start9-Hinweise | Gleiches Verhalten wie Desktop, dokumentiert |
 
@@ -53,7 +53,7 @@ Legende Status: `todo` Â· `doing` Â· `done` Â· `blocked`
 | S4-3 | done | Interfaces: UI mit `addSsl.auth`; interne Ports bridge-only | Kein Roh-RPC exportiert |
 | S4-4 | done | Health: Prozess + optional Electrs-Dependency-Health | StartOS zeigt grÃ¼n wenn nutzbar |
 | S4-5 | done | `README.md` + `instructions.md` (kein â€žist auf Torâ€œ) | Review-Checkliste Docs |
-| S4-6 | doing | E2E auf StartOS: Install, Login, Wallet-Scan gegen Electrs-Dep, Backup/Restore, Uninstall â€” Runbook ready; device E2E pending user sideload; no prod XPUB | Protokoll abgehakt |
+| S4-6 | done | E2E auf StartOS: Install, Login, Wallet-Scan gegen Electrs-Dep, Backup/Restore, Uninstall â€” Maintainer-Sideload mit Release **0.9** durchgeklickt (Passwort einmal via StartOS Basic Auth / Proxy-Session; Electrs+Core-Bridge auto; Bridge-Einstellungen gesperrt/ausgeblendet) | Protokoll abgehakt; GerÃ¤tetest 2026-09 |
 | S4-7 | todo | Einreichung `submissions@start9.com` â†’ Community-Fork â†’ beta â†’ promote | Package in community-beta |
 
 ## Phase 5 â€” Nice-to-have
@@ -96,4 +96,4 @@ Legende Status: `todo` Â· `doing` Â· `done` Â· `blocked`
 
 - S4-1: wrapper is `packaging/` in this repo on `main` (not a sibling `satsage-startos`). `make x86` still needs Docker, Node 22, `start-cli`, and a `.startos/` workspace key.
 - S4-2 through S4-5: Dockerfile/entrypoint, UI+Basic-auth, health, instructions.md; only x86_64 until an ARM image exists.
-- S4-6 is doing: Runbook ready; device E2E pending user sideload; no prod XPUB. S4-7 remains todo and is intentionally not submitted.
+- S4-6 **done** (2026-09): Maintainer E2E on device with GitHub/App **0.9** sideload — single password gate (StartOS `addSsl` Basic Auth + `X-Forwarded-User` → SatSage session), bitcoind/electrs bridges from StartOS deps, UI/API locks for `own_fulcrum`/`own_core`. S4-7 remains todo (Community submission not started).

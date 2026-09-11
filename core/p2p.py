@@ -384,6 +384,42 @@ def _sag(on_log: Callable[[str], None] | None, text: str) -> None:
         on_log(text)
 
 
+#: Peers, für die in diesem Prozess schon eine Erfolgszeile lief (kein Spam).
+_GELOGGTE_FILTER_PEERS: set[tuple[str, int]] = set()
+_GELOGGTE_FILTER_LOCK = threading.Lock()
+
+
+def _log_filter_peer_entdeckt(
+    on_log: Callable[[str], None] | None,
+    host: str,
+    port: int,
+    *,
+    zusatz: str = "",
+) -> None:
+    """
+    Erfolgszeile je neuem Compact-Filter-Peer — nur bis ``P2P_SCAN_WARN_PEERS``.
+
+    Unter 3 Peers soll das Log leben; ab 3 reicht Stille (kein Spam je Host).
+    """
+    if not on_log:
+        return
+    paar = (str(host).strip(), int(port) or DEFAULT_P2P_PORT)
+    if not paar[0]:
+        return
+    with _GELOGGTE_FILTER_LOCK:
+        if paar in _GELOGGTE_FILTER_PEERS:
+            return
+        if len(_GELOGGTE_FILTER_PEERS) >= P2P_SCAN_WARN_PEERS:
+            _GELOGGTE_FILTER_PEERS.add(paar)
+            return
+        _GELOGGTE_FILTER_PEERS.add(paar)
+    wo = f"{paar[0]}:{paar[1]}"
+    if zusatz:
+        _sag(on_log, f"Verbunden. Compact-Filter-Peer {wo} ({zusatz}).")
+    else:
+        _sag(on_log, f"Verbunden. Compact-Filter-Peer {wo}.")
+
+
 def _verbinde_ansage(
     host: str,
     port: int,
@@ -1290,7 +1326,7 @@ def probe_compact_filter_peer(
                 continue
             peer.close()
             merke_filter_peer(host, port)
-            _sag(on_log, f"Verbunden. Compact Filter {host}:{port}")
+            _log_filter_peer_entdeckt(on_log, host, port)
             return host, port
         return None
 
@@ -1347,9 +1383,6 @@ def _verbinde_peer_batch(
     while warteschlange and len(live) < limit:
         batch = warteschlange[:8]
         del warteschlange[:8]
-        for host, port in batch:
-            _verbinde_ansage(host, port, tor_proxy, on_log)
-
         def eines(
             paar: tuple[str, int],
         ) -> tuple[str, int, object | None, BaseException | None]:
@@ -1368,17 +1401,13 @@ def _verbinde_peer_batch(
                 host, port, peer, fehler = fut.result()
                 if peer is None:
                     demote_filter_peer(host, port)
-                    _sag(
-                        on_log,
-                        f"Verbindung fehlgeschlagen {host}:{port}: {fehler}",
-                    )
                     continue
                 if len(live) >= limit:
                     peer.close()  # type: ignore[union-attr]
                     continue
                 live.append(peer)
                 merke_filter_peer(host, port)
-                _sag(on_log, f"Verbunden. Compact Filter {host}:{port}")
+                _log_filter_peer_entdeckt(on_log, host, port)
 
 
 def verbinde_compact_filter_peers(
@@ -1470,25 +1499,32 @@ def verbinde_compact_filter_peers(
 
     if live:
         wort = "Peer" if len(live) == 1 else "Peers"
-        # limit=1: Header-/Probe-Pfad — kein „Scan langsamer“-Alarm.
+        # Unter 3 Peers: Erfolgszeilen (auch ruhig). Ab 3: _log_filter… schweigt.
         if limit <= 1:
             p0 = live[0]
-            host = getattr(p0, "host", "?")
-            port = getattr(p0, "port", "")
-            wo = f"{host}:{port}" if port != "" else str(host)
-            _sag(on_log, f"Verbunden. Compact-Filter-Peer {wo} (Header/Probe).")
+            _log_filter_peer_entdeckt(
+                on_log,
+                getattr(p0, "host", "?"),
+                getattr(p0, "port", DEFAULT_P2P_PORT),
+                zusatz="Header/Probe",
+            )
         else:
+            for p0 in live:
+                _log_filter_peer_entdeckt(
+                    on_log,
+                    getattr(p0, "host", "?"),
+                    getattr(p0, "port", DEFAULT_P2P_PORT),
+                )
+        if (
+            limit > 1
+            and len(live) < min(P2P_SCAN_WARN_PEERS, limit)
+        ):
             _sag(
                 on_log,
-                f"Verbunden. {len(live)} Compact-Filter-{wort} für den Scan.",
+                f"Nur {len(live)} Compact-Filter-{wort} "
+                f"(Ziel {limit}) — Filter-Scan wird langsamer.",
             )
-            if len(live) < min(P2P_SCAN_WARN_PEERS, limit):
-                _sag(
-                    on_log,
-                    f"Nur {len(live)} Compact-Filter-{wort} "
-                    f"(Ziel {limit}) — Filter-Scan wird langsamer.",
-                )
-    else:
+    elif not ruhig:
         _sag(on_log, "Verbindung fehlgeschlagen: kein Compact-Filter-Peer")
     return live
 
@@ -1513,12 +1549,8 @@ def zaehle_compact_filter_peers(
         peers, dns_fallback=dns_fallback, tor_proxy=tor_proxy, on_log=on_log,
     )
     if not kandidaten:
-        _sag(on_log, "Keine P2P-Adressen gefunden.")
         return []
     auswahl = kandidaten[:versuche]
-    _sag(on_log, f"{len(auswahl)} Kandidaten, prüfe Compact Filter…")
-    for host, port in auswahl:
-        _verbinde_ansage(host, port, tor_proxy, on_log)
 
     def eines(paar: tuple[str, int]) -> tuple[str, int, BaseException | None]:
         host, port = paar
@@ -1537,12 +1569,7 @@ def zaehle_compact_filter_peers(
             if fehler is None:
                 treffer.append(f"{host}:{port}")
                 merke_filter_peer(host, port)
-                _sag(on_log, f"Verbunden. Compact Filter {host}:{port}")
-            else:
-                _sag(on_log, f"Verbindung fehlgeschlagen {host}:{port}: {fehler}")
+                # Nur Erfolgszeile, und nur bei Erst-Entdeckung in diesem Lauf.
+                _log_filter_peer_entdeckt(on_log, host, port)
     treffer.sort()
-    if treffer:
-        _sag(on_log, f"Verbunden. {len(treffer)} Compact-Filter-Peers.")
-    else:
-        _sag(on_log, "Verbindung fehlgeschlagen: kein Compact-Filter-Peer")
     return treffer

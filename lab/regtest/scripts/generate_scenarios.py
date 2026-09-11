@@ -175,6 +175,40 @@ def select(rpc: Rpc, wallet: str, count: int) -> list[dict[str, Any]]:
         raise RuntimeError(f"Zu wenige UTXOs in {wallet}: {len(rows)} < {count}")
     return rows[:count]
 
+
+def select_near(
+    rpc: Rpc,
+    wallet: str,
+    count: int,
+    *,
+    target: float = 0.05,
+    lo: float = 0.01,
+    hi: float = 0.08,
+) -> list[dict[str, Any]]:
+    """
+    Wählt UTXOs nahe *target* — nie Faucet-Coinbase-Wale.
+
+    Sonst explodiert die Fee (maxtxfee), sobald ein Mix-Szenario große
+    Miner-Outputs mit 0,05-Lab-Coins mischt.
+    """
+    rows = [
+        u for u in unspent(rpc, wallet)
+        if lo <= float(u["amount"]) <= hi
+    ]
+    rows.sort(
+        key=lambda row: (
+            abs(float(row["amount"]) - target),
+            row["txid"],
+            int(row["vout"]),
+        )
+    )
+    if len(rows) < count:
+        raise RuntimeError(
+            f"Zu wenige UTXOs ~{target} BTC in {wallet}: {len(rows)} < {count} "
+            f"(Range {lo}–{hi})"
+        )
+    return rows[:count]
+
 def raw_spend(rpc: Rpc, name: str, inputs: list[dict[str, Any]],
               outputs: list[tuple[str, float]], signers: list[str]) -> dict[str, Any]:
     input_json = json.dumps([{"txid": u["txid"], "vout": int(u["vout"])} for u in inputs], separators=(",", ":"))
@@ -211,6 +245,8 @@ def write_env(rpc: Rpc) -> None:
         "RPCPORT=18443",
         "RPCUSER=bitcoin",
         "RPCPASSWORD=secret",
+        # Lokaler mempool.space-Explorer (docker: mempool-web auf :18080).
+        "MEMPOOL_URL=http://127.0.0.1:18080",
         # Assistent: lokales Ollama (Loopback). Modell muss auf dem Host liegen
         # (z. B. ollama pull qwen2.5:0.5b) — sonst Pille grau / unreachable.
         "LLM_BASE_URL=http://127.0.0.1:11434/v1",
@@ -257,41 +293,221 @@ def run(rpc: Rpc) -> None:
     records.append(raw_spend(rpc, "Beta-aged-fanout", old, fanout, [beta]))
     mine(rpc, 2, faucet)
 
-    # Four wallets x six inputs and six equal outputs plus one change each.
-    cj1_inputs: list[dict[str, Any]] = []
-    cj1_signers: list[str] = []
-    cj1_outputs: list[tuple[str, float]] = []
-    for label, wallet in zip(LABELS, WALLETS):
-        chosen = select(rpc, wallet, 6)
-        cj1_inputs += chosen
-        cj1_signers += [wallet] * 6
-        cj1_outputs += [(addresses[label][20 + i], .045) for i in range(6)]
-        cj1_outputs.append((addresses[label][32], .029))
-    cj1 = raw_spend(rpc, "CoinJoin-like-round-1", cj1_inputs, cj1_outputs, cj1_signers)
+    # ------------------------------------------------------------------
+    # CoinJoin-Fixtures: Fremd-Peers = lab-faucet (Funding-Quelle aller Lab-
+    # Sats). lab-faucet steht bewusst NICHT in SatSage WALLET_* → in SatSage
+    # sind das fremde Inputs. Lab-Wallets = nur Viewer-Anteile (eigene Ins).
+    # Kein Multisig — alles Einzelsignatur (P2WPKH).
+    # ------------------------------------------------------------------
+
+    # Extra-Funding: Lab-Wallets + viele kleine Faucet-Peer-UTXOs für Mixes.
+    for index in range(30, 50):
+        payouts = {addresses[label][index]: 0.05 for label in LABELS}
+        rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
+        mine(rpc, 1, faucet)
+
+    peer_addrs = [new_address(rpc, "lab-faucet") for _ in range(60)]
+    for i in range(0, len(peer_addrs), 12):
+        chunk = peer_addrs[i : i + 12]
+        rpc.call(
+            "sendmany",
+            "",
+            json.dumps({a: 0.05 for a in chunk}, separators=(",", ":")),
+            wallet="lab-faucet",
+        )
+        mine(rpc, 1, faucet)
+
+    # Wasabi-Classic-ähnlich: 6× Alpha (eigen) + 18× Faucet (fremd);
+    # 24 gleiche Mix-Outs + 4 Changes (1× Alpha, 3× Faucet).
+    cj1_own = select_near(rpc, alpha, 6)
+    cj1_foreign = select_near(rpc, "lab-faucet", 18)
+    cj1_ins = cj1_own + cj1_foreign
+    cj1_signers = [alpha] * 6 + ["lab-faucet"] * 18
+    cj1_in_sum = sum(float(u["amount"]) for u in cj1_ins)
+    cj1_equal = round((cj1_in_sum - 0.001) * 0.90 / 24, 8)
+    cj1_change = round((cj1_in_sum - 24 * cj1_equal - 0.0005) / 4, 8)
+    if cj1_equal <= 0 or cj1_change <= 0:
+        raise RuntimeError("Wasabi-classic-like: Beträge ungültig")
+    cj1_outputs = (
+        [(addresses["alpha"][20 + i], cj1_equal) for i in range(6)]
+        + [(new_address(rpc, "lab-faucet"), cj1_equal) for _ in range(18)]
+        + [(addresses["alpha"][32], cj1_change)]
+        + [(new_address(rpc, "lab-faucet"), cj1_change) for _ in range(3)]
+    )
+    cj1 = raw_spend(rpc, "Wasabi-classic-like", cj1_ins, cj1_outputs, cj1_signers)
+    cj1["alias"] = "CoinJoin-like-round-1"
+    cj1["expected_kind"] = "wasabi_classic"
+    cj1["viewer_wallet"] = "lab-alpha"
+    cj1["foreign_wallet"] = "lab-faucet"
     records.append(cj1)
     mine(rpc, 3, faucet)
 
-    cj2_inputs: list[dict[str, Any]] = []
-    cj2_signers: list[str] = []
-    cj2_outputs: list[tuple[str, float]] = []
-    for label, wallet in zip(LABELS, WALLETS):
-        equal_addresses = set(addresses[label][20:26])
-        rows = [u for u in unspent(rpc, wallet) if u["txid"] == cj1["txid"] and u.get("address") in equal_addresses]
-        if len(rows) != 6:
-            raise RuntimeError(f"CoinJoin-like-round-1: {label} outputs fehlen")
-        cj2_inputs += rows
-        cj2_signers += [wallet] * 6
-        cj2_outputs += [(addresses[label][28 + i], .039) for i in range(6)]
-        cj2_outputs.append((addresses[label][39], .034))
-    records.append(raw_spend(rpc, "CoinJoin-like-round-2", cj2_inputs, cj2_outputs, cj2_signers))
+    # Remix: nur Alpha-Equal-Outs aus Round 1 + neue Faucet-Peers.
+    equal_alpha = set(addresses["alpha"][20:26])
+    cj2_own = [
+        u for u in unspent(rpc, alpha)
+        if u["txid"] == cj1["txid"] and u.get("address") in equal_alpha
+    ]
+    if len(cj2_own) != 6:
+        raise RuntimeError(f"Wasabi-classic-like: Alpha-Equal-Outs fehlen ({len(cj2_own)})")
+    cj2_foreign = select_near(rpc, "lab-faucet", 18)
+    cj2_ins = cj2_own + cj2_foreign
+    cj2_signers = [alpha] * 6 + ["lab-faucet"] * 18
+    cj2_sum = sum(float(u["amount"]) for u in cj2_ins)
+    cj2_equal = round((cj2_sum - 0.001) * 0.90 / 24, 8)
+    cj2_change = round((cj2_sum - 24 * cj2_equal - 0.0005) / 4, 8)
+    cj2_outputs = (
+        [(addresses["alpha"][28 + i], cj2_equal) for i in range(6)]
+        + [(new_address(rpc, "lab-faucet"), cj2_equal) for _ in range(18)]
+        + [(addresses["alpha"][39], cj2_change)]
+        + [(new_address(rpc, "lab-faucet"), cj2_change) for _ in range(3)]
+    )
+    cj2 = raw_spend(rpc, "Wasabi-classic-remix", cj2_ins, cj2_outputs, cj2_signers)
+    cj2["alias"] = "CoinJoin-like-round-2"
+    cj2["expected_kind"] = "wasabi_classic"
+    cj2["viewer_wallet"] = "lab-alpha"
+    cj2["foreign_wallet"] = "lab-faucet"
+    records.append(cj2)
     mine(rpc, 3, faucet)
+
+    # Whirlpool-like 5×5: 1× Alpha + 4× Faucet-fremd.
+    wp_own = select_near(rpc, alpha, 1)
+    wp_foreign = select_near(rpc, "lab-faucet", 4)
+    wp_ins = wp_own + wp_foreign
+    wp_sum = sum(float(u["amount"]) for u in wp_ins)
+    wp_denom = round((wp_sum - 0.0002) / 5, 8)
+    if wp_denom <= 0:
+        raise RuntimeError("Whirlpool-like: Inputs zu klein")
+    wp_outs = [(addresses["alpha"][50], wp_denom)] + [
+        (new_address(rpc, "lab-faucet"), wp_denom) for _ in range(4)
+    ]
+    wp = raw_spend(
+        rpc, "Whirlpool-like-5x5", wp_ins, wp_outs, [alpha] + ["lab-faucet"] * 4
+    )
+    wp["expected_kind"] = "whirlpool"
+    wp["viewer_wallet"] = "lab-alpha"
+    wp["foreign_wallet"] = "lab-faucet"
+    records.append(wp)
+    mine(rpc, 2, faucet)
+
+    # JoinMarket-like: 1 eigen + 3 fremd; 4 gleiche CJ-Outs + 3 Changes.
+    jm_own = select_near(rpc, beta, 1)
+    jm_foreign = select_near(rpc, "lab-faucet", 3)
+    jm_ins = jm_own + jm_foreign
+    jm_in_sum = sum(float(u["amount"]) for u in jm_ins)
+    jm_equal = round(jm_in_sum * 0.18, 8)
+    jm_change = round((jm_in_sum - 4 * jm_equal - 0.0002) / 3, 8)
+    if jm_equal <= 0 or jm_change <= 0:
+        raise RuntimeError("JoinMarket-like: Beträge ungültig")
+    jm_outs = (
+        [(addresses["beta"][51], jm_equal)]
+        + [(new_address(rpc, "lab-faucet"), jm_equal) for _ in range(3)]
+        + [(addresses["beta"][52], jm_change)]
+        + [(new_address(rpc, "lab-faucet"), jm_change) for _ in range(2)]
+    )
+    jm = raw_spend(
+        rpc, "JoinMarket-like", jm_ins, jm_outs, [beta] + ["lab-faucet"] * 3
+    )
+    jm["expected_kind"] = "joinmarket"
+    jm["viewer_wallet"] = "lab-beta"
+    jm["foreign_wallet"] = "lab-faucet"
+    records.append(jm)
+    mine(rpc, 2, faucet)
+
+    # WabiSabi-like: 2× Alpha eigen + 14× Faucet fremd; 16 ungleiche Outs.
+    ws_own = select_near(rpc, alpha, 2)
+    ws_foreign = select_near(rpc, "lab-faucet", 14)
+    ws_ins = ws_own + ws_foreign
+    ws_signers = [alpha] * 2 + ["lab-faucet"] * 14
+    ws_in_sum = sum(float(u["amount"]) for u in ws_ins)
+    ws_weights = [
+        31, 22, 17, 11, 9, 7, 5, 4,
+        28, 19, 14, 8, 6, 3, 2, 1,
+    ]
+    wsum = float(sum(ws_weights))
+    budget = ws_in_sum - 0.0005
+    ws_amounts = [round(budget * (w / wsum), 8) for w in ws_weights]
+    ws_amounts[-1] = round(budget - sum(ws_amounts[:-1]), 8)
+    # 2 eigene Empfänge (Alpha), Rest Faucet — in SatSage nur Alpha „eigen“.
+    ws_outs: list[tuple[str, float]] = [
+        (addresses["alpha"][53], ws_amounts[0]),
+        (addresses["alpha"][54], ws_amounts[1]),
+    ]
+    for amt in ws_amounts[2:]:
+        ws_outs.append((new_address(rpc, "lab-faucet"), amt))
+    ws = raw_spend(rpc, "Wabisabi-like", ws_ins, ws_outs, ws_signers)
+    ws["expected_kind"] = "wabisabi"
+    ws["viewer_wallet"] = "lab-alpha"
+    ws["foreign_wallet"] = "lab-faucet"
+    records.append(ws)
+    mine(rpc, 2, faucet)
+
+    # PayJoin-like: 1 eigen (Gamma) + 1 Faucet; 2 Outs.
+    pj_ins = select_near(rpc, gamma, 1) + select_near(rpc, "lab-faucet", 1)
+    pj_sum = sum(float(u["amount"]) for u in pj_ins)
+    pj_outs = [
+        (addresses["gamma"][54], round(pj_sum * 0.55, 8)),
+        (new_address(rpc, "lab-faucet"), round(pj_sum * 0.40, 8)),
+    ]
+    pj = raw_spend(rpc, "PayJoin-like", pj_ins, pj_outs, [gamma, "lab-faucet"])
+    pj["expected_kind"] = "payjoin"
+    pj["viewer_wallet"] = "lab-gamma"
+    records.append(pj)
+    mine(rpc, 2, faucet)
+
+    # Exchange-batch-like: Faucet-Fan-out, genau 1 Out an Alpha (0 eigene Ins).
+    ex_ins = select_near(rpc, "lab-faucet", 1)
+    ex_sum = float(ex_ins[0]["amount"])
+    ex_main = round(ex_sum * 0.40, 8)
+    ex_rest = round((ex_sum - ex_main - 0.0002) / 5, 8)
+    ex_outs = [(addresses["alpha"][55], ex_main)] + [
+        (new_address(rpc, "lab-faucet"), ex_rest) for _ in range(5)
+    ]
+    ex = raw_spend(rpc, "Exchange-batch-like", ex_ins, ex_outs, ["lab-faucet"])
+    ex["expected_kind"] = "exchange_batch"
+    ex["viewer_wallet"] = "lab-alpha"
+    records.append(ex)
+    mine(rpc, 2, faucet)
+
+    # Fan-out-own: Alias auf bestehendes Beta-aged-fanout
+    for rec in records:
+        if rec.get("name") == "Beta-aged-fanout":
+            rec["expected_kind"] = "fan_out_own"
+            rec["viewer_wallet"] = "lab-beta"
+            rec["alias"] = "Fan-out-own"
+            break
 
     write_env(rpc)
     report = {"tip_height": int(rpc.call("getblockcount")), "records": records}
     (HERE / ".data" / "scenario-report.json").write_text(json.dumps(report, indent=2) + "\n")
+
+    # Expectations für Klassifikation / Soft-Label-Abnahme
+    txclass = {
+        "tip_height": report["tip_height"],
+        "cases": [
+            {
+                "name": r["name"],
+                "txid": r["txid"],
+                "expected_kind": r["expected_kind"],
+                "viewer_wallet": r.get("viewer_wallet"),
+                "alias": r.get("alias"),
+            }
+            for r in records
+            if r.get("expected_kind")
+        ],
+    }
+    (HERE / ".data" / "scenario-report-txclass.json").write_text(
+        json.dumps(txclass, indent=2) + "\n"
+    )
+
     for record in records:
         print(json.dumps(record, sort_keys=True))
-    print(json.dumps({"env": str(ENV_PATH), "tip_height": report["tip_height"], "scenario_count": len(records)}))
+    print(json.dumps({
+        "env": str(ENV_PATH),
+        "tip_height": report["tip_height"],
+        "scenario_count": len(records),
+        "txclass_cases": len(txclass["cases"]),
+    }))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Erzeugt SatSage-Regtest-Wallets und Szenarien.")

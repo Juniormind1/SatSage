@@ -115,13 +115,15 @@ class TestOberflaeche(unittest.TestCase):
         marke = self.js[self.js.index("function labelMarke"):]
         marke = marke[:marke.index("\nfunction ")]
         self.assertIn('label.art === "erwaehnung"', marke)
-        self.assertIn("erwähnt", marke)
+        self.assertIn('t("labels.mentionedOn"', marke)
         self.assertIn("kategorie_label", marke)
+        de = (Path(__file__).resolve().parent.parent / "web" / "locales" / "de.json")
+        self.assertIn("erwähnt", de.read_text(encoding="utf-8"))
 
     def test_datenstand_steht_im_hilfetext(self):
         marke = self.js[self.js.index("function labelMarke"):]
         marke = marke[:marke.index("\nfunction ")]
-        self.assertIn("label.hinweis", marke)
+        self.assertIn('t("labels.dataHint")', marke)
 
     def test_einstellungen_haben_die_karte(self):
         for kennung in ("label-laden", "label-verwerfen", "label-variante",

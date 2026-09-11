@@ -450,6 +450,144 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         self.assertEqual(self.datenquellen(), [text, neu])
 
 
+class TestOnionLatenzGate(unittest.TestCase):
+    """Öffentliches Onion: Setup-Probe → BIP-158 oder Warnung/Abbruch."""
+
+    def setUp(self):
+        main._reset_quelle_log()
+        self.logs: list[str] = []
+        self._log = patch.object(
+            main, "_log_quelle", side_effect=lambda t: self.logs.append(t)
+        )
+        self._log.start()
+        self.addCleanup(self._log.stop)
+        self.args = SimpleNamespace(
+            bip158=False,
+            rpc_only=False,
+            oeffentliche_electrum=True,
+            bip158_start=None,
+        )
+        self.env = {"OEFFENTLICHE_ELECTRUM": "1"}
+
+    def test_limit_aus_env_null_schaltet_ab(self):
+        self.assertIsNone(
+            main._public_onion_latency_limit({"PUBLIC_ONION_LATENCY_SECONDS": "0"})
+        )
+        self.assertEqual(
+            main._public_onion_latency_limit({}),
+            main.PUBLIC_ONION_LATENCY_GATE_SECONDS,
+        )
+
+    def test_zu_langsam_wechselt_zu_bip158(self):
+        pool = MagicMock()
+        bip = {"client": MagicMock()}
+        with patch.object(
+            main, "_measure_onion_get_history_latency", return_value=12.0
+        ), patch.object(
+            main, "_try_bip158_backend", return_value=bip
+        ) as try_bip:
+            gewählt = main._nach_oeffentlichem_onion_latenz(
+                pool,
+                self.args,
+                self.env,
+                allow_bip158_fallback=True,
+                interactive=False,
+            )
+        self.assertEqual(gewählt, ("bip158", bip))
+        try_bip.assert_called_once()
+        pool.close.assert_called_once()
+        self.assertTrue(any("langsam" in z.lower() for z in self.logs))
+        self.assertTrue(any("BIP-158" in z for z in self.logs))
+
+    def test_zu_langsam_ohne_bip158_warnt_und_behaelt_onion(self):
+        pool = MagicMock()
+        with patch.object(
+            main, "_measure_onion_get_history_latency", return_value=15.0
+        ), patch.object(
+            main, "_try_bip158_backend", return_value=None
+        ):
+            gewählt = main._nach_oeffentlichem_onion_latenz(
+                pool,
+                self.args,
+                self.env,
+                allow_bip158_fallback=True,
+                interactive=False,
+            )
+        self.assertEqual(gewählt, ("fulcrum", pool))
+        pool.close.assert_not_called()
+        self.assertTrue(
+            any("einzige Option" in z and "langsam" in z for z in self.logs)
+        )
+
+    def test_zu_langsam_interaktiv_abbruch(self):
+        pool = MagicMock()
+        with patch.object(
+            main, "_measure_onion_get_history_latency", return_value=20.0
+        ), patch.object(
+            main, "_try_bip158_backend", return_value=None
+        ), patch("interact.prompt_yes_no", return_value=False):
+            gewählt = main._nach_oeffentlichem_onion_latenz(
+                pool,
+                self.args,
+                self.env,
+                allow_bip158_fallback=True,
+                interactive=True,
+            )
+        self.assertIsNone(gewählt)
+        pool.close.assert_called_once()
+        self.assertTrue(any("Abgebrochen" in z for z in self.logs))
+
+    def test_rpc_only_ueberspringt_gate(self):
+        pool = MagicMock()
+        with patch.object(
+            main, "_measure_onion_get_history_latency"
+        ) as mess:
+            gewählt = main._nach_oeffentlichem_onion_latenz(
+                pool,
+                self.args,
+                self.env,
+                allow_bip158_fallback=False,
+                interactive=False,
+            )
+        self.assertEqual(gewählt, ("fulcrum", pool))
+        mess.assert_not_called()
+
+    def test_kette_onion_zu_langsam_landet_bei_bip158(self):
+        pool = MagicMock()
+        bip = {"client": MagicMock()}
+        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
+            main, "_try_bip158_backend", side_effect=[None, bip]
+        ), patch.object(
+            main, "_try_public_onion_fulcrum", return_value=pool
+        ), patch.object(
+            main, "_measure_onion_get_history_latency", return_value=11.0
+        ):
+            quelle, backend, _ = main._try_data_source_priority_chain(
+                self.args, self.env, include_bip158=True
+            )
+        self.assertEqual(quelle, "bip158")
+        self.assertIs(backend, bip)
+        pool.close.assert_called_once()
+
+    def test_schnell_genug_behaelt_onion(self):
+        pool = MagicMock()
+        with patch.object(
+            main, "_measure_onion_get_history_latency", return_value=1.5
+        ), patch.object(
+            main, "_try_bip158_backend"
+        ) as try_bip:
+            gewählt = main._nach_oeffentlichem_onion_latenz(
+                pool,
+                self.args,
+                self.env,
+                allow_bip158_fallback=True,
+                interactive=False,
+            )
+        self.assertEqual(gewählt, ("fulcrum", pool))
+        try_bip.assert_not_called()
+        self.assertFalse(any("langsam" in z.lower() for z in self.logs))
+
+
 class TestJobRegistry(unittest.TestCase):
 
     def test_systemexit_beendet_den_job(self):

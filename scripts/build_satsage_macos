@@ -28,6 +28,9 @@ echo "→ Marke und Splash (für Cross-Check / Linux-Win-Builds)…"
 "$PY" "$ROOT/scripts/prepare_brand_assets.py" || true
 "$PY" "$ROOT/scripts/make_splash.py" || true
 
+echo "→ BTC-Preis-Bundle bis Tip (Bitstamp/CDD; SKIP_BTC_PRICE_REFRESH=1 zum Überspringen)…"
+"$PY" "$ROOT/scripts/refresh_btc_price_bundle.py"
+
 echo "→ PyInstaller (Onefile; unter macOS ohne Splash-Bootloader)…"
 rm -rf build/satsage-webgui dist/satsage-webgui
 "$PY" -m PyInstaller --noconfirm --clean packaging/satsage-webgui.spec

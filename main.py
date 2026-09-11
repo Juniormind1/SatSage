@@ -58,6 +58,10 @@ ELECTRUM_SERVERS_FILE = app_dir() / "electrum_servers.json"
 MAX_PUBLIC_ONION_SERVERS = 10
 MIN_PUBLIC_ONION_POOL = 3
 PUBLIC_ONION_PROBE_WORKERS = 6
+#: Setup-Latenz-Gate für öffentliches Onion-Electrs (Auto-Priorität).
+#: Probe = eine ``get_history`` auf Dummy-Scripthash; darüber → BIP-158
+#: bevorzugen bzw. Warnung/Abbruch. ``PUBLIC_ONION_LATENCY_SECONDS=0`` aus.
+PUBLIC_ONION_LATENCY_GATE_SECONDS = 8.0
 UTXO_CACHE_DIR = app_dir() / "utxo_cache"
 IMMUTABLE_CACHE_DIR = app_dir() / "immutable_cache"
 MIN_FREE_DISK_RATIO = 0.05
@@ -85,6 +89,41 @@ _immutable_tx_memory: dict[str, dict] = {}
 _immutable_tx_lock = threading.Lock()
 _xpub_address_positive_cache: set[tuple[str, str]] = set()
 _xpub_address_negative_cache: set[tuple[str, str, int]] = set()
+
+# SQLite-Hinweis für tx/ / utxo_ingress/ — siehe ISSUES.md (nach CoinJoin-Verfolgung).
+_SQLITE_FLATFILE_HINT_THRESHOLD = 10_000
+_SQLITE_FLATFILE_RECOUNT_EVERY = 500
+_sqlite_flatfile_hint_emitted = False
+_sqlite_flatfile_save_ticks: dict[str, int] = {}
+_sqlite_flatfile_last_count: dict[str, int] = {}
+
+
+def _maybe_log_sqlite_flatfile_hint(subdir: Path, *, kind: str) -> None:
+    """Einmaliger Log-Hinweis, wenn Winz-JSON-Caches die SQLite-Schwelle erreichen."""
+    global _sqlite_flatfile_hint_emitted
+    if _sqlite_flatfile_hint_emitted:
+        return
+    key = str(subdir.resolve()) if subdir.exists() else str(subdir)
+    ticks = _sqlite_flatfile_save_ticks.get(key, 0) + 1
+    _sqlite_flatfile_save_ticks[key] = ticks
+    # Nicht bei jedem Write den Ordner zählen — nur beim ersten Write und periodisch.
+    if ticks != 1 and ticks % _SQLITE_FLATFILE_RECOUNT_EVERY != 0:
+        n = _sqlite_flatfile_last_count.get(key, 0)
+    else:
+        try:
+            n = sum(1 for p in subdir.iterdir() if p.suffix == ".json")
+        except OSError:
+            return
+        _sqlite_flatfile_last_count[key] = n
+    if n < _SQLITE_FLATFILE_HINT_THRESHOLD:
+        return
+    _sqlite_flatfile_hint_emitted = True
+    print(
+        f"Cache wächst — sqlite ab jetzt sinnvoll "
+        f"({kind}: {n:,} Dateien unter {subdir}). "
+        f"Falls das stört: GitHub-Issue an SatSage — wir prüfen die Schwelle.",
+        flush=True,
+    )
 
 
 def set_chain_network(name: str | None) -> None:
@@ -597,6 +636,7 @@ def save_cached_tx(
     tmp.replace(path)
     with _immutable_tx_lock:
         _immutable_tx_memory[key] = tx
+    _maybe_log_sqlite_flatfile_hint(path.parent, kind="tx")
     return path
 
 
@@ -876,6 +916,7 @@ def save_utxo_ingress_cache(
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(_dump_cache_json(payload), encoding="utf-8")
     tmp.replace(path)
+    _maybe_log_sqlite_flatfile_hint(path.parent, kind="utxo_ingress")
     return path
 
 
@@ -1780,19 +1821,24 @@ def _open_own_sanctions_pool(
     anderen Server; ein eigener Fulcrum im LAN verträgt die Last dagegen
     problemlos selbst, also werden mehrere Verbindungen dorthin geöffnet.
 
-    Die erste entscheidet, ob der Server überhaupt taugt (listunspent und
-    Block-Historie). Schlägt eine weitere fehl, läuft der Pool eben
-    schmaler — das ist kein Grund, auf Clearnet auszuweichen.
+    Die erste Verbindung muss listunspent können. Die Mainnet-Historie-Sonde
+    (Höhe 500k) entfällt hier — Regtest/Testnet und frische LAN-Nodes hätten
+    sonst fälschlich Clearnet als Fallback.
     """
     from fulcrum import SanctionsClearnetPool, connect_fulcrum
 
-    hit = _probe_clearnet_fulcrum(
-        host, port, use_ssl, SANCTIONS_CLEARNET_PROBE_TIMEOUT
+    started = time.monotonic()
+    erster, _fehler = connect_fulcrum(
+        host,
+        port,
+        use_ssl=use_ssl,
+        timeout=SANCTIONS_CLEARNET_PROBE_TIMEOUT,
+        require_listunspent=True,
     )
-    if not hit:
+    if not erster:
         return None, 0.0
+    latency = time.monotonic() - started
 
-    erster, latency = hit
     clients = [erster]
     for _ in range(max(0, workers - 1)):
         weiterer, _fehler = connect_fulcrum(
@@ -2200,6 +2246,126 @@ def _try_public_onion_fulcrum(
         return None
 
 
+def _public_onion_latency_limit(env: dict[str, str]) -> float | None:
+    """
+    Schwelle in Sekunden für das Onion-Latenz-Gate.
+
+    ``None`` = Gate aus (``PUBLIC_ONION_LATENCY_SECONDS=0`` / negativ).
+    """
+    raw = (env.get("PUBLIC_ONION_LATENCY_SECONDS") or "").strip()
+    if raw:
+        try:
+            val = float(raw.replace(",", "."))
+        except ValueError:
+            val = PUBLIC_ONION_LATENCY_GATE_SECONDS
+        if val <= 0:
+            return None
+        return val
+    return PUBLIC_ONION_LATENCY_GATE_SECONDS
+
+
+def _measure_onion_get_history_latency(backend) -> float | None:
+    """
+    Eine Probe-``get_history`` (Dummy-Scripthash) und Wandzeit in Sekunden.
+
+    Ohne Retries — das Gate soll schnell entscheiden, nicht 3×30 s hängen.
+    ``None`` bei Fehler (dann gilt der Pool nicht als „zu langsam“).
+    """
+    from fulcrum import _PROBE_SCRIPT_HASH
+
+    clients = getattr(backend, "_clients", None)
+    client = clients[0] if clients else backend
+    t0 = time.monotonic()
+    try:
+        once = getattr(client, "_request_once", None)
+        if callable(once):
+            lock = getattr(client, "_lock", None)
+            if lock is not None:
+                with lock:
+                    once(
+                        "blockchain.scripthash.get_history",
+                        [_PROBE_SCRIPT_HASH],
+                    )
+            else:
+                once(
+                    "blockchain.scripthash.get_history",
+                    [_PROBE_SCRIPT_HASH],
+                )
+        else:
+            backend.request(
+                "blockchain.scripthash.get_history",
+                [_PROBE_SCRIPT_HASH],
+            )
+    except Exception:
+        return None
+    return time.monotonic() - t0
+
+
+def _nach_oeffentlichem_onion_latenz(
+    pool,
+    args,
+    env: dict[str, str],
+    *,
+    allow_bip158_fallback: bool,
+    interactive: bool,
+) -> tuple[str, object] | None:
+    """
+    Latenz-Gate nur für Auto-Priorität (öffentliches Onion nach BIP-158-Fail).
+
+    Zu langsam + BIP-158 erreichbar → BIP-158 binden (kein Mid-Scan-Hop).
+    Zu langsam ohne BIP-158 → klare Warnung; interaktiv Abbruch möglich.
+    Explizites ``--rpc-only`` (``allow_bip158_fallback=False``) überspringt
+    das Gate.
+    """
+    if not allow_bip158_fallback:
+        return "fulcrum", pool
+
+    limit = _public_onion_latency_limit(env)
+    if limit is None:
+        return "fulcrum", pool
+
+    _log_quelle("Prüfe Latenz öffentliches Onion-Electrs…")
+    sekunden = _measure_onion_get_history_latency(pool)
+    if sekunden is None:
+        return "fulcrum", pool
+    if sekunden <= limit:
+        return "fulcrum", pool
+
+    _log_quelle(
+        f"Öffentliches Onion-Electrs langsam "
+        f"(Probe {sekunden:.1f}s > {limit:.0f}s)."
+    )
+
+    bip = _try_bip158_backend(args, env)
+    if bip:
+        try:
+            pool.close()
+        except Exception:
+            pass
+        _log_quelle(
+            "→ wechsle zu BIP-158 Compact Filter "
+            "(Onion für diese Session zu langsam)."
+        )
+        return "bip158", bip
+
+    _log_quelle(
+        "Onion ist die einzige Option und wird langsam — "
+        "Scan kann sehr lange dauern."
+    )
+    if interactive:
+        print("Trotzdem fortfahren? [j/N]: ", end="", flush=True)
+        from interact import prompt_yes_no
+
+        if not prompt_yes_no(default_yes=False):
+            try:
+                pool.close()
+            except Exception:
+                pass
+            _log_quelle("Abgebrochen (Onion zu langsam).")
+            return None
+    return "fulcrum", pool
+
+
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     """Priorität 4: öffentliche Fulcrum-Server über Clearnet."""
     from fulcrum import RotatingFulcrumPool
@@ -2266,7 +2432,16 @@ def _try_data_source_priority_chain(
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
-        return "fulcrum", pool, None
+        gewählt = _nach_oeffentlichem_onion_latenz(
+            pool,
+            args,
+            env,
+            allow_bip158_fallback=include_bip158,
+            interactive=interactive_onion,
+        )
+        if gewählt:
+            return gewählt[0], gewählt[1], None
+        return None
 
     pool = _setup_public_clearnet_fulcrum(args, env)
     if pool:
@@ -2280,6 +2455,7 @@ def _try_public_electrum_fuer_verlauf(
     env: dict[str, str],
     *,
     interactive_onion: bool = False,
+    allow_bip158_fallback: bool = True,
 ):
     """Öffentliche Electrum-Server für Verlauf — nur nach Bestätigung."""
     erlaubt = _oeffentliche_electrum_erlaubt(env, args)
@@ -2306,11 +2482,27 @@ def _try_public_electrum_fuer_verlauf(
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
+        gewählt = _nach_oeffentlichem_onion_latenz(
+            pool,
+            args,
+            env,
+            allow_bip158_fallback=allow_bip158_fallback,
+            interactive=interactive_onion,
+        )
+        if not gewählt:
+            return None
+        quelle, backend = gewählt
+        if quelle == "bip158":
+            _log_quelle(
+                "Verlauf: BIP-158 Compact Filter — Historie per "
+                "Blockwalk/Cache (Onion zu langsam)."
+            )
+            return quelle, backend
         _log_quelle(
             "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
             "(Privatsphäre mäßig)."
         )
-        return "fulcrum", pool
+        return "fulcrum", backend
 
     pool = _setup_public_clearnet_fulcrum(args, env)
     if pool:
@@ -2387,7 +2579,10 @@ def _try_verlauf_priority_chain(
             return "bip158", backend
 
     return _try_public_electrum_fuer_verlauf(
-        args, env, interactive_onion=interactive_onion,
+        args,
+        env,
+        interactive_onion=interactive_onion,
+        allow_bip158_fallback=include_bip158,
     )
 
 
@@ -2522,7 +2717,7 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
         fetch_wallet_utxos_bip158,
         verify_p2p_filters,
     )
-    from core.bitcoind_rpc import stelle_core_client_bereit
+    from core.bitcoind_rpc import stelle_tx_lookup_rollen
 
     if args.bip158_start is not None:
         start_height = args.bip158_start
@@ -2586,21 +2781,39 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
             on_utxos_update=on_utxos_update,
         )
 
-    # Core optional: getrawtransaction (txindex) vor P2P-getdata / Block-Fallback.
-    core = None
+    # Core optional: lokal (UTXO-Slot) bis pruneheight, sonst Lookup (Start9).
+    lokal_core = None
+    archival_core = None
+    lokal_prune = None
     try:
-        core = stelle_core_client_bereit(env, timeout=30.0)
-        if core is not None:
-            _log_quelle("→ Core-RPC für Tx-Lookup verfügbar (getrawtransaction)")
+        lokal_core, archival_core, lokal_prune = stelle_tx_lookup_rollen(
+            env, timeout=30.0,
+        )
+        if lokal_core is not None:
+            ph = (
+                f"pruneheight {lokal_prune}"
+                if lokal_prune and lokal_prune > 0
+                else "nicht gepruned"
+            )
+            _log_quelle(
+                f"→ Core lokal für Tx/Block ({lokal_core.cfg.ziel}, {ph})"
+            )
+        if archival_core is not None:
+            _log_quelle(
+                f"→ Core-Lookup für Tx/Block ({archival_core.cfg.ziel})"
+            )
+        if lokal_core is None and archival_core is None:
+            _log_quelle("→ kein Core-RPC für Tx-Lookup konfiguriert")
     except Exception as exc:
         _log_quelle(f"→ Core-RPC für Tx-Lookup nicht nutzbar: {exc}")
-        core = None
 
     def _get_tx_bip158(txid: str) -> dict:
         return fetch_tx_p2p_mit_fallback(
             client,
             txid,
-            core_client=core,
+            local_core=lokal_core,
+            archival_core=archival_core,
+            local_pruneheight=lokal_prune,
             on_log=_log_quelle,
         )
 
@@ -2617,7 +2830,10 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
         "fetch_wallet_utxos": _bip158_fetch_wallet_utxos,
         "fulcrum": None,
         "client": client,
-        "core_rpc": core,
+        "core_rpc": archival_core or lokal_core,
+        "core_local": lokal_core,
+        "core_archival": archival_core,
+        "core_local_pruneheight": lokal_prune,
     }
 
 
@@ -2862,6 +3078,10 @@ def _build_blockchain_fetchers(
             fetch_wallet_history_fulcrum,
             fetch_wallet_utxos_fulcrum,
         )
+        from core.bitcoind_rpc import (
+            fetch_tx_core_mit_rollen,
+            stelle_tx_lookup_rollen,
+        )
 
         fulcrum = backend
         # Weitere Verbindungen für den parallelen Scan. Einmal geöffnet und
@@ -2874,7 +3094,34 @@ def _build_blockchain_fetchers(
                 flush=True,
             )
         fetch_address_utxos = lambda addr: fetch_address_utxos_fulcrum(fulcrum, addr)
-        raw_get_tx = lambda txid: fetch_tx_fulcrum(fulcrum, txid)
+        # Core nur Ausnahme, wenn Electrs die Tx nicht liefert.
+        _core_lokal = _core_arch = None
+        _core_ph = None
+        try:
+            _env_tx = _load_dotenv()
+            _core_lokal, _core_arch, _core_ph = stelle_tx_lookup_rollen(
+                _env_tx, timeout=20.0,
+            )
+        except Exception:
+            pass
+
+        def raw_get_tx(txid: str) -> dict:
+            try:
+                return fetch_tx_fulcrum(fulcrum, txid)
+            except Exception as electrs_exc:
+                if _core_lokal is None and _core_arch is None:
+                    raise
+                try:
+                    return fetch_tx_core_mit_rollen(
+                        txid,
+                        local=_core_lokal,
+                        archival=_core_arch,
+                        local_pruneheight=_core_ph,
+                        on_log=_log_quelle,
+                    )
+                except Exception:
+                    raise electrs_exc from None
+
         get_tx = wrap_get_tx_with_immutable_cache(
             raw_get_tx, cache_root, source, pool=scan_pool
         )
@@ -4553,6 +4800,93 @@ def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
     return gefunden
 
 
+def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
+    """
+    True, wenn der UTXO-Bestand am Chain-Tip bekannt ist.
+
+    Gesetzt nach erfolgreichem BIP-158-Fullscan **oder** Electrum-/Fulcrum-
+    Fullscan (Gap liefert den Stand am Tip). Zwischenstände (Abbruch) dürfen
+    Turbo-Erstscan nicht deaktivieren. Alt-Caches ohne Flag: vorhandenes
+    ``scan_tip_height`` gilt als fertig.
+    """
+    if not roh:
+        return False
+    flag = roh.get("bip158_fullscan_ok")
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    tip = roh.get("scan_tip_height")
+    if tip is None:
+        return False
+    try:
+        return int(tip) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+#: Nach frischem UTXO-Scan: Verlauf braucht keinen zweiten Gap-Scan.
+VERLAUF_UTXO_CACHE_MAX_ALTER_S = 2 * 3600
+
+
+def _parse_scanned_at(stempel: object) -> datetime | None:
+    if not stempel:
+        return None
+    text = str(stempel).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def utxo_cache_frisch_genug(
+    xpubs: list[str],
+    cache_dir: Path,
+    *,
+    max_alter_s: int = VERLAUF_UTXO_CACHE_MAX_ALTER_S,
+) -> tuple[list[dict] | None, str]:
+    """
+    Liefert (alle UTXOs, Grund), wenn jeder XPUB einen frischen Cache hat.
+
+    Sonst ``(None, grund)`` — Verlaufs-Job soll Gap-Scan nachziehen.
+    Partial-BIP-158 (``bip158_fullscan_ok=false``) zählt nicht als frisch.
+    """
+    if not xpubs:
+        return None, "keine XPUBs"
+    jetzt = datetime.now(UTC)
+    alle: list[dict] = []
+    aeltest_s = 0
+    for xpub in xpubs:
+        entry = load_xpub_cache_entry(xpub, cache_dir)
+        if entry is None:
+            return None, "UTXO-Cache fehlt"
+        roh = entry.get("raw") or {}
+        if roh.get("bip158_fullscan_ok") is False:
+            return None, "BIP-158-Scan unvollständig"
+        stempel = _parse_scanned_at(roh.get("scanned_at"))
+        if stempel is None:
+            return None, "kein scanned_at"
+        if stempel.tzinfo is None:
+            stempel = stempel.replace(tzinfo=UTC)
+        alter = (jetzt - stempel.astimezone(UTC)).total_seconds()
+        if alter < 0:
+            alter = 0
+        if alter > max_alter_s:
+            return None, f"Cache {int(alter // 60)} Min. alt"
+        aeltest_s = max(aeltest_s, int(alter))
+        alle.extend(entry.get("utxos") or [])
+    minuten = max(1, aeltest_s // 60) if aeltest_s >= 60 else 0
+    if minuten:
+        grund = f"UTXO-Cache ≤{minuten} Min. alt — Gap-Scan übersprungen"
+    else:
+        grund = "UTXO-Cache frisch — Gap-Scan übersprungen"
+    return alle, grund
+
+
 def save_xpub_utxo_cache(
     xpub: str,
     utxos: list[dict],
@@ -4562,6 +4896,8 @@ def save_xpub_utxo_cache(
     max_addresses: int = DEFAULT_MAX_ADDRESSES,
     first_seen: dict | None = None,
     scan_tip_height: int | None = None,
+    *,
+    bip158_fullscan_ok: bool | None = None,
 ) -> Path:
     """
     Speichert UTXOs eines XPUB als JSON-Flatfile.
@@ -4573,6 +4909,10 @@ def save_xpub_utxo_cache(
 
     *scan_tip_height* (BIP-158): bis zu welcher Chain-Höhe der Filter-Scan
     ging. Fehlt der Wert, bleibt ein bereits gespeicherter Tip erhalten.
+
+    *bip158_fullscan_ok*: nur ``True`` nach komplettem BIP-158-Fullscan.
+    ``None`` = bisherigen Wert behalten (Zwischenstand darf nicht auf fertig
+    setzen). Explizit ``False`` markiert unvollständig.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = _xpub_cache_path(xpub, cache_dir)
@@ -4603,6 +4943,10 @@ def save_xpub_utxo_cache(
         payload["first_seen_ts"] = first_seen.get("time_ts")
     if scan_tip_height is not None:
         payload["scan_tip_height"] = int(scan_tip_height)
+    if bip158_fullscan_ok is not None:
+        payload["bip158_fullscan_ok"] = bool(bip158_fullscan_ok)
+    elif "bip158_fullscan_ok" in roh_bisher:
+        payload["bip158_fullscan_ok"] = bool(roh_bisher["bip158_fullscan_ok"])
     if not cache_disk_write_allowed(cache_dir):
         # Früher: still return path — Scan meldete Erfolg, UI zeigte keinen Cache.
         raise CacheDiskFullError(_cache_disk_full_meldung(cache_dir))
@@ -4623,10 +4967,18 @@ def schreibe_utxo_zwischenstand(
 
     ``scan_end_index`` und ``scan_tip_height`` bleiben unverändert (bzw. 0),
     damit ein Abbruch keinen unfertigen Lauf als Tip-Sync-fertig markiert.
+    ``bip158_fullscan_ok`` wird nicht auf True gesetzt (Abbruch ≠ Fullscan).
     First-seen wird nicht neu erhoben — nur übernommen, falls schon da.
     """
     entry = load_xpub_cache_entry(xpub, cache_dir)
     scan_end = int(entry["scan_end_index"] or 0) if entry else 0
+    # BIP-158-Zwischenstand: explizit unvollständig, falls noch nie fertig.
+    # War schon ein Fullscan ok, Flag behalten (Rescan-Abbruch).
+    full_ok = None
+    if source == "bip158":
+        roh = (entry or {}).get("raw") or {}
+        if not bip158_fullscan_ist_fertig(roh):
+            full_ok = False
     return save_xpub_utxo_cache(
         xpub,
         utxos,
@@ -4638,6 +4990,7 @@ def schreibe_utxo_zwischenstand(
             if entry
             else max_addresses
         ),
+        bip158_fullscan_ok=full_ok,
     )
 
 
@@ -5407,26 +5760,21 @@ def _fulcrum_transport_ist_lan(fulcrum) -> bool:
     return True
 
 
-def _utxo_scan_scantxoutset_vorrang(fulcrum=None) -> bool:
+def _utxo_scan_scantxoutset_vorrang(fulcrum=None, env: dict[str, str] | None = None) -> bool:
     """
     Wann Bitcoin Core ``scantxoutset`` vor dem Electrum-Gap-Scan steht.
 
-    Reihenfolge für den **reinen UTXO-Bestand** (Geschwindigkeit, gleiche
-    Privatsphäre bei eigenem Node):
+    Reihenfolge für den **reinen UTXO-Bestand** (Alltag = Tempo):
 
-    1. Electrs/Fulcrum im LAN — Gap-Scan nur über genutzte Adressen
-    2. Core RPC im LAN — ``scantxoutset`` über das ganze UTXO-Set (~1 Min)
-    3. Core RPC über Onion — dasselbe, plus Tor-Latenz
-    4. Electrs über Onion
-    5. BIP-158 Compact Filter (Header/Filter-Walk)
+    1. Electrs/Fulcrum **im LAN** — Gap-Scan nur über genutzte Adressen
+    2. Core ``scantxoutset`` — bevorzugt ``UTXO_RPC_*`` (lokaler Node),
+       sonst Lookup-``NODE_IP`` (z. B. Start9)
+    3. Electrs Onion / BIP-158 / öffentlich
 
-    Öffentliche Electrum-Server bleiben dahinter (schlechtere Privatsphäre).
-
-    Ist Electrs im LAN die aktive Quelle, entfällt Core: der Gap-Scan ist
-    für typische Wallets deutlich schneller als ein voller Set-Durchlauf.
-    Fehlt LAN-Electrs, bleibt Core (LAN oder Onion) vor Onion-Electrs und
-    BIP-158.
+    Lokaler scantxoutset bleibt Fallback (Vollständigkeit ohne Gap-Policy,
+    Privatsphäre), nicht der Default neben schnellem LAN-Electrs.
     """
+    _ = env  # reserviert (Tests/Caller); Priorität hängt am Fulcrum-Transport
     if _fulcrum_transport_ist_lan(fulcrum):
         return False
     return True
@@ -5447,7 +5795,8 @@ def _try_scantxoutset_xpub(
     None = absichtlich übersprungen, Core fehlt/unerreichbar → Caller nutzt
     Electrum/BIP-158. Siehe ``_utxo_scan_scantxoutset_vorrang``.
     """
-    if not _utxo_scan_scantxoutset_vorrang(fulcrum):
+    env = _load_dotenv()
+    if not _utxo_scan_scantxoutset_vorrang(fulcrum, env=env):
         msg = (
             "scantxoutset übersprungen — Electrs/Fulcrum im LAN ist für den "
             "UTXO-Bestand typischerweise schneller (Gap-Scan)."
@@ -5460,7 +5809,6 @@ def _try_scantxoutset_xpub(
                 on_progress(msg)
         return None
 
-    env = _load_dotenv()
     from core.bitcoind_rpc import try_scantxoutset_for_xpubs
 
     scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
@@ -5638,8 +5986,30 @@ def _scan_xpub_utxos(
         except TypeError:
             fetch_kwargs.pop("on_utxos_update", None)
             utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
+        # Electrum/Fulcrum liefert den Bestand am Tip — Höhe mitschreiben,
+        # damit späterer P2P-Lauf Tip-Nachzug machen kann.
+        if fulcrum is not None and not is_list_abort_requested():
+            try:
+                from fulcrum import get_chain_tip_height
+
+                tip_hoehe = int(get_chain_tip_height(fulcrum, force=True))
+            except Exception:
+                tip_hoehe = None
     if is_list_abort_requested() and not utxos:
         return list(zwischen) if zwischen else utxos
+    # Bestand am Tip: BIP-158-Fullscan oder erfolgreicher Electrum-Gap.
+    # Abbruch: kein Tip / fullscan_ok=False → nächster P2P-Lauf Turbo-Erstscan.
+    full_ok = None
+    if is_list_abort_requested():
+        if source == "bip158":
+            full_ok = False
+            tip_hoehe = None
+    elif source == "bip158":
+        full_ok = True
+    elif tip_hoehe and tip_hoehe > 0:
+        # Fulcrum/Electrum (und Core+Fulcrum-Tip): Flag heißt historisch
+        # bip158_fullscan_ok, meint aber „UTXO-Stand am Tip bekannt“.
+        full_ok = True
     cache_path = save_xpub_utxo_cache(
         xpub,
         utxos,
@@ -5656,6 +6026,7 @@ def _scan_xpub_utxos(
             utxos=utxos,
         ),
         scan_tip_height=tip_hoehe,
+        bip158_fullscan_ok=full_ok,
     )
     print(
         f"  → {len(utxos)} UTXO(s) gecacht in {cache_path.name}",
@@ -5933,11 +6304,19 @@ def sync_xpub_zum_tip(
     merged = _merge_utxo_lists(merged, extra_utxos)
     merged = _merge_utxo_lists(merged, extra_window)
     old_n = len(alt)
-    # Electrs light liefert keinen Filter-Tip — Header-Cache-Tip merken,
-    # damit der nächste Start-Sync BIP-158 multi-peer ab Tip nutzen kann.
-    # Electrs light: Tip auf Header-Cache anheben (auch wenn schon ein
-    # älterer scan_tip_height stand — sonst bleibt „−N Blöcke“ hängen).
+    # Electrs light: Tip auf Live-Electrs (bevorzugt) bzw. Header-Datei
+    # anheben — sonst bleibt „−N Blöcke“ hängen, wenn p2p_headers hinter
+    # dem Node liegt oder stundenlang nicht nachgezogen wurde.
     tip_fuer_cache = tip_i
+    if fulcrum is not None:
+        try:
+            from fulcrum import get_chain_tip_height
+
+            et = int(get_chain_tip_height(fulcrum, force=True))
+            if tip_fuer_cache is None or et > int(tip_fuer_cache):
+                tip_fuer_cache = et
+        except Exception:
+            pass
     try:
         from core.p2p import header_datei_tip, p2p_headers_path
 

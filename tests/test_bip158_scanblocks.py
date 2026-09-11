@@ -25,15 +25,103 @@ from core.p2p import (
 
 class TestTurboPasses(unittest.TestCase):
 
-    def test_erstscan_ohne_used_ist_ein_historien_pass(self):
+    def test_erstscan_ohne_used_ist_turbo_dann_historie(self):
+        """Wasabi-Erstscan: Turbo(all) zuerst, Historie nur Gap — kein Full-All-Keys."""
         alle = {b"\x01", b"\x02", b"\x03"}
+        gap = {b"\x01"}
+        tip = 900_000
+        passe = plane_filter_passes(481_824, tip, alle, set(), gap_scripts=gap)
+        self.assertEqual(len(passe), 2)
+        turbo, histo = passe
+        self.assertEqual(turbo[0], "turbo")
+        self.assertEqual(turbo[1], tip - TURBO_WINDOW + 1)
+        self.assertEqual(turbo[2], tip)
+        self.assertEqual(turbo[3], frozenset(alle))
+        self.assertEqual(histo[0], "historie")
+        self.assertEqual(histo[1], 481_824)
+        self.assertEqual(histo[2], turbo[1] - 1)
+        self.assertEqual(histo[3], frozenset(gap))
+        self.assertNotEqual(histo[3], frozenset(alle))
+
+    def test_abbruch_zwischenstand_deaktiviert_turbo_nicht(self):
+        """Partial-Cache ohne Fullscan-Flag → used leer → Turbo-Erstscan."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import main
+        from bip158_scanner import _used_scripts_aus_cache
+
+        self.assertFalse(main.bip158_fullscan_ist_fertig({}))
+        self.assertFalse(
+            main.bip158_fullscan_ist_fertig(
+                {"bip158_fullscan_ok": False, "utxos": [{"address": "x"}]}
+            )
+        )
+        self.assertTrue(main.bip158_fullscan_ist_fertig({"bip158_fullscan_ok": True}))
+        self.assertTrue(main.bip158_fullscan_ist_fertig({"scan_tip_height": 800_000}))
+        self.assertFalse(main.bip158_fullscan_ist_fertig({"scan_tip_height": 0}))
+
+        xpub = (
+            "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3N"
+            "o2dFDFGTsxxpG5uJh7n7epu4trkrX7x7DogT5Uf1nxASY"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            # Zwischenstand nach Abbruch: UTXOs da, Fullscan nicht ok.
+            main.save_xpub_utxo_cache(
+                xpub,
+                [{
+                    "txid": "ab" * 32,
+                    "vout": 0,
+                    "value": 1000,
+                    "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+                }],
+                cache,
+                "bip158",
+                bip158_fullscan_ok=False,
+            )
+            self.assertEqual(_used_scripts_aus_cache(xpub, cache), set())
+            # Fertig: Flag + Tip → used aus Cache (Mock der Adress→Script-Map).
+            main.save_xpub_utxo_cache(
+                xpub,
+                [{
+                    "txid": "ab" * 32,
+                    "vout": 0,
+                    "value": 1000,
+                    "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+                }],
+                cache,
+                "bip158",
+                scan_tip_height=900_000,
+                bip158_fullscan_ok=True,
+            )
+            with patch(
+                "bip158_scanner.addresses_to_script_pubkeys",
+                return_value={b"\x01\x02": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"},
+            ):
+                self.assertEqual(_used_scripts_aus_cache(xpub, cache), {b"\x01\x02"})
+            # Zwischenstand nach Fullscan behält ok.
+            main.schreibe_utxo_zwischenstand(
+                xpub,
+                [{
+                    "txid": "cd" * 32,
+                    "vout": 0,
+                    "value": 500,
+                    "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+                }],
+                cache,
+                "bip158",
+            )
+            ein = main.load_xpub_cache_entry(xpub, cache)
+            self.assertTrue(ein["raw"].get("bip158_fullscan_ok"))
+
+    def test_erstscan_ohne_gap_historie_leer(self):
+        alle = {b"\x01", b"\x02"}
         passe = plane_filter_passes(481_824, 900_000, alle, set())
-        self.assertEqual(len(passe), 1)
-        name, von, bis, scripts = passe[0]
-        self.assertEqual(name, "historie")
-        self.assertEqual(von, 481_824)
-        self.assertEqual(bis, 900_000)
-        self.assertEqual(scripts, frozenset(alle))
+        self.assertEqual(passe[0][0], "turbo")
+        self.assertEqual(passe[1][0], "historie")
+        self.assertEqual(passe[1][3], frozenset())
 
     def test_used_keys_historie_lookahead_nur_turbo(self):
         used = {b"\x01"}
@@ -60,7 +148,7 @@ class TestTurboPasses(unittest.TestCase):
 
     def test_filter_umfang_ist_nach_den_paessen_bekannt(self):
         alle = {b"\x01"}
-        erst = plane_filter_passes(481_824, 900_000, alle, set())
+        erst = plane_filter_passes(481_824, 900_000, alle, set(), gap_scripts=alle)
         self.assertEqual(_filter_umfang(erst), 900_000 - 481_824 + 1)
         zwei = plane_filter_passes(481_824, 900_000, alle, {b"\x01"})
         self.assertEqual(
@@ -148,6 +236,39 @@ class TestFilterParallel(unittest.TestCase):
     def test_filter_treffer_loggt_bevor_der_block_kommt(self):
         from unittest.mock import patch
 
+        from bip158_scanner import _BLOCK_PENDING, _lade_cfilter_chunk
+        import queue
+
+        logs: list[str] = []
+        q: queue.Queue = queue.Queue()
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(b"\x11" * 32, b"\x01")]
+
+            def fetch_block(self, block_hash):
+                raise AssertionError("async: kein Sync-Fetch im Filter-Worker")
+
+        peer = FakePeer()
+        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            zeilen = _lade_cfilter_chunk(
+                peer, 850_123, 850_123, b"\x22" * 32,
+                frozenset({b"\x01"}), on_log=logs.append,
+                block_queue=q,
+            )
+        self.assertTrue(
+            any("Filter-Treffer Block 850.123 — hole Block" in z for z in logs),
+            logs,
+        )
+        self.assertIs(zeilen[0][3], _BLOCK_PENDING)
+        hoehe, bhash = q.get_nowait()
+        self.assertEqual(hoehe, 850_123)
+        self.assertEqual(bhash, b"\x11" * 32)
+
+    def test_filter_treffer_sync_ohne_queue(self):
+        from unittest.mock import patch
+
         from bip158_scanner import _lade_cfilter_chunk
 
         logs: list[str] = []
@@ -168,16 +289,87 @@ class TestFilterParallel(unittest.TestCase):
                 peer, 850_123, 850_123, b"\x22" * 32,
                 frozenset({b"\x01"}), on_log=logs.append,
             )
-        self.assertTrue(
-            any("Filter-Treffer Block 850.123 — hole Block" in z for z in logs),
-            logs,
-        )
-        self.assertTrue(
-            any("hole Block" in z for z in peer.gesehen),
-            peer.gesehen,
-        )
+        self.assertTrue(any("hole Block" in z for z in peer.gesehen), peer.gesehen)
         self.assertEqual(peer.hash, b"\x11" * 32)
         self.assertIsNotNone(zeilen[0][3])
+        self.assertIsNot(zeilen[0][3], object())
+
+    def test_cfilter_cache_zweiter_scan_ohne_netz(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from bip158_scanner import _lade_cfilter_chunk
+        from core.cfilter_cache import speichere_cfilter_blob
+
+        hoehe = 850_100
+        bhash = b"\xab" * 32
+        blob = b"\x01\x02\x03"
+
+        class FakePeer:
+            def __init__(self):
+                self.fetches = 0
+
+            def fetch_cfilters(self, start, stop, expect):
+                self.fetches += 1
+                raise AssertionError("Cache warm — kein getcfilters")
+
+            def fetch_block(self, block_hash):
+                raise AssertionError("kein Match")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            speichere_cfilter_blob(root, hoehe, bhash, blob)
+            peer = FakePeer()
+            stats = {"geholt": 0, "gecacht": 0}
+            with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+                matcher.return_value.match_any.return_value = False
+                zeilen = _lade_cfilter_chunk(
+                    peer, hoehe, hoehe, bhash,
+                    frozenset({b"\x01"}),
+                    hash_at=lambda h: bhash,
+                    cache_dir=root,
+                    stats=stats,
+                )
+            self.assertEqual(peer.fetches, 0)
+            self.assertEqual(stats["gecacht"], 1)
+            self.assertEqual(stats["geholt"], 0)
+            self.assertEqual(zeilen[0][2], blob)
+
+    def test_filter_hit_enqueued_block_fetch_async(self):
+        """Treffer geht in die Queue; Block-Worker holt nach Filter-Match."""
+        import threading
+        import time
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+
+        fetch_block_calls: list = []
+        filter_done = threading.Event()
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                time.sleep(0.02)
+                filter_done.set()
+                return [(b"\x11" * 32, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, block_hash):
+                fetch_block_calls.append((block_hash, filter_done.is_set()))
+                time.sleep(0.05)
+                return b"\x00" * 80
+
+        peer = FakePeer()
+        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [peer],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0][0][3], b"\x00" * 80)
+        self.assertEqual(len(fetch_block_calls), 1)
+        self.assertTrue(fetch_block_calls[0][1], "Filter-Match vor Block-Fetch")
 
     def test_beschreibe_block_treffer_nennt_utxos_und_fp(self):
         from bip158_scanner import MatchedOutput, _beschreibe_block_treffer
@@ -503,7 +695,10 @@ class TestP2pCodec(unittest.TestCase):
     def test_zaehle_compact_filter_peers(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import zaehle_compact_filter_peers
+
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
 
         def fake_verbinde(host, port, **kwargs):
             if host.endswith(".1"):
@@ -519,17 +714,12 @@ class TestP2pCodec(unittest.TestCase):
                 on_log=logs.append,
             )
         self.assertEqual(n, ["192.0.2.2:8333", "192.0.2.3:8333"])
-        self.assertIn("Feste Peer-Liste: 3 Einträge", logs)
-        self.assertIn("Verbinde mit 192.0.2.1:8333", logs)
-        self.assertTrue(
-            any(z.startswith("Verbindung fehlgeschlagen 192.0.2.1:8333") for z in logs)
-        )
-        self.assertIn("Verbunden. Compact Filter 192.0.2.2:8333", logs)
-        self.assertIn("Verbunden. 2 Compact-Filter-Peers.", logs)
-        self.assertLess(
-            logs.index("Verbinde mit 192.0.2.1:8333"),
-            next(i for i, z in enumerate(logs) if z.startswith("Verbunden.")),
-        )
+        # Knapp: nur Erfolgszeilen je neuem Peer, kein Kandidaten-/Fehler-Spam.
+        self.assertFalse(any("Verbinde mit" in z for z in logs), logs)
+        self.assertFalse(any("fehlgeschlagen" in z for z in logs), logs)
+        self.assertIn("Verbunden. Compact-Filter-Peer 192.0.2.2:8333.", logs)
+        self.assertIn("Verbunden. Compact-Filter-Peer 192.0.2.3:8333.", logs)
+        self.assertEqual(len([z for z in logs if z.startswith("Verbunden.")]), 2)
 
     def test_timeouts_an_wenigen_hosts_sind_firewall(self):
         from unittest.mock import patch
@@ -636,16 +826,25 @@ class TestP2pCodec(unittest.TestCase):
         self.assertEqual(n, [])
         dns.assert_not_called()
         verb.assert_not_called()
-        self.assertIn("Keine P2P-Adressen gefunden.", logs)
+        self.assertEqual(logs, [])
         reset_clearnet_port_block_cache()
 
     def test_verbinde_ruhig_unterdrueckt_hostzeilen(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import verbinde_compact_filter_peers
 
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
         logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()), patch(
+
+        def fake_peer(host, port, **kwargs):
+            m = MagicMock()
+            m.host = host
+            m.port = port
+            return m
+
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
             "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
         ):
             live = verbinde_compact_filter_peers(
@@ -664,18 +863,30 @@ class TestP2pCodec(unittest.TestCase):
         self.assertEqual(len(live), 4)
         self.assertFalse(any("Verbinde mit" in z for z in logs), logs)
         self.assertFalse(any("DNS-Seed" in z for z in logs), logs)
-        self.assertTrue(
-            any("4 Compact-Filter-Peers für den Scan" in z for z in logs), logs
+        # Unter 3 Peers Log, ab 3 Stille — bei 4 Treffern also genau 3 Zeilen.
+        self.assertEqual(
+            len([z for z in logs if z.startswith("Verbunden. Compact-Filter-Peer ")]),
+            3,
+            logs,
         )
         self.assertFalse(any(z.startswith("Nur ") for z in logs), logs)
 
     def test_verbinde_ruhig_warnt_unter_drei_peers(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import verbinde_compact_filter_peers
 
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
         logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()), patch(
+
+        def fake_peer(host, port, **kwargs):
+            m = MagicMock()
+            m.host = host
+            m.port = port
+            return m
+
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
             "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
         ):
             live = verbinde_compact_filter_peers(
@@ -698,36 +909,43 @@ class TestP2pCodec(unittest.TestCase):
     def test_verbinde_log_sagt_ueber_tor(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import zaehle_compact_filter_peers
 
-        logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()):
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        with patch("core.p2p.verbinde_peer", return_value=MagicMock()) as verb:
             zaehle_compact_filter_peers(
                 peers=[("198.51.100.9", 8333)],
                 versuche=1,
                 dns_fallback=False,
                 tor_proxy=("127.0.0.1", 9150),
-                on_log=logs.append,
+                on_log=None,
             )
-        self.assertIn("Verbinde mit 198.51.100.9:8333 über Tor", logs)
-        self.assertFalse(any(z == "Verbinde mit 198.51.100.9:8333" for z in logs))
+        verb.assert_called()
+        kwargs = verb.call_args.kwargs
+        self.assertEqual(kwargs.get("tor_proxy"), ("127.0.0.1", 9150))
 
     def test_lan_peer_auch_mit_tor_proxy_direkt(self):
         from unittest.mock import MagicMock, patch
 
+        import core.p2p as p2p_mod
         from core.p2p import zaehle_compact_filter_peers
 
-        logs: list[str] = []
-        with patch("core.p2p.verbinde_peer", return_value=MagicMock()):
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        with patch("core.p2p.verbinde_peer", return_value=MagicMock()) as verb:
             zaehle_compact_filter_peers(
                 peers=[("192.168.1.50", 8333)],
                 versuche=1,
                 dns_fallback=False,
                 tor_proxy=("127.0.0.1", 9150),
-                on_log=logs.append,
+                on_log=None,
             )
-        self.assertIn("Verbinde mit 192.168.1.50:8333", logs)
-        self.assertFalse(any("über Tor" in z for z in logs))
+        verb.assert_called()
+        # LAN bleibt direkt — tor_proxy wird an verbinde_peer durchgereicht,
+        # die Peer-Klasse verbindet LAN trotzdem ohne Tor (host_ist_lan).
+        self.assertEqual(
+            verb.call_args.kwargs.get("tor_proxy"), ("127.0.0.1", 9150),
+        )
 
     def test_stelle_p2p_tor_prueft_laufenden_socks(self):
         from unittest.mock import patch

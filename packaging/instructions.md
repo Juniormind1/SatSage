@@ -5,25 +5,29 @@ descriptors. It does not store seeds or private keys.
 
 ## Requirements
 
-SatSage depends on two services on the same StartOS device:
+SatSage depends on services on the same StartOS device:
 
-- **Bitcoin** (Bitcoin Core) — RPC plus the cookie file
-- **Electrs** — address history and UTXO lookups
+- **Bitcoin** (Bitcoin Core) — RPC plus the cookie file (**required**)
+- **Electrs** *or* **Fulcrum** — Electrum index for address history and UTXOs
 
-Both must be installed, configured, and synced before SatSage is useful.
+Use the SatSage action **Select Indexer** to pick Electrs or Fulcrum (default
+for existing installs: Electrs). Install and sync the chosen indexer before
+expecting wallet scans to work.
+
 This package does **not** put SatSage “on Tor” or on the public internet.
 LAN / Tor / clearnet exposure is whatever you enable in StartOS for this
 service.
 
 ## First start
 
-1. Start Bitcoin and Electrs and wait until they are healthy.
-2. Start SatSage.
-3. Open **Web UI**. StartOS asks for HTTP Basic auth:
+1. Start Bitcoin and your chosen indexer (Electrs or Fulcrum); wait until healthy.
+2. In SatSage, run **Select Indexer** if you want Fulcrum instead of Electrs.
+3. Start SatSage.
+4. Open **Web UI**. StartOS asks for HTTP Basic auth:
    - username: `admin`
    - password: the generated service password (StartOS → SatSage →
      Properties / the rotate-password action)
-4. The same password is the SatSage login.
+5. The same password is the SatSage login (no second password prompt).
 
 If you rotate the password, stop SatSage first, run **Rotate Web UI
 Password**, then start it again.
@@ -39,3 +43,4 @@ analysis caches. Restoring a backup restores that volume.
 - Watch-only: no signing, no seed management.
 - Public Electrum servers stay off unless you explicitly opt in.
 - Only the x86_64 package is built today.
+- Fulcrum needs more disk/RAM than Electrs; follow Fulcrum’s StartOS docs.

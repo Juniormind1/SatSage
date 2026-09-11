@@ -66,3 +66,5 @@ tmp/live-timing-*.json
 price_cache/
 satsage-webgui.exe
 satsage-webgui.exe.sha256
+
+.grok-local-notes.txt

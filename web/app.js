@@ -143,6 +143,10 @@ function quelleDetail(quelle) {
     (_, n) => t("sources.detail.extraPeers", { n }),
   );
   d = d
+    .replace(
+      /\baus — öffentliche Listen können greifen\b/g,
+      t("sources.detail.p2pOff"),
+    )
     .replace(/\bnicht eingetragen\b/g, t("sources.detail.notSet"))
     .replace(/\bkeine eingetragen\b/g, t("sources.detail.noneSet"))
     .replace(/\bkeine Liste\b/g, t("sources.detail.noList"))
@@ -158,8 +162,11 @@ function privacyLabel(stufe) {
 }
 
 function knotenNotiz(knoten) {
-  if (!knoten || !knoten.note) return "";
-  if (knoten.type === "external") return t("trace.noteExternalNotFollowed");
+  if (!knoten) return "";
+  // Soft-Label und „Extern“ sitzen in der TxID-/Zeit-Zeile, nicht als Extra-Band.
+  if (softTxClassLabel(knoten)) return "";
+  if (knoten.type === "external") return "";
+  if (!knoten.note) return "";
   if (knoten.type === "external_unresolved") {
     return t("trace.noteUnresolvedInputs", { count: knoten.input_count || 0 });
   }
@@ -167,7 +174,158 @@ function knotenNotiz(knoten) {
   if (knoten.note === "Keine Herkunft ermittelbar.") {
     return t("trace.errorNoOriginDetermined");
   }
+  // Backend-Notiz „Externe Zweige…“ / Soft-Label nicht nochmal als Band.
+  if (knoten.note === "Externe Zweige werden nicht weiterverfolgt.") return "";
+  if (knoten.tx_class_label && knoten.note === knoten.tx_class_label) return "";
   return knoten.note;
+}
+
+/** Soft-Label der Tx-Klassifikation (CoinJoin-Art, PayJoin, …). */
+function softTxClassLabel(knotenOderErgebnis) {
+  if (!knotenOderErgebnis) return "";
+  const kind = knotenOderErgebnis.tx_class || "";
+  if (!kind || kind === "unknown") return "";
+  const key = `trace.txClass.${kind}`;
+  const uebersetzt = t(key);
+  if (uebersetzt !== key) return uebersetzt;
+  return knotenOderErgebnis.tx_class_label || knotenOderErgebnis.note || "";
+}
+
+/** Mempool-artige Form-Icons für Mix-Soft-Labels (kein Markenlogo). */
+const TX_CLASS_ICON = {
+  whirlpool: "img/tx-class/whirlpool.svg",
+  wasabi_classic: "img/tx-class/wasabi-classic.svg",
+  wabisabi: "img/tx-class/wabisabi.svg",
+  joinmarket: "img/tx-class/joinmarket.svg",
+};
+
+function softTxClassKind(knotenOderErgebnis) {
+  const kind = (knotenOderErgebnis && knotenOderErgebnis.tx_class) || "";
+  if (!kind || kind === "unknown") return "";
+  return kind;
+}
+
+/** Füllt .knoten-unten-rechts mit optionalem Icon + Soft-Label-Text. */
+function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
+  if (!rechts) return;
+  const text = softTxClassLabel(knotenOderErgebnis);
+  const kind = softTxClassKind(knotenOderErgebnis);
+  rechts.replaceChildren();
+  if (!text) {
+    rechts.hidden = true;
+    return;
+  }
+  rechts.hidden = false;
+  const iconSrc = TX_CLASS_ICON[kind];
+  if (iconSrc) {
+    const img = document.createElement("img");
+    img.className = "tx-class-icon";
+    img.src = iconSrc;
+    img.alt = "";
+    img.width = 18;
+    img.height = 18;
+    img.decoding = "async";
+    rechts.append(img);
+  }
+  const span = document.createElement("span");
+  span.className = "tx-class-text";
+  span.textContent = text;
+  rechts.append(span);
+}
+
+const MIX_ICON_ORDER = [
+  "whirlpool",
+  "wasabi_classic",
+  "wabisabi",
+  "joinmarket",
+];
+
+/** Mix-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
+function mixArtenAusErgebnis(ergebnis) {
+  const gesehen = new Set();
+  if (!ergebnis || !ergebnis.found) return [];
+  const stapel = [];
+  if (ergebnis.root) stapel.push(ergebnis.root);
+  for (const k of ergebnis.children || []) stapel.push(k);
+  if (ergebnis.tx_class && TX_CLASS_ICON[ergebnis.tx_class]) {
+    gesehen.add(ergebnis.tx_class);
+  }
+  while (stapel.length) {
+    const knoten = stapel.pop();
+    if (!knoten || typeof knoten !== "object") continue;
+    if (knoten.tx_class && TX_CLASS_ICON[knoten.tx_class]) {
+      gesehen.add(knoten.tx_class);
+    }
+    for (const kind of knoten.children || []) stapel.push(kind);
+  }
+  return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
+}
+
+/** Mix-Arten einer Adressgruppe aus schon gespeicherten Traces (ohne Extra-Job). */
+function mixArtenDerGruppe(gruppe) {
+  const gesehen = new Set();
+  for (const u of gruppe.utxos || []) {
+    for (const k of u.mix_arten || []) {
+      if (TX_CLASS_ICON[k]) gesehen.add(k);
+    }
+    if (u.tx_class && TX_CLASS_ICON[u.tx_class]) gesehen.add(u.tx_class);
+  }
+  return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
+}
+
+/** Kurznamen für Adressgruppen-Tooltips (nicht das volle Soft-Label). */
+const MIX_ICON_KURZ = {
+  whirlpool: "Whirlpool",
+  wasabi_classic: "Wasabi",
+  wabisabi: "WabiSabi",
+  joinmarket: "JoinMarket",
+};
+
+/** Nur Icons, kein Text — Tooltip: „Im Verlauf …-Muster erkannt.“ */
+function zeichneMixIconLeiste(arten) {
+  if (!arten || !arten.length) return null;
+  const leiste = document.createElement("span");
+  leiste.className = "adress-mix-icons";
+  const tipps = [];
+  for (const kind of arten) {
+    const src = TX_CLASS_ICON[kind];
+    if (!src) continue;
+    const name = MIX_ICON_KURZ[kind] || softTxClassLabel({ tx_class: kind }) || kind;
+    const tipp = t("trace.mixInHistory", { art: name });
+    tipps.push(tipp);
+    const img = document.createElement("img");
+    img.className = "tx-class-icon adress-mix-icon";
+    img.src = src;
+    img.alt = tipp;
+    img.title = tipp;
+    img.width = 16;
+    img.height = 16;
+    img.decoding = "async";
+    leiste.append(img);
+  }
+  if (tipps.length) leiste.setAttribute("aria-label", tipps.join("; "));
+  return leiste.children.length ? leiste : null;
+}
+
+/** Nach neuem Trace: Mix-Icons an der Adressgruppe nachziehen. */
+function aktualisiereGruppenMixIcons(address) {
+  if (!address) return;
+  const gruppeEl = document.querySelector(
+    `.adress-gruppe[data-address="${CSS.escape(address)}"]`,
+  );
+  if (!gruppeEl) return;
+  const gruppe = gruppeAusTraceListe(address);
+  if (!gruppe) return;
+  const kopf = gruppeEl.querySelector(".adress-kopf");
+  if (!kopf) return;
+  const alt = kopf.querySelector(".adress-mix-icons");
+  if (alt) alt.remove();
+  const leiste = zeichneMixIconLeiste(mixArtenDerGruppe(gruppe));
+  if (!leiste) return;
+  // Vor dem Betrag rechts einfügen, falls vorhanden.
+  const betrag = kopf.querySelector(".adress-betrag");
+  if (betrag) kopf.insertBefore(leiste, betrag);
+  else kopf.append(leiste);
 }
 
 function quelleFeldLabel(feld, quelleKey) {
@@ -448,18 +606,40 @@ function chainTipHoehe() {
 }
 
 function walletSyncLaeuftFuer(walletId) {
+  if (!walletId) return false;
   const jobs = Zustand.jobsNav?.jobs || [];
   for (const job of jobs) {
-    if (job.kind !== "wallet_sync" || job.status !== "running") continue;
+    if (job.kind !== "wallet_sync") continue;
+    if (!(job.running || job.status === "running" || job.status === "queued")) {
+      continue;
+    }
     const ids = job.meta?.wallet_ids;
     if (Array.isArray(ids) && ids.length) {
       if (ids.includes(walletId)) return true;
       continue;
     }
-    // Sync ohne explizite Liste: alle Caches
-    return true;
+    // Sync ohne explizite Wallet-Liste: Tip-Knopf darf global warten,
+    // UTXO-Scan dieses Portfolios nicht pauschal sperren.
+    if (job.meta?.wallet_id === walletId) return true;
   }
   return false;
+}
+
+/** Job-ID noch wirklich laufend/in Queue laut jobsNav (sonst stale GUI-Bindung). */
+function jobNochAktiv(jobId) {
+  if (!jobId) return false;
+  const jobs = Zustand.jobsNav?.jobs || [];
+  const j = jobs.find((x) => x && x.id === jobId);
+  if (!j) {
+    // Nav noch nicht da / älterer Server: lokale Bindung nur kurz vertrauen
+    return Boolean(Zustand.rescanTimer);
+  }
+  return Boolean(
+    j.running
+    || j.status === "running"
+    || j.status === "queued"
+    || j.queue_status === "queued",
+  );
 }
 
 /**
@@ -720,11 +900,33 @@ function formatLocale() {
   return "de-DE";
 }
 
+/** Fallback bevor locales geladen sind — Kopf-Pillen nie als Roh-Keys. */
+const T_FALLBACK = {
+  "header.p2pPeers": "P2P {n}",
+  "header.sourceCore": "Core",
+  "header.sourceElectrumOwn": "Electrum privat",
+  "header.sourceElectrumPublic": "Electrum öffentlich",
+  "privacy.pillHigh": "Privatsphäre hoch",
+  "privacy.pillMedium": "Privatsphäre mittel",
+  "privacy.pillNone": "keine Privatsphäre",
+  "privacy.pillUnclear": "Privatsphäre unklar",
+};
+
 function t(key, vars) {
+  let text;
   if (window.SatSageI18n && typeof window.SatSageI18n.t === "function") {
-    return window.SatSageI18n.t(key, vars);
+    text = window.SatSageI18n.t(key, vars);
+    // Catalog noch leer / Key fehlt → Roh-Key vermeiden.
+    if (text === key && T_FALLBACK[key]) text = T_FALLBACK[key];
+  } else {
+    text = T_FALLBACK[key] || key;
   }
-  return key;
+  if (vars && typeof vars === "object" && text.indexOf("{") >= 0) {
+    for (const [name, wert] of Object.entries(vars)) {
+      text = text.split(`{${name}}`).join(String(wert));
+    }
+  }
+  return text;
 }
 
 
@@ -893,6 +1095,9 @@ function gruppeAusTraceListe(address, keyHinweis) {
 /**
  * Nach einem frischen Trace: Listendaten und Kopfzeilen nachziehen.
  * Sonst sähe man „jüngste sats" und das Verfolgt-Datum erst nach Refresh.
+ *
+ * Bei gezielter Tx-Suche startet die Kopfzeile oft mit 0 sats / leerer
+ * Adresse — hier kommen Output-Betrag und Adresse aus dem Trace-Root.
  */
 function merkeTraceAmUtxo(utxo, ergebnis) {
   if (!utxo || !ergebnis || !ergebnis.found) return;
@@ -907,6 +1112,33 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
   utxo.verfolgt_vollstaendig = Boolean(voll);
   if (ergebnis.juengste_sats_ts) {
     utxo.juengste_sats_ts = ergebnis.juengste_sats_ts;
+  }
+  const root = ergebnis.root || {};
+  if (root.amount_sats != null && Number(root.amount_sats) >= 0) {
+    utxo.value_sats = Number(root.amount_sats) || 0;
+  }
+  if (root.address && !utxo.address) {
+    utxo.address = root.address;
+  }
+  if (root.wallet) {
+    utxo.wallet = root.wallet;
+  } else if (root.address && !utxo.wallet) {
+    utxo.wallet = t("trace.targetedWallet");
+  }
+  if (root.time_label) {
+    utxo.time_label = root.time_label;
+  }
+  if (root.tx_class && TX_CLASS_ICON[root.tx_class]) {
+    utxo.tx_class = root.tx_class;
+    const arten = new Set(utxo.mix_arten || []);
+    arten.add(root.tx_class);
+    utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
+  }
+  // Auch Mix-Formen tiefer im Baum (Remix-Hops).
+  const tief = mixArtenAusErgebnis(ergebnis);
+  if (tief.length) {
+    const arten = new Set([...(utxo.mix_arten || []), ...tief]);
+    utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
   }
   // Dieselbe Instanz in der Trace-Liste nachziehen (findeTraceUtxo kann
   // ein anderes Objekt geliefert haben als die Gruppenzeile).
@@ -924,11 +1156,91 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
         if (utxo.juengste_sats_ts) {
           eintrag.juengste_sats_ts = utxo.juengste_sats_ts;
         }
+        if (utxo.value_sats != null) eintrag.value_sats = utxo.value_sats;
+        if (utxo.address) eintrag.address = utxo.address;
+        if (utxo.wallet) eintrag.wallet = utxo.wallet;
+        if (utxo.time_label) eintrag.time_label = utxo.time_label;
+        if (utxo.mix_arten) eintrag.mix_arten = utxo.mix_arten;
+        if (utxo.tx_class) eintrag.tx_class = utxo.tx_class;
         if (!utxo.address && gruppe.address) utxo.address = gruppe.address;
       }
     }
   }
+  aktualisiereTraceWurzelKopf(utxo);
   zeichneJuengsteSatsNach(utxo);
+  if (utxo.address) aktualisiereGruppenMixIcons(utxo.address);
+}
+
+/**
+ * Betrag/Adresse/Wallet in der UTXO-Kopfzeile nachziehen.
+ * *wurzelEl*: optional der konkrete Block (zuverlässiger als data-key-Suche).
+ */
+function aktualisiereTraceWurzelKopf(utxo, wurzelEl = null) {
+  if (!utxo || !utxo.key) return;
+  let block = wurzelEl && wurzelEl.classList?.contains("utxo-wurzel")
+    ? wurzelEl
+    : null;
+  if (!block && wurzelEl?.closest) {
+    block = wurzelEl.closest(".utxo-wurzel");
+  }
+  if (!block) {
+    block = document.querySelector(
+      `.utxo-wurzel[data-key="${CSS.escape(utxo.key)}"]`,
+    );
+  }
+  if (!block) return;
+  const oben = block.querySelector(".utxo-kopf .knoten-oben");
+  if (!oben) return;
+
+  const betrag = oben.querySelector(".betrag");
+  if (betrag && utxo.value_sats != null) {
+    betrag.classList.remove("zart");
+    if (utxo.spent || utxo.spent_pending) {
+      setzeSatsBetrag(betrag, utxo.value_sats, {
+        atTs: spentZeitstempel(utxo) || undefined,
+        spentUtxos: [utxo],
+      });
+    } else {
+      betrag.textContent = formatSats(utxo.value_sats);
+    }
+  }
+
+  // Wallet-Label: zweites Kind nach .betrag (nicht Marken).
+  let wer = null;
+  for (const el of oben.children) {
+    if (el.classList.contains("betrag")) continue;
+    if (el.classList.contains("mono")) continue;
+    if (el.classList.contains("verfolgt-marke")) continue;
+    wer = el;
+    break;
+  }
+  if (wer && utxo.wallet) wer.textContent = utxo.wallet;
+
+  let adresse = oben.querySelector("span.mono.zart");
+  if (!adresse) {
+    // Fallback: erstes mono ohne betrag
+    adresse = [...oben.querySelectorAll("span.mono")].find(
+      (el) => !el.classList.contains("betrag"),
+    );
+  }
+  if (adresse && utxo.address) {
+    adresse.textContent = kuerze(utxo.address, 12, 6);
+    macheKopierbar(adresse, utxo.address, "Adresse");
+  }
+
+  const unten = block.querySelector(".utxo-kopf .knoten-unten-links");
+  if (unten && (utxo.time_label || utxo.key)) {
+    const ankunft = formatAnkunft(utxo);
+    unten.replaceChildren();
+    const utxoKennung = document.createElement("span");
+    utxoKennung.className = "mono";
+    utxoKennung.textContent = kuerze(utxo.key, 12, 8);
+    macheKopierbar(utxoKennung, utxo.key, "UTXO (txid:vout)");
+    unten.append(utxoKennung);
+    if (ankunft) {
+      unten.append(document.createTextNode(` · ${ankunft}`));
+    }
+  }
 }
 
 /** Marke „verfolgt · Datum" in der UTXO-Kopfzeile an den aktuellen Stand anpassen. */
@@ -2132,6 +2444,7 @@ function scanArtVonKind(kind) {
 }
 
 function schonGeplant(ziel) {
+  if (!ziel || !ziel.id) return false;
   const artKind = ziel.art === "verlauf" ? "verlauf" : "rescan";
   const pipe = scanPipeline();
   const cur = pipe.current;
@@ -2140,12 +2453,14 @@ function schonGeplant(ziel) {
     && cur.wallet_id === ziel.id
     && (cur.kind === artKind || scanArtVonKind(cur.kind) === ziel.art)
   ) {
-    return true;
+    // Pipeline-Eintrag nur zählen, wenn der Job noch aktiv ist.
+    if (!cur.job_id || jobNochAktiv(cur.job_id)) return true;
   }
   if (
     Zustand.rescanJob
     && Zustand.scanWalletId === ziel.id
     && Zustand.scanArt === ziel.art
+    && jobNochAktiv(Zustand.rescanJob)
   ) {
     return true;
   }
@@ -2193,20 +2508,22 @@ function setzeWalletScanGesperrt() {
   const tipSync = $("#tip-sync-knopf");
   const tief = $("#herkunft-tief-knopf");
   const wid = Zustand.walletId;
-  const utxoGeplant = wid && schonGeplant({ id: wid, art: "utxo" });
-  const verlaufGeplant = wid && schonGeplant({ id: wid, art: "verlauf" });
-  const tipLaeuft = wid && walletSyncLaeuftFuer(wid);
-  const tiefLaeuft = wid && herkunftTiefLaeuftFuer(wid);
+  // UTXO/Verlauf nur sperren, wenn wirklich dieses Portfolio scannt/wartet —
+  // nicht wegen fremdem Wallet, stale rescanJob oder globalem Tip-Nachzug.
+  const utxoGeplant = Boolean(wid && schonGeplant({ id: wid, art: "utxo" }));
+  const verlaufGeplant = Boolean(wid && schonGeplant({ id: wid, art: "verlauf" }));
+  const tipLaeuft = Boolean(wid && walletSyncLaeuftFuer(wid));
+  const tiefLaeuft = Boolean(wid && herkunftTiefLaeuftFuer(wid));
   if (rescan) {
     if (!rescan.dataset.titel) rescan.dataset.titel = rescan.title || "";
-    rescan.disabled = Boolean(utxoGeplant || tipLaeuft);
+    rescan.disabled = utxoGeplant;
     rescan.title = rescan.disabled
       ? t("nav.jobAlreadyRunning")
       : rescan.dataset.titel;
   }
   if (verlauf) {
     if (!verlauf.dataset.titel) verlauf.dataset.titel = verlauf.title || "";
-    verlauf.disabled = Boolean(verlaufGeplant);
+    verlauf.disabled = verlaufGeplant;
     verlauf.title = verlauf.disabled
       ? t("nav.jobAlreadyRunning")
       : verlauf.dataset.titel;
@@ -2308,11 +2625,31 @@ function stelleScanAn(art) {
   starteScanFuer(ziel);
 }
 
+/**
+ * BIP-158-Startdatum fragen, wenn das Wallet kein First-seen hat und der
+ * UTXO-Scan über Compact Filter laufen wird (oder dorthin fällt).
+ *
+ * Früher: nur wenn autoQuelle() === bip158. autoQuelle nimmt aber die erste
+ * *konfigurierte* Quelle (z. B. eigenen Electrum-Host), auch wenn der nicht
+ * erreichbar ist und der Scan real über P2P geht — dann fehlte der Dialog.
+ */
 function brauchtBip158Startdatum(walletId) {
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   if (!wallet || wallet.first_seen_height) return false;
-  const aktiv = autoQuelle(Zustand.config?.sources);
-  return Boolean(aktiv && aktiv.key === "bip158");
+
+  const liste = Zustand.config?.sources || [];
+  const nach = {};
+  for (const q of liste) nach[q.key] = q;
+
+  const bip = nach.bip158;
+  if (!bip || !bip.configured) return false;
+
+  // Eigener Node wirklich verbunden → Gap-Scan ohne BIP-158-Geburtstag.
+  for (const key of ["own_fulcrum", "own_core"]) {
+    const q = nach[key];
+    if (q && q.configured && q.reachable === true) return false;
+  }
+  return true;
 }
 
 function vorschlagScanDatum(wallet) {
@@ -2877,12 +3214,20 @@ function setzeJobsTakt() {
 
 async function brichRescanAb() {
   if (!Zustand.rescanJob) return;
+  const scanId = Zustand.scanWalletId;
+  const art = scanArtName();
   setzeText($("#rescan-text"), "Abbruch angefordert…");
   try {
     await api(`/jobs/${Zustand.rescanJob}`, { methode: "DELETE" });
   } catch (_) {
     /* Vorgang war bereits beendet */
   }
+  // Knopf sofort freigeben — nicht auf den nächsten Poll warten
+  // (sonst bleibt UTXO-Scan nach Abbruch/Quellenwechsel tot).
+  beendeRescan(`${art} abgebrochen.`, false);
+  await erfrischeWalletNachScan(scanId);
+  await ladeJobsNav();
+  setzeWalletScanGesperrt();
 }
 
 // ---------------------------------------------------------------------------
@@ -2988,10 +3333,13 @@ function zeichneAusgegeben(daten) {
   const zusatz = document.createElement("span");
   zusatz.className = "zart";
   const pendingN = Number(verlauf.pending_count || daten.pending_spends || 0);
+  // Nur BTC/sats — kein Spot-€ auf dem Brutto-Volumen (alte Ausgaben
+  // würden sonst zum heutigen Kurs zu „Reichtum“). € je Vorgang steht
+  // an den Adress-/UTXO-Zeilen zum Tageskurs am Ausgabedatum.
   zusatz.textContent =
     t("wallet.spentSummary", {
       count: verlauf.total_count,
-      sats: formatSats(verlauf.total_sats),
+      sats: formatSatsBasis(verlauf.total_sats),
     }) +
     (pendingN > 0
       ? ` · ${t("wallet.spentPendingCount", { n: pendingN })}`
@@ -3069,6 +3417,10 @@ function zeichneTraceAdressGruppe(gruppe) {
   }
   haengeGruppenJuengsteAn(kopf, gruppe);
 
+  // Nur Icons, wenn gespeicherte Herkunft Mix-Formen kennt — sonst nichts.
+  const mixLeiste = zeichneMixIconLeiste(mixArtenDerGruppe(gruppe));
+  if (mixLeiste) kopf.append(mixLeiste);
+
   const betrag = document.createElement("span");
   betrag.className = "betrag adress-betrag";
   if ((gruppe.utxos || []).some((u) => u.spent || u.spent_pending)) {
@@ -3132,7 +3484,10 @@ function zeichneTraceWurzel(utxo) {
   oben.className = "knoten-oben";
   const betrag = document.createElement("span");
   betrag.className = "betrag";
-  if (utxo.spent || utxo.spent_pending) {
+  if (utxo.value_sats == null) {
+    betrag.textContent = t("trace.amountPending");
+    betrag.classList.add("zart");
+  } else if (utxo.spent || utxo.spent_pending) {
     setzeSatsBetrag(betrag, utxo.value_sats, {
       atTs: spentZeitstempel(utxo) || undefined,
       spentUtxos: [utxo],
@@ -3144,8 +3499,10 @@ function zeichneTraceWurzel(utxo) {
   wer.textContent = utxo.wallet || t("wallet.unknownWallet");
   const adresse = document.createElement("span");
   adresse.className = "mono zart";
-  adresse.textContent = kuerze(utxo.address, 12, 6);
-  macheKopierbar(adresse, utxo.address, "Adresse");
+  adresse.textContent = utxo.address
+    ? kuerze(utxo.address, 12, 6)
+    : t("trace.addressPending");
+  if (utxo.address) macheKopierbar(adresse, utxo.address, "Adresse");
   oben.append(betrag, wer, adresse);
 
   // Vor dem Aufklappen sichtbar machen, ob eine Analyse vorliegt: Dann geht
@@ -3214,15 +3571,22 @@ function zeichneTraceWurzel(utxo) {
 
   const unten = document.createElement("span");
   unten.className = "knoten-unten";
+  const links = document.createElement("span");
+  links.className = "knoten-unten-links";
   const utxoKennung = document.createElement("span");
   utxoKennung.className = "mono";
   utxoKennung.textContent = kuerze(utxo.key, 12, 8);
   macheKopierbar(utxoKennung, utxo.key, "UTXO (txid:vout)");
-  unten.append(utxoKennung);
+  links.append(utxoKennung);
   const ankunftText = formatAnkunft(utxo);
   if (ankunftText) {
-    unten.append(document.createTextNode(` · ${ankunftText}`));
+    links.append(document.createTextNode(` · ${ankunftText}`));
   }
+  unten.append(links);
+  const rechts = document.createElement("span");
+  rechts.className = "knoten-unten-rechts";
+  rechts.hidden = true;
+  unten.append(rechts);
 
   info.append(oben, unten);
   zeile.append(klapp, punkt, info);
@@ -3289,6 +3653,8 @@ async function ladeGespeichertenZweig(utxo, zweig, klapp) {
     if (gespeichert && gespeichert.vorhanden) {
       zweig.dataset.geladen = "ja";
       zeichneZweig(gespeichert.ergebnis, zweig, utxo, klapp);
+      merkeTraceAmUtxo(utxo, gespeichert.ergebnis);
+      aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
       zweig.prepend(gespeicherterKopf(gespeichert, utxo, zweig, klapp));
       return true;
     }
@@ -3413,6 +3779,8 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
         zweig.dataset.geladen = "ja";
         zeichneZweig(job.result, zweig, utxo, klapp);
         merkeTraceAmUtxo(utxo, job.result);
+        // Kopfzeile am konkreten Block (gezielte Suche startet oft mit „…“).
+        aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
         // Stand-Zeile wie nach Cache-Laden — sonst fehlt sie bis zum Refresh.
         if (job.result.found) {
           zweig.prepend(gespeicherterKopf({
@@ -3499,6 +3867,21 @@ function zeichneFolgeBand(ergebnis, zweig, utxo, klapp) {
   zweig.append(band);
 }
 
+function setzeWurzelTxClass(zweig, ergebnis) {
+  /** Soft-Label (+ Icon) rechts neben Timestamp in der UTXO-Wurzelzeile. */
+  const wurzel = zweig && zweig.closest(".utxo-wurzel");
+  if (!wurzel) return;
+  const unten = wurzel.querySelector(".utxo-kopf .knoten-unten");
+  if (!unten) return;
+  let rechts = unten.querySelector(".knoten-unten-rechts");
+  if (!rechts) {
+    rechts = document.createElement("span");
+    rechts.className = "knoten-unten-rechts";
+    unten.append(rechts);
+  }
+  fuelleTxClassRechts(rechts, ergebnis.root || ergebnis);
+}
+
 function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   zweig.replaceChildren();
 
@@ -3507,8 +3890,16 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
     zweig.dataset.geladen = "";
     return;
   }
+
+  const klasseHinweis = softTxClassLabel(ergebnis.root || ergebnis);
+  setzeWurzelTxClass(zweig, ergebnis);
+
   if (ergebnis.children.length === 0) {
-    zweig.append(hinweisZeile(t("trace.noInflows")));
+    zweig.append(hinweisZeile(
+      klasseHinweis
+        ? t("trace.coinjoinOwnOnlyEmpty")
+        : t("trace.noInflows"),
+    ));
     return;
   }
 
@@ -3526,29 +3917,76 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
 
 /** Gezielte Suche nach TxID oder UTXO — Ergebnis erscheint oben in der Liste. */
 async function starteTrace() {
-  const ziel = $("#trace-ziel").value.trim();
-  if (!ziel) return;
+  const roh = $("#trace-ziel").value.trim();
+  if (!roh) return;
 
   $("#trace-start").disabled = true;
   $("#trace-meldung").hidden = true;
 
-  const gesucht = {
-    key: ziel.includes(":") ? ziel : `${ziel}:0`,
-    value_sats: 0,
+  // Reine TxID → Output #0 (explizit im Key und im Feld).
+  const key = roh.includes(":") ? roh : `${roh}:0`;
+  if (!roh.includes(":")) {
+    $("#trace-ziel").value = key;
+  }
+
+  // Schon offene gezielte Suche zum selben UTXO wiederverwenden — sonst
+  // stapeln sich Blöcke und der alte bleibt bei „0 sats“ / „…“.
+  let block = document.querySelector(
+    `#trace-liste .trace-suche .utxo-wurzel[data-key="${CSS.escape(key)}"]`,
+  );
+  let utxo = null;
+  if (block) {
+    utxo = {
+      key,
+      value_sats: null,
+      address: "",
+      wallet: t("trace.targetedWallet"),
+      time_label: "",
+    };
+    const zweig = block.querySelector(".utxo-zweig");
+    const klapp = block.querySelector(".klapp");
+    if (zweig) {
+      zweig.dataset.geladen = "";
+      zweig.replaceChildren();
+      zweig.hidden = false;
+      if (klapp) klapp.textContent = "▾";
+      // Frisch laden (Cache oder Job) und Kopfzeile danach setzen.
+      await oeffneZweig(utxo, zweig, klapp);
+      aktualisiereTraceWurzelKopf(utxo, block);
+    }
+    block.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    $("#trace-start").disabled = false;
+    return;
+  }
+
+  utxo = {
+    key,
+    value_sats: null,
     address: "",
     wallet: t("trace.targetedWallet"),
     time_label: "",
   };
 
-  // Steht ohne Adressgruppe ganz oben: Das gesuchte UTXO muss nicht in der
-  // Liste vorkommen — es kann längst ausgegeben sein.
-  const block = zeichneTraceWurzel(gesucht);
+  // Steht ohne Adressgruppe ganz oben: Das UTXO muss nicht in der Liste
+  // vorkommen — es kann längst ausgegeben sein.
+  block = zeichneTraceWurzel(utxo);
   const huelle = document.createElement("div");
   huelle.className = "trace-suche";
   huelle.append(block);
 
   $("#trace-liste").prepend(huelle);
-  block.querySelector(".klapp").click();
+  const zweig = block.querySelector(".utxo-zweig");
+  const klapp = block.querySelector(".klapp");
+  // Direkt öffnen (nicht nur click) — sonst läuft der Trace ohne await und
+  // die Kopfzeile wird nicht zuverlässig nachgezogen.
+  if (zweig && klapp) {
+    const zeile = block.querySelector(".utxo-kopf");
+    if (zeile) zeile.setAttribute("aria-expanded", "true");
+    zweig.hidden = false;
+    klapp.textContent = "▾";
+    await oeffneZweig(utxo, zweig, klapp);
+    aktualisiereTraceWurzelKopf(utxo, block);
+  }
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
   $("#trace-start").disabled = false;
 }
@@ -3724,25 +4162,40 @@ function zeichneKnoten(knoten) {
 
   info.append(oben);
 
-  if (knoten.from_utxo || knoten.time_label) {
+  const klasseText = softTxClassLabel(knoten);
+  const externKurz =
+    knoten.type === "external" ? t("trace.externalInput") : "";
+  const ankunftText = knoten.time_label ? formatAnkunft(knoten) : "";
+  if (knoten.from_utxo || ankunftText || klasseText || externKurz) {
     const unten = document.createElement("span");
     unten.className = "knoten-unten";
+    const links = document.createElement("span");
+    links.className = "knoten-unten-links";
     if (knoten.from_utxo) {
       const utxoKennung = document.createElement("span");
       utxoKennung.className = "mono";
       utxoKennung.textContent = kuerze(knoten.from_utxo, 12, 8);
       macheKopierbar(utxoKennung, knoten.from_utxo, "UTXO (txid:vout)");
-      unten.append(utxoKennung);
+      links.append(utxoKennung);
     }
-    if (knoten.time_label) {
-      const ankunftText = formatAnkunft(knoten);
-      if (ankunftText) {
-        unten.append(
-          document.createTextNode(
-            (knoten.from_utxo ? " · " : "") + ankunftText,
-          ),
-        );
-      }
+    if (externKurz) {
+      links.append(
+        document.createTextNode((knoten.from_utxo ? " · " : "") + externKurz),
+      );
+    }
+    if (ankunftText) {
+      links.append(
+        document.createTextNode(
+          (knoten.from_utxo || externKurz ? " · " : "") + ankunftText,
+        ),
+      );
+    }
+    unten.append(links);
+    if (klasseText) {
+      const rechts = document.createElement("span");
+      rechts.className = "knoten-unten-rechts";
+      fuelleTxClassRechts(rechts, knoten);
+      unten.append(rechts);
     }
     info.append(unten);
   }
@@ -3760,10 +4213,15 @@ function zeichneKnoten(knoten) {
   const kopfzeile = document.createElement("div");
   kopfzeile.className = "kopf-mit-verweis";
   kopfzeile.append(zeile);
-  const ziel = knoten.from_utxo ? knoten.from_utxo.split(":")[0] : "";
-  const extern = knoten.address
-    ? mempoolVerweis("address", knoten.address)
-    : mempoolVerweis("tx", ziel);
+  // Tx vor Adresse: VIN/VOUT-Grafik. Adresse nur, wenn keine Tx bekannt
+  // (reine Adresszeilen bleiben bei /address/… — siehe Adressgruppen).
+  const txid =
+    (knoten.from_utxo || "").split(":")[0]
+    || knoten.txid
+    || "";
+  const extern = txid
+    ? mempoolVerweis("tx", txid)
+    : (knoten.address ? mempoolVerweis("address", knoten.address) : null);
   if (extern) kopfzeile.append(extern);
   block.append(kopfzeile);
 
@@ -4239,7 +4697,11 @@ async function starteHerkunftVollstaendig() {
       daten: { wallet_id: wid, vollstaendig: true },
     });
     if (antwort.nichts_zu_tun) {
-      await fertig(t("wallet.originDeepNothing"), "gut");
+      if (antwort.keine_utxos) {
+        await fertig(t("wallet.originDeepNeedCache"), "warn");
+      } else {
+        await fertig(t("wallet.originDeepNothing"), "gut");
+      }
       return;
     }
     jobId = antwort.id;
@@ -4337,7 +4799,7 @@ async function verlaufErheben() {
       setzeText(kasten, meldung);
       kasten.hidden = false;
     }
-    ladeSteuerjahr();
+    ladeSteuerjahrMitKandidaten();
   };
 
   logZeile("Starte Verlauf aller Wallets…");
@@ -4406,13 +4868,124 @@ async function erfrischeHerkunftZwischenstand() {
   }
 }
 
+/** Wartet, bis ein Hintergrundjob fertig ist (done / cancelled / error). */
+async function warteAufJobEnde(jobId, {
+  onTick = null,
+  sollAbbrechen = () => false,
+  intervallMs = 900,
+} = {}) {
+  while (true) {
+    if (sollAbbrechen()) {
+      try {
+        await api(`/jobs/${jobId}`, { methode: "DELETE" });
+      } catch (_) {
+        /* schon weg */
+      }
+      const err = new Error("abgebrochen");
+      err.abgebrochen = true;
+      throw err;
+    }
+    const job = await api(`/jobs/${jobId}`);
+    if (typeof onTick === "function") onTick(job);
+    if (job.running) {
+      await new Promise((r) => setTimeout(r, intervallMs));
+      continue;
+    }
+    if (job.status === "done") return job;
+    if (job.status === "cancelled") {
+      const err = new Error("abgebrochen");
+      err.abgebrochen = true;
+      throw err;
+    }
+    throw new Error(job.error || t("common.failed"));
+  }
+}
+
+/**
+ * UTXO-Scan für jedes konfigurierte Wallet — Voraussetzung für
+ * „Herkunft aller UTXOs“ bei leerem Cache.
+ */
+async function scanneAlleWalletsUtxo({
+  textEl = null,
+  sollAbbrechen = () => false,
+  logStand = null,
+} = {}) {
+  const wallets = (Zustand.config?.wallets || []).filter((w) => w && w.id);
+  if (!wallets.length) {
+    throw new Error(t("wallets.emptyList"));
+  }
+  let scanAb = "";
+  for (let i = 0; i < wallets.length; i += 1) {
+    const wallet = wallets[i];
+    if (sollAbbrechen()) {
+      const err = new Error("abgebrochen");
+      err.abgebrochen = true;
+      throw err;
+    }
+    if (textEl) {
+      setzeText(textEl, t("trace.allOriginsScanning", {
+        aktuell: i + 1,
+        gesamt: wallets.length,
+        name: wallet.name || wallet.id,
+      }));
+    }
+    logZeile(
+      t("trace.allOriginsScanning", {
+        aktuell: i + 1,
+        gesamt: wallets.length,
+        name: wallet.name || wallet.id,
+      }),
+      undefined,
+      wallet.name,
+    );
+
+    let datum = scanAb;
+    if (brauchtBip158Startdatum(wallet.id)) {
+      const gewählt = await frageScanDatum(wallet);
+      if (gewählt === undefined) {
+        const err = new Error("abgebrochen");
+        err.abgebrochen = true;
+        throw err;
+      }
+      datum = gewählt || "";
+      scanAb = datum;
+    }
+
+    const job = await api("/jobs/rescan", {
+      methode: "POST",
+      daten: { wallet_id: wallet.id, scan_ab: datum || "" },
+    });
+    const jid = job.id || job.job_id;
+    if (!jid) {
+      throw new Error(t("wallet.utxoScan") + " — " + t("common.failed"));
+    }
+    // Pipeline kann „queued“ liefern — trotzdem auf diese Job-ID warten.
+    await warteAufJobEnde(jid, {
+      sollAbbrechen,
+      onTick: (j) => {
+        if (logStand) nimmJobLogAb(j, logStand, wallet.name);
+        if (textEl && j.message) {
+          setzeText(
+            textEl,
+            t("trace.allOriginsScanning", {
+              aktuell: i + 1,
+              gesamt: wallets.length,
+              name: wallet.name || wallet.id,
+            }) + ` · ${übersetzeLogText(j.message)}`,
+          );
+        }
+      },
+    });
+  }
+}
+
 async function herkunftAllerUtxos(ziele = {
   knopf: "#herkunft-alle",
   lauf: "#herkunft-lauf",
   text: "#herkunft-text",
   abbruch: "#herkunft-abbruch",
   meldung: "#steuer-meldung",
-  danach: ladeSteuerjahr,
+  danach: ladeSteuerjahrMitKandidaten,
 }) {
   const knopf = $(ziele.knopf);
   knopf.disabled = true;
@@ -4425,6 +4998,7 @@ async function herkunftAllerUtxos(ziele = {
   let zuletztVerfolgt = -1;
   let refreshUm = 0;
   let refreshLaeuft = false;
+  let abbruchWunsch = false;
 
   const fertig = (meldung, art) => {
     clearInterval(timer);
@@ -4439,28 +5013,63 @@ async function herkunftAllerUtxos(ziele = {
     ziele.danach();
   };
 
+  $(ziele.abbruch).onclick = async () => {
+    abbruchWunsch = true;
+    setzeText($(ziele.text), "Abbruch angefordert…");
+    if (jobId) {
+      try {
+        await api(`/jobs/${jobId}`, { methode: "DELETE" });
+      } catch (_) {
+        /* schon beendet */
+      }
+    }
+  };
+
   logZeile("Starte Herkunft aller UTXOs…");
   try {
-    const antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    let antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    if (antwort.nichts_zu_tun && antwort.keine_utxos) {
+      // Bestand fehlt: nach Bestätigung erst alle Wallets scannen, dann Trace.
+      knopf.disabled = false;
+      $(ziele.lauf).hidden = true;
+      if (!window.confirm(t("trace.allOriginsNeedUtxoConfirm"))) {
+        fertig(t("trace.allOriginsScanAbort"), "warn");
+        return;
+      }
+      knopf.disabled = true;
+      $(ziele.lauf).hidden = false;
+      abbruchWunsch = false;
+      await scanneAlleWalletsUtxo({
+        textEl: $(ziele.text),
+        sollAbbrechen: () => abbruchWunsch,
+        logStand,
+      });
+      if (abbruchWunsch) {
+        fertig(t("trace.allOriginsScanAbort"), "warn");
+        return;
+      }
+      setzeText($(ziele.text), t("trace.allOriginsScanDone"));
+      await ladeConfig();
+      antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    }
     if (antwort.nichts_zu_tun) {
-      fertig("Für alle UTXOs liegt bereits eine Herkunftsanalyse vor.", "gut");
+      if (antwort.keine_utxos) {
+        fertig(t("trace.allOriginsNeedUtxo"), "warn");
+      } else {
+        fertig(t("trace.allOriginsNothing"), "gut");
+      }
       return;
     }
     jobId = antwort.id;
     nimmJobLogAb(antwort, logStand);
   } catch (fehler) {
+    if (fehler && fehler.abgebrochen) {
+      fertig(t("trace.allOriginsScanAbort"), "warn");
+      return;
+    }
     fertig(`Analyse fehlgeschlagen: ${fehler.message}`, "krit");
     return;
   }
-
-  $(ziele.abbruch).onclick = async () => {
-    setzeText($(ziele.text), "Abbruch angefordert…");
-    try {
-      await api(`/jobs/${jobId}`, { methode: "DELETE" });
-    } catch (_) {
-      /* war bereits beendet */
-    }
-  };
 
   timer = setInterval(async () => {
     try {
@@ -4532,11 +5141,17 @@ Zustand.saUtxos = [];
 Zustand.saVerlauf = null;
 Zustand.saStichtag = "";
 
-async function ladeSelbstanzeigeKandidaten() {
+/**
+ * Selbstanzeige-Kandidaten aus dem Cache (kein Netz).
+ * *opts.auto*: kurzer Log-Hinweis — beim Öffnen der Steuerjahr-Ansicht.
+ */
+async function ladeSelbstanzeigeKandidaten(opts = {}) {
+  const auto = Boolean(opts.auto);
   const jahr = $("#jahr-wahl").value;
   const txid = ($("#sa-txid")?.value || "").trim();
   const liste = $("#sa-liste");
   if (!liste) return;
+  if (auto) logZeile("Selbstanzeige: Kandidaten aus Cache…");
   liste.textContent = t("common.loading");
   try {
     let pfad = `/tax/selbstanzeige/kandidaten?jahr=${encodeURIComponent(jahr)}`;
@@ -4547,9 +5162,23 @@ async function ladeSelbstanzeigeKandidaten() {
     Zustand.saVerlauf = daten.verlauf || null;
     Zustand.saStichtag = daten.stichtag_hypothese || "";
     zeichneSelbstanzeigeKandidaten();
+    if (auto) {
+      const n = Zustand.saKandidaten.length;
+      const u = Zustand.saUtxos.length;
+      logZeile(
+        `Selbstanzeige: ${n} Abfluss-Kandidat(en) · ${u} UTXO(s) Was-wäre-wenn.`,
+      );
+    }
   } catch (fehler) {
     liste.textContent = t("common.errorPrefix", { msg: fehler.message });
+    if (auto) logZeile(`Selbstanzeige: Kandidaten fehlgeschlagen — ${fehler.message}`);
   }
+}
+
+/** Steuerjahr öffnen bzw. Jahr gewechselt: Auswertung + Kandidaten. */
+async function ladeSteuerjahrMitKandidaten() {
+  await ladeSteuerjahr();
+  await ladeSelbstanzeigeKandidaten({ auto: true });
 }
 
 function saAbschnitt(titel, zusatz, {
@@ -4982,6 +5611,7 @@ function zeichneWalletVerwaltung() {
   );
   setzeEnvPfad(Zustand.config?.env_path);
   ladeUnreferenziertenCache();
+  ladeCacheDashboard();
 }
 
 function setzeZeileAktualisieren(zeile, wallet) {
@@ -5049,12 +5679,236 @@ async function loescheUnreferenziertenCache() {
     meldung(text, "gut");
     logZeile(text);
     zeichneUnreferenziertenCache({ vorhanden: false, dateien: 0, bytes: 0 });
+    await ladeCacheDashboard();
   } catch (fehler) {
     meldung(`Aufräumen fehlgeschlagen — ${fehler.message}`, "krit");
   } finally {
     if (knopf) knopf.disabled = false;
     await ladeUnreferenziertenCache();
   }
+}
+
+async function ladeCacheDashboard() {
+  const karte = $("#cache-dashboard");
+  if (!karte) return;
+  const meldungEl = $("#cache-dash-meldung");
+  try {
+    const stand = await api("/cache/stats");
+    zeichneCacheDashboard(stand);
+    if (meldungEl) meldungEl.hidden = true;
+  } catch (fehler) {
+    if (meldungEl) {
+      setzeText(meldungEl, t("wallets.cacheDashError", { error: fehler.message }));
+      meldungEl.hidden = false;
+    }
+  }
+}
+
+function _cacheDashKachel(titel, wert, meta, ampel) {
+  const kachel = document.createElement("div");
+  kachel.className = "cache-dash-kachel";
+  const tEl = document.createElement("div");
+  tEl.className = "titel";
+  tEl.textContent = titel;
+  const wEl = document.createElement("div");
+  wEl.className = "wert" + (ampel === "warn" || ampel === "krit" ? ` ${ampel}` : "");
+  wEl.textContent = wert;
+  kachel.append(tEl, wEl);
+  if (meta) {
+    const m = document.createElement("div");
+    m.className = "meta";
+    m.textContent = meta;
+    kachel.append(m);
+  }
+  return kachel;
+}
+
+function zeichneCacheDashboard(stand) {
+  const zusatz = $("#cache-dash-zusatz");
+  const platte = $("#cache-dash-platte");
+  const balken = $("#cache-dash-balken");
+  const kacheln = $("#cache-dash-kacheln");
+  const wallets = $("#cache-dash-wallets");
+  if (!platte || !balken || !kacheln || !wallets) return;
+
+  if (zusatz) {
+    setzeText(zusatz, t("wallets.cacheDashSum", { size: stand.summe_label || "0 MB" }));
+  }
+
+  platte.replaceChildren();
+  const ampel = document.createElement("span");
+  const platteStand = stand.platte || {};
+  ampel.className = `cache-dash-ampel ${platteStand.ampel || ""}`;
+  const text = document.createElement("span");
+  if (platteStand.free_bytes == null) {
+    text.textContent = t("wallets.cacheDashDiskUnknown");
+  } else {
+    const pct = Math.round((Number(platteStand.free_ratio) || 0) * 1000) / 10;
+    text.textContent = t("wallets.cacheDashDisk", {
+      free: platteStand.free_label || "—",
+      total: platteStand.total_label || "—",
+      pct,
+    });
+  }
+  platte.append(ampel, text);
+  if (platteStand.write_blocked) {
+    const warn = document.createElement("span");
+    warn.className = "meta";
+    warn.textContent = t("wallets.cacheDashDiskBlocked");
+    platte.append(warn);
+  }
+
+  const utxoB = Number(stand.utxo_cache?.bytes || 0);
+  const immB = Number(stand.immutable_cache?.bytes || 0);
+  const sankB = Number(stand.sanctioned_cache?.bytes || 0);
+  const sumB = Math.max(1, utxoB + immB + sankB);
+  balken.replaceChildren();
+  const segs = [
+    ["seg-utxo", utxoB],
+    ["seg-immutable", immB],
+    ["seg-sanctioned", sankB],
+  ];
+  for (const [cls, bytes] of segs) {
+    if (bytes <= 0) continue;
+    const seg = document.createElement("span");
+    seg.className = cls;
+    seg.style.flex = String(bytes / sumB);
+    seg.title = `${cls.replace("seg-", "")}: ${format_dateigroesse_client(bytes)}`;
+    balken.append(seg);
+  }
+
+  const flatAmpel = stand.tx?.ampel || stand.utxo_ingress?.ampel || "gut";
+  kacheln.replaceChildren(
+    _cacheDashKachel(
+      t("wallets.cacheDashTileUtxo"),
+      stand.utxo_cache?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.utxo_cache?.dateien || 0) }),
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileImmutable"),
+      stand.immutable_cache?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.immutable_cache?.dateien || 0) }),
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileTx"),
+      stand.tx?.groesse_label || "0 MB",
+      `${t("wallets.cacheDashFiles", { n: formatZahl(stand.tx?.dateien || 0) })} · ${t("wallets.cacheDashSchwelle", { n: formatZahl(stand.tx?.schwelle || 10000) })}`,
+      flatAmpel,
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileIngress"),
+      stand.utxo_ingress?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.utxo_ingress?.dateien || 0) }),
+      flatAmpel,
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileHeaders"),
+      stand.p2p_headers?.groesse_label || "0 MB",
+      stand.p2p_headers?.tip != null
+        ? t("wallets.cacheDashHeaderTip", { tip: formatZahl(stand.p2p_headers.tip) })
+        : "—",
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileSanctions"),
+      stand.sanctioned_cache?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.sanctioned_cache?.dateien || 0) }),
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTileExternal"),
+      stand.external_addresses?.groesse_label || "0 MB",
+      stand.external_addresses?.vorhanden ? "JSON" : "—",
+    ),
+    _cacheDashKachel(
+      t("wallets.cacheDashTilePrice"),
+      stand.btc_price?.groesse_label || "0 MB",
+      t("wallets.cacheDashFiles", { n: formatZahl(stand.btc_price?.dateien || 0) }),
+    ),
+  );
+
+  wallets.replaceChildren();
+  const liste = Array.isArray(stand.wallets) ? stand.wallets : [];
+  if (liste.length === 0) {
+    const leer = document.createElement("p");
+    leer.className = "meta";
+    leer.textContent = t("wallets.cacheDashEmpty");
+    wallets.append(leer);
+    return;
+  }
+
+  const tabelle = document.createElement("table");
+  const kopf = document.createElement("tr");
+  const spalten = [
+    ["wallets.cacheDashColWallet", false],
+    ["wallets.cacheDashColUtxo", true],
+    ["wallets.cacheDashColSats", true],
+    ["wallets.cacheDashColTip", true],
+    ["wallets.cacheDashColGap", true],
+    ["wallets.cacheDashColVerlauf", true],
+    ["wallets.cacheDashColHerkunft", true],
+    ["wallets.cacheDashColSize", true],
+  ];
+  for (const [key, zahl] of spalten) {
+    const th = document.createElement("th");
+    if (zahl) th.className = "zahl";
+    th.textContent = t(key);
+    kopf.append(th);
+  }
+  tabelle.append(kopf);
+
+  for (const w of liste) {
+    const zeile = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = w.wallet_name || w.wallet_id || "—";
+    zeile.append(name);
+
+    const zelle = (text, zahl = true) => {
+      const td = document.createElement("td");
+      if (zahl) td.className = "zahl mono";
+      td.textContent = text;
+      zeile.append(td);
+    };
+
+    zelle(formatZahl(w.utxo_count || 0));
+    zelle(formatSats(w.total_sats || 0));
+    if (w.tip_lag == null) zelle("—");
+    else if (Number(w.tip_lag) <= 0) zelle(t("wallets.cacheDashLagOk"));
+    else zelle(t("wallets.cacheDashLag", { n: formatZahl(w.tip_lag) }));
+
+    if (w.scan_end_index == null || !w.max_addresses) zelle("—");
+    else zelle(`${formatZahl(w.scan_end_index)}/${formatZahl(w.max_addresses)}`);
+
+    zelle(formatZahl(w.verlauf_count || 0));
+
+    if (w.herkunft_referenzen) {
+      const pct = Math.round((Number(w.herkunft_ratio) || 0) * 100);
+      zelle(`${formatZahl(w.herkunft_treffer || 0)}/${formatZahl(w.herkunft_referenzen)} (${pct} %)`);
+    } else {
+      zelle("—");
+    }
+    zelle(w.groesse_label || "0 MB");
+    tabelle.append(zeile);
+  }
+  wallets.append(tabelle);
+}
+
+function format_dateigroesse_client(bytes) {
+  const n = Number(bytes) || 0;
+  if (n <= 0) return "0 MB";
+  const mb = n / (1024 * 1024);
+  if (mb >= 0.1) {
+    return `${mb.toLocaleString(formatLocale(), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })} MB`;
+  }
+  if (n >= 1024) {
+    const kb = n / 1024;
+    return `${kb.toLocaleString(formatLocale(), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })} KB`;
+  }
+  return `${n} B`;
 }
 
 function zeichneAppEinstellungen() {
@@ -5067,7 +5921,55 @@ function zeichneAppEinstellungen() {
   setzeEnvPfad(Zustand.config?.env_path);
 }
 
+function zeichneLocalCoreHinweis() {
+  const kasten = $("#local-core-hinweis");
+  const text = $("#local-core-hinweis-text");
+  const knopf = $("#local-core-uebernehmen");
+  if (!kasten || !text) return;
+  const stand = Zustand.config?.local_core;
+  const zeigen = Boolean(stand?.needs_opt_in && stand?.hit);
+  kasten.hidden = !zeigen;
+  if (!zeigen) return;
+  const hit = stand.hit;
+  const art = hit.pruned ? "pruned (scantxoutset trotzdem nützlich)" : "vollständig";
+  const p2p = hit.p2p_port || 8333;
+  const p2pHinweis = hit.p2p_tcp_open === false
+    ? ` P2P :${p2p} derzeit nicht offen — BIP-158 Prefer-Peer wird trotzdem gesetzt (peerblockfilters=1 nötig).`
+    : ` Opt-in setzt auch BIP158_HOST=${hit.host}:${p2p} (Compact Filter zuerst lokal).`;
+  text.textContent =
+    `Lokaler Bitcoin Core erkannt: ${hit.host}:${hit.port} `
+    + `(${hit.chain || hit.network}, ${art}, ~${Number(hit.blocks || 0).toLocaleString("de-DE")} Blöcke). `
+    + `Nicht still verbunden — „Lokalen Core übernehmen“ schreibt RPC + BIP-158-Prefer-Peer `
+    + `(LOCAL_CORE_OPT_IN=1).`
+    + p2pHinweis;
+  if (knopf && !knopf.dataset.bound) {
+    knopf.dataset.bound = "1";
+    knopf.addEventListener("click", async () => {
+      knopf.disabled = true;
+      try {
+        const antwort = await api("/source/local-core", { method: "POST", body: {} });
+        if (antwort?.sources) {
+          Zustand.config = {
+            ...(Zustand.config || {}),
+            sources: antwort.sources,
+            local_core: antwort.local_core,
+          };
+        } else {
+          await ladeConfig();
+        }
+        zeichneDatenquellenAnsicht();
+        logZeile("Lokaler Bitcoin Core übernommen.");
+      } catch (fehler) {
+        logZeile(String(fehler?.message || fehler), "krit");
+      } finally {
+        knopf.disabled = false;
+      }
+    });
+  }
+}
+
 function zeichneDatenquellenAnsicht() {
+  zeichneLocalCoreHinweis();
   zeichneQuellen(Zustand.config?.sources || []);
   zeichneMempoolStatus();
   ladeKursHistorie();
@@ -5115,6 +6017,8 @@ async function ladeKursHistorie() {
     const stand = await api("/price/history");
     Zustand.kursHistorie = stand;
     zeichneKursHistorie(stand);
+    const opt = $("#kurs-historie-opt-in");
+    if (opt) opt.checked = Boolean(stand.price_history_opt_in);
   } catch (fehler) {
     const kasten = $("#kurs-historie-status");
     if (kasten) {
@@ -5124,6 +6028,35 @@ async function ladeKursHistorie() {
           : `${t("sources.rates")}: ${übersetzeServerMeldung(fehler.message)}`,
       ));
     }
+  }
+}
+
+async function speichereKursHistorieOptInUndSync() {
+  const opt = $("#kurs-historie-opt-in");
+  const an = Boolean(opt && opt.checked);
+  logZeile(
+    an
+      ? "Kurs-Historie: Opt-in an — prüfe Lücken (Bitstamp)…"
+      : "Kurs-Historie: Opt-in aus — nur Lücken-Hinweis.",
+  );
+  try {
+    const stand = await api("/price/history/sync", {
+      methode: "POST",
+      daten: { opt_in: an },
+    });
+    for (const zeile of stand.log || []) logZeile(zeile);
+    Zustand.kursHistorie = {
+      histories: stand.histories || [],
+      price_history_opt_in: stand.price_history_opt_in,
+    };
+    zeichneKursHistorie(Zustand.kursHistorie);
+    if (opt) opt.checked = Boolean(stand.price_history_opt_in);
+    meldung(
+      stand.ok ? t("sources.ratesSyncDone") : t("sources.ratesSyncPartial"),
+      stand.ok ? "gut" : "warn",
+    );
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
   }
 }
 
@@ -5200,26 +6133,58 @@ function aktualisiereSpeicherleiste() {
 }
 
 /**
+ * Hoch-private Quelle verdrängt mäßig/gering (Auto-Vorrang), solange sie
+ * nicht nachweislich unerreichbar ist.
+ */
+function quelleHochVerdraengt(quellen) {
+  return (quellen || []).some(
+    (q) => q && q.privacy === "hoch" && q.configured && q.reachable !== false,
+  );
+}
+
+/**
  * Farbe der Erläuterungsnotiz unter einer Datenquelle.
  * - grün: konfiguriert und Privatsphäre hoch
- * - grau: nicht konfiguriert; oder mäßig/gering und aktuell nicht genutzt,
- *   weil eine hoch-private Quelle konfiguriert/verbunden ist (Auto-Vorrang)
- * - gelb: mäßig/gering und relevant (keine bessere Hoch-Privatsphäre aktiv)
+ * - grau: nicht konfiguriert; Liste geladen aber unverbunden; oder mäßig/gering
+ *   und von einer Hoch-Privatsphäre-Quelle verdrängt
+ * - gelb: mäßig/gering mit bestehender und genutzter Verbindung
  */
 function quelleNotizKlasse(quelle, quellen) {
   if (!quelle.configured) return "quelle-notiz notiz-inaktiv";
   if (quelle.privacy === "hoch") return "quelle-notiz notiz-hoch";
+  // Nur gelb bei echter, genutzter Verbindung — geladene Liste allein bleibt grau.
+  if (quelle.reachable !== true || quelleHochVerdraengt(quellen)) {
+    return "quelle-notiz notiz-inaktiv";
+  }
+  return "quelle-notiz";
+}
 
-  const bessere = (quellen || []).filter(
-    (q) => q && q.privacy === "hoch" && q.configured,
-  );
-  if (!bessere.length) return "quelle-notiz";
+/**
+ * Privatsphäre-Pille: mäßig/gering erst bei genutzter Verbindung färben.
+ */
+function quellePrivacyStufe(quelle, quellen) {
+  if (!quelle.configured) return "neutral";
+  if (quelle.privacy === "hoch") return "gut";
+  if (quelle.reachable !== true || quelleHochVerdraengt(quellen)) {
+    return "neutral";
+  }
+  return ({ "mäßig": "warn", gering: "krit" }[quelle.privacy] || "neutral");
+}
 
-  // Verbunden oder ungetestet: Hoch-Privatsphäre hat Auto-Vorrang.
-  // Nur wenn alle besseren Quellen nachweislich unerreichbar sind, bleibt
-  // die mäßige/geringe Quelle relevant (gelb).
-  const verdrängt = bessere.some((q) => q.reachable !== false);
-  return verdrängt ? "quelle-notiz notiz-inaktiv" : "quelle-notiz";
+/**
+ * Gelbe „Verbindung im Aufbau…“-Pille nur während eines echten Checks
+ * für Quellen, die der Check gerade anfasst — nicht bei idle reachable=null
+ * und nicht bei öffentlich, wenn P2P/Eigen Vorrang hat oder Opt-in aus ist.
+ */
+function quelleZeigtVerbindungsaufbau(quelle, quellen) {
+  if (!quelle || !quelle.configured) return false;
+  if (!Zustand.peerCheckLaeuft) return false;
+  if (quelle.reachable === true || quelle.reachable === false) return false;
+  if (quelle.key === "public_onion" || quelle.key === "clearnet") {
+    if (!Zustand.config?.oeffentliche_electrum) return false;
+    if (quelleHochVerdraengt(quellen)) return false;
+  }
+  return true;
 }
 
 function zeichneQuellen(quellen) {
@@ -5255,13 +6220,12 @@ function zeichneQuellen(quellen) {
       rechts.append(pille("gut", t("sources.reachable")));
     } else if (quelle.configured && quelle.reachable === false) {
       rechts.append(pille("krit", t("sources.unreachable")));
+    } else if (quelleZeigtVerbindungsaufbau(quelle, liste)) {
+      rechts.append(pille("warn", t("sources.connecting")));
     }
-    // Privatsphäre-Farbe nur wenn die Quelle wirklich konfiguriert ist —
-    // sonst wäre „hoch“ nur hypothetisch und wirkt fälschlich aktiv (grün).
-    const stufe = !quelle.configured
-      ? "neutral"
-      : ({ hoch: "gut", "mäßig": "warn", gering: "krit" }[quelle.privacy] || "neutral");
-    rechts.append(pille(stufe, privacyLabel(quelle.privacy)));
+    // Sonst keine Status-Pille: Liste geladen, aber gerade nicht genutzt
+    // (z. B. öffentlich nach „P2P / kappen“) → grau über Notiz/Privatsphäre.
+    rechts.append(pille(quellePrivacyStufe(quelle, liste), privacyLabel(quelle.privacy)));
 
     const formular = document.createElement("div");
     formular.className = "quelle-formular";
@@ -5295,7 +6259,9 @@ function zeichneQuellen(quellen) {
       korb.textContent = "🗑";
       korb.title = bridgeManaged
         ? t("sources.start9BridgeHint")
-        : t("sources.discardTitle", { name: anzeigename });
+        : (quelle.key === "bip158"
+          ? t("sources.disableP2pTitle")
+          : t("sources.discardTitle", { name: anzeigename }));
       korb.disabled = bridgeManaged;
       korb.addEventListener("click", () => verwerfeQuelle(quelle));
       rechts.append(korb);
@@ -5309,6 +6275,16 @@ function zeichneQuellen(quellen) {
       laden.title = t("sources.loadElectrumTitle", { url: quelle.laden_url });
       laden.addEventListener("click", () => ladeElectrumServer(quelle, laden));
       rechts.append(laden);
+      // Papierkorb hinter dem Laden-Knopf: nur die Serverliste, nicht Opt-in.
+      if (quelle.configured) {
+        const listeKorb = document.createElement("button");
+        listeKorb.type = "button";
+        listeKorb.className = "stift papierkorb";
+        listeKorb.textContent = "🗑";
+        listeKorb.title = t("sources.clearListTitle", { name: anzeigename });
+        listeKorb.addEventListener("click", () => loescheElectrumListe(quelle));
+        rechts.append(listeKorb);
+      }
     }
 
     zeile.append(rang, name, detail, rechts);
@@ -5334,16 +6310,51 @@ function zeichneQuellen(quellen) {
 
 async function verwerfeQuelle(quelle) {
   const ok = window.confirm(
-    t("sources.confirmDiscard", { name: quelleName(quelle) }),
+    quelle.key === "bip158"
+      ? t("sources.confirmDisableP2p")
+      : t("sources.confirmDiscard", { name: quelleName(quelle) }),
   );
   if (!ok) return;
   try {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
     });
+    // Zuerst Server-Antwort (P2P-Schalter aus), dann Config — sonst hält
+    // uebernehmeQuellenErreichbarkeit kurz den alten „an“-Stand.
+    if (Zustand.config && Array.isArray(ergebnis.sources)) {
+      Zustand.config.sources = ergebnis.sources;
+    }
     await ladeConfig();
-    zeichneQuellen(ergebnis.sources || Zustand.config.sources);
-    meldung(t("sources.discarded", { name: quelleName(quelle) }), "warn");
+    // Nach ladeConfig nochmals DELETE-Stand für bip158 erzwingen, falls Merge
+    // reachable/peers aus Altlasten mischt — configured kommt aus .env.
+    if (Array.isArray(ergebnis.sources)) {
+      const nach = Object.create(null);
+      for (const q of ergebnis.sources) {
+        if (q && q.key) nach[q.key] = q;
+      }
+      Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+        const frisch = nach[q.key];
+        if (!frisch) return q;
+        if (q.key === "bip158" || !frisch.configured) {
+          return {
+            ...frisch,
+            reachable: frisch.configured ? q.reachable : null,
+            peer_count: frisch.configured ? (q.peer_count || 0) : 0,
+            peer_hosts: frisch.configured ? (q.peer_hosts || []) : [],
+          };
+        }
+        return q;
+      });
+    }
+    zeichneDatenquellenAnsicht();
+    zeichneKopfStatus(Zustand.config.sources);
+    meldung(
+      quelle.key === "bip158"
+        ? t("sources.p2pDisabled")
+        : t("sources.discarded", { name: quelleName(quelle) }),
+      "warn",
+    );
+    // Node-Check nachziehen (nächste Quelle), P2P nicht wieder „an“ malen.
     pruefeNodeStatus();
   } catch (fehler) {
     meldung(fehler.message, "krit");
@@ -5370,6 +6381,24 @@ async function ladeElectrumServer(quelle, knopf) {
   }
 }
 
+async function loescheElectrumListe(quelle) {
+  const ok = window.confirm(
+    t("sources.confirmClearList", { name: quelleName(quelle) }),
+  );
+  if (!ok) return;
+  try {
+    const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
+      methode: "DELETE",
+    });
+    await ladeConfig();
+    zeichneQuellen(ergebnis.sources || Zustand.config.sources);
+    meldung(t("sources.listCleared", { name: quelleName(quelle) }), "warn");
+    pruefeNodeStatus();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  }
+}
+
 /** Baut das Bearbeitungsformular einer Datenquelle. */
 function quellenFormular(quelle, behaelter) {
   const form = document.createElement("div");
@@ -5386,7 +6415,12 @@ function quellenFormular(quelle, behaelter) {
     zeile.append(titel);
 
     let eingabe;
-    if (feld.typ === "schalter") {
+    if (feld.typ === "checkbox") {
+      eingabe = document.createElement("input");
+      eingabe.type = "checkbox";
+      eingabe.checked = feld.value === "true";
+      eingabe.className = "feld-checkbox";
+    } else if (feld.typ === "schalter") {
       eingabe = document.createElement("select");
       for (const [wert, text] of [["true", t("common.yes")], ["false", t("common.no")]]) {
         const option = document.createElement("option");
@@ -5449,14 +6483,21 @@ function quellenFormular(quelle, behaelter) {
     meldungsfeld.textContent = "";
     const werte = {};
     for (const [key, eingabe] of eingaben) {
-      werte[key] = eingabe.value;
+      werte[key] = eingabe.type === "checkbox"
+        ? (eingabe.checked ? "true" : "false")
+        : eingabe.value;
     }
+    const p2pWirdAn = quelle.key === "bip158"
+      && String(werte.BIP158_P2P || "").toLowerCase() === "true";
+    const hatteOeffentlich = oeffentlicheElectrumNochAktiv();
     try {
       const ergebnis = await api("/config/source", {
         methode: "PUT",
         daten: { source: quelle.key, values: werte },
       });
       await ladeConfig();
+      // Während des Tests „im Aufbau“ zeigen.
+      Zustand.peerCheckLaeuft = true;
       zeichneQuellen(ergebnis.sources || Zustand.config.sources);
       meldung(t("sources.appliedTesting"), "warn");
       try {
@@ -5465,6 +6506,9 @@ function quellenFormular(quelle, behaelter) {
           t("sources.appliedResult", { stand: stand.label }),
           stand.gut ? "gut" : "krit",
         );
+        if (p2pWirdAn && hatteOeffentlich && p2pQuelleVerbunden()) {
+          await frageP2pPrivatsphaereKappen();
+        }
       } catch (testFehler) {
         meldung(t("sources.appliedTestFailed", { msg: testFehler.message }), "krit");
       }
@@ -6020,7 +7064,8 @@ async function starteSanktionsCheck() {
 
   let hops = parseInt($("#sank-hops").value, 10);
   if (Number.isNaN(hops) || hops < 1) hops = 3;
-  hops = Math.min(hops, 20);
+  const hopCap = Number((Zustand.config || {}).sanktion_max_hops_cap) || 20;
+  hops = Math.min(hops, hopCap);
 
   const daten = { max_hops: hops };
   const walletId = $("#sank-wallet").value;
@@ -6095,8 +7140,11 @@ function mempoolVerweis(art, wert) {
   const kopf = instanz.local
     ? t("sources.mempool.openPrivate")
     : t("sources.mempool.openPublic");
+  const zielArt = art === "address"
+    ? t("sources.mempool.targetAddress")
+    : t("sources.mempool.targetTx");
   // Host in zweiter Zeile — native title zeigt Zeilenumbruch.
-  link.title = `${kopf}\n${instanz.host}`;
+  link.title = `${kopf}\n${zielArt}\n${instanz.host}`;
   // Der Klick darf nicht die darunterliegende Zeile aufklappen.
   link.addEventListener("click", (e) => e.stopPropagation());
   return link;
@@ -6227,7 +7275,7 @@ async function speichereSteuerEinstellungen() {
       ergebnis.steuer.haltefrist_jahre_auswahl,
     );
     meldung(t("settings.taxSaved"), "gut");
-    if (Zustand.ansicht === "steuerjahr") ladeSteuerjahr();
+    if (Zustand.ansicht === "steuerjahr") ladeSteuerjahrMitKandidaten();
   } catch (fehler) {
     meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
   } finally {
@@ -7092,8 +8140,9 @@ function peerStatusAusQuellen(quellen, apiStand) {
       gut: true,
     };
   }
-  const pub =
-    (nach.public_onion?.peer_count || 0) + (nach.clearnet?.peer_count || 0);
+  const onionN = nach.public_onion?.peer_count || 0;
+  const clearN = nach.clearnet?.peer_count || 0;
+  const pub = onionN + clearN;
   if (pub > 0) {
     const hosts = [
       ...(nach.public_onion?.peer_hosts || []),
@@ -7102,21 +8151,34 @@ function peerStatusAusQuellen(quellen, apiStand) {
     return {
       n: pub,
       kind: "public",
-      label:
-        pub === 1
-          ? "1 öffentlicher Peer verbunden"
-          : `${pub} öffentliche Peers verbunden`,
+      label: oeffentlicheElectrumLabel(onionN, clearN),
       peers: hosts,
+      onion_electrs: onionN,
+      clearnet_electrs: clearN,
       gut: true,
     };
   }
   return { n: 0, kind: "none", label: "0 Peers verbunden", peers: [], gut: false };
 }
 
+/** Öffentliche Electrum: onion-electrs / clearnet-electrs — nicht „Peers“. */
+function oeffentlicheElectrumLabel(onionN, clearN) {
+  const teile = [];
+  if (onionN > 0) teile.push(`${onionN} onion-electrs`);
+  if (clearN > 0) teile.push(`${clearN} clearnet-electrs`);
+  if (!teile.length) return "0 electrs verbunden";
+  return `${teile.join(" · ")} verbunden`;
+}
+
 function peerAenderungen(alt, neu) {
   if (!alt) return [];
   if (alt.kind !== neu.kind) {
     if (alt.n || neu.n) return [`Wechsel: ${alt.label} → ${neu.label}`];
+    return [];
+  }
+  // P2P-/Public-Probe-Peers wechseln oft — kein Ausgefallen/Neu-Spam pro Host.
+  if (alt.kind === "p2p" || alt.kind === "public") {
+    if (alt.n !== neu.n) return [`Wechsel: ${alt.label} → ${neu.label}`];
     return [];
   }
   const vorher = new Set(alt.peers || []);
@@ -7131,14 +8193,19 @@ function peerAenderungen(alt, neu) {
   return zeilen;
 }
 
-/** Während eines UTXO-Scans: keine Host-Liste, nur Wechsel und < 3 Peers. */
+/** Während eines UTXO-Scans: keine Host-Liste, nur Wechsel und < 3 Peers/electrs. */
 function peerAenderungenFuerLog(alt, neu, scanLaeuft) {
   const roh = peerAenderungen(alt, neu);
   if (!scanLaeuft) return roh;
   const zeilen = roh.filter((z) => z.startsWith("Wechsel:"));
   if (neu.n < 3 && alt.n !== neu.n) {
-    const wort = neu.n === 1 ? "Peer" : "Peers";
-    zeilen.push(`Nur ${neu.n} ${wort} verbunden.`);
+    if (neu.kind === "public") {
+      // Label schon „n onion-electrs · m clearnet-electrs verbunden“
+      zeilen.push(`Nur ${neu.label}.`);
+    } else {
+      const wort = neu.n === 1 ? "Peer" : "Peers";
+      zeilen.push(`Nur ${neu.n} ${wort} verbunden.`);
+    }
   }
   return zeilen;
 }
@@ -7165,8 +8232,13 @@ function peerTaktMs(quellen) {
 /**
  * Live-Peers aus Job/Config in die BIP-158-Quelle und Kopf-Pille schreiben.
  * Ohne Netzprobe — die Connections hält der Scan bereits.
+ *
+ * @param {{ setzeStatus?: boolean }} opts  setzeStatus=false: nur Quellen/Pille,
+ *   peerStatus setzt der Aufrufer (nimmPeerStand) — sonst überschreibt die
+ *   kurze Tor-Probe (oft 2 Peers) den Live-Stand und erzeugt „Wechsel: 2 → N“.
  */
-function nimmLiveP2pPeers(hosts) {
+function nimmLiveP2pPeers(hosts, opts = {}) {
+  const setzeStatus = opts.setzeStatus !== false;
   const liste = Array.isArray(hosts)
     ? hosts.map((h) => String(h || "").trim()).filter(Boolean)
     : [];
@@ -7179,18 +8251,17 @@ function nimmLiveP2pPeers(hosts) {
       // Scan vorbei: Live-Markierung fallen lassen, Check-Stand behalten.
       return q;
     }
-    const alt = Array.isArray(q.peer_hosts) ? q.peer_hosts : [];
-    const hostsMerged = [...new Set([...alt, ...uniq])];
+    // Nur aktuelle Live-Hosts — nicht unbegrenzt mit alten Probe-Hosts mergen.
     return {
       ...q,
       reachable: true,
-      peer_count: Math.max(Number(q.peer_count) || 0, hostsMerged.length),
-      peer_hosts: hostsMerged,
+      peer_count: uniq.length,
+      peer_hosts: uniq,
       error: "",
     };
   });
   Zustand.config.sources = sources;
-  if (uniq.length) {
+  if (uniq.length && setzeStatus) {
     Zustand.peerStatus = {
       n: uniq.length,
       kind: "p2p",
@@ -7307,6 +8378,7 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
 }
 
 function nimmPeerStand(ergebnis, still) {
+  const altStand = Zustand.peerStatus;
   const quellen = uebernehmeQuellenErreichbarkeit(
     Zustand.config?.sources,
     ergebnis.sources || [],
@@ -7321,21 +8393,40 @@ function nimmPeerStand(ergebnis, still) {
       Zustand.config.header_tip = ergebnis.header_tip;
     }
   }
-  if (Array.isArray(ergebnis.live_p2p_peers) && ergebnis.live_p2p_peers.length) {
-    nimmLiveP2pPeers(ergebnis.live_p2p_peers);
+  const liveHosts = Array.isArray(ergebnis.live_p2p_peers)
+    ? [...new Set(
+      ergebnis.live_p2p_peers.map((h) => String(h || "").trim()).filter(Boolean),
+    )]
+    : [];
+  if (liveHosts.length) {
+    // Quellen aktualisieren, peerStatus noch nicht — sonst steht der Vergleich
+    // immer auf der kurzen Live-/Tor-Probe (oft 2) statt dem letzten Stand.
+    nimmLiveP2pPeers(liveHosts, { setzeStatus: false });
   }
-  const stand = peerStatusAusQuellen(
+  let stand = peerStatusAusQuellen(
     Zustand.config?.sources || quellen,
     ergebnis.peer_status,
   );
+  // Aktive Filter-Peers des Scans schlagen die Erreichbarkeits-Probe
+  // (Probe über Tor oft max. 2, Scan-Pool kann anders zählen).
+  if (liveHosts.length && (Zustand.rescanJob || stand.kind === "p2p" || stand.kind === "none")) {
+    stand = {
+      n: liveHosts.length,
+      kind: "p2p",
+      label:
+        liveHosts.length === 1
+          ? "1 Peer verbunden"
+          : `${liveHosts.length} Peers verbunden`,
+      peers: liveHosts,
+      gut: true,
+    };
+  }
   const ruhig = eigeneNodesBeideErreichbar(ergebnis.sources);
   // Bei Electrs+Core kein Log über ausfallende P2P-/Wechsel-Peers —
   // der stille Takt reicht alle 10 Min für den Header-Tip.
-  if (still && Zustand.peerStatus && !ruhig) {
+  if (still && altStand && !ruhig) {
     const scanLaeuft = Boolean(Zustand.rescanJob);
-    for (const zeile of peerAenderungenFuerLog(
-      Zustand.peerStatus, stand, scanLaeuft,
-    )) {
+    for (const zeile of peerAenderungenFuerLog(altStand, stand, scanLaeuft)) {
       logZeile(zeile, true);
     }
   }
@@ -7343,11 +8434,13 @@ function nimmPeerStand(ergebnis, still) {
   Zustand.peers = stand.n;
   Zustand.peerLabel = stand.label;
   Zustand.peersGeprueft = true;
-  zeichneKopfStatus(quellen);
+  zeichneKopfStatus(Zustand.config?.sources || quellen);
   aktualisiereDatenquellenNav();
   const liste = $("#quellen-liste");
-  if (liste && liste.childElementCount) zeichneQuellen(quellen);
-  setzePeerTakt(quellen);
+  if (liste && liste.childElementCount) {
+    zeichneQuellen(Zustand.config?.sources || quellen);
+  }
+  setzePeerTakt(Zustand.config?.sources || quellen);
   if (
     !still &&
     ergebnis.peer_status &&
@@ -7385,6 +8478,7 @@ async function erlaubeOeffentlicheElectrum() {
       methode: "POST",
       daten: { erlauben: true },
     });
+    if (Zustand.config) Zustand.config.oeffentliche_electrum = true;
     await testeEigenenNode();
   } catch (fehler) {
     Zustand.oeffentlicheGefragt = false;
@@ -7392,29 +8486,123 @@ async function erlaubeOeffentlicheElectrum() {
   }
 }
 
-/**
- * Kopfzeile rechts: vier Quellen-Pillen, danach Privatsphäre.
- *
- * Core RPC privat / Electrs privat: ohne Konfig neutral; konfiguriert aber
- * nicht verbunden rot; verbunden grün. P2P BIP-158: immer sichtbar, neutral
- * Label „n P2Peers anonym“: 0 grau, 1–2 gelb, >2 grün. Electrs öffentlich:
- * neutral unverbunden, rot verbunden — Privatsphäre-Pille dann „niedrig“.
- */
-function kopfQuelleStufe(quelle, { verbunden, brauchtKonfig, verbundenStufe = "gut" }) {
-  if (brauchtKonfig && !(quelle && quelle.configured)) return "neutral";
-  if (verbunden) return verbundenStufe;
-  // Vor dem ersten Check nicht rot aufblitzen: unbekannter Stand = neutral.
-  if (!Zustand.peersGeprueft && !(quelle && quelle.reachable === false)) {
-    return "neutral";
-  }
-  if (brauchtKonfig) return "krit";
-  return "neutral";
+function oeffentlicheElectrumNochAktiv() {
+  if (Zustand.config?.oeffentliche_electrum) return true;
+  const liste = Zustand.config?.sources || [];
+  return liste.some(
+    (q) =>
+      q
+      && (q.key === "public_onion" || q.key === "clearnet")
+      && q.configured
+      && (q.reachable === true || (q.peer_count || 0) > 0),
+  );
 }
 
+function p2pQuelleVerbunden() {
+  const p2p = (Zustand.config?.sources || []).find((q) => q && q.key === "bip158");
+  return Boolean(
+    p2p
+    && p2p.configured
+    && (p2p.reachable === true || (p2p.peer_count || 0) > 0),
+  );
+}
+
+/**
+ * Nach P2P-Aktivierung: optional öffentliche Electrum-Nutzung kappen.
+ * @returns {Promise<"kappen"|"behalten"|undefined>}
+ */
+function frageP2pPrivatsphaereKappen() {
+  return new Promise((resolve) => {
+    const dlg = $("#p2p-privatsphaere-dialog");
+    if (!dlg) {
+      resolve(undefined);
+      return;
+    }
+    const ja = $("#p2p-privatsphaere-ja");
+    const nein = $("#p2p-privatsphaere-nein");
+    dlg.hidden = false;
+    if (ja) ja.focus();
+
+    const fertig = async (wahl) => {
+      ja?.removeEventListener("click", onJa);
+      nein?.removeEventListener("click", onNein);
+      dlg.removeEventListener("keydown", onTaste);
+      dlg.hidden = true;
+      if (wahl === "kappen") {
+        try {
+          await api("/source/oeffentlich", {
+            methode: "POST",
+            daten: { erlauben: false },
+          });
+          if (Zustand.config) Zustand.config.oeffentliche_electrum = false;
+          Zustand.peerCheckLaeuft = false;
+          // Stale „verbunden“/„im Aufbau“ an Onion/Clearnet entfernen.
+          Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+            if (q.key !== "public_onion" && q.key !== "clearnet") return q;
+            return {
+              ...q,
+              reachable: null,
+              peer_count: 0,
+              peer_hosts: [],
+            };
+          });
+          zeichneDatenquellenAnsicht();
+          zeichneKopfStatus(Zustand.config.sources);
+          logZeile("Öffentliche Electrum-Nutzung gekappt (höhere Privatsphäre).");
+          meldung(t("sources.publicCut"), "gut");
+        } catch (fehler) {
+          logZeile(`Öffentlich kappen: ${fehler.message}`, true);
+          meldung(fehler.message, "krit");
+        }
+      } else if (wahl === "behalten") {
+        logZeile("Öffentliche Electrum bleiben als Fallback erlaubt.");
+      }
+      resolve(wahl);
+    };
+    const onJa = () => fertig("kappen");
+    const onNein = () => fertig("behalten");
+    const onTaste = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        onNein();
+      }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        onJa();
+      }
+    };
+    ja?.addEventListener("click", onJa);
+    nein?.addEventListener("click", onNein);
+    dlg.addEventListener("keydown", onTaste);
+  });
+}
+
+/**
+ * Kopfzeile: nur aktive/im Aufbau/fehlerhafte Quellen + eine Privatsphäre-Pille.
+ * Kein Katalog ungenutzter Quellen. Cache-only → Privatsphäre hoch.
+ */
 function kopfQuelleVerbunden(quelle) {
   if (!quelle || !quelle.configured) return false;
   if (quelle.reachable === true) return true;
   return (quelle.peer_count || 0) > 0;
+}
+
+/** konfiguriert, noch kein Check → Aufbau; nach Check unerreichbar → Fehler. */
+function kopfQuelleAufbau(quelle) {
+  if (!quelle || !quelle.configured) return false;
+  if (kopfQuelleVerbunden(quelle)) return false;
+  if (quelle.reachable === false) return false;
+  return !Zustand.peersGeprueft || quelle.reachable == null;
+}
+
+function kopfQuelleFehler(quelle) {
+  return Boolean(
+    quelle
+    && quelle.configured
+    && !kopfQuelleVerbunden(quelle)
+    && Zustand.peersGeprueft
+    && quelle.reachable === false,
+  );
 }
 
 function zeichneKopfStatus(quellen) {
@@ -7429,8 +8617,6 @@ function zeichneKopfStatus(quellen) {
 
   const coreVerbunden = kopfQuelleVerbunden(core);
   const electrsVerbunden = kopfQuelleVerbunden(electrs);
-  // Anzahl wie bisher bei „n Peers verbunden“ — aus der BIP-158-Quelle,
-  // sonst dem P2P-Peer-Stand (wenn gerade Compact Filter die aktive Sorte ist).
   const liveN = Array.isArray(Zustand.liveP2pPeers)
     ? Zustand.liveP2pPeers.length
     : 0;
@@ -7439,25 +8625,25 @@ function zeichneKopfStatus(quellen) {
     liveN,
   );
   if (
-    !p2pAnzahl &&
-    Zustand.peerStatus &&
-    Zustand.peerStatus.kind === "p2p"
+    !p2pAnzahl
+    && Zustand.peerStatus
+    && Zustand.peerStatus.kind === "p2p"
   ) {
     p2pAnzahl = Number(Zustand.peerStatus.n || Zustand.peers || 0);
   }
-  const p2pVerbunden =
-    p2pAnzahl > 0
-    || kopfQuelleVerbunden(p2p)
-    || (Zustand.peerStatus && Zustand.peerStatus.kind === "p2p");
+  const p2pAktiv =
+    (Zustand.peerStatus && Zustand.peerStatus.kind === "p2p")
+    || liveN > 0;
+  const p2pVerbunden = p2pAnzahl > 0 || p2pAktiv;
+  const p2pAufbau =
+    Boolean(p2p?.configured)
+    && !p2pVerbunden
+    && (!Zustand.peersGeprueft || Zustand.peerCheckLaeuft);
   const oeffentlichVerbunden =
-    kopfQuelleVerbunden(oeffentlichOnion) ||
-    kopfQuelleVerbunden(oeffentlichClear) ||
-    (Zustand.peerStatus && Zustand.peerStatus.kind === "public");
-  const p2pLabel = t("header.p2pPeers", { n: p2pAnzahl });
-  // 0 = grau, 1–2 = gelb, ab 3 = grün (mehr Peers = robuster).
-  // Während aktivem Filter-Scan: mindestens gelb, wenn Peers da sind.
-  const p2pStufe =
-    p2pAnzahl > 2 ? "gut" : p2pAnzahl > 0 ? "warn" : "neutral";
+    kopfQuelleVerbunden(oeffentlichOnion)
+    || kopfQuelleVerbunden(oeffentlichClear)
+    || (Zustand.peerStatus && Zustand.peerStatus.kind === "public");
+
   const p2pHosts = [
     ...new Set([
       ...(p2p?.peer_hosts || []),
@@ -7468,66 +8654,81 @@ function zeichneKopfStatus(quellen) {
     (liveN > 0
       ? `Aktiv für Filter/Tip-Sync: ${liveN} Peer(s). `
       : "")
-    + "Verbundene Bitcoin-Nodes, die BIP-158 Blockfilter teilen. "
-    + "Hohe Anonymität, nur die Blöcke von Interesse könnten verfolgt werden, "
-    + "nicht welche Tx in den Blöcken für xPubTracing relevant war."
-    + (p2pHosts.length ? ` · ${p2pHosts.slice(0, 6).join(", ")}` : "");
+    + "Bitcoin-P2P mit BIP-158 Compact Filters. "
+    + (p2pHosts.length ? p2pHosts.slice(0, 6).join(", ") : "");
 
-  const eintraege = [
-    {
+  const eintraege = [];
+
+  if (coreVerbunden || kopfQuelleAufbau(core) || kopfQuelleFehler(core)) {
+    eintraege.push({
       key: "own_core",
       label: t("header.sourceCore"),
-      stufe: kopfQuelleStufe(core, { verbunden: coreVerbunden, brauchtKonfig: true }),
-      title:
-        "Bitcoin Node mit RPC Zugang, hohe Privatsphäre bei eigenem Node",
-    },
-    {
+      stufe: coreVerbunden ? "gut" : (kopfQuelleAufbau(core) ? "warn" : "krit"),
+      title: core?.error
+        || "Bitcoin Core RPC (scantxoutset / Lookups), hohe Privatsphäre",
+    });
+  }
+
+  if (p2pVerbunden || p2pAufbau) {
+    const n = p2pVerbunden ? p2pAnzahl : 0;
+    eintraege.push({
       key: "bip158",
-      label: p2pLabel,
-      stufe: p2pStufe,
-      title: p2pTitle,
-    },
-    {
+      label: t("header.p2pPeers", { n }),
+      stufe: p2pAufbau
+        ? "warn"
+        : (p2pAnzahl > 2 ? "gut" : (p2pAnzahl > 0 ? "warn" : "krit")),
+      title: p2pTitle || t("header.p2pPeers", { n }),
+    });
+  }
+
+  if (electrsVerbunden || kopfQuelleAufbau(electrs) || kopfQuelleFehler(electrs)) {
+    eintraege.push({
       key: "own_fulcrum",
       label: t("header.sourceElectrumOwn"),
-      stufe: kopfQuelleStufe(electrs, {
-        verbunden: electrsVerbunden,
-        brauchtKonfig: true,
-      }),
-      title:
-        "eigener Electrum-Server gemäß Zugangsdaten unter Datenquellen",
-    },
-    {
+      stufe: electrsVerbunden
+        ? "gut"
+        : (kopfQuelleAufbau(electrs) ? "warn" : "krit"),
+      title: electrs?.error
+        || "Eigener Electrum-Server (Fulcrum/electrs) gemäß Datenquellen",
+    });
+  }
+
+  if (oeffentlichVerbunden) {
+    eintraege.push({
       key: "public",
       label: t("header.sourceElectrumPublic"),
-      stufe: kopfQuelleStufe(null, {
-        verbunden: oeffentlichVerbunden,
-        brauchtKonfig: false,
-        verbundenStufe: "krit",
-      }),
-      title:
-        "Öffentliche Electrum-Server gemäß Liste von Electrum, keine Privatsphäre",
-    },
-  ];
+      stufe: "krit",
+      title: "Öffentliche Electrum-Server — keine Privatsphäre",
+    });
+  }
 
-  // Aktive Quelle = dieselbe Kaskade wie Fußzeile (nicht „Electrs privat“ als Default).
+  const privateVerbunden =
+    coreVerbunden || electrsVerbunden || (p2pVerbunden && p2pAnzahl > 0);
+  const privateAufbau =
+    kopfQuelleAufbau(core)
+    || kopfQuelleAufbau(electrs)
+    || p2pAufbau;
+
   let privText;
   let privStufe;
   if (oeffentlichVerbunden) {
-    privText = t("privacy.sourceElectrumPublic");
+    privText = t("privacy.pillNone");
     privStufe = "krit";
-  } else if (electrsVerbunden) {
-    privText = t("privacy.sourceElectrumPrivate");
+  } else if (privateVerbunden && p2pVerbunden && p2pAnzahl === 1
+    && !coreVerbunden && !electrsVerbunden) {
+    // Nur ein P2P-Peer: privat, aber schwach.
+    privText = t("privacy.pillMedium");
+    privStufe = "warn";
+  } else if (privateVerbunden) {
+    privText = t("privacy.pillHigh");
     privStufe = "gut";
-  } else if (coreVerbunden) {
-    privText = t("privacy.sourceCorePrivate");
-    privStufe = "gut";
-  } else if (p2pVerbunden) {
-    privText = t("privacy.sourceP2P", { label: p2pLabel });
-    privStufe = p2pStufe === "neutral" ? "gut" : p2pStufe;
+  } else if (privateAufbau) {
+    privText = t("privacy.pillUnclear");
+    privStufe = "warn";
   } else {
-    privText = t("privacy.noneConnected");
-    privStufe = "neutral";
+    // Nichts live verbunden — nur Cache: kein Leak.
+    privText = t("privacy.pillHigh");
+    privStufe = "gut";
   }
 
   setzeText($("#fuss-quelle"), privText);
@@ -7617,13 +8818,30 @@ async function ladeSpotkurs({ laut = false } = {}) {
   try {
     // Kurz timeout: sonst blockiert der Start bei Netz-/SSL-Problemen.
     Zustand.kurs = await api("/price?currency=EUR", { timeoutMs: 8000 });
-    if (laut) {
+    const warn = (Zustand.kurs && Zustand.kurs.warning) || "";
+    if (warn) {
+      // Nur einmal pro Session — und nur wenn wirklich ein älterer Tag.
+      if (!Zustand.kursWarnGeloggt) {
+        Zustand.kursWarnGeloggt = true;
+        logZeile(`Kurs: ${warn}.`, true);
+      }
+    } else if (laut) {
       const label = formatKursLabel(Zustand.kurs);
       const quelle = Zustand.kurs.source || "?";
       logZeile(`Kurs: ${label} (${quelle}).`, true);
     }
   } catch (fehler) {
-    if (laut) logZeile(`Kurs: ${fehler.message}`, true);
+    const msg = String(fehler.message || fehler || "");
+    // Keine mehrzeilige Opt-in-/Pipe-Forensik; höchstens einmal.
+    if (!Zustand.kursWarnGeloggt && (laut || /nicht beschaffbar/i.test(msg))) {
+      Zustand.kursWarnGeloggt = true;
+      logZeile(
+        msg.length > 120 || msg.includes(" | ")
+          ? "Kurs: aktueller Kurs nicht beschaffbar."
+          : `Kurs: ${msg}`,
+        true,
+      );
+    }
   }
   zeichneKursPille();
   if (Zustand.kurs && Number(Zustand.kurs.amount) > 0) {
@@ -7645,7 +8863,7 @@ function aktualisiereFiatAnzeigen() {
     return;
   }
   if (Zustand.ansicht === "steuerjahr") {
-    const jahr = $("#steuer-jahr");
+    const jahr = $("#jahr-wahl");
     if (jahr && typeof ladeSteuerjahr === "function") {
       ladeSteuerjahr().catch(() => {});
     }
@@ -8112,11 +9330,18 @@ async function testeEigenenNode(knopf) {
     logZeile("Starte Verbindungstest…");
   }
   Zustand.peerCheckLaeuft = true;
+  // Sofort „Verbindung im Aufbau…“ in Datenquellen, solange der Check läuft.
+  if ($("#quellen-liste")?.childElementCount) {
+    zeichneQuellen(Zustand.config?.sources || []);
+  }
   try {
     const ergebnis = await apiSourceCheck();
     return nimmPeerStand(ergebnis, false);
   } finally {
     Zustand.peerCheckLaeuft = false;
+    if ($("#quellen-liste")?.childElementCount) {
+      zeichneQuellen(Zustand.config?.sources || []);
+    }
     if (knopf) {
       knopf.disabled = false;
       knopf.textContent = vorher || "Eigenen Node testen";
@@ -8326,6 +9551,10 @@ async function ladeConfig() {
   Zustand.config.sources = uebernehmeQuellenErreichbarkeit(
     altQuellen, Zustand.config.sources,
   );
+  // Offene Server-Peers sofort in die Pille — ohne erneute Netzprobe.
+  if (Array.isArray(Zustand.config.live_p2p_peers) && Zustand.config.live_p2p_peers.length) {
+    nimmLiveP2pPeers(Zustand.config.live_p2p_peers);
+  }
   Zustand.entwurf = Zustand.config.wallets.map((w) => ({ ...w }));
   setzeEnvPfad(Zustand.config.env_path);
   Zustand.llmStatus = Zustand.config.llm || Zustand.llmStatus;
@@ -8351,6 +9580,11 @@ async function ladeConfig() {
   zeichneChatAnbindung();
   zeichneNav();
   zeichneFussVersion();
+  const hopFeld = $("#sank-hops");
+  if (hopFeld) {
+    const cap = Number(Zustand.config?.sanktion_max_hops_cap) || 20;
+    hopFeld.max = String(cap);
+  }
 }
 
 async function start() {
@@ -8391,6 +9625,8 @@ async function start() {
       zeichneUiLang();
       // Haltefrist-Optionen wurden in ladeConfig vor dem Catalog befüllt (Roh-Keys).
       zeichneSteuerEinstellungen();
+      // Kopf nach Catalog nochmal — ladeConfig kann vor initI18n gelaufen sein.
+      zeichneKopfStatus(Zustand.config?.sources || []);
     }
     const langWahl = $("#ui-lang");
     if (langWahl) {
@@ -8488,7 +9724,7 @@ async function start() {
     .querySelector('[data-ansicht="steuerjahr"]')
     .addEventListener("click", () => {
       zeigeAnsicht("steuerjahr");
-      ladeSteuerjahr();
+      ladeSteuerjahrMitKandidaten();
     });
   document
     .querySelector('[data-ansicht="sanktionen"]')
@@ -8522,7 +9758,7 @@ async function start() {
   $("#trace-ziel").addEventListener("keydown", (e) => {
     if (e.key === "Enter") starteTrace();
   });
-  $("#jahr-wahl").addEventListener("change", ladeSteuerjahr);
+  $("#jahr-wahl").addEventListener("change", () => ladeSteuerjahrMitKandidaten());
   $("#frist-wahl").addEventListener("change", async () => {
     try {
       const ergebnis = await api("/config/steuer", {
@@ -8653,6 +9889,12 @@ async function start() {
   if (unrefLoeschen) {
     unrefLoeschen.addEventListener("click", loescheUnreferenziertenCache);
   }
+  const cacheDashRefresh = $("#cache-dash-aktualisieren");
+  if (cacheDashRefresh) {
+    cacheDashRefresh.addEventListener("click", () => {
+      ladeCacheDashboard();
+    });
+  }
   $("#privatsphaere-entfernen").addEventListener("click", verwerfeErstenXpub);
   $("#privatsphaere-ok").addEventListener("click", akzeptiereOhneSicherenNode);
   $("#oeffentliche-electrum-nein").addEventListener("click", lehneOeffentlicheElectrumAb);
@@ -8704,6 +9946,14 @@ async function start() {
   if (kursUsd) kursUsd.addEventListener("click", () => starteKursImport("USD"));
   const kursDatei = $("#kurs-csv-datei");
   if (kursDatei) kursDatei.addEventListener("change", liesKursCsvDatei);
+  const kursOpt = $("#kurs-historie-opt-in");
+  if (kursOpt) {
+    kursOpt.addEventListener("change", () => speichereKursHistorieOptInUndSync());
+  }
+  const kursSync = $("#kurs-historie-sync");
+  if (kursSync) {
+    kursSync.addEventListener("click", () => speichereKursHistorieOptInUndSync());
+  }
   $("#mempool-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") speichereMempool();
   });
@@ -8733,7 +9983,8 @@ async function start() {
   }
 
   einrichtungBeimStart();
-  pruefeNodeStatus();
+  // Still nachladen: Server hält Connections; lauter Neu-Test nur über Knopf.
+  pruefePeersLeise();
 
   // Sprachumschalter oben rechts
   const deBtn = $("#lang-de");

@@ -198,8 +198,11 @@ button, input, select { font: inherit; color: inherit; }
 .marke { display: flex; align-items: center; gap: 10px; }
 .marke-logo {
   width: 36px; height: 36px; border-radius: 8px;
-  object-fit: cover; flex-shrink: 0;
+  /* contain: Hut + Pfeife nicht am Rand abschneiden */
+  object-fit: contain; flex-shrink: 0;
   box-shadow: 0 0 0 1px var(--linie);
+  /* Helle Platte: dunkle Sherlock-Silhouette lesbar in Light und Dark */
+  background: #F0F3F0;
 }
 .marke-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
 .marke-name { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; }
@@ -674,8 +677,23 @@ select { font-family: var(--mono); font-size: 11px; }
 .hinweis-gut  { background: var(--gut-bg);  color: var(--gut); }
 .hinweis-warn { background: var(--warn-bg); color: var(--warn); }
 .hinweis-krit { background: var(--krit-bg); color: var(--krit); }
-.hinweis-lauf { background: var(--flaeche-2); color: var(--gedaempft);
-                border: 1px solid var(--linie); }
+.hinweis-lauf {
+  background: var(--flaeche-2); color: var(--gedaempft);
+  border: 1px solid var(--linie);
+  /* Abbrechen rechts fest — Textlänge ändert sich, Knopf springt nicht. */
+  width: 100%;
+  box-sizing: border-box;
+}
+.hinweis-lauf > span:not(.spinner) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hinweis-lauf > .knopf {
+  margin-left: auto;
+  flex: none;
+}
 .hinweis-lauf.hinweis-fremd {
   background: var(--warn-bg); color: var(--warn); border-color: transparent;
 }
@@ -826,7 +844,13 @@ select { font-family: var(--mono); font-size: 11px; }
   display: flex; flex-direction: column; gap: 10px;
 }
 .feld-zeile { display: flex; flex-direction: column; gap: 3px; max-width: 52ch; }
-.feld-zeile input,
+.feld-zeile .feld-checkbox {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 2px 0 0;
+  accent-color: var(--akzent);
+}
+.feld-zeile input:not(.feld-checkbox),
 .feld-zeile select,
 .feld-zeile textarea {
   background: var(--flaeche); border: 1px solid var(--linie);
@@ -909,7 +933,49 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .knoten-coinbase { background: var(--akzent); }
 .knoten-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .knoten-oben { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
-.knoten-unten { font-family: var(--mono); font-size: 11px; color: var(--blass); }
+.knoten-unten {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--blass);
+  width: 100%;
+}
+.knoten-unten-links { font-family: var(--mono); min-width: 0; }
+.knoten-unten-rechts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-weight: 500;
+  color: var(--text);
+  text-align: right;
+  white-space: nowrap;
+}
+.tx-class-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  display: block;
+}
+.tx-class-text {
+  line-height: 1.2;
+}
+.adress-mix-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+.adress-mix-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.95;
+}
 .knoten-notiz {
   font-size: 11px; color: var(--warn); background: var(--warn-bg);
   border-radius: var(--r); padding: 4px 8px; margin-top: 4px;
@@ -1126,6 +1192,67 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .kennzahl-wert.gut { color: var(--gut); }
 .kennzahl-wert.warn { color: var(--warn); }
 .kennzahl-zusatz { font-size: 11px; color: var(--gedaempft); }
+
+/* ---------- Cache-Dashboard (Belegung) ---------- */
+
+.cache-dash-intro { padding: 8px 13px 0; margin: 0; }
+.cache-dash-platte {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 13px 4px; font-size: 12px;
+}
+.cache-dash-ampel {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--blass); flex: none;
+}
+.cache-dash-ampel.gut { background: var(--gut); }
+.cache-dash-ampel.warn { background: var(--warn); }
+.cache-dash-ampel.krit { background: var(--krit); }
+.cache-dash-balken {
+  display: flex; height: 10px; margin: 6px 13px 10px;
+  border-radius: 3px; overflow: hidden; background: var(--flaeche-3);
+  border: 1px solid var(--linie-zart);
+}
+.cache-dash-balken span { display: block; height: 100%; min-width: 0; }
+.cache-dash-balken .seg-utxo { background: var(--gut); }
+.cache-dash-balken .seg-immutable { background: var(--warn); }
+.cache-dash-balken .seg-sanctioned { background: var(--krit); opacity: 0.75; }
+.cache-dash-kacheln {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px; padding: 0 13px 12px;
+}
+.cache-dash-kachel {
+  border: 1px solid var(--linie-zart); border-radius: 4px;
+  padding: 8px 10px; background: var(--flaeche-2);
+}
+.cache-dash-kachel .titel {
+  font-size: 10px; color: var(--blass); text-transform: uppercase;
+  letter-spacing: 0.03em; margin-bottom: 4px;
+}
+.cache-dash-kachel .wert {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 600;
+}
+.cache-dash-kachel .wert.warn { color: var(--warn); }
+.cache-dash-kachel .wert.krit { color: var(--krit); }
+.cache-dash-kachel .meta { font-size: 11px; color: var(--gedaempft); margin-top: 2px; }
+.cache-dash-wallets { padding: 0 13px 12px; overflow-x: auto; }
+.cache-dash-wallets table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.cache-dash-wallets th,
+.cache-dash-wallets td {
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid var(--linie-zart);
+  white-space: nowrap;
+}
+.cache-dash-wallets th {
+  font-size: 10px; color: var(--blass); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.02em;
+}
+.cache-dash-wallets td.zahl,
+.cache-dash-wallets th.zahl { text-align: right; font-variant-numeric: tabular-nums; }
+.cache-dash-wallets td.mono { font-family: var(--mono); font-size: 11px; }
+#cache-dash-meldung { padding: 0 13px 12px; }
 
 /* ---------- Haltedauer-Balken ---------- */
 

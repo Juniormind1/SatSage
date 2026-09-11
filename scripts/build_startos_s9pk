@@ -48,6 +48,16 @@ if [ ! -d "$ROOT/.startos" ] && [ ! -f "$ROOT/.startos/build.key.pem" ]; then
   fi
 fi
 
+# Mitgelieferte Kurs-Historie bis Tip (wie Desktop-Builds).
+if [ -z "${SKIP_BTC_PRICE_REFRESH:-}" ]; then
+  echo "BTC-Preis-Bundle bis Tip…"
+  if [ -x "$ROOT/.venv/bin/python" ]; then
+    "$ROOT/.venv/bin/python" "$ROOT/scripts/refresh_btc_price_bundle.py"
+  else
+    python3 "$ROOT/scripts/refresh_btc_price_bundle.py"
+  fi
+fi
+
 cd "$PKG"
 if [ ! -d node_modules/@start9labs/start-sdk ]; then
   echo "npm ci in packaging/"

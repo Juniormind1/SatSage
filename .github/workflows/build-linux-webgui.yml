@@ -31,10 +31,29 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             python3-tk tcl tk libtk8.6
 
+      - name: BTC-Preis-Bundle bis Tip
+        run: |
+          chmod +x scripts/refresh_btc_price_bundle.py
+          python3 scripts/refresh_btc_price_bundle.py
+          # Kurz prüfen, dass die Serie nicht hinter dem Build-Tag zurückliegt
+          python3 - <<'PY'
+          from pathlib import Path
+          from datetime import datetime, timezone, timedelta
+          p = Path("data/btc_price/EUR.csv")
+          tage = [l.split(",",1)[0] for l in p.read_text().splitlines()
+                  if l and not l.startswith("#") and l[0].isdigit()]
+          assert tage, "EUR.csv leer"
+          tip = tage[-1]
+          gestern = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+          print(f"EUR tip={tip} (gestern UTC={gestern})")
+          assert tip >= gestern, f"Bundle-Tip {tip} hinter gestern {gestern}"
+          PY
+
       - name: Linux-Binary bauen
         run: |
           chmod +x scripts/build_satsage_linux
-          ./scripts/build_satsage_linux
+          # Bundle bereits oben aktualisiert — Build nicht doppelt ziehen
+          SKIP_BTC_PRICE_REFRESH=1 ./scripts/build_satsage_linux
           test -x dist/satsage-webgui
           file dist/satsage-webgui
 

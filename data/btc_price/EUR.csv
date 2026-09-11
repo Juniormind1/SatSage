@@ -1,7 +1,7 @@
-# BTC/EUR Tageskurs (Schlusskurs)
-# Quelle: Bitstamp via CryptoDataDownload
+# BTC/EUR Tageskurs
+# Quelle: Bitstamp via CryptoDataDownload; URL: https://www.cryptodatadownload.com/cdd/Bitstamp_BTCEUR_d.csv; Stand: 2026-09-11
 # URL: https://www.cryptodatadownload.com/cdd/Bitstamp_BTCEUR_d.csv
-# Stand: 2026-08-27
+# Zeitraum: 2016-06-04 … 2026-09-11
 # Format: date,price
 date,price
 2016-06-04,503
@@ -3739,4 +3739,19 @@ date,price
 2026-08-24,67674.43
 2026-08-25,67261
 2026-08-26,67795.68
-2026-08-27,67669.08
+2026-08-27,68891.63
+2026-08-28,67187.2
+2026-08-29,67599.13
+2026-08-30,67061.25
+2026-08-31,67623.84
+2026-09-01,66788.44
+2026-09-02,66748.18
+2026-09-03,69875.89
+2026-09-04,68643.38
+2026-09-05,68779.56
+2026-09-06,69204.1
+2026-09-07,68067.14
+2026-09-08,67463.98
+2026-09-09,67298.87
+2026-09-10,65930.61
+2026-09-11,66014.01
