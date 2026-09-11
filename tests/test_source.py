@@ -541,7 +541,8 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(nach["bip158"].peer_hosts, ["198.51.100.9:8333"])
         self.assertTrue(nach["bip158"].reachable)
         self.assertTrue(
-            any("versuche über Tor" in z for z in gesehen), gesehen
+            any("versuche über Tor" in z for z in gesehen),
+            gesehen,
         )
 
     def test_p2p_clearnet_mit_peer_startet_kein_tor(self):
