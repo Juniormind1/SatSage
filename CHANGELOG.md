@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft · Mix-Icons:** Soft-Labels Wasabi Classic / WabiSabi / Whirlpool / JoinMarket mit farbigen Form-Icons (Mempool-Stil) in der Herkunftszeile.
+- **Herkunft · gezielte Suche:** Nach Trace zeigt die Kopfzeile den **Output-Betrag** (und Adresse) des gewählten `txid:vout` — nicht dauerhaft „0 sats“.
+- **Herkunft aller UTXOs:** Ohne UTXO-Bestand: Bestätigungsdialog — OK startet UTXO-Scan aller Wallets, danach automatisch die Herkunft (Abbruch möglich); kein falsches „schon erledigt“ mehr.
+- **Lab · CJ-Peers:** Mix-Fixtures nutzen `lab-faucet` als Fremd-Inputs (Funding-Quelle, nicht in SatSage `WALLET_*`); Viewer nur mit eigenen Anteilen — kein Fan-Out-Fehllabel mehr bei Wasabi/WabiSabi.
+- **Herkunft · Mix-Form vor Fan-Out:** Klar erkennbare CoinJoin-Form (Wasabi/WabiSabi/…) behält das Soft-Label auch wenn alle Inputs eigene XPUBs sind (Multi-Wallet/Lab) — kein Fehl-Label „eigene Auszahlung“.
+- **Lab · mempool.space:** Regtest-Docker startet lokalen Explorer unter `http://127.0.0.1:18080` (API + MariaDB + Frontend); `MEMPOOL_URL` in der Lab-`.env` zeigt darauf — Tx-Form (z. B. Whirlpool 5×5) im Browser prüfbar.
+- **Herkunft · kompaktere Knoten:** Soft-Label („Wahrscheinlich …“) rechts neben Timestamp; externe Enden kurz als „Externer Eingang“ in der TxID-Zeile statt Extra-Notiz.
 - **Herkunft · CoinJoin-Klassifikation:** Soft-Labels („Wahrscheinlich Wasabi-CoinJoin (Classic) / WabiSabi / Whirlpool / JoinMarket“, PayJoin, Exchange-Batch, eigener Fan-Out). Bei erkanntem Mix nur **eigene** Inputs weiterverfolgen — Peer-Adressen nicht mehr als „Herkunft von extern“. Lab-Fixtures + `verify_tx_classify.py`. Whirlpool-Ketten (Remix × n) bleiben Folgepunkt.
 - **Marke · Sherlock-Pfeife:** Web-Kopf, Login, Favicon und Packaging-Icon nutzen einen Ausschnitt aus `satsage-head.png` mit Fokus auf die **stilisierte Pfeife** (nicht die Hutkrone), abgeleitet über `scripts/prepare_brand_assets.py` — nicht mehr das Sat-Symbol. Splash bleibt das volle Logo.
 - **Datenquellen · Onion-Latenz-Gate:** Beim Setup öffentlicher Onion-Electrs eine kurze Probe-`get_history`; bei Überschreitung (Default 8 s, `PUBLIC_ONION_LATENCY_SECONDS`) BIP-158 bevorzugen, wenn Peers da sind — sonst klare Warnung „wird langsam“ und interaktiv Abbruch. Nur Auto-Priorität (nicht `--rpc-only`); kein Quellenwechsel mitten im Scan.

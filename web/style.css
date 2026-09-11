@@ -933,7 +933,37 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .knoten-coinbase { background: var(--akzent); }
 .knoten-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .knoten-oben { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
-.knoten-unten { font-family: var(--mono); font-size: 11px; color: var(--blass); }
+.knoten-unten {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--blass);
+  width: 100%;
+}
+.knoten-unten-links { font-family: var(--mono); min-width: 0; }
+.knoten-unten-rechts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-weight: 500;
+  color: var(--text);
+  text-align: right;
+  white-space: nowrap;
+}
+.tx-class-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  display: block;
+}
+.tx-class-text {
+  line-height: 1.2;
+}
 .knoten-notiz {
   font-size: 11px; color: var(--warn); background: var(--warn-bg);
   border-radius: var(--r); padding: 4px 8px; margin-top: 4px;
@@ -1034,11 +1064,6 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .utxo-wurzel > .baum-knoten { align-items: center; }
 .utxo-zweig { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie); }
-.tx-class-hinweis {
-  color: var(--text);
-  font-weight: 500;
-  margin-bottom: 4px;
-}
 .zweig-status {
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; color: var(--gedaempft); padding: 6px 0;

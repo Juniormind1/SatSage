@@ -206,6 +206,48 @@ class TestCoinJoinForms(unittest.TestCase):
         self.assertEqual(c.kind, "joinmarket")
 
 
+class TestAllOwnStillMixForm(unittest.TestCase):
+    """Multi-Wallet / Lab: alle Ins eigen, Form trotzdem Mix-Label."""
+
+    def test_wabisabi_all_own_inputs(self):
+        vins = []
+        for i in range(16):
+            v = core_vin(txid(f"w{i:02x}"), 0)
+            v["prevout"] = {
+                "value": 0.05,
+                "scriptPubKey": {
+                    "address": BIP84_RECEIVE_0 if i % 2 == 0 else BIP84_CHANGE_0
+                },
+            }
+            vins.append(v)
+        amounts = [
+            0.031, 0.022, 0.017, 0.011, 0.009, 0.007, 0.005, 0.004,
+            0.033, 0.019, 0.013, 0.008, 0.006, 0.003, 0.002, 0.001,
+        ]
+        outs = [
+            core_vout(i, BIP84_RECEIVE_1 if i == 0 else BIP84_CHANGE_0, btc)
+            for i, btc in enumerate(amounts)
+        ]
+        t = core_tx(txid("wsown"), vins, outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "wabisabi")
+        self.assertTrue(c.walk_own_inputs_only)
+
+    def test_small_fanout_bleibt_fan_out(self):
+        vins = [core_vin(txid("a0"), 0)]
+        vins[0]["prevout"] = {
+            "value": 1.0,
+            "scriptPubKey": {"address": BIP84_RECEIVE_0},
+        }
+        outs = [
+            core_vout(i, BIP84_RECEIVE_1 if i < 9 else BIP84_CHANGE_0, 0.1)
+            for i in range(10)
+        ]
+        t = core_tx(txid("fo2"), vins, outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "fan_out_own")
+
+
 class TestTraceOwnOnly(unittest.TestCase):
     def test_cj_trace_ohne_peer_externals(self):
         eigener = txid("e0")
