@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.1] - 2026-09-11
+
+- **Version:** 0.9.1 — Pflege-Release: CoinJoin-Herkunft (Soft-Labels/Icons, Own-only-Walk), Marke Pfeiffe-Icon, Core-Rollen UTXO vs. Lookup, Kurs-Historie/Onion-Latenz, Steuerjahr- und Herkunfts-UI.
 - **Marke · Pfeiffe-Icon:** Favicon, Kopf-Mark, Apple-Touch und Packaging-Icon stammen aus `Pfeiffe-Icon.jpg` → transparente PNG (`web/img/pfeiffe-icon.png`, Schwarz = Vordergrund) via `scripts/prepare_brand_assets.py`. Splash bleibt das volle Logo.
 - **Herkunft · Mempool-Link:** Am Herkunftsbaum öffnet ↗ die **Transaktion** (VIN/VOUT), sobald `from_utxo`/`txid` da ist; `/address/…` nur an reinen Adresszeilen. Tooltip nennt das Ziel.
 - **Herkunft · Mix-Icons:** Soft-Labels Wasabi / WabiSabi / Whirlpool / JoinMarket mit farbigen Form-Icons (Mempool-Stil) in der Herkunftszeile; an Adressgruppen nur die Icons (ohne Text), wenn gespeicherte Bäume Mix-Formen enthalten — kein Extra-Scan.
