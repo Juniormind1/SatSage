@@ -627,7 +627,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("function setzeKlapp", self.js)
         self.assertIn("function ladeGespeichertenZweig", self.js)
         self.assertIn("oeffneAusCache", self.js)
-        self.assertIn('knoten.expandable ? "▾" : "·"', self.js)
+        # Erste Ebene unter dem UTXO zeichnet zeichneZweig sofort; tiefere
+        # Ebenen starten zu (▸) und werden erst beim Aufklappen gebaut.
+        self.assertIn('knoten.expandable ? "▸" : "·"', self.js)
+        self.assertIn("kinder.dataset.gezeichnet", self.js)
         self.assertIn("Scan neu", self.js)
         self.assertNotIn("Herkunft neu", self.js)
         self.assertNotIn("Neu verfolgen", self.js)
@@ -645,13 +648,13 @@ class TestOberflaeche(unittest.TestCase):
                 re.S,
             ),
         )
-        self.assertIsNone(
+        self.assertIsNotNone(
             re.search(
                 r"function zeichneKnoten\(knoten\) \{.*?kinder\.hidden = true",
                 self.js,
                 re.S,
             ),
-            "Herkunftszweige dürfen nicht mehr mit hidden starten",
+            "Tiefere Herkunftszweige starten lazy (hidden, DOM erst beim Aufklappen)",
         )
 
     def test_klapp_pfeil_ist_kein_zierat(self):

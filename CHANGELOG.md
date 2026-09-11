@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunftsbaum · lazy Rendern:** Erste Ebene unter dem UTXO bleibt sofort sichtbar; tiefere Zweige werden erst beim Aufklappen ins DOM gebaut (große CoinJoin-/Remix-Bäume sonst tausende Knoten auf einmal).
+- **Herkunft · Mix-Icon-Tooltip:** Hover zeigt wieder die CoinJoin-Art (Soft-Label), nicht „Zweig auf- und zuklappen“ — Klapp-Hinweis nur noch am Pfeil.
 - **StartOS · Build:** `npm ci` braucht `packaging/package-lock.json`; Select-Indexer-i18n-Keys und `dependencies.ts`-Typen so, dass `tsc`/`make x86` wieder durchlaufen. Build-Skripte ausführbar (`+x`).
 
 ## [0.9.1] - 2026-09-11

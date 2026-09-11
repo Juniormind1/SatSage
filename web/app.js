@@ -216,12 +216,14 @@ function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
     return;
   }
   rechts.hidden = false;
+  rechts.title = text;
   const iconSrc = TX_CLASS_ICON[kind];
   if (iconSrc) {
     const img = document.createElement("img");
     img.className = "tx-class-icon";
     img.src = iconSrc;
-    img.alt = "";
+    img.alt = text;
+    img.title = text;
     img.width = 18;
     img.height = 18;
     img.decoding = "async";
@@ -230,6 +232,7 @@ function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
   const span = document.createElement("span");
   span.className = "tx-class-text";
   span.textContent = text;
+  span.title = text;
   rechts.append(span);
 }
 
@@ -3465,13 +3468,14 @@ function zeichneTraceWurzel(utxo) {
   // Die ganze Zeile ist bedienbar, nicht nur das Dreieck: Ein Ziel von zwölf
   // Pixeln trifft niemand gern. Als Button statt als div, damit Tastatur und
   // Bildschirmleser ihn ohne Zusatzarbeit bekommen.
+  // Title nicht an die ganze Zeile — sonst überschreibt er Mix-Icon-Tooltips.
   const zeile = document.createElement("button");
   zeile.type = "button";
   zeile.className = "baum-knoten utxo-kopf";
-  zeile.title = "Herkunft dieses UTXO verfolgen";
 
   const klapp = document.createElement("span");
   klapp.className = "klapp";
+  klapp.title = "Herkunft dieses UTXO verfolgen";
   klapp.setAttribute("aria-hidden", "true");
 
   const punkt = document.createElement("span");
@@ -4106,20 +4110,23 @@ function zeichneKnoten(knoten) {
   const block = document.createElement("div");
 
   // Die ganze Zeile ist der Treffer — nicht das Dreieck allein.
-  // Unter der UTXO-Wurzel startet der Baum offen: Die Daten liegen schon vor,
-  // und ein zugeklappter erster Hop wirkt wie das Ende der Kette.
+  // Erste Ebene unter der UTXO-Wurzel zeichnet zeichneZweig sofort (sichtbar).
+  // Tiefere Ebenen erst beim Aufklappen — große CoinJoin-/Remix-Bäume sonst
+  // tausende DOM-Knoten und zehntausende Pixel Listenhöhe auf einmal.
   const zeile = document.createElement(knoten.expandable ? "button" : "div");
   zeile.className = "baum-knoten";
   if (knoten.expandable) {
     zeile.type = "button";
-    zeile.setAttribute("aria-expanded", "true");
-    zeile.title = "Zweig auf- und zuklappen";
+    zeile.setAttribute("aria-expanded", "false");
   }
 
   const klapp = document.createElement("span");
   klapp.className = knoten.expandable ? "klapp" : "klapp leer";
-  klapp.textContent = knoten.expandable ? "▾" : "·";
+  klapp.textContent = knoten.expandable ? "▸" : "·";
   klapp.setAttribute("aria-hidden", "true");
+  // Title nur am Pfeil — sonst überschreibt „Zweig auf-/zuklappen“ das
+  // Soft-Label am Mix-Icon (native title am Button gewinnt über Kinder).
+  if (knoten.expandable) klapp.title = "Zweig auf- und zuklappen";
 
   const punkt = document.createElement("span");
   punkt.className = `knoten-punkt ${PUNKT_KLASSE[knoten.type] || "knoten-extern"}`;
@@ -4228,13 +4235,17 @@ function zeichneKnoten(knoten) {
   if (knoten.expandable) {
     const kinder = document.createElement("div");
     kinder.className = "baum-kinder";
-    kinder.append(zeichneKnotenListe(knoten.children));
+    kinder.hidden = true;
     block.append(kinder);
 
     zeile.addEventListener("click", (ereignis) => {
       if (ereignis.detail > 1) return;
       if (window.getSelection().toString()) return;
       const auf = kinder.hidden;
+      if (auf && !kinder.dataset.gezeichnet) {
+        kinder.dataset.gezeichnet = "ja";
+        kinder.append(zeichneKnotenListe(knoten.children || []));
+      }
       kinder.hidden = !auf;
       klapp.textContent = auf ? "▾" : "▸";
       zeile.setAttribute("aria-expanded", String(auf));
