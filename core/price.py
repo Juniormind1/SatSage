@@ -717,9 +717,22 @@ def lade_spot_cache(
         preis = BtcPreis.from_dict(roh)
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
-    alter = (jetzt if jetzt is not None else int(time.time())) - fetched
+    jetzt_ts = int(time.time() if jetzt is None else jetzt)
+    alter = jetzt_ts - fetched
     if alter < 0 or alter > int(ttl):
         return None
+    # Alte Caches: „Tageskurs von heute“ war fälschlich als Warnung gespeichert.
+    heute = datetime.fromtimestamp(jetzt_ts, tz=timezone.utc).date().isoformat()
+    if preis.warning and preis.day and preis.day >= heute:
+        preis = BtcPreis(
+            amount=preis.amount,
+            currency=preis.currency,
+            time=preis.time,
+            source=preis.source,
+            kind=preis.kind,
+            day=preis.day,
+            warning=None,
+        )
     return preis
 
 
@@ -783,7 +796,7 @@ def spot_preis(
             preis = None
 
     if preis is None:
-        # Heutiger Tag als Historie-Lücke — gleiche Quellen wie tageskurs().
+        # Heutiger Tag aus Historie (CSV/API) — das ist der Tageskurs, kein Alarm.
         try:
             tag_preis = tageskurs(
                 heute,
@@ -793,30 +806,34 @@ def spot_preis(
                 timeout=timeout,
                 fetch=fetch,
             )
+            tag = tag_preis.day or heute.isoformat()
             preis = BtcPreis(
                 amount=tag_preis.amount,
                 currency=w,
                 time=jetzt_ts,
                 source=f"{tag_preis.source}-day",
                 kind="spot",
-                day=tag_preis.day or heute.isoformat(),
-                warning=(
-                    f"aktueller Kurs nicht beschaffbar, "
-                    f"Tageskurs aus Historie von {tag_preis.day or heute.isoformat()} "
-                    f"wird verwendet"
-                ),
+                day=tag,
+                # Kein warning: heutiger Tageskurs ist der erwartete Stand
+                # ohne Live-Spot (nicht „veraltet“).
             )
         except PriceError:
             preis = None
 
     if preis is None:
-        # Letzter bekannter Bundle-/Import-Tag — auch wenn älter als 14 Tage.
+        # Älterer Bundle-/Import-Tag — nur dann kurz hinweisen (nicht bei heute).
         lokal = _neuester_tageskurs_csv(cache_root, w, bis=heute)
         if lokal is None:
             lokal = _letzter_tageskurs_csv(
                 cache_root, w, bis=heute, max_tage=14,
             )
         if lokal is not None:
+            warn = None
+            if lokal.day and lokal.day < heute.isoformat():
+                warn = (
+                    f"aktueller Kurs nicht beschaffbar, "
+                    f"letzter Kurs aus Historie von {lokal.day} wird verwendet"
+                )
             preis = BtcPreis(
                 amount=lokal.amount,
                 currency=w,
@@ -824,10 +841,7 @@ def spot_preis(
                 source=f"{lokal.source}-day",
                 kind="spot",
                 day=lokal.day,
-                warning=(
-                    f"aktueller Kurs nicht beschaffbar, "
-                    f"letzter Kurs aus Historie von {lokal.day} wird verwendet"
-                ),
+                warning=warn,
             )
 
     if preis is None:

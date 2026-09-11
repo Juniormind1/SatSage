@@ -969,3 +969,167 @@ def fetch_tx_core(client: BitcoinRpcClient, txid: str) -> dict:
     if isinstance(raw, str):
         return _embit_tx_to_analyze_dict(Transaction.from_string(raw.strip()))
     raise RuntimeError(f"unerwartete getrawtransaction-Antwort: {type(raw)}")
+
+
+def pruneheight_of(client: BitcoinRpcClient) -> int | None:
+    """
+    Unterste gehaltene Blockhöhe bei pruned Node; ``0`` wenn nicht gepruned;
+    ``None`` wenn Abfrage scheitert.
+    """
+    try:
+        info = client.call("getblockchaininfo")
+    except Exception:
+        return None
+    if not isinstance(info, dict):
+        return None
+    if not info.get("pruned"):
+        return 0
+    try:
+        return int(info.get("pruneheight") or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cfg_ziel(cfg: CoreRpcConfig) -> str:
+    return f"{cfg.host}:{cfg.port}"
+
+
+def stelle_tx_lookup_rollen(
+    env: dict[str, str],
+    *,
+    on_log: LogFn | None = None,
+    timeout: float = 30.0,
+) -> tuple[BitcoinRpcClient | None, BitcoinRpcClient | None, int | None]:
+    """
+    (lokal_oder_None, archival_lookup, local_pruneheight).
+
+    *lokal* nur bei dediziertem ``UTXO_RPC_*``, der sich vom Lookup-Host unterscheidet.
+    """
+    from core.local_bitcoind import utxo_rpc_dedicated
+
+    archival = stelle_core_client_bereit(env, on_log=on_log, timeout=timeout)
+    lokal: BitcoinRpcClient | None = None
+    ph: int | None = None
+    if utxo_rpc_dedicated(env):
+        lokal = stelle_utxo_core_client_bereit(env, on_log=on_log, timeout=timeout)
+        if (
+            lokal is not None
+            and archival is not None
+            and _cfg_ziel(lokal.cfg) == _cfg_ziel(archival.cfg)
+        ):
+            # Derselbe Node — eine Verbindung reicht (archival).
+            lokal = None
+        elif lokal is not None:
+            ph = pruneheight_of(lokal)
+    return lokal, archival, ph
+
+
+def fetch_tx_from_block_core(
+    client: BitcoinRpcClient,
+    txid: str,
+    height: int,
+) -> dict:
+    """Tx aus ``getblock`` (verbosity 2) — braucht den Block noch lokal."""
+    key = (txid or "").strip().lower()
+    if int(height) < 0:
+        raise ValueError(f"ungültige Höhe: {height}")
+    blockhash = client.call("getblockhash", [int(height)])
+    block = client.call("getblock", [blockhash, 2])
+    if not isinstance(block, dict):
+        raise RuntimeError("getblock: unerwartete Antwort")
+    for raw in block.get("tx") or []:
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("txid") or "").lower() == key:
+            # Block-Kontext für status
+            if "blockhash" not in raw:
+                raw = dict(raw)
+                raw["blockhash"] = blockhash
+            if "blocktime" not in raw and block.get("time") is not None:
+                raw["blocktime"] = block.get("time")
+            if "confirmations" not in raw and block.get("confirmations") is not None:
+                raw["confirmations"] = block.get("confirmations")
+            tx = normalize_core_tx(raw, client)
+            st = tx.setdefault("status", {})
+            st["block_height"] = int(height)
+            return tx
+    raise RuntimeError(f"Tx {key[:16]}… nicht in Block {height}")
+
+
+def _core_reihenfolge(
+    *,
+    local: BitcoinRpcClient | None,
+    archival: BitcoinRpcClient | None,
+    local_pruneheight: int | None,
+    height: int | None,
+) -> list[tuple[str, BitcoinRpcClient]]:
+    """Welche Core-Verbindung zuerst — lokal nur wenn Höhe noch gehalten."""
+    if local is None and archival is None:
+        return []
+    if local is None:
+        return [("lookup", archival)] if archival else []
+    if archival is None:
+        return [("lokal", local)]
+
+    # Höhe unter/gleich pruneheight → Block weg → archival zuerst.
+    if (
+        height is not None
+        and int(height) > 0
+        and local_pruneheight is not None
+        and int(height) <= int(local_pruneheight)
+    ):
+        return [("lookup", archival), ("lokal", local)]
+    # Unbekannt oder jung genug → lokal (Loopback) zuerst.
+    return [("lokal", local), ("lookup", archival)]
+
+
+def fetch_tx_core_mit_rollen(
+    txid: str,
+    *,
+    local: BitcoinRpcClient | None = None,
+    archival: BitcoinRpcClient | None = None,
+    local_pruneheight: int | None = None,
+    height: int | None = None,
+    on_log: LogFn | None = None,
+) -> dict:
+    """
+    Tx über lokalen pruned Node und/oder Lookup-Core (Start9).
+
+    Reihenfolge: lokal wenn Höhe > pruneheight (oder unbekannt), sonst Lookup;
+    bei Fehler die andere Rolle; optional ``getblock`` bei bekannter Höhe.
+    """
+    key = (txid or "").strip().lower()
+    hoehe = int(height) if (height and int(height) > 0) else None
+    fehler: list[str] = []
+    reihenfolge = _core_reihenfolge(
+        local=local,
+        archival=archival,
+        local_pruneheight=local_pruneheight,
+        height=hoehe,
+    )
+    if not reihenfolge:
+        raise RuntimeError("kein Core-RPC für Tx-Lookup konfiguriert")
+
+    for name, client in reihenfolge:
+        try:
+            _log(on_log, f"Tx {key[:16]}… über Core-RPC ({name})…")
+            return fetch_tx_core(client, key)
+        except Exception as exc:
+            fehler.append(f"{name}/getrawtransaction: {exc}")
+
+    if hoehe is not None:
+        for name, client in reihenfolge:
+            # getblock nur sinnvoll wenn Block noch da.
+            if (
+                name == "lokal"
+                and local_pruneheight is not None
+                and hoehe <= int(local_pruneheight)
+            ):
+                continue
+            try:
+                _log(on_log, f"Tx {key[:16]}… Core-getblock {hoehe} ({name})…")
+                return fetch_tx_from_block_core(client, key, hoehe)
+            except Exception as exc:
+                fehler.append(f"{name}/getblock: {exc}")
+
+    raise RuntimeError("; ".join(fehler) if fehler else "Core-Tx-Lookup fehlgeschlagen")

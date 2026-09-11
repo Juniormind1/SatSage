@@ -138,6 +138,33 @@ class TestOrchestrierung(unittest.TestCase):
             )
             self.assertEqual(calls["n"], 2)
 
+    def test_spot_cache_streicht_warnung_fuer_heutigen_tag(self):
+        """Alte Spot-JSONs mit sinnloser Heute-Warnung still bereinigen."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            jetzt = int(datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc).timestamp())
+            preis = price.BtcPreis(
+                amount=66014.01,
+                currency="EUR",
+                time=jetzt,
+                source="bundle-day",
+                kind="spot",
+                day="2026-09-11",
+                warning=(
+                    "aktueller Kurs nicht beschaffbar, "
+                    "Tageskurs aus Historie von 2026-09-11 wird verwendet"
+                ),
+            )
+            price._schreibe_cache(
+                price._spot_pfad(price.preis_cache_dir(root), "EUR"),
+                preis,
+                fetched_at=jetzt,
+            )
+            geladen = price.lade_spot_cache(root, "EUR", ttl=3600, jetzt=jetzt)
+            self.assertIsNotNone(geladen)
+            self.assertFalse(geladen.warning)
+            self.assertEqual(geladen.amount, 66014.01)
+
     def test_spot_fallback_coinbase(self):
         def fetch(url, timeout):
             if "mempool" in url:
@@ -168,8 +195,8 @@ class TestOrchestrierung(unittest.TestCase):
             self.assertEqual(preis.amount, 55555.0)
             self.assertIn("day", preis.source)
             self.assertEqual(preis.kind, "spot")
-            self.assertTrue(preis.warning)
-            self.assertIn(heute.isoformat(), preis.warning)
+            # Heutiger Tageskurs: kein Warn-Spam („Realtime fehlt“).
+            self.assertFalse(preis.warning)
 
     def test_spot_fallback_alter_tageskurs_ohne_lange_fehlermeldung(self):
         """Veraltetes Bundle (>14 Tage): trotzdem letzter Kurs, kurze Warning."""

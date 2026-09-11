@@ -58,6 +58,10 @@ ELECTRUM_SERVERS_FILE = app_dir() / "electrum_servers.json"
 MAX_PUBLIC_ONION_SERVERS = 10
 MIN_PUBLIC_ONION_POOL = 3
 PUBLIC_ONION_PROBE_WORKERS = 6
+#: Setup-Latenz-Gate für öffentliches Onion-Electrs (Auto-Priorität).
+#: Probe = eine ``get_history`` auf Dummy-Scripthash; darüber → BIP-158
+#: bevorzugen bzw. Warnung/Abbruch. ``PUBLIC_ONION_LATENCY_SECONDS=0`` aus.
+PUBLIC_ONION_LATENCY_GATE_SECONDS = 8.0
 UTXO_CACHE_DIR = app_dir() / "utxo_cache"
 IMMUTABLE_CACHE_DIR = app_dir() / "immutable_cache"
 MIN_FREE_DISK_RATIO = 0.05
@@ -2242,6 +2246,126 @@ def _try_public_onion_fulcrum(
         return None
 
 
+def _public_onion_latency_limit(env: dict[str, str]) -> float | None:
+    """
+    Schwelle in Sekunden für das Onion-Latenz-Gate.
+
+    ``None`` = Gate aus (``PUBLIC_ONION_LATENCY_SECONDS=0`` / negativ).
+    """
+    raw = (env.get("PUBLIC_ONION_LATENCY_SECONDS") or "").strip()
+    if raw:
+        try:
+            val = float(raw.replace(",", "."))
+        except ValueError:
+            val = PUBLIC_ONION_LATENCY_GATE_SECONDS
+        if val <= 0:
+            return None
+        return val
+    return PUBLIC_ONION_LATENCY_GATE_SECONDS
+
+
+def _measure_onion_get_history_latency(backend) -> float | None:
+    """
+    Eine Probe-``get_history`` (Dummy-Scripthash) und Wandzeit in Sekunden.
+
+    Ohne Retries — das Gate soll schnell entscheiden, nicht 3×30 s hängen.
+    ``None`` bei Fehler (dann gilt der Pool nicht als „zu langsam“).
+    """
+    from fulcrum import _PROBE_SCRIPT_HASH
+
+    clients = getattr(backend, "_clients", None)
+    client = clients[0] if clients else backend
+    t0 = time.monotonic()
+    try:
+        once = getattr(client, "_request_once", None)
+        if callable(once):
+            lock = getattr(client, "_lock", None)
+            if lock is not None:
+                with lock:
+                    once(
+                        "blockchain.scripthash.get_history",
+                        [_PROBE_SCRIPT_HASH],
+                    )
+            else:
+                once(
+                    "blockchain.scripthash.get_history",
+                    [_PROBE_SCRIPT_HASH],
+                )
+        else:
+            backend.request(
+                "blockchain.scripthash.get_history",
+                [_PROBE_SCRIPT_HASH],
+            )
+    except Exception:
+        return None
+    return time.monotonic() - t0
+
+
+def _nach_oeffentlichem_onion_latenz(
+    pool,
+    args,
+    env: dict[str, str],
+    *,
+    allow_bip158_fallback: bool,
+    interactive: bool,
+) -> tuple[str, object] | None:
+    """
+    Latenz-Gate nur für Auto-Priorität (öffentliches Onion nach BIP-158-Fail).
+
+    Zu langsam + BIP-158 erreichbar → BIP-158 binden (kein Mid-Scan-Hop).
+    Zu langsam ohne BIP-158 → klare Warnung; interaktiv Abbruch möglich.
+    Explizites ``--rpc-only`` (``allow_bip158_fallback=False``) überspringt
+    das Gate.
+    """
+    if not allow_bip158_fallback:
+        return "fulcrum", pool
+
+    limit = _public_onion_latency_limit(env)
+    if limit is None:
+        return "fulcrum", pool
+
+    _log_quelle("Prüfe Latenz öffentliches Onion-Electrs…")
+    sekunden = _measure_onion_get_history_latency(pool)
+    if sekunden is None:
+        return "fulcrum", pool
+    if sekunden <= limit:
+        return "fulcrum", pool
+
+    _log_quelle(
+        f"Öffentliches Onion-Electrs langsam "
+        f"(Probe {sekunden:.1f}s > {limit:.0f}s)."
+    )
+
+    bip = _try_bip158_backend(args, env)
+    if bip:
+        try:
+            pool.close()
+        except Exception:
+            pass
+        _log_quelle(
+            "→ wechsle zu BIP-158 Compact Filter "
+            "(Onion für diese Session zu langsam)."
+        )
+        return "bip158", bip
+
+    _log_quelle(
+        "Onion ist die einzige Option und wird langsam — "
+        "Scan kann sehr lange dauern."
+    )
+    if interactive:
+        print("Trotzdem fortfahren? [j/N]: ", end="", flush=True)
+        from interact import prompt_yes_no
+
+        if not prompt_yes_no(default_yes=False):
+            try:
+                pool.close()
+            except Exception:
+                pass
+            _log_quelle("Abgebrochen (Onion zu langsam).")
+            return None
+    return "fulcrum", pool
+
+
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     """Priorität 4: öffentliche Fulcrum-Server über Clearnet."""
     from fulcrum import RotatingFulcrumPool
@@ -2308,7 +2432,16 @@ def _try_data_source_priority_chain(
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
-        return "fulcrum", pool, None
+        gewählt = _nach_oeffentlichem_onion_latenz(
+            pool,
+            args,
+            env,
+            allow_bip158_fallback=include_bip158,
+            interactive=interactive_onion,
+        )
+        if gewählt:
+            return gewählt[0], gewählt[1], None
+        return None
 
     pool = _setup_public_clearnet_fulcrum(args, env)
     if pool:
@@ -2322,6 +2455,7 @@ def _try_public_electrum_fuer_verlauf(
     env: dict[str, str],
     *,
     interactive_onion: bool = False,
+    allow_bip158_fallback: bool = True,
 ):
     """Öffentliche Electrum-Server für Verlauf — nur nach Bestätigung."""
     erlaubt = _oeffentliche_electrum_erlaubt(env, args)
@@ -2348,11 +2482,27 @@ def _try_public_electrum_fuer_verlauf(
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
+        gewählt = _nach_oeffentlichem_onion_latenz(
+            pool,
+            args,
+            env,
+            allow_bip158_fallback=allow_bip158_fallback,
+            interactive=interactive_onion,
+        )
+        if not gewählt:
+            return None
+        quelle, backend = gewählt
+        if quelle == "bip158":
+            _log_quelle(
+                "Verlauf: BIP-158 Compact Filter — Historie per "
+                "Blockwalk/Cache (Onion zu langsam)."
+            )
+            return quelle, backend
         _log_quelle(
             "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
             "(Privatsphäre mäßig)."
         )
-        return "fulcrum", pool
+        return "fulcrum", backend
 
     pool = _setup_public_clearnet_fulcrum(args, env)
     if pool:
@@ -2429,7 +2579,10 @@ def _try_verlauf_priority_chain(
             return "bip158", backend
 
     return _try_public_electrum_fuer_verlauf(
-        args, env, interactive_onion=interactive_onion,
+        args,
+        env,
+        interactive_onion=interactive_onion,
+        allow_bip158_fallback=include_bip158,
     )
 
 
@@ -2564,7 +2717,7 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
         fetch_wallet_utxos_bip158,
         verify_p2p_filters,
     )
-    from core.bitcoind_rpc import stelle_core_client_bereit
+    from core.bitcoind_rpc import stelle_tx_lookup_rollen
 
     if args.bip158_start is not None:
         start_height = args.bip158_start
@@ -2628,21 +2781,39 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
             on_utxos_update=on_utxos_update,
         )
 
-    # Core optional: getrawtransaction (txindex) vor P2P-getdata / Block-Fallback.
-    core = None
+    # Core optional: lokal (UTXO-Slot) bis pruneheight, sonst Lookup (Start9).
+    lokal_core = None
+    archival_core = None
+    lokal_prune = None
     try:
-        core = stelle_core_client_bereit(env, timeout=30.0)
-        if core is not None:
-            _log_quelle("→ Core-RPC für Tx-Lookup verfügbar (getrawtransaction)")
+        lokal_core, archival_core, lokal_prune = stelle_tx_lookup_rollen(
+            env, timeout=30.0,
+        )
+        if lokal_core is not None:
+            ph = (
+                f"pruneheight {lokal_prune}"
+                if lokal_prune and lokal_prune > 0
+                else "nicht gepruned"
+            )
+            _log_quelle(
+                f"→ Core lokal für Tx/Block ({lokal_core.cfg.ziel}, {ph})"
+            )
+        if archival_core is not None:
+            _log_quelle(
+                f"→ Core-Lookup für Tx/Block ({archival_core.cfg.ziel})"
+            )
+        if lokal_core is None and archival_core is None:
+            _log_quelle("→ kein Core-RPC für Tx-Lookup konfiguriert")
     except Exception as exc:
         _log_quelle(f"→ Core-RPC für Tx-Lookup nicht nutzbar: {exc}")
-        core = None
 
     def _get_tx_bip158(txid: str) -> dict:
         return fetch_tx_p2p_mit_fallback(
             client,
             txid,
-            core_client=core,
+            local_core=lokal_core,
+            archival_core=archival_core,
+            local_pruneheight=lokal_prune,
             on_log=_log_quelle,
         )
 
@@ -2659,7 +2830,10 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
         "fetch_wallet_utxos": _bip158_fetch_wallet_utxos,
         "fulcrum": None,
         "client": client,
-        "core_rpc": core,
+        "core_rpc": archival_core or lokal_core,
+        "core_local": lokal_core,
+        "core_archival": archival_core,
+        "core_local_pruneheight": lokal_prune,
     }
 
 
@@ -2904,6 +3078,10 @@ def _build_blockchain_fetchers(
             fetch_wallet_history_fulcrum,
             fetch_wallet_utxos_fulcrum,
         )
+        from core.bitcoind_rpc import (
+            fetch_tx_core_mit_rollen,
+            stelle_tx_lookup_rollen,
+        )
 
         fulcrum = backend
         # Weitere Verbindungen für den parallelen Scan. Einmal geöffnet und
@@ -2916,7 +3094,34 @@ def _build_blockchain_fetchers(
                 flush=True,
             )
         fetch_address_utxos = lambda addr: fetch_address_utxos_fulcrum(fulcrum, addr)
-        raw_get_tx = lambda txid: fetch_tx_fulcrum(fulcrum, txid)
+        # Core nur Ausnahme, wenn Electrs die Tx nicht liefert.
+        _core_lokal = _core_arch = None
+        _core_ph = None
+        try:
+            _env_tx = _load_dotenv()
+            _core_lokal, _core_arch, _core_ph = stelle_tx_lookup_rollen(
+                _env_tx, timeout=20.0,
+            )
+        except Exception:
+            pass
+
+        def raw_get_tx(txid: str) -> dict:
+            try:
+                return fetch_tx_fulcrum(fulcrum, txid)
+            except Exception as electrs_exc:
+                if _core_lokal is None and _core_arch is None:
+                    raise
+                try:
+                    return fetch_tx_core_mit_rollen(
+                        txid,
+                        local=_core_lokal,
+                        archival=_core_arch,
+                        local_pruneheight=_core_ph,
+                        on_log=_log_quelle,
+                    )
+                except Exception:
+                    raise electrs_exc from None
+
         get_tx = wrap_get_tx_with_immutable_cache(
             raw_get_tx, cache_root, source, pool=scan_pool
         )
