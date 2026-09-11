@@ -28,14 +28,18 @@ EDITIERBARE_FELDER: dict[str, tuple[str, ...]] = {
                     "FULCRUM_SSL", "FULCRUM_TOR_PROXY"),
     # scantxoutset am eigenen bitcoind — schneller UTXO-Bestand, kein Verlauf.
     "own_core": ("NODE_IP", "RPCPORT", "RPCUSER", "RPCPASSWORD", "RPC_SSL",
-                 "FULCRUM_TOR_PROXY"),
+                 "RPC_COOKIE_FILE", "FULCRUM_TOR_PROXY"),
+    "own_utxo_core": (
+        "UTXO_RPC_HOST", "UTXO_RPCPORT", "UTXO_RPCUSER", "UTXO_RPCPASSWORD",
+        "UTXO_RPC_SSL", "UTXO_RPC_COOKIE_FILE",
+    ),
     "bip158": ("BIP158_P2P", "BIP158_START_HEIGHT", "BIP158_PEERS",
                "FULCRUM_TOR_PROXY"),
     "public_onion": ("FULCRUM_TOR_LISTE", "FULCRUM_TOR_PROXY"),
 }
 
 #: Schlüssel, deren Wert die Oberfläche nie zu sehen bekommt.
-GEHEIME_FELDER = ("RPCPASSWORD",)
+GEHEIME_FELDER = ("RPCPASSWORD", "UTXO_RPCPASSWORD")
 
 
 def verbindungsversuch_kommentar(erfolg: bool, wann: datetime | None = None) -> str:
@@ -106,7 +110,9 @@ class SourceInfo:
     @property
     def verwerfbar(self) -> bool:
         """Eigene Nodes streichen oder P2P ausschalten (BIP158_P2P=0)."""
-        return self.key in ("own_fulcrum", "own_core", "bip158") and self.configured
+        return self.key in (
+            "own_fulcrum", "own_core", "own_utxo_core", "bip158",
+        ) and self.configured
 
     def as_dict(self) -> dict:
         return {
@@ -420,7 +426,56 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         ],
     ))
 
-    # --- Bitcoin Core (scantxoutset) — schneller UTXO-Bestand ---------------
+    # --- UTXO-Set-Quelle (scantxoutset) — oft lokaler pruned Node ------------
+    utxo_host = (values.get("UTXO_RPC_HOST") or "").strip()
+    if utxo_host:
+        utxo_host = main._normalize_fulcrum_host(utxo_host)
+    utxo_port = _int(values, "UTXO_RPCPORT", 8332)
+    utxo_user = values.get("UTXO_RPCUSER", "").strip()
+    utxo_cookie = values.get("UTXO_RPC_COOKIE_FILE", "").strip()
+    utxo_ssl = _flag(values, "UTXO_RPC_SSL", False)
+    utxo_ok = bool(utxo_host and (utxo_user or utxo_cookie))
+    utxo_detail = (
+        f"{utxo_host}:{utxo_port} · {'TLS' if utxo_ssl else 'ohne TLS'}"
+        + (" · Cookie" if utxo_cookie and not utxo_user else "")
+        if utxo_ok else "nicht eingetragen (Fallback: Tx/Block-Lookup-Core)"
+    )
+    quellen.append(SourceInfo(
+        rank=2,
+        key="own_utxo_core",
+        name="UTXO-Set-Quelle",
+        detail=utxo_detail,
+        privacy=PRIVACY_HIGH,
+        configured=utxo_ok,
+        note=(
+            "scantxoutset am eigenen Node — auch pruned. Lokaler bitcoin-qt "
+            "wird still eingetragen, wenn RPC erreichbar ist. Electrs/Fulcrum "
+            "im LAN hat Vorrang (Gap-Scan schneller); dieser Slot greift ohne "
+            "LAN-Electrs oder als bewusste Alternative."
+            if utxo_ok else
+            "Optional: eigener Core nur für den UTXO-Bestand (scantxoutset). "
+            "Leer = Lookup-Core (NODE_IP). Lokaler Desktop-Node füllt den "
+            "Slot automatisch. Electrs-LAN bleibt bevorzugt."
+        ),
+        felder=[
+            Feld("UTXO_RPC_HOST", "Host", "text", utxo_host,
+                 "z. B. 127.0.0.1 für lokalen bitcoin-qt"),
+            Feld("UTXO_RPCPORT", "RPC-Port", "port", str(utxo_port),
+                 "meist 8332"),
+            Feld("UTXO_RPCUSER", "Benutzer", "text", utxo_user,
+                 "oder Cookie-Datei nutzen"),
+            Feld("UTXO_RPCPASSWORD", "Passwort", "geheim", "",
+                 "Leer lassen behält das gespeicherte Passwort",
+                 gesetzt=bool(values.get("UTXO_RPCPASSWORD", "").strip())),
+            Feld("UTXO_RPC_COOKIE_FILE", "Cookie-Datei", "text", utxo_cookie,
+                 "Pfad zu bitcoind .cookie"),
+            Feld("UTXO_RPC_SSL", "TLS verwenden", "schalter",
+                 "true" if utxo_ssl else "false",
+                 "Loopback/LAN meist nein"),
+        ],
+    ))
+
+    # --- Tx/Block-Lookup (archival / Start9) --------------------------------
     node = (values.get("NODE_IP") or values.get("RPCHOST")
             or values.get("BITCOIN_RPC_HOST") or "").strip()
     if node:
@@ -439,23 +494,19 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         if core_ok else "nicht eingetragen"
     )
     quellen.append(SourceInfo(
-        rank=2,
+        rank=3,
         key="own_core",
-        name="Bitcoin Core · RPC",
+        name="Tx/Block-Lookup",
         detail=core_detail,
         privacy=PRIVACY_HIGH,
         configured=core_ok,
         note=(
-            "UTXO-Bestand per scantxoutset am eigenen bitcoind (LAN vor Onion). "
-            "Electrs im LAN hat Vorrang — Gap-Scan ist oft schneller. Kein "
-            "Verlauf und keine Herkunft aus Core; die bleiben bei Electrum "
-            "oder BIP-158."
+            "getrawtransaction / getblock für Herkunft — ideal full node mit "
+            "txindex (z. B. Start9). Nicht der Adress-Verlaufsscan (Electrs/"
+            "BIP-158). UTXO-Bestand hat einen eigenen Slot darüber."
             if core_ok else
-            "UTXO-Bestand per scantxoutset: Host (LAN oder .onion), Port, "
-            "RPC-Benutzer und Passwort (oder Cookie-Datei). Ideal mit "
-            "-txindex=1. Electrs im LAN bleibt schneller und hat Vorrang. "
-            "Lokaler bitcoind auf derselben Maschine: Opt-in unter "
-            "Datenquellen bzw. LOCAL_CORE_OPT_IN=1."
+            "Core für Tx/Block-Lookups (Start9 o. Ä.). Pruned Desktop-Node "
+            "gehört in die UTXO-Set-Quelle, nicht hier."
         ),
         felder=[
             Feld("NODE_IP", "Host", "text", node,
@@ -491,7 +542,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         p2p_teile.append(f"{len(peers.splitlines())} extra Peers")
     p2p_teile.append("DNS-Seeds")
     quellen.append(SourceInfo(
-        rank=3,
+        rank=4,
         key="bip158",
         name="Bitcoin-P2P · Compact Filter",
         detail=(
@@ -539,7 +590,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
               and k != "FULCRUM_TOR_PROXY"]
     proxy = values.get("FULCRUM_TOR_PROXY", "").strip() or "127.0.0.1:9050"
     quellen.append(SourceInfo(
-        rank=4,
+        rank=5,
         key="public_onion",
         name="Öffentliche Onions",
         detail=f"{len(onions)} Server · SOCKS {proxy}" if onions else "keine eingetragen",
@@ -570,7 +621,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         except (OSError, ValueError):
             clearnet_datei = False
     quellen.append(SourceInfo(
-        rank=5,
+        rank=6,
         key="clearnet",
         name="Öffentliche Electrum-Server",
         detail=(
@@ -1004,14 +1055,23 @@ def check_reachable(
 
     if info.key == "bip158":
         return ergebnis
-    if info.key == "own_core":
+    if info.key in ("own_core", "own_utxo_core"):
         if not info.configured:
             return ergebnis
-        from core.bitcoind_rpc import stelle_core_client_bereit, verify_core_rpc
+        from core.bitcoind_rpc import (
+            stelle_core_client_bereit,
+            stelle_utxo_core_client_bereit,
+            verify_core_rpc,
+        )
 
         log(f"Prüfe {info.name}…")
         try:
-            client = stelle_core_client_bereit(
+            bau = (
+                stelle_utxo_core_client_bereit
+                if info.key == "own_utxo_core"
+                else stelle_core_client_bereit
+            )
+            client = bau(
                 values, on_log=log, timeout=float(timeout) + 25.0,
             )
             if client is None:

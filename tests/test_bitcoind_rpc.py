@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 from core.bitcoind_rpc import (
     CoreRpcConfig,
     _unspent_to_utxo,
+    config_from_env,
+    config_utxo_from_env,
     descriptors_for_key,
     normalize_rpc_host,
     scantxoutset_status_prozent,
@@ -22,6 +24,30 @@ class TestBitcoindRpc(unittest.TestCase):
             "abc.onion",
         )
         self.assertEqual(normalize_rpc_host("user@192.168.1.5"), "192.168.1.5")
+
+    def test_config_utxo_slot_vor_lookup(self):
+        env = {
+            "NODE_IP": "10.0.0.5",
+            "RPCPORT": "8332",
+            "RPCUSER": "lookup",
+            "RPCPASSWORD": "lpw",
+            "UTXO_RPC_HOST": "127.0.0.1",
+            "UTXO_RPCPORT": "8332",
+            "UTXO_RPCUSER": "__cookie__",
+            "UTXO_RPCPASSWORD": "geheim",
+        }
+        lookup = config_from_env(env)
+        utxo = config_utxo_from_env(env)
+        self.assertEqual(lookup.host, "10.0.0.5")
+        self.assertEqual(utxo.host, "127.0.0.1")
+        self.assertEqual(utxo.user, "__cookie__")
+        # Ohne UTXO-Slot: Fallback auf Lookup
+        nur = {
+            "NODE_IP": "10.0.0.5",
+            "RPCUSER": "lookup",
+            "RPCPASSWORD": "lpw",
+        }
+        self.assertEqual(config_utxo_from_env(nur).host, "10.0.0.5")
 
     def test_descriptors_zpub_wpkh_path_inside(self):
         # zpub from fixtures if available

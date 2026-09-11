@@ -1,7 +1,7 @@
-# BTC/USD Tageskurs (Schlusskurs)
-# Quelle: Bitstamp via CryptoDataDownload
+# BTC/USD Tageskurs
+# Quelle: Bitstamp via CryptoDataDownload; URL: https://www.cryptodatadownload.com/cdd/Bitstamp_BTCUSD_d.csv; Stand: 2026-09-11
 # URL: https://www.cryptodatadownload.com/cdd/Bitstamp_BTCUSD_d.csv
-# Stand: 2026-08-27
+# Zeitraum: 2014-11-28 … 2026-09-11
 # Format: date,price
 date,price
 2014-11-28,376.28
@@ -4293,4 +4293,19 @@ date,price
 2026-08-24,78986.06
 2026-08-25,78534.93
 2026-08-26,79022.66
-2026-08-27,78847.29
+2026-08-27,80278.98
+2026-08-28,77835.18
+2026-08-29,78235.02
+2026-08-30,77701.7
+2026-08-31,78571.17
+2026-09-01,77397.43
+2026-09-02,77301.83
+2026-09-03,81265
+2026-09-04,79676.6
+2026-09-05,79830.42
+2026-09-06,80338.98
+2026-09-07,79090.41
+2026-09-08,78449
+2026-09-09,78281.65
+2026-09-10,76528.75
+2026-09-11,76618.9

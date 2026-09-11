@@ -34,6 +34,10 @@ if errorlevel 1 exit /b 1
 "%PY%" scripts\make_splash.py
 if errorlevel 1 exit /b 1
 
+echo → BTC-Preis-Bundle bis Tip (Bitstamp/CDD; SKIP_BTC_PRICE_REFRESH=1 zum Ueberspringen^)…
+"%PY%" scripts\refresh_btc_price_bundle.py
+if errorlevel 1 exit /b 1
+
 echo → PyInstaller (Onefile + Splash^)…
 if exist "build\satsage-webgui" rmdir /s /q "build\satsage-webgui"
 if exist "dist\satsage-webgui.exe" del /f /q "dist\satsage-webgui.exe"

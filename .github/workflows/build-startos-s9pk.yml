@@ -51,7 +51,15 @@ jobs:
             start-cli s9pk init-workspace .
           fi
 
+      - name: BTC-Preis-Bundle bis Tip
+        working-directory: .
+        run: |
+          chmod +x scripts/refresh_btc_price_bundle.py
+          python3 scripts/refresh_btc_price_bundle.py
+
       - name: make x86
+        env:
+          SKIP_BTC_PRICE_REFRESH: "1"
         run: make x86
 
       - name: Checksum

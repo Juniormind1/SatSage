@@ -542,7 +542,7 @@ class AppState:
             if cookie_password and not (values.get("RPCPASSWORD") or "").strip():
                 env.runtime_values["RPCPASSWORD"] = cookie_password
         elif self.managed_by not in ("specter", "start9"):
-            # Desktop: lokaler bitcoind nur nach Opt-in (LOCAL_CORE_OPT_IN).
+            # Desktop: lokaler bitcoind → UTXO-Slot (still); Lookup nur wenn leer.
             _apply_local_core_runtime(env)
         return env
 
@@ -1258,23 +1258,72 @@ _local_core_probe_cache: tuple[float, object | None] | None = None
 _local_core_hint_logged = False
 
 
+_local_core_runtime_logged = False
+
+
 def _apply_local_core_runtime(env) -> None:
-    """Wenn Opt-in gesetzt und Core noch nicht konfiguriert: Cookie/Loopback nutzen."""
+    """Lokalen Qt still in den UTXO-Slot legen; Lookup-Core (Start9) nicht anfassen.
+
+    Nur Desktop (Aufrufer schließt Specter/Start9 aus).
+
+    - Immer: leere ``UTXO_RPC_*`` + ``BIP158_HOST`` aus Discovery.
+    - Nur wenn kein Lookup-Core: zusätzlich ``NODE_IP``/``RPC*`` (leere Keys).
+    - ``BIP158_P2P`` wird nicht erzwungen.
+    - **Persistenz in die .env**, damit Scan-Jobs (``main._load_dotenv``) den
+      UTXO-Slot sehen — Runtime allein reicht nicht.
+    """
+    global _local_core_runtime_logged
     from core import local_bitcoind as local_core
 
     values = env.values()
-    if not local_core.local_core_opt_in_enabled(values):
-        return
-    if local_core.core_already_configured(values):
-        return
     hit = _discover_local_core_cached(values)
     if hit is None:
         return
-    for key, val in local_core.env_updates_from_hit(hit).items():
-        if key == "LOCAL_CORE_OPT_IN":
+    already = local_core.core_already_configured(values)
+    updates = local_core.env_updates_from_hit(hit, lookup_core_already=already)
+    schreiben: dict[str, str] = {}
+    for key, val in updates.items():
+        if key == "BIP158_P2P":
             continue
-        if not (values.get(key) or "").strip():
+        if key == "LOCAL_CORE_OPT_IN":
+            # Merker setzen, auch wenn schon andere Keys da sind.
+            if (values.get(key) or "").strip():
+                continue
+            schreiben[key] = val
+            continue
+        if (values.get(key) or "").strip():
+            continue
+        schreiben[key] = val
+    if not schreiben:
+        return
+    env.apply(schreiben)
+    try:
+        env.save(backup=True)
+    except OSError as exc:
+        print(f"Lokaler Bitcoin Core: .env nicht speicherbar — {exc}", flush=True)
+        # Fallback: wenigstens Runtime für API/Config.
+        for key, val in schreiben.items():
             env.runtime_values[key] = val
+        return
+    if not _local_core_runtime_logged:
+        _local_core_runtime_logged = True
+        basis = (
+            f"{hit.host}:{hit.port} ({hit.chain}, "
+            f"{'pruned' if hit.pruned else 'vollständig'}, ~{hit.blocks} Blöcke)"
+        )
+        if already:
+            print(
+                f"Lokaler Bitcoin Core → UTXO-Set-Slot in .env (+ Prefer-Peer): "
+                f"{basis}. Lookup-NODE_IP unverändert. "
+                f"Nächster UTXO-Scan nutzt scantxoutset lokal.",
+                flush=True,
+            )
+        else:
+            print(
+                f"Lokaler Bitcoin Core → UTXO-Set- und Lookup-Slot in .env "
+                f"(+ Prefer-Peer): {basis}.",
+                flush=True,
+            )
 
 
 def _discover_local_core_cached(werte: dict | None = None):
@@ -1313,11 +1362,16 @@ def _local_core_status_for_api(state: AppState) -> dict | None:
             "configured": configured,
             "opt_in": opt_in,
         }
+    utxo_slot = local_core.utxo_rpc_dedicated(werte)
     out: dict = {
         "detected": hit is not None,
         "configured": configured,
         "opt_in": opt_in,
-        "needs_opt_in": bool(hit is not None and not configured and not opt_in),
+        "utxo_slot": utxo_slot,
+        # Persistenz-Hinweis: Runtime-Fill reicht; Banner nur wenn nichts greift.
+        "needs_opt_in": bool(
+            hit is not None and not utxo_slot and not configured and not opt_in
+        ),
     }
     if hit is not None:
         out["hit"] = hit.as_public_dict()
@@ -1338,8 +1392,9 @@ def _log_local_core_hint_once(state: AppState) -> None:
     print(
         f"Lokaler Bitcoin Core erkannt ({hit.get('host')}:{hit.get('port')}, "
         f"{hit.get('chain')}, {pruned}, ~{hit.get('blocks')} Blöcke). "
-        f"Nicht still verbunden — Opt-in unter Datenquellen oder "
-        f"LOCAL_CORE_OPT_IN=1 setzt RPC und BIP158_HOST={hit.get('host')}:{p2p}.",
+        f"UTXO-Set-Slot wird still genutzt; Prefer-Peer "
+        f"BIP158_HOST={hit.get('host')}:{p2p} "
+        f"(P2P-Schalter unverändert). Lookup-NODE_IP bleibt, falls gesetzt.",
         flush=True,
     )
 
@@ -3020,17 +3075,19 @@ def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
 
 
 def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
-    """Übernimmt erkannten Loopback-bitcoind nach Opt-in in die .env."""
+    """Übernimmt erkannten Loopback-bitcoind in die .env (UTXO-Slot; Lookup nur wenn leer)."""
     _datenquellen_config_gesperrt(state)
     if state.managed_by in ("specter", "start9"):
         raise ApiError(403, "Im Managed-Modus kommt Core von Start9/Specter.")
     from core import local_bitcoind as local_core
 
-    hit = _discover_local_core_cached(state.env().values())
+    werte = state.env().values()
+    hit = _discover_local_core_cached(werte)
     if hit is None:
         raise ApiError(404, "Kein lokaler Bitcoin Core (Cookie/RPC) gefunden.")
+    already = local_core.core_already_configured(werte)
     env = state.env()
-    env.apply(local_core.env_updates_from_hit(hit))
+    env.apply(local_core.env_updates_from_hit(hit, lookup_core_already=already))
     try:
         env.save()
     except OSError as exc:
@@ -3038,14 +3095,24 @@ def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
     global _local_core_probe_cache
     _local_core_probe_cache = None
     state.reload()
-    print(
-        f"Lokaler Bitcoin Core übernommen: RPC {hit.host}:{hit.port}, "
-        f"BIP-158 Prefer-Peer {hit.host}:{hit.p2p_port} "
-        f"({hit.chain}, {'pruned' if hit.pruned else 'vollständig'}).",
-        flush=True,
-    )
+    if already:
+        print(
+            f"Lokaler Bitcoin Core → UTXO-Set-Slot gespeichert: "
+            f"{hit.host}:{hit.port}, Prefer-Peer {hit.host}:{hit.p2p_port} "
+            f"({hit.chain}, {'pruned' if hit.pruned else 'vollständig'}). "
+            f"Lookup-NODE_IP unverändert.",
+            flush=True,
+        )
+    else:
+        print(
+            f"Lokaler Bitcoin Core übernommen: RPC {hit.host}:{hit.port}, "
+            f"BIP-158 Prefer-Peer {hit.host}:{hit.p2p_port} "
+            f"({hit.chain}, {'pruned' if hit.pruned else 'vollständig'}).",
+            flush=True,
+        )
     return {
         "saved": True,
+        "lookup_preserved": already,
         "local_core": _local_core_status_for_api(state),
         "sources": [
             q.as_dict() for q in source_mod.describe_sources(state.env().values())
@@ -3098,9 +3165,12 @@ def api_price_history(state: AppState, query: dict) -> dict:
     ``?series=1`` liefert zusätzlich die Tag→Preis-Map (für EUR-Umrechnung
     ausgegebener Beträge zum Ausgabedatum).
     """
+    from core import price_history_sync as hist_sync
+
     mit_serie = (query.get("series", ["0"])[0] or "").strip().lower() in (
         "1", "true", "ja", "yes", "on",
     )
+    werte = state.env().values()
     roh = (query.get("currency", [""])[0] or "").strip()
     if roh:
         return {
@@ -3109,6 +3179,7 @@ def api_price_history(state: AppState, query: dict) -> dict:
                     state.immutable_cache_dir, roh, mit_serie=mit_serie,
                 ),
             ],
+            "price_history_opt_in": hist_sync.price_history_opt_in(werte),
         }
     return {
         "histories": [
@@ -3117,7 +3188,85 @@ def api_price_history(state: AppState, query: dict) -> dict:
             )
             for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
         ],
+        "price_history_opt_in": hist_sync.price_history_opt_in(werte),
     }
+
+
+def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict:
+    """Manueller oder erzwungener Historie-Nachzug (Bitstamp/CDD)."""
+    from core import price_history_sync as hist_sync
+
+    payload = payload or {}
+    an = payload.get("opt_in")
+    env = state.env()
+    if an is not None:
+        env.apply({
+            hist_sync.ENV_OPT_IN: "1" if bool(an) else "0",
+        })
+        try:
+            env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+        state.reload()
+    logs: list[str] = []
+    # Manueller API-Lauf: Stamp ignorieren, Opt-in weiter beachten.
+    ergebnisse = hist_sync.historie_nachziehen_alle(
+        state.immutable_cache_dir,
+        values=state.env().values(),
+        on_log=logs.append,
+        force=True,
+    )
+    for zeile in logs:
+        print(zeile, flush=True)
+    return {
+        "ok": all(e.get("ok") for e in ergebnisse),
+        "results": ergebnisse,
+        "log": logs,
+        "price_history_opt_in": hist_sync.price_history_opt_in(
+            state.env().values()
+        ),
+        "histories": [
+            price_mod.historie_status(state.immutable_cache_dir, w)
+            for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
+        ],
+    }
+
+
+def starte_historie_nachzug_taeglich(
+    state: AppState,
+    *,
+    warte_sekunden: float = 45.0,
+) -> None:
+    """Lücken-Check erst *nach* GUI-Start — nicht während Splash/Verbindungsaufbau.
+
+    Einmal pro Prozess; wartet ``warte_sekunden``, damit Browser und
+    Datenquellen-Pillen stehen, bevor Bitstamp ggf. gezogen wird.
+    """
+    import threading
+
+    if getattr(state, "_historie_sync_gestartet", False):
+        return
+    state._historie_sync_gestartet = True  # type: ignore[attr-defined]
+
+    def _lauf() -> None:
+        import time as _time
+
+        from core import price_history_sync as hist_sync
+
+        _time.sleep(max(0.0, float(warte_sekunden)))
+        try:
+            hist_sync.historie_nachziehen_alle(
+                state.immutable_cache_dir,
+                values=state.env().values(),
+                on_log=lambda t: print(t, flush=True),
+                force=False,
+            )
+        except Exception as exc:
+            print(f"Kurs-Historie-Nachzug: {exc}", flush=True)
+
+    threading.Thread(
+        target=_lauf, name="satsage-price-history-sync", daemon=True,
+    ).start()
 
 
 def api_price_import(state: AppState, payload: dict) -> dict:
@@ -3290,7 +3439,7 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
     env = state.env()
     sicherung = None
 
-    if name in ("own_fulcrum", "own_core"):
+    if name in ("own_fulcrum", "own_core", "own_utxo_core"):
         erlaubt = source_mod.EDITIERBARE_FELDER[name]
         # Tor-Proxy teilen sich mehrere Quellen — nicht mit Core löschen.
         loeschen = [
@@ -5197,6 +5346,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_price(state, query)
         if teile == ["price", "history"] and methode == "GET":
             return 200, api_price_history(state, query)
+        if teile == ["price", "history", "sync"] and methode == "POST":
+            return 200, api_price_history_sync(state, self._body())
         if teile == ["price", "import"] and methode == "POST":
             return 200, api_price_import(state, self._body())
         if teile[:2] == ["llm", "context"]:
@@ -6172,6 +6323,8 @@ def main_cli(argv=None) -> int:
             _splash_timeout_wache(25.0)
         else:
             _splash_schliessen()
+        # GUI/HTTP stehen — Historie-Nachzug erst danach (nicht im Splash).
+        starte_historie_nachzug_taeglich(state)
         try:
             return lauf_steuerung(
                 state,
@@ -6217,6 +6370,8 @@ def main_cli(argv=None) -> int:
     else:
         _splash_schliessen()
     print("  Server bereit — Anfragen werden angenommen (Strg+C beendet).", flush=True)
+    # GUI erreichbar — Lücken-Nachzug nachgelagert (nicht Startpfad).
+    starte_historie_nachzug_taeglich(state)
     try:
         _http_loop_bis_strg_c(httpd)
     finally:

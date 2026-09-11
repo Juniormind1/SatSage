@@ -124,12 +124,15 @@ class TestCheckReachable(unittest.TestCase):
         self.assertNotIn("esplora", keys2)
 
     def test_bitcoin_core_rpc_in_einstellungen(self):
-        """Core für schnelleren UTXO-Scan — Felder und Geheimnis-Maske."""
+        """Lookup-Core und UTXO-Set-Slot — Felder und Geheimnis-Maske."""
         leer = {q.key: q for q in describe_sources({})}
         self.assertIn("own_core", leer)
-        self.assertEqual(leer["own_core"].rank, 2)
+        self.assertIn("own_utxo_core", leer)
+        self.assertEqual(leer["own_utxo_core"].rank, 2)
+        self.assertEqual(leer["own_core"].rank, 3)
         self.assertFalse(leer["own_core"].configured)
-        self.assertIn("scantxoutset", leer["own_core"].note)
+        self.assertIn("Tx/Block", leer["own_core"].note)
+        self.assertIn("scantxoutset", leer["own_utxo_core"].note)
 
         werte = {
             "NODE_IP": "https://abcdefghijklmnop.onion",
@@ -145,7 +148,7 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(pwd.typ, "geheim")
         self.assertEqual(pwd.value, "")
         self.assertTrue(pwd.gesetzt)
-        self.assertIn("scantxoutset", core.note)
+        self.assertIn("getrawtransaction", core.note)  # configured branch
         host = next(f for f in core.felder if f.key == "NODE_IP")
         self.assertTrue(host.value.endswith(".onion"))
         self.assertFalse(host.value.startswith("http"))
@@ -420,17 +423,17 @@ class TestCheckReachable(unittest.TestCase):
         from core.source import SourceInfo, PRIVACY_HIGH, PRIVACY_MEDIUM
 
         p2p = SourceInfo(
-            rank=3, key="bip158", name="P2P", detail="", privacy=PRIVACY_HIGH,
+            rank=4, key="bip158", name="P2P", detail="", privacy=PRIVACY_HIGH,
             configured=True, reachable=True, peer_count=3,
             peer_hosts=["a:8333"],
         )
         onion = SourceInfo(
-            rank=4, key="public_onion", name="Onion", detail="",
+            rank=5, key="public_onion", name="Onion", detail="",
             privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
             peer_count=2, peer_hosts=["x.onion:50002"],
         )
         clear = SourceInfo(
-            rank=5, key="clearnet", name="Clear", detail="",
+            rank=6, key="clearnet", name="Clear", detail="",
             privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
             peer_count=1, peer_hosts=["e.example:50002"],
         )

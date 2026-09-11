@@ -168,6 +168,37 @@ class TestOrchestrierung(unittest.TestCase):
             self.assertEqual(preis.amount, 55555.0)
             self.assertIn("day", preis.source)
             self.assertEqual(preis.kind, "spot")
+            self.assertTrue(preis.warning)
+            self.assertIn(heute.isoformat(), preis.warning)
+
+    def test_spot_fallback_alter_tageskurs_ohne_lange_fehlermeldung(self):
+        """Veraltetes Bundle (>14 Tage): trotzdem letzter Kurs, kurze Warning."""
+        def fetch(url, timeout):
+            raise price.PriceError(
+                "Öffentliches Ziel „mempool.space“ für mempool ist blockiert. "
+                "| Öffentliches Ziel „api.coinbase.com“ …"
+            )
+
+        alt = date(2026, 8, 27)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            price.schreibe_kurs_csv(
+                root / "btc_price" / "EUR.csv",
+                {alt.isoformat(): 67669.08},
+                currency="EUR",
+                quelle="bundle",
+            )
+            preis = price.spot_preis(
+                "EUR",
+                immutable_cache_dir=root,
+                fetch=fetch,
+                jetzt=int(datetime(2026, 9, 11, tzinfo=timezone.utc).timestamp()),
+            )
+            self.assertEqual(preis.amount, 67669.08)
+            self.assertEqual(preis.day, alt.isoformat())
+            self.assertIn("letzter Kurs aus Historie von 2026-08-27", preis.warning)
+            self.assertNotIn(" | ", preis.warning or "")
+            self.assertNotIn("blockiert", preis.warning or "")
 
     def test_eigene_mempool_url_zuerst(self):
         gesehen = []
