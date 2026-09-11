@@ -65,16 +65,23 @@ py main.py --txid <txid> --xpubs zpub6...
 3. **Ã–ffentliche Fulcrum-Onions** â€” `FULCRUM_TOR_0`â€¦`9`, nur nach BestÃ¤tigung
 4. **Clearnet-Fulcrum** â€” Ã¶ffentliche Server ohne Tor (`electrum_servers.json`), nur nach BestÃ¤tigung
 
-**UTXO-Bestand** (zusÃ¤tzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
+**UTXO-Bestand** (zusätzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
 
-1. Electrs/Fulcrum **im LAN** (Gap-Scan) â€” typisch am schnellsten  
-2. Core RPC **LAN** (`scantxoutset`) â€” sonst ganzer UTXO-Set-Durchlauf  
-3. Core RPC **Onion**  
-4. Electrs **Onion**  
-5. BIP-158  
-6. Ã¶ffentliche Electrum (schlechtere PrivatsphÃ¤re)
+1. Electrs/Fulcrum **im LAN** (Gap-Scan) — typisch am schnellsten
+2. Core `scantxoutset` — bevorzugt `UTXO_RPC_*` (lokaler Node), sonst Lookup-`NODE_IP` (z. B. Start9)
+3. Electrs **Onion**
+4. BIP-158
+5. öffentliche Electrum (schlechtere Privatsphäre)
 
-Mit Electrs-LAN entfÃ¤llt `scantxoutset`.
+Mit Electrs-LAN entfällt `scantxoutset`. Ohne LAN-Electrs: lokaler pruned Node (`UTXO_RPC_*`) vor remote Lookup-Core.
+
+**Tx/Block-Lookup** (Herkunft ohne Electrs bzw. Electrs-Ausnahme):
+
+1. Lokaler Core (`UTXO_RPC_*`), solange Höhe > `pruneheight` (sonst Block weg)
+2. Lookup-Core (`NODE_IP`, archival / Start9)
+3. P2P `getdata` / Block bei bekannter Höhe
+
+Mit Electrs bleibt Electrs primär für `get_tx`; Core nur wenn Electrs die Tx nicht liefert.
 
 **Verlaufsscan** (`_try_verlauf_priority_chain` / `_setup_verlauf_client`) â€” eigene Kette, Core liefert keinen Verlauf:
 

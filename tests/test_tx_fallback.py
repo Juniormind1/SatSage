@@ -67,6 +67,31 @@ class TestFallbackKette(unittest.TestCase):
         mock_core.assert_called_once()
         mock_p2p.assert_not_called()
 
+    def test_rollen_lokal_unter_prune_nimmt_archival(self):
+        client = MagicMock()
+        lokal = MagicMock()
+        archival = MagicMock()
+        erwartet = {"txid": "ab" * 32, "vin": [], "vout": [], "status": {"block_height": 50}}
+        note_tx_height("ab" * 32, 50)
+
+        with patch(
+            "core.bitcoind_rpc.fetch_tx_core_mit_rollen", return_value=erwartet,
+        ) as mock_rollen:
+            with patch("bip158_scanner.fetch_tx_p2p") as mock_p2p:
+                out = fetch_tx_p2p_mit_fallback(
+                    client,
+                    "ab" * 32,
+                    local_core=lokal,
+                    archival_core=archival,
+                    local_pruneheight=100,
+                )
+        self.assertEqual(out["txid"], "ab" * 32)
+        mock_rollen.assert_called_once()
+        kw = mock_rollen.call_args.kwargs
+        self.assertEqual(kw["height"], 50)
+        self.assertEqual(kw["local_pruneheight"], 100)
+        mock_p2p.assert_not_called()
+
     def test_block_nach_notfound(self):
         client = MagicMock()
         txid = "ab" * 32

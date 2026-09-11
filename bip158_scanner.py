@@ -2011,19 +2011,43 @@ def fetch_tx_p2p_mit_fallback(
     txid: str,
     *,
     core_client=None,
+    local_core=None,
+    archival_core=None,
+    local_pruneheight: int | None = None,
     height: int | None = None,
     on_log=None,
 ) -> dict[str, Any]:
     """
-    Tx-Lookup ohne Electrs: Core-RPC → P2P getdata → Block bei bekannter Höhe.
+    Tx-Lookup ohne Electrs: Core-RPC (lokal/Lookup) → P2P getdata → Block.
 
-    *height* oder ``note_tx_height`` liefern die Höhe für den Block-Fallback.
+    *local_core* / *archival_core*: Rollen-Split (pruned lokal bis pruneheight,
+    sonst Lookup z. B. Start9). *core_client* bleibt als Einzel-Fallback.
+    *height* oder ``note_tx_height`` für Block-Fallback.
     """
     key = (txid or "").strip().lower()
     hoehe = height if (height and int(height) > 0) else tx_height_hint(key)
     fehler: list[str] = []
 
-    if core_client is not None:
+    hat_rollen = local_core is not None or archival_core is not None
+    if hat_rollen:
+        try:
+            from core.bitcoind_rpc import fetch_tx_core_mit_rollen
+
+            tx = fetch_tx_core_mit_rollen(
+                key,
+                local=local_core,
+                archival=archival_core or core_client,
+                local_pruneheight=local_pruneheight,
+                height=hoehe,
+                on_log=on_log,
+            )
+            st = tx.get("status") or {}
+            if st.get("block_height"):
+                note_tx_height(key, st["block_height"])
+            return tx
+        except Exception as exc:
+            fehler.append(f"Core: {exc}")
+    elif core_client is not None:
         try:
             from core.bitcoind_rpc import fetch_tx_core
 
