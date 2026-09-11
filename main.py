@@ -3920,6 +3920,43 @@ def _format_tx_time(tx: dict) -> str:
 
 
 
+def derive_addresses_at_index(
+    xpub: str,
+    change: int,
+    index: int,
+    script_type: str | None = None,
+) -> list[str]:
+    """
+    Alle Adressformen an (change, index) — für Gap-Scan bei ``xpub``+auto.
+
+    Bei ``auto`` und Prefix ``xpub``/`tpub`` gibt es mehrere mögliche Skripte
+    (Legacy/Nested/SegWit/Taproot). Wer nur die erste Form prüft, übersieht
+    Wasabi-/BIP84-Coins und bricht nach leerem Legacy-Gap ab.
+    """
+    if ist_deskriptor(xpub):
+        addr = derive_address_at_index(xpub, change, index)
+        return [addr] if addr else []
+
+    hd = _hdkey_for_xpub(xpub)
+    if hd is None:
+        return []
+    gefunden: list[str] = []
+    gesehen: set[str] = set()
+    try:
+        child = hd.derive([change, index])
+    except Exception:
+        return []
+    for encoder in _encoders_for_xpub(xpub, script_type):
+        try:
+            addr = _script_address(encoder(child.key))
+        except Exception:
+            continue
+        if addr and addr not in gesehen:
+            gesehen.add(addr)
+            gefunden.append(addr)
+    return gefunden
+
+
 def derive_address_at_index(xpub: str, change: int, index: int) -> str | None:
     """
     Leitet eine Wallet-Adresse (change, index) ab.
@@ -3927,6 +3964,9 @@ def derive_address_at_index(xpub: str, change: int, index: int) -> str | None:
     Auch aus einem Deskriptor: Der Gap-Scan geht Index für Index vor und
     braucht deshalb den Einzelzugriff. Hat der Deskriptor nur einen Zweig,
     liefert *change* dort keine eigene Kette.
+
+    Bei mehreren Skripttypen (``xpub`` + auto) die erste Form — für den
+    Gap-Scan ``derive_addresses_at_index`` verwenden.
     """
     if ist_deskriptor(xpub):
         desc = parse_deskriptor(xpub)
@@ -3940,16 +3980,8 @@ def derive_address_at_index(xpub: str, change: int, index: int) -> str | None:
         except Exception:
             return None
 
-    hd = _hdkey_for_xpub(xpub)
-    if hd is None:
-        return None
-    for encoder in _encoders_for_xpub(xpub):
-        try:
-            child = hd.derive([change, index])
-            return _script_address(encoder(child.key))
-        except Exception:
-            continue
-    return None
+    varianten = derive_addresses_at_index(xpub, change, index)
+    return varianten[0] if varianten else None
 
 
 def derive_receive_address_at_index(
@@ -4006,10 +4038,10 @@ def _collect_used_chain_indices_gap(
         if is_list_abort_requested():
             break
         next_index = i + 1
-        address = derive_address_at_index(xpub, change, i)
-        if not address:
+        adressen = derive_addresses_at_index(xpub, change, i)
+        if not adressen:
             break
-        if address_has_received(address):
+        if any(address_has_received(a) for a in adressen):
             used.add(i)
             gap = 0
         else:
@@ -4070,7 +4102,7 @@ def discover_wallet_scan_addresses(
                 change,
                 max_index_per_chain,
                 gap_limit,
-                derive_address_at_index,
+                derive_addresses_at_index,
                 start_index=start_index,
                 on_progress=on_progress,
                 on_utxos_update=_kette_utxos if on_utxos_update else None,
@@ -4086,8 +4118,7 @@ def discover_wallet_scan_addresses(
                 ):
                     indices_to_derive.add(i)
             for i in sorted(indices_to_derive):
-                addr = derive_address_at_index(xpub, change, i)
-                if addr:
+                for addr in derive_addresses_at_index(xpub, change, i):
                     addresses.add(addr)
             print(
                 f"  → {label}: {len(used)} genutzte Indizes, "

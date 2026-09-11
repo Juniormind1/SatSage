@@ -1615,13 +1615,18 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
         )
         beschreibungen.append({
             "descriptor": descriptor,
+            "is_multisig": eintrag.is_multisig,
             "script_type": eintrag.script_type,
             "script_type_label": wallets_mod.SCRIPT_TYPE_LABELS.get(
                 eintrag.script_type, eintrag.script_type
             ),
             "threshold": eintrag.threshold,
             "cosigner_count": eintrag.cosigner_count,
-            "xpubs_masked": eintrag.masked_xpubs(),
+            "xpubs_masked": (
+                eintrag.masked_xpubs()
+                if eintrag.is_multisig
+                else ([eintrag.masked_xpub()] if eintrag.masked_xpub() else [])
+            ),
             "erste_adresse": adressen[0] if adressen else "",
             "bereits_vorhanden": eintrag.wallet_id() in vorhandene_ids,
         })
@@ -1686,6 +1691,20 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     threshold=bekannt.threshold,
                     script_type=bekannt.script_type,
                     descriptor=bekannt.descriptor,
+                    max_addresses=int(
+                        eintrag.get("max_addresses", bekannt.max_addresses)
+                    ),
+                ))
+                continue
+
+            if bekannt is not None and bekannt.descriptor and not bekannt.is_multisig:
+                # Single-Sig-Policy (Wasabi WPKH …): Deskriptor behalten.
+                entries.append(WalletEntry(
+                    name=str(eintrag.get("name", "")) or bekannt.name,
+                    descriptor=bekannt.descriptor,
+                    script_type=str(
+                        eintrag.get("script_type", bekannt.script_type)
+                    ),
                     max_addresses=int(
                         eintrag.get("max_addresses", bekannt.max_addresses)
                     ),

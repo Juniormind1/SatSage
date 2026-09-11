@@ -188,11 +188,23 @@ def _ergaenze_standard_ableitung(descriptor: str) -> str:
     (``[fp/48h/0h/0h/2h]xpub…`` ohne ``/0/*``). Empfang und Change entstehen
     erst durch die Standardableitung. Specter DIY hängt ``/{0,1}/*`` an; wir
     nutzen die Core-Form ``/<0;1>/*``. Hat mindestens ein Schlüssel schon
-    eine Wildcard, bleibt der Text unverändert.
+    eine Wildcard, bleibt der Text unverändert — außer der DIY-Form
+    ``/{0,1}/*``, die hier auf Core-Schreibweise gebracht wird.
     """
     if not descriptor:
         return descriptor
     roh = descriptor.split("#", 1)[0]
+    # Specter DIY / manche Exporte: /{0,1}/* statt Core /<0;1>/*
+    if "/{0,1}/*" in roh or "/{0, 1}/*" in roh:
+        vereinheitlicht = roh.replace("/{0, 1}/*", "/<0;1>/*").replace(
+            "/{0,1}/*", "/<0;1>/*"
+        )
+        try:
+            from embit.descriptor.checksum import add_checksum
+
+            return add_checksum(vereinheitlicht)
+        except Exception:
+            return vereinheitlicht
     if "*" in roh:
         return descriptor
     if not _XPUB_RE.search(roh):
@@ -210,6 +222,15 @@ def _ergaenze_standard_ableitung(descriptor: str) -> str:
         return add_checksum(erweitert)
     except Exception:
         return erweitert
+
+
+def ist_deskriptor_text(text: str) -> bool:
+    """Sieht der Text wie ein Output-Deskriptor / Wallet-Policy aus?"""
+    if not text or not text.strip():
+        return False
+    return bool(
+        re.search(r"\b(sh|wsh|tr|wpkh|pkh|combo)\s*\(", text.strip(), re.I)
+    )
 
 
 def deskriptoren_aus_text(text: str) -> list[str]:
@@ -245,16 +266,25 @@ def deskriptoren_aus_text(text: str) -> list[str]:
 
 def _script_aus_deskriptor(descriptor: str) -> str:
     """
-    Skripttyp aus der Hülle: wsh(…) oder sh(wsh(…)).
+    Skripttyp aus der Hülle.
 
-    Ein reines sh(multi(…)) — Legacy-P2SH-Multisig — wird hier nicht
-    unterstützt und bleibt leer, statt als sh-wsh durchzugehen.
+    Multisig: ``wsh(…)`` / ``sh(wsh(…))``. Single-Sig: ``wpkh`` / ``pkh`` /
+    ``sh(wpkh)`` / einzelnes ``tr``. Ein reines ``sh(multi(…))`` — Legacy-
+    P2SH-Multisig — bleibt leer, statt als sh-wsh durchzugehen.
     """
     text = (descriptor or "").strip().lower()
     if text.startswith("sh(wsh("):
         return "sh-wsh"
     if text.startswith("wsh("):
         return "wsh"
+    if text.startswith("sh(wpkh("):
+        return "nested"
+    if text.startswith("wpkh("):
+        return "segwit"
+    if text.startswith("pkh("):
+        return "legacy"
+    if text.startswith("tr(") and not _MULTI_RE.search(text):
+        return "taproot"
     return ""
 
 
@@ -268,14 +298,31 @@ def _normalize_multisig_script(value: str | None) -> str:
     return text
 
 
+def _ist_singlesig_deskriptor(descriptor: str) -> bool:
+    """
+    Einfache Single-Sig-Hüllen — Wasabi WPKH-Policy, Sparrow/Coldcard wpkh.
+
+    Alles andere mit Deskriptor (sortedmulti, Liana-Miniscript, Taproot
+    multi_a, …) gilt für Speicherung und UI als Mehrschlüssel-/Policy-Wallet.
+    """
+    if not descriptor or _MULTI_RE.search(descriptor):
+        return False
+    text = descriptor.strip().lower().split("#", 1)[0]
+    if text.startswith(("wpkh(", "pkh(", "sh(wpkh(")):
+        return True
+    if text.startswith("tr("):
+        return len(extract_xpubs_from_text(descriptor)) <= 1
+    return False
+
+
 @dataclass
 class WalletEntry:
     """
     Ein konfiguriertes Wallet — Single-Sig oder Multisig.
 
-    Single-Sig: *xpub* gesetzt, *threshold* None, *xpubs* leer.
-    Multisig: *xpubs* mit den Cosignern, *threshold* mit M; alternativ nur
-    *descriptor*, aus dem beides abgeleitet wird.
+    Single-Sig: *xpub* gesetzt und/oder Single-Key-Deskriptor (``wpkh``/…).
+    Multisig: *xpubs* mit den Cosignern, *threshold* mit M; alternativ ein
+    Deskriptor mit ``multi``/``sortedmulti``/``multi_a``.
 
     Beide liegen bewusst in einem Modell: Sie stehen in derselben Liste,
     tragen denselben Namen und dieselbe Scan-Tiefe. Ein zweites Parallelmodell
@@ -290,11 +337,10 @@ class WalletEntry:
     xpubs: list[str] = field(default_factory=list)
     #: M einer m-aus-n-Wallet.
     threshold: int | None = None
-    #: Output-Deskriptor — die kanonische Form einer Multisig-Wallet.
+    #: Output-Deskriptor — kanonisch bei Multisig; optional bei Single-Sig
+    #: (Wasabi WPKH-Policy, Sparrow/Coldcard-Export).
     descriptor: str = ""
-    #: Vom Deskriptor gemeldeter Skripttyp (p2wsh, p2tr, p2sh). Wird in
-    #: __post_init__ gefüllt und ist bei Taproot die einzige verlässliche
-    #: Angabe — „wsh" stünde dort schlicht falsch.
+    #: Vom Deskriptor gemeldeter Skripttyp (p2wsh, p2tr, p2sh, p2wpkh, …).
     script_typ_wirksam: str = ""
 
     def __post_init__(self):
@@ -314,10 +360,14 @@ class WalletEntry:
             # Ein ausdrücklich gesetzter, gültiger Skripttyp gewinnt; sonst
             # zählt die Hülle des Deskriptors.
             abgeleitet = _script_aus_deskriptor(self.descriptor)
-            if abgeleitet and _normalize_multisig_script(
-                self.script_type
-            ) not in MULTISIG_SCRIPT_CHOICES:
-                self.script_type = abgeleitet
+            if abgeleitet:
+                if self.is_multisig:
+                    if _normalize_multisig_script(
+                        self.script_type
+                    ) not in MULTISIG_SCRIPT_CHOICES:
+                        self.script_type = abgeleitet
+                elif self.script_type in ("", "auto"):
+                    self.script_type = abgeleitet
 
         if self.is_multisig:
             self.script_type = _normalize_multisig_script(self.script_type) or "wsh"
@@ -330,6 +380,14 @@ class WalletEntry:
                 )
             self._uebernimm_aus_deskriptor()
         else:
+            if self.descriptor:
+                self._uebernimm_aus_deskriptor()
+                # Anzeige/Maskierung und XPUB-Feld: erster Key aus der Policy.
+                if not self.xpub and self.xpubs:
+                    self.xpub = self.xpubs[0]
+                # Single-Sig-Keys gehören nicht in die Cosigner-Liste.
+                self.xpubs = []
+                self.threshold = None
             self.script_type = main.normalize_script_type(self.script_type)
 
     def _uebernimm_aus_deskriptor(self) -> None:
@@ -338,9 +396,10 @@ class WalletEntry:
 
         Der Parser weiß mehr als eine Zeichenketten-Prüfung: Bei Taproot
         gehört der interne Schlüssel dazu, und der Skripttyp steht als
-        ``p2wsh``/``p2tr``/``p2sh`` fest, statt aus der Schreibweise geraten
-        zu werden. Lässt sich der Deskriptor nicht lesen, bleibt alles, wie es
-        angegeben wurde — die Prüfung meldet ihn dann als ungültig.
+        ``p2wsh``/``p2tr``/``p2sh``/``p2wpkh`` fest, statt aus der
+        Schreibweise geraten zu werden. Lässt sich der Deskriptor nicht
+        lesen, bleibt alles, wie es angegeben wurde — die Prüfung meldet ihn
+        dann als ungültig.
         """
         desc = main.parse_deskriptor(self.descriptor)
         if desc is None:
@@ -357,23 +416,41 @@ class WalletEntry:
         except Exception:
             self.script_typ_wirksam = ""
 
-        # Bei Taproot wäre „wsh" oder „auto" schlicht falsch. Der Parser weiß
-        # es genau; die Kurzform-Angabe wird deshalb überschrieben, sobald ein
-        # Deskriptor vorliegt.
-        nach_typ = {"p2wsh": "wsh", "p2sh": "sh-wsh", "p2tr": "tr"}
-        if self.script_typ_wirksam in nach_typ:
-            self.script_type = nach_typ[self.script_typ_wirksam]
+        # Der Parser weiß den Typ genau; Kurzform/„auto“ wird überschrieben.
+        nach_typ_multi = {"p2wsh": "wsh", "p2sh": "sh-wsh", "p2tr": "tr"}
+        nach_typ_single = {
+            "p2wpkh": "segwit",
+            "p2pkh": "legacy",
+            "p2sh-p2wpkh": "nested",
+            "p2tr": "taproot",
+        }
+        if self.is_multisig:
+            if self.script_typ_wirksam in nach_typ_multi:
+                self.script_type = nach_typ_multi[self.script_typ_wirksam]
+        else:
+            if self.script_typ_wirksam in nach_typ_single:
+                self.script_type = nach_typ_single[self.script_typ_wirksam]
 
     # -- Art ----------------------------------------------------------------
 
     @property
     def is_multisig(self) -> bool:
-        """Mehrere Cosigner, ein Schwellwert oder ein Deskriptor."""
-        return bool(self.xpubs) or self.threshold is not None or bool(self.descriptor)
+        """
+        Mehrschlüssel- oder komplexe Policy-Wallet — nicht jeder Deskriptor.
+
+        Wasabi-``wpkh([…/84h/…]xpub/<0;1>/*)`` ist Single-Sig mit Policy.
+        ``wsh(sortedmulti…)``, Taproot ``multi_a`` und Miniscript (Liana)
+        bleiben Multisig-/Policy-Pfad. Kurzform: mehrere Cosigner oder M.
+        """
+        if self.descriptor:
+            return not _ist_singlesig_deskriptor(self.descriptor)
+        return self.threshold is not None or len(self.xpubs) > 1
 
     @property
     def cosigner_count(self) -> int:
-        return len(self.xpubs)
+        if self.is_multisig:
+            return len(self.xpubs)
+        return 1 if (self.xpub or self.descriptor) else 0
 
     @property
     def alle_xpubs(self) -> list[str]:
@@ -385,7 +462,13 @@ class WalletEntry:
     @property
     def prefix(self) -> str:
         quelle = self.xpubs[0] if self.is_multisig and self.xpubs else self.xpub
-        return quelle[:4].lower()
+        if quelle:
+            return quelle[:4].lower()
+        if self.descriptor:
+            treffer = _XPUB_RE.search(self.descriptor)
+            if treffer:
+                return treffer.group(1)[:4].lower()
+        return ""
 
     @property
     def display_name(self) -> str:
@@ -393,7 +476,9 @@ class WalletEntry:
             return self.name
         if self.is_multisig:
             return f"Multisig {self.threshold or '?'}/{self.cosigner_count or '?'}"
-        return main._default_wallet_name(self.xpub)
+        if self.xpub:
+            return main._default_wallet_name(self.xpub)
+        return "Deskriptor-Wallet"
 
     def masked_xpub(self, head: int = 6, tail: int = 4) -> str:
         """
@@ -403,6 +488,9 @@ class WalletEntry:
         masked_xpubs().
         """
         quelle = self.xpubs[0] if self.is_multisig and self.xpubs else self.xpub
+        if not quelle and self.descriptor:
+            treffer = _XPUB_RE.search(self.descriptor)
+            quelle = treffer.group(1) if treffer else ""
         return _maskiere(quelle, head, tail)
 
     def masked_xpubs(self, head: int = 6, tail: int = 4) -> list[str]:
@@ -412,6 +500,8 @@ class WalletEntry:
     # -- Prüfung ------------------------------------------------------------
 
     def is_valid(self) -> bool:
+        if self.descriptor:
+            return main.parse_deskriptor(self.descriptor) is not None
         if not self.is_multisig:
             return bool(self.xpub) and main._hdkey_for_xpub(self.xpub) is not None
         # Über den Parser statt über Einzelprüfungen: Er akzeptiert genau das,
@@ -425,11 +515,11 @@ class WalletEntry:
         """
         Der Schlüssel, unter dem dieses Wallet im Analyse-Stack geführt wird.
 
-        Bei Single-Sig der XPUB, bei Multisig der Deskriptor. Beide sind
-        Zeichenketten, aus denen sich Adressen ableiten lassen — mehr braucht
-        der Stack nicht zu wissen.
+        Deskriptor, wenn vorhanden (Single-Sig-Policy oder Multisig) — sonst
+        der XPUB. Beides sind Zeichenketten, aus denen sich Adressen ableiten
+        lassen.
         """
-        return self.descriptor if self.is_multisig else self.xpub
+        return self.descriptor if self.descriptor else self.xpub
 
     # -- Kennung ------------------------------------------------------------
 
@@ -481,14 +571,17 @@ def erste_empfangsadresse(entry: WalletEntry) -> str:
     Damit lässt sich von Hand nachsehen, ob zwei Einträge wirklich dasselbe
     Konto meinen.
 
-    Für Multisig leer: Die Adresse ergibt sich dort aus allen Cosignern
-    zusammen (wsh/sortedmulti), und diese Ableitung gibt es noch nicht. Die
-    Single-Sig-Adresse eines einzelnen Cosigners wäre nicht bloß nutzlos,
-    sondern falsch — wer darauf einzahlt, zahlt an einen der Mitunterzeichner
-    allein.
+    Für echte Multisig leer in der Doppelungs-Warnung: Die Adresse ergibt sich
+    aus allen Cosignern zusammen. Single-Sig-Deskriptoren (wpkh/…) liefern die
+    Adresse über die Ableitung.
     """
     if entry.is_multisig:
         return ""
+    if entry.descriptor:
+        adressen = sorted(
+            main.derive_descriptor_addresses(entry.descriptor, max_addresses=2)
+        )
+        return adressen[0] if adressen else ""
     hd = main._hdkey_for_xpub(entry.xpub)
     if hd is None:
         return ""
@@ -520,6 +613,31 @@ def validate_wallets(entries: list[WalletEntry]) -> tuple[list[str], list[str]]:
             fehler.extend(_pruefe_multisig(index, entry))
             for xpub in entry.xpubs:
                 cosigner.setdefault(xpub, entry)
+            continue
+
+        if entry.descriptor:
+            if not entry.is_valid():
+                fehler.append(
+                    f"Wallet {index} („{entry.display_name}“): der "
+                    "Deskriptor lässt sich nicht lesen."
+                )
+                continue
+            if not main.derive_descriptor_addresses(
+                entry.descriptor, max_addresses=2
+            ):
+                fehler.append(
+                    f"Wallet {index} („{entry.display_name}“): aus dem "
+                    "Deskriptor lässt sich keine Adresse ableiten."
+                )
+                continue
+            # Doppelte Single-Sig-Policies über denselben Key erkennen.
+            if entry.xpub:
+                if entry.xpub in gesehen:
+                    fehler.append(
+                        f"Wallet {index} ({entry.masked_xpub()}): dieser "
+                        "XPUB steht bereits in der Liste."
+                    )
+                gesehen.add(entry.xpub)
             continue
 
         if not entry.xpub:
@@ -1180,6 +1298,10 @@ def wallet_updates(
             # Eingabe erlaubt, kann aber weder Taproot noch Miniscript
             # ausdrücken. Zwei Darstellungen nebeneinander wären zwei
             # Wahrheiten — bei Abweichung gälte welche?
+            updates[f"{praefix}_DESC"] = eintrag.descriptor
+        elif eintrag.descriptor:
+            # Single-Sig-Policy (Wasabi WPKH, Sparrow/Coldcard …): Deskriptor
+            # behalten — Origin/Fingerprint und Skripttyp bleiben eindeutig.
             updates[f"{praefix}_DESC"] = eintrag.descriptor
         else:
             updates[f"{praefix}_XPUB"] = eintrag.xpub

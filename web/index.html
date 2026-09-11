@@ -692,7 +692,7 @@
           </div>
 
           <div class="karte-fuss wallet-einfuegen deskriptor-fuss">
-            <span class="feld-titel" data-i18n="wallets.descriptorLabel">Multisig · Deskriptor oder Wallet-Export</span>
+            <span class="feld-titel" data-i18n="wallets.descriptorLabel">Deskriptor / Wallet-Policy (Single-Sig oder Multisig)</span>
             <input type="text" id="neuer-deskriptor-name" class="feld-breit"
                    data-i18n-placeholder="wallets.descriptorNamePlaceholder"
                    placeholder="Name (optional)" data-i18n-placeholder="wallets.namePlaceholderShort"
@@ -702,7 +702,7 @@
             <textarea id="neuer-deskriptor" class="feld-breit mono"
                       rows="3" autocomplete="off" spellcheck="false"
                       data-i18n-placeholder="wallets.descriptorPlaceholder"
-                      placeholder="wsh(sortedmulti(2,…)) oder tr(…,multi_a(2,…)) — auch der JSON-Export aus Sparrow, Specter oder Bitcoin Core"></textarea>
+                      placeholder="wpkh([…/84h/…]xpub/<0;1>/*) · Wasabi-Policy, oder wsh(sortedmulti(…)) / Sparrow-/Specter-/Core-Export"></textarea>
             <div class="deskriptor-neben">
               <p id="deskriptor-hinweis" class="deskriptor-hinweis"
                  data-i18n="wallets.descriptorHint"

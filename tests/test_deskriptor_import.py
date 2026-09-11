@@ -179,5 +179,38 @@ class TestUnbrauchbares(unittest.TestCase):
         self.assertEqual(deskriptoren_aus_text(text), [])
 
 
+class TestWasabiWpkhPolicy(unittest.TestCase):
+    """Wasabi „WPKH Wallet Policy“ — Single-Sig, nicht Multisig."""
+
+    def test_wpkh_mit_origin_ist_single_sig(self):
+        from core.config import WalletEntry
+        from embit.descriptor.checksum import add_checksum
+        from embit.networks import NETWORKS
+
+        xpub = main._hdkey_for_xpub(BIP84_ZPUB).to_base58(
+            version=NETWORKS["main"]["xpub"]
+        )
+        policy = add_checksum(f"wpkh([abcd1234/84h/0h/0h]{xpub}/<0;1>/*)")
+        gefunden = deskriptoren_aus_text(policy)
+        self.assertEqual(len(gefunden), 1)
+        e = WalletEntry(name="Wasabi", descriptor=gefunden[0])
+        self.assertFalse(e.is_multisig)
+        self.assertEqual(e.script_type, "segwit")
+        self.assertTrue(e.is_valid())
+        self.assertEqual(e.analyse_schluessel, e.descriptor)
+        self.assertTrue(main.derive_addresses(e.analyse_schluessel, max_addresses=4))
+
+    def test_specter_diy_geschweifte_klammern(self):
+        from embit.networks import NETWORKS
+
+        xpub = main._hdkey_for_xpub(BIP84_ZPUB).to_base58(
+            version=NETWORKS["main"]["xpub"]
+        )
+        diy = f"wpkh([abcd1234/84h/0h/0h]{xpub}/{{0,1}}/*)"
+        gefunden = deskriptoren_aus_text(diy)
+        self.assertEqual(len(gefunden), 1)
+        self.assertIn("<0;1>", gefunden[0])
+
+
 if __name__ == "__main__":
     unittest.main()
