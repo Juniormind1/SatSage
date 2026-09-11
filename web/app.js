@@ -191,13 +191,21 @@ function softTxClassLabel(knotenOderErgebnis) {
   return knotenOderErgebnis.tx_class_label || knotenOderErgebnis.note || "";
 }
 
-/** Mempool-artige Form-Icons für Mix-Soft-Labels (kein Markenlogo). */
+/** Mempool-artige Form-Icons für Soft-Labels (kein Markenlogo). */
 const TX_CLASS_ICON = {
   whirlpool: "img/tx-class/whirlpool.svg",
   wasabi_classic: "img/tx-class/wasabi-classic.svg",
   wabisabi: "img/tx-class/wabisabi.svg",
   joinmarket: "img/tx-class/joinmarket.svg",
+  bisq_payout: "img/tx-class/bisq.svg",
+  bisq_deposit: "img/tx-class/bisq.svg",
 };
+
+/** Icon-/Leisten-Schlüssel: Deposit und Payout teilen dasselbe Bisq-Icon. */
+function txClassIconKind(kind) {
+  if (kind === "bisq_deposit") return "bisq_payout";
+  return kind || "";
+}
 
 function softTxClassKind(knotenOderErgebnis) {
   const kind = (knotenOderErgebnis && knotenOderErgebnis.tx_class) || "";
@@ -217,7 +225,7 @@ function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
   }
   rechts.hidden = false;
   rechts.title = text;
-  const iconSrc = TX_CLASS_ICON[kind];
+  const iconSrc = TX_CLASS_ICON[txClassIconKind(kind)] || TX_CLASS_ICON[kind];
   if (iconSrc) {
     const img = document.createElement("img");
     img.className = "tx-class-icon";
@@ -241,37 +249,39 @@ const MIX_ICON_ORDER = [
   "wasabi_classic",
   "wabisabi",
   "joinmarket",
+  "bisq_payout",
 ];
 
-/** Mix-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
+function _merkeTxClassIcon(gesehen, kind) {
+  const k = txClassIconKind(kind);
+  if (k && TX_CLASS_ICON[k]) gesehen.add(k);
+}
+
+/** Mix-/Form-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
 function mixArtenAusErgebnis(ergebnis) {
   const gesehen = new Set();
   if (!ergebnis || !ergebnis.found) return [];
   const stapel = [];
   if (ergebnis.root) stapel.push(ergebnis.root);
   for (const k of ergebnis.children || []) stapel.push(k);
-  if (ergebnis.tx_class && TX_CLASS_ICON[ergebnis.tx_class]) {
-    gesehen.add(ergebnis.tx_class);
-  }
+  _merkeTxClassIcon(gesehen, ergebnis.tx_class);
   while (stapel.length) {
     const knoten = stapel.pop();
     if (!knoten || typeof knoten !== "object") continue;
-    if (knoten.tx_class && TX_CLASS_ICON[knoten.tx_class]) {
-      gesehen.add(knoten.tx_class);
-    }
+    _merkeTxClassIcon(gesehen, knoten.tx_class);
     for (const kind of knoten.children || []) stapel.push(kind);
   }
   return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
 }
 
-/** Mix-Arten einer Adressgruppe aus schon gespeicherten Traces (ohne Extra-Job). */
+/** Form-Arten einer Adressgruppe aus schon gespeicherten Traces (ohne Extra-Job). */
 function mixArtenDerGruppe(gruppe) {
   const gesehen = new Set();
   for (const u of gruppe.utxos || []) {
     for (const k of u.mix_arten || []) {
-      if (TX_CLASS_ICON[k]) gesehen.add(k);
+      _merkeTxClassIcon(gesehen, k);
     }
-    if (u.tx_class && TX_CLASS_ICON[u.tx_class]) gesehen.add(u.tx_class);
+    _merkeTxClassIcon(gesehen, u.tx_class);
   }
   return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
 }
@@ -282,6 +292,7 @@ const MIX_ICON_KURZ = {
   wasabi_classic: "Wasabi",
   wabisabi: "WabiSabi",
   joinmarket: "JoinMarket",
+  bisq_payout: "Bisq",
 };
 
 /** Nur Icons, kein Text — Tooltip: „Im Verlauf …-Muster erkannt.“ */
@@ -1131,10 +1142,10 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
   if (root.time_label) {
     utxo.time_label = root.time_label;
   }
-  if (root.tx_class && TX_CLASS_ICON[root.tx_class]) {
+  if (root.tx_class && (TX_CLASS_ICON[root.tx_class] || TX_CLASS_ICON[txClassIconKind(root.tx_class)])) {
     utxo.tx_class = root.tx_class;
     const arten = new Set(utxo.mix_arten || []);
-    arten.add(root.tx_class);
+    _merkeTxClassIcon(arten, root.tx_class);
     utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
   }
   // Auch Mix-Formen tiefer im Baum (Remix-Hops).

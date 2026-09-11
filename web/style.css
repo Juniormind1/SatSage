@@ -774,10 +774,12 @@ select { font-family: var(--mono); font-size: 11px; }
 }
 
 .wallet-zeile {
-  padding: 12px 13px; border-bottom: 1px solid var(--linie-zart);
+  padding: 14px 13px;
+  border-bottom: 2px solid var(--linie);
   display: flex; flex-direction: column; gap: 9px;
 }
-.wallet-zeile:last-child { border-bottom: 0; }
+/* Trennlinie auch vor dem Einfüge-Bereich behalten (Eye-Catcher beim Scrollen). */
+.wallet-zeile:last-child { border-bottom: 2px solid var(--linie); }
 .wallet-oben { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .name-zeile {
   display: flex; align-items: center; gap: 4px;
@@ -785,7 +787,10 @@ select { font-family: var(--mono); font-size: 11px; }
 }
 .name-zeile .wallet-name { flex: 1; min-width: 120px; }
 .wallet-name {
-  font-weight: 600; min-width: 150px;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 150px;
   border: 1px solid transparent; border-bottom-color: var(--linie);
   background: none; border-radius: 0;
 }
@@ -1463,16 +1468,44 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   row-gap: 8px;
   align-items: start;
   flex-wrap: nowrap;
+  border-top: 2px solid var(--linie);
 }
 .wallet-einfuegen #neuer-name,
 .wallet-einfuegen #neuer-deskriptor-name,
 .wallet-einfuegen #neuer-xpub,
 .wallet-einfuegen #neuer-deskriptor { width: 100%; min-width: 0; }
-.wallet-einfuegen #neuer-name { grid-column: 1 / -1; max-width: 28rem; }
+.wallet-einfuegen #neuer-name {
+  grid-column: 1 / -1;
+  max-width: 28rem;
+  /* Einstiegspunkt „nächstes Wallet“: Akzent statt XPUB-Balken-Optik. */
+  background: var(--akzent-zart);
+  border-color: var(--akzent);
+  color: var(--text);
+}
+.wallet-einfuegen #neuer-name::placeholder {
+  color: var(--akzent);
+  opacity: 0.85;
+}
+.wallet-einfuegen #neuer-name:focus {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
+}
 .wallet-einfuegen #hinzufuegen { width: 100%; }
 .deskriptor-fuss .feld-titel { grid-column: 1 / -1; }
 .deskriptor-fuss #neuer-deskriptor-name {
-  grid-column: 1 / -1; max-width: 28rem;
+  grid-column: 1 / -1;
+  max-width: 28rem;
+  background: var(--akzent-zart);
+  border-color: var(--akzent);
+  color: var(--text);
+}
+.deskriptor-fuss #neuer-deskriptor-name::placeholder {
+  color: var(--akzent);
+  opacity: 0.85;
+}
+.deskriptor-fuss #neuer-deskriptor-name:focus {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
 }
 .deskriptor-fuss #neuer-deskriptor { grid-column: 1; }
 .deskriptor-fuss .deskriptor-neben { grid-column: 2; }

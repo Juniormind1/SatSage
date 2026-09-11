@@ -41,6 +41,15 @@ _LARGE_NM_MIN_OUTS = 10
 #: Whirlpool: starres 5×5 mit gleicher Denomination.
 _WHIRLPOOL_SIZE = 5
 
+#: Bisq-Payout: Seller bekommt Deposit ``s``, Buyer ``t+s``.
+#: ``s/(t+s)`` bei Deposit 15–50 % der Trade-Summe ≈ 0,13–0,33 — etwas Spiel.
+_BISQ_PAYOUT_RATIO_MIN = 0.10
+_BISQ_PAYOUT_RATIO_MAX = 0.40
+
+#: Bisq-Deposit: OP_RETURN trägt typisch den Contract-Hash (~20 Byte).
+_BISQ_OP_RETURN_DATA_MIN = 16
+_BISQ_OP_RETURN_DATA_MAX = 32
+
 
 def _chain():
     import main
@@ -127,6 +136,14 @@ _LABELS: dict[str, tuple[str, str]] = {
     "exchange_batch": (
         "Wahrscheinlich Batch-Auszahlung von Exchange",
         "Likely exchange batch payout",
+    ),
+    "bisq_payout": (
+        "Wahrscheinlich Bisq-Auszahlung",
+        "Likely Bisq payout",
+    ),
+    "bisq_deposit": (
+        "Wahrscheinlich Bisq-Deposit (Escrow)",
+        "Likely Bisq deposit (escrow)",
     ),
     "unknown": ("", ""),
 }
@@ -302,6 +319,141 @@ def _form_coinjoin_kind(n_in: int, n_out: int, values: list[int]) -> str | None:
     return None
 
 
+def _vout_is_op_return(vout: dict) -> bool:
+    """True, wenn der Output ein OP_RETURN / nulldata ist."""
+    spk = vout.get("scriptPubKey") or {}
+    typ = str(spk.get("type") or "").lower().replace(" ", "")
+    if typ in ("nulldata", "op_return"):
+        return True
+    hx = str(spk.get("hex") or "").lower()
+    if hx.startswith("6a"):
+        return True
+    asm = str(spk.get("asm") or "").upper()
+    if asm.startswith("OP_RETURN"):
+        return True
+    # Esplora-ähnlich
+    if str(vout.get("scriptpubkey_type") or "").lower() in ("op_return", "nulldata"):
+        return True
+    return False
+
+
+def _op_return_push_len(vout: dict) -> int | None:
+    """Länge der OP_RETURN-Daten (Push), oder None wenn nicht lesbar."""
+    if not _vout_is_op_return(vout):
+        return None
+    hx = str((vout.get("scriptPubKey") or {}).get("hex") or "").lower()
+    if not hx.startswith("6a") or len(hx) < 4:
+        return None
+    # 6a + direkter Push (1–75): nächstes Byte = Länge
+    try:
+        push = int(hx[2:4], 16)
+    except ValueError:
+        return None
+    if 1 <= push <= 75:
+        return push
+    return None
+
+
+def _spendable_output_values_sats(tx: dict) -> list[int]:
+    """Output-Werte ohne OP_RETURN."""
+    chain = _chain()
+    out: list[int] = []
+    for vout in tx.get("vout") or []:
+        if _vout_is_op_return(vout):
+            continue
+        sats = chain._extract_value_sats(vout)
+        if sats > 0:
+            out.append(sats)
+    return out
+
+
+def _looks_bisq_payout_amounts(values: list[int]) -> bool:
+    """
+    Zwei Ausgänge: kleiner ≈ Deposit, größer ≈ Trade+Deposit.
+
+    ``kleiner/größer`` bei 15–50 % Deposit ≈ 0,13–0,33.
+    """
+    if len(values) != 2:
+        return False
+    a, b = sorted(int(v) for v in values)
+    if a <= 0 or b <= 0:
+        return False
+    ratio = a / b
+    return _BISQ_PAYOUT_RATIO_MIN <= ratio <= _BISQ_PAYOUT_RATIO_MAX
+
+
+def _prev_tx_via_single_vin(
+    tx: dict,
+    get_tx: Callable[[str], dict] | None,
+) -> dict | None:
+    vins = list(tx.get("vin") or [])
+    if len(vins) != 1:
+        return None
+    vin = vins[0]
+    if vin.get("is_coinbase") or "txid" not in vin:
+        return None
+    if get_tx is None:
+        return None
+    try:
+        return get_tx(str(vin["txid"]))
+    except Exception:
+        return None
+
+
+def _deposit_has_bisq_op_return(prev_tx: dict | None) -> bool:
+    """Prevout-Tx sieht nach Bisq-Deposit aus (OP_RETURN mit Contract-Hash)."""
+    if not prev_tx:
+        return False
+    return _looks_bisq_deposit_form(prev_tx)
+
+
+def _looks_bisq_deposit_form(tx: dict) -> bool:
+    """
+    Bisq-v1-Deposit: typisch ≥2 Inputs, genau 2 Outs —
+    Escrow-Wert + OP_RETURN (Contract-Hash ~20 Byte).
+    """
+    vins = [v for v in (tx.get("vin") or []) if not v.get("is_coinbase")]
+    vouts = list(tx.get("vout") or [])
+    if len(vins) < 2 or len(vouts) != 2:
+        return False
+    op_outs = [v for v in vouts if _vout_is_op_return(v)]
+    spend = [v for v in vouts if not _vout_is_op_return(v)]
+    if len(op_outs) != 1 or len(spend) != 1:
+        return False
+    if _chain()._extract_value_sats(spend[0]) <= 0:
+        return False
+    push = _op_return_push_len(op_outs[0])
+    if push is None:
+        # type/asm erkannt, Hex fehlt — Form reicht als weicher Hinweis
+        return True
+    return _BISQ_OP_RETURN_DATA_MIN <= push <= _BISQ_OP_RETURN_DATA_MAX
+
+
+def _looks_bisq_payout(
+    tx: dict,
+    own: TxOwnership,
+    *,
+    get_tx: Callable[[str], dict] | None = None,
+) -> bool:
+    """
+    Soft-Heuristik Bisq-Trade-Payout: 1 Input (Escrow) → 2 Spend-Outs,
+    Deposit-Verhältnis; OP_RETURN am Deposit-Prevout verstärkt.
+    """
+    if own.own_output_count < 1 or own.own_input_count > 0:
+        return False
+    if own.input_count != 1:
+        return False
+    values = _spendable_output_values_sats(tx)
+    if not _looks_bisq_payout_amounts(values):
+        return False
+    # Mit geklärtem Fremd-Input reicht die Form.
+    if own.ownership_complete and own.foreign_input_count == 1:
+        return True
+    # Sonst nur mit Deposit-Fingerprint (OP_RETURN) soft labeln.
+    prev = _prev_tx_via_single_vin(tx, get_tx)
+    return _deposit_has_bisq_op_return(prev)
+
+
 def classify_tx(
     tx: dict,
     own_addresses: set[str],
@@ -317,12 +469,13 @@ def classify_tx(
 
     Detektor-Reihenfolge:
     1. Eigentum klären
-    2. 0 eigene Ins + eigene Outs → Exchange-Batch (bei Fan-out-Form)
-    3. alle Ins eigen → Fan-Out (eigen), **außer** die Form ist klar Mix
+    2. Bisq-Deposit / Bisq-Payout (Form + optional OP_RETURN am Prevout)
+    3. 0 eigene Ins + eigene Outs → Exchange-Batch (bei Fan-out-Form)
+    4. alle Ins eigen → Fan-Out (eigen), **außer** die Form ist klar Mix
        (Wasabi/WabiSabi/Whirlpool/…) — Soft-Label der Form bleibt nützlich,
        auch wenn alle Teilnehmer eigene XPUBs sind (Lab / Multi-Wallet)
-    4. wenige Ins, wenige Fremd → PayJoin
-    5. Whirlpool → Wasabi Classic → WabiSabi → JoinMarket → coinjoin
+    5. wenige Ins, wenige Fremd → PayJoin
+    6. Whirlpool → Wasabi Classic → WabiSabi → JoinMarket → coinjoin
     """
     own = ownership or analyze_ownership(
         tx,
@@ -340,7 +493,15 @@ def classify_tx(
     if n_in == 0 or (n_in == 1 and (tx.get("vin") or [{}])[0].get("is_coinbase")):
         return _classification("unknown", own)
 
-    # 2. Exchange-Batch: kein eigener Input, aber eigener Empfang; typisch Fan-out.
+    # 2a. Bisq-Deposit: strukturell (OP_RETURN + Escrow), unabhängig vom Eigentum.
+    if _looks_bisq_deposit_form(tx):
+        return _classification("bisq_deposit", own)
+
+    # 2b. Bisq-Payout: Empfang aus Escrow (vor generischem Exchange).
+    if _looks_bisq_payout(tx, own, get_tx=get_tx):
+        return _classification("bisq_payout", own)
+
+    # 3. Exchange-Batch: kein eigener Input, aber eigener Empfang; typisch Fan-out.
     if (
         own.ownership_complete
         and own.own_input_count == 0

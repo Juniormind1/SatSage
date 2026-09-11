@@ -710,6 +710,8 @@
   "trace.txClass.payjoin": "Likely PayJoin",
   "trace.txClass.fan_out_own": "Likely own fan-out spend",
   "trace.txClass.exchange_batch": "Likely exchange batch payout",
+  "trace.txClass.bisq_payout": "Likely Bisq payout",
+  "trace.txClass.bisq_deposit": "Likely Bisq deposit (escrow)",
   "trace.none": "No origin could be determined.",
   "trace.noteCoinbase": "Freshly mined sats — every origin ends here.",
   "trace.noteExternalNotFollowed": "External branches are not followed further.",

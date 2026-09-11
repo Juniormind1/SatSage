@@ -22,6 +22,8 @@ Vor Formheuristik: **alle** `vin`/`vout` gegen konfigurierte XPUBs/Deskriptoren 
 | **Fan-Out (eigen)** | **alle** Ins eigen | 0 oder nur Change | du zahlst aus; viele Outs möglich |
 | **PayJoin** | gemischt, **übersichtlich** viele Ins; **wenige** Fremd-Ins (typisch 1, selten 2) | Sender oft Change; Empfänger oft 1 Netto-Out | kollaborative Zahlung, **kein** Mix |
 | **Exchange-Batch** | **0** eigen | genau 1 (selten mehr) | nur Empfang aus fremdem Fan-out |
+| **Bisq-Payout** | **0** eigen | 1 von 2 | Escrow-Auszahlung; Deposit-Verhältnis; OP_RETURN am Deposit-Prevout verstärkt |
+| **Bisq-Deposit** | egal | Escrow + `OP_RETURN` | v1-Escrow-Funding (≥2 Ins) |
 | **CoinJoin** (Wasabi / Whirlpool / JM) | ≥1 eigen | ≥1 eigen | Anonymitätsmenge; Peers = Rauschen |
 
 ### Abgrenzung
@@ -50,7 +52,7 @@ Semantik: CJ ist **kein** externer Zufluss; Anschaffung nur über **eigene** Vor
 
 ## Lab / Akzeptanz
 
-- [x] Erkennung/Klassifikation (Tabelle oben) inkl. Fan-Out / PayJoin / Exchange-Batch (`core/tx_classify.py`)  
+- [x] Erkennung/Klassifikation (Tabelle oben) inkl. Fan-Out / PayJoin / Exchange-Batch / Bisq (`core/tx_classify.py`)  
 - [x] Soft-Labels in Trace-UI (`web/app.js` + locales)  
 - [x] Own-Input-Walk bei erkanntem CJ  
 - [x] Regtest-Fixtures pro Typ (Wasabi-classic, WabiSabi, Whirlpool 5×5, JM, PayJoin, Fan-out, Exchange)  

@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallets · Einstellungen:** Dickere Trennlinie zwischen Wallet-Zeilen; Namensfeld „Name (optional)“ mit Akzent-Hintergrund/Rahmen — klarer Einstieg fürs nächste Wallet trotz XPUB-Balken darunter. Bereits konfigurierte Wallet-Namen fett (`font-weight: 700`).
+- **Herkunft · Bisq:** Soft-Labels „Wahrscheinlich Bisq-Auszahlung“ / „Bisq-Deposit (Escrow)“ — Payout: 1 Input → 2 Outs mit Deposit-Verhältnis (~15–50 %); Deposit: ≥2 Ins, Escrow+`OP_RETURN` (Contract-Hash). OP_RETURN am Prevout verstärkt den Payout, wenn Eigentum noch unklar ist. Kein Mix/Own-only-Walk. Form-Icon (Amber, P2P-Escrow 2→1→2) wie bei den CoinJoin-Icons an Herkunftszeile und Adressgruppe.
 - **Aktualität · Nur bekannte UTXOs:** Unteroption zu „Wallets immer aktuell halten“ — Tip-Nachzug (Start, neuer Block, „Bis Tip“) prüft nur bekannte UTXOs/Adressen, **kein Gap-Scan**. Neue Empfangsadressen dann per manuellem UTXO-Scan. `.env`: `WALLETS_NUR_BEKANNTE_UTXOS`.
 - **Wallets · Öffnen:** Mempool-Pending-Check über eigenen Electrs prüft nur noch die geöffnete Wallet — nicht mehr `listunspent` über alle Adressen aller anderen Wallets. Öffnen eines kleinen Wallets (z. B. 1 UTXO) blieb sonst ~2 s hinter dem Querschnitt stecken; Herkunft (alle UTXOs) unverändert.
 - **Wallets · Erst-Paint:** Wallet-Ansicht lädt zuerst nur den Cache (`mempool=0`), zeichnet sofort, und zieht Pending/Mempool danach im Hintergrund nach — Wallets mit vielen Adressen (z. B. 9× `listunspent`) blockieren den Wechsel nicht mehr ~1 s.

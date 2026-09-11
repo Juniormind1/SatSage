@@ -710,6 +710,8 @@
   "trace.txClass.payjoin": "Wahrscheinlich PayJoin",
   "trace.txClass.fan_out_own": "Wahrscheinlich eigene Auszahlung (Fan-Out)",
   "trace.txClass.exchange_batch": "Wahrscheinlich Batch-Auszahlung von Exchange",
+  "trace.txClass.bisq_payout": "Wahrscheinlich Bisq-Auszahlung",
+  "trace.txClass.bisq_deposit": "Wahrscheinlich Bisq-Deposit (Escrow)",
   "trace.none": "Keine Herkunft ermittelbar.",
   "trace.noteCoinbase": "Frisch geschürfte Sats — hier endet jede Herkunft.",
   "trace.noteExternalNotFollowed": "Externe Zweige werden nicht weiterverfolgt.",
