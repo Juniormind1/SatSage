@@ -233,6 +233,101 @@ function fuelleTxClassRechts(rechts, knotenOderErgebnis) {
   rechts.append(span);
 }
 
+const MIX_ICON_ORDER = [
+  "whirlpool",
+  "wasabi_classic",
+  "wabisabi",
+  "joinmarket",
+];
+
+/** Mix-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
+function mixArtenAusErgebnis(ergebnis) {
+  const gesehen = new Set();
+  if (!ergebnis || !ergebnis.found) return [];
+  const stapel = [];
+  if (ergebnis.root) stapel.push(ergebnis.root);
+  for (const k of ergebnis.children || []) stapel.push(k);
+  if (ergebnis.tx_class && TX_CLASS_ICON[ergebnis.tx_class]) {
+    gesehen.add(ergebnis.tx_class);
+  }
+  while (stapel.length) {
+    const knoten = stapel.pop();
+    if (!knoten || typeof knoten !== "object") continue;
+    if (knoten.tx_class && TX_CLASS_ICON[knoten.tx_class]) {
+      gesehen.add(knoten.tx_class);
+    }
+    for (const kind of knoten.children || []) stapel.push(kind);
+  }
+  return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
+}
+
+/** Mix-Arten einer Adressgruppe aus schon gespeicherten Traces (ohne Extra-Job). */
+function mixArtenDerGruppe(gruppe) {
+  const gesehen = new Set();
+  for (const u of gruppe.utxos || []) {
+    for (const k of u.mix_arten || []) {
+      if (TX_CLASS_ICON[k]) gesehen.add(k);
+    }
+    if (u.tx_class && TX_CLASS_ICON[u.tx_class]) gesehen.add(u.tx_class);
+  }
+  return MIX_ICON_ORDER.filter((k) => gesehen.has(k));
+}
+
+/** Kurznamen für Adressgruppen-Tooltips (nicht das volle Soft-Label). */
+const MIX_ICON_KURZ = {
+  whirlpool: "Whirlpool",
+  wasabi_classic: "Wasabi",
+  wabisabi: "WabiSabi",
+  joinmarket: "JoinMarket",
+};
+
+/** Nur Icons, kein Text — Tooltip: „Im Verlauf …-Muster erkannt.“ */
+function zeichneMixIconLeiste(arten) {
+  if (!arten || !arten.length) return null;
+  const leiste = document.createElement("span");
+  leiste.className = "adress-mix-icons";
+  const tipps = [];
+  for (const kind of arten) {
+    const src = TX_CLASS_ICON[kind];
+    if (!src) continue;
+    const name = MIX_ICON_KURZ[kind] || softTxClassLabel({ tx_class: kind }) || kind;
+    const tipp = t("trace.mixInHistory", { art: name });
+    tipps.push(tipp);
+    const img = document.createElement("img");
+    img.className = "tx-class-icon adress-mix-icon";
+    img.src = src;
+    img.alt = tipp;
+    img.title = tipp;
+    img.width = 16;
+    img.height = 16;
+    img.decoding = "async";
+    leiste.append(img);
+  }
+  if (tipps.length) leiste.setAttribute("aria-label", tipps.join("; "));
+  return leiste.children.length ? leiste : null;
+}
+
+/** Nach neuem Trace: Mix-Icons an der Adressgruppe nachziehen. */
+function aktualisiereGruppenMixIcons(address) {
+  if (!address) return;
+  const gruppeEl = document.querySelector(
+    `.adress-gruppe[data-address="${CSS.escape(address)}"]`,
+  );
+  if (!gruppeEl) return;
+  const gruppe = gruppeAusTraceListe(address);
+  if (!gruppe) return;
+  const kopf = gruppeEl.querySelector(".adress-kopf");
+  if (!kopf) return;
+  const alt = kopf.querySelector(".adress-mix-icons");
+  if (alt) alt.remove();
+  const leiste = zeichneMixIconLeiste(mixArtenDerGruppe(gruppe));
+  if (!leiste) return;
+  // Vor dem Betrag rechts einfügen, falls vorhanden.
+  const betrag = kopf.querySelector(".adress-betrag");
+  if (betrag) kopf.insertBefore(leiste, betrag);
+  else kopf.append(leiste);
+}
+
 function quelleFeldLabel(feld, quelleKey) {
   const key = `sources.field.${feld.key}.label`;
   const uebersetzt = t(key);
@@ -1033,6 +1128,18 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
   if (root.time_label) {
     utxo.time_label = root.time_label;
   }
+  if (root.tx_class && TX_CLASS_ICON[root.tx_class]) {
+    utxo.tx_class = root.tx_class;
+    const arten = new Set(utxo.mix_arten || []);
+    arten.add(root.tx_class);
+    utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
+  }
+  // Auch Mix-Formen tiefer im Baum (Remix-Hops).
+  const tief = mixArtenAusErgebnis(ergebnis);
+  if (tief.length) {
+    const arten = new Set([...(utxo.mix_arten || []), ...tief]);
+    utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
+  }
   // Dieselbe Instanz in der Trace-Liste nachziehen (findeTraceUtxo kann
   // ein anderes Objekt geliefert haben als die Gruppenzeile).
   for (const liste of [
@@ -1053,12 +1160,15 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
         if (utxo.address) eintrag.address = utxo.address;
         if (utxo.wallet) eintrag.wallet = utxo.wallet;
         if (utxo.time_label) eintrag.time_label = utxo.time_label;
+        if (utxo.mix_arten) eintrag.mix_arten = utxo.mix_arten;
+        if (utxo.tx_class) eintrag.tx_class = utxo.tx_class;
         if (!utxo.address && gruppe.address) utxo.address = gruppe.address;
       }
     }
   }
   aktualisiereTraceWurzelKopf(utxo);
   zeichneJuengsteSatsNach(utxo);
+  if (utxo.address) aktualisiereGruppenMixIcons(utxo.address);
 }
 
 /**
@@ -3307,6 +3417,10 @@ function zeichneTraceAdressGruppe(gruppe) {
   }
   haengeGruppenJuengsteAn(kopf, gruppe);
 
+  // Nur Icons, wenn gespeicherte Herkunft Mix-Formen kennt — sonst nichts.
+  const mixLeiste = zeichneMixIconLeiste(mixArtenDerGruppe(gruppe));
+  if (mixLeiste) kopf.append(mixLeiste);
+
   const betrag = document.createElement("span");
   betrag.className = "betrag adress-betrag";
   if ((gruppe.utxos || []).some((u) => u.spent || u.spent_pending)) {
@@ -4099,10 +4213,15 @@ function zeichneKnoten(knoten) {
   const kopfzeile = document.createElement("div");
   kopfzeile.className = "kopf-mit-verweis";
   kopfzeile.append(zeile);
-  const ziel = knoten.from_utxo ? knoten.from_utxo.split(":")[0] : "";
-  const extern = knoten.address
-    ? mempoolVerweis("address", knoten.address)
-    : mempoolVerweis("tx", ziel);
+  // Tx vor Adresse: VIN/VOUT-Grafik. Adresse nur, wenn keine Tx bekannt
+  // (reine Adresszeilen bleiben bei /address/… — siehe Adressgruppen).
+  const txid =
+    (knoten.from_utxo || "").split(":")[0]
+    || knoten.txid
+    || "";
+  const extern = txid
+    ? mempoolVerweis("tx", txid)
+    : (knoten.address ? mempoolVerweis("address", knoten.address) : null);
   if (extern) kopfzeile.append(extern);
   block.append(kopfzeile);
 
@@ -7021,8 +7140,11 @@ function mempoolVerweis(art, wert) {
   const kopf = instanz.local
     ? t("sources.mempool.openPrivate")
     : t("sources.mempool.openPublic");
+  const zielArt = art === "address"
+    ? t("sources.mempool.targetAddress")
+    : t("sources.mempool.targetTx");
   // Host in zweiter Zeile — native title zeigt Zeilenumbruch.
-  link.title = `${kopf}\n${instanz.host}`;
+  link.title = `${kopf}\n${zielArt}\n${instanz.host}`;
   // Der Klick darf nicht die darunterliegende Zeile aufklappen.
   link.addEventListener("click", (e) => e.stopPropagation());
   return link;

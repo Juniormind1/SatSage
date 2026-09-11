@@ -9,7 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Herkunft · Mix-Icons:** Soft-Labels Wasabi Classic / WabiSabi / Whirlpool / JoinMarket mit farbigen Form-Icons (Mempool-Stil) in der Herkunftszeile.
+- **Herkunft · Mempool-Link:** Am Herkunftsbaum öffnet ↗ die **Transaktion** (VIN/VOUT), sobald `from_utxo`/`txid` da ist; `/address/…` nur an reinen Adresszeilen. Tooltip nennt das Ziel.
+- **Herkunft · Mix-Icons:** Soft-Labels Wasabi / WabiSabi / Whirlpool / JoinMarket mit farbigen Form-Icons (Mempool-Stil) in der Herkunftszeile; an Adressgruppen nur die Icons (ohne Text), wenn gespeicherte Bäume Mix-Formen enthalten — kein Extra-Scan.
+
 - **Herkunft · gezielte Suche:** Nach Trace zeigt die Kopfzeile den **Output-Betrag** (und Adresse) des gewählten `txid:vout` — nicht dauerhaft „0 sats“.
 - **Herkunft aller UTXOs:** Ohne UTXO-Bestand: Bestätigungsdialog — OK startet UTXO-Scan aller Wallets, danach automatisch die Herkunft (Abbruch möglich); kein falsches „schon erledigt“ mehr.
 - **Lab · CJ-Peers:** Mix-Fixtures nutzen `lab-faucet` als Fremd-Inputs (Funding-Quelle, nicht in SatSage `WALLET_*`); Viewer nur mit eigenen Anteilen — kein Fan-Out-Fehllabel mehr bei Wasabi/WabiSabi.
