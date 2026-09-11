@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **StartOS · Build:** `npm ci` braucht `packaging/package-lock.json`; Select-Indexer-i18n-Keys und `dependencies.ts`-Typen so, dass `tsc`/`make x86` wieder durchlaufen. Build-Skripte ausführbar (`+x`).
+
 ## [0.9.1] - 2026-09-11
 
 - **Version:** 0.9.1 — Pflege-Release: CoinJoin-Herkunft (Soft-Labels/Icons, Own-only-Walk), Marke Pfeiffe-Icon, Core-Rollen UTXO vs. Lookup, Kurs-Historie/Onion-Latenz, Steuerjahr- und Herkunfts-UI.

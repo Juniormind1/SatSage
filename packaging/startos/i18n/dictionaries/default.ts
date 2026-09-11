@@ -11,6 +11,11 @@ const dict = {
   'SatSage Web UI Password': 7,
   'Use this password with the username admin.': 8,
   Password: 9,
+  'Select Indexer': 10,
+  'Electrum server for SatSage address history and UTXO lookups (StartOS bridge)': 11,
+  'Fulcrum (recommended when installed)': 12,
+  Electrs: 13,
+  'Choose Electrs or Fulcrum as the local Electrum backend for SatSage': 14,
 } as const
 
 export type I18nKey = keyof typeof dict
