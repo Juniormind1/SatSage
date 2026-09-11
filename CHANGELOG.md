@@ -5,7 +5,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 **Release Notes:** GitHub-/Tag-Release-Texte entstehen nur bei Version-Bump, Merge nach `main` oder Tag — Inhalt = der dann datierte Block aus `[Unveröffentlicht]` (nicht bei jedem Dev-Push).
 
-**Herkunft:** Die datierten Abschnitte ab `2026-07-08` stammen aus dem privaten Vorgängerprojekt **xPubQuery** (lokale Kopie unter PyCharmProjects) und wurden unverändert übernommen — in der gesamten Changelog-Historie dort kamen **keine** Klarname-Einträge ( o. Ä.) vor; Maintainer-Bezug ist durchgängig die Projekt-Identität **Juniormind1**. Ab dem Marker **2026-09-08** gilt die öffentliche SatSage-Historie.
+**Herkunft:** Die datierten Abschnitte ab `2026-07-08` stammen aus dem privaten Vorgängerprojekt **xPubQuery** und wurden unverändert übernommen; Maintainer-Bezug ist durchgängig die Projekt-Identität **Juniormind1**. Ab dem Marker **2026-09-08** gilt die öffentliche SatSage-Historie.
 
 ## [Unveröffentlicht]
 
@@ -110,7 +110,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 ## 2026-09-08 — Öffentlicher Start (SatSage Open Source)
 
 - **Public Release:** Erstes öffentliches GitHub-Repository unter dem Namen **SatSage – know your sats** (MIT, Maintainer `Juniormind1 <juniormind@proton.me>`). Commit-Marke im öffentlichen Tree: `d8d3601` (*Initial public release of SatSage*).
-- **Vorgeschichte:** Alles **unterhalb** dieses Abschnitts (`2026-09-07` … `2026-07-08`) ist die private xPubQuery-/SatSage-Entwicklung vor der Freigabe — inhaltlich deckungsgleich mit `PyCharmProjects/xPubQuery/CHANGELOG.md` (Stand Abgleich 2026-09-09); kein nachträgliches Umschreiben von Klarnamen nötig.
+- **Vorgeschichte:** Alles **unterhalb** dieses Abschnitts (`2026-09-07` … `2026-07-08`) ist die private xPubQuery-/SatSage-Entwicklung vor der Freigabe — inhaltlich deckungsgleich mit dem privaten Vorgänger-Changelog (Stand Abgleich 2026-09-09).
 - **Danach:** Einträge in `[Unveröffentlicht]` bzw. neueren Datumsabschnitten gehören zur öffentlichen Weiterentwicklung (u. a. Identitäts-Hooks, Lab-Sanktions-Hops, README/CI).
 
 ## 2026-09-07
