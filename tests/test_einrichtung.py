@@ -288,13 +288,18 @@ class TestVertragMitDerApi(unittest.TestCase):
         """Opt-in: Cache bis Tip nachziehen, kein Fullscan."""
         html = (WEB / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="start-sync"', html)
+        self.assertIn('id="start-sync-known-only"', html)
         self.assertIn('data-i18n="settings.start.sync"', html)
+        self.assertIn('data-i18n="settings.start.knownOnly"', html)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Wallets immer aktuell", de)
+        self.assertIn("Nur bekannte UTXOs", de)
         self.assertIn("speichereStartSync", self.js)
         self.assertIn('"/config/start-sync"', self.js)
         self.assertIn("folgeWalletSyncJob", self.js)
         self.assertIn("wallets_immer_aktuell", self.js)
+        self.assertIn("wallets_nur_bekannte_utxos", self.js)
+        self.assertIn("setzeKnownOnlySichtbarkeit", self.js)
 
     def test_filter_treffer_log_wird_in_place_aktualisiert(self):
         """Ergebnis überschreibt „hole Block…“, hängt keine zweite Zeile an."""

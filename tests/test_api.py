@@ -1498,6 +1498,42 @@ class TestSteuerjahr(ApiTestBasis):
             "0",
         )
 
+
+    def test_start_sync_nur_bekannte_wird_gespeichert(self):
+        status, körper = self.anfrage(
+            "/api/config/start-sync", methode="PUT",
+            daten={"enabled": True, "nur_bekannte_utxos": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["wallets_immer_aktuell"])
+        self.assertTrue(körper["wallets_nur_bekannte_utxos"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte["WALLETS_NUR_BEKANNTE_UTXOS"], "1")
+        _, cfg = self.anfrage("/api/config")
+        self.assertTrue(cfg["wallets_nur_bekannte_utxos"])
+
+        _, aus = self.anfrage(
+            "/api/config/start-sync", methode="PUT",
+            daten={"enabled": True, "nur_bekannte_utxos": False},
+        )
+        self.assertFalse(aus["wallets_nur_bekannte_utxos"])
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["WALLETS_NUR_BEKANNTE_UTXOS"],
+            "0",
+        )
+
+        # Parent aus → Known-only ebenfalls aus
+        _, aus2 = self.anfrage(
+            "/api/config/start-sync", methode="PUT",
+            daten={"enabled": False, "nur_bekannte_utxos": True},
+        )
+        self.assertFalse(aus2["wallets_immer_aktuell"])
+        self.assertFalse(aus2["wallets_nur_bekannte_utxos"])
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["WALLETS_NUR_BEKANNTE_UTXOS"],
+            "0",
+        )
+
     def test_onchain_hinweis_steht_in_der_config(self):
         from core import tax
         _, cfg = self.anfrage("/api/config")

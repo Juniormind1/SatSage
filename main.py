@@ -1272,6 +1272,23 @@ def resolve_wallets_beim_start_aktualisieren(
     return str(raw).strip().lower() in ("1", "true", "ja", "yes", "on")
 
 
+def resolve_wallets_nur_bekannte_utxos(
+    env: dict[str, str],
+    default: bool = False,
+) -> bool:
+    """
+    Unteroption zu „Wallets immer aktuell halten“.
+
+    Env: ``WALLETS_NUR_BEKANNTE_UTXOS``. Bei ja: Tip-Nachzug (Start / Block /
+    „Bis Tip“) prüft nur bekannte UTXOs/Adressen — kein Gap-Scan. Neue
+    Empfangsadressen nur per manuellem UTXO-Scan. Vorgabe aus.
+    """
+    raw = env.get("WALLETS_NUR_BEKANNTE_UTXOS")
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in ("1", "true", "ja", "yes", "on")
+
+
 def _parse_env_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
@@ -6121,6 +6138,7 @@ def sync_xpub_zum_tip(
     verify_utxo_spent=None,
     bip158_fetch_wallet_utxos=None,
     on_progress=None,
+    nur_bekannte: bool = False,
 ) -> list[dict] | None:
     """
     Leichtes Nachziehen bis Chain-Tip (Start-Sync / Light-Update).
@@ -6130,9 +6148,10 @@ def sync_xpub_zum_tip(
     Produktregel:
     1. **BIP-158 inkrementell**, wenn Compact-Filter-Fetcher und
        ``scan_tip_height`` vorhanden (auch wenn Electrs/Core die allgemeine
-       Datenquelle sind).
+       Datenquelle sind) — entfällt bei ``nur_bekannte``.
     2. Sonst **Electrs/Adresse light**: nur bekannte UTXOs auf spent prüfen
        + Gap/Lookahead ab ``scan_end_index`` — nicht alle Indizes #0…N.
+       Bei ``nur_bekannte``: nur bekannte UTXOs/Adressen, kein Gap.
     3. Expliziter User-UTXO-Scan bleibt bei Electrs/Core-Vorrang (anderer Pfad).
 
     Rückgabe: aktualisierte UTXO-Liste, oder ``None`` ohne Cache.
@@ -6153,13 +6172,17 @@ def sync_xpub_zum_tip(
         tip_i = None
 
     if on_progress:
-        on_progress(f"Aktualisiere {label} bis Chain-Tip…")
+        if nur_bekannte:
+            on_progress(f"Aktualisiere {label} (nur bekannte UTXOs)…")
+        else:
+            on_progress(f"Aktualisiere {label} bis Chain-Tip…")
 
     # --- 1) BIP-158 inkrementell (bevorzugt für Tip-Nachzug) ---------------
+    # Bei nur_bekannte: kein Filter-Walk — nur Light auf bekannte Adressen.
     bip_fetch = bip158_fetch_wallet_utxos
     if bip_fetch is None and source == "bip158":
         bip_fetch = fetch_wallet_utxos
-    if bip_fetch is not None and tip_i is not None:
+    if not nur_bekannte and bip_fetch is not None and tip_i is not None:
         print(
             f"\nAktualisiere {label} (BIP-158 ab Tip {tip_i:,})".replace(",", "."),
             flush=True,
@@ -6192,7 +6215,7 @@ def sync_xpub_zum_tip(
             print(f"  ⚠️  {msg}", flush=True)
             if on_progress:
                 on_progress(msg)
-    if bip_fetch is not None and tip_i is None:
+    if not nur_bekannte and bip_fetch is not None and tip_i is None:
         msg = (
             f"{label}: kein scan_tip_height im Cache — "
             "kein BIP-158-Filter-Nachzug (bräuchte mehrere Peers ab Tip); "
@@ -6231,14 +6254,24 @@ def sync_xpub_zum_tip(
     alt = list(entry["utxos"] or [])
     # Adressen der Cache-UTXOs: auch nach spent erneut abfragen (neue Empfänge).
     addrs_cache = {u.get("address") for u in alt if u.get("address")}
-    print(
-        f"\nAktualisiere {label} (Light: bekannte UTXOs + Gap ab #{scan_end})",
-        flush=True,
-    )
-    if on_progress:
-        on_progress(
-            f"{label}: prüfe {len(alt)} bekannte UTXO(s), Gap ab #{scan_end}…"
+    if nur_bekannte:
+        print(
+            f"\nAktualisiere {label} (Light: nur {len(alt)} bekannte UTXO(s), kein Gap)",
+            flush=True,
         )
+        if on_progress:
+            on_progress(
+                f"{label}: prüfe {len(alt)} bekannte UTXO(s) (kein Gap)…"
+            )
+    else:
+        print(
+            f"\nAktualisiere {label} (Light: bekannte UTXOs + Gap ab #{scan_end})",
+            flush=True,
+        )
+        if on_progress:
+            on_progress(
+                f"{label}: prüfe {len(alt)} bekannte UTXO(s), Gap ab #{scan_end}…"
+            )
 
     live = _prune_cached_utxos(
         alt,
@@ -6266,7 +6299,7 @@ def sync_xpub_zum_tip(
     extra_utxos: list[dict] = []
     extra_window: list[dict] = []
 
-    if fulcrum is not None:
+    if not nur_bekannte and fulcrum is not None:
         scan_cap = _scan_index_cap_per_chain(xpub, wallet, xpub_max)
         if on_progress:
             on_progress(f"{label}: Gap ab Index #{scan_end}…")
@@ -6311,7 +6344,7 @@ def sync_xpub_zum_tip(
                     progress_label=f"Rückwärts-Gap {label}",
                     on_progress=on_progress,
                 )
-    else:
+    elif not nur_bekannte:
         lookahead = max(BIP44_GAP_LIMIT, SALDEN_CHECK_LOOKAHEAD)
         if on_progress:
             on_progress(f"{label}: Lookahead {lookahead} Indizes…")
@@ -6396,6 +6429,7 @@ def sync_wallets_zum_tip(
     bip158_fetch_wallet_utxos=None,
     on_progress=None,
     on_wallet_done=None,
+    nur_bekannte: bool = False,
 ) -> dict[str, list[dict]]:
     """
     Aktualisiert alle XPUBs mit Cache bis Chain-Tip (Light-Update).
@@ -6421,6 +6455,7 @@ def sync_wallets_zum_tip(
                 verify_utxo_spent=verify_utxo_spent,
                 bip158_fetch_wallet_utxos=bip158_fetch_wallet_utxos,
                 on_progress=on_progress,
+                nur_bekannte=nur_bekannte,
             )
         except Exception as exc:
             label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."

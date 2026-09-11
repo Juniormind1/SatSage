@@ -1988,27 +1988,40 @@ function ladeHinweisVonQuelle(key) {
 
 async function zeigeWallet(walletId) {
   Zustand.walletId = walletId;
+  Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
+  const ladeGen = Zustand.walletLadeGen;
   zeigeAnsicht("wallet");
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   setzeText($("#wallet-titel"), wallet ? wallet.name : t("common.wallet"));
-  // Dieser GET liest nur den lokalen Cache — nie Electrum/P2P/Core.
+  // Erst Cache (schnell), Mempool-Pending danach im Hintergrund.
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
   $("#wallet-leer").hidden = true;
 
   const limit = $("#limit-wahl").value;
   const sort = $("#sort-wahl")?.value || "betrag";
+  const basis =
+    `/wallets/${walletId}/utxos?limit=${limit}&sort=${encodeURIComponent(sort)}`;
   try {
-    const daten = await api(
-      `/wallets/${walletId}/utxos?limit=${limit}&sort=${encodeURIComponent(sort)}`,
-    );
+    const daten = await api(`${basis}&mempool=0`);
+    if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeichneUtxos(daten, wallet);
   } catch (fehler) {
+    if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeigeLeer(t("wallet.loadFailed", { msg: fehler.message }), "");
     setzeText($("#wallet-meta"), "");
   }
   aktualisiereScanAnzeige();
+
+  // Pending über eigenen Electrs — blockiert den Erst-Paint nicht.
+  api(basis)
+    .then((frisch) => {
+      if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
+      zeichneUtxos(frisch, wallet);
+      aktualisiereScanAnzeige();
+    })
+    .catch(() => {});
 }
 
 function zeigeLeer(titel, text) {
@@ -7203,26 +7216,56 @@ function zeichneSteuerEinstellungen() {
   }
 }
 
+function setzeKnownOnlySichtbarkeit(parentAn = undefined) {
+  const zeile = $("#start-sync-known-only-zeile");
+  const box = $("#start-sync-known-only");
+  if (!zeile || !box) return;
+  const an = parentAn === undefined
+    ? Boolean(
+      Zustand.config?.wallets_immer_aktuell
+      ?? Zustand.config?.wallets_beim_start_aktualisieren,
+    )
+    : Boolean(parentAn);
+  zeile.hidden = !an;
+  box.disabled = !an;
+  if (!an) box.checked = false;
+}
+
 function zeichneStartSync() {
   const box = $("#start-sync");
   if (!box) return;
-  box.checked = Boolean(
+  const an = Boolean(
     Zustand.config?.wallets_immer_aktuell
     ?? Zustand.config?.wallets_beim_start_aktualisieren,
   );
-  setzeTipSyncSichtbarkeit();
+  box.checked = an;
+  const known = $("#start-sync-known-only");
+  if (known) {
+    known.checked = an && Boolean(Zustand.config?.wallets_nur_bekannte_utxos);
+  }
+  setzeKnownOnlySichtbarkeit(an);
+  setzeTipSyncSichtbarkeit(an);
 }
 
-async function speichereStartSync() {
+async function speichereStartSync(ereignis) {
   const box = $("#start-sync");
   if (!box) return;
   const an = box.checked;
+  const knownBox = $("#start-sync-known-only");
+  const nurBekannte = an && Boolean(knownBox?.checked);
+  const vonKnownOnly = Boolean(
+    ereignis && knownBox && ereignis.target === knownBox,
+  );
   // Hide/show immediately; the config response below remains authoritative.
+  setzeKnownOnlySichtbarkeit(an);
   setzeTipSyncSichtbarkeit(an);
   try {
     const ergebnis = await api("/config/start-sync", {
       methode: "PUT",
-      daten: { enabled: an },
+      daten: {
+        enabled: an,
+        nur_bekannte_utxos: nurBekannte,
+      },
     });
     if (Zustand.config) {
       const v = Boolean(
@@ -7231,15 +7274,14 @@ async function speichereStartSync() {
       );
       Zustand.config.wallets_immer_aktuell = v;
       Zustand.config.wallets_beim_start_aktualisieren = v;
+      Zustand.config.wallets_nur_bekannte_utxos = Boolean(
+        ergebnis.wallets_nur_bekannte_utxos,
+      );
       if (ergebnis.wallet_watch) {
         Zustand.config.wallet_watch = ergebnis.wallet_watch;
       }
     }
-    box.checked = Boolean(
-      Zustand.config?.wallets_immer_aktuell
-      ?? Zustand.config?.wallets_beim_start_aktualisieren,
-    );
-    setzeTipSyncSichtbarkeit();
+    zeichneStartSync();
     // Tip-Nachzug sofort mitverfolgen (ohne Server-Neustart).
     const jobId = ergebnis.wallet_sync_job_id || ergebnis.job?.id;
     if (an && jobId) {
@@ -7247,21 +7289,22 @@ async function speichereStartSync() {
         Zustand.config.wallet_sync_job_id = jobId;
       }
       folgeWalletSyncJob(jobId);
-      logZeile(t("settings.startSyncStarted"));
+      if (!vonKnownOnly) logZeile(t("settings.startSyncStarted"));
       await ladeJobsNav();
     }
-    meldung(
-      an
-        ? t("settings.startSyncOn")
-        : t("settings.startSyncOff"),
-      "gut",
-    );
+    let text = t("settings.startSyncOff");
+    if (an && vonKnownOnly) {
+      text = nurBekannte
+        ? t("settings.startSyncKnownOnlyOn")
+        : t("settings.startSyncKnownOnlyOff");
+    } else if (an && nurBekannte) {
+      text = t("settings.startSyncKnownOnlyOn");
+    } else if (an) {
+      text = t("settings.startSyncOn");
+    }
+    meldung(text, "gut");
   } catch (fehler) {
-    box.checked = Boolean(
-      Zustand.config?.wallets_immer_aktuell
-      ?? Zustand.config?.wallets_beim_start_aktualisieren,
-    );
-    setzeTipSyncSichtbarkeit();
+    zeichneStartSync();
     meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
   }
 }
@@ -9814,6 +9857,10 @@ async function start() {
   const startSync = $("#start-sync");
   if (startSync) {
     startSync.addEventListener("change", speichereStartSync);
+  }
+  const startSyncKnown = $("#start-sync-known-only");
+  if (startSyncKnown) {
+    startSyncKnown.addEventListener("change", speichereStartSync);
   }
   const llmKnopf = $("#llm-uebernehmen");
   if (llmKnopf) {
