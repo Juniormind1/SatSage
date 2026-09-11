@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunftsbaum · lazy Rendern:** Erste Ebene unter dem UTXO bleibt sofort sichtbar; tiefere Zweige werden erst beim Aufklappen ins DOM gebaut (große CoinJoin-/Remix-Bäume sonst tausende Knoten auf einmal).
+- **Herkunft · Mix-Icon-Tooltip:** Hover zeigt wieder die CoinJoin-Art (Soft-Label), nicht „Zweig auf- und zuklappen“ — Klapp-Hinweis nur noch am Pfeil.
+
 ## [0.9.1] - 2026-09-11
 
 - **Version:** 0.9.1 — Pflege-Release: CoinJoin-Herkunft (Soft-Labels/Icons, Own-only-Walk), Marke Pfeiffe-Icon, Core-Rollen UTXO vs. Lookup, Kurs-Historie/Onion-Latenz, Steuerjahr- und Herkunfts-UI.
