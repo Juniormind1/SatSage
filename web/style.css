@@ -964,6 +964,18 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .tx-class-text {
   line-height: 1.2;
 }
+.adress-mix-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+.adress-mix-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.95;
+}
 .knoten-notiz {
   font-size: 11px; color: var(--warn); background: var(--warn-bg);
   border-radius: var(--r); padding: 4px 8px; margin-top: 4px;

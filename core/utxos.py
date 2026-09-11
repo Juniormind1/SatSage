@@ -85,6 +85,9 @@ def utxo_as_dict(
         "verfolgt_veraltet": False,
         "verfolgt_vollstaendig": False,
         "juengste_sats_ts": None,
+        # Mix-Formen aus gespeichertem Herkunftsbaum (Icons an der Adressgruppe).
+        "mix_arten": [],
+        "tx_class": "",
         # Mempool: Ausgabe unterwegs (eigener Electrs).
         "spending_pending": bool(utxo.get("spending_pending")),
         "spent_txid": utxo.get("spent_txid") or "",
@@ -130,6 +133,10 @@ def utxo_as_dict(
                     ingress.get("external_time_ts")
                     or ingress.get("youngest_time_ts")
                 )
+            # Schon aus demselben Cache-Lesen wie die Verfolgt-Marke —
+            # kein Extra-Durchlauf über die Chain.
+            eintrag["mix_arten"] = list(gespeichert.get("mix_arten") or [])
+            eintrag["tx_class"] = str(gespeichert.get("tx_class") or "")
 
     return eintrag
 

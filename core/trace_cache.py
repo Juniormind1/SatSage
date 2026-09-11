@@ -224,6 +224,47 @@ def _blaetter_ohne_luecke(knoten: list) -> bool:
     return hat_ende
 
 
+#: Mix-Arten mit UI-Icon — Reihenfolge = Anzeige an der Adressgruppe.
+MIX_ICON_KINDS = (
+    "whirlpool",
+    "wasabi_classic",
+    "wabisabi",
+    "joinmarket",
+)
+_MIX_ICON_SET = frozenset(MIX_ICON_KINDS)
+
+
+def mix_arten_im_baum(baum: dict | None) -> list[str]:
+    """
+    Eindeutige Mix-Formen im gespeicherten Herkunftsbaum (nur Icon-Arten).
+
+    Läuft über denselben Baum, den ``kopf`` ohnehin lädt — kein Extra-I/O.
+    """
+    if not isinstance(baum, dict):
+        return []
+    gefunden: set[str] = set()
+    stapel: list = []
+    root = baum.get("root")
+    if isinstance(root, dict):
+        stapel.append(root)
+    stapel.extend(baum.get("children") or [])
+    # Auch Top-Level-Feld (ältere/kompakte Speicherung).
+    top = baum.get("tx_class")
+    if top in _MIX_ICON_SET:
+        gefunden.add(str(top))
+    while stapel:
+        knoten = stapel.pop()
+        if not isinstance(knoten, dict):
+            continue
+        kind = knoten.get("tx_class")
+        if kind in _MIX_ICON_SET:
+            gefunden.add(str(kind))
+        kinder = knoten.get("children") or []
+        if kinder:
+            stapel.extend(kinder)
+    return [k for k in MIX_ICON_KINDS if k in gefunden]
+
+
 def kopf(
     txid: str,
     vout: int,
@@ -243,10 +284,20 @@ def kopf(
     # Veraltet (neue Adressen) ändert nicht, ob jeder Sat außen endet.
     # Die Unsicherheit steht an der Marke „verfolgt"; die jüngsten Sats
     # trotzdem zeigen, sonst wirkt ein vollständiger Baum in der Liste leer.
-    vollstaendig = baum_ist_vollstaendig(geladen["baum"])
+    baum = geladen["baum"]
+    vollstaendig = baum_ist_vollstaendig(baum)
+    mix_arten = mix_arten_im_baum(baum)
+    root = baum.get("root") if isinstance(baum, dict) else None
+    tx_class = ""
+    if isinstance(root, dict):
+        tx_class = str(root.get("tx_class") or "")
+    if not tx_class:
+        tx_class = str(baum.get("tx_class") or "") if isinstance(baum, dict) else ""
     return {
         "erstellt_ts": geladen["erstellt_ts"],
         "veraltet": geladen["veraltet"],
         "adressen_seither": geladen["adressen_seither"],
         "vollstaendig": vollstaendig,
+        "mix_arten": mix_arten,
+        "tx_class": tx_class,
     }

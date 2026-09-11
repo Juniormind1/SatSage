@@ -97,8 +97,8 @@ class TxClassification:
 
 _LABELS: dict[str, tuple[str, str]] = {
     "wasabi_classic": (
-        "Wahrscheinlich Wasabi-CoinJoin (Classic)",
-        "Likely Wasabi CoinJoin (Classic)",
+        "Wahrscheinlich Wasabi-CoinJoin",
+        "Likely Wasabi CoinJoin",
     ),
     "wabisabi": (
         "Wahrscheinlich WabiSabi-CoinJoin",

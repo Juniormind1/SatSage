@@ -168,7 +168,7 @@ class TestCoinJoinForms(unittest.TestCase):
         c = tx_classify.classify_tx(t, EIGENE)
         self.assertEqual(c.kind, "wasabi_classic")
         self.assertEqual(
-            c.soft_label_de, "Wahrscheinlich Wasabi-CoinJoin (Classic)"
+            c.soft_label_de, "Wahrscheinlich Wasabi-CoinJoin"
         )
 
     def test_wabisabi_unequal(self):
