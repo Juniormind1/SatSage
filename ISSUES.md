@@ -4,52 +4,39 @@ Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
 ## Kurs-Historie · Bundle veraltet / Lücken bis „heute“ — teilweise gelöst
 
-**Stand:** 2026-09-11 · **umgesetzt (MVP)** · Feinschliff offen
+**Stand:** 2026-09-11 · **umgesetzt (MVP)** · **zurückgestellt** (Feinschliff im Büro)
 
-Täglicher Job + Opt-in ``SATSAGE_PRICE_HISTORY_OPT_IN`` lädt Bitstamp/CDD bei Lücke; Overlap/Smoothing wie geplant. Bundle selbst wird nicht überschrieben (Cache darunter). Lauf **nach** GUI/„Server bereit“ (~45 s), nicht im Splash.
+Täglicher Job + Opt-in ``SATSAGE_PRICE_HISTORY_OPT_IN`` lädt Bitstamp/CDD bei Lücke; Overlap/Smoothing wie geplant. Bundle selbst wird nicht überschrieben (Cache darunter). Lauf **nach** GUI/„Server bereit“ (~45 s), nicht im Splash. Release-bis-Tip-Script in Builds/CI ist drin.
 
-**Offen/Feinschliff:** Live-Test hinter Firewall; UI-Texte EN durchklicken.
-
-**Release bis Tip:** ``scripts/refresh_btc_price_bundle.py`` in Build-Scripts + CI (Linux-webgui, StartOS); Bundle wird vor dem Packen aus Bitstamp/CDD aktualisiert.
+**Zurückgestellt bis Büro:** Live-Test hinter Firewall; UI-Texte EN durchklicken (restliche DE-Strings in `app.js` / Log).
 
 ---
 
 ## Datenquellen · Onion-Electrs zu langsam → früh BIP-158 / Abbruch
 
-**Stand:** 2026-09-10 · **offen** · nur notiert
+**Stand:** 2026-09-11 · **umgesetzt (MVP)** · Feinschliff offen
 
-Wenn Clearnet-Electrs (Firewall) ausfällt und nur **öffentliches Onion-Electrs** bleibt, kann der Scan scheußlich langsam sein. In der Auto-Priorität steht **BIP-158 schon vor** öffentlichem Onion — hängen bleibt man typisch, wenn BIP-158-Peer-Aufbau vorher scheiterte (8333 zu und keine Compact-Filter-Peers über Tor).
+Latenz-Gate beim Setup öffentlicher Onion-Electrs (Auto-Priorität): Probe-`get_history`, Default 8 s (`PUBLIC_ONION_LATENCY_SECONDS`; `0` = aus). Zu langsam → BIP-158 erneut versuchen und binden; sonst Warnung „einzige Option, wird langsam“ + interaktiv Abbruch. Kein Mid-Scan-Hop; `--rpc-only` überspringt das Gate.
 
-**Beobachtung:** BIP-158 (Clearnet-P2P, lokaler Prefer-Peer, ggf. Tor-P2P) ist für Tip/Turbo/UTXO oft schneller als Onion-`get_history`; voller Blockwalk kann trotzdem lang werden. Heute: Connect-Timeouts (Onion ~30 s) + Rotation + „Moment noch“ — **kein** Latenz-Gate, **kein** Quellenwechsel nach Setup (Mid-Scan-Hop bewusst unerwünscht).
-
-**Soll:**
-- Beim Job-Setup kurzes **Latenz-Gate** (z. B. `server.version` + eine Probe-`get_history`); bei Überschreitung Onion für die Session als unbrauchbar markieren.
-- Sind BIP-158-Peers erreichbar → Job an BIP-158 binden + klare Logzeile.
-- Sonst: ehrlich „Onion einzige Option, wird langsam“ + Abbrechen anbieten — nicht erst nach Extremverzögerung.
-- Optional Setup-Race: BIP-158-Peer-Hunt ‖ Onion-Probe (vor allem schnelleres BIP-158-*Fail*).
-- Kein Mid-Scan-Quellenwechsel (Cache/Konsistenz; siehe Testprotokoll Datenquellen-Wechsel).
+**Offen/Feinschliff:** Live hinter Firewall/Tor messen; optional Setup-Race BIP-158-Peer-Hunt ‖ Onion-Probe (schnelleres BIP-158-Fail).
 
 ---
 
 ## Marke · Sherlock-Satoshi-Kopf statt Sat-Symbol
 
-**Stand:** 2026-09-10 · **offen** · nur notiert
+**Stand:** 2026-09-11 · **umgesetzt**
 
-Kleine Marke ist heute das Sat-Symbol (`web/img/sat-logo.png` — Kopf, Login, Favicon, Packaging). Wunsch: **Kopf vom Sherlock-Satoshi** (mit Hut) aus dem Splash / vollen Logo (`web/img/logo.jpg` / Quelle `SatSage final.jpg`) als Marken-Icon.
-
-- Ableitung über `scripts/prepare_brand_assets.py` anpassen (Crop Kopf+Hut, nicht ganzes Artwork).
-- Einsatzorte: Web-Kopf, Login, Favicon, ggf. Packaging-Icon — Splash/Windows kann weiter das volle Logo zeigen.
-- Eigenes Thema — nicht an Core-/Datenquellen-Umbau koppeln.
+Marke aus Splash-Clipping `satsage-head.png`: Ausschnitt auf die **stilisierte Pfeife** (Mund→Rauch-Geometrie), Hut bewusst weitgehend weg — das liest sich als Sherlock stärker als die Hutkrone. Ableitung: `scripts/prepare_brand_assets.py` → `web/img/sat-logo.png`, Favicon, `logo-mark`, Packaging-Icon. Splash/Windows weiter volles `logo.jpg`.
 
 ---
 
 ## Core-Rollen · UTXO-Set vs. Tx/Block-Lookup (+ lokaler pruned Qt)
 
-**Stand:** 2026-09-11 · **teilweise umgesetzt** (Phase 0–1 + UI-Karten)
+**Stand:** 2026-09-11 · **umgesetzt** (Morgen-Plan inkl. Block-Fetch)
 
-**Ist:** `UTXO_RPC_*` vs. `NODE_IP`/`RPC*`; Still-Fill UTXO-Slot + `BIP158_HOST`; Accept überschreibt Lookup nicht; scantxoutset über UTXO-Slot (Vorrang vor Electrs-LAN wenn Slot gesetzt); Datenquellen-Karten „UTXO-Set-Quelle“ / „Tx/Block-Lookup“.
+**Ist:** `UTXO_RPC_*` vs. `NODE_IP`/`RPC*`; Still-Fill in `.env`; Bestand Electrs-LAN vor scantxoutset; Tx/Block: lokal bis `pruneheight`, darunter Lookup-Core; mit Electrs Core nur Fallback wenn Electrs die Tx nicht liefert; UI-Karten; Prefer-Peer `BIP158_HOST`.
 
-**Noch offen:** Block-Fetch lokal bis `pruneheight`, darunter Lookup-Core; Electrs → Core-Blöcke nur Ausnahme; Handbuch/`AGENTS.md`-Prioritätstabelle nachziehen; Prefer-Peer braucht `peerblockfilters=1` am Qt (Hinweis).
+**Feinschliff:** `AGENTS.md`/Handbuch-Prioritätstabelle; UI-Hinweis `peerblockfilters=1` am Qt.
 
 ---
 
@@ -394,87 +381,103 @@ Export â†’ A fehlt? â†’ Dialog A â†’ Cache
 
 **Wenn wir wieder drankommen:** Challenge-/Hash-Schema festlegen; Verify in SatSage; UI-Dialoge + Cache; HTML/CSV-Abschnitt; Multisig/BIP-322 spÃ¤ter.
 
-## Ideensammlung: CoinJoins rÃ¼ckverfolgen kÃ¶nnen
+## Ideensammlung: CoinJoins rückverfolgen können
 
-**Stand:** 2026-09-02 Â· **nur notiert, noch nicht umsetzen** (Hybrid-Walk fÃ¼r Wasabi skizziert)  
-**Danach:** Immutable-Cache SQLite (tx/ingress) — Entscheidungsgrundlage siehe Issue oben; nicht parallel vorziehen.
-**Ort:** Herkunftsanalyse (`trace_engine.py`, `analyze.py`, Web-Herkunft / CLI), Einstellungen, Steuerbericht; abhÃ¤ngig von â€žServer bleibt nach Browser-SchlieÃŸungâ€œ und Status-Mails
+**Stand:** 2026-09-11 · **MVP umgesetzt** (Klassifikation + Soft-Label + Own-only-Walk; ohne Einstellungs-UI A/B/C)  
+**Kurzfassung:** [`doc/issues/coinjoin-herkunft.md`](doc/issues/coinjoin-herkunft.md)  
+**Code:** `core/tx_classify.py`, Own-only in `trace_engine.iter_trace_funding_inputs` / `analyze.trace_utxo_origin`, UI Soft-Label in `web/app.js`, Lab `verify_tx_classify.py`  
+**Offen / Folge:** Whirlpool-Ketten (Remix × n kumuliert); Einstellungen A/B/C; langer WabiSabi-Remix-Job / Status-Mails  
+**Danach:** Immutable-Cache SQLite (tx/ingress) — Entscheidungsgrundlage siehe Issue oben; nicht parallel vorziehen.  
+**Ort:** Herkunftsanalyse (`trace_engine.py`, `analyze.py`, Web-Herkunft / CLI), Einstellungen, Steuerbericht; Hintergrundjob/Status-Mails für lange Walks
+
 ### Ist-Zustand
 
-Bei Sammel-Txs mit mehr als 20 EingÃ¤ngen bricht die Engine nach dem ersten eigenen Input ab (`FULL_RESOLUTION_INPUT_LIMIT`); der Rest erscheint als â€žn EingÃ¤nge gebÃ¼ndeltâ€œ. Das trifft typische Wasabi-/WabiSabi-CoinJoins.
+Bei Sammel-Txs mit mehr als 20 Eingängen bricht die Engine nach dem ersten eigenen Input ab (`FULL_RESOLUTION_INPUT_LIMIT`); der Rest erscheint als „n Eingänge gebündelt“. Das trifft typische Wasabi-/WabiSabi-CoinJoins. Regtest: zwei CJ-**ähnliche** Txs (24 in / 28 out) — kein echter Coordinator.
 
 | Muster | vs. 20er-Limit | Anschaffungsdatum |
 |--------|----------------|-------------------|
-| Wasabi / WabiSabi (oft â‰«20 Inputs) | bricht ab â†’ gebÃ¼ndelt | unvollstÃ¤ndig / Untergrenze |
-| Whirlpool (typisch 5Ã—5) | unter Limit, schon voll aufgelÃ¶st | Peer-Inputs dÃ¼rfen trotzdem **kein** Datum liefern (nur eigene Zweige; Fremde = Rauschen) |
-| JoinMarket (oft kleinâ€“mittel) | meist unter Limit | wie CoinJoin: nur eigene Zweige |
-| Payjoin (typisch 2â€“wenige Inputs) | **bricht nicht** am Limit | kein Mix â€” fremder Input = Gegenstelle, nicht Peer-Rauschen |
+| Wasabi / WabiSabi (oft ≫20 Inputs) | bricht ab → gebündelt | unvollständig / Untergrenze |
+| Whirlpool (typisch 5×5) | unter Limit, schon voll aufgelöst | Peer-Inputs dürfen trotzdem **kein** Datum liefern (nur eigene Zweige; Fremde = Rauschen) |
+| JoinMarket (oft klein–mittel) | meist unter Limit | wie CoinJoin: nur eigene Zweige |
+| PayJoin (typisch 2–wenige Inputs) | **bricht nicht** am Limit | kein Mix — fremder Input = Gegenstelle, nicht Peer-Rauschen |
 
-Verwandt mit â€žGrÃ¼ndlichere Herkunft in der Web-GUIâ€œ.
+Verwandt mit „Gründlichere Herkunft in der Web-GUI“.
+
+### Klassifikation · Eigentum zuerst (festgeschrieben)
+
+Vor Formheuristik: **alle** `vin`/`vout` gegen konfigurierte XPUBs matchen. Sonst kein Exchange-/PayJoin-Label. Soft: „Wahrscheinlich …“.
+
+| Label | Eigene Inputs | Eigene Outputs | Lesart |
+|--------|---------------|----------------|--------|
+| **Fan-Out (eigen)** | **alle** Ins eigen | 0 oder nur Change | du zahlst aus |
+| **PayJoin** | gemischt; übersichtlich viele Ins, **wenige** Fremd (typisch 1, selten 2) | Sender oft Change; Empfänger oft 1 Netto-Out | kollaborative Zahlung, **kein** Mix |
+| **Exchange-Batch** | **0** eigen | genau 1 (selten mehr) | nur Empfang; **kein** CJ (Risiko gering, wenn Input-Eigentum vollständig) |
+| **CoinJoin** (Wasabi / Whirlpool / JM) | ≥1 eigen | ≥1 eigen | Mix; Fremde = Rauschen |
+
+**Detektor-Reihenfolge:** (1) Eigentum klären → (2) 0 eigene Ins + eigene Outs → Exchange-Batch → (3) alle Ins eigen → Fan-Out → (4) wenige Ins/wenige Fremd → PayJoin → (5) Whirlpool → Wasabi → JoinMarket → unklar.
+
+**Abgrenzung:** Fan-Out = 0 Fremd-Ins; PayJoin = ≥1 Fremd-In bei kleinem Ins-Set (Richtwert ≤5–8 Ins, ≤2 Fremd); Exchange ohne eigenen Input kein CJ. PayJoin/Fan-Out/Exchange **nicht** in die CJ-Stop-/Auflös-Optionen.
 
 ### Umsetzungsstrategie (Reihenfolge)
 
 **1. Einstellung: Behandlung von CoinJoins**
 
-Benutzer regelt in den Einstellungen (Web + `.env`), was bei erkannten CoinJoins passiert. Cache vermerkt Typ (`samourai` / `wasabi`, spÃ¤ter ggf. `joinmarket`):
+Benutzer regelt in den Einstellungen (Web + `.env`), was bei erkannten CoinJoins passiert. Cache vermerkt Typ (`whirlpool` / `wasabi` / `joinmarket`; Exchange/PayJoin/Fan-Out separat):
 
 | Option | Verhalten |
 |--------|-----------|
-| A â€” Scan stoppt am CoinJoin | Herkunft endet am Mix; Cache: â€žCoinJoin erkannt (Samourai\|Wasabi\|â€¦)â€œ; kein Weiterlaufen durch den Mix |
-| B â€” Nur Wasabi stoppt | Whirlpool/Samourai wird aufgelÃ¶st; Wasabi bleibt Markierung + Abbruch |
-| C â€” Beide auflÃ¶sen | Wasabi und Samourai werden durchverfolgt (langsamste Variante) |
+| A — Scan stoppt am CoinJoin | Herkunft endet am Mix; Cache: „CoinJoin erkannt (…)“; kein Weiterlaufen durch den Mix |
+| B — Nur Wasabi stoppt | Whirlpool wird aufgelöst; Wasabi bleibt Markierung + Abbruch |
+| C — Beide auflösen | Wasabi und Whirlpool werden durchverfolgt (langsamste Variante) |
 
-Erkennung vor dem teuren Walk; Abgrenzung zur normalen Sammel-/Konsolidierungs-Tx (dort bleiben unaufgelÃ¶ste eigene Inputs eine echte Untergrenze).
+Erkennung vor dem teuren Walk; Abgrenzung zur normalen Sammel-/Konsolidierungs-Tx (dort bleiben unaufgelöste eigene Inputs eine echte Untergrenze).
 
-**Payjoin gehÃ¶rt nicht in diese Einstellung** (siehe unten).
-
-**2. Whirlpool-Scan (Samourai / Nachfolger z.â€¯B. Ashigaru)**
+**2. Whirlpool-Scan (Samourai / Nachfolger z. B. Ashigaru)**
 
 - Heuristik: starres Muster (typisch 5 In / 5 Out, gleiche Pool-Denomination; Tx0 separat).  
-- n Remix-Runden erkennen und nach MÃ¶glichkeit **kumuliert** darstellen (eine Kette â€žWhirlpool Ã— nâ€œ, nicht n EinzelbÃ¤ume in der UI).  
-- Im **Steuerbericht** die Kette auflÃ¶sen: Anschaffungsdatum Ã¼ber eigene Zweige durchreichen; Peer-Inputs als Rauschen, nicht als externer Zufluss.  
-- Eigene Inputs bevorzugt Ã¼ber Verlauf/`spent_txid`-Index finden, nicht alle Prevouts laden.
+- n Remix-Runden erkennen und nach Möglichkeit **kumuliert** darstellen (eine Kette „Whirlpool × n“, nicht n Einzelbäume in der UI).  
+- Im **Steuerbericht** die Kette auflösen: Anschaffungsdatum über eigene Zweige durchreichen; Peer-Inputs als Rauschen, nicht als externer Zufluss.  
+- Eigene Inputs bevorzugt über Verlauf/`spent_txid`-Index finden, nicht alle Prevouts laden.
 
 **3. Wasabi-/WabiSabi-Scan**
 
-- GroÃŸe n:m-Txs; nur eigene Inputs/Outputs weiterverfolgen, Rest verwerfen (kein Blind-AuflÃ¶sen aller `vin`s).  
-- Erfordert Geduld (viele Abrufe Ã¼ber Remix-Historie). Praktisch erst sinnvoll mit Hintergrundbetrieb: Issue â€žServer bleibt nach Browser-SchlieÃŸungâ€œ + Status-Mails (neutrale Fertigmeldung).  
-- Einstellung C (oder B nur fÃ¼r den Wasabi-Zweig) steuert, ob Ã¼berhaupt durchgelaufen wird.
+- Große n:m-Txs; nur eigene Inputs/Outputs weiterverfolgen, Rest verwerfen (kein Blind-Auflösen aller `vin`s).  
+- Erfordert Geduld (viele Abrufe über Remix-Historie). Praktisch erst sinnvoll mit Hintergrundbetrieb + Status-Mails.  
+- Einstellung C (oder B nur für den Wasabi-Zweig) steuert, ob überhaupt durchgelaufen wird.
 
-#### LÃ¶sungsskizze: Hybrid-Walk (bei Implementation hier ansetzen)
+#### Lösungsskizze: Hybrid-Walk (bei Implementation hier ansetzen)
 
-RÃ¼ckwÃ¤rts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein** externer Zufluss; Anschaffungsdatum nur Ã¼ber **eigene** Vorfahren. Fremde Inputs = Rauschen, nie auflÃ¶sen.
+Rückwärts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein** externer Zufluss; Anschaffungsdatum nur über **eigene** Vorfahren. Fremde Inputs = Rauschen, nie auflösen.
 
-**Auswahlregel = Eigentum, nicht Betrag.** Betragsgleichheit Outputâ†”Inputs ist hÃ¶chstens Priorisierung (WabiSabi zerlegt/rekombiniert; Fees; mehrere eigene Ins/Outs). Weiterverfolgt werden **alle** eigenen Inputs von `C`.
+**Auswahlregel = Eigentum, nicht Betrag.** Betragsgleichheit Output↔Inputs ist höchstens Priorisierung (WabiSabi zerlegt/rekombiniert; Fees; mehrere eigene Ins/Outs). Weiterverfolgt werden **alle** eigenen Inputs von `C`.
 
 | Stufe | Wann | Vorgehen | Kosten |
 |-------|------|----------|--------|
-| **1 Â· Index** | Verlauf/`spent_txid` brauchbar | `eigene_inputs(C) = { Outpoints aus Verlauf \| spent_txid == C }` â€” kein Prevout-Resolve | billig (Cache) |
-| **2 Â· LÃ¼cke** | Verlauf `incomplete`, fehlende `spent_txid`, unsicherer `max_index`/Gap | Ein `get_tx(C)` (alle `vin`s, billig). Dann Outpointâˆ©bekannte eigenen Outpoints und/oder Adressraumâˆ©Vin-Adressen (Receive+Change, alle Script-Typen, Superset bis weit Ã¼ber hÃ¶chstem Index, groÃŸes Gap). Prevouts **nur** fÃ¼r Treffer bzw. fehlende Adressen nachladen â€” nie blind alle Fremden | teuer/zeitaufwÃ¤ndig, **korrekt** wenn Wallets/Deskriptoren stimmen und der Adressraum reicht |
+| **1 · Index** | Verlauf/`spent_txid` brauchbar | eigene Outpoints mit `spent_txid == C` — kein Prevout-Resolve | billig (Cache) |
+| **2 · Lücke** | Verlauf `incomplete`, fehlende `spent_txid`, unsicherer `max_index`/Gap | Ein `get_tx(C)` (alle `vin`s, billig). Dann Outpoint∩bekannte eigenen Outpoints und/oder Adressraum∩Vin-Adressen. Prevouts **nur** für Treffer — nie blind alle Fremden | teuer/zeitaufwändig, **korrekt** wenn Wallets/Deskriptoren stimmen und der Adressraum reicht |
 
-**Deckung:** Stufe 1 und â€žAdressraum âˆ© Vinsâ€œ sind dieselbe Aussage, sobald Cache und Adressraum vollstÃ¤ndig sind. LÃ¼cken werden erkannt â†’ bewusst Stufe 2, nicht raten.
+**Deckung:** Stufe 1 und „Adressraum ∩ Vins“ sind dieselbe Aussage, sobald Cache und Adressraum vollständig sind. Lücken werden erkannt → bewusst Stufe 2, nicht raten.
 
-**Nicht verwechseln:** `FULL_RESOLUTION_INPUT_LIMIT` / â€žgebÃ¼ndeltâ€œ bleibt fÃ¼r **normale** Sammel-/Konsolidierungs-Txs (ohne CJ-Erkennung); dort sind unaufgelÃ¶ste eigene Inputs echte Untergrenze. Beim CJ-Hybrid entfÃ¤llt Blind-Resolve der Fremden.
+**Nicht verwechseln:** `FULL_RESOLUTION_INPUT_LIMIT` / „gebündelt“ bleibt für **normale** Sammel-/Konsolidierungs-Txs (ohne CJ-Erkennung); dort sind unaufgelöste eigene Inputs echte Untergrenze. Beim CJ-Hybrid entfällt Blind-Resolve der Fremden.
 
-**Voraussetzungen fÃ¼r â€žkorrektâ€œ:** alle relevanten XPUBs/Deskriptoren konfiguriert; Scan/Gap deckt Mix-Adressen; bei Stufe 2 Eigentums-Schnittmenge statt Betragsfilter. Remix-Ketten bleiben lang â†’ Hintergrundjob/Mails bleiben Voraussetzung; der Hybrid macht den **einzelnen Hop** billig bzw. die Teuerkeit an erkannte LÃ¼cken gebunden.
+**Voraussetzungen für „korrekt“:** alle relevanten XPUBs/Deskriptoren konfiguriert; Scan/Gap deckt Mix-Adressen; bei Stufe 2 Eigentums-Schnittmenge statt Betragsfilter. Remix-Ketten bleiben lang → Hintergrundjob/Mails bleiben Voraussetzung; der Hybrid macht den **einzelnen Hop** billig bzw. die Teuerkeit an erkannte Lücken gebunden.
 
-**4. JoinMarket (spÃ¤ter, echte CoinJoin-Variante)**
+**4. JoinMarket (später, echte CoinJoin-Variante)**
 
-- P2P Maker/Taker, **kein** zentraler Coordinator; Taker wÃ¤hlt den gleichen Output-Betrag.  
-- On-chain: N+1 **gleiche** CJ-Outputs + meist je Teilnehmer ein Change (auÃŸer Sweep). Kein festes 5Ã—5, keine Pool-Liste â†’ Erkennung **locker**, False Positives mÃ¶glich (normale Tx mit gleichen BetrÃ¤gen). Detektoren prÃ¼fen oft erst Whirlpool/Wasabi, JoinMarket als Fallback.  
-- Mit XPUB: eigene Inputs + typisch ein CJ-Out + ggf. eigenes Change; Fremde = Rauschen (gleiche Semantik wie Whirlpool). Change historisch leichter an eigene Inputs koppelbar als der gleiche CJ-Out.  
-- Tx-GrÃ¶ÃŸe oft unter dem 20er-Limit â†’ teurer Wasabi-Walk selten nÃ¶tig.  
-- In die CoinJoin-Einstellung aufnehmen (stoppen vs. nur eigene Zweige), PrioritÃ¤t hinter Whirlpool/Wasabi; eigene Heuristik, Cache-Typ `joinmarket`.
+- P2P Maker/Taker, **kein** zentraler Coordinator; Taker wählt den gleichen Output-Betrag.  
+- On-chain: N+1 **gleiche** CJ-Outputs + meist je Teilnehmer ein Change (außer Sweep). Kein festes 5×5 → Erkennung **locker**, False Positives möglich. Detektoren: erst Whirlpool/Wasabi, JoinMarket als Fallback.  
+- Mit XPUB: eigene Inputs + typisch ein CJ-Out + ggf. eigenes Change; Fremde = Rauschen.  
+- In die CoinJoin-Einstellung aufnehmen; Cache-Typ `joinmarket`.
 
-**5. Payjoin (BIP78 / BIP77) â€” bewusst ausklammern**
+**5. PayJoin / Fan-Out / Exchange-Batch — eigene Labels, kein CJ**
 
-- **Kein** CoinJoin / keine AnonymitÃ¤tsmenge: kollaborative **Zahlung**, Sender und EmpfÃ¤nger legen Inputs in eine Tx (bricht Common-Input-Ownership fÃ¼r Kettenanalyse).  
-- On-chain absichtlich wie normale Multi-Input-Zahlung â†’ **keine zuverlÃ¤ssige** Erkennungsheuristik; nicht in CJ-Stop-/AuflÃ¶s-Optionen stecken (Fehlalarme).  
-- Typisch 2â€“wenige Inputs â†’ **trifft die 20er-Grenze nicht**; Engine lÃ¶st schon vollstÃ¤ndig auf.  
-- Mit XPUB: fremder Input = Gegenstelle. Sender: Abgang (+ ggf. Change). EmpfÃ¤nger: Nettozufluss bei ggf. mitgegebenem eigenem UTXO â€” eher Empfang/Recycling als Remix.  
-- BerÃ¼hrt eher bestehende Logik â€žfremde Inputs / mehr zurÃ¼ck als eingesetztâ€œ (`tax.py`), nicht â€žScan am Mix abbrechenâ€œ oder â€žn Runden kumulierenâ€œ. SpÃ¤testens weicher Hinweis, keine automatische CJ-Klassifikation.
+- Siehe Tabelle „Klassifikation · Eigentum zuerst“.  
+- PayJoin (BIP78/BIP77): weicher Hinweis möglich; **nicht** in CJ-Stop-/Auflös-Optionen.  
+- Exchange-Batch erst nach vollständigem Input-Eigentum (0 eigene Ins).  
+- Fan-Out (eigen): alle Ins eigen.
 
-**Wenn wir wieder drankommen:** zuerst Einstellungs-Enum + Cache-Felder + Erkennung Whirlpool; dann kumulierter Whirlpool-Pfad inkl. SteuerauflÃ¶sung; danach Wasabi Ã¼ber **Hybrid-Walk** (Stufe Index â†’ LÃ¼cke) an Hintergrund-Jobs/Mails koppeln; JoinMarket als Phase 4 (Heuristik + gleiche Semantik); Payjoin nicht als CoinJoin fÃ¼hren.
+**Erledigt (MVP):** Detektor + Soft-Labels + Own-Input-Walk + Lab-Fixtures.  
+**Wenn wir wieder drankommen:** Einstellungs-Enum A/B/C → Whirlpool-Kette (Remix × n) → Handbuch-Abschnitt Trace-Verhalten.
 
 ## Erledigt: Logo einbinden
 

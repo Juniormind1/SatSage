@@ -162,7 +162,10 @@ function privacyLabel(stufe) {
 }
 
 function knotenNotiz(knoten) {
-  if (!knoten || !knoten.note) return "";
+  if (!knoten) return "";
+  const klasse = softTxClassLabel(knoten);
+  if (klasse) return klasse;
+  if (!knoten.note) return "";
   if (knoten.type === "external") return t("trace.noteExternalNotFollowed");
   if (knoten.type === "external_unresolved") {
     return t("trace.noteUnresolvedInputs", { count: knoten.input_count || 0 });
@@ -172,6 +175,17 @@ function knotenNotiz(knoten) {
     return t("trace.errorNoOriginDetermined");
   }
   return knoten.note;
+}
+
+/** Soft-Label der Tx-Klassifikation (CoinJoin-Art, PayJoin, …). */
+function softTxClassLabel(knotenOderErgebnis) {
+  if (!knotenOderErgebnis) return "";
+  const kind = knotenOderErgebnis.tx_class || "";
+  if (!kind || kind === "unknown") return "";
+  const key = `trace.txClass.${kind}`;
+  const uebersetzt = t(key);
+  if (uebersetzt !== key) return uebersetzt;
+  return knotenOderErgebnis.tx_class_label || knotenOderErgebnis.note || "";
 }
 
 function quelleFeldLabel(feld, quelleKey) {
@@ -3591,8 +3605,21 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
     zweig.dataset.geladen = "";
     return;
   }
+
+  const klasseHinweis = softTxClassLabel(ergebnis.root || ergebnis);
+  if (klasseHinweis) {
+    const band = document.createElement("div");
+    band.className = "zweig-status tx-class-hinweis";
+    band.textContent = klasseHinweis;
+    zweig.append(band);
+  }
+
   if (ergebnis.children.length === 0) {
-    zweig.append(hinweisZeile(t("trace.noInflows")));
+    zweig.append(hinweisZeile(
+      klasseHinweis
+        ? t("trace.coinjoinOwnOnlyEmpty")
+        : t("trace.noInflows"),
+    ));
     return;
   }
 
@@ -8292,8 +8319,11 @@ async function ladeSpotkurs({ laut = false } = {}) {
     Zustand.kurs = await api("/price?currency=EUR", { timeoutMs: 8000 });
     const warn = (Zustand.kurs && Zustand.kurs.warning) || "";
     if (warn) {
-      // Historie-Fallback: eine kurze Zeile statt Pipe aus Netzfehlern.
-      logZeile(`Kurs: ${warn}.`, true);
+      // Nur einmal pro Session — und nur wenn wirklich ein älterer Tag.
+      if (!Zustand.kursWarnGeloggt) {
+        Zustand.kursWarnGeloggt = true;
+        logZeile(`Kurs: ${warn}.`, true);
+      }
     } else if (laut) {
       const label = formatKursLabel(Zustand.kurs);
       const quelle = Zustand.kurs.source || "?";
@@ -8301,8 +8331,9 @@ async function ladeSpotkurs({ laut = false } = {}) {
     }
   } catch (fehler) {
     const msg = String(fehler.message || fehler || "");
-    // Keine mehrzeilige Opt-in-/Pipe-Forensik in der Kopfzeile.
-    if (laut || /nicht beschaffbar/i.test(msg)) {
+    // Keine mehrzeilige Opt-in-/Pipe-Forensik; höchstens einmal.
+    if (!Zustand.kursWarnGeloggt && (laut || /nicht beschaffbar/i.test(msg))) {
+      Zustand.kursWarnGeloggt = true;
       logZeile(
         msg.length > 120 || msg.includes(" | ")
           ? "Kurs: aktueller Kurs nicht beschaffbar."

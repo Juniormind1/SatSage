@@ -257,7 +257,8 @@ def run(rpc: Rpc) -> None:
     records.append(raw_spend(rpc, "Beta-aged-fanout", old, fanout, [beta]))
     mine(rpc, 2, faucet)
 
-    # Four wallets x six inputs and six equal outputs plus one change each.
+    # Wasabi-Classic-ähnlich: 4 Wallets × 6 Ins; je 6 gleiche Mix-Outs + 1 Change.
+    # (früher CoinJoin-like-round-1 — Alias bleibt im Report-Feld alias)
     cj1_inputs: list[dict[str, Any]] = []
     cj1_signers: list[str] = []
     cj1_outputs: list[tuple[str, float]] = []
@@ -267,7 +268,10 @@ def run(rpc: Rpc) -> None:
         cj1_signers += [wallet] * 6
         cj1_outputs += [(addresses[label][20 + i], .045) for i in range(6)]
         cj1_outputs.append((addresses[label][32], .029))
-    cj1 = raw_spend(rpc, "CoinJoin-like-round-1", cj1_inputs, cj1_outputs, cj1_signers)
+    cj1 = raw_spend(rpc, "Wasabi-classic-like", cj1_inputs, cj1_outputs, cj1_signers)
+    cj1["alias"] = "CoinJoin-like-round-1"
+    cj1["expected_kind"] = "wasabi_classic"
+    cj1["viewer_wallet"] = "lab-alpha"
     records.append(cj1)
     mine(rpc, 3, faucet)
 
@@ -278,20 +282,163 @@ def run(rpc: Rpc) -> None:
         equal_addresses = set(addresses[label][20:26])
         rows = [u for u in unspent(rpc, wallet) if u["txid"] == cj1["txid"] and u.get("address") in equal_addresses]
         if len(rows) != 6:
-            raise RuntimeError(f"CoinJoin-like-round-1: {label} outputs fehlen")
+            raise RuntimeError(f"Wasabi-classic-like: {label} outputs fehlen")
         cj2_inputs += rows
         cj2_signers += [wallet] * 6
         cj2_outputs += [(addresses[label][28 + i], .039) for i in range(6)]
         cj2_outputs.append((addresses[label][39], .034))
-    records.append(raw_spend(rpc, "CoinJoin-like-round-2", cj2_inputs, cj2_outputs, cj2_signers))
+    cj2 = raw_spend(rpc, "Wasabi-classic-remix", cj2_inputs, cj2_outputs, cj2_signers)
+    cj2["alias"] = "CoinJoin-like-round-2"
+    cj2["expected_kind"] = "wasabi_classic"
+    cj2["viewer_wallet"] = "lab-alpha"
+    records.append(cj2)
     mine(rpc, 3, faucet)
+
+    # Extra-Faucet für weitere Klassifikations-Fixtures (Fremd-Peers + Empfang).
+    for index in range(30, 50):
+        payouts = {addresses[label][index]: 0.05 for label in LABELS}
+        rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
+        mine(rpc, 1, faucet)
+
+    # Whirlpool-like 5×5: 1× Alpha + 4× Faucet-fremd, 5 gleiche Outs.
+    wp_own = select(rpc, alpha, 1)
+    wp_foreign = select(rpc, "lab-faucet", 4)
+    wp_ins = wp_own + wp_foreign
+    wp_denom = round(min(float(u["amount"]) for u in wp_ins) - 0.001, 8)
+    if wp_denom <= 0:
+        raise RuntimeError("Whirlpool-like: Inputs zu klein")
+    wp_outs = [(addresses["alpha"][50], wp_denom)] + [
+        (new_address(rpc, "lab-faucet"), wp_denom) for _ in range(4)
+    ]
+    wp = raw_spend(
+        rpc, "Whirlpool-like-5x5", wp_ins, wp_outs, [alpha] + ["lab-faucet"] * 4
+    )
+    wp["expected_kind"] = "whirlpool"
+    wp["viewer_wallet"] = "lab-alpha"
+    records.append(wp)
+    mine(rpc, 2, faucet)
+
+    # JoinMarket-like: 1 eigen + 3 fremd; 4 gleiche CJ-Outs + 3 Changes.
+    jm_own = select(rpc, beta, 1)
+    jm_foreign = select(rpc, "lab-faucet", 3)
+    jm_ins = jm_own + jm_foreign
+    jm_in_sum = sum(float(u["amount"]) for u in jm_ins)
+    jm_equal = round(jm_in_sum * 0.18, 8)  # 4× ≈ 72 %
+    jm_change = round((jm_in_sum - 4 * jm_equal - 0.001) / 3, 8)
+    if jm_equal <= 0 or jm_change <= 0:
+        raise RuntimeError("JoinMarket-like: Beträge ungültig")
+    jm_outs = (
+        [(addresses["beta"][51], jm_equal)]
+        + [(new_address(rpc, "lab-faucet"), jm_equal) for _ in range(3)]
+        + [(addresses["beta"][52], jm_change)]
+        + [(new_address(rpc, "lab-faucet"), jm_change) for _ in range(2)]
+    )
+    jm = raw_spend(
+        rpc, "JoinMarket-like", jm_ins, jm_outs, [beta] + ["lab-faucet"] * 3
+    )
+    jm["expected_kind"] = "joinmarket"
+    jm["viewer_wallet"] = "lab-beta"
+    records.append(jm)
+    mine(rpc, 2, faucet)
+
+    # WabiSabi-like: große n:m, ungleiche Out-Beträge (Zerlegung).
+    ws_ins: list[dict[str, Any]] = []
+    ws_signers: list[str] = []
+    for wallet in WALLETS:
+        chosen = select(rpc, wallet, 4)
+        ws_ins += chosen
+        ws_signers += [wallet] * 4
+    ws_in_sum = sum(float(u["amount"]) for u in ws_ins)
+    # 16 ungleiche Anteile (Summe 1.0), skaliert auf Input abzgl. Fee.
+    ws_weights = [
+        31, 22, 17, 11, 9, 7, 5, 4,
+        28, 19, 14, 8, 6, 3, 2, 1,
+    ]
+    wsum = float(sum(ws_weights))
+    budget = ws_in_sum - 0.002
+    ws_amounts = [round(budget * (w / wsum), 8) for w in ws_weights]
+    # Rundungsrest in letztem Out auffangen.
+    ws_amounts[-1] = round(budget - sum(ws_amounts[:-1]), 8)
+    ws_outs: list[tuple[str, float]] = [
+        (addresses["alpha"][53], ws_amounts[0]),
+        (addresses["beta"][53], ws_amounts[1]),
+        (addresses["change"][53], ws_amounts[2]),
+        (addresses["gamma"][53], ws_amounts[3]),
+    ]
+    for amt in ws_amounts[4:]:
+        ws_outs.append((new_address(rpc, "lab-faucet"), amt))
+    ws = raw_spend(rpc, "Wabisabi-like", ws_ins, ws_outs, ws_signers)
+    ws["expected_kind"] = "wabisabi"
+    ws["viewer_wallet"] = "lab-alpha"
+    records.append(ws)
+    mine(rpc, 2, faucet)
+
+    # PayJoin-like: 1 eigen (Gamma) + 1 Faucet; 2 Outs.
+    pj_ins = select(rpc, gamma, 1) + select(rpc, "lab-faucet", 1)
+    pj_sum = sum(float(u["amount"]) for u in pj_ins)
+    pj_outs = [
+        (addresses["gamma"][54], round(pj_sum * 0.55, 8)),
+        (new_address(rpc, "lab-faucet"), round(pj_sum * 0.40, 8)),
+    ]
+    pj = raw_spend(rpc, "PayJoin-like", pj_ins, pj_outs, [gamma, "lab-faucet"])
+    pj["expected_kind"] = "payjoin"
+    pj["viewer_wallet"] = "lab-gamma"
+    records.append(pj)
+    mine(rpc, 2, faucet)
+
+    # Exchange-batch-like: Faucet-Fan-out, genau 1 Out an Alpha (0 eigene Ins).
+    ex_ins = select(rpc, "lab-faucet", 1)
+    ex_sum = float(ex_ins[0]["amount"])
+    ex_main = round(ex_sum * 0.40, 8)
+    ex_rest = round((ex_sum - ex_main - 0.001) / 5, 8)
+    ex_outs = [(addresses["alpha"][55], ex_main)] + [
+        (new_address(rpc, "lab-faucet"), ex_rest) for _ in range(5)
+    ]
+    ex = raw_spend(rpc, "Exchange-batch-like", ex_ins, ex_outs, ["lab-faucet"])
+    ex["expected_kind"] = "exchange_batch"
+    ex["viewer_wallet"] = "lab-alpha"
+    records.append(ex)
+    mine(rpc, 2, faucet)
+
+    # Fan-out-own: Alias auf bestehendes Beta-aged-fanout
+    for rec in records:
+        if rec.get("name") == "Beta-aged-fanout":
+            rec["expected_kind"] = "fan_out_own"
+            rec["viewer_wallet"] = "lab-beta"
+            rec["alias"] = "Fan-out-own"
+            break
 
     write_env(rpc)
     report = {"tip_height": int(rpc.call("getblockcount")), "records": records}
     (HERE / ".data" / "scenario-report.json").write_text(json.dumps(report, indent=2) + "\n")
+
+    # Expectations für Klassifikation / Soft-Label-Abnahme
+    txclass = {
+        "tip_height": report["tip_height"],
+        "cases": [
+            {
+                "name": r["name"],
+                "txid": r["txid"],
+                "expected_kind": r["expected_kind"],
+                "viewer_wallet": r.get("viewer_wallet"),
+                "alias": r.get("alias"),
+            }
+            for r in records
+            if r.get("expected_kind")
+        ],
+    }
+    (HERE / ".data" / "scenario-report-txclass.json").write_text(
+        json.dumps(txclass, indent=2) + "\n"
+    )
+
     for record in records:
         print(json.dumps(record, sort_keys=True))
-    print(json.dumps({"env": str(ENV_PATH), "tip_height": report["tip_height"], "scenario_count": len(records)}))
+    print(json.dumps({
+        "env": str(ENV_PATH),
+        "tip_height": report["tip_height"],
+        "scenario_count": len(records),
+        "txclass_cases": len(txclass["cases"]),
+    }))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Erzeugt SatSage-Regtest-Wallets und Szenarien.")
