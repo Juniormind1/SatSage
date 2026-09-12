@@ -487,6 +487,8 @@ class AppState:
         self._lock = threading.Lock()
         self._wallet_ctx = None
         self._entries: list[WalletEntry] = []
+        # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
+        self.empfang_cache: dict[str, dict] = {}
         self.reload()
 
     def set_managed_by(self, value: str | None) -> None:
@@ -553,6 +555,8 @@ class AppState:
             main.set_chain_network(env.values().get("NETWORK"))
             self._entries = read_wallets(env)
             self._wallet_ctx = self._build_context(self._entries)
+            # Empfangs-QR neu ableiten (Indizes/Adressen können sich geändert haben).
+            self.empfang_cache.clear()
 
     @staticmethod
     def _build_context(entries: list[WalletEntry]):
@@ -1502,6 +1506,7 @@ def api_config(state: AppState, query: dict) -> dict:
         "status_mail": status_mail_mod.als_dict(werte),
         "ui_lang": _ui_lang_aus_env(werte),
         "ui_theme": _ui_theme_aus_env(werte),
+        "lernhinweise_plebs": _lernhinweise_plebs_aus_env(werte),
         "managed_by": state.managed_by,
         "managed_hint": _managed_hint(state, werte),
         "electrum_indexer": (
@@ -1556,6 +1561,25 @@ def api_save_ui_theme(state: AppState, payload: dict) -> dict:
     return {"saved": True, "ui_theme": theme}
 
 
+def _lernhinweise_plebs_aus_env(werte: dict) -> bool:
+    """``LERNHINWEISE_PLEBS=1`` — Experiment Neugier-Tooltips/Lern-QR; Default aus."""
+    roh = str((werte or {}).get("LERNHINWEISE_PLEBS") or "").strip().lower()
+    return roh in ("1", "true", "yes", "ja", "on")
+
+
+def api_save_lernhinweise_plebs(state: AppState, payload: dict) -> dict:
+    """Speichert das Experiment „Lernhinweise für Plebs“ in der .env."""
+    roh = payload.get("lernhinweise_plebs", payload.get("enabled", False))
+    an = roh in (True, 1, "1", "true", "yes", "ja", "on")
+    env = state.env()
+    env.apply({"LERNHINWEISE_PLEBS": "1" if an else "0"})
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    return {"saved": True, "lernhinweise_plebs": an}
+
+
 def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
     _wallets_config_gesperrt(state)
     """
@@ -1602,10 +1626,10 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
         return {
             "gefunden": [],
             "fehler": (
-                "Kein verwendbarer Deskriptor gefunden. Aggregierte "
+                "Kein verwendbarer Deskriptor gefunden. Bitkey: beide Zeilen "
+                "„External:“ und „Internal:“ einfügen. Aggregierte "
                 "Taproot-Schlüssel (musig) werden nicht unterstützt; sonst "
-                "deutet es auf einen Tippfehler oder eine falsche Prüfsumme "
-                "hin."
+                "Tippfehler oder falsche Prüfsumme."
             ),
         }
 
@@ -1613,9 +1637,10 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
     vorhandene_ids = {wallets_mod.eintrag_id(e) for e in state.entries}
     for descriptor in gefunden:
         eintrag = WalletEntry(descriptor=descriptor)
-        adressen = sorted(
-            main.derive_descriptor_addresses(descriptor, max_addresses=2)
-        )
+        # Empfang #0 — nie Change, nie lexikografische Sortierung (Bitkey-Check).
+        erste = config_mod.erste_empfangsadresse(eintrag)
+        if not erste:
+            erste = main.derive_address_at_index(descriptor, 0, 0) or ""
         beschreibungen.append({
             "descriptor": descriptor,
             "is_multisig": eintrag.is_multisig,
@@ -1630,7 +1655,7 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
                 if eintrag.is_multisig
                 else ([eintrag.masked_xpub()] if eintrag.masked_xpub() else [])
             ),
-            "erste_adresse": adressen[0] if adressen else "",
+            "erste_adresse": erste,
             "bereits_vorhanden": eintrag.wallet_id() in vorhandene_ids,
         })
     return {"gefunden": beschreibungen, "fehler": ""}
@@ -1667,6 +1692,7 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     max_addresses=int(
                         eintrag.get("max_addresses", main.DEFAULT_MAX_ADDRESSES)
                     ),
+                    read_only=bool(eintrag.get("read_only", False)),
                 ))
             except (TypeError, ValueError) as exc:
                 raise ApiError(400, f"Wallet {index}: {exc}") from exc
@@ -1697,6 +1723,9 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     max_addresses=int(
                         eintrag.get("max_addresses", bekannt.max_addresses)
                     ),
+                    read_only=bool(
+                        eintrag.get("read_only", bekannt.read_only)
+                    ),
                 ))
                 continue
 
@@ -1711,6 +1740,9 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     max_addresses=int(
                         eintrag.get("max_addresses", bekannt.max_addresses)
                     ),
+                    read_only=bool(
+                        eintrag.get("read_only", bekannt.read_only)
+                    ),
                 ))
                 continue
 
@@ -1719,6 +1751,7 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                 name=str(eintrag.get("name", "")),
                 script_type=str(eintrag.get("script_type", "auto")),
                 max_addresses=int(eintrag.get("max_addresses", main.DEFAULT_MAX_ADDRESSES)),
+                read_only=bool(eintrag.get("read_only", False)),
             ))
         except (TypeError, ValueError) as exc:
             raise ApiError(400, f"Wallet {index}: {exc}") from exc
@@ -2724,6 +2757,220 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
         **anhang,
     })
     return ergebnis
+
+
+def _empfang_max_index(entry: WalletEntry) -> int:
+    """Obergrenze Empfangs-Indizes: Scan-Tiefe/2, sonst Trace-Limit."""
+    try:
+        tief = int(entry.max_addresses or 0)
+    except (TypeError, ValueError):
+        tief = 0
+    if tief >= 2:
+        return max(1, tief // 2)
+    return main.MAX_TRACE_ADDRESS_SEARCH
+
+
+def _cache_bekannt_adressen(
+    state: AppState,
+    entry: WalletEntry,
+) -> tuple[set[str], int]:
+    """Adressen aus UTXO-/Verlaufs-Cache plus ``scan_end_index``."""
+    xpub = entry.analyse_schluessel
+    bekannt: set[str] = set()
+    scan_end = 0
+    eintrag = main.load_xpub_cache_entry(xpub, state.cache_dir)
+    if eintrag:
+        for u in eintrag.get("utxos") or []:
+            addr = u.get("address")
+            if addr:
+                bekannt.add(str(addr))
+        roh = eintrag.get("raw") or {}
+        for addr in roh.get("scanned_addresses") or []:
+            if addr:
+                bekannt.add(str(addr))
+        try:
+            scan_end = int(eintrag.get("scan_end_index") or 0)
+        except (TypeError, ValueError):
+            scan_end = 0
+    for e in main.load_xpub_verlauf_cache(xpub, state.cache_dir) or []:
+        addr = e.get("address")
+        if addr:
+            bekannt.add(str(addr))
+    return bekannt, scan_end
+
+
+def _next_receive_index_from_cache(
+    state: AppState,
+    entry: WalletEntry,
+    *,
+    max_index: int,
+) -> int:
+    """
+    Nächste Empfangs-Index-Schätzung: ``max(bekannter Empfangs-Index) + 1``.
+
+    Kein BIP44-Gap ab 0 (der oft fälschlich #0 lieferte, wenn ``scan_end``
+    klein war und hohe Indizes gar nicht gematcht wurden). Mit Electrs
+    kann die API später nachschärfen — die Cache-Schätzung soll sofort
+    und hinter dem höchsten bekannten Empfang liegen.
+    """
+    bekannt, scan_end = _cache_bekannt_adressen(state, entry)
+    if not bekannt and scan_end <= 0:
+        return 0
+
+    xpub = entry.analyse_schluessel
+    skript = None if entry.is_multisig or entry.descriptor else entry.script_type
+    # Volle Scan-Tiefe matchen — nicht nur scan_end+Gap (sonst #0-Falle).
+    limit = max(1, min(max_index, max(scan_end + main.BIP44_GAP_LIMIT, max_index)))
+    index_fuer: dict[str, int] = {}
+    for i in range(limit):
+        dest = main.derive_receive_address_at_index(xpub, i, script_type=skript)
+        if dest and dest[0]:
+            index_fuer[str(dest[0])] = i
+        # auto/xpub: zusätzlich alle Skriptformen, falls Cache-Adressen anders typisiert
+        if skript in (None, "", "auto") and not entry.descriptor:
+            for addr in main.derive_addresses_at_index(xpub, 0, i) or []:
+                index_fuer.setdefault(str(addr), i)
+
+    max_used = -1
+    for addr in bekannt:
+        idx = index_fuer.get(addr)
+        if idx is not None:
+            max_used = max(max_used, idx)
+
+    if max_used < 0 and bekannt and scan_end > 0:
+        # Adressen da, Index-Match fehlgeschlagen — Scan-Ende als Untergrenze.
+        return min(scan_end, max_index - 1) if max_index > 0 else 0
+
+    next_index = max_used + 1
+    if next_index >= max_index:
+        return max(0, max_index - 1)
+    return next_index
+
+
+def _empfang_gehoert_zu_wallet(
+    state: AppState,
+    entry: WalletEntry,
+    address: str,
+) -> bool:
+    """Belong-Check: Adresse gehört zu diesem Wallet (kein XPUB in der Antwort)."""
+    if not address:
+        return False
+    ctx = state.wallet_ctx
+    if ctx is None:
+        return True
+    xpub = entry.analyse_schluessel
+    bekannt = ctx.xpub_for_address(address)
+    if bekannt is not None:
+        return bekannt == xpub
+    label = ctx.resolve_address(address)
+    if label is None:
+        return False
+    return label == entry.display_name or ctx.xpub_for_address(address) == xpub
+
+
+def _empfang_antwort(
+    *,
+    kennung: str,
+    entry: WalletEntry,
+    address: str,
+    index: int,
+    source: str,
+    subscribed: bool,
+    watch_active: bool,
+    read_only: bool = False,
+) -> dict:
+    return {
+        "wallet_id": kennung,
+        "wallet_name": entry.display_name,
+        "address": address,
+        "index": index,
+        "change": 0,
+        "source": source,
+        "subscribed": subscribed,
+        "watch_active": watch_active,
+        "read_only": bool(read_only),
+    }
+
+
+def api_wallet_empfang(state: AppState, kennung: str) -> dict:
+    """
+    Nächste Empfangsadresse für QR/Anzeige — lokal und schnell.
+
+    Strategie: ``max(bekannter Empfangs-Index)+1`` aus UTXO-/Verlaufs-Cache.
+    Kein Electrs-Rundlauf bei jedem Wallet-Wechsel (das hing sonst Sekunden).
+    Ergebnis wird pro Wallet im Prozess gecacht. Liefert nie XPUB/Deskriptor.
+    """
+    entry = wallets_mod.find_entry(state.entries, kennung)
+    if entry is None:
+        raise ApiError(404, "Wallet nicht gefunden.")
+    if not entry.is_valid():
+        raise ApiError(400, "Wallet lässt sich nicht ableiten.")
+
+    if getattr(entry, "read_only", False):
+        return _empfang_antwort(
+            kennung=kennung,
+            entry=entry,
+            address="",
+            index=0,
+            source="read_only",
+            subscribed=False,
+            watch_active=False,
+            read_only=True,
+        )
+
+    # Frischer Prozess-Cache (nach Scan/Zahlung invalidieren).
+    gemerkt = state.empfang_cache.get(kennung)
+    if gemerkt and gemerkt.get("address") and not gemerkt.get("read_only"):
+        bekannt, _ = _cache_bekannt_adressen(state, entry)
+        if gemerkt["address"] not in bekannt:
+            return dict(gemerkt)
+
+    xpub = entry.analyse_schluessel
+    max_index = _empfang_max_index(entry)
+    next_index = _next_receive_index_from_cache(
+        state, entry, max_index=max_index,
+    )
+    skript = None if entry.is_multisig or entry.descriptor else entry.script_type
+    abgeleitet = main.derive_receive_address_at_index(
+        xpub, next_index, script_type=skript,
+    )
+    if not abgeleitet:
+        raise ApiError(500, "Empfangsadresse konnte nicht abgeleitet werden.")
+    address, index = abgeleitet[0], int(abgeleitet[1])
+    source = "cache_estimate"
+
+    if not _empfang_gehoert_zu_wallet(state, entry, address):
+        raise ApiError(500, "Abgeleitete Adresse gehört nicht zu diesem Wallet.")
+
+    lookahead = [address]
+    plus = main.derive_receive_address_at_index(
+        xpub, index + 1, script_type=skript,
+    )
+    if plus and plus[0]:
+        lookahead.append(plus[0])
+
+    from core import wallet_watch
+
+    watch = wallet_watch.wallet_watch_status()
+    watch_active = bool(watch.get("running"))
+    subscribed = False
+    if watch_active:
+        subscribed = bool(
+            wallet_watch.subscribe_addresses(lookahead, xpub)
+        )
+
+    antwort = _empfang_antwort(
+        kennung=kennung,
+        entry=entry,
+        address=address,
+        index=index,
+        source=source,
+        subscribed=subscribed,
+        watch_active=watch_active,
+        read_only=False,
+    )
+    state.empfang_cache[kennung] = dict(antwort)
+    return antwort
 
 
 def api_alle_utxos(state: AppState, query: dict) -> dict:
@@ -5378,6 +5625,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_save_ui_lang(state, self._body())
         if teile == ["config", "ui-theme"] and methode == "PUT":
             return 200, api_save_ui_theme(state, self._body())
+        if teile == ["config", "lernhinweise-plebs"] and methode == "PUT":
+            return 200, api_save_lernhinweise_plebs(state, self._body())
         if teile == ["config", "steuer"] and methode == "PUT":
             return 200, api_save_steuer(state, self._body())
         if teile == ["config", "hinweis-onchain"] and methode == "PUT":
@@ -5390,6 +5639,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_probe(state, self._body())
         if len(teile) == 3 and teile[0] == "wallets" and teile[2] == "utxos" and methode == "GET":
             return 200, api_wallet_utxos(state, teile[1], query)
+        if len(teile) == 3 and teile[0] == "wallets" and teile[2] == "empfang" and methode == "GET":
+            return 200, api_wallet_empfang(state, teile[1])
         if teile == ["utxos"] and methode == "GET":
             return 200, api_alle_utxos(state, query)
         if teile == ["sanctions"] and methode == "GET":

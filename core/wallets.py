@@ -63,6 +63,7 @@ class WalletSummary:
             "script_type_label": SCRIPT_TYPE_LABELS.get(typ, typ),
             "script_type_effective": effective_script_type(self.entry),
             "max_addresses": self.entry.max_addresses,
+            "read_only": bool(self.entry.read_only),
             "has_cache": self.has_cache,
             "utxo_count": self.utxo_count,
             "total_sats": self.total_sats,

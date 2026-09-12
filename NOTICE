@@ -19,6 +19,13 @@ Runtime dependencies (see requirements.txt):
     The Apache License text is available at:
     https://www.apache.org/licenses/LICENSE-2.0
 
+Vendored front-end (web/vendor/):
+
+  qr-min (javascript/qr-min.js)
+    License: MIT
+    https://github.com/jazz-soft/qr-min
+    Used only to render receive-address QR codes locally (no CDN).
+
 Optional Specter Desktop extension host (specter_plugin/):
 
   cryptoadvance.specter

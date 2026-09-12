@@ -55,5 +55,32 @@ class TestWalletWatchTipPending(unittest.TestCase):
         versuch.assert_called_once()
 
 
+class TestSubscribeAddresses(unittest.TestCase):
+    def test_ohne_watcher_false(self):
+        svc = wallet_watch.WalletWatchService()
+        self.assertFalse(svc.subscribe_addresses(["bc1qtest"], "zpub-test"))
+
+    def test_modul_wrapper_delegiert(self):
+        with mock.patch.object(
+            wallet_watch.WalletWatchService,
+            "subscribe_addresses",
+            return_value=True,
+        ) as meth:
+            ok = wallet_watch.subscribe_addresses(["bc1qabc"], "zpub1")
+        self.assertTrue(ok)
+        meth.assert_called_once_with(["bc1qabc"], "zpub1")
+
+    def test_laufend_ruft_subscribe_extra(self):
+        svc = wallet_watch.WalletWatchService()
+        svc._session = object()
+        with mock.patch.object(
+            wallet_watch.WalletWatchService, "laeuft", new_callable=mock.PropertyMock
+        ) as laeuft, mock.patch.object(svc, "_subscribe_extra") as extra:
+            laeuft.return_value = True
+            ok = svc.subscribe_addresses(["bc1qxyz"], "zpub2")
+        self.assertTrue(ok)
+        extra.assert_called_once_with(["bc1qxyz"], "zpub2")
+
+
 if __name__ == "__main__":
     unittest.main()

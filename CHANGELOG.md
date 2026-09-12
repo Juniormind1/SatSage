@@ -9,6 +9,16 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **UI · Flüchtigkeit:** Richtlinie `doc/design-fluchtigkeit.md` — Nutzer in Eile; Fehlerverhinderung statt Hinweis. Empfangs-QR beim Wallet-Wechsel sofort weg (kein Cache-Vorzeigen), erst wieder wenn die Adresse des neuen Wallets feststeht.
+- **UI · Neugier:** Richtlinie `doc/design-neugier.md` — unwissend/lernfaul aber neugierig; bevorzugt Tooltips („Wo ist Walter?“): Eilige ungestört, Neugierige lernen nebenbei.
+- **Dealbreaker T13:** Lern-URLs nur Bitcoin-only; Shitcoins/Eth im Zweifel warnen, nicht durchwinken. Lernstoff = Bitcoin-Mechanismen für Plebs, keine SatSage-Internals (`doc/merge-dealbreakers.md`, `doc/lernhinweise-kuratierung.md`).
+- **Empfangen · Herzschlag:** Während Adresssuche, UTXO-Scan **oder Tip-/Start-Aktualisierung** am gewählten Wallet: gedimmter QR nur durch Glyph-Maske (**₿ → sat → Pfeife**, mit Lernhinweisen zusätzlich **Student**), atmet; Wechsel bei „alles Hintergrund“. Kein vorschnelles „Schätzung aus Cache“. Nie scanbar.
+- **Lernhinweise für Plebs (Experiment):** Einstellung (default aus); Tooltips mit „geeignete Quelle für einen Einstieg in diesen Kaninchenbau“; optional Lern-QR (Klick = kopieren + neuer Tab). Kuratierung: `web/lernhinweise.json`, DE u. a. Aprycot/Blocktrainer/Einundzwanzig.
+- **Empfangen · schneller & genauer:** Wallet-Wechsel zeigt sofort den QR des neuen Wallets (Client-Cache) bzw. „wird ermittelt…“ — nie länger den alten. Nächste freie Adresse = höchster bekannter Empfangs-Index + 1 aus UTXO/Verlauf (kein Electrs-Rundlauf bei jedem Klick). Wallets können „Nur lesen“ markiert werden → kein QR, Hinweis „Read-only-Wallet ausgewählt“.
+- **Empfangen · bc1 zuerst:** Bei generischem `xpub`/`tpub` und Skripttyp „Automatisch“ ist die Empfangsadresse (QR, Ableitung #0) natives SegWit (`bc1q`), nicht mehr Legacy (`1…`). Gap-Scan prüft weiter alle Skriptformen; in den Wallet-Einstellungen bleibt Legacy/Nested/Taproot wählbar.
+- **Wallets · Bitkey-Deskriptor:** Export mit `External:` / `Internal:` (2-of-3 `wsh(sortedmulti…)`) wird zu einer multipfadigen Wallet zusammengeführt; auch bei vertauschter Cosigner-Reihenfolge. Die Kontrolladresse ist Empfang #0 (nicht mehr Change durch Sortierung).
+- **Lab · Kalender:** Regtest-Szenarien streuen Blockzeiten mit `setmocktime` über 2022–2025 bis Tip≈heute — Steuerjahr-/Haltefrist-Visualisierung testbar. Frische Chain nötig (`.data/` wipen). Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`; Phasen in `scenario-report.json`.
+- **Empfangen · QR:** Rechts neben dem Assistenten zeigt ein quadratisches Dock-Feld die nächste Empfangsadresse der gewählten Wallet als QR (lokal generiert, kein CDN), mit Name, Index und Quelle. Ableitung nur serverseitig; Electrs/Fulcrum bevorzugt, sonst „Schätzung aus Cache“. Bei aktivem Wallet-Watch werden die Adresse und Index+1 abonniert. Kurzes Polling erkennt eingehende Zahlungen.
 - **Tests · CI:** Vier Unittests nach dem WPKH-/Gap-Scan-Fix wieder grün — Skripttyp-Registry vor Ableitungstests leeren, Sofort-Speichern-Prüfung an Deskriptor-Umleitung anpassen, Specter-`wpkh` als Single-Sig erwarten, Regex-Literal in `fuegeWalletHinzu` ohne falsche Klammerbilanz.
 
 ## [0.9.2] - 2026-09-11

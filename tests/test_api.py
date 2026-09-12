@@ -23,6 +23,7 @@ from core import trace as trace_mod
 from tests.fixtures import (
     BIP84_AS_XPUB,
     BIP84_RECEIVE_0,
+    BIP84_RECEIVE_1,
     BIP84_ZPUB,
     ZWEITER_ALS_XPUB,
     txid,
@@ -414,6 +415,83 @@ class TestUtxoListe(ApiTestBasis):
         self.assertFalse(körper["hat_verlauf"])
         self.assertEqual(körper["verlauf"]["total_count"], 0)
 
+
+class TestEmpfang(ApiTestBasis):
+    """GET /api/wallets/{id}/empfang — nächste Empfangsadresse ohne XPUB."""
+
+    def test_cache_schaetzung_nach_benutztem_index(self):
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000)], self.cache, 6,
+        )
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["wallet_id"], kennung)
+        self.assertEqual(körper["wallet_name"], "Cold Storage")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_1)
+        self.assertEqual(körper["index"], 1)
+        self.assertEqual(körper["change"], 0)
+        self.assertEqual(körper["source"], "cache_estimate")
+        self.assertIn("subscribed", körper)
+        self.assertIn("watch_active", körper)
+        # Nie Schlüsselmaterial.
+        roh = json.dumps(körper)
+        self.assertNotIn(BIP84_ZPUB, roh)
+        self.assertNotIn("xpub", roh.lower())
+        self.assertNotIn("descriptor", roh.lower())
+
+    def test_leeres_wallet_index_null(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["address"], BIP84_RECEIVE_0)
+        self.assertEqual(körper["index"], 0)
+        self.assertEqual(körper["source"], "cache_estimate")
+
+    def test_unbekanntes_wallet(self):
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, _ = self.anfrage("/api/wallets/gibtsnicht/empfang")
+        self.assertEqual(status, 404)
+
+    def test_naechste_hinter_hoechstem_index(self):
+        """Auch ohne scan_end: max(UTXO-Empfangs-Index)+1, nicht wieder #0."""
+        from tests.fixtures import BIP84_RECEIVE_1
+
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB,
+            [utxo(1_000, BIP84_RECEIVE_1, marker="hi")],
+            self.cache,
+            6,
+        )
+        # scan_end_index absichtlich klein lassen (alte Falle).
+        pfad = main._xpub_cache_path(BIP84_ZPUB, self.cache)
+        data = __import__("json").loads(pfad.read_text(encoding="utf-8"))
+        data["scan_end_index"] = 0
+        pfad.write_text(__import__("json").dumps(data), encoding="utf-8")
+
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["index"], 2)
+        self.assertNotEqual(körper["address"], BIP84_RECEIVE_0)
+
+    def test_read_only_ohne_adresse(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        # Eintrag in state auf read_only setzen
+        for e in self.state.entries:
+            if e.analyse_schluessel == BIP84_ZPUB:
+                e.read_only = True
+        status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertTrue(körper["read_only"])
+        self.assertEqual(körper["address"], "")
+        self.assertEqual(körper["source"], "read_only")
+
+
+class TestUtxoVerlauf(ApiTestBasis):
     def test_verlauf_liefert_ausgegebene_dieses_wallets(self):
         """Steuerjahr und Herkunft lesen dieselbe Datei — die Wallet-Ansicht auch."""
         main.save_xpub_utxo_cache(
@@ -2212,15 +2290,49 @@ class TestDeskriptorEndpunkt(ApiTestBasis):
         """
         Nur an ihr lässt sich vor dem Speichern sehen, ob wirklich die eigene
         Wallet gemeint ist — ein Deskriptor sieht auch mit vertauschtem
-        Schlüssel richtig aus.
+        Schlüssel richtig aus. Immer Empfang #0, nie Change.
         """
         _, körper = self.pruefe(self.deskriptor())
         adresse = körper["gefunden"][0]["erste_adresse"]
+        deskriptor = körper["gefunden"][0]["descriptor"]
         self.assertEqual(
             adresse,
-            sorted(main.derive_descriptor_addresses(
-                körper["gefunden"][0]["descriptor"], max_addresses=2
-            ))[0],
+            main.derive_address_at_index(deskriptor, 0, 0),
+        )
+
+    def test_bitkey_external_internal_export(self):
+        """Bitkey-Export → eine Multisig-Wallet, Empfangsadresse #0."""
+        cosigner = _abgeleitete_cosigner(3)
+        fps = ("34eae6a8", "3bef7db3", "aabbccdd")
+        ext = (
+            "wsh(sortedmulti(2,"
+            + ",".join(
+                f"[{fps[i]}/84'/0'/0']{cosigner[i]}/0/*" for i in range(3)
+            )
+            + "))"
+        )
+        intr = (
+            "wsh(sortedmulti(2,"
+            + ",".join(
+                f"[{fps[i]}/84'/0'/0']{cosigner[i]}/1/*" for i in range(3)
+            )
+            + "))"
+        )
+        text = f"External: {ext}\n\nInternal: {intr}"
+        status, körper = self.pruefe(text)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(körper["gefunden"]), 1)
+        treffer = körper["gefunden"][0]
+        self.assertTrue(treffer["is_multisig"])
+        self.assertEqual(treffer["threshold"], 2)
+        self.assertIn("/<0;1>/*", treffer["descriptor"])
+        self.assertEqual(
+            treffer["erste_adresse"],
+            main.derive_address_at_index(treffer["descriptor"], 0, 0),
+        )
+        self.assertNotEqual(
+            treffer["erste_adresse"],
+            main.derive_address_at_index(treffer["descriptor"], 1, 0),
         )
 
     def test_volle_schluessel_verlassen_den_server_nicht(self):

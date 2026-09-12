@@ -2,7 +2,32 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Empfangen · Mempool-Lebenszeichen (Herzschlag + Wallet-Blink)
+
+**Stand:** 2026-09-12 · **offen** · Idee / Experiment
+
+Wenn eine für ein Wallet **relevante Tx im Mempool** auftaucht (Wallet-Watch / Pending):
+
+1. **Herzschlag** im Empfangs-QR (maskierter, nicht scanbarer Puls — wie beim Scan-Denken).
+2. Das betroffene Wallet in der Nav **kurz aufblinken**.
+3. Maske nach Betrag (eingehend, Satoshi):
+   - **≥ 1 000 000 sats** → Bitcoin-**B**
+   - **≥ 10 000 und &lt; 1 000 000** → **sat**
+   - **&lt; 10 000 sats** → **Pfeiffe**
+
+Wenn dieselbe Tx **bestätigt** (erster Block):
+
+4. Nochmal Herzschlag, diesmal mit **Ausrufezeichen**-Maske (oder Overlay).
+5. Wallet **nochmals** kurz aufblinken.
+
+**Hinweise:** Flüchtigkeit beachten — Empfangs-QR eines *anderen* gewählten Wallets nicht mit fremdem Mempool-Puls überschreiben (oder Puls nur am betroffenen Wallet + ggf. dezent global). Bestehenden `WalletWatch` / Pending-Pfad nutzen, nicht neuen Poll erfinden. Ausrufezeichen-Asset noch nicht vorhanden (Maske analog zu B/sat/Pfeiffe anlegen).
+
+**Abgrenzung:** Lernhinweise-QR und Scan-Herzschlag bleiben getrennte Modi; Mempool-Puls ist Ereignis, kein Dauerzustand.
+
+---
+
 ## Kurs-Historie · Bundle veraltet / Lücken bis „heute“ — teilweise gelöst
+
 
 **Stand:** 2026-09-11 · **umgesetzt (MVP)** · **zurückgestellt** (Feinschliff im Büro)
 

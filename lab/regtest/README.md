@@ -53,6 +53,21 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
 
    Tx im Explorer: `http://127.0.0.1:18080/tx/<txid>` (z. B. Whirlpool-Lab-Tx).
 
+### Kalender / Haltefrist (setmocktime)
+
+Die Basis-Szenarien streuen Blockzeiten über **2022 → 2025 → Tip≈heute** (`setmocktime` in `generate_scenarios.py`). So sind Steuerjahr-Zeitstrahl und 1-Jahres-Haltefrist in der GUI testbar — nicht nur Conf-Tiefe.
+
+| Phase | Inhalt (kurz) |
+|-------|----------------|
+| 2022-bootstrap | 110 Blocks + Funding Indizes 0–9 (oft unspent → außerhalb Frist) |
+| 2022-mid | Funding 10–14 |
+| 2023 | Funding 15–22; Hop / Self / Consolidation |
+| 2024 | Funding 23–29; Beta-aged-fanout |
+| 2025 | Funding 30–49 + Peers; CoinJoin-Shapes (noch innerhalb Frist) |
+| tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
+
+**Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
+
 Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Für die **Tx-Klassifikation / Herkunft**:
 
 | Szenario | Erwartetes Label |

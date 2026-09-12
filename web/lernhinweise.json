@@ -1,0 +1,379 @@
+{
+  "schema": 1,
+  "hinweis_de": "Geeignete Quelle für einen Einstieg in diesen Kaninchenbau",
+  "hinweis_en": "A suitable source for going down this rabbit hole",
+  "kuratiert": "Manuell pflegen. Nur Bitcoin-only (T13). Keine Shitcoins/Altcoins/Eth — im Zweifel verworfen. Inhalt: Bitcoin-Mechanismen für Plebs, keine SatSage-Internals. Status: vorschlag|ok|verworfen",
+  "quellen_de_prioritaet": [
+    "https://aprycot.media/",
+    "https://aprycot.media/thek/",
+    "https://www.blocktrainer.de/",
+    "https://einundzwanzig.space/"
+  ],
+  "themen": [
+    {
+      "id": "bitcoin",
+      "stichwort_de": "Bitcoin",
+      "stichwort_en": "Bitcoin",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://aprycot.media/thek/",
+        "titel": "Aprycot Mediathek — Einstieg Kaninchenbau"
+      },
+      "en": {
+        "url": "https://bitcoin.org/en/",
+        "titel": "bitcoin.org — getting started"
+      },
+      "notiz": "DE: Aprycot Thek als Portal; EN: bitcoin.org"
+    },
+    {
+      "id": "whitepaper",
+      "stichwort_de": "Whitepaper",
+      "stichwort_en": "Whitepaper",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://bitcoin.org/files/bitcoin-paper/bitcoin_de.pdf",
+        "titel": "Bitcoin-Whitepaper (DE)"
+      },
+      "en": {
+        "url": "https://bitcoin.org/bitcoin.pdf",
+        "titel": "Bitcoin whitepaper"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "geld",
+      "stichwort_de": "Was ist Geld?",
+      "stichwort_en": "What is money?",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/die-natur-des-wertes/",
+        "titel": "Aprycot: Die Natur des Wertes"
+      },
+      "en": {
+        "url": "https://nakamotoinstitute.org/",
+        "titel": "Nakamoto Institute"
+      },
+      "notiz": "DE: Aprycot Blog; EN: Nakamoto Institute"
+    },
+
+    {
+      "id": "oesterreichische-schule",
+      "stichwort_de": "Österreichische Schule",
+      "stichwort_en": "Austrian economics",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://aprycot.media/",
+        "titel": "Aprycot Media — Verlag & Bildung"
+      },
+      "en": {
+        "url": "https://nakamotoinstitute.org/literature/",
+        "titel": "Nakamoto Institute literature"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "selbstverwahrung",
+      "stichwort_de": "Selbstverwahrung",
+      "stichwort_en": "Self-custody",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/liebe-familie-liebe-freunde/",
+        "titel": "Aprycot: Liebe Familie… (Übers. Gigi) — Schlüssel selbst halten"
+      },
+      "en": {
+        "url": "https://bitcoin-only.com/",
+        "titel": "bitcoin-only.com"
+      },
+      "notiz": "DE: Aprycot-Übersetzung Gigi; EN: bitcoin-only"
+    },
+
+    {
+      "id": "xpub",
+      "stichwort_de": "XPUB / Watch-only",
+      "stichwort_en": "XPUB / watch-only",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer — Bildung & Guides"
+      },
+      "en": {
+        "url": "https://learnmeabitcoin.com/technical/keys/extended-keys/",
+        "titel": "learnmeabitcoin — extended keys"
+      },
+      "notiz": "Konkreten Blocktrainer-Artikel ersetzen, sobald kuratiert"
+    },
+    {
+      "id": "deskriptor",
+      "stichwort_de": "Output-Deskriptor",
+      "stichwort_en": "Output descriptor",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer"
+      },
+      "en": {
+        "url": "https://github.com/bitcoin/bitcoin/blob/master/doc/descriptors.md",
+        "titel": "Bitcoin Core descriptors.md"
+      },
+      "notiz": "DE-URL noch schärfen"
+    },
+    {
+      "id": "segwit",
+      "stichwort_de": "Native SegWit (bc1)",
+      "stichwort_en": "Native SegWit (bc1)",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer"
+      },
+      "en": {
+        "url": "https://learnmeabitcoin.com/technical/script/p2wpkh/",
+        "titel": "learnmeabitcoin — P2WPKH"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "utxo",
+      "stichwort_de": "UTXO",
+      "stichwort_en": "UTXO",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/1-die-innovation-basierend-auf-grundprinzipien/",
+        "titel": "Aprycot: Innovation / UTXO-Kassenbuch (Übers. Allen Farrington)"
+      },
+      "en": {
+        "url": "https://learnmeabitcoin.com/technical/transaction/utxo/",
+        "titel": "learnmeabitcoin — UTXO"
+      },
+      "notiz": "DE: Aprycot-Übersetzung; EN: learnmeabitcoin"
+    },
+
+    {
+      "id": "empfang",
+      "stichwort_de": "Empfangsadresse / Gap-Limit",
+      "stichwort_en": "Receive address / gap limit",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer"
+      },
+      "en": {
+        "url": "https://learnmeabitcoin.com/technical/keys/hd-wallets/",
+        "titel": "learnmeabitcoin — HD wallets"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "privatsphaere",
+      "stichwort_de": "Privatsphäre / Tor",
+      "stichwort_en": "Privacy / Tor",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/gigi-redefreiheit/",
+        "titel": "Aprycot: Redefreiheit (Gigi)"
+      },
+      "en": {
+        "url": "https://bitcoinops.org/en/topics/privacy/",
+        "titel": "Bitcoin Optech — privacy"
+      },
+      "notiz": "DE: Aprycot/Gigi; EN: Optech — ggf. später gezielter Privacy-Artikel"
+    },
+
+    {
+      "id": "node",
+      "stichwort_de": "Eigener Node",
+      "stichwort_en": "Your own node",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/node-weltordnung/",
+        "titel": "Aprycot: Node-Weltordnung (Übers. Michael Goldstein)"
+      },
+      "en": {
+        "url": "https://bitcoin.org/en/full-node",
+        "titel": "Running a full node"
+      },
+      "notiz": "DE: Aprycot-Übersetzung Goldstein; EN: bitcoin.org"
+    },
+
+    {
+      "id": "core",
+      "stichwort_de": "Bitcoin Core",
+      "stichwort_en": "Bitcoin Core",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/node-weltordnung/",
+        "titel": "Aprycot: Node-Weltordnung — warum ein eigener Node"
+      },
+      "en": {
+        "url": "https://bitcoin.org/en/bitcoin-core/",
+        "titel": "bitcoin.org — Bitcoin Core"
+      },
+      "notiz": "Pleb: Was ist Core / Full Node — keine SatSage-RPC-Details"
+    },
+    {
+      "id": "electrum",
+      "stichwort_de": "Electrs / Electrum-Server",
+      "stichwort_en": "Electrs / Electrum server",
+      "status": "ok",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer — Einstieg eigener Indexer (kuratieren)"
+      },
+      "en": {
+        "url": "https://electrum.readthedocs.io/en/latest/faq.html",
+        "titel": "Electrum FAQ — what is an Electrum server"
+      },
+      "notiz": "electrs/Fulcrum = Indexer für Adress-/Tx-Abfragen; nicht die Electrum-Wallet-App allein"
+    },
+    {
+      "id": "p2p",
+      "stichwort_de": "Bitcoin-P2P / Compact Filter",
+      "stichwort_en": "Bitcoin P2P / compact filters",
+      "status": "ok",
+      "de": {
+        "url": "https://einundzwanzig.space/",
+        "titel": "Einundzwanzig — Bitcoin-Netzwerk & Nodes"
+      },
+      "en": {
+        "url": "https://bitcoinops.org/en/topics/compact-block-filters/",
+        "titel": "Bitcoin Optech — compact block filters (BIP-158)"
+      },
+      "notiz": "Nicht Wasabi: P2P-Pille = Bitcoin-Peers mit Compact Filters. Wasabi = CoinJoin-Wallet (Thema coinjoin)."
+    },
+    {
+      "id": "bip158",
+      "stichwort_de": "Compact Filter (BIP-158)",
+      "stichwort_en": "Compact filters (BIP-158)",
+      "status": "ok",
+      "de": {
+        "url": "https://einundzwanzig.space/",
+        "titel": "Einundzwanzig"
+      },
+      "en": {
+        "url": "https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki",
+        "titel": "BIP 158"
+      },
+      "notiz": "Alias/Technik zu p2p — DE-URL noch schärfen"
+    },
+    {
+      "id": "preis",
+      "stichwort_de": "Bitcoin-Preis (Angebot/Nachfrage)",
+      "stichwort_en": "Bitcoin price (supply and demand)",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/blog/die-natur-des-wertes/",
+        "titel": "Aprycot: Die Natur des Wertes"
+      },
+      "en": {
+        "url": "https://nakamotoinstitute.org/mempool/the-bitcoin-standard-preface/",
+        "titel": "Nakamoto Institute — value / Bitcoin Standard context"
+      },
+      "notiz": "Preis = Angebot/Nachfrage am Markt; kein Shitcoin-Ticker-Portal"
+    },
+    {
+      "id": "coinjoin",
+      "stichwort_de": "CoinJoin",
+      "stichwort_en": "CoinJoin",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://einundzwanzig.space/",
+        "titel": "Einundzwanzig"
+      },
+      "en": {
+        "url": "https://bitcoinops.org/en/topics/coinjoin/",
+        "titel": "Bitcoin Optech — CoinJoin"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "haltefrist",
+      "stichwort_de": "Haltefrist / Steuer",
+      "stichwort_en": "Holding period / tax",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer (Steuer-Artikel kuratieren)"
+      },
+      "en": {
+        "url": "https://river.com/learn",
+        "titel": "River Learn (EN, nicht DE-Steuer)"
+      },
+      "notiz": "DE-Steuer: konkreten Blocktrainer-/Fachanwalt-Link setzen; EN ist nicht 1:1 übertragbar"
+    },
+    {
+      "id": "taproot",
+      "stichwort_de": "Taproot",
+      "stichwort_en": "Taproot",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://aprycot.media/thek/",
+        "titel": "Aprycot Mediathek"
+      },
+      "en": {
+        "url": "https://bitcoinops.org/en/topics/taproot/",
+        "titel": "Bitcoin Optech — Taproot"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "multisig",
+      "stichwort_de": "Multisig",
+      "stichwort_en": "Multisig",
+      "status": "vorschlag",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "Blocktrainer"
+      },
+      "en": {
+        "url": "https://learnmeabitcoin.com/technical/script/p2wsh/",
+        "titel": "learnmeabitcoin — P2WSH"
+      },
+      "notiz": ""
+    },
+    {
+      "id": "einundzwanzig",
+      "stichwort_de": "Einundzwanzig",
+      "stichwort_en": "Einundzwanzig (DE podcast)",
+      "status": "ok",
+      "de": {
+        "url": "https://einundzwanzig.space/",
+        "titel": "einundzwanzig.space"
+      },
+      "en": {
+        "url": "https://einundzwanzig.space/",
+        "titel": "einundzwanzig.space (German)"
+      },
+      "notiz": "Anchor-Quelle DE"
+    },
+    {
+      "id": "aprycot",
+      "stichwort_de": "Aprycot Media",
+      "stichwort_en": "Aprycot Media",
+      "status": "ok",
+      "de": {
+        "url": "https://aprycot.media/",
+        "titel": "aprycot.media"
+      },
+      "en": {
+        "url": "https://aprycot.media/",
+        "titel": "aprycot.media (German publisher)"
+      },
+      "notiz": "Anchor-Quelle DE"
+    },
+    {
+      "id": "blocktrainer",
+      "stichwort_de": "Blocktrainer",
+      "stichwort_en": "Blocktrainer",
+      "status": "ok",
+      "de": {
+        "url": "https://www.blocktrainer.de/",
+        "titel": "blocktrainer.de"
+      },
+      "en": {
+        "url": "https://www.blocktrainer.de/en/",
+        "titel": "blocktrainer.de (EN section)"
+      },
+      "notiz": "Anchor-Quelle DE"
+    }
+  ]
+}

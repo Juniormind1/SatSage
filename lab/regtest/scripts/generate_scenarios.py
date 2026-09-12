@@ -12,6 +12,8 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,14 @@ ENV_PATH = HERE / ".data" / ".regtest.env"
 COMPOSE_FILE = HERE / "docker-compose.yml"
 WALLETS = ("lab-alpha", "lab-beta", "lab-change", "lab-gamma")
 LABELS = ("alpha", "beta", "change", "gamma")
+
+# Kalender-Phasen für Steuerjahr / Haltefrist (Blockzeiten, nicht nur Conf-Tiefe).
+# Frische Chain nötig — setmocktime nicht rückwärts auf bestehendem Tip.
+PHASE_BOOTSTRAP = "2022-06-01"
+PHASE_2022_MID = "2022-09-15"
+PHASE_2023 = "2023-06-01"
+PHASE_2024 = "2024-06-01"
+PHASE_2025 = "2025-09-01"
 
 class Rpc:
     def __init__(self, native: bool):
@@ -68,6 +78,84 @@ def choose_native(force: bool) -> bool:
 
 def mine(rpc: Rpc, blocks: int, address: str) -> None:
     rpc.call("generatetoaddress", str(blocks), address, wallet="lab-faucet")
+
+
+def utc_ts(iso_date: str) -> int:
+    """UTC-Mitternacht für YYYY-MM-DD → Unix-Timestamp."""
+    return int(datetime.fromisoformat(iso_date).replace(tzinfo=timezone.utc).timestamp())
+
+
+def set_time(rpc: Rpc, unix_ts: int) -> None:
+    rpc.call("setmocktime", str(int(unix_ts)))
+
+
+def mine_at(rpc: Rpc, ts: int, blocks: int, address: str) -> int:
+    """Mocktime setzen und minen; je Block +60s, damit nTime > MTP bleibt.
+
+    Rückgabe: letzter verwendeter Mock-Timestamp.
+    """
+    cursor = int(ts)
+    for _ in range(max(0, int(blocks))):
+        set_time(rpc, cursor)
+        mine_next(rpc, 1, address)
+        cursor += 60
+    return cursor
+
+
+# Laufender Mock-Cursor innerhalb einer Phase (fund/spend/mine).
+_MOCK_CURSOR = 0
+
+
+def phase_jump(
+    rpc: Rpc,
+    iso_date: str,
+    faucet: str,
+    phases: list[dict[str, Any]],
+    *,
+    label: str,
+    note: str,
+    blocks: int = 2,
+) -> int:
+    """Jahres-Sprung: Mocktime vorwärts, ≥1 Block für MTP/Header, Phase loggen."""
+    global _MOCK_CURSOR
+    ts = utc_ts(iso_date)
+    _MOCK_CURSOR = mine_at(rpc, ts, blocks, faucet)
+    height = int(rpc.call("getblockcount"))
+    phases.append({
+        "label": label,
+        "date": iso_date,
+        "mock_ts": ts,
+        "height": height,
+        "note": note,
+    })
+    print(f"Phase {label} ({iso_date}): Höhe {height}", file=sys.stderr)
+    return ts
+
+
+def mine_next(rpc: Rpc, blocks: int, address: str) -> None:
+    """Weiter minen in der aktuellen Phase (Mock-Cursor +60s je Block)."""
+    global _MOCK_CURSOR
+    if _MOCK_CURSOR <= 0:
+        mine(rpc, blocks, address)
+        return
+    _MOCK_CURSOR = mine_at(rpc, _MOCK_CURSOR, blocks, address)
+
+
+def fund_indices(
+    rpc: Rpc,
+    addresses: dict[str, list[str]],
+    faucet: str,
+    start: int,
+    stop: int,
+    *,
+    amount: float = 0.05,
+) -> None:
+    """Faucet → feste Empfangs-Indizes [start, stop) je Lab-Wallet, 1 Block je Index."""
+    for index in range(start, stop):
+        payouts = {addresses[label][index]: amount for label in LABELS}
+        rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
+        mine_next(rpc, 1, faucet)
+
 
 def new_address(rpc: Rpc, wallet: str) -> str:
     # bech32 = BIP84 native SegWit — muss zum exportierten wpkh-XPUB passen.
@@ -245,6 +333,10 @@ def write_env(rpc: Rpc) -> None:
         "RPCPORT=18443",
         "RPCUSER=bitcoin",
         "RPCPASSWORD=secret",
+        # Haltefrist-Demo: Lab-Blöcke sind über 2022–2025 gestreut.
+        "STEUER_HALTEFRIST_JAHRE=1",
+        # Empfangs-QR / Mempool-ASAP: Dauer-Watch am eigenen Electrs.
+        "WALLETS_IMMER_AKTUELL=1",
         # Lokaler mempool.space-Explorer (docker: mempool-web auf :18080).
         "MEMPOOL_URL=http://127.0.0.1:18080",
         # Assistent: lokales Ollama (Loopback). Modell muss auf dem Host liegen
@@ -259,52 +351,82 @@ def write_env(rpc: Rpc) -> None:
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 def run(rpc: Rpc) -> None:
+    global _MOCK_CURSOR
+    _MOCK_CURSOR = 0
     for wallet in ("lab-faucet", *WALLETS):
         load_or_create(rpc, wallet)
     faucet = new_address(rpc, "lab-faucet")
-    mine(rpc, 110, faucet)
+    phases: list[dict[str, Any]] = []
+
+    # --- 2022 Bootstrap: Reife + Kohorte A (Indizes 0–9 bleiben oft unspent) ---
+    phase_jump(
+        rpc, PHASE_BOOTSTRAP, faucet, phases,
+        label="2022-bootstrap",
+        note="110 Blocks + Funding 0–9; Kohorte außerhalb Haltefrist (Bezug 2026)",
+        blocks=110,
+    )
     # Feste Indizes 0..n — kein Keypool-Vorschub bei erneutem Lauf.
     addresses = {
         label: receive_addresses(rpc, wallet, LAB_RECEIVE_COUNT)
         for label, wallet in zip(LABELS, WALLETS)
     }
-    for index in range(30):
-        payouts = {addresses[label][index]: 0.05 for label in LABELS}
-        rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
-        mine(rpc, 1, faucet)
+    fund_indices(rpc, addresses, faucet, 0, 10)
 
-    alpha, beta, change, gamma = WALLETS
+    # --- 2022 Mid: weitere Empfänge, noch keine Shape-Spends ---
+    phase_jump(
+        rpc, PHASE_2022_MID, faucet, phases,
+        label="2022-mid",
+        note="Funding 10–14; Empfang 2022 für späteren Abgang 2023/24",
+    )
+    fund_indices(rpc, addresses, faucet, 10, 15)
+
+    alpha, beta, _change, gamma = WALLETS
     records: list[dict[str, Any]] = []
+
+    # --- 2023: Funding + frühe Shape-Spends (Empfang ggf. 2022 → Abgang 2023) ---
+    phase_jump(
+        rpc, PHASE_2023, faucet, phases,
+        label="2023",
+        note="Funding 15–22; Hop/Self/Consolidation — Jahresgrenze Empfang→Abgang",
+    )
+    fund_indices(rpc, addresses, faucet, 15, 23)
     u = select(rpc, alpha, 1)
     records.append(raw_spend(rpc, "Alpha-hop-to-Beta", u, [(addresses["beta"][31], .02), (addresses["alpha"][31], .029)], [alpha]))
-    mine(rpc, 1, faucet)
+    mine_next(rpc, 1, faucet)
     u = select(rpc, alpha, 1)
     records.append(raw_spend(rpc, "Alpha-self-send", u, [(addresses["alpha"][32], .02), (addresses["alpha"][33], .029)], [alpha]))
-    mine(rpc, 1, faucet)
+    mine_next(rpc, 1, faucet)
     records.append(raw_spend(rpc, "Gamma-consolidation", select(rpc, gamma, 4), [(addresses["gamma"][34], .19)], [gamma] * 4))
-    mine(rpc, 1, faucet)
+    mine_next(rpc, 1, faucet)
 
+    # --- 2024: Fan-out aus älterem Coin + weitere Kohorte ---
+    phase_jump(
+        rpc, PHASE_2024, faucet, phases,
+        label="2024",
+        note="Funding 23–29; Beta-aged-fanout aus älterem UTXO (Conf + Kalender)",
+    )
+    fund_indices(rpc, addresses, faucet, 23, 30)
     # Wait before spending one old coin, making age visible in the chain.
     old = select(rpc, beta, 1)
-    mine(rpc, 12, faucet)
+    mine_next(rpc, 12, faucet)
     # 10 gleiche Outputs + 1 Change; Change-Index darf nicht mit den 10 kollidieren
     # (sonst merged createrawtransaction und vout-Anzahl weicht ab).
     fanout = [(addresses["beta"][35 + i], .004) for i in range(10)] + [(addresses["beta"][45], .008)]
     records.append(raw_spend(rpc, "Beta-aged-fanout", old, fanout, [beta]))
-    mine(rpc, 2, faucet)
+    mine_next(rpc, 2, faucet)
 
     # ------------------------------------------------------------------
-    # CoinJoin-Fixtures: Fremd-Peers = lab-faucet (Funding-Quelle aller Lab-
-    # Sats). lab-faucet steht bewusst NICHT in SatSage WALLET_* → in SatSage
-    # sind das fremde Inputs. Lab-Wallets = nur Viewer-Anteile (eigene Ins).
-    # Kein Multisig — alles Einzelsignatur (P2WPKH).
+    # 2025: CoinJoin-Fixtures (Form-Tests) + Mix-Funding nahe „innerhalb Frist“
+    # Fremd-Peers = lab-faucet (Funding-Quelle aller Lab-Sats). lab-faucet steht
+    # bewusst NICHT in SatSage WALLET_* → in SatSage sind das fremde Inputs.
+    # Lab-Wallets = nur Viewer-Anteile (eigene Ins). Kein Multisig — P2WPKH.
     # ------------------------------------------------------------------
-
-    # Extra-Funding: Lab-Wallets + viele kleine Faucet-Peer-UTXOs für Mixes.
-    for index in range(30, 50):
-        payouts = {addresses[label][index]: 0.05 for label in LABELS}
-        rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
-        mine(rpc, 1, faucet)
+    phase_jump(
+        rpc, PHASE_2025, faucet, phases,
+        label="2025",
+        note="Funding 30–49 + Peers; CJ-Shapes — Kohorte noch innerhalb 1-Jahres-Frist",
+    )
+    fund_indices(rpc, addresses, faucet, 30, 50)
 
     peer_addrs = [new_address(rpc, "lab-faucet") for _ in range(60)]
     for i in range(0, len(peer_addrs), 12):
@@ -315,7 +437,7 @@ def run(rpc: Rpc) -> None:
             json.dumps({a: 0.05 for a in chunk}, separators=(",", ":")),
             wallet="lab-faucet",
         )
-        mine(rpc, 1, faucet)
+        mine_next(rpc, 1, faucet)
 
     # Wasabi-Classic-ähnlich: 6× Alpha (eigen) + 18× Faucet (fremd);
     # 24 gleiche Mix-Outs + 4 Changes (1× Alpha, 3× Faucet).
@@ -340,7 +462,7 @@ def run(rpc: Rpc) -> None:
     cj1["viewer_wallet"] = "lab-alpha"
     cj1["foreign_wallet"] = "lab-faucet"
     records.append(cj1)
-    mine(rpc, 3, faucet)
+    mine_next(rpc, 3, faucet)
 
     # Remix: nur Alpha-Equal-Outs aus Round 1 + neue Faucet-Peers.
     equal_alpha = set(addresses["alpha"][20:26])
@@ -368,7 +490,7 @@ def run(rpc: Rpc) -> None:
     cj2["viewer_wallet"] = "lab-alpha"
     cj2["foreign_wallet"] = "lab-faucet"
     records.append(cj2)
-    mine(rpc, 3, faucet)
+    mine_next(rpc, 3, faucet)
 
     # Whirlpool-like 5×5: 1× Alpha + 4× Faucet-fremd.
     wp_own = select_near(rpc, alpha, 1)
@@ -388,7 +510,7 @@ def run(rpc: Rpc) -> None:
     wp["viewer_wallet"] = "lab-alpha"
     wp["foreign_wallet"] = "lab-faucet"
     records.append(wp)
-    mine(rpc, 2, faucet)
+    mine_next(rpc, 2, faucet)
 
     # JoinMarket-like: 1 eigen + 3 fremd; 4 gleiche CJ-Outs + 3 Changes.
     jm_own = select_near(rpc, beta, 1)
@@ -412,7 +534,7 @@ def run(rpc: Rpc) -> None:
     jm["viewer_wallet"] = "lab-beta"
     jm["foreign_wallet"] = "lab-faucet"
     records.append(jm)
-    mine(rpc, 2, faucet)
+    mine_next(rpc, 2, faucet)
 
     # WabiSabi-like: 2× Alpha eigen + 14× Faucet fremd; 16 ungleiche Outs.
     ws_own = select_near(rpc, alpha, 2)
@@ -440,7 +562,7 @@ def run(rpc: Rpc) -> None:
     ws["viewer_wallet"] = "lab-alpha"
     ws["foreign_wallet"] = "lab-faucet"
     records.append(ws)
-    mine(rpc, 2, faucet)
+    mine_next(rpc, 2, faucet)
 
     # PayJoin-like: 1 eigen (Gamma) + 1 Faucet; 2 Outs.
     pj_ins = select_near(rpc, gamma, 1) + select_near(rpc, "lab-faucet", 1)
@@ -453,7 +575,7 @@ def run(rpc: Rpc) -> None:
     pj["expected_kind"] = "payjoin"
     pj["viewer_wallet"] = "lab-gamma"
     records.append(pj)
-    mine(rpc, 2, faucet)
+    mine_next(rpc, 2, faucet)
 
     # Exchange-batch-like: Faucet-Fan-out, genau 1 Out an Alpha (0 eigene Ins).
     ex_ins = select_near(rpc, "lab-faucet", 1)
@@ -467,7 +589,7 @@ def run(rpc: Rpc) -> None:
     ex["expected_kind"] = "exchange_batch"
     ex["viewer_wallet"] = "lab-alpha"
     records.append(ex)
-    mine(rpc, 2, faucet)
+    mine_next(rpc, 2, faucet)
 
     # Fan-out-own: Alias auf bestehendes Beta-aged-fanout
     for rec in records:
@@ -477,13 +599,37 @@ def run(rpc: Rpc) -> None:
             rec["alias"] = "Fan-out-own"
             break
 
+    # --- Tip ≈ Host-Jetzt: Bezugstag Steuerjahr = datetime.now(); Chain-Tip nachziehen ---
+    tip_ts = int(time.time())
+    tip_date = datetime.fromtimestamp(tip_ts, tz=timezone.utc).date().isoformat()
+    _MOCK_CURSOR = mine_at(rpc, tip_ts, 3, faucet)
+    phases.append({
+        "label": "tip-now",
+        "date": tip_date,
+        "mock_ts": tip_ts,
+        "height": int(rpc.call("getblockcount")),
+        "note": "Tip auf Wanduhr; Mocktime danach aus (0)",
+    })
+    # Mocktime aus — weitere manuelle Mines nutzen wieder die Systemzeit.
+    set_time(rpc, 0)
+    _MOCK_CURSOR = 0
+
     write_env(rpc)
-    report = {"tip_height": int(rpc.call("getblockcount")), "records": records}
+    report = {
+        "tip_height": int(rpc.call("getblockcount")),
+        "phases": phases,
+        "tax_note": (
+            "Kohorte Indizes 0–9 ≈ 2022 (außerhalb 1y-Frist bei Bezug 2026); "
+            "2023/24 Spends mit Jahresgrenze; 2025 CJs/Funding innerhalb Frist."
+        ),
+        "records": records,
+    }
     (HERE / ".data" / "scenario-report.json").write_text(json.dumps(report, indent=2) + "\n")
 
     # Expectations für Klassifikation / Soft-Label-Abnahme
     txclass = {
         "tip_height": report["tip_height"],
+        "phases": phases,
         "cases": [
             {
                 "name": r["name"],
@@ -507,6 +653,7 @@ def run(rpc: Rpc) -> None:
         "tip_height": report["tip_height"],
         "scenario_count": len(records),
         "txclass_cases": len(txclass["cases"]),
+        "phases": [p["label"] for p in phases],
     }))
 
 def main() -> int:

@@ -140,6 +140,78 @@ class TestPaarVereinigen(unittest.TestCase):
         roh = f"wsh(sortedmulti(2,{K[0]}/<0;1>/*,{K[1]}/<0;1>/*))"
         self.assertEqual(deskriptoren_aus_text(roh), [roh])
 
+    def test_sortedmulti_vertauschte_cosigner_werden_gepaart(self):
+        """Gleiche Keys, andere Reihenfolge — trotzdem eine Wallet."""
+        empfang = f"wsh(sortedmulti(2,{K[0]}/0/*,{K[1]}/0/*,{K[2]}/0/*))"
+        change = f"wsh(sortedmulti(2,{K[2]}/1/*,{K[0]}/1/*,{K[1]}/1/*))"
+        gefunden = deskriptoren_aus_text(f"{empfang}\n{change}")
+        self.assertEqual(len(gefunden), 1)
+        self.assertIn("<0;1>", gefunden[0])
+
+
+class TestBitkeyExport(unittest.TestCase):
+    """
+    Bitkey exportiert Watch-only als beschriftetes Paar:
+
+        External: wsh(sortedmulti(2,…/0/*,…))
+        Internal: wsh(sortedmulti(2,…/1/*,…))
+
+    (siehe ExportWatchingDescriptorServiceImpl). Ohne Zusammenführung wären
+    Empfang und Change zwei Wallets — oder die Change-Kette fehlt.
+    """
+
+    def _bitkey_text(self, *, reorder_internal: bool = False) -> str:
+        fps = ("34eae6a8", "3bef7db3", "aabbccdd")
+        # Bitkey nutzt Apostroph-Pfade und oft keine Prüfsumme.
+        ext_keys = ",".join(
+            f"[{fps[i]}/84'/0'/0']{K[i]}/0/*" for i in range(3)
+        )
+        order = (2, 0, 1) if reorder_internal else (0, 1, 2)
+        int_keys = ",".join(
+            f"[{fps[i]}/84'/0'/0']{K[i]}/1/*" for i in order
+        )
+        external = f"wsh(sortedmulti(2,{ext_keys}))"
+        internal = f"wsh(sortedmulti(2,{int_keys}))"
+        return f"External: {external}\n\nInternal: {internal}"
+
+    def test_external_internal_werden_eine_wallet(self):
+        gefunden = deskriptoren_aus_text(self._bitkey_text())
+        self.assertEqual(len(gefunden), 1)
+        self.assertIn("/<0;1>/*", gefunden[0])
+        self.assertTrue(main.derive_addresses(gefunden[0], max_addresses=6))
+
+    def test_empfang_index_null_nicht_change(self):
+        """Vergleichsadresse = Empfang #0, wie im Bitkey-QR — nicht Change."""
+        from core.config import WalletEntry, erste_empfangsadresse
+
+        vereint = deskriptoren_aus_text(self._bitkey_text())[0]
+        empfang = erste_empfangsadresse(WalletEntry(descriptor=vereint))
+        self.assertEqual(empfang, main.derive_address_at_index(vereint, 0, 0))
+        self.assertNotEqual(empfang, main.derive_address_at_index(vereint, 1, 0))
+
+    def test_internal_zuerst_und_leere_zeile(self):
+        fps = ("34eae6a8", "3bef7db3", "aabbccdd")
+        ext = (
+            f"wsh(sortedmulti(2,"
+            f"[{fps[0]}/84'/0'/0']{K[0]}/0/*,"
+            f"[{fps[1]}/84'/0'/0']{K[1]}/0/*,"
+            f"[{fps[2]}/84'/0'/0']{K[2]}/0/*))"
+        )
+        intr = (
+            f"wsh(sortedmulti(2,"
+            f"[{fps[0]}/84'/0'/0']{K[0]}/1/*,"
+            f"[{fps[1]}/84'/0'/0']{K[1]}/1/*,"
+            f"[{fps[2]}/84'/0'/0']{K[2]}/1/*))"
+        )
+        text = f"Internal: {intr}\n\nExternal: {ext}\n"
+        gefunden = deskriptoren_aus_text(text)
+        self.assertEqual(len(gefunden), 1)
+        self.assertIn("<0;1>", gefunden[0])
+
+    def test_vertauschte_cosigner_im_bitkey_export(self):
+        gefunden = deskriptoren_aus_text(self._bitkey_text(reorder_internal=True))
+        self.assertEqual(len(gefunden), 1)
+
 
 class TestTaproot(unittest.TestCase):
 

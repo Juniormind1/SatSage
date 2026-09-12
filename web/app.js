@@ -1569,6 +1569,833 @@ function macheLogZiehbar() {
 
 const DOCK_SPALTE_MERKER = "xpq-dock-spalte";
 
+const EMPFANG_POLL_MS = 12_000;
+
+/** QR-Matrix → SVG (lokal, kein CDN). */
+function empfangQrSvg(text, { dunkel = false } = {}) {
+  if (typeof window.QR !== "function" || !text) return "";
+  let matrix;
+  try {
+    matrix = window.QR(String(text));
+  } catch (_) {
+    return "";
+  }
+  if (!matrix || !matrix.length) return "";
+  const n = matrix.length;
+  const quiet = 2;
+  const size = n + quiet * 2;
+  const teile = [];
+  for (let y = 0; y < n; y++) {
+    const zeile = matrix[y];
+    if (!zeile) continue;
+    for (let x = 0; x < n; x++) {
+      if (zeile[x]) teile.push(`M${x + quiet},${y + quiet}h1v1h-1z`);
+    }
+  }
+  // Dunkel: nur Graustufen — nicht scannbar/beruhigend beim „Denken“.
+  const bg = dunkel ? "#111111" : "#fff";
+  const fg = dunkel ? "#9a9a9a" : "#000";
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" ` +
+    `shape-rendering="crispEdges" role="img" aria-hidden="true">` +
+    `<rect width="100%" height="100%" fill="${bg}"/>` +
+    `<path fill="${fg}" d="${teile.join("")}"/></svg>`
+  );
+}
+
+/**
+ * Herzschlag: gedimmter QR nur durch Glyph-Maske sichtbar — nie scanbar.
+ * Atem = QR-Alpha; bei „alles Hintergrund“ ₿ → sat → Pfeife (→ Student wenn Lernhinweise).
+ */
+const EmpfangPuls = (() => {
+  let raf = 0;
+  let startTs = 0;
+  let maskeIx = 0;
+  let gewechseltInZyklus = false;
+  let canvas = null;
+  let ctx = null;
+  let qrBmp = null; // ImageData-fertig gerendertes QR (volle Fläche)
+  let qrSeite = 0;
+  let maskLuma = {}; // art → Uint8ClampedArray luma 0..255
+  const MASK_SRC = {
+    btc: "/img/bitcoin-mask.png",
+    sat: "/img/sat-mask.png",
+    pfeiffe: "/img/pfeiffe-mask.png",
+    student: "/img/student-mask.png",
+  };
+  // Gleicher Hintergrund für alle Masken (dark: schwarz; light ggf. später).
+  const MASK_BG = {
+    btc: "#000000",
+    sat: "#000000",
+    pfeiffe: "#000000",
+    student: "#000000",
+  };
+
+  function maskenListe() {
+    // Student-Silhouette nur mit „Lernhinweise für Plebs“.
+    if (typeof lernhinweiseAn === "function" && lernhinweiseAn()) {
+      return ["btc", "sat", "pfeiffe", "student"];
+    }
+    return ["btc", "sat", "pfeiffe"];
+  }
+
+  const PAYLOADS = [
+    "satsage:denken",
+    "satsage:warten",
+    "satsage:suchen",
+    "satsage:atmen",
+  ];
+  let payloadIx = 0;
+  const ATEM_MS = 2200;
+
+  function stop() {
+    if (raf) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+    startTs = 0;
+    gewechseltInZyklus = false;
+    const pane = $("#empfang-pane");
+    if (pane) pane.classList.remove("empfang-pane--puls");
+    const qr = $("#empfang-qr");
+    if (qr) {
+      qr.classList.remove("empfang-qr--puls");
+      qr.replaceChildren();
+    }
+    const maske = $("#empfang-qr-maske");
+    if (maske) {
+      maske.hidden = true;
+      maske.replaceChildren();
+    }
+    canvas = null;
+    ctx = null;
+    qrBmp = null;
+    qrSeite = 0;
+  }
+
+  function ladeBild(src) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  async function bereiteMaskeLuma(art, seite) {
+    const key = `${art}@${seite}`;
+    if (maskLuma[key]) return maskLuma[key];
+    const img = await ladeBild(MASK_SRC[art]);
+    if (!img) return null;
+    const c = document.createElement("canvas");
+    c.width = seite;
+    c.height = seite;
+    const cctx = c.getContext("2d");
+    cctx.drawImage(img, 0, 0, seite, seite);
+    const data = cctx.getImageData(0, 0, seite, seite).data;
+    const luma = new Uint8Array(seite * seite);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      luma[p] = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    }
+    maskLuma[key] = luma;
+    return luma;
+  }
+
+  function stelleCanvas() {
+    const host = $("#empfang-qr");
+    if (!host) return null;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.className = "empfang-puls-canvas";
+      canvas.setAttribute("aria-hidden", "true");
+      host.replaceChildren(canvas);
+      ctx = canvas.getContext("2d");
+    } else if (!host.contains(canvas)) {
+      host.replaceChildren(canvas);
+    }
+    const wrap = host.closest(".empfang-qr-wrap") || host;
+    const seite = Math.max(
+      64,
+      Math.floor(Math.min(wrap.clientWidth || 160, wrap.clientHeight || 160)),
+    );
+    if (canvas.width !== seite || canvas.height !== seite) {
+      canvas.width = seite;
+      canvas.height = seite;
+      qrBmp = null;
+      qrSeite = 0;
+    }
+    return canvas;
+  }
+
+  function baueQrBitmap(seite) {
+    if (qrBmp && qrSeite === seite) return Promise.resolve(qrBmp);
+    const payload = PAYLOADS[payloadIx % PAYLOADS.length];
+    const svg = empfangQrSvg(payload, { dunkel: true });
+    if (!svg) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = seite;
+        c.height = seite;
+        const qctx = c.getContext("2d");
+        qctx.fillStyle = "#111111";
+        qctx.fillRect(0, 0, seite, seite);
+        qctx.drawImage(img, 0, 0, seite, seite);
+        const data = qctx.getImageData(0, 0, seite, seite);
+        // Harte Graustufen — keine Brauntöne aus SVG/Skalierung.
+        const d = data.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const g = Math.round((d[i] + d[i + 1] + d[i + 2]) / 3);
+          d[i] = d[i + 1] = d[i + 2] = g;
+          d[i + 3] = 255;
+        }
+        qrBmp = data;
+        qrSeite = seite;
+        resolve(qrBmp);
+      };
+      img.onerror = () => resolve(null);
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    });
+  }
+
+  async function zeichne(sichtQr) {
+    const c = stelleCanvas();
+    if (!c || !ctx) return;
+    const seite = c.width;
+    const listen = maskenListe();
+    const art = listen[maskeIx % listen.length];
+    const luma = await bereiteMaskeLuma(art, seite);
+    const qr = await baueQrBitmap(seite);
+
+    const dark = (typeof liesUiTheme === "function" ? liesUiTheme() : "dark") !== "light";
+    // Dark: schwarzer Grund, weißer Randglanz; Light: umgekehrt.
+    const bg = dark ? 0 : 255;
+    const glow = dark ? 255 : 0;
+    const out = ctx.createImageData(seite, seite);
+    const od = out.data;
+    const qd = qr ? qr.data : null;
+    const aScale = Math.max(0, Math.min(1, sichtQr));
+    const innen = new Uint8Array(seite * seite);
+    if (luma) {
+      for (let p = 0; p < luma.length; p++) {
+        innen[p] = luma[p] >= 120 ? 1 : 0;
+      }
+    }
+
+    for (let y = 0, p = 0; y < seite; y++) {
+      for (let x = 0; x < seite; x++, p++) {
+        const i = p * 4;
+        const maskA = luma ? Math.max(0, Math.min(1, (luma[p] - 40) / 180)) : 0;
+        let g = bg;
+        if (qd && maskA > 0.02 && aScale > 0) {
+          const a = aScale * maskA;
+          g = Math.round(qd[i] * a + bg * (1 - a));
+        }
+        // Rand des Glyphs „erstrahlen“ lassen (Nachbar außerhalb).
+        if (innen[p]) {
+          let rand = false;
+          if (x === 0 || y === 0 || x === seite - 1 || y === seite - 1) {
+            rand = true;
+          } else if (
+            !innen[p - 1] || !innen[p + 1]
+            || !innen[p - seite] || !innen[p + seite]
+          ) {
+            rand = true;
+          }
+          if (rand) {
+            // Einatmen: Rand darf scharf kommen; Ausatmen: mitdimmen (kein Abriss).
+            const glowA = aScale;
+            if (glowA > 0.01) {
+              g = Math.round(glow * glowA + g * (1 - glowA));
+            }
+          }
+        }
+        od[i] = od[i + 1] = od[i + 2] = g;
+        od[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+
+  function tick(ts) {
+    if (!startTs) startTs = ts;
+    const tNorm = ((ts - startTs) % ATEM_MS) / ATEM_MS;
+    // Einatmen 0→1, Ausatmen 1→0
+    const sicht = tNorm < 0.5
+      ? (tNorm / 0.5)
+      : (1 - (tNorm - 0.5) / 0.5);
+    // Am Talboden (alles Hintergrund): Maske wechseln, einmal pro Zyklus.
+    if (tNorm >= 0.97 || tNorm <= 0.03) {
+      if (!gewechseltInZyklus && tNorm >= 0.97) {
+        const n = maskenListe().length;
+        maskeIx = (maskeIx + 1) % n;
+        payloadIx += 1;
+        qrBmp = null;
+        qrSeite = 0;
+        gewechseltInZyklus = true;
+      }
+    } else {
+      gewechseltInZyklus = false;
+    }
+    zeichne(sicht).catch(() => {});
+    raf = requestAnimationFrame(tick);
+  }
+
+  function start() {
+    // Schon am Atmen → nicht neu anstoßen (Poll würde sonst den Takt resetten).
+    if (raf) return;
+    maskeIx = 0;
+    payloadIx = 0;
+    maskLuma = {}; // Masken-Assets können sich ändern (z. B. B ohne Kreisrand)
+    const pane = $("#empfang-pane");
+    const leer = $("#empfang-leer");
+    const inhalt = $("#empfang-inhalt");
+    if (pane) pane.classList.add("empfang-pane--puls");
+    if (leer) leer.hidden = true;
+    if (inhalt) inhalt.hidden = false;
+    const qr = $("#empfang-qr");
+    if (qr) {
+      qr.classList.add("empfang-qr--puls");
+      qr.title = t("dock.empfangPuls");
+    }
+    const maske = $("#empfang-qr-maske");
+    if (maske) {
+      maske.hidden = true;
+      maske.replaceChildren();
+    }
+    setzeText($("#empfang-wallet"), t("dock.empfangPuls"));
+    setzeText($("#empfang-adresse"), "");
+    setzeText($("#empfang-index"), "");
+    setzeText($("#empfang-quelle"), "");
+    const zurueck = $("#empfang-lern-zurueck");
+    if (zurueck) zurueck.hidden = true;
+    Promise.all(maskenListe().map((a) => ladeBild(MASK_SRC[a]))).then(() => {
+      if (raf) return;
+      stelleCanvas();
+      startTs = 0;
+      raf = requestAnimationFrame(tick);
+    });
+  }
+
+  function laeuft() {
+    return Boolean(raf);
+  }
+
+  return { start, stop, laeuft };
+})();
+
+function empfangQuelleLabel(source) {
+  if (source === "fulcrum") return t("dock.empfangSourceFulcrum");
+  if (source === "cache_estimate") return t("dock.empfangSourceCache");
+  return source || "";
+}
+
+function lernhinweiseAn() {
+  return Boolean(Zustand.config?.lernhinweise_plebs);
+}
+
+function lernLang() {
+  const lang = (Zustand.config?.ui_lang || "de").toLowerCase();
+  return lang.startsWith("en") ? "en" : "de";
+}
+
+async function ladeLernhinweiseKatalog() {
+  if (Zustand.lernhinweise) return Zustand.lernhinweise;
+  try {
+    const antwort = await fetch("/lernhinweise.json", { credentials: "same-origin" });
+    if (!antwort.ok) return null;
+    Zustand.lernhinweise = await antwort.json();
+    return Zustand.lernhinweise;
+  } catch (_) {
+    return null;
+  }
+}
+
+function lernThemaEintrag(id) {
+  const kat = Zustand.lernhinweise;
+  if (!kat || !Array.isArray(kat.themen)) return null;
+  return kat.themen.find((t) => t && t.id === id && t.status !== "verworfen") || null;
+}
+
+function lernUrlFuerThema(eintrag) {
+  if (!eintrag) return null;
+  const block = eintrag[lernLang()] || eintrag.de || eintrag.en;
+  if (!block || !block.url) return null;
+  return {
+    url: String(block.url),
+    titel: String(block.titel || ""),
+    stichwort: String(
+      (lernLang() === "en" ? eintrag.stichwort_en : eintrag.stichwort_de)
+      || eintrag.id
+      || "",
+    ),
+  };
+}
+
+function ergaenzeLernTooltip(el) {
+  if (!lernhinweiseAn() || !el || !el.getAttribute) return;
+  const id = el.getAttribute("data-lern");
+  if (!id) return;
+  const ziel = lernUrlFuerThema(lernThemaEintrag(id));
+  if (!ziel) return;
+  // Basis immer frisch aus i18n-Title, sonst überschreibt Locale den Kaninchenbau.
+  const i18nKey = el.getAttribute("data-i18n-title");
+  const basis = i18nKey
+    ? t(i18nKey)
+    : (el.dataset.lernBaseTitle || el.getAttribute("title") || "");
+  el.dataset.lernBaseTitle = basis;
+  const suffix = t("lernhinweise.tooltipSuffix", { url: ziel.url });
+  el.setAttribute("title", basis ? `${basis} — ${suffix}` : suffix);
+}
+
+async function wendeAlleLernTooltipsAn() {
+  if (!lernhinweiseAn()) return;
+  await ladeLernhinweiseKatalog();
+  document.querySelectorAll("[data-lern]").forEach((el) => {
+    ergaenzeLernTooltip(el);
+  });
+}
+
+async function setzeLernThema(id) {
+  if (!lernhinweiseAn()) return;
+  await ladeLernhinweiseKatalog();
+  const ziel = lernUrlFuerThema(lernThemaEintrag(id));
+  if (!ziel) return;
+  Zustand.lernThema = { id, ...ziel };
+  zeichneEmpfangLernstoff(Zustand.lernThema);
+}
+
+function loescheLernThema() {
+  Zustand.lernThema = null;
+  const pane = $("#empfang-pane");
+  if (pane) pane.classList.remove("empfang-pane--lern");
+  const zurueck = $("#empfang-lern-zurueck");
+  if (zurueck) zurueck.hidden = true;
+  if (Zustand.walletId) {
+    ladeEmpfang(Zustand.walletId).catch(() => {});
+  } else {
+    zeichneEmpfangLeer();
+  }
+}
+
+function zeichneEmpfangLernstoff(thema) {
+  if (!thema || !thema.url) return;
+  EmpfangPuls.stop();
+  // Flüchtigkeit: Empfangsadresse entwerten, bevor Lern-QR erscheint.
+  const leer = $("#empfang-leer");
+  const inhalt = $("#empfang-inhalt");
+  if (leer) leer.hidden = true;
+  if (!inhalt) return;
+  inhalt.hidden = false;
+  const pane = $("#empfang-pane");
+  if (pane) {
+    pane.classList.add("empfang-pane--lern");
+    pane.classList.remove("empfang-pane--puls");
+  }
+
+  const qr = $("#empfang-qr");
+  if (qr) {
+    const svg = empfangQrSvg(thema.url);
+    qr.replaceChildren();
+    if (svg) qr.insertAdjacentHTML("afterbegin", svg);
+    qr.title = t("dock.empfangLernClick");
+    qr.classList.add("kopierbar");
+    qr.classList.remove("empfang-qr--puls");
+  }
+  setzeText(
+    $("#empfang-wallet"),
+    t("dock.empfangLernstoff", { topic: thema.stichwort || thema.id }),
+  );
+  const adresse = $("#empfang-adresse");
+  if (adresse) {
+    adresse.replaceChildren();
+    adresse.textContent = thema.url;
+    adresse.title = t("dock.empfangLernClick");
+    adresse.classList.add("kopierbar");
+  }
+  setzeText($("#empfang-index"), "");
+  setzeText($("#empfang-quelle"), thema.titel || "");
+  const zurueck = $("#empfang-lern-zurueck");
+  if (zurueck) zurueck.hidden = false;
+  Zustand.empfang = {
+    wallet_id: Zustand.walletId,
+    address: "",
+    index: 0,
+    lern: true,
+    url: thema.url,
+  };
+}
+
+function oeffneLernUrl(url) {
+  const ziel = String(url || "").trim();
+  if (!ziel) return;
+  const schreiben = navigator.clipboard && navigator.clipboard.writeText
+    ? navigator.clipboard.writeText(ziel)
+    : Promise.reject();
+  schreiben.catch(() => {
+    /* Clipboard optional — Tab öffnen trotzdem */
+  }).finally(() => {
+    try {
+      window.open(ziel, "_blank", "noopener,noreferrer");
+    } catch (_) { /* ignore */ }
+  });
+}
+
+function setzeLernhinweiseDelegates() {
+  if (document.documentElement.dataset.lernDelegates === "1") return;
+  document.documentElement.dataset.lernDelegates = "1";
+  document.addEventListener("mouseover", (e) => {
+    if (!lernhinweiseAn()) return;
+    const el = e.target && e.target.closest && e.target.closest("[data-lern]");
+    if (!el) return;
+    const id = el.getAttribute("data-lern");
+    const anwenden = () => {
+      ergaenzeLernTooltip(el);
+      // Tooltip sichtbar ↔ Empfangs-QR zeigt dieselbe Lern-URL (anklickbar).
+      if (id && Zustand.lernThema?.id !== id) {
+        setzeLernThema(id);
+      }
+    };
+    if (!Zustand.lernhinweise) {
+      ladeLernhinweiseKatalog().then(anwenden);
+      return;
+    }
+    anwenden();
+  });
+  document.addEventListener("click", (e) => {
+    if (!lernhinweiseAn()) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    // Klick auf Lern-QR / URL darunter → Tab öffnen (nicht als data-lern werten).
+    if (Zustand.empfang?.lern && Zustand.empfang.url) {
+      const amQr = e.target && e.target.closest
+        && e.target.closest("#empfang-qr, #empfang-adresse");
+      if (amQr) {
+        e.preventDefault();
+        e.stopPropagation();
+        oeffneLernUrl(Zustand.empfang.url);
+        return;
+      }
+    }
+    const el = e.target && e.target.closest && e.target.closest("[data-lern]");
+    if (!el) return;
+    setzeLernThema(el.getAttribute("data-lern"));
+  });
+}
+
+function zeichneLernhinweiseEinstellung() {
+  const box = $("#lernhinweise-plebs");
+  if (!box) return;
+  box.checked = Boolean(Zustand.config?.lernhinweise_plebs);
+}
+
+async function speichereLernhinweiseEinstellung() {
+  const box = $("#lernhinweise-plebs");
+  if (!box) return;
+  const an = Boolean(box.checked);
+  const ergebnis = await api("/config/lernhinweise-plebs", {
+    methode: "PUT",
+    daten: { lernhinweise_plebs: an },
+  });
+  if (Zustand.config) {
+    Zustand.config.lernhinweise_plebs = Boolean(ergebnis.lernhinweise_plebs);
+  }
+  if (!an) {
+    Zustand.lernThema = null;
+    document.querySelectorAll("[data-lern]").forEach((el) => {
+      const basis = el.dataset.lernBaseTitle;
+      if (basis != null) el.setAttribute("title", basis);
+    });
+    if (Zustand.walletId) ladeEmpfang(Zustand.walletId).catch(() => {});
+  } else {
+    await wendeAlleLernTooltipsAn();
+  }
+  zeichneLernhinweiseEinstellung();
+  if (typeof meldung === "function") {
+    meldung(
+      an ? t("settings.lernhinweise.savedAn") : t("settings.lernhinweise.saved"),
+      "gut",
+    );
+  }
+}
+
+function stoppeEmpfangPoll() {
+  if (Zustand.empfangTimer) {
+    clearInterval(Zustand.empfangTimer);
+    Zustand.empfangTimer = null;
+  }
+}
+
+function setzeEmpfangPoll() {
+  stoppeEmpfangPoll();
+  Zustand.empfangTimer = setInterval(() => {
+    const pane = $("#empfang-pane");
+    if (!pane || pane.offsetParent === null) return;
+    if (!Zustand.walletId) return;
+    ladeEmpfang(Zustand.walletId, { still: true }).catch(() => {});
+  }, EMPFANG_POLL_MS);
+}
+
+function zeichneEmpfangLeer(text, { puls = false } = {}) {
+  // Puls weiterlaufen lassen, wenn wir ohnehin wieder atmen sollen.
+  if (!puls) EmpfangPuls.stop();
+  const leer = $("#empfang-leer");
+  const inhalt = $("#empfang-inhalt");
+  if (!puls) {
+    const qr = $("#empfang-qr");
+    if (qr) {
+      qr.replaceChildren();
+      qr.removeAttribute("title");
+      qr.classList.remove("empfang-qr--puls");
+    }
+  }
+  const adresse = $("#empfang-adresse");
+  if (adresse) {
+    adresse.replaceChildren();
+    adresse.textContent = "";
+    adresse.removeAttribute("title");
+    adresse.classList.remove("kopierbar", "kopierbar-ok", "kopierbar-fehl");
+  }
+  if (!puls) {
+    setzeText($("#empfang-wallet"), "");
+    setzeText($("#empfang-index"), "");
+    setzeText($("#empfang-quelle"), "");
+  }
+  const hinweis = $("#empfang-hinweis");
+  if (hinweis) {
+    hinweis.hidden = true;
+    hinweis.textContent = "";
+  }
+  const zurueck = $("#empfang-lern-zurueck");
+  if (zurueck) zurueck.hidden = true;
+  const pane = $("#empfang-pane");
+  if (pane && !puls) {
+    pane.classList.remove("empfang-pane--lern", "empfang-pane--puls");
+  }
+  Zustand.empfang = null;
+
+  if (puls) {
+    EmpfangPuls.start();
+    return;
+  }
+  if (leer) {
+    leer.hidden = false;
+    leer.textContent = text || t("dock.empfangEmpty");
+  }
+  if (inhalt) inhalt.hidden = true;
+}
+
+function zeichneEmpfangReadOnly(walletName) {
+  zeichneEmpfangLeer(t("dock.empfangReadOnly"));
+  const leer = $("#empfang-leer");
+  if (leer && walletName) {
+    leer.textContent = t("dock.empfangReadOnly");
+  }
+}
+
+function zeichneEmpfang(daten, { zahlung = false } = {}) {
+  EmpfangPuls.stop();
+  if (daten && daten.read_only) {
+    zeichneEmpfangReadOnly(daten.wallet_name);
+    Zustand.empfang = {
+      wallet_id: daten.wallet_id,
+      address: "",
+      index: daten.index,
+      read_only: true,
+    };
+    if (daten.wallet_id) {
+      Zustand.empfangByWallet[daten.wallet_id] = daten;
+    }
+    return;
+  }
+
+  const leer = $("#empfang-leer");
+  const inhalt = $("#empfang-inhalt");
+  if (!inhalt) return;
+  if (leer) leer.hidden = true;
+  inhalt.hidden = false;
+  const pane = $("#empfang-pane");
+  if (pane) pane.classList.remove("empfang-pane--lern", "empfang-pane--puls");
+  const zurueck = $("#empfang-lern-zurueck");
+  if (zurueck) zurueck.hidden = true;
+
+  const qr = $("#empfang-qr");
+  if (qr) {
+    const svg = empfangQrSvg(daten.address);
+    qr.replaceChildren();
+    if (svg) {
+      qr.insertAdjacentHTML("afterbegin", svg);
+    } else {
+      qr.textContent = t("dock.empfangQrFehlt");
+    }
+  }
+
+  setzeText($("#empfang-wallet"), daten.wallet_name || "");
+  const adresse = $("#empfang-adresse");
+  if (adresse) {
+    adresse.replaceChildren();
+    const kurz = String(daten.address || "");
+    adresse.textContent = kurz;
+    macheKopierbar(adresse, kurz, "Adresse");
+  }
+  setzeText(
+    $("#empfang-index"),
+    t("dock.empfangIndex", { n: daten.index }),
+  );
+  setzeText($("#empfang-quelle"), empfangQuelleLabel(daten.source));
+
+  const hinweis = $("#empfang-hinweis");
+  if (hinweis) {
+    if (zahlung) {
+      hinweis.hidden = false;
+      hinweis.textContent = t("dock.empfangZahlung");
+    } else if (!hinweis.hidden && Zustand.empfang?.address === daten.address) {
+      /* Hinweis bleibt kurz stehen, bis Adresse wechselt */
+    } else {
+      hinweis.hidden = true;
+      hinweis.textContent = "";
+    }
+  }
+  Zustand.empfang = {
+    wallet_id: daten.wallet_id,
+    address: daten.address,
+    index: daten.index,
+    read_only: false,
+  };
+  if (daten.wallet_id) {
+    Zustand.empfangByWallet[daten.wallet_id] = daten;
+  }
+}
+
+/** Tip-/Start-Aktualisierung betrifft dieses Wallet (oder alle). */
+function tipSyncLaeuftFuer(walletId) {
+  if (!walletId) return false;
+  if (walletSyncLaeuftFuer(walletId)) return true;
+  const id = Zustand.walletSyncJob || Zustand.config?.wallet_sync_job_id;
+  if (!id) return false;
+  const jobs = Zustand.jobsNav?.jobs || [];
+  const j = jobs.find((x) => x && x.id === id);
+  if (j) {
+    const aktiv = Boolean(
+      j.running
+      || j.status === "running"
+      || j.status === "queued"
+      || j.queue_status === "queued",
+    );
+    if (!aktiv) return false;
+    const ids = j.meta?.wallet_ids;
+    if (Array.isArray(ids) && ids.length) return ids.includes(walletId);
+    if (j.meta?.wallet_id) return j.meta.wallet_id === walletId;
+    return true;
+  }
+  // Folger schon aktiv, jobsNav noch ohne Meta → für gewähltes Wallet atmen.
+  return Boolean(Zustand.walletSyncTimer || Zustand.walletSyncJob);
+}
+
+/** Empfang noch unsicher: UTXO-/Verlaufs-Scan oder Tip-/Start-Sync. */
+function empfangScanLaeuftFuer(walletId) {
+  if (!walletId) return false;
+  if (
+    Zustand.rescanJob
+    && Zustand.scanWalletId === walletId
+    && (Zustand.scanArt === "utxo" || Zustand.scanArt === "verlauf")
+  ) {
+    return true;
+  }
+  return tipSyncLaeuftFuer(walletId);
+}
+
+async function ladeEmpfang(walletId, { still = false } = {}) {
+  if (!walletId) {
+    zeichneEmpfangLeer();
+    return null;
+  }
+
+  const walletMeta = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+
+  // Scan/Sync hat Vorrang vor Lern-QR — sonst bleibt Cache-Text ohne Atmung.
+  if (empfangScanLaeuftFuer(walletId)) {
+    Zustand.lernThema = null;
+    if (walletMeta && walletMeta.read_only) {
+      zeichneEmpfangReadOnly(walletMeta.name);
+      return null;
+    }
+    if (!EmpfangPuls.laeuft()) {
+      EmpfangPuls.start();
+    }
+    Zustand.empfang = {
+      wallet_id: walletId,
+      address: "",
+      index: 0,
+      puls: true,
+    };
+    return null;
+  }
+
+  // Lern-QR (Hover/Klick) nicht durch Poll/Cache überschreiben — nur ohne Scan.
+  if (still && Zustand.lernThema && lernhinweiseAn() && Zustand.empfang?.lern) {
+    return null;
+  }
+
+  // Flüchtigkeit: bei Kontextwechsel QR/Adresse sofort ungültig.
+  const gleicherWallet = Zustand.empfang && Zustand.empfang.wallet_id === walletId
+    && !Zustand.empfang.lern;
+
+  if (walletMeta && walletMeta.read_only) {
+    zeichneEmpfangReadOnly(walletMeta.name);
+  } else if (!still || !gleicherWallet) {
+    // Wallet-Wechsel oder Erstladen: scannbaren QR entfernen + Herzschlag.
+    zeichneEmpfangLeer(t("dock.empfangLade"), { puls: true });
+  }
+  // still + gleiches Wallet (Poll): sichtbaren QR stehen lassen, bis neue
+  // Antwort da ist — Adresse gehört noch zu diesem Wallet.
+
+  Zustand.empfangLadeGen = (Zustand.empfangLadeGen || 0) + 1;
+  const gen = Zustand.empfangLadeGen;
+  try {
+    const daten = await api(`/wallets/${walletId}/empfang`);
+    if (gen !== Zustand.empfangLadeGen || Zustand.walletId !== walletId) {
+      return null;
+    }
+    // Scan kann während dem Request gestartet haben — Cache-QR unterdrücken.
+    if (empfangScanLaeuftFuer(walletId)) {
+      Zustand.lernThema = null;
+      if (!EmpfangPuls.laeuft()) EmpfangPuls.start();
+      Zustand.empfang = {
+        wallet_id: walletId,
+        address: "",
+        index: 0,
+        puls: true,
+      };
+      return null;
+    }
+    const alt = Zustand.empfangByWallet[walletId];
+    const zahlung = Boolean(
+      alt
+      && !daten.read_only
+      && alt.address
+      && daten.address
+      && alt.address !== daten.address,
+    );
+    zeichneEmpfang(daten, { zahlung });
+    if (zahlung && Zustand.ansicht === "wallet" && Zustand.walletId === walletId) {
+      zeigeWallet(walletId).catch(() => {});
+    }
+    return daten;
+  } catch (fehler) {
+    if (gen !== Zustand.empfangLadeGen) return null;
+    if (empfangScanLaeuftFuer(walletId)) {
+      Zustand.lernThema = null;
+      if (!EmpfangPuls.laeuft()) EmpfangPuls.start();
+      return null;
+    }
+    if (!still) {
+      zeichneEmpfangLeer(fehler.message || t("dock.empfangFehler"));
+    }
+    return null;
+  }
+}
+
 function macheDockSpalter() {
   const spalter = $("#dock-spalter");
   const spalten = document.querySelector(".dock-spalten");
@@ -1747,6 +2574,14 @@ const Zustand = {
   kursTimer: null,
   chatMessages: [],
   chatWartet: false,
+  /** Empfangs-QR: letzte Adresse / Poll-Handle / Cache je Wallet. */
+  empfang: null,
+  empfangByWallet: Object.create(null),
+  empfangTimer: null,
+  empfangLadeGen: 0,
+  /** Lernhinweise für Plebs (Experiment). */
+  lernhinweise: null,
+  lernThema: null,
   slashIndex: 0,
   traceJobs: new Map(),
   traceListe: null,
@@ -1770,6 +2605,7 @@ function entwurfGeaendert() {
       (w.name || "") !== (alt.name || "")
       || w.script_type !== alt.script_type
       || Number(w.max_addresses) !== Number(alt.max_addresses)
+      || Boolean(w.read_only) !== Boolean(alt.read_only)
     ) {
       return true;
     }
@@ -1787,6 +2623,7 @@ function walletZeileGeaendert(wallet) {
     (wallet.name || "") !== (alt.name || "")
     || wallet.script_type !== alt.script_type
     || Number(wallet.max_addresses) !== Number(alt.max_addresses)
+    || Boolean(wallet.read_only) !== Boolean(alt.read_only)
   );
 }
 
@@ -2002,6 +2839,7 @@ async function zeigeWallet(walletId) {
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
   const ladeGen = Zustand.walletLadeGen;
   zeigeAnsicht("wallet");
+  ladeEmpfang(walletId).catch(() => {});
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   setzeText($("#wallet-titel"), wallet ? wallet.name : t("common.wallet"));
@@ -2916,6 +3754,12 @@ function bindeWalletScanJob(job, ziel) {
   nimmJobLog(job);
   aktualisiereScanAnzeige(job.message || "wird gestartet…");
   zeichneNav();
+  // Empfangs-Pane: Herzschlag wenn dieses Wallet gewählt (Lern-QR weichen).
+  if (Zustand.walletId === ziel.id) {
+    Zustand.lernThema = null;
+    EmpfangPuls.stop();
+    ladeEmpfang(ziel.id).catch(() => {});
+  }
   if (Zustand.rescanTimer) clearInterval(Zustand.rescanTimer);
   Zustand.rescanTimer = setInterval(pruefeWalletScan, 900);
 }
@@ -3012,6 +3856,7 @@ async function erfrischeWalletNachScan(scanId) {
 function beendeRescan(_meldung, _istFehler = false) {
   clearInterval(Zustand.rescanTimer);
   Zustand.rescanTimer = null;
+  const scanId = Zustand.scanWalletId;
   Zustand.rescanJob = null;
   Zustand.scanArt = null;
   Zustand.scanWalletId = null;
@@ -3019,6 +3864,7 @@ function beendeRescan(_meldung, _istFehler = false) {
   Zustand.scanUtxoZahl = null;
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
+  EmpfangPuls.stop();
   const leiste = $("#rescan-lauf");
   const pipe = scanPipeline();
   if (leiste && !pipe.current && !(pipe.queued || []).length) {
@@ -3029,6 +3875,9 @@ function beendeRescan(_meldung, _istFehler = false) {
   // Wallet-Inhalt kommt vom Cache-Zwischenstand (Caller refreshed) —
   // hier keine Leer-Meldung mehr, die gefundene UTXOs verdecken würde.
   zeichneNav();
+  if (scanId && Zustand.walletId === scanId && !Zustand.lernThema) {
+    ladeEmpfang(scanId).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -5605,6 +6454,15 @@ function zeichneWalletVerwaltung() {
       aktualisiereKnopf();
     });
 
+    const nurLesen = zeile.querySelector(".read-only-wahl");
+    if (nurLesen) {
+      nurLesen.checked = Boolean(wallet.read_only);
+      nurLesen.addEventListener("change", () => {
+        wallet.read_only = Boolean(nurLesen.checked);
+        aktualisiereKnopf();
+      });
+    }
+
     const ergebnisFeld = zeile.querySelector(".probe-ergebnis");
     zeile.querySelector(".pruefen").addEventListener("click", (ereignis) => {
       pruefeSkripttyp(wallet, ergebnisFeld, ereignis.currentTarget);
@@ -7643,6 +8501,7 @@ function walletsNutzlast() {
     name: w.name,
     script_type: w.script_type,
     max_addresses: w.max_addresses,
+    read_only: Boolean(w.read_only),
   }));
 }
 
@@ -7940,6 +8799,7 @@ function uebernimmDeskriptor(treffer) {
     script_type: treffer.script_type,
     script_type_label: treffer.script_type_label,
     max_addresses: 50,
+    read_only: false,
     has_cache: false,
     utxo_count: 0,
     is_new: true,
@@ -7986,6 +8846,7 @@ function fuegeWalletHinzu() {
     prefix: xpub.slice(0, 4).toLowerCase(),
     script_type: "auto",
     max_addresses: 50,
+    read_only: false,
     has_cache: false,
     utxo_count: 0,
     is_new: true,
@@ -8752,10 +9613,11 @@ function zeichneKopfStatus(quellen) {
   if (coreVerbunden || kopfQuelleAufbau(core) || kopfQuelleFehler(core)) {
     eintraege.push({
       key: "own_core",
+      lern: "core",
       label: t("header.sourceCore"),
       stufe: coreVerbunden ? "gut" : (kopfQuelleAufbau(core) ? "warn" : "krit"),
       title: core?.error
-        || "Bitcoin Core RPC (scantxoutset / Lookups), hohe Privatsphäre",
+        || t("header.sourceCoreTitle"),
     });
   }
 
@@ -8763,32 +9625,35 @@ function zeichneKopfStatus(quellen) {
     const n = p2pVerbunden ? p2pAnzahl : 0;
     eintraege.push({
       key: "bip158",
+      lern: "p2p",
       label: t("header.p2pPeers", { n }),
       stufe: p2pAufbau
         ? "warn"
         : (p2pAnzahl > 2 ? "gut" : (p2pAnzahl > 0 ? "warn" : "krit")),
-      title: p2pTitle || t("header.p2pPeers", { n }),
+      title: p2pTitle || t("header.p2pTitle"),
     });
   }
 
   if (electrsVerbunden || kopfQuelleAufbau(electrs) || kopfQuelleFehler(electrs)) {
     eintraege.push({
       key: "own_fulcrum",
+      lern: "electrum",
       label: t("header.sourceElectrumOwn"),
       stufe: electrsVerbunden
         ? "gut"
         : (kopfQuelleAufbau(electrs) ? "warn" : "krit"),
       title: electrs?.error
-        || "Eigener Electrum-Server (Fulcrum/electrs) gemäß Datenquellen",
+        || t("header.sourceElectrumOwnTitle"),
     });
   }
 
   if (oeffentlichVerbunden) {
     eintraege.push({
       key: "public",
+      lern: "privatsphaere",
       label: t("header.sourceElectrumPublic"),
       stufe: "krit",
-      title: "Öffentliche Electrum-Server — keine Privatsphäre",
+      title: t("header.sourceElectrumPublicTitle"),
     });
   }
 
@@ -8828,11 +9693,18 @@ function zeichneKopfStatus(quellen) {
   for (const eintrag of eintraege) {
     const pill = pille(eintrag.stufe, eintrag.label);
     pill.title = eintrag.title;
+    if (eintrag.lern) pill.setAttribute("data-lern", eintrag.lern);
     status.append(pill);
   }
-  status.append(pille(privStufe, privText));
+  const privPill = pille(privStufe, privText);
+  privPill.title = t("header.privacyTitle");
+  privPill.setAttribute("data-lern", "privatsphaere");
+  status.append(privPill);
   zeichneKursPille();
   zeichneLlmPille();
+  if (lernhinweiseAn()) {
+    wendeAlleLernTooltipsAn().catch(() => {});
+  }
 }
 
 const LLM_TAKT_MS = 30000;
@@ -8848,16 +9720,17 @@ function formatKursLabel(preis) {
 
 function formatKursTooltip(preis) {
   if (!preis || !(Number(preis.amount) > 0)) {
-    return "Bitcoin-Kurs noch nicht geladen (Clearnet, ohne Wallet-Daten)";
+    return t("header.btcTitleEmpty");
   }
   const wann = preis.time
     ? new Date(Number(preis.time) * 1000).toLocaleString(formatLocale())
     : "?";
   const quelle = preis.source || "?";
-  return (
-    `1 BTC ≈ ${formatKursLabel(preis)} · Quelle: ${quelle} · Stand: ${wann}. ` +
-    "Abruf ohne Wallet-Adressen."
-  );
+  return t("header.btcTitleLive", {
+    preis: formatKursLabel(preis),
+    quelle,
+    wann,
+  });
 }
 
 function zeichneKursPille() {
@@ -8868,14 +9741,18 @@ function zeichneKursPille() {
   const neu = pille(stufe, formatKursLabel(preis));
   neu.id = "kurs-pille";
   neu.title = formatKursTooltip(preis);
+  neu.setAttribute("data-lern", "preis");
+  neu.setAttribute("data-i18n-title", "header.btcTitle");
   const alt = $("#kurs-pille");
   if (alt) {
     alt.replaceWith(neu);
+    if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
     return;
   }
   const llm = $("#llm-pille");
   if (llm) status.insertBefore(neu, llm);
   else status.append(neu);
+  if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
 }
 
 /** Tageskurs-Serie für EUR-Umrechnung ausgegebener Beträge (einmalig cachen). */
@@ -9506,6 +10383,10 @@ function folgeWalletSyncJob(jobId) {
   Zustand.walletSyncTimer = setInterval(pruefeWalletSyncJob, 900);
   pruefeWalletSyncJob();
   setzeWalletScanGesperrt();
+  // Empfangs-QR atmet bis Tip-Nachzug fertig (kein vorschnelles Cache-QR).
+  if (Zustand.walletId && !Zustand.lernThema) {
+    ladeEmpfang(Zustand.walletId).catch(() => {});
+  }
 }
 
 async function pruefeWalletSyncJob() {
@@ -9533,20 +10414,33 @@ async function pruefeWalletSyncJob() {
           `Tip-Nachzug fertig: ${n} Wallet(s), ${u ?? "?"} UTXO(s).`,
         );
       }
+      EmpfangPuls.stop();
+      Zustand.empfangByWallet = Object.create(null);
       await ladeConfig();
       await ladeJobsNav();
       setzeWalletScanGesperrt();
       if (Zustand.ansicht === "wallet" && Zustand.walletId) {
         await zeigeWallet(Zustand.walletId);
+      } else if (Zustand.walletId && !Zustand.lernThema) {
+        ladeEmpfang(Zustand.walletId).catch(() => {});
+        zeichneNav();
       } else {
         zeichneNav();
       }
     } else if (job.status === "cancelled") {
       logZeile("Tip-Nachzug abgebrochen.");
+      EmpfangPuls.stop();
       setzeWalletScanGesperrt();
+      if (Zustand.walletId && !Zustand.lernThema) {
+        ladeEmpfang(Zustand.walletId).catch(() => {});
+      }
     } else if (job.error) {
       logZeile(`Tip-Nachzug: ${job.error}`);
+      EmpfangPuls.stop();
       setzeWalletScanGesperrt();
+      if (Zustand.walletId && !Zustand.lernThema) {
+        ladeEmpfang(Zustand.walletId).catch(() => {});
+      }
     }
   } catch (_) {
     /* optionaler Hintergrund-Job */
@@ -9664,12 +10558,21 @@ async function ladeConfig() {
   zeichneUiTheme();
   fuellOnchainHinweisTexte();
   zeichneStartSync();
+  zeichneLernhinweiseEinstellung();
   zeichneLlmEinstellungen();
   zeichneStatusMailEinstellungen();
   zeichneMempoolStatus();
   zeichneChatAnbindung();
   zeichneNav();
   zeichneFussVersion();
+  if (Zustand.config?.lernhinweise_plebs) {
+    wendeAlleLernTooltipsAn().catch(() => {});
+  }
+  if (Zustand.walletId) {
+    ladeEmpfang(Zustand.walletId).catch(() => {});
+  } else {
+    zeichneEmpfangLeer();
+  }
   const hopFeld = $("#sank-hops");
   if (hopFeld) {
     const cap = Number(Zustand.config?.sanktion_max_hops_cap) || 20;
@@ -9705,6 +10608,8 @@ async function start() {
   });
   macheLogZiehbar();
   macheDockSpalter();
+  setzeEmpfangPoll();
+  setzeLernhinweiseDelegates();
 
   try {
     await ladeConfig();
@@ -9744,6 +10649,11 @@ async function start() {
       }
       const chatLeer = document.querySelector("#chat-verlauf .chat-leer");
       if (chatLeer) chatLeer.textContent = t("dock.empty");
+      if (Zustand.empfang && Zustand.walletId) {
+        ladeEmpfang(Zustand.walletId, { still: true }).catch(() => {});
+      } else {
+        zeichneEmpfangLeer();
+      }
       if (typeof zeichneEinrichtung === "function" && $("#einrichtung") && !$("#einrichtung").hidden) {
         zeichneEinrichtung();
       }
@@ -9867,6 +10777,36 @@ async function start() {
     ladeSteuerjahr();
   });
   $("#steuer-uebernehmen").addEventListener("click", speichereSteuerEinstellungen);
+  const lernPlebs = $("#lernhinweise-plebs");
+  if (lernPlebs) {
+    lernPlebs.addEventListener("change", () => {
+      speichereLernhinweiseEinstellung().catch((fehler) => {
+        meldung(fehler.message || String(fehler), "krit");
+      });
+    });
+  }
+  const empfangZurueck = $("#empfang-lern-zurueck");
+  if (empfangZurueck) {
+    empfangZurueck.addEventListener("click", () => loescheLernThema());
+  }
+  const empfangQr = $("#empfang-qr");
+  if (empfangQr) {
+    empfangQr.addEventListener("click", () => {
+      if (Zustand.empfang?.lern && Zustand.empfang.url) {
+        oeffneLernUrl(Zustand.empfang.url);
+      }
+    });
+  }
+  const empfangAdresse = $("#empfang-adresse");
+  if (empfangAdresse) {
+    empfangAdresse.addEventListener("click", (e) => {
+      if (Zustand.empfang?.lern && Zustand.empfang.url) {
+        e.preventDefault();
+        e.stopPropagation();
+        oeffneLernUrl(Zustand.empfang.url);
+      }
+    });
+  }
   const startSync = $("#start-sync");
   if (startSync) {
     startSync.addEventListener("change", speichereStartSync);

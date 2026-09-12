@@ -191,14 +191,18 @@ class TestMultisigLesen(EnvBasis):
         )
         self.assertEqual(read_wallets(env)[0].script_type, "sh-wsh")
 
-    def test_keine_empfangsadresse(self):
+    def test_empfangsadresse_aus_vollstaendigem_deskriptor(self):
         """
-        Die Adresse ergibt sich aus allen Cosignern zusammen. Die eines
-        einzelnen zu zeigen wäre falsch — dort läge das Geld bei ihm allein.
+        Mit allen Cosignern im Deskriptor ist Empfang #0 die Kontrolladresse
+        (Bitkey-/Sparrow-Vergleich) — nicht die eines einzelnen Schlüssels.
         """
         wallet = WalletEntry(name="T", xpubs=COSIGNER, threshold=2, script_type="wsh")
-        self.assertEqual(erste_empfangsadresse(wallet), "")
-
+        adresse = erste_empfangsadresse(wallet)
+        self.assertTrue(adresse.startswith("bc1"))
+        self.assertEqual(
+            adresse,
+            main.derive_address_at_index(wallet.descriptor, 0, 0),
+        )
     def test_kennung_haengt_nicht_an_der_reihenfolge(self):
         a = WalletEntry(name="T", xpubs=[COSIGNER[0], COSIGNER[1]], threshold=2,
                         script_type="wsh")

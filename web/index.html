@@ -265,7 +265,7 @@
       </div>
     </div>
     <div id="quelle-status" class="quelle" aria-live="polite">
-      <span id="kurs-pille" class="pille pille-neutral" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs">BTC —</span>
+      <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
       <span id="llm-pille" class="pille pille-neutral">LLM</span>
     </div>
     <label class="kopf-log" data-i18n-title="header.showLogTitle" title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an.">
@@ -291,6 +291,7 @@
           Herkunft tracen
         </button>
         <button type="button" class="nav-eintrag" data-ansicht="steuerjahr"
+                data-lern="haltefrist"
                 data-i18n="nav.tax" data-i18n-title="nav.taxTitle">
           Steuerjahr
         </button>
@@ -302,6 +303,7 @@
       <div class="nav-titel" data-i18n="nav.sectionAdmin">Verwaltung</div>
       <div class="nav-liste">
         <button type="button" class="nav-eintrag" data-ansicht="wallets"
+                data-lern="xpub"
                 data-i18n="nav.wallets" data-i18n-title="nav.walletsTitle">
           Wallets
         </button>
@@ -311,6 +313,7 @@
         </button>
         <button type="button" class="nav-eintrag" data-ansicht="datenquellen"
                 id="nav-datenquellen"
+                data-lern="privatsphaere"
                 data-i18n="nav.sources" data-i18n-title="nav.sourcesTitle">
           Datenquellen
         </button>
@@ -344,8 +347,8 @@
                 <option value="datum" data-i18n="wallet.sortDate">neueste zuerst</option>
               </select>
             </label>
-            <button type="button" id="tip-sync-knopf" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür UTXO-Scan." class="knopf">Bis Tip</button>
-            <button type="button" id="rescan-knopf" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den UTXO-Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt der Verlaufsscan daneben." class="knopf">UTXO-Scan</button>
+            <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür UTXO-Scan." class="knopf">Bis Tip</button>
+            <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den UTXO-Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt der Verlaufsscan daneben." class="knopf">UTXO-Scan</button>
             <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Verlaufsscan</button>
             <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht UTXO-Bestand." class="knopf">Herkunft vollständig</button>
           </div>
@@ -532,7 +535,7 @@
             </label>
             <label class="feld-inline">
               <span data-i18n="tax.holding">Haltefrist</span>
-              <select id="frist-wahl" data-i18n-title="tax.holdingTitle" title="Jahre bis zur Steuerfreiheit. Vorgabe 1 Jahr (Deutschland). Mehrjährige Fristen im Dropdown."></select>
+              <select id="frist-wahl" data-lern="haltefrist" data-i18n-title="tax.holdingTitle" title="Jahre bis zur Steuerfreiheit. Vorgabe 1 Jahr (Deutschland). Mehrjährige Fristen im Dropdown."></select>
             </label>
             <button type="button" id="verlauf-erheben" data-i18n="tax.historyAll" data-i18n-title="tax.historyAllTitle" title="Holt die Historie aller Wallets — auch ausgegebene Beträge. Einzelnes Wallet: Verlaufsscan in der Wallet-Ansicht. Derselbe Cache. Braucht einen Electrum-Server." class="knopf">
               Verlauf aller Wallets
@@ -851,6 +854,28 @@
           <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.theme.hint">
             Hell: bisheriges Erscheinungsbild. Dunkel: sehr dunkler grauer Grund —
             Markierungsfarben (rot/grün/gelb) bleiben erkennbar.
+          </p>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.lernhinweise.title">Lernhinweise für Plebs</span>
+            <span class="karte-zusatz" data-i18n="settings.lernhinweise.zusatz">
+              Experiment · Neugier
+            </span>
+          </div>
+          <div class="karte-fuss">
+            <label class="check-zeile"
+                   data-i18n-title="settings.lernhinweise.titleAttr"
+                   title="Aus = unveränderte UI, Empfangs-QR nur Adressen. An = Tooltips mit Kaninchenbau-Link; Lern-QR im Empfangs-Bereich möglich (Bitcoin-only).">
+              <input type="checkbox" id="lernhinweise-plebs">
+              <span data-i18n="settings.lernhinweise.enable">Lernhinweise für Plebs</span>
+            </label>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.lernhinweise.hint">
+            Für Neugierige: Tooltips nennen eine geeignete Quelle für den Einstieg
+            in diesen Kaninchenbau (DE u. a. Aprycot, Blocktrainer, Einundzwanzig).
+            Lern-QR: Klick kopiert und öffnet die URL. Eilige: Einstellung aus lassen.
           </p>
         </div>
 
@@ -1273,6 +1298,30 @@
           </button>
         </form>
       </section>
+      <section id="empfang-pane" class="empfang-pane"
+               data-i18n-aria-label="dock.empfangAria" aria-label="Empfangsadresse">
+        <div class="empfang-kopf" data-lern="empfang" data-i18n="dock.empfangHead"
+             data-i18n-title="dock.empfangHeadTitle"
+             title="Nächste Empfangsadresse dieses Wallets">Empfangen</div>
+        <div id="empfang-leer" class="empfang-leer" data-i18n="dock.empfangEmpty">
+          Wallet wählen, um eine Empfangsadresse zu zeigen.
+        </div>
+        <div id="empfang-inhalt" class="empfang-inhalt" hidden>
+          <div class="empfang-qr-wrap">
+            <div id="empfang-qr" class="empfang-qr" aria-hidden="true"></div>
+            <div id="empfang-qr-maske" class="empfang-qr-maske" hidden aria-hidden="true"></div>
+          </div>
+          <div class="empfang-meta">
+            <div id="empfang-wallet" class="empfang-wallet"></div>
+            <div id="empfang-adresse" class="empfang-adresse mono"></div>
+            <button type="button" id="empfang-lern-zurueck" class="empfang-lern-zurueck" hidden
+                    data-i18n="dock.empfangLernZurueck">Zurück zur Empfangsadresse</button>
+            <div id="empfang-index" class="empfang-index"></div>
+            <div id="empfang-quelle" class="empfang-quelle"></div>
+            <div id="empfang-hinweis" class="empfang-hinweis" hidden></div>
+          </div>
+        </div>
+      </section>
     </div>
   </aside>
   </div>
@@ -1317,12 +1366,19 @@
         <span class="feld-titel" data-i18n="wallets.addressDepth">Adressen (beide Ketten)</span>
         <input type="number" class="tiefe-wahl" min="2" max="2000" step="2">
       </label>
+      <label class="feld feld-check">
+        <span class="feld-titel" data-i18n="wallets.readOnly">Nur lesen</span>
+        <input type="checkbox" class="read-only-wahl"
+               data-i18n-title="wallets.readOnlyTitle"
+               title="Kein Empfangs-QR — Wallet nur beobachten.">
+      </label>
       <button type="button" data-i18n="wallets.probe" data-i18n-title="wallets.probeTitle" title="Leitet für jeden Skripttyp Adressen ab und fragt den Node, welche davon je benutzt wurden. Klärt, welcher Typ wirklich zu diesem XPUB gehört — bei „xpub“-Prefix ist das nicht ablesbar." class="knopf knopf-klein pruefen">Skripttyp prüfen</button>
     </div>
     <div class="probe-ergebnis" hidden></div>
   </div>
 </template>
 
+<script src="/vendor/qr-min.js"></script>
 <script src="/i18n.js"></script>
 <script src="/log_i18n.js"></script>
 <script src="/app.js"></script>

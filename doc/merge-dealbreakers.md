@@ -32,8 +32,11 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 | T10 | **Clipboard**: sensible Werte systematisch klauen oder remote spiegeln | Hart+Review |
 | T11 | **Öffentliche Electrum** oder **Remote-LLM** als stiller Default / ohne Opt-in-Dialog | Hart |
 | T12 | **Phishing-UX**: „Wallet gesperrt — Seed eingeben“, Fake-Support, irreführende Fremdlinks zur Seed-Eingabe | Hart+Review |
+| T13 | **Lern-URLs / „Kaninchenbau“**: Shitcoin-, Altcoin- oder Eth-Content; „Crypto“-Gemischtwaren; im Zweifel **warnen und blocken**, nicht durchwinken. Nur Bitcoin-only. Lernstoff erklärt **Bitcoin-Mechanismen** für Plebs — keine SatSage-Implementierungsdetails | Hart+Review |
 
 **Präzisierung T3:** Gewollte Abfragen an vom Nutzer konfigurierte Datenquellen (Electrs/Fulcrum, BIP-158-Peers, Sanktions-Clearnet laut Design) sind kein Leak. Verboten ist Weitergabe an **andere** Endpoints / Telemetrie / Cloud ohne Opt-in.
+
+**Präzisierung T13:** Gilt für `web/lernhinweise.json`, Tooltips und Lern-QR. Zulässig: Whitepaper, UTXO, Selbstverwahrung, Privatsphäre auf Protokollebene. Unzulässig: Altcoin-Portale, Staking-Eth, und Texte à la „so scanned SatSage den Gap“. Im Review: unklare Quelle = Nein bis kuratiert (`status: ok`).
 
 ---
 

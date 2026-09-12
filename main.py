@@ -3220,6 +3220,10 @@ def _encoders_for_xpub(xpub: str, script_type: str | None = None):
     'tpub' werden deshalb alle gängigen Typen probiert, statt natives SegWit
     auszulassen — sonst finden solche Wallets keine UTXOs. Wer das nicht
     braucht, setzt den Typ ausdrücklich und spart die überflüssigen Ableitungen.
+
+    Bei auto/xpub kommt **native SegWit (bc1q) zuerst** — Empfangsadresse/QR
+    und erste Ableitung sollen modern sein; Legacy/Nested/Taproot folgen für
+    den Gap-Scan. Explizit „legacy“ in den Einstellungen erzwingt weiter ``1…``.
     """
     pubkey = lambda pk: script.p2pkh(pk)
     nested = lambda pk: script.p2sh(script.p2wpkh(pk))
@@ -3243,7 +3247,8 @@ def _encoders_for_xpub(xpub: str, script_type: str | None = None):
         "upub": [nested],
         "vpub": [segwit],
     }
-    return mapping.get(prefix, [pubkey, nested, segwit, taproot])
+    # xpub/tpub/unbekannt: SegWit zuerst (Empfang/QR), dann Rest für den Scan.
+    return mapping.get(prefix, [segwit, nested, taproot, pubkey])
 
 
 def ist_deskriptor(text: str) -> bool:
@@ -4004,14 +4009,26 @@ def derive_address_at_index(xpub: str, change: int, index: int) -> str | None:
 def derive_receive_address_at_index(
     xpub: str,
     index: int,
-) -> tuple[str, int, HDKey, object] | None:
-    """Leitet die Empfangsadresse (change=0) am Index ab."""
+    script_type: str | None = None,
+) -> tuple[str, int, HDKey | None, object | None] | None:
+    """
+    Leitet die Empfangsadresse (change=0) am Index ab.
+
+    ``script_type`` überschreibt die XPUB-Registry (Wallet-Einstellung).
+    Bei auto/xpub: natives SegWit zuerst (bc1q).
+    """
+    if ist_deskriptor(xpub):
+        addr = derive_address_at_index(xpub, 0, index)
+        if not addr:
+            return None
+        return addr, index, None, None
+
     try:
         hd = HDKey.from_string(xpub)
     except Exception:
         return None
 
-    for encoder in _encoders_for_xpub(xpub):
+    for encoder in _encoders_for_xpub(xpub, script_type):
         try:
             child = hd.derive([0, index])
             sc = encoder(child.key)

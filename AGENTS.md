@@ -16,6 +16,8 @@ Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diese
 - **Konfiguration:** `.env` (Vorlage: `.env.example`) â€” niemals Secrets, XPUBs oder persÃ¶nliche Wallet-Namen committen
 - **Dokumentation:** `README.md`, Nutzerhandbuch: `doc/handbuch.html`, Ã„nderungshistorie: `CHANGELOG.md`, offene Punkte: `ISSUES.md`, Plugin: `specter_plugin/README.md`
 - **Design Â· Node-Anbindung:** `doc/design-node-anbindung.md` â€” schick, minimalistisch, fehlertolerant; Konfigurationsfehler mÃ¶glichst von der App abfangen (nicht vom Nutzer)
+- **Design Â· FlÃ¼chtigkeit:** `doc/design-fluchtigkeit.md` â€” Nutzer in Eile/unaufmerksam; Fehlerverhinderung statt Hinweistext (z.â€¯B. Empfangs-QR beim Wallet-Wechsel sofort ungÃ¼ltig)
+- **Design Â· Neugier:** `doc/design-neugier.md` â€” unwissend/lernfaul aber neugierig; subtile Hinweise ohne die minimale Funktion zu stÃ¶ren
 - **Grok-Bot (remote, z.â€¯B. nur iPhone + GitHub):** `GROK_BOT.md` â€” hart: keine Secrets/Heim-Node; **Mainnet nie**; Lab/CI: **Regtest â†’ Signet â†’ Testnet nur Ausnahme**; Lab-Env getrennt von Prod-`.env` (kein eingebauter Multi-Chain-Schalter)
 - **Web-GUI-StabilitÃ¤t (Rumgeklicke):** Protokoll `doc/testprotokoll-webgui-stabilitaet.md`; halbautomatisch `scripts/webgui_chaos_run.py` + `scripts/webgui_chaos_harness.js` (optional Playwright)
 - **Datenquellen-Wechsel waehrend Scan:** Protokoll `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — P2P vs Electrum, Job-Snapshot, Cache-Flags, Queue
@@ -241,6 +243,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 ## Sicherheit & Datenschutz
 
 - XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
+- Lern-URLs / Kaninchenbau: nur Bitcoin-only-Content für Plebs (Mechanismen, keine SatSage-Internals); Shitcoins/Eth im Zweifel warnen (Dealbreaker T13)
 - Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen
 - Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` öffentlich sichtbar
 - Fulcrum (öffentliche Onions/Clearnet): mäßig (Rotation mildert Risiko); öffentliche Server und Remote-LLM nur nach Opt-in
@@ -251,6 +254,8 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 ## UI-Konventionen
 
 - **Node verbinden:** Leitbild in `doc/design-node-anbindung.md` â€” dem Nutzer den Node so einfach wie mÃ¶glich machen; typische Heimnetz-/TLS-/Port-Fallen selbst abfangen; HÃ¤rte nur wo nÃ¶tig (Clearnet, Opt-in), nicht als Kollateralschaden auf Desktop-LAN oder Start9-Bridge.
+- **FlÃ¼chtigkeit / Eile:** Leitbild in `doc/design-fluchtigkeit.md` â€” von unaufmerksamem, eiligem Nutzer ausgehen; gefÃ¤hrliche ZwischenzustÃ¤nde unmÃ¶glich machen (nicht nur beschriften). Beispiel Empfangs-QR: bei Wallet-Wechsel sofort entwerten, erst wieder zeigen wenn die Adresse des neuen Wallets feststeht.
+- **Neugier / Lernen nebenbei:** Leitbild in `doc/design-neugier.md` â€” unwissend und lernfaul, aber neugierig; bevorzugt native Tooltips (`title` / `data-i18n-title`): Eilige sehen sie nicht, Neugierige spielen „Wo ist Walter?“ mit der GUI. Kein Widerspruch zur FlÃ¼chtigkeit: Hinweise ergÃ¤nzen Absicherung, ersetzen sie nicht.
 - **Verbose:** Default `nein` (`VERBOSE` in `.env` oder Einstellungen [4]); gekÃ¼rzte TxIDs/Adressen
 - **BetrÃ¤ge:** `format_sats` â€” â‰¤100â€¯000 sats als sats, darÃ¼ber BTC mit 2 Dezimalstellen
 - **Lange Listen:** `cancellable_output` â€” `q` zum Abbrechen (nur interaktives TTY)

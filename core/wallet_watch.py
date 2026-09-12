@@ -299,6 +299,23 @@ class WalletWatchService:
                 self._addr_to_xpubs.setdefault(a, set()).add(xpub)
             self._log(f"Wallet-Watch: neue Adresse abonniert ({a[:12]}…)")
 
+    def subscribe_addresses(self, addrs: list[str], xpub: str) -> bool:
+        """
+        Öffentlich: Lookahead-Adressen nachabonnieren, wenn der Watcher läuft.
+
+        Rückgabe True, wenn Session aktiv und Aufruf durchging (auch wenn
+        einzelne Adressen schon abonniert waren).
+        """
+        if not self.laeuft or self._session is None:
+            return False
+        if not addrs or not (xpub or "").strip():
+            return False
+        try:
+            self._subscribe_extra(addrs, xpub)
+            return True
+        except Exception:
+            return False
+
     def _on_scripthash(self, scripthash: str, _status) -> None:
         with self._lock:
             self._pending_scripts.add(str(scripthash))
@@ -592,3 +609,8 @@ def stoppe_wallet_watch() -> None:
 
 def wallet_watch_status() -> dict[str, Any]:
     return get_watch_service().status()
+
+
+def subscribe_addresses(addrs: list[str], xpub: str) -> bool:
+    """Lookahead-Adressen beim laufenden Wallet-Watch nachabonnieren."""
+    return get_watch_service().subscribe_addresses(addrs, xpub)

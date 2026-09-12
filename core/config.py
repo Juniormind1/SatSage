@@ -155,6 +155,130 @@ def _mehrpfad(descriptor: str) -> str | None:
     return ersetzt if anzahl else None
 
 
+def _args_ausserhalb_klammern(text: str) -> list[str]:
+    """Komma-Trennung, die eckige/runde Klammern respektiert (Key-Origin)."""
+    teile: list[str] = []
+    buf: list[str] = []
+    tiefe_eck = 0
+    tiefe_rund = 0
+    for zeichen in text:
+        if zeichen == "[":
+            tiefe_eck += 1
+        elif zeichen == "]":
+            tiefe_eck = max(0, tiefe_eck - 1)
+        elif zeichen == "(":
+            tiefe_rund += 1
+        elif zeichen == ")":
+            tiefe_rund = max(0, tiefe_rund - 1)
+        if zeichen == "," and tiefe_eck == 0 and tiefe_rund == 0:
+            teile.append("".join(buf).strip())
+            buf = []
+            continue
+        buf.append(zeichen)
+    if buf:
+        teile.append("".join(buf).strip())
+    return [t for t in teile if t]
+
+
+def _schliesende_klammer(text: str, offen_bei: int) -> int:
+    """Index der zu ``text[offen_bei]=='('`` passenden schließenden Klammer."""
+    tiefe = 0
+    for i in range(offen_bei, len(text)):
+        if text[i] == "(":
+            tiefe += 1
+        elif text[i] == ")":
+            tiefe -= 1
+            if tiefe == 0:
+                return i
+    return -1
+
+
+def _paar_muster(descriptor: str) -> str | None:
+    """
+    Kanonisches Muster für Empfang/Change-Paarung.
+
+    Bei ``sortedmulti`` ist die Reihenfolge der Schlüssel im Deskriptor
+    egal (BIP-67 sortiert zur Laufzeit). Manche Exporte liefern External/
+    Internal mit vertauschter Cosigner-Reihenfolge — ohne Sortierung würden
+    daraus zwei Wallets.
+    """
+    muster = _mehrpfad(descriptor)
+    if muster is None:
+        return None
+    treffer = re.search(r"\b(sortedmulti)\s*\(\s*(\d+)\s*,", muster, re.I)
+    if not treffer:
+        return muster
+    # Position der '(' nach sortedmulti
+    offen = muster.find("(", treffer.start())
+    zu = _schliesende_klammer(muster, offen)
+    if zu < 0:
+        return muster
+    # Inhalt: "2,key1,key2,…"
+    innen = muster[offen + 1 : zu]
+    teile = _args_ausserhalb_klammern(innen)
+    if len(teile) < 3:  # M + mindestens 2 Keys
+        return muster
+    schwelle, *schluessel = teile
+    sortiert = ",".join([schwelle] + sorted(schluessel))
+    return (
+        muster[:offen + 1]
+        + sortiert
+        + muster[zu:]
+    ).lower()
+
+def _mit_checksum(descriptor: str) -> str:
+    """Hängt eine gültige Deskriptor-Prüfsumme an (ohne alte)."""
+    roh = (descriptor or "").split("#", 1)[0].strip()
+    if not roh:
+        return descriptor
+    try:
+        from embit.descriptor.checksum import add_checksum
+
+        return add_checksum(roh)
+    except Exception:
+        return roh
+
+
+def _bitkey_beschriftete_paare(text: str) -> list[tuple[str, str]]:
+    """
+    Bitkey-Export: ``External: …`` und ``Internal: …`` (auch Receive/Change).
+
+    Bitkey formatiert den Watch-only-Export bewusst so
+    (``ExportWatchingDescriptorServiceImpl``). Die Labels steuern die Paarung,
+    falls der reine Textvergleich der Ketten scheitert.
+    """
+    if not text:
+        return []
+    labels = {
+        "external": "empfang",
+        "receive": "empfang",
+        "empfang": "empfang",
+        "internal": "change",
+        "change": "change",
+        "wechsel": "change",
+    }
+    empfang: str | None = None
+    change: str | None = None
+    for zeile in text.splitlines():
+        roh = zeile.strip()
+        if not roh or ":" not in roh:
+            continue
+        prefix, rest = roh.split(":", 1)
+        art = labels.get(prefix.strip().lower())
+        if not art:
+            continue
+        kandidaten = _deskriptor_kandidaten(rest)
+        if not kandidaten:
+            continue
+        if art == "empfang" and empfang is None:
+            empfang = kandidaten[0]
+        elif art == "change" and change is None:
+            change = kandidaten[0]
+    if empfang and change:
+        return [(empfang, change)]
+    return []
+
+
 def _vereinige_paare(kandidaten: list[str]) -> list[str]:
     """
     Führt Empfangs- und Change-Deskriptor zu einem mehrpfadigen zusammen.
@@ -166,17 +290,55 @@ def _vereinige_paare(kandidaten: list[str]) -> list[str]:
     nach_muster: dict[str, str] = {}
 
     for kandidat in kandidaten:
-        muster = _mehrpfad(kandidat)
+        muster = _paar_muster(kandidat)
         if muster is None:
             if kandidat not in ergebnis:
                 ergebnis.append(kandidat)
             continue
         if muster in nach_muster:
             continue
-        nach_muster[muster] = kandidat
+        # Bevorzuge die Empfangs-Form (/0/*) als Vorlage für den Mehrpfad.
+        bisher = nach_muster.get(muster)
+        if bisher is None or (
+            "/0/*" in kandidat.split("#", 1)[0]
+            and "/0/*" not in bisher.split("#", 1)[0]
+        ):
+            nach_muster[muster] = kandidat
 
-    for muster in nach_muster:
-        ergebnis.append(muster.replace("/<CHAIN>/*", "/<0;1>/*"))
+    for muster, vorlage in nach_muster.items():
+        # Vorlage hat /0/* oder /1/* — Mehrpfad aus dem Ketten-Muster bauen.
+        basis = _mehrpfad(vorlage) or muster
+        vereint = basis.replace("/<CHAIN>/*", "/<0;1>/*")
+        ergebnis.append(_mit_checksum(vereint))
+    return ergebnis
+
+
+def _vereinige_bitkey_labels(text: str, kandidaten: list[str]) -> list[str]:
+    """
+    Paart zuerst beschriftete Bitkey-/BDK-Zeilen, Rest wie Core-Paare.
+
+    So bleibt ein Export mit ``External:`` / ``Internal:`` auch dann eine
+    Wallet, wenn dazwischen Kommentarzeilen stehen.
+    """
+    verbraucht: set[str] = set()
+    ergebnis: list[str] = []
+    for empfang, change in _bitkey_beschriftete_paare(text):
+        muster_e = _paar_muster(empfang)
+        muster_c = _paar_muster(change)
+        if muster_e and muster_c and muster_e == muster_c:
+            basis = _mehrpfad(empfang) or muster_e
+            ergebnis.append(
+                _mit_checksum(basis.replace("/<CHAIN>/*", "/<0;1>/*"))
+            )
+            verbraucht.add(empfang.split("#", 1)[0])
+            verbraucht.add(change.split("#", 1)[0])
+    rest = [
+        k for k in kandidaten
+        if k.split("#", 1)[0] not in verbraucht
+    ]
+    for vereint in _vereinige_paare(rest):
+        if vereint not in ergebnis:
+            ergebnis.append(vereint)
     return ergebnis
 
 
@@ -238,10 +400,10 @@ def deskriptoren_aus_text(text: str) -> list[str]:
     Zieht brauchbare Output-Deskriptoren aus beliebigem Text.
 
     Nimmt, was Wallets tatsächlich herausgeben: eine nackte Zeile, den
-    JSON-Export von Sparrow oder Specter, die Liste aus ``listdescriptors``.
-    Empfangs- und Change-Kette werden zu einer mehrpfadigen Form vereinigt.
-    Fehlt die Wildcard-Ableitung (Specter auf Kontoebene), wird
-    ``/<0;1>/*`` ergänzt.
+    JSON-Export von Sparrow oder Specter, die Liste aus ``listdescriptors``,
+    Bitkeys ``External:`` / ``Internal:``-Export. Empfangs- und Change-Kette
+    werden zu einer mehrpfadigen Form vereinigt. Fehlt die Wildcard-Ableitung
+    (Specter auf Kontoebene), wird ``/<0;1>/*`` ergänzt.
 
     Geliefert wird nur, was sich auch ableiten lässt — ein Deskriptor, der
     später still keine Adressen ergibt, hilft niemandem. Private Schlüssel
@@ -256,7 +418,7 @@ def deskriptoren_aus_text(text: str) -> list[str]:
         return []
 
     brauchbar: list[str] = []
-    for kandidat in _vereinige_paare(kandidaten):
+    for kandidat in _vereinige_bitkey_labels(text, kandidaten):
         kandidat = _ergaenze_standard_ableitung(kandidat)
         if main.derive_descriptor_addresses(kandidat, max_addresses=2):
             if kandidat not in brauchbar:
@@ -342,6 +504,8 @@ class WalletEntry:
     descriptor: str = ""
     #: Vom Deskriptor gemeldeter Skripttyp (p2wsh, p2tr, p2sh, p2wpkh, …).
     script_typ_wirksam: str = ""
+    #: Nur beobachten — kein Empfangs-QR (z. B. fremdes/archiviertes Wallet).
+    read_only: bool = False
 
     def __post_init__(self):
         self.xpub = (self.xpub or "").strip()
@@ -349,6 +513,7 @@ class WalletEntry:
         self.descriptor = (self.descriptor or "").strip()
         self.xpubs = [x.strip() for x in (self.xpubs or []) if x and x.strip()]
         self.max_addresses = max(2, int(self.max_addresses))
+        self.read_only = bool(self.read_only)
 
         # Aus dem Deskriptor ergänzen, was nicht ausdrücklich angegeben ist.
         # Er ist die knappere Schreibweise, nicht die schwächere.
@@ -569,25 +734,24 @@ def erste_empfangsadresse(entry: WalletEntry) -> str:
     Empfangsadresse #0 — die Adresse, die jede Wallet-Software als erste zeigt.
 
     Damit lässt sich von Hand nachsehen, ob zwei Einträge wirklich dasselbe
-    Konto meinen.
+    Konto meinen (Bitkey-/Sparrow-Empfangs-QR). Immer Zweig 0 / Index 0 —
+    nicht die lexikografisch erste aus Empfang+Change, sonst landet man auf
+    der Change-Adresse.
 
-    Für echte Multisig leer in der Doppelungs-Warnung: Die Adresse ergibt sich
-    aus allen Cosignern zusammen. Single-Sig-Deskriptoren (wpkh/…) liefern die
-    Adresse über die Ableitung.
+    Deskriptor-Wallets (auch Multisig ``wsh(sortedmulti…)``) leiten #0 ab.
+    Reine Kurzform ohne Deskriptor bleibt leer, bis Cosigner fehlen.
     """
+    if entry.descriptor:
+        adresse = main.derive_address_at_index(entry.descriptor, 0, 0)
+        return adresse or ""
     if entry.is_multisig:
         return ""
-    if entry.descriptor:
-        adressen = sorted(
-            main.derive_descriptor_addresses(entry.descriptor, max_addresses=2)
-        )
-        return adressen[0] if adressen else ""
-    hd = main._hdkey_for_xpub(entry.xpub)
-    if hd is None:
+    if not entry.xpub:
         return ""
+    # Über derive_receive — bei xpub/auto damit bc1q, nicht Legacy-first.
     try:
-        encoder = main._encoders_for_xpub(entry.xpub, entry.script_type)[0]
-        return encoder(hd.derive([0, 0]).key).address()
+        dest = main.derive_receive_address_at_index(entry.xpub, 0)
+        return dest[0] if dest else ""
     except Exception:
         return ""
 
@@ -1156,6 +1320,9 @@ def _block_eintrag(values: dict[str, str], nummer: int, standard: int) -> Wallet
             # und fällt in der Prüfung mit klarer Meldung durch.
             schwelle = -1
 
+    read_only_roh = feld("READ_ONLY").lower()
+    read_only = read_only_roh in ("1", "true", "yes", "ja", "on")
+
     return WalletEntry(
         xpub=feld("XPUB"),
         name=feld("NAME"),
@@ -1164,6 +1331,7 @@ def _block_eintrag(values: dict[str, str], nummer: int, standard: int) -> Wallet
         xpubs=feld("XPUBS").split(),
         threshold=schwelle,
         descriptor=feld("DESC"),
+        read_only=read_only,
     )
 
 
@@ -1307,6 +1475,7 @@ def wallet_updates(
             updates[f"{praefix}_XPUB"] = eintrag.xpub
             updates[f"{praefix}_SCRIPT"] = eintrag.script_type
         updates[f"{praefix}_MAX_ADDRESSES"] = str(eintrag.max_addresses)
+        updates[f"{praefix}_READ_ONLY"] = "1" if eintrag.read_only else "0"
 
     return updates
 
