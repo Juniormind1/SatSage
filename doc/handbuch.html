@@ -240,6 +240,7 @@
       </ol>
     </li>
     <li><a href="#anhang">Anhang: Stolpersteine und Vorgemerktes</a></li>
+    <li><a href="#lernstoff-faq">Anhang: FAQ Lernstoff (Bitcoin only)</a></li>
   </ol>
 </nav>
 
@@ -364,7 +365,7 @@ dort verbleiben auch die Einstellungen.</p>
 
 <h3 id="win">2.2 Windows</h3>
 
-<p>Python von <a href="https://www.python.org/downloads/">python.org</a> laden.
+<p>Python von <a href="https://www.python.org/downloads/" target="_blank" rel="noopener noreferrer">python.org</a> laden.
 <strong>Wichtig:</strong> im Installationsprogramm den Haken bei
 <em>„Add python.exe to PATH"</em> setzen — sonst findet die
 Eingabeaufforderung Python später nicht. <code>pip</code> und <code>venv</code>
@@ -1989,6 +1990,92 @@ Listenadressen (Menüpunkt 6.2) sind weiterhin nur im Menü verfügbar.</p>
 
 <a class="zurueck" href="#">↑ nach oben</a>
 </section>
+
+<!-- ================================================================= -->
+<section id="lernstoff-faq">
+<h2><span class="nr">14</span>Anhang: FAQ Lernstoff (Bitcoin only)</h2>
+
+<p>Die Einstellung <strong>Lernhinweise für Plebs</strong> (Web → Einstellungen)
+hängt an ausgewählten UI-Elementen kurze Kaninchenbau-Hinweise. Die Links
+darunter sind dieselben wie in <code>web/lernhinweise.json</code> — nur
+<strong>Bitcoin</strong>, keine Shitcoins/Altcoins (Dealbreaker T13). Inhalt:
+Bitcoin-Mechanismen für Neugierige, keine SatSage-Internals.</p>
+<p><strong>Kuratierung:</strong> nur <em>konkrete</em> Inhalte zum jeweiligen
+Thema — keine Anbieter-Startseiten, keine Mediathek-Übersichten, keine
+Shop-/„Buch kaufen“-Links.</p>
+
+<p>Wortlaut im Tooltip: <em>„Geeignete Quelle für einen Einstieg in diesen
+Kaninchenbau“</em> / <em>„A suitable source for going down this rabbit
+hole“</em>.</p>
+
+<h3 id="lernstoff-de">Deutsch</h3>
+<div class="tabelle">
+<table>
+<thead><tr><th>Thema</th><th>Quelle</th></tr></thead>
+<tbody>
+    <tr><td>Bitcoin</td><td><a href="https://aprycot.media/blog/liebe-familie-liebe-freunde/" target="_blank" rel="noopener noreferrer">Aprycot: Liebe Familie, liebe Freunde (Gigi) — Einstieg</a></td></tr>
+    <tr><td>Whitepaper</td><td><a href="https://bitcoin.org/files/bitcoin-paper/bitcoin_de.pdf" target="_blank" rel="noopener noreferrer">Bitcoin-Whitepaper (DE)</a></td></tr>
+    <tr><td>Was ist Geld?</td><td><a href="https://aprycot.media/blog/die-natur-des-wertes/" target="_blank" rel="noopener noreferrer">Aprycot: Die Natur des Wertes</a></td></tr>
+    <tr><td>Österreichische Schule</td><td><a href="https://austrian-institute.org/de/oesterreichische-schule/" target="_blank" rel="noopener noreferrer">Austrian Institute: Österreichische Schule</a></td></tr>
+    <tr><td>Selbstverwahrung</td><td><a href="https://aprycot.media/blog/liebe-familie-liebe-freunde/" target="_blank" rel="noopener noreferrer">Aprycot: Liebe Familie… (Übers. Gigi) — Schlüssel selbst halten</a></td></tr>
+    <tr><td>XPUB / Watch-only</td><td><a href="https://www.blocktrainer.de/blog/hd-wallets-ableitungspfade" target="_blank" rel="noopener noreferrer">Blocktrainer: HD-Wallets &amp; Ableitungspfade</a></td></tr>
+    <tr><td>Output-Deskriptor</td><td><a href="https://www.blocktrainer.de/blog/bitcoin-selbstverwahrung-noch-sicherer-anleitung-fuer-multisig-wallet" target="_blank" rel="noopener noreferrer">Blocktrainer: Multisig / Output Descriptor</a></td></tr>
+    <tr><td>Native SegWit (bc1)</td><td><a href="https://www.blocktrainer.de/blog/das-segwit-update-einfach-erklaert" target="_blank" rel="noopener noreferrer">Blocktrainer: SegWit einfach erklärt</a></td></tr>
+    <tr><td>UTXO</td><td><a href="https://www.blocktrainer.de/wissen/fuer-einsteiger/was-ist-ein-utxo" target="_blank" rel="noopener noreferrer">Blocktrainer: Was ist ein UTXO?</a></td></tr>
+    <tr><td>Empfangsadresse / Gap-Limit</td><td><a href="https://www.blocktrainer.de/blog/hd-wallets-ableitungspfade" target="_blank" rel="noopener noreferrer">Blocktrainer: HD-Wallets &amp; Gap-Limit / Ableitungspfade</a></td></tr>
+    <tr><td>Privatsphäre / Tor</td><td><a href="https://support.torproject.org/de/about-tor/introduction/what-is-tor/" target="_blank" rel="noopener noreferrer">Tor Project: Was ist Tor?</a></td></tr>
+    <tr><td>Eigener Node</td><td><a href="https://www.blocktrainer.de/blog/warum-eine-bitcoin-node-fast-niemandem-vertrauen-muss" target="_blank" rel="noopener noreferrer">Blocktrainer: Warum eine Bitcoin-Node fast niemandem vertrauen muss</a></td></tr>
+    <tr><td>Bitcoin Core</td><td><a href="https://www.spark.money/research/bitcoin-node-implementation-comparison" target="_blank" rel="noopener noreferrer">Spark: Bitcoin-Node-Implementierungen im Vergleich</a></td></tr>
+    <tr><td>Electrs / Electrum-Server</td><td><a href="https://yourdevice.ch/electrs-vs-electrumx-vs-fulcrum/" target="_blank" rel="noopener noreferrer">yourdevice: electrs vs ElectrumX vs Fulcrum</a></td></tr>
+    <tr><td>Bitcoin-P2P / Compact Filter</td><td><a href="https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki" target="_blank" rel="noopener noreferrer">BIP 158 — Compact Block Filters (P2P)</a></td></tr>
+    <tr><td>Compact Filter (BIP-158)</td><td><a href="https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki" target="_blank" rel="noopener noreferrer">BIP 158 — Compact Block Filters</a></td></tr>
+    <tr><td>Bitcoin-Preis (Angebot/Nachfrage)</td><td><a href="https://aprycot.media/blog/die-natur-des-wertes/" target="_blank" rel="noopener noreferrer">Aprycot: Die Natur des Wertes</a></td></tr>
+    <tr><td>CoinJoin</td><td><a href="https://blog.bitbox.swiss/de/was-ist-eigentlich-ein-coinjoin/" target="_blank" rel="noopener noreferrer">BitBox: Was ist eigentlich ein CoinJoin?</a></td></tr>
+    <tr><td>Haltefrist / Steuer</td><td><a href="https://forum.blocktrainer.de/t/die-steuer-faq-read-only/7104" target="_blank" rel="noopener noreferrer">Blocktrainer-Forum: Steuer-FAQ (read-only)</a></td></tr>
+    <tr><td>Taproot</td><td><a href="https://blog.bitbox.swiss/de/taproot-die-saat-fur-bitcoin-anwendungen/" target="_blank" rel="noopener noreferrer">BitBox: Taproot — die Saat für Bitcoin-Anwendungen</a></td></tr>
+    <tr><td>Multisig</td><td><a href="https://www.blocktrainer.de/blog/bitcoin-selbstverwahrung-noch-sicherer-anleitung-fuer-multisig-wallet" target="_blank" rel="noopener noreferrer">Blocktrainer: Multisig-Wallet Anleitung</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="lernstoff-en">English</h3>
+<div class="tabelle">
+<table>
+<thead><tr><th>Topic</th><th>Source</th></tr></thead>
+<tbody>
+    <tr><td>Bitcoin</td><td><a href="https://bitcoin.org/bitcoin.pdf" target="_blank" rel="noopener noreferrer">Bitcoin whitepaper</a></td></tr>
+    <tr><td>Whitepaper</td><td><a href="https://bitcoin.org/bitcoin.pdf" target="_blank" rel="noopener noreferrer">Bitcoin whitepaper</a></td></tr>
+    <tr><td>What is money?</td><td><a href="https://nakamotoinstitute.org/mempool/shelling-out/" target="_blank" rel="noopener noreferrer">Nakamoto Institute — Shelling Out (Nick Szabo)</a></td></tr>
+    <tr><td>Austrian economics</td><td><a href="https://nakamotoinstitute.org/literature/" target="_blank" rel="noopener noreferrer">Nakamoto Institute literature</a></td></tr>
+    <tr><td>Self-custody</td><td><a href="https://bitcoin.org/en/secure-your-wallet" target="_blank" rel="noopener noreferrer">bitcoin.org — secure your wallet</a></td></tr>
+    <tr><td>XPUB / watch-only</td><td><a href="https://learnmeabitcoin.com/technical/keys/extended-keys/" target="_blank" rel="noopener noreferrer">learnmeabitcoin — extended keys</a></td></tr>
+    <tr><td>Output descriptor</td><td><a href="https://github.com/bitcoin/bitcoin/blob/master/doc/descriptors.md" target="_blank" rel="noopener noreferrer">Bitcoin Core descriptors.md</a></td></tr>
+    <tr><td>Native SegWit (bc1)</td><td><a href="https://learnmeabitcoin.com/technical/script/p2wpkh/" target="_blank" rel="noopener noreferrer">learnmeabitcoin — P2WPKH</a></td></tr>
+    <tr><td>UTXO</td><td><a href="https://learnmeabitcoin.com/technical/transaction/utxo/" target="_blank" rel="noopener noreferrer">learnmeabitcoin — UTXO</a></td></tr>
+    <tr><td>Receive address / gap limit</td><td><a href="https://learnmeabitcoin.com/technical/keys/hd-wallets/" target="_blank" rel="noopener noreferrer">learnmeabitcoin — HD wallets</a></td></tr>
+    <tr><td>Privacy / Tor</td><td><a href="https://support.torproject.org/about-tor/introduction/what-is-tor/" target="_blank" rel="noopener noreferrer">Tor Project: What is Tor?</a></td></tr>
+    <tr><td>Your own node</td><td><a href="https://bitcoin.org/en/full-node" target="_blank" rel="noopener noreferrer">Running a full node</a></td></tr>
+    <tr><td>Bitcoin Core</td><td><a href="https://www.spark.money/research/bitcoin-node-implementation-comparison" target="_blank" rel="noopener noreferrer">Spark: Bitcoin node implementation comparison</a></td></tr>
+    <tr><td>Electrs / Electrum server</td><td><a href="https://yourdevice.ch/electrs-vs-electrumx-vs-fulcrum/" target="_blank" rel="noopener noreferrer">yourdevice: electrs vs ElectrumX vs Fulcrum</a></td></tr>
+    <tr><td>Bitcoin P2P / compact filters</td><td><a href="https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki" target="_blank" rel="noopener noreferrer">BIP 158 — Compact Block Filters</a></td></tr>
+    <tr><td>Compact filters (BIP-158)</td><td><a href="https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki" target="_blank" rel="noopener noreferrer">BIP 158 — Compact Block Filters</a></td></tr>
+    <tr><td>Bitcoin price (supply and demand)</td><td><a href="https://nakamotoinstitute.org/mempool/the-bitcoin-standard-preface/" target="_blank" rel="noopener noreferrer">Nakamoto Institute — value / Bitcoin Standard context</a></td></tr>
+    <tr><td>CoinJoin</td><td><a href="https://bitcoinops.org/en/topics/coinjoin/" target="_blank" rel="noopener noreferrer">Bitcoin Optech — CoinJoin</a></td></tr>
+    <tr><td>Holding period / tax</td><td><a href="https://bitcoin.org/en/you-need-to-know" target="_blank" rel="noopener noreferrer">bitcoin.org — things you need to know (EN; DE-Steuer nicht 1:1)</a></td></tr>
+    <tr><td>Taproot</td><td><a href="https://bitcoinops.org/en/topics/taproot/" target="_blank" rel="noopener noreferrer">Bitcoin Optech — Taproot</a></td></tr>
+    <tr><td>Multisig</td><td><a href="https://learnmeabitcoin.com/technical/script/p2wsh/" target="_blank" rel="noopener noreferrer">learnmeabitcoin — P2WSH</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p class="meta">Pflege: URLs in <code>web/lernhinweise.json</code> kuratieren
+(<code>status: ok|vorschlag|verworfen</code>), dann diese Tabellen nachziehen.
+Siehe auch <code>doc/lernhinweise-kuratierung.md</code>.</p>
+
+<a class="zurueck" href="#">↑ nach oben</a>
+</section>
+
+
 
 <footer>
   <p>SatSage — Handbuch. Erzeugt für den lokalen Gebrauch; enthält keine

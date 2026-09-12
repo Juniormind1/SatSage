@@ -36,7 +36,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 
 **Präzisierung T3:** Gewollte Abfragen an vom Nutzer konfigurierte Datenquellen (Electrs/Fulcrum, BIP-158-Peers, Sanktions-Clearnet laut Design) sind kein Leak. Verboten ist Weitergabe an **andere** Endpoints / Telemetrie / Cloud ohne Opt-in.
 
-**Präzisierung T13:** Gilt für `web/lernhinweise.json`, Tooltips und Lern-QR. Zulässig: Whitepaper, UTXO, Selbstverwahrung, Privatsphäre auf Protokollebene. Unzulässig: Altcoin-Portale, Staking-Eth, und Texte à la „so scanned SatSage den Gap“. Im Review: unklare Quelle = Nein bis kuratiert (`status: ok`).
+**Präzisierung T13:** Gilt für `web/lernhinweise.json`, Tooltips und Lern-QR. Zulässig: konkrete Artikel/BIPs/Whitepaper zu Bitcoin-Mechanismen. Unzulässig: Altcoin-Portale, Staking-Eth, SatSage-Internals, **Anbieter-Startseiten, Mediathek-Index, Shop/„Buch kaufen“**. Im Review: unklare oder generische URL = Nein bis kuratiert (`status: ok`).
 
 ---
 

@@ -1605,7 +1605,7 @@ function empfangQrSvg(text, { dunkel = false } = {}) {
 
 /**
  * Herzschlag: gedimmter QR nur durch Glyph-Maske sichtbar — nie scanbar.
- * Atem = QR-Alpha; bei „alles Hintergrund“ ₿ → sat → Pfeife (→ Student wenn Lernhinweise).
+ * Atem = QR-Alpha; Zyklus ₿ → sat → Pfeife → Lupe → ∞/21M (→ Student wenn Lernhinweise).
  */
 const EmpfangPuls = (() => {
   let raf = 0;
@@ -1622,6 +1622,8 @@ const EmpfangPuls = (() => {
     sat: "/img/sat-mask.png",
     pfeiffe: "/img/pfeiffe-mask.png",
     student: "/img/student-mask.png",
+    lupe: "/img/lupe-mask.png",
+    unendlich21m: "/img/unendlich21m-mask.png",
   };
   // Gleicher Hintergrund für alle Masken (dark: schwarz; light ggf. später).
   const MASK_BG = {
@@ -1629,14 +1631,17 @@ const EmpfangPuls = (() => {
     sat: "#000000",
     pfeiffe: "#000000",
     student: "#000000",
+    lupe: "#000000",
+    unendlich21m: "#000000",
   };
 
   function maskenListe() {
-    // Student-Silhouette nur mit „Lernhinweise für Plebs“.
+    // Basis-Zyklus; Student nur mit „Lernhinweise für Plebs“.
+    const basis = ["btc", "sat", "pfeiffe", "lupe", "unendlich21m"];
     if (typeof lernhinweiseAn === "function" && lernhinweiseAn()) {
-      return ["btc", "sat", "pfeiffe", "student"];
+      return [...basis, "student"];
     }
-    return ["btc", "sat", "pfeiffe"];
+    return basis;
   }
 
   const PAYLOADS = [
@@ -1645,8 +1650,45 @@ const EmpfangPuls = (() => {
     "satsage:suchen",
     "satsage:atmen",
   ];
+  // Pro Atemzug über dem QR — feste Ketten nicht auseinanderreißen:
+  // dies→das→ananas; Mine…→Scams→Bootsunfall→Frage→sauer.
+  const ATEM_WORTE = [
+    "hyperventiliere…",
+    "knusperflöte…",
+    "wabbeltron…",
+    "dies…",
+    "das…",
+    "ananas…",
+    "quengelquark…",
+    "murmelstrom…",
+    "satoshi-seufzer…",
+    "blockfussel…",
+    "peerkitzel…",
+    "mempool-muff…",
+    "gap-galopp…",
+    "tip-träller…",
+    "filterflaum…",
+    "utxo-humm…",
+    "Mine bitcoin (nein, war nur Spaß)",
+    "ärgere mich über scams…",
+    "plane Bootsunfall…",
+    "ärgere mich über die Frage…",
+    "bin auch ein bischen sauer deshalb…",
+    "knotenknistern…",
+    "orangenes Nichts…",
+    "fast fertig (gelogen)…",
+    "noch ein Atemzug…",
+  ];
   let payloadIx = 0;
+  let wortIx = 0;
   const ATEM_MS = 2200;
+
+  function setzeAtemWort() {
+    const kopf = $("#empfang-kopf");
+    if (!kopf) return;
+    const wort = ATEM_WORTE[wortIx % ATEM_WORTE.length];
+    kopf.textContent = wort;
+  }
 
   function stop() {
     if (raf) {
@@ -1666,6 +1708,10 @@ const EmpfangPuls = (() => {
     if (maske) {
       maske.hidden = true;
       maske.replaceChildren();
+    }
+    const kopf = $("#empfang-kopf");
+    if (kopf) {
+      kopf.textContent = t("dock.empfangHead");
     }
     canvas = null;
     ctx = null;
@@ -1831,6 +1877,8 @@ const EmpfangPuls = (() => {
         const n = maskenListe().length;
         maskeIx = (maskeIx + 1) % n;
         payloadIx += 1;
+        wortIx = (wortIx + 1) % ATEM_WORTE.length;
+        setzeAtemWort();
         qrBmp = null;
         qrSeite = 0;
         gewechseltInZyklus = true;
@@ -1847,6 +1895,7 @@ const EmpfangPuls = (() => {
     if (raf) return;
     maskeIx = 0;
     payloadIx = 0;
+    wortIx = 0;
     maskLuma = {}; // Masken-Assets können sich ändern (z. B. B ohne Kreisrand)
     const pane = $("#empfang-pane");
     const leer = $("#empfang-leer");
@@ -1864,6 +1913,7 @@ const EmpfangPuls = (() => {
       maske.hidden = true;
       maske.replaceChildren();
     }
+    setzeAtemWort();
     setzeText($("#empfang-wallet"), t("dock.empfangPuls"));
     setzeText($("#empfang-adresse"), "");
     setzeText($("#empfang-index"), "");
@@ -2042,6 +2092,19 @@ function oeffneLernUrl(url) {
   });
 }
 
+/** Wie lange warten, bis der Browser-Tooltip typischerweise da ist (~1 s). */
+const LERN_TOOLTIP_WARTE_MS = 1000;
+let lernHoverTimer = null;
+let lernHoverEl = null;
+
+function brichLernHoverAb() {
+  if (lernHoverTimer) {
+    clearTimeout(lernHoverTimer);
+    lernHoverTimer = null;
+  }
+  lernHoverEl = null;
+}
+
 function setzeLernhinweiseDelegates() {
   if (document.documentElement.dataset.lernDelegates === "1") return;
   document.documentElement.dataset.lernDelegates = "1";
@@ -2049,19 +2112,34 @@ function setzeLernhinweiseDelegates() {
     if (!lernhinweiseAn()) return;
     const el = e.target && e.target.closest && e.target.closest("[data-lern]");
     if (!el) return;
+    // Schon auf demselben Element (Kind→Eltern): Timer nicht neu starten.
+    if (el === lernHoverEl) return;
+    brichLernHoverAb();
+    lernHoverEl = el;
     const id = el.getAttribute("data-lern");
-    const anwenden = () => {
-      ergaenzeLernTooltip(el);
-      // Tooltip sichtbar ↔ Empfangs-QR zeigt dieselbe Lern-URL (anklickbar).
+    // Tooltip-Text sofort vorbereiten; Lern-QR erst nach Wartezeit (wie title).
+    const vorbereiten = () => ergaenzeLernTooltip(el);
+    if (!Zustand.lernhinweise) {
+      ladeLernhinweiseKatalog().then(vorbereiten);
+    } else {
+      vorbereiten();
+    }
+    lernHoverTimer = setTimeout(() => {
+      lernHoverTimer = null;
+      if (!lernhinweiseAn() || lernHoverEl !== el) return;
       if (id && Zustand.lernThema?.id !== id) {
         setzeLernThema(id);
       }
-    };
-    if (!Zustand.lernhinweise) {
-      ladeLernhinweiseKatalog().then(anwenden);
-      return;
-    }
-    anwenden();
+    }, LERN_TOOLTIP_WARTE_MS);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (!lernhinweiseAn()) return;
+    const el = e.target && e.target.closest && e.target.closest("[data-lern]");
+    if (!el || el !== lernHoverEl) return;
+    const wohin = e.relatedTarget;
+    // Innerhalb desselben data-lern-Elements bleiben → Timer weiterlaufen lassen.
+    if (wohin && el.contains(wohin)) return;
+    brichLernHoverAb();
   });
   document.addEventListener("click", (e) => {
     if (!lernhinweiseAn()) return;
@@ -2079,6 +2157,7 @@ function setzeLernhinweiseDelegates() {
     }
     const el = e.target && e.target.closest && e.target.closest("[data-lern]");
     if (!el) return;
+    brichLernHoverAb();
     setzeLernThema(el.getAttribute("data-lern"));
   });
 }
