@@ -44,8 +44,8 @@ OESTERREICH_ALTBESTAND = date(2021, 2, 28)
 #: Vorgabe: keine Stichtagsregel.
 STANDARD_STICHTAG = None
 
-#: Auswahl in den Einstellungen: 1…n Jahre plus „keine“.
-HALTEFRIST_MAX_JAHRE = 20
+#: Auswahl in den Einstellungen: 1…n Jahre plus „keine“ (Dropdown).
+HALTEFRIST_MAX_JAHRE = 10
 
 #: Anschaffungsdatum aus Herkunft: defensiv (jüngster externer Zufluss) oder
 #: offensiv (ältester). Default bleibt defensiv.

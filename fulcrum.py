@@ -987,6 +987,32 @@ def klassifiziere_utxo_spends(
     return pending, confirmed, live_all
 
 
+def mempool_tx_hat_eigenen_output(
+    client: FulcrumClient,
+    spent_txid: str,
+    is_own_address,
+) -> bool:
+    """
+    True, wenn die Mempool-Spend-Tx mindestens einen Output an eine eigene
+    Adresse hat (Change oder Transfer an anderes SatSage-Wallet).
+    """
+    tid = str(spent_txid or "").strip().lower()
+    if not tid or not callable(is_own_address):
+        return False
+    try:
+        tx = fetch_tx_fulcrum(client, tid, enrich_block_info=False)
+    except Exception:
+        return False
+    for vout in tx.get("vout") or []:
+        for addr in _vout_addresses(vout):
+            try:
+                if is_own_address(addr):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 def eigene_mempool_empfaenge(
     client: FulcrumClient,
     pending_spends: list[dict],

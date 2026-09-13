@@ -8,12 +8,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import shlex
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +25,14 @@ COMPOSE_FILE = HERE / "docker-compose.yml"
 WALLETS = ("lab-alpha", "lab-beta", "lab-change", "lab-gamma")
 LABELS = ("alpha", "beta", "change", "gamma")
 
-# Kalender-Phasen für Steuerjahr / Haltefrist (Blockzeiten, nicht nur Conf-Tiefe).
-# Frische Chain nötig — setmocktime nicht rückwärts auf bestehendem Tip.
-PHASE_BOOTSTRAP = "2022-06-01"
-PHASE_2022_MID = "2022-09-15"
-PHASE_2023 = "2023-06-01"
-PHASE_2024 = "2024-06-01"
-PHASE_2025 = "2025-09-01"
+# Unspent-Alterungs-Kohorte (nie ausgegeben) vs. Spend-Pool für Shape-Txs.
+# Beträge trennen select_near(target=0.05) von der Alters-Kohorte.
+AGE_FUND_AMOUNT = 0.049
+SPEND_FUND_AMOUNT = 0.05
+#: Empfangs-Indizes 0..AGE_INDEX_COUNT-1 = nur Alter (unspent).
+AGE_INDEX_COUNT = 40
+#: Indizes AGE_INDEX_COUNT .. AGE+SPEND-1 = Spend-Pool (CJ/Hop/…).
+SPEND_INDEX_COUNT = 40
 
 class Rpc:
     def __init__(self, native: bool):
@@ -80,6 +83,24 @@ def mine(rpc: Rpc, blocks: int, address: str) -> None:
     rpc.call("generatetoaddress", str(blocks), address, wallet="lab-faucet")
 
 
+def rescan_wallets(rpc: Rpc, *wallets: str) -> None:
+    """
+    Full-Rescan ab Genesis.
+
+    setmocktime legt Blöcke in 2022–2025 an, während createwallet die
+    Birthtime auf die Host-Uhr (z. B. 2026) setzt — ohne Rescan bleibt
+    listunspent leer (Insufficient funds trotz generatetoaddress).
+    """
+    for wallet in wallets:
+        if not wallet:
+            continue
+        try:
+            rpc.call("rescanblockchain", "0", wallet=wallet)
+        except RuntimeError as exc:
+            # Ältere Core / schon am Tip: nicht fatal.
+            print(f"  rescan {wallet}: {exc}", file=sys.stderr)
+
+
 def utc_ts(iso_date: str) -> int:
     """UTC-Mitternacht für YYYY-MM-DD → Unix-Timestamp."""
     return int(datetime.fromisoformat(iso_date).replace(tzinfo=timezone.utc).timestamp())
@@ -92,12 +113,13 @@ def set_time(rpc: Rpc, unix_ts: int) -> None:
 def mine_at(rpc: Rpc, ts: int, blocks: int, address: str) -> int:
     """Mocktime setzen und minen; je Block +60s, damit nTime > MTP bleibt.
 
+    Ruft ``mine`` direkt (nicht ``mine_next``) — sonst Rekursion.
     Rückgabe: letzter verwendeter Mock-Timestamp.
     """
     cursor = int(ts)
     for _ in range(max(0, int(blocks))):
         set_time(rpc, cursor)
-        mine_next(rpc, 1, address)
+        mine(rpc, 1, address)
         cursor += 60
     return cursor
 
@@ -141,6 +163,52 @@ def mine_next(rpc: Rpc, blocks: int, address: str) -> None:
     _MOCK_CURSOR = mine_at(rpc, _MOCK_CURSOR, blocks, address)
 
 
+def age_window_ts(*, days_back: int = 365 * 7) -> tuple[int, int]:
+    """Unix-Fenster: vor *days_back* Tagen … gestern (UTC)."""
+    now = datetime.now(timezone.utc)
+    end = now - timedelta(days=1)
+    start = now - timedelta(days=int(days_back))
+    return int(start.timestamp()), int(end.timestamp())
+
+
+def sorted_random_timestamps(n: int, t0: int, t1: int, rng: random.Random) -> list[int]:
+    """n Zufallszeiten in [t0, t1], aufsteigend (Chain-Zeit darf nicht zurück)."""
+    if n <= 0:
+        return []
+    if t1 <= t0:
+        return [t0] * n
+    return sorted(int(rng.randint(t0, t1)) for _ in range(n))
+
+
+def fund_index_at(
+    rpc: Rpc,
+    addresses: dict[str, list[str]],
+    faucet: str,
+    index: int,
+    ts: int,
+    *,
+    amount: float,
+) -> int:
+    """
+    Eine Funding-Runde (alle Lab-Wallets, fester Index) bei Blockzeit *ts*.
+
+    Rückgabe: Mock-Cursor nach dem Bestätigungsblock.
+    """
+    global _MOCK_CURSOR
+    ts = max(int(ts), int(_MOCK_CURSOR) + 60 if _MOCK_CURSOR else int(ts))
+    payouts = {addresses[label][index]: float(amount) for label in LABELS}
+    # Mocktime vor dem Send, damit wallet-interne Zeiten konsistent sind.
+    set_time(rpc, ts)
+    rpc.call(
+        "sendmany",
+        "",
+        json.dumps(payouts, separators=(",", ":")),
+        wallet="lab-faucet",
+    )
+    _MOCK_CURSOR = mine_at(rpc, ts, 1, faucet)
+    return int(_MOCK_CURSOR)
+
+
 def fund_indices(
     rpc: Rpc,
     addresses: dict[str, list[str]],
@@ -151,10 +219,14 @@ def fund_indices(
     amount: float = 0.05,
 ) -> None:
     """Faucet → feste Empfangs-Indizes [start, stop) je Lab-Wallet, 1 Block je Index."""
+    # Faucet muss Coinbases mit Mocktime-Timestamps sehen.
+    rescan_wallets(rpc, "lab-faucet")
     for index in range(start, stop):
         payouts = {addresses[label][index]: amount for label in LABELS}
         rpc.call("sendmany", "", json.dumps(payouts, separators=(",", ":")), wallet="lab-faucet")
         mine_next(rpc, 1, faucet)
+    # Empfänger-Wallets: Funding-Txs mit altem nTime ebenfalls einsammeln.
+    rescan_wallets(rpc, *WALLETS)
 
 
 def new_address(rpc: Rpc, wallet: str) -> str:
@@ -353,91 +425,138 @@ def write_env(rpc: Rpc) -> None:
 def run(rpc: Rpc) -> None:
     global _MOCK_CURSOR
     _MOCK_CURSOR = 0
+    rng = random.Random()
+    t0, t1 = age_window_ts(days_back=365 * 7)
     for wallet in ("lab-faucet", *WALLETS):
         load_or_create(rpc, wallet)
     faucet = new_address(rpc, "lab-faucet")
     phases: list[dict[str, Any]] = []
 
-    # --- 2022 Bootstrap: Reife + Kohorte A (Indizes 0–9 bleiben oft unspent) ---
-    phase_jump(
-        rpc, PHASE_BOOTSTRAP, faucet, phases,
-        label="2022-bootstrap",
-        note="110 Blocks + Funding 0–9; Kohorte außerhalb Haltefrist (Bezug 2026)",
-        blocks=110,
+    # --- Bootstrap: Coinbase-Reife am Beginn des 7-Jahres-Fensters ---
+    _MOCK_CURSOR = mine_at(rpc, t0, 110, faucet)
+    phases.append({
+        "label": "bootstrap",
+        "date": datetime.fromtimestamp(t0, tz=timezone.utc).date().isoformat(),
+        "mock_ts": t0,
+        "height": int(rpc.call("getblockcount")),
+        "note": "110 Blocks ab Fensterstart (Coinbase-Reife)",
+    })
+    print(
+        f"Phase bootstrap: Höhe {phases[-1]['height']} "
+        f"({phases[-1]['date']})",
+        file=sys.stderr,
     )
-    # Feste Indizes 0..n — kein Keypool-Vorschub bei erneutem Lauf.
+    rescan_wallets(rpc, "lab-faucet", *WALLETS)
+
+    # Feste Indizes — kein Keypool-Vorschub bei erneutem Lauf.
+    need = AGE_INDEX_COUNT + SPEND_INDEX_COUNT + 30  # Shape-Empfangs-Indizes
     addresses = {
-        label: receive_addresses(rpc, wallet, LAB_RECEIVE_COUNT)
+        label: receive_addresses(rpc, wallet, max(LAB_RECEIVE_COUNT, need))
         for label, wallet in zip(LABELS, WALLETS)
     }
-    fund_indices(rpc, addresses, faucet, 0, 10)
 
-    # --- 2022 Mid: weitere Empfänge, noch keine Shape-Spends ---
-    phase_jump(
-        rpc, PHASE_2022_MID, faucet, phases,
-        label="2022-mid",
-        note="Funding 10–14; Empfang 2022 für späteren Abgang 2023/24",
+    # --- Funding: je Index eigene Zufallszeit, dann zeitlich aufsteigend minen ---
+    # Indizes 0..AGE-1: nur Alter, bleiben unspent (Betrag ≠ 0.05).
+    # Indizes AGE..AGE+SPEND-1: Spend-Pool für Hop/CJ (0.05).
+    # Wichtig: Zeit nicht an Index-Reihenfolge koppeln (sonst nur alte Hälfte = Alter).
+    rescan_wallets(rpc, "lab-faucet")
+    fund_slots: list[tuple[int, int, float]] = []
+    lo, hi = t0 + 3600, t1
+    for i in range(AGE_INDEX_COUNT):
+        fund_slots.append((rng.randint(lo, hi), i, AGE_FUND_AMOUNT))
+    for j in range(SPEND_INDEX_COUNT):
+        idx = AGE_INDEX_COUNT + j
+        fund_slots.append((rng.randint(lo, hi), idx, SPEND_FUND_AMOUNT))
+    fund_slots.sort(key=lambda row: (row[0], row[1]))
+    age_dates: list[str] = []
+    for ts, index, amount in fund_slots:
+        fund_index_at(rpc, addresses, faucet, index, ts, amount=amount)
+        if amount == AGE_FUND_AMOUNT:
+            age_dates.append(
+                datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+            )
+    rescan_wallets(rpc, *WALLETS, "lab-faucet")
+    # Grob-Histogramm für Report (Jahr → Anzahl Alters-Fundings)
+    year_hist = Counter(d[:4] for d in age_dates)
+    phases.append({
+        "label": "random-age-funding",
+        "date": f"{datetime.fromtimestamp(t0, tz=timezone.utc).date()}"
+                f" … {datetime.fromtimestamp(t1, tz=timezone.utc).date()}",
+        "mock_ts": t0,
+        "height": int(rpc.call("getblockcount")),
+        "note": (
+            f"{AGE_INDEX_COUNT}× unspent @{AGE_FUND_AMOUNT} BTC + "
+            f"{SPEND_INDEX_COUNT}× spend-pool @{SPEND_FUND_AMOUNT} BTC; "
+            f"Jahre {dict(sorted(year_hist.items()))}"
+        ),
+        "age_fund_years": dict(sorted(year_hist.items())),
+    })
+    print(
+        f"Phase random-age-funding: Höhe {phases[-1]['height']} — "
+        f"Alters-Jahre {dict(sorted(year_hist.items()))}",
+        file=sys.stderr,
     )
-    fund_indices(rpc, addresses, faucet, 10, 15)
 
     alpha, beta, _change, gamma = WALLETS
     records: list[dict[str, Any]] = []
 
-    # --- 2023: Funding + frühe Shape-Spends (Empfang ggf. 2022 → Abgang 2023) ---
-    phase_jump(
-        rpc, PHASE_2023, faucet, phases,
-        label="2023",
-        note="Funding 15–22; Hop/Self/Consolidation — Jahresgrenze Empfang→Abgang",
-    )
-    fund_indices(rpc, addresses, faucet, 15, 23)
-    u = select(rpc, alpha, 1)
-    records.append(raw_spend(rpc, "Alpha-hop-to-Beta", u, [(addresses["beta"][31], .02), (addresses["alpha"][31], .029)], [alpha]))
-    mine_next(rpc, 1, faucet)
-    u = select(rpc, alpha, 1)
-    records.append(raw_spend(rpc, "Alpha-self-send", u, [(addresses["alpha"][32], .02), (addresses["alpha"][33], .029)], [alpha]))
-    mine_next(rpc, 1, faucet)
-    records.append(raw_spend(rpc, "Gamma-consolidation", select(rpc, gamma, 4), [(addresses["gamma"][34], .19)], [gamma] * 4))
-    mine_next(rpc, 1, faucet)
+    # Shape-Spends nur aus Spend-Pool (0.05); Alters-Kohorte bleibt liegen.
+    def _bump(hours: float = 2.0) -> None:
+        global _MOCK_CURSOR
+        _MOCK_CURSOR = mine_at(
+            rpc, int(_MOCK_CURSOR) + int(hours * 3600), 1, faucet,
+        )
 
-    # --- 2024: Fan-out aus älterem Coin + weitere Kohorte ---
-    phase_jump(
-        rpc, PHASE_2024, faucet, phases,
-        label="2024",
-        note="Funding 23–29; Beta-aged-fanout aus älterem UTXO (Conf + Kalender)",
+    u = select_near(rpc, alpha, 1, target=SPEND_FUND_AMOUNT)
+    records.append(raw_spend(
+        rpc, "Alpha-hop-to-Beta", u,
+        [(addresses["beta"][AGE_INDEX_COUNT + SPEND_INDEX_COUNT], .02),
+         (addresses["alpha"][AGE_INDEX_COUNT + SPEND_INDEX_COUNT], .029)],
+        [alpha],
+    ))
+    _bump()
+    u = select_near(rpc, alpha, 1, target=SPEND_FUND_AMOUNT)
+    records.append(raw_spend(
+        rpc, "Alpha-self-send", u,
+        [(addresses["alpha"][AGE_INDEX_COUNT + SPEND_INDEX_COUNT + 1], .02),
+         (addresses["alpha"][AGE_INDEX_COUNT + SPEND_INDEX_COUNT + 2], .029)],
+        [alpha],
+    ))
+    _bump()
+    records.append(raw_spend(
+        rpc, "Gamma-consolidation",
+        select_near(rpc, gamma, 4, target=SPEND_FUND_AMOUNT),
+        [(addresses["gamma"][AGE_INDEX_COUNT + SPEND_INDEX_COUNT + 3], .19)],
+        [gamma] * 4,
+    ))
+    _bump(6)
+
+    old = select_near(rpc, beta, 1, target=SPEND_FUND_AMOUNT)
+    _bump(24)
+    base = AGE_INDEX_COUNT + SPEND_INDEX_COUNT + 5
+    fanout = (
+        [(addresses["beta"][base + i], .004) for i in range(10)]
+        + [(addresses["beta"][base + 10], .008)]
     )
-    fund_indices(rpc, addresses, faucet, 23, 30)
-    # Wait before spending one old coin, making age visible in the chain.
-    old = select(rpc, beta, 1)
-    mine_next(rpc, 12, faucet)
-    # 10 gleiche Outputs + 1 Change; Change-Index darf nicht mit den 10 kollidieren
-    # (sonst merged createrawtransaction und vout-Anzahl weicht ab).
-    fanout = [(addresses["beta"][35 + i], .004) for i in range(10)] + [(addresses["beta"][45], .008)]
     records.append(raw_spend(rpc, "Beta-aged-fanout", old, fanout, [beta]))
-    mine_next(rpc, 2, faucet)
+    _bump(4)
 
     # ------------------------------------------------------------------
-    # 2025: CoinJoin-Fixtures (Form-Tests) + Mix-Funding nahe „innerhalb Frist“
-    # Fremd-Peers = lab-faucet (Funding-Quelle aller Lab-Sats). lab-faucet steht
-    # bewusst NICHT in SatSage WALLET_* → in SatSage sind das fremde Inputs.
-    # Lab-Wallets = nur Viewer-Anteile (eigene Ins). Kein Multisig — P2WPKH.
+    # CoinJoin-Fixtures (Form-Tests). Fremd-Peers = lab-faucet.
+    # Spend-Pool + frische Peer-Fundings; Alters-Kohorte unangetastet.
     # ------------------------------------------------------------------
-    phase_jump(
-        rpc, PHASE_2025, faucet, phases,
-        label="2025",
-        note="Funding 30–49 + Peers; CJ-Shapes — Kohorte noch innerhalb 1-Jahres-Frist",
-    )
-    fund_indices(rpc, addresses, faucet, 30, 50)
-
     peer_addrs = [new_address(rpc, "lab-faucet") for _ in range(60)]
     for i in range(0, len(peer_addrs), 12):
         chunk = peer_addrs[i : i + 12]
+        set_time(rpc, int(_MOCK_CURSOR))
         rpc.call(
             "sendmany",
             "",
-            json.dumps({a: 0.05 for a in chunk}, separators=(",", ":")),
+            json.dumps({a: SPEND_FUND_AMOUNT for a in chunk}, separators=(",", ":")),
             wallet="lab-faucet",
         )
-        mine_next(rpc, 1, faucet)
+        _bump(1)
+    rescan_wallets(rpc, "lab-faucet")
 
     # Wasabi-Classic-ähnlich: 6× Alpha (eigen) + 18× Faucet (fremd);
     # 24 gleiche Mix-Outs + 4 Changes (1× Alpha, 3× Faucet).
@@ -619,8 +738,10 @@ def run(rpc: Rpc) -> None:
         "tip_height": int(rpc.call("getblockcount")),
         "phases": phases,
         "tax_note": (
-            "Kohorte Indizes 0–9 ≈ 2022 (außerhalb 1y-Frist bei Bezug 2026); "
-            "2023/24 Spends mit Jahresgrenze; 2025 CJs/Funding innerhalb Frist."
+            f"Indizes 0–{AGE_INDEX_COUNT - 1}: unspent @{AGE_FUND_AMOUNT} BTC, "
+            f"Blockzeiten zufällig gestern…vor 7 Jahren; "
+            f"Indizes {AGE_INDEX_COUNT}–{AGE_INDEX_COUNT + SPEND_INDEX_COUNT - 1}: "
+            f"Spend-Pool @{SPEND_FUND_AMOUNT} BTC für Hop/CJ."
         ),
         "records": records,
     }

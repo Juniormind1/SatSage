@@ -490,6 +490,115 @@ class TestEmpfang(ApiTestBasis):
         self.assertEqual(körper["address"], "")
         self.assertEqual(körper["source"], "read_only")
 
+    def test_schaerfe_nach_sync_setzt_fulcrum_quelle(self):
+        """Nach Tip/Scan: einmal Electrs → source=fulcrum im Prozess-Cache."""
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000)], self.cache, 6,
+        )
+        kennung = self.wallet_id(BIP84_ZPUB)
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            self.assertIs(client, fake)
+            return (BIP84_RECEIVE_1, 1)
+
+        with mock.patch.object(main, "is_own_fulcrum_backend", return_value=True), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ), \
+             mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            n = server._schaerfe_empfang_nach_sync(
+                self.state, [entry], fulcrum=fake,
+            )
+        self.assertEqual(n, 1)
+        gemerkt = self.state.empfang_cache.get(kennung)
+        self.assertIsNotNone(gemerkt)
+        self.assertEqual(gemerkt["source"], "fulcrum")
+        self.assertEqual(gemerkt["address"], BIP84_RECEIVE_1)
+        self.assertEqual(gemerkt["index"], 1)
+
+        # GET mit Electrs: gemerkte fulcrum-Adresse per History-Probe bestätigt.
+        with mock.patch.object(
+            server, "_naechste_freie_empfang_electrs",
+        ) as nicht_nochmal, \
+             mock.patch.object(server, "_adresse_hat_history", return_value=False), \
+             mock.patch.object(server, "_eigener_fulcrum_client", return_value=fake), \
+             mock.patch.object(main, "is_own_fulcrum_backend", return_value=True):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_1)
+        nicht_nochmal.assert_not_called()
+
+    def test_empfang_mit_electrs_liefert_fulcrum(self):
+        """Lebendiger Electrs → immer source=fulcrum (unbenutzt)."""
+        kennung = self.wallet_id(BIP84_ZPUB)
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            return (BIP84_RECEIVE_0, 0)
+
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=fake), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_0)
+        self.assertEqual(körper["index"], 0)
+
+    def test_empfang_electrs_belegt_neu_holen(self):
+        """Gemerkte Adresse hat History → neu unbenutzte holen."""
+        kennung = self.wallet_id(BIP84_ZPUB)
+        fake = object()
+        self.state.empfang_cache[kennung] = {
+            "wallet_id": kennung,
+            "wallet_name": "Cold Storage",
+            "address": BIP84_RECEIVE_0,
+            "index": 0,
+            "source": "fulcrum",
+            "subscribed": False,
+            "watch_active": False,
+            "read_only": False,
+            "change": 0,
+        }
+        calls = {"n": 0}
+
+        def _fake_next(state, entry, client, *, max_index):
+            calls["n"] += 1
+            return (BIP84_RECEIVE_1, 1)
+
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=fake), \
+             mock.patch.object(server, "_adresse_hat_history", return_value=True), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["index"], 1)
+        self.assertEqual(calls["n"], 1)
+
+    def test_schaerfe_ohne_eigenen_electrs_leert_nur_cache(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        self.state.empfang_cache[kennung] = {
+            "wallet_id": kennung,
+            "address": BIP84_RECEIVE_0,
+            "index": 0,
+            "source": "cache_estimate",
+        }
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            n = server._schaerfe_empfang_nach_sync(self.state, [entry], fulcrum=None)
+        self.assertEqual(n, 0)
+        self.assertNotIn(kennung, self.state.empfang_cache)
+
 
 class TestUtxoVerlauf(ApiTestBasis):
     def test_verlauf_liefert_ausgegebene_dieses_wallets(self):

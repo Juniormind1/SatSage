@@ -91,6 +91,8 @@ def utxo_as_dict(
         # Mempool: Ausgabe unterwegs (eigener Electrs).
         "spending_pending": bool(utxo.get("spending_pending")),
         "spent_txid": utxo.get("spent_txid") or "",
+        # Spend-Tx hat Output an eigenes Wallet (anderes oder Change) → nur Konfetti.
+        "spending_internal": bool(utxo.get("spending_internal")),
         # Mempool: eigener Empfang noch unbestätigt (Selbstüberweisung/Change).
         "receive_pending": bool(
             utxo.get("receive_pending")

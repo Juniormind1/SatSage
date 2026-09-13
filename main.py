@@ -147,6 +147,15 @@ def set_chain_network(name: str | None) -> None:
     _hdkey_by_xpub.clear()
     _xpub_address_positive_cache.clear()
     _xpub_address_negative_cache.clear()
+    # Fulcrum-Header-Zeiten: Mainnet-Höhe ≠ Regtest-Höhe.
+    try:
+        import fulcrum as _fulcrum_mod
+
+        cache = getattr(_fulcrum_mod, "_HEADER_TIME_CACHE", None)
+        if isinstance(cache, dict):
+            cache.clear()
+    except Exception:
+        pass
 
 _hdkey_by_xpub: dict[str, HDKey] = {}
 #: Cache-Kennung pro Deskriptor-Text (erste Adresse → Hash), damit
@@ -167,8 +176,15 @@ def _dump_cache_json(payload: dict | list) -> str:
 
 
 
-def _load_dotenv(env_path: Path = ENV_FILE) -> dict[str, str]:
-    """Lädt KEY=VALUE-Paare aus einer .env-Datei (ohne externe Abhängigkeit)."""
+def _load_dotenv(env_path: Path | None = None) -> dict[str, str]:
+    """Lädt KEY=VALUE-Paare aus einer .env-Datei (ohne externe Abhängigkeit).
+
+    *env_path* default zur Laufzeit ``ENV_FILE`` — nicht als Default-Argument
+    einfrieren, sonst bleibt nach ``server --env lab/…`` die Root-``.env``
+    (und z. B. ``NETWORK=main``) aktiv und setzt Regtest-Adressen zurück.
+    """
+    if env_path is None:
+        env_path = ENV_FILE
     values: dict[str, str] = {}
     if not env_path.is_file():
         return values
@@ -642,8 +658,27 @@ def save_cached_tx(
 
 
 
+def _block_header_network_tag() -> str:
+    """Unterscheidet Mainnet/Regtest — Höhe 130 ist nicht dieselbe Chain."""
+    if _CHAIN_NETWORK is None:
+        return "main"
+    name = str(_CHAIN_NETWORK.get("name") or "main").strip().lower()
+    if "regtest" in name:
+        return "regtest"
+    if "signet" in name:
+        return "signet"
+    if "test" in name:
+        return "test"
+    return "main"
+
+
 def _block_header_cache_path(height: int, cache_root: Path) -> Path:
-    return cache_root / BLOCK_HEADER_CACHE_SUBDIR / f"{int(height)}.json"
+    # Netzwerk im Dateinamen: Mainnet-Cache darf Regtest-Höhen nicht vergiften.
+    return (
+        cache_root
+        / BLOCK_HEADER_CACHE_SUBDIR
+        / f"{_block_header_network_tag()}-{int(height)}.json"
+    )
 
 
 def load_cached_block_time(height: int, cache_root: Path | None = None) -> int | None:
@@ -653,7 +688,12 @@ def load_cached_block_time(height: int, cache_root: Path | None = None) -> int |
     root = cache_root or IMMUTABLE_CACHE_DIR
     path = _block_header_cache_path(height, root)
     if not path.is_file():
-        return None
+        # Legacy: höhen-only (Mainnet-Ära) — nur ohne aktives Alt-Netz lesen.
+        legacy = root / BLOCK_HEADER_CACHE_SUBDIR / f"{int(height)}.json"
+        if _block_header_network_tag() == "main" and legacy.is_file():
+            path = legacy
+        else:
+            return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -676,6 +716,7 @@ def save_cached_block_time(
     payload = {
         "height": int(height),
         "block_time": int(block_time),
+        "network": _block_header_network_tag(),
         "cached_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": source,
     }

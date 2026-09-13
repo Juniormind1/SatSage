@@ -67,6 +67,54 @@ def pfad(txid: str, vout: int, immutable_cache_dir: Path | str | None) -> Path |
     return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.json"
 
 
+def meta_pfad(
+    txid: str, vout: int, immutable_cache_dir: Path | str | None,
+) -> Path | None:
+    """Kleine Kopf-Datei für Listen — ohne den vollen Baum zu parsen."""
+    ordner = verzeichnis(immutable_cache_dir)
+    if ordner is None:
+        return None
+    return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.meta.json"
+
+
+def _tx_class_aus_baum(baum: dict | None) -> str:
+    if not isinstance(baum, dict):
+        return ""
+    root = baum.get("root")
+    if isinstance(root, dict):
+        tc = str(root.get("tx_class") or "")
+        if tc:
+            return tc
+    return str(baum.get("tx_class") or "")
+
+
+def _schreibe_meta(
+    ziel_meta: Path,
+    *,
+    txid: str,
+    vout: int,
+    erstellt_ts: int,
+    adressen_fingerprint: str,
+    adressen_anzahl: int,
+    baum: dict,
+) -> None:
+    """Sidecar mit Listenkopf — kopf() liest nur diese Datei."""
+    nutzlast = {
+        "version": VERSION,
+        "txid": main._normalize_txid(txid),
+        "vout": int(vout),
+        "erstellt_ts": int(erstellt_ts),
+        "adressen_fingerprint": adressen_fingerprint or "",
+        "adressen_anzahl": int(adressen_anzahl or 0),
+        "vollstaendig": bool(baum_ist_vollstaendig(baum)),
+        "mix_arten": mix_arten_im_baum(baum),
+        "tx_class": _tx_class_aus_baum(baum),
+    }
+    tmp = ziel_meta.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(nutzlast, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(ziel_meta)
+
+
 def speichern(
     txid: str,
     vout: int,
@@ -81,18 +129,23 @@ def speichern(
     soll keine Spuren hinterlassen. Erfolglose Analysen ebenfalls nicht: Ein
     gespeichertes „nicht gefunden" würde beim nächsten Aufruf einen Fehler
     zeigen, statt es noch einmal zu versuchen.
+
+    Zusätzlich ``.meta.json``: Listenkopf (vollständig/Mix) ohne Baum-Parse.
     """
     ziel = pfad(txid, vout, immutable_cache_dir)
     if ziel is None or not baum or not baum.get("found"):
         return None
 
+    fp = fingerabdruck(adressen)
+    n_addr = len(adressen) if adressen else 0
+    erstellt = int(time.time())
     nutzlast = {
         "version": VERSION,
         "txid": main._normalize_txid(txid),
         "vout": int(vout),
-        "erstellt_ts": int(time.time()),
-        "adressen_fingerprint": fingerabdruck(adressen),
-        "adressen_anzahl": len(adressen) if adressen else 0,
+        "erstellt_ts": erstellt,
+        "adressen_fingerprint": fp,
+        "adressen_anzahl": n_addr,
         "baum": baum,
     }
 
@@ -106,6 +159,20 @@ def speichern(
             json.dumps(nutzlast, ensure_ascii=False), encoding="utf-8"
         )
         tmp.replace(ziel)
+        meta = meta_pfad(txid, vout, immutable_cache_dir)
+        if meta is not None:
+            try:
+                _schreibe_meta(
+                    meta,
+                    txid=txid,
+                    vout=vout,
+                    erstellt_ts=erstellt,
+                    adressen_fingerprint=fp,
+                    adressen_anzahl=n_addr,
+                    baum=baum,
+                )
+            except OSError:
+                pass
     except OSError:
         return None
     return ziel
@@ -275,24 +342,74 @@ def kopf(
     Nur die Angaben *über* den Baum: wann erhoben, noch aktuell, vollständig?
 
     Für Listen gedacht, die je Eintrag eine Markierung brauchen, aber keinen
-    Baum. Der Rückgabewert hält den Baum nicht fest — bei vielen UTXOs bleibt
-    so nur die Kopfzeile im Speicher, nicht die gesamte Vorgeschichte.
+    Baum. Liest bevorzugt die kleine ``.meta.json`` (kein Baum-Parse) —
+    sonst Fallback auf volle Datei + einmaliges Meta-Nachziehen.
     """
+    meta_ziel = meta_pfad(txid, vout, immutable_cache_dir)
+    if meta_ziel is not None and meta_ziel.is_file():
+        try:
+            daten = json.loads(meta_ziel.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            daten = None
+        if (
+            isinstance(daten, dict)
+            and daten.get("version") == VERSION
+            and daten.get("txid") == main._normalize_txid(txid)
+            and int(daten.get("vout", -1)) == int(vout)
+            and "vollstaendig" in daten
+        ):
+            veraltet = False
+            seither = None
+            if adressen:
+                gespeichert = daten.get("adressen_fingerprint") or ""
+                veraltet = bool(gespeichert) and gespeichert != fingerabdruck(
+                    adressen
+                )
+                seither = len(adressen) - int(
+                    daten.get("adressen_anzahl", 0) or 0
+                )
+            return {
+                "erstellt_ts": int(daten.get("erstellt_ts", 0) or 0),
+                "veraltet": veraltet,
+                "adressen_seither": seither,
+                "vollstaendig": bool(daten.get("vollstaendig")),
+                "mix_arten": list(daten.get("mix_arten") or []),
+                "tx_class": str(daten.get("tx_class") or ""),
+            }
+
     geladen = laden(txid, vout, immutable_cache_dir, adressen)
     if geladen is None:
         return None
     # Veraltet (neue Adressen) ändert nicht, ob jeder Sat außen endet.
-    # Die Unsicherheit steht an der Marke „verfolgt"; die jüngsten Sats
-    # trotzdem zeigen, sonst wirkt ein vollständiger Baum in der Liste leer.
     baum = geladen["baum"]
     vollstaendig = baum_ist_vollstaendig(baum)
     mix_arten = mix_arten_im_baum(baum)
-    root = baum.get("root") if isinstance(baum, dict) else None
-    tx_class = ""
-    if isinstance(root, dict):
-        tx_class = str(root.get("tx_class") or "")
-    if not tx_class:
-        tx_class = str(baum.get("tx_class") or "") if isinstance(baum, dict) else ""
+    tx_class = _tx_class_aus_baum(baum)
+    # Alte Caches: Meta nachziehen, damit der nächste Listen-Lauf billig bleibt.
+    if meta_ziel is not None:
+        try:
+            quelle = pfad(txid, vout, immutable_cache_dir)
+            fp = ""
+            n_addr = 0
+            if quelle and quelle.is_file():
+                try:
+                    roh = json.loads(quelle.read_text(encoding="utf-8"))
+                    fp = str(roh.get("adressen_fingerprint") or "")
+                    n_addr = int(roh.get("adressen_anzahl", 0) or 0)
+                except (OSError, ValueError, TypeError):
+                    pass
+            if main.cache_disk_write_allowed(meta_ziel.parent):
+                _schreibe_meta(
+                    meta_ziel,
+                    txid=txid,
+                    vout=vout,
+                    erstellt_ts=geladen["erstellt_ts"],
+                    adressen_fingerprint=fp,
+                    adressen_anzahl=n_addr,
+                    baum=baum,
+                )
+        except OSError:
+            pass
     return {
         "erstellt_ts": geladen["erstellt_ts"],
         "veraltet": geladen["veraltet"],

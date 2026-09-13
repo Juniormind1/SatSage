@@ -505,6 +505,9 @@ class AppState:
         self._entries: list[WalletEntry] = []
         # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
         self.empfang_cache: dict[str, dict] = {}
+        # Wiederverwendeter Electrs-Client nur für Empfangs-QR (kein Connect/Request).
+        self._empfang_fulcrum = None
+        self._empfang_fulcrum_lock = threading.Lock()
         self.reload()
 
     def set_managed_by(self, value: str | None) -> None:
@@ -571,8 +574,35 @@ class AppState:
             main.set_chain_network(env.values().get("NETWORK"))
             self._entries = read_wallets(env)
             self._wallet_ctx = self._build_context(self._entries)
+            # UTXO-/Resolution-Cache → Mapping: sonst resolve_address je
+            # ungeseedeter Adresse MAX_TRACE_ADDRESS_SEARCH Ableitungen
+            # (Herkunftsliste mit 30+ UTXOs: Sekunden).
+            if self._wallet_ctx is not None:
+                schluessel = [
+                    e.analyse_schluessel for e in self._entries if e.is_valid()
+                ]
+                try:
+                    main.seed_wallet_addresses_from_utxo_cache(
+                        self._wallet_ctx, schluessel, self.cache_dir,
+                    )
+                except Exception:
+                    pass
+                try:
+                    main.seed_wallet_addresses_from_resolution_cache(
+                        self._wallet_ctx, schluessel,
+                    )
+                except Exception:
+                    pass
             # Empfangs-QR neu ableiten (Indizes/Adressen können sich geändert haben).
             self.empfang_cache.clear()
+            with getattr(self, "_empfang_fulcrum_lock", threading.Lock()):
+                alt = getattr(self, "_empfang_fulcrum", None)
+                self._empfang_fulcrum = None
+            if alt is not None:
+                try:
+                    alt.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _build_context(entries: list[WalletEntry]):
@@ -1515,7 +1545,10 @@ def api_config(state: AppState, query: dict) -> dict:
         ),
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
-        "wallet_sync_job_id": state.wallet_sync_job_id,
+        # Nur melden, wenn der Job wirklich noch läuft (stale ID → null).
+        "wallet_sync_job_id": (
+            state.wallet_sync_job_id if tip_sync_laeuft(state) else None
+        ),
         "live_p2p_peers": _live_p2p_peers(),
         # Ohne Netzprobe — die Pille bleibt grau, bis /api/llm/status?check=1.
         "llm": llm_mod.status_dict(werte, check=False),
@@ -2430,17 +2463,237 @@ def _verlaufs_anhang(state: AppState, entries, *, limit: int | None = None,
 
 
 def _eigener_fulcrum_client(state: AppState):
-    """Eigener Electrs/Fulcrum oder None (kein öffentlicher Pool)."""
+    """
+    Eigener Electrs/Fulcrum oder None (kein öffentlicher Pool).
+
+    Wiederverwendet eine Verbindung am AppState — sonst kostet jeder
+    Empfangs-QR-Klick einen frischen TCP/TLS-Handshake (wirkt wie „Scan“).
+    """
     werte = state.env().values()
     if not (
         (werte.get("FULCRUM_HOST") or "").strip()
         or (werte.get("FULCRUM_TOR") or "").strip()
     ):
         return None
-    try:
-        return main._try_own_fulcrum_client(state.args_namespace(), werte)
-    except Exception:
-        return None
+
+    lock = getattr(state, "_empfang_fulcrum_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+
+    with lock:
+        alt = getattr(state, "_empfang_fulcrum", None)
+        if alt is not None:
+            try:
+                alt.request("server.ping")
+                return alt
+            except Exception:
+                try:
+                    alt.close()
+                except Exception:
+                    pass
+                state._empfang_fulcrum = None
+        try:
+            client = main._try_own_fulcrum_client(
+                state.args_namespace(), werte,
+            )
+        except Exception:
+            return None
+        state._empfang_fulcrum = client
+        return client
+
+
+def _adresse_hat_history(client, address: str) -> bool:
+    """True wenn Electrs für die Adresse mindestens eine Tx kennt."""
+    if not address:
+        return False
+    from fulcrum import address_to_scripthash
+
+    sh = address_to_scripthash(address)
+    hist = client.request("blockchain.scripthash.get_history", [sh]) or []
+    return bool(hist)
+
+
+def _naechste_freie_empfang_electrs(
+    state: AppState,
+    entry,
+    client,
+    *,
+    max_index: int,
+) -> tuple[str, int] | None:
+    """
+    Nächste freie Empfangsadresse per Electrs — **kein** Fullscan.
+
+    Educated guess aus UTXO-/Verlaufs-Cache (``max bekannter Empfangs-Index + 1``,
+    nach Tip-Sync typisch schon korrekt). Dann nur **vorwärts** per
+    ``get_history`` prüfen, bis die erste leere Adresse kommt.
+
+    Üblich: **1 RPC**. Wenn der Cache hinter der Chain liegt (Zahlung auf
+    höherem Index), wenige weitere Probes — Obergrenze ``BIP44_GAP_LIMIT``,
+    kein Walk ab #0 und kein electrs-seitiger Gap-Rescan.
+    """
+    gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+    skript = (
+        None if entry.is_multisig or entry.descriptor else entry.script_type
+    )
+    xpub = entry.analyse_schluessel
+    start = int(
+        _next_receive_index_from_cache(state, entry, max_index=max_index)
+    )
+    if start < 0:
+        start = 0
+    # Nur vorwärts ab Schätzung — höchstens gap+1 History-Probes.
+    limit = min(max_index, start + gap + 1)
+    for i in range(start, limit):
+        dest = main.derive_receive_address_at_index(
+            xpub, i, script_type=skript,
+        )
+        if not dest or not dest[0]:
+            break
+        if _adresse_hat_history(client, dest[0]):
+            continue
+        return str(dest[0]), int(i)
+    return None
+
+
+def _schaerfe_empfang_nach_sync(
+    state: AppState,
+    eintraege: list,
+    *,
+    fulcrum=None,
+    on_progress=None,
+) -> int:
+    """
+    Einmal nach Tip-Nachzug / UTXO-Scan: Empfangs-QR schärfen.
+
+    * Prozess-Cache leeren, dann pro Wallet **1–wenige** ``get_history`` ab
+      Cache-Schätzung (kein Fullscan, siehe ``_naechste_freie_empfang_electrs``).
+    * Ohne eigenen Electrs: nur Cache leeren.
+    """
+    if not eintraege:
+        return 0
+    for entry in eintraege:
+        try:
+            state.empfang_cache.pop(wallets_mod.eintrag_id(entry), None)
+        except Exception:
+            pass
+
+    client = fulcrum
+    if client is not None:
+        try:
+            if not main.is_own_fulcrum_backend(client):
+                client = None
+        except Exception:
+            client = None
+    if client is None:
+        client = _eigener_fulcrum_client(state)
+    if client is None:
+        return 0
+
+    from core import wallet_watch
+
+    watch = wallet_watch.wallet_watch_status()
+    watch_active = bool(watch.get("running"))
+    gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+    ok = 0
+
+    def _cache_estimate_merker(entry) -> None:
+        """Fallback-QR aus UTXO-Stand, falls Electrs scheitert / Belong-Check nein."""
+        kennung = wallets_mod.eintrag_id(entry)
+        try:
+            max_index = _empfang_max_index(entry, state)
+            next_index = _next_receive_index_from_cache(
+                state, entry, max_index=max_index,
+            )
+            skript = (
+                None
+                if entry.is_multisig or entry.descriptor
+                else entry.script_type
+            )
+            abgeleitet = main.derive_receive_address_at_index(
+                entry.analyse_schluessel, next_index, script_type=skript,
+            )
+            if not abgeleitet or not abgeleitet[0]:
+                return
+            address, index = str(abgeleitet[0]), int(abgeleitet[1])
+            # Belong-Check hier weich: sonst bleibt das Dock leer (500).
+            state.empfang_cache[kennung] = _empfang_antwort(
+                kennung=kennung,
+                entry=entry,
+                address=address,
+                index=index,
+                source="cache_estimate",
+                subscribed=False,
+                watch_active=watch_active,
+                read_only=False,
+            )
+        except Exception:
+            pass
+
+    for entry in eintraege:
+        if getattr(entry, "read_only", False) or not entry.is_valid():
+            continue
+        kennung = wallets_mod.eintrag_id(entry)
+        try:
+            if on_progress:
+                on_progress(
+                    f"Empfangsadresse „{entry.display_name}“ per Electrs…",
+                    sofort=True,
+                )
+            max_index = _empfang_max_index(entry, state)
+            treffer = _naechste_freie_empfang_electrs(
+                state, entry, client, max_index=max_index,
+            )
+            if not treffer:
+                _cache_estimate_merker(entry)
+                continue
+            address, index = treffer
+            if not _empfang_gehoert_zu_wallet(state, entry, address):
+                _cache_estimate_merker(entry)
+                continue
+            skript = (
+                None
+                if entry.is_multisig or entry.descriptor
+                else entry.script_type
+            )
+            lookahead: list[str] = []
+            for i in range(index, min(index + gap + 1, max_index)):
+                dest = main.derive_receive_address_at_index(
+                    entry.analyse_schluessel, i, script_type=skript,
+                )
+                if dest and dest[0] and dest[0] not in lookahead:
+                    lookahead.append(dest[0])
+            subscribed = False
+            if watch_active and lookahead:
+                subscribed = bool(
+                    wallet_watch.subscribe_addresses(
+                        lookahead, entry.analyse_schluessel,
+                    )
+                )
+            state.empfang_cache[kennung] = _empfang_antwort(
+                kennung=kennung,
+                entry=entry,
+                address=address,
+                index=index,
+                source="fulcrum",
+                subscribed=subscribed,
+                watch_active=watch_active,
+                read_only=False,
+            )
+            ok += 1
+        except Exception as exc:
+            # Tip/Scan bleibt gültig — Empfang fällt auf Cache-Schätzung zurück.
+            if on_progress:
+                try:
+                    on_progress(
+                        f"Empfang „{entry.display_name}“: {exc}",
+                        sofort=True,
+                    )
+                except Exception:
+                    pass
+            _cache_estimate_merker(entry)
+            continue
+    return ok
 
 
 def _verlauf_anhang_fuer_xpub(
@@ -2549,12 +2802,18 @@ def _mit_mempool_pending(
                 gesehen_k.add(key)
                 kandidaten.append({"txid": e.get("txid"), "vout": e.get("vout"), "value": int(e.get("value") or 0), "address": e.get("address"), "status": e.get("status") or {}})
     try:
-        from fulcrum import eigene_mempool_empfaenge, klassifiziere_utxo_spends
+        from fulcrum import (
+            eigene_mempool_empfaenge,
+            klassifiziere_utxo_spends,
+            mempool_tx_hat_eigenen_output,
+        )
 
         alle_pending, alle_confirmed, alle_live = klassifiziere_utxo_spends(client, kandidaten)
         pending = [p for p in alle_pending if not xpub or f"{str(p.get('txid') or '').lower()}:{int(p.get('vout') or 0)}" in ziel_keys]
         confirmed = [c for c in alle_confirmed if not xpub or f"{str(c.get('txid') or '').lower()}:{int(c.get('vout') or 0)}" in ziel_keys]
         live = [u for u in alle_live if not xpub or u.get("address") in ziel_adressen]
+        # Intern = Output an irgendein SatSage-Wallet (nicht nur Change desselben).
+        intern_tx: set[str] = set()
         if alle_pending and state.wallet_ctx is not None:
             try:
                 if xpub:
@@ -2568,6 +2827,18 @@ def _mit_mempool_pending(
                 )
             except Exception:
                 empfaenge = []
+            try:
+                is_own = state.wallet_ctx.is_own_address
+                gesehen_tx: set[str] = set()
+                for p in alle_pending:
+                    tid = str(p.get("spent_txid") or "").strip().lower()
+                    if not tid or tid in gesehen_tx:
+                        continue
+                    gesehen_tx.add(tid)
+                    if mempool_tx_hat_eigenen_output(client, tid, is_own):
+                        intern_tx.add(tid)
+            except Exception:
+                intern_tx = set()
     except Exception:
         return gecacht, anhang
     finally:
@@ -2669,6 +2940,9 @@ def _mit_mempool_pending(
         neu = dict(u)
         neu["spending_pending"] = True
         neu["spent_txid"] = p.get("spent_txid") or ""
+        stid = str(neu.get("spent_txid") or "").strip().lower()
+        if stid and stid in intern_tx:
+            neu["spending_internal"] = True
         markiert.append(neu)
 
     # Pending-Spends, die Light-Tip schon aus dem Cache genommen hat, wieder zeigen.
@@ -2681,6 +2955,9 @@ def _mit_mempool_pending(
         neu["spending_pending"] = True
         neu.pop("spent", None)
         neu.pop("spent_pending", None)
+        stid = str(neu.get("spent_txid") or "").strip().lower()
+        if stid and stid in intern_tx:
+            neu["spending_internal"] = True
         markiert.append(neu)
 
     # Selbstüberweisung/Change: unbestätigte eigenen Outputs in den Bestand.
@@ -2725,6 +3002,7 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     # mempool=0: nur Cache (schneller Erst-Paint). Default: Pending über Electrs.
     mempool = _query_flag(query, "mempool", default=True)
 
+    _seed_wallet_ctx_aus_caches(state)
     anhang = _verlaufs_anhang(state, [entry], limit=limit, sort=sort)
     gecacht = utxos_mod.load_cached_utxos(
         entry.analyse_schluessel,
@@ -2776,15 +3054,31 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     return ergebnis
 
 
-def _empfang_max_index(entry: WalletEntry) -> int:
-    """Obergrenze Empfangs-Indizes: Scan-Tiefe/2, sonst Trace-Limit."""
+def _empfang_max_index(entry: WalletEntry, state: AppState | None = None) -> int:
+    """
+    Obergrenze Empfangs-Indizes.
+
+    Basis: Scan-Tiefe/2 (Receive-Kette). Liegt ``scan_end_index`` höher
+    (Tip/Fullscan hat weiter gelaufen), die Grenze mitziehen — sonst bleibt
+    die „nächste“ Adresse künstlich bei max−1 und Electrs-Schärfung scheitert.
+    """
     try:
         tief = int(entry.max_addresses or 0)
     except (TypeError, ValueError):
         tief = 0
     if tief >= 2:
-        return max(1, tief // 2)
-    return main.MAX_TRACE_ADDRESS_SEARCH
+        basis = max(1, tief // 2)
+    else:
+        basis = main.MAX_TRACE_ADDRESS_SEARCH
+    if state is not None:
+        try:
+            _, scan_end = _cache_bekannt_adressen(state, entry)
+            gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+            if scan_end > 0:
+                basis = max(basis, int(scan_end) + gap + 1)
+        except Exception:
+            pass
+    return max(1, basis)
 
 
 def _cache_bekannt_adressen(
@@ -2909,58 +3203,19 @@ def _empfang_antwort(
     }
 
 
-def api_wallet_empfang(state: AppState, kennung: str) -> dict:
-    """
-    Nächste Empfangsadresse für QR/Anzeige — lokal und schnell.
-
-    Strategie: ``max(bekannter Empfangs-Index)+1`` aus UTXO-/Verlaufs-Cache.
-    Kein Electrs-Rundlauf bei jedem Wallet-Wechsel (das hing sonst Sekunden).
-    Ergebnis wird pro Wallet im Prozess gecacht. Liefert nie XPUB/Deskriptor.
-    """
-    entry = wallets_mod.find_entry(state.entries, kennung)
-    if entry is None:
-        raise ApiError(404, "Wallet nicht gefunden.")
-    if not entry.is_valid():
-        raise ApiError(400, "Wallet lässt sich nicht ableiten.")
-
-    if getattr(entry, "read_only", False):
-        return _empfang_antwort(
-            kennung=kennung,
-            entry=entry,
-            address="",
-            index=0,
-            source="read_only",
-            subscribed=False,
-            watch_active=False,
-            read_only=True,
-        )
-
-    # Frischer Prozess-Cache (nach Scan/Zahlung invalidieren).
-    gemerkt = state.empfang_cache.get(kennung)
-    if gemerkt and gemerkt.get("address") and not gemerkt.get("read_only"):
-        bekannt, _ = _cache_bekannt_adressen(state, entry)
-        if gemerkt["address"] not in bekannt:
-            return dict(gemerkt)
-
+def _empfang_finalize(
+    state: AppState,
+    entry: WalletEntry,
+    *,
+    kennung: str,
+    address: str,
+    index: int,
+    source: str,
+    max_index: int,
+) -> dict:
+    """Subscribe Gap + Prozess-Cache + Antwort (ohne XPUB)."""
     xpub = entry.analyse_schluessel
-    max_index = _empfang_max_index(entry)
-    next_index = _next_receive_index_from_cache(
-        state, entry, max_index=max_index,
-    )
     skript = None if entry.is_multisig or entry.descriptor else entry.script_type
-    abgeleitet = main.derive_receive_address_at_index(
-        xpub, next_index, script_type=skript,
-    )
-    if not abgeleitet:
-        raise ApiError(500, "Empfangsadresse konnte nicht abgeleitet werden.")
-    address, index = abgeleitet[0], int(abgeleitet[1])
-    source = "cache_estimate"
-
-    if not _empfang_gehoert_zu_wallet(state, entry, address):
-        raise ApiError(500, "Abgeleitete Adresse gehört nicht zu diesem Wallet.")
-
-    # Gap-Lookahead: nächste freie + weitere Empfangsadressen (BIP44-üblich 20).
-    # Fängt Zahlungen auf Adressen, die SatSage nicht selbst „ausgegeben“ hat.
     gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
     lookahead: list[str] = []
     for i in range(index, min(index + gap + 1, max_index)):
@@ -2992,6 +3247,119 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
     )
     state.empfang_cache[kennung] = dict(antwort)
     return antwort
+
+
+def _empfang_aus_cache_schaetzung(
+    state: AppState,
+    entry: WalletEntry,
+    *,
+    kennung: str,
+    max_index: int,
+) -> dict:
+    """Fallback ohne Electrs: max(bekannter Index)+1 — UI warnt."""
+    xpub = entry.analyse_schluessel
+    next_index = _next_receive_index_from_cache(
+        state, entry, max_index=max_index,
+    )
+    skript = None if entry.is_multisig or entry.descriptor else entry.script_type
+    abgeleitet = main.derive_receive_address_at_index(
+        xpub, next_index, script_type=skript,
+    )
+    if not abgeleitet or not abgeleitet[0]:
+        raise ApiError(500, "Empfangsadresse konnte nicht abgeleitet werden.")
+    address, index = str(abgeleitet[0]), int(abgeleitet[1])
+    # Belong weich: Ableitung kommt vom Wallet-Schlüssel; harter 500 leert das Dock.
+    return _empfang_finalize(
+        state,
+        entry,
+        kennung=kennung,
+        address=address,
+        index=index,
+        source="cache_estimate",
+        max_index=max_index,
+    )
+
+
+def api_wallet_empfang(state: AppState, kennung: str) -> dict:
+    """
+    Nächste Empfangsadresse für QR/Anzeige.
+
+    * **Eigener Electrs/Fulcrum erreichbar:** immer unbenutzte Adresse
+      (get_history / BIP44-Gap). Prozess-Cache nur, wenn die gemerkte
+      Adresse noch history-frei ist (ein RPC).
+    * **Sonst:** Schätzung aus UTXO-/Verlaufs-Cache + ``source=cache_estimate``
+      (UI-Warnhinweis). Liefert nie XPUB/Deskriptor.
+    """
+    entry = wallets_mod.find_entry(state.entries, kennung)
+    if entry is None:
+        raise ApiError(404, "Wallet nicht gefunden.")
+    if not entry.is_valid():
+        raise ApiError(400, "Wallet lässt sich nicht ableiten.")
+
+    if getattr(entry, "read_only", False):
+        return _empfang_antwort(
+            kennung=kennung,
+            entry=entry,
+            address="",
+            index=0,
+            source="read_only",
+            subscribed=False,
+            watch_active=False,
+            read_only=True,
+        )
+
+    max_index = _empfang_max_index(entry, state)
+    bekannt, _ = _cache_bekannt_adressen(state, entry)
+    client = _eigener_fulcrum_client(state)
+
+    gemerkt = state.empfang_cache.get(kennung)
+    if (
+        gemerkt
+        and gemerkt.get("address")
+        and not gemerkt.get("read_only")
+        and gemerkt["address"] not in bekannt
+    ):
+        if client is not None:
+            if gemerkt.get("source") == "fulcrum":
+                # Schnellpfad: eine History-Probe — Adresse noch unbenutzt?
+                try:
+                    if not _adresse_hat_history(client, gemerkt["address"]):
+                        return dict(gemerkt)
+                except Exception:
+                    pass
+                # Benutzt oder Electrs-Fehler → neu ermitteln.
+            # cache_estimate bei lebendem Electrs verwerfen.
+            state.empfang_cache.pop(kennung, None)
+        else:
+            # Ohne Electrs: gemerkte Adresse behalten, aber nicht als „unbenutzt“ behaupten.
+            out = dict(gemerkt)
+            if out.get("source") == "fulcrum":
+                out["source"] = "cache_estimate"
+            return out
+
+    if client is not None:
+        try:
+            treffer = _naechste_freie_empfang_electrs(
+                state, entry, client, max_index=max_index,
+            )
+            if treffer:
+                address, index = treffer
+                return _empfang_finalize(
+                    state,
+                    entry,
+                    kennung=kennung,
+                    address=address,
+                    index=index,
+                    source="fulcrum",
+                    max_index=max_index,
+                )
+        except Exception:
+            pass
+        # Electrs konfiguriert, aber Abfrage gescheitert → Schätzung + Warnung.
+
+    return _empfang_aus_cache_schaetzung(
+        state, entry, kennung=kennung, max_index=max_index,
+    )
 
 
 #: Lab-Regtest: Fountain/Faucet — nicht in SatSage-WALLET_*, nur als Fremdquelle.
@@ -3056,13 +3424,36 @@ def api_lab_faucet_senden(state: AppState, payload: dict) -> dict:
     }
 
 
+def _seed_wallet_ctx_aus_caches(state: AppState) -> None:
+    """UTXO-/Resolution-Adressen ins Mapping — vor Listen/Trace ohne teure Ableitung."""
+    ctx = state.wallet_ctx
+    if ctx is None:
+        return
+    schluessel = [e.analyse_schluessel for e in state.analyse_entries]
+    if not schluessel:
+        return
+    try:
+        main.seed_wallet_addresses_from_utxo_cache(
+            ctx, schluessel, state.cache_dir,
+        )
+    except Exception:
+        pass
+    try:
+        main.seed_wallet_addresses_from_resolution_cache(ctx, schluessel)
+    except Exception:
+        pass
+
+
 def api_alle_utxos(state: AppState, query: dict) -> dict:
     """
     UTXOs über alle Wallets — Einstieg für die Herkunftsansicht.
 
     Bestand und Verlauf aus dem Cache. Optional Mempool-Pending-Spends
     nur über den eigenen Electrs (sonst kein Netz).
+
+    ``mempool=0``: kein Electrs-Rundlauf (Herkunftsliste / Sprung aus Wallet).
     """
+    _seed_wallet_ctx_aus_caches(state)
     gesammelt: list[dict] = []
     ohne_cache: list[str] = []
     for entry in state.entries:
@@ -3081,13 +3472,17 @@ def api_alle_utxos(state: AppState, query: dict) -> dict:
     except (ValueError, TypeError):
         limit = None
     sort = _sortierung(query)
+    mempool_an = str((query.get("mempool") or ["1"])[0]).strip().lower() not in (
+        "0", "false", "no", "nein", "off",
+    )
 
     anhang = _verlaufs_anhang(
         state, state.analyse_entries, limit=limit, sort=sort,
     )
-    gesammelt, anhang = _mit_mempool_pending(
-        state, gesammelt, anhang, limit=limit, sort=sort,
-    )
+    if mempool_an:
+        gesammelt, anhang = _mit_mempool_pending(
+            state, gesammelt, anhang, limit=limit, sort=sort,
+        )
 
     ergebnis = utxos_mod.rank_wallet_utxos(
         gesammelt,
@@ -3999,9 +4394,24 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 on_utxos_update=on_utxos_update,
             )
             job.raise_if_cancelled()
+            n_empfang = _schaerfe_empfang_nach_sync(
+                state,
+                [entry],
+                fulcrum=fetchers.get("fulcrum"),
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+            )
             wort = "UTXO" if len(gefunden) == 1 else "UTXOs"
-            stand.phase(f"{len(gefunden)} {wort} gefunden.")
-            return {"utxo_count": len(gefunden), "partial": False}
+            stand.phase(
+                f"{len(gefunden)} {wort} gefunden."
+                + (" Empfangsadresse per Electrs geschärft." if n_empfang else "")
+            )
+            return {
+                "utxo_count": len(gefunden),
+                "partial": False,
+                "empfang_scharf": n_empfang,
+            }
         finally:
             halt.set()
             stand.close()
@@ -5054,9 +5464,19 @@ def api_jobs(state: AppState, query: dict) -> dict:
         job = state.jobs.get(daten["id"])
         if job is not None and job.result is not None:
             daten["result"] = job.result
+    watch = _wallet_watch_status()
+    block_event = None
+    try:
+        seq = int(watch.get("last_block_seq") or 0)
+        hoehe = watch.get("last_block_height")
+        if seq > 0 and hoehe is not None:
+            block_event = {"seq": seq, "height": int(hoehe)}
+    except (TypeError, ValueError):
+        block_event = None
     return {
         "jobs": jobs,
         "scan_pipeline": state.scan_queue.snapshot(),
+        "block_event": block_event,
     }
 
 
@@ -5933,6 +6353,12 @@ def build_state(args) -> AppState:
     # Damit main._load_dotenv() dieselbe Datei sieht wie --env / AppState.
     if args.env:
         main.ENV_FILE = Path(args.env)
+    if args.cache_dir:
+        main.UTXO_CACHE_DIR = Path(args.cache_dir)
+    if args.immutable_cache_dir:
+        # fulcrum._block_time_for_height liest global IMMUTABLE_CACHE_DIR —
+        # sonst Mainnet-Header-Zeiten auf Regtest-Höhen (Alter nur 1T/377T).
+        main.IMMUTABLE_CACHE_DIR = Path(args.immutable_cache_dir)
     state = AppState(
         env_path=Path(args.env or main.ENV_FILE),
         cache_dir=Path(args.cache_dir or main.UTXO_CACHE_DIR),
@@ -6066,6 +6492,9 @@ def tip_sync_laeuft(state: AppState) -> bool:
         return False
     job = state.jobs.get(jid)
     if job is None or job.status != "running":
+        # Fertig/weg: stale ID freigeben — sonst meldet /api/config ewig den alten Job.
+        if job is None or job.status in ("done", "failed", "cancelled"):
+            state.wallet_sync_job_id = None
         return False
     # Abbruch angefordert: neuer Start darf den Slot übernehmen.
     if getattr(job, "cancelled", False):
@@ -6098,6 +6527,7 @@ def starte_wallet_aktualisierung(
     *,
     erzwingen: bool = False,
     wallet_ids: list[str] | None = None,
+    still: bool = False,
 ) -> dict | None:
     """
     Hintergrund: Wallets mit Cache bis Chain-Tip nachziehen.
@@ -6105,6 +6535,7 @@ def starte_wallet_aktualisierung(
     Kein Fullscan — BIP-158 ab ``scan_tip_height`` oder Electrs light.
     *erzwingen*: auch ohne ``WALLETS_BEIM_START_AKTUALISIEREN`` (UI-Knopf).
     *wallet_ids*: nur diese Wallets; sonst alle mit Cache.
+    *still*: Hintergrund (Wallet-Watch-Fallback) — GUI ohne Nav-„aktualisiere…“.
     Rückgabe: Job-Dict bei Start, None wenn nichts zu tun / schon läuft.
     """
     werte = state.env().values()
@@ -6141,9 +6572,14 @@ def starte_wallet_aktualisierung(
             nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
                 state.env().values()
             )
+            extras = []
+            if still:
+                extras.append("still")
+            if nur_bekannte:
+                extras.append("nur bekannte UTXOs, kein Gap")
+            suffix = f" ({', '.join(extras)})…" if extras else "…"
             stand.phase(
-                f"Aktualisiere {len(eintraege)} Wallet(s) bis Chain-Tip"
-                + (" (nur bekannte UTXOs, kein Gap)…" if nur_bekannte else "…")
+                f"Aktualisiere {len(eintraege)} Wallet(s) bis Chain-Tip{suffix}"
             )
             args = state.args_namespace()
             args.xpubs = [e.analyse_schluessel for e in eintraege]
@@ -6245,17 +6681,44 @@ def starte_wallet_aktualisierung(
                 nur_bekannte=nur_bekannte,
             )
             job.raise_if_cancelled()
+            # UTXO-Tip ist fertig → Nav darf „gerade eben“ zeigen. Empfangs-QR
+            # wird danach noch geschärft; der Nutzer sieht das am QR, nicht am
+            # Wallet-Marker.
+            if isinstance(job.meta, dict):
+                job.meta["phase"] = "empfang"
+            job.result = {
+                "wallets": zaehler["ok"],
+                "utxo_count": zaehler["utxos"],
+                "empfang_phase": True,
+            }
+            if state.wallet_sync_job_id == job.id:
+                state.wallet_sync_job_id = None
             stand.phase(
                 f"{zaehler['ok']} Wallet(s) aktualisiert, "
-                f"{zaehler['utxos']} UTXO(s)."
+                f"{zaehler['utxos']} UTXO(s) — Empfangsadressen folgen…"
             )
+            n_empfang = _schaerfe_empfang_nach_sync(
+                state,
+                eintraege,
+                fulcrum=fetchers.get("fulcrum"),
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+            )
+            job.raise_if_cancelled()
+            if n_empfang:
+                stand.phase(f"Empfang per Electrs: {n_empfang} Wallet(s).")
             return {
                 "wallets": zaehler["ok"],
                 "utxo_count": zaehler["utxos"],
+                "empfang_scharf": n_empfang,
             }
         finally:
             halt.set()
             stand.close()
+            # Slot freigeben sobald der Job-Thread endet (done/fail/cancel).
+            if state.wallet_sync_job_id == job.id:
+                state.wallet_sync_job_id = None
             try:
                 from core import wallet_watch
 
@@ -6266,11 +6729,12 @@ def starte_wallet_aktualisierung(
     namen = ", ".join(e.display_name for e in eintraege[:3])
     if len(eintraege) > 3:
         namen += f" +{len(eintraege) - 3}"
-    label = (
-        f"Tip-Nachzug ({namen})"
-        if erzwingen
-        else f"Start-Aktualisierung ({namen})"
-    )
+    if still:
+        label = f"Tip-Nachzug still ({namen})"
+    elif erzwingen:
+        label = f"Tip-Nachzug ({namen})"
+    else:
+        label = f"Start-Aktualisierung ({namen})"
     job = state.jobs.start(
         "wallet_sync",
         label,
@@ -6278,6 +6742,7 @@ def starte_wallet_aktualisierung(
         meta={
             "art": "wallet_sync",
             "wallet_ids": [wallets_mod.eintrag_id(e) for e in eintraege],
+            "still": bool(still),
         },
     )
     state.wallet_sync_job_id = job.id

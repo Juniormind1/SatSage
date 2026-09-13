@@ -619,22 +619,60 @@ function chainTipHoehe() {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** Wallet-IDs aus wallet_sync-Job-Meta (leer = unbekannt, nicht „alle“). */
+function walletIdsAusSyncJob(job) {
+  if (!job) return [];
+  const meta = job.meta || {};
+  if (Array.isArray(meta.wallet_ids) && meta.wallet_ids.length) {
+    return meta.wallet_ids.map(String);
+  }
+  if (meta.wallet_id) return [String(meta.wallet_id)];
+  return [];
+}
+
+function merkeWalletSyncZiele(jobOrIds) {
+  if (Array.isArray(jobOrIds)) {
+    Zustand.walletSyncWalletIds = jobOrIds.map(String);
+    return;
+  }
+  const ids = walletIdsAusSyncJob(jobOrIds);
+  if (ids.length) Zustand.walletSyncWalletIds = ids;
+}
+
 function walletSyncLaeuftFuer(walletId) {
   if (!walletId) return false;
+  // UTXO-Tip fertig, Empfangsadressen trudeln noch → Nav schon „gerade eben“.
+  if (Zustand.walletSyncPhase === "empfang") return false;
+  if (Zustand.walletSyncLogStand?._tipUiFertig) return false;
   const jobs = Zustand.jobsNav?.jobs || [];
   for (const job of jobs) {
     if (job.kind !== "wallet_sync") continue;
+    // Stiller Watch-Fallback: kein Nav-„aktualisiere…“ / kein Empfangs-Puls.
+    if (job.meta?.still) continue;
+    // UTXO-Tip fertig, nur noch Empfangs-QR: Marker grün — QR zeigt den Rest.
+    if (job.meta?.phase === "empfang") continue;
     if (!(job.running || job.status === "running" || job.status === "queued")) {
       continue;
     }
-    const ids = job.meta?.wallet_ids;
-    if (Array.isArray(ids) && ids.length) {
-      if (ids.includes(walletId)) return true;
+    const ids = walletIdsAusSyncJob(job);
+    if (ids.length) {
+      if (ids.includes(String(walletId))) return true;
       continue;
     }
-    // Sync ohne explizite Wallet-Liste: Tip-Knopf darf global warten,
-    // UTXO-Scan dieses Portfolios nicht pauschal sperren.
-    if (job.meta?.wallet_id === walletId) return true;
+    // Meta fehlt: nicht pauschal alle Wallets markieren.
+  }
+  // Lokaler Tip-Poller mit bekannten Zielen (Nav noch ohne Meta).
+  // Nicht während Empfangs-Phase — sonst bleibt „aktualisiere…“ trotz Log-Fertig.
+  if (
+    Zustand.walletSyncJob
+    && Zustand.walletSyncTimer
+    && Array.isArray(Zustand.walletSyncWalletIds)
+    && Zustand.walletSyncWalletIds.length
+    && !Zustand.walletSyncStill
+    && Zustand.walletSyncPhase !== "empfang"
+    && !Zustand.walletSyncLogStand?._tipUiFertig
+  ) {
+    return Zustand.walletSyncWalletIds.includes(String(walletId));
   }
   return false;
 }
@@ -645,8 +683,11 @@ function jobNochAktiv(jobId) {
   const jobs = Zustand.jobsNav?.jobs || [];
   const j = jobs.find((x) => x && x.id === jobId);
   if (!j) {
-    // Nav noch nicht da / älterer Server: lokale Bindung nur kurz vertrauen
-    return Boolean(Zustand.rescanTimer);
+    // Nav kennt den Job noch nicht / nicht mehr: nur solange der zugehörige
+    // Poller die ID noch aktiv verfolgt — nie pauschal „ja“ für alle Wallets.
+    if (Zustand.rescanJob === jobId && Zustand.rescanTimer) return true;
+    if (Zustand.walletSyncJob === jobId && Zustand.walletSyncTimer) return true;
+    return false;
   }
   return Boolean(
     j.running
@@ -1654,44 +1695,63 @@ const EmpfangPuls = (() => {
   // dies→das→ananas; Mine…→Scams→Bootsunfall→Frage→sauer.
   const ATEM_WORTE = [
     "hyperventiliere…",
-    "knusperflöte…",
-    "wabbeltron…",
+    "schultere den Header…",
+    "besumme die Peers…",
     "dies…",
     "das…",
     "ananas…",
-    "quengelquark…",
-    "murmelstrom…",
-    "satoshi-seufzer…",
-    "blockfussel…",
-    "peerkitzel…",
-    "mempool-muff…",
-    "gap-galopp…",
-    "tip-träller…",
-    "filterflaum…",
-    "utxo-humm…",
+    "tunnele Gap-Limits…",
+    "falte Compact Filter…",
+    "seufze satoshi-mäßig…",
+    "dipsybake den Tip…",
+    "überrede mehr Peers…",
+    "schnuppere am Mempool…",
+    "galoppiere die Gaps…",
+    "trällere den Tip…",
+    "aurakämme die Filter…",
+    "entstaube UTXOs…",
     "Mine bitcoin (nein, war nur Spaß)",
     "ärgere mich über scams…",
     "plane Bootsunfall…",
     "ärgere mich über die Frage…",
-    "bin auch ein bischen sauer deshalb…",
-    "knotenknistern…",
-    "orangenes Nichts…",
+    "bin ein bisschen wütend deshalb…",
+    "finde mein mojo…",
+    "kontempliere orangenes Nichts…",
     "fast fertig (gelogen)…",
     "noch ein Atemzug…",
   ];
   let payloadIx = 0;
   let wortIx = 0;
+  /** Noch so viele Atemzüge mit dem aktuellen funny Text (2–4, neu gewürfelt). */
+  let wortAtemRest = 0;
   const ATEM_MS = 2200;
   /** Sonderatem: orangeB | ohNo | incoming */
   let sonderQueue = [];
   let sonder = null; // { typ, t0, phase?, walletId? }
   const BTC_ORANGE = { r: 247, g: 147, b: 26 };
 
-  function setzeAtemWort() {
+  function wuerfleWortAtemRest() {
+    return 2 + Math.floor(Math.random() * 3); // 2, 3 oder 4
+  }
+
+  function setzeAtemKopfStil({ mehrzeilig = false, mono = false } = {}) {
     const kopf = $("#empfang-kopf");
     if (!kopf) return;
+    kopf.classList.toggle("empfang-kopf--mehrzeilig", Boolean(mehrzeilig));
+    kopf.classList.toggle("empfang-kopf--mono", Boolean(mono));
+  }
+
+  function setzeAtemWort(fest) {
+    const kopf = $("#empfang-kopf");
+    if (!kopf) return;
+    if (fest != null && fest !== "") {
+      kopf.textContent = String(fest);
+      return;
+    }
+    setzeAtemKopfStil({});
     const wort = ATEM_WORTE[wortIx % ATEM_WORTE.length];
     kopf.textContent = wort;
+    if (wortAtemRest <= 0) wortAtemRest = wuerfleWortAtemRest();
   }
 
   function setzeAtemTextSicht(sicht) {
@@ -1715,7 +1775,32 @@ const EmpfangPuls = (() => {
     }
   }
 
-  function stop() {
+  function stop(opts) {
+    const force = Boolean(opts && opts.force);
+    // Incoming/Konfetti: nicht von zeichneEmpfang/Poll abwürgen.
+    if (
+      !force
+      && (
+        incomingAktiv
+        || (sonder && sonder.typ === "incoming")
+        || sonderQueue.some((s) => s && s.typ === "incoming")
+      )
+    ) {
+      return;
+    }
+    if (force) {
+      incomingAktiv = false;
+      incomingOnDone = null;
+      incomingKonfettiFertig = true;
+    }
+
+    const pane = $("#empfang-pane");
+    const warAn = Boolean(
+      raf
+      || sonder
+      || sonderQueue.length
+      || (pane && pane.classList.contains("empfang-pane--puls")),
+    );
     if (raf) {
       cancelAnimationFrame(raf);
       raf = 0;
@@ -1724,7 +1809,9 @@ const EmpfangPuls = (() => {
     gewechseltInZyklus = false;
     sonderQueue = [];
     sonder = null;
-    const pane = $("#empfang-pane");
+    // Ohne laufende Animation den normalen Empfangs-QR nicht zerstören
+    // (Tip-Sync-Ende fremdes Wallet rief stop() und wischte Firmung-QR weg).
+    if (!warAn) return;
     if (pane) pane.classList.remove("empfang-pane--puls", "empfang-pane--konfetti");
     const qr = $("#empfang-qr");
     if (qr) {
@@ -1741,6 +1828,7 @@ const EmpfangPuls = (() => {
       kopf.textContent = t("dock.empfangHead");
       kopf.style.opacity = "";
       kopf.style.color = "";
+      kopf.classList.remove("empfang-kopf--mehrzeilig", "empfang-kopf--mono");
     }
     const konfetti = document.getElementById("empfang-konfetti");
     if (konfetti) konfetti.remove();
@@ -1775,19 +1863,89 @@ const EmpfangPuls = (() => {
     });
   }
 
+  /** True solange TxIN-Jubel (Text und/oder Konfetti) aktiv ist. */
+  let incomingAktiv = false;
+  let incomingOnDone = null;
+  let incomingKonfettiFertig = true;
+
+  function _incomingFertigPruefen() {
+    if (!incomingAktiv) return;
+    if (!incomingKonfettiFertig) return;
+    // Noch Sonderatem „incoming“ in Queue/RAF → warten.
+    if (sonder && sonder.typ === "incoming") return;
+    if (sonderQueue.some((s) => s && s.typ === "incoming")) return;
+    incomingAktiv = false;
+    const cb = incomingOnDone;
+    incomingOnDone = null;
+    if (typeof cb === "function") {
+      try {
+        cb();
+      } catch (_) {
+        /* optional */
+      }
+    }
+  }
+
   function flashIncoming(walletId, sats, konfettiOpts) {
     const wid = walletId || Zustand.walletId;
     // auto: < 1 Mio bunt, ≥ 1 Mio alle Schnipsel gold/silber (goldAb überschreibbar)
     const opts = Object.assign({ modus: "auto", goldAb: 1_000_000 }, konfettiOpts || {});
-    if (sats != null && sats !== "") opts.sats = Number(sats);
+    if (sats != null && sats !== "" && Number.isFinite(Number(sats))) {
+      opts.sats = Number(sats);
+    } else if (opts.sats == null || opts.sats === "" || !Number.isFinite(Number(opts.sats))) {
+      // Ohne Betrag: trotzdem sichtbare Schnipsel (nicht 0 → leere Kanone optisch).
+      opts.sats = 100_000;
+    }
+    const onDone = typeof opts.onDone === "function" ? opts.onDone : null;
+    delete opts.onDone;
+    const halte = opts.halteDanach != null
+      ? Boolean(opts.halteDanach)
+      : (typeof empfangScanLaeuftFuer === "function" && empfangScanLaeuftFuer(wid));
+    delete opts.halteDanach;
+
+    incomingAktiv = true;
+    incomingOnDone = onDone;
+    incomingKonfettiFertig = false;
+
+    // Konfetti SOFORT — nicht erst nach 420 ms Fadeout (der oft abgewürgt wurde).
+    try {
+      starteKonfetti(opts, () => {
+        incomingKonfettiFertig = true;
+        if (sonder && sonder.typ === "incoming") {
+          sonder.konfettiFertig = true;
+        }
+        _incomingFertigPruefen();
+      });
+    } catch (_) {
+      incomingKonfettiFertig = true;
+    }
+
+    // Pane sichtbar + Ka-Ching-Text, auch wenn noch kein Puls-RAF lief.
+    const pane = $("#empfang-pane");
+    const leer = $("#empfang-leer");
+    const inhalt = $("#empfang-inhalt");
+    if (pane) pane.classList.add("empfang-pane--puls", "empfang-pane--konfetti");
+    if (leer) leer.hidden = true;
+    if (inhalt) inhalt.hidden = false;
+    setzeAtemWort("Ka-Ching!");
+    setzeAtemTextSicht(1);
+
     queueSonder({
       typ: "incoming",
       walletId: wid,
       sats: opts.sats,
       konfettiOpts: opts,
-      halteDanach: typeof empfangScanLaeuftFuer === "function"
-        && empfangScanLaeuftFuer(wid),
+      halteDanach: halte,
+      // onDone nur über _incomingFertigPruefen (Konfetti + Atem-Ende).
+      konfettiBereitsGestartet: true,
     });
+  }
+
+  /** TxIN-/Konfetti-Sonderatem läuft (QR darf nicht überschrieben werden). */
+  function istIncoming() {
+    if (incomingAktiv) return true;
+    if (sonder && sonder.typ === "incoming") return true;
+    return sonderQueue.some((s) => s && s.typ === "incoming");
   }
 
   /** Tx im Block bestätigt — grüner Haken, einen Atemzug. */
@@ -1797,6 +1955,27 @@ const EmpfangPuls = (() => {
       halteDanach: typeof empfangScanLaeuftFuer === "function"
         && empfangScanLaeuftFuer(Zustand.walletId),
     });
+  }
+
+  /** Neuer Chain-Tip: Atem 1 „NEUER BLOCK“, Atem 2 Blockhöhe (Mono). */
+  function flashNeuerBlock(hoehe) {
+    const n = Number(hoehe);
+    queueSonder({
+      typ: "neuerBlock",
+      hoehe: Number.isFinite(n) ? Math.trunc(n) : hoehe,
+      halteDanach: typeof empfangScanLaeuftFuer === "function"
+        && empfangScanLaeuftFuer(Zustand.walletId),
+    });
+  }
+
+  function formatBlockHoeheAtem(hoehe) {
+    const n = Number(hoehe);
+    if (!Number.isFinite(n)) return String(hoehe ?? "");
+    try {
+      return Math.trunc(n).toLocaleString("de-DE");
+    } catch (_) {
+      return String(Math.trunc(n));
+    }
   }
 
   function beendeSonderWennIdle(halteDanach) {
@@ -2022,17 +2201,13 @@ const EmpfangPuls = (() => {
   }
 
   /**
-   * Parameter aus Satoshi-Betrag.
-   * 1…(goldAb−1): bunte Schnipsel, Schussstärke wächst (log) bis fast goldAb.
-   * ≥ goldAb: goldene Schnipsel, Physik wie bei goldAb−1.
-   */
-  /**
    * Sats → Geldscheine (greedy, auf 10 gerundet).
    * Losgrößen: 100000, 10000, 1000, 100, 10. Staub = 10.
    */
   function konfettiScheineAusSats(sats) {
     let rest = Math.max(0, Math.round(Number(sats) / 10) * 10);
     if (rest <= 0 && Number(sats) > 0) rest = 10; // unter 5 → 0; 5–9 → 10
+    if (rest <= 0) rest = 100_000; // Fallback: sichtbarer Schuss
     const denoms = [100000, 10000, 1000, 100, 10];
     const scheine = [];
     for (const d of denoms) {
@@ -2047,7 +2222,7 @@ const EmpfangPuls = (() => {
   function konfettiGroesseFuerSchein(denom) {
     switch (denom) {
       case 10:
-        return { w0: 1, h: 1 }; // Staub
+        return { w0: 1.5, h: 1.5 }; // Staub (sichtbar)
       case 100:
         return { w0: 3 + Math.random() * 1.2, h: 1.2 + Math.random() * 0.5 };
       case 1000:
@@ -2061,36 +2236,69 @@ const EmpfangPuls = (() => {
     }
   }
 
+  /**
+   * Kalibrierte Defaults (animdebug-Regler / Lab):
+   * Impuls 500, Streu 80 %, Grav 5, Luft 2, Winkel 30–80°, Dauer 3 s,
+   * Gold ab 1 Mio, +25 Staub je Schuss.
+   */
+  const KONFETTI_DEFAULTS = {
+    goldAb: 1_000_000,
+    impuls: 500,
+    impulsStreu: 80,
+    grav: 5,
+    luft: 2,
+    winkelMin: 30,
+    winkelMax: 80,
+    dauer: 3000,
+    staubExtra: 25,
+  };
+
   function konfettiParamsAusSats(sats, overrides) {
     const o = overrides || {};
-    const goldAb = Math.max(2, Number(o.goldAb) || 1_000_000);
-    const s = Math.max(0, Number(sats != null && sats !== "" ? sats : o.sats) || 0);
+    const goldAb = Math.max(2, Number(o.goldAb) || KONFETTI_DEFAULTS.goldAb);
+    let s = Math.max(0, Number(sats != null && sats !== "" ? sats : o.sats) || 0);
+    if (s <= 0) s = 100_000;
     const modus = o.modus || "auto"; // auto | bunt | gold
-    // < 1 Mio: bunt; ≥ 1 Mio: alle Schnipsel gold/silber (Debug kann erzwingen).
     let gold = s >= goldAb;
     if (modus === "bunt") gold = false;
     if (modus === "gold") gold = true;
+    // Stärke nur für Anzeige / Sats→Impuls-Vorschlag — Physik nutzt Impuls.
     const ref = Math.min(Math.max(1, s), goldAb - 1);
-    const staerkeAuto = Math.min(1, Math.log10(Math.max(1, ref)) / Math.log10(goldAb - 1));
+    const staerkeAuto = Math.min(
+      1,
+      Math.log10(Math.max(1, ref)) / Math.log10(Math.max(2, goldAb - 1)),
+    );
     let staerke = staerkeAuto;
     if (o.staerke != null && o.staerke !== "" && Number(o.staerke) >= 0) {
       staerke = Math.max(0, Math.min(1, Number(o.staerke)));
     }
-    if (gold && modus === "auto") staerke = Math.max(staerke, staerkeAuto);
+    // Impuls: Override oder Default 500 (volle Kanone). Optional aus Stärke ableiten.
     let impuls = Number(o.impuls);
     if (!Number.isFinite(impuls) || impuls <= 0) {
-      impuls = 5 + staerke * 495;
+      if (o.impulsAusStaerke) {
+        impuls = 5 + staerke * 495;
+      } else {
+        impuls = KONFETTI_DEFAULTS.impuls;
+      }
     }
     impuls = Math.max(5, Math.min(500, impuls));
-    const impulsStreu = Math.max(0, Math.min(90, Number(o.impulsStreu) || 80)) / 100;
-    const speed = 0.008 + (impuls / 500) * 0.14;
-    const grav = Math.max(0, Math.min(100, Number(o.grav) != null && o.grav !== "" ? Number(o.grav) : 5));
+    const impulsStreu = Math.max(
+      0,
+      Math.min(90, Number(o.impulsStreu != null ? o.impulsStreu : KONFETTI_DEFAULTS.impulsStreu)),
+    ) / 100;
+    // Mündungsgeschwindigkeit relativ zur QR-Seite (bei Impuls 500 ≈ 0.15·seite/Frame-Einheit).
+    const speed = 0.04 + (impuls / 500) * 0.14;
+    const grav = Math.max(
+      0,
+      Math.min(100, Number(o.grav != null && o.grav !== "" ? o.grav : KONFETTI_DEFAULTS.grav)),
+    );
     let scheine = konfettiScheineAusSats(s);
-    // Optik: jeder Schuss +45 Staub (1 px), sonst wirkt z. B. 100 k wie ein einsamer Batzen.
-    const STAUB_EXTRA = 45;
-    for (let i = 0; i < STAUB_EXTRA; i++) scheine.push(10);
-    // Performance-Deckel: größte Scheine zuerst behalten, Staub am Ende kürzen
-    const maxParts = 200;
+    const staubExtra = Math.max(
+      0,
+      Math.min(80, Number(o.staubExtra != null ? o.staubExtra : KONFETTI_DEFAULTS.staubExtra)),
+    );
+    for (let i = 0; i < staubExtra; i++) scheine.push(10);
+    const maxParts = 220;
     if (scheine.length > maxParts) {
       const wert = scheine.filter((d) => d > 10);
       const staub = scheine.filter((d) => d === 10);
@@ -2112,11 +2320,15 @@ const EmpfangPuls = (() => {
       scheine,
       zählung,
       count: scheine.length,
-      dauer: Math.max(1000, Math.min(60000, Number(o.dauer) || 3000)),
-      winkelMin: Number(o.winkelMin) || 30,
-      winkelMax: Number(o.winkelMax) || 80,
-      luft: Math.max(0, Math.min(100, Number(o.luft) != null && o.luft !== "" ? Number(o.luft) : 2)),
+      dauer: Math.max(1000, Math.min(60000, Number(o.dauer) || KONFETTI_DEFAULTS.dauer)),
+      winkelMin: Number(o.winkelMin != null ? o.winkelMin : KONFETTI_DEFAULTS.winkelMin),
+      winkelMax: Number(o.winkelMax != null ? o.winkelMax : KONFETTI_DEFAULTS.winkelMax),
+      luft: Math.max(
+        0,
+        Math.min(100, Number(o.luft != null && o.luft !== "" ? o.luft : KONFETTI_DEFAULTS.luft)),
+      ),
       speed,
+      staubExtra,
     };
   }
 
@@ -2136,50 +2348,78 @@ const EmpfangPuls = (() => {
 
   function starteKonfetti(opts, onDone) {
     const wrap = document.querySelector(".empfang-qr-wrap");
-    if (!wrap) {
+    const pane = document.getElementById("empfang-pane");
+    const host = wrap || pane;
+    if (!host) {
       if (typeof onDone === "function") onDone();
       return 3000;
     }
-    let layer = document.getElementById("empfang-konfetti");
-    if (!layer) {
-      layer = document.createElement("canvas");
-      layer.id = "empfang-konfetti";
-      layer.className = "empfang-konfetti";
-      wrap.appendChild(layer);
+    // Altes Layer weg — sonst hängt ein totes Canvas.
+    const alt = document.getElementById("empfang-konfetti");
+    if (alt) alt.remove();
+
+    const layer = document.createElement("canvas");
+    layer.id = "empfang-konfetti";
+    layer.className = "empfang-konfetti";
+    host.appendChild(layer);
+
+    // Echte Pixelgröße des QR-Quadrats (nicht 0 durch flex/hidden).
+    const rect = host.getBoundingClientRect();
+    let seite = Math.floor(Math.min(rect.width || 0, rect.height || 0));
+    if (seite < 80) {
+      seite = Math.floor(Math.min(
+        host.clientWidth || 0,
+        host.clientHeight || 0,
+        pane?.clientWidth || 0,
+        pane?.clientHeight || 0,
+      ));
     }
-    const seite = Math.max(64, Math.floor(Math.min(wrap.clientWidth || 160, wrap.clientHeight || 160)));
+    if (seite < 80) seite = 200;
     layer.width = seite;
     layer.height = seite;
+    // CSS-Größe = Bitmap — kein verzerrtes Hochskalieren.
+    layer.style.width = `${seite}px`;
+    layer.style.height = `${seite}px`;
+
     const cctx = layer.getContext("2d");
+    if (!cctx) {
+      layer.remove();
+      if (typeof onDone === "function") onDone();
+      return 3000;
+    }
+
     const p = konfettiParamsAusSats(opts && opts.sats, opts);
-    // Bunt: feste Palette. Gold: Phasen-Offset, Lerp goldgelb ↔ silberweiß.
-    const farbenBunt = ["#f7931a", "#ff5c5c", "#5cff8a", "#5cb8ff", "#ffd15c", "#d45cff", "#fff4c4"];
+    const farbenBunt = [
+      "#f7931a", "#ff5c5c", "#5cff8a", "#5cb8ff", "#ffd15c", "#d45cff", "#fff4c4",
+    ];
     const goldDunkel = _hexRgb("#e6b422");
     const goldHell = _hexRgb("#fff8e7");
     const wMin = Math.min(p.winkelMin, p.winkelMax);
     const wMax = Math.max(p.winkelMin, p.winkelMax);
     const luft = (p.luft != null ? p.luft : 2) / 100;
     const kLuft = 0.00025 + luft * 0.0022;
-    const bodenY = seite - 4;
+    const bodenY = seite - 3;
     const scheine = (p.scheine && p.scheine.length)
-      ? p.scheine
-      : konfettiScheineAusSats(p.sats);
-    // Kanone: ein Schnipsel pro Schein, Größe nach Denomination.
+      ? p.scheine.slice()
+      : konfettiScheineAusSats(p.sats).concat(
+        Array.from({ length: KONFETTI_DEFAULTS.staubExtra }, () => 10),
+      );
+
+    // Kanone: unten links, Schuss nach oben-rechts in den QR.
     const parts = scheine.map((denom) => {
       const grad = wMin + Math.random() * Math.max(1, wMax - wMin);
       const rad = (grad * Math.PI) / 180;
       const streu = 1 + (Math.random() * 2 - 1) * p.impulsStreu;
-      const speed = seite * p.speed * Math.max(0.15, streu);
+      const speed = seite * p.speed * Math.max(0.35, streu);
       const gravMul = (p.grav != null ? p.grav : 5) / 5;
       const sz = konfettiGroesseFuerSchein(denom);
       return {
         denom,
-        x: seite * (0.02 + Math.random() * 0.06),
-        y: seite * (0.92 + Math.random() * 0.05),
+        x: seite * (0.04 + Math.random() * 0.08),
+        y: seite * (0.88 + Math.random() * 0.06),
         vx: Math.cos(rad) * speed,
         vy: -Math.sin(rad) * speed,
-        g: (seite * 0.00012 + Math.random() * seite * 0.00008) * gravMul,
-        // Bei gold wird c ignoriert (Shimmer); sonst bunte Palette.
+        g: (seite * 0.00018 + Math.random() * seite * 0.0001) * gravMul,
         c: p.gold
           ? "#e6b422"
           : farbenBunt[Math.floor(Math.random() * farbenBunt.length)],
@@ -2188,47 +2428,49 @@ const EmpfangPuls = (() => {
         w0: sz.w0,
         h: sz.h,
         rot: Math.random() * Math.PI,
-        vr: (Math.random() - 0.5) * 0.04,
+        vr: (Math.random() - 0.5) * 0.05,
         spinPhase: Math.random() * Math.PI * 2,
         spinHz: 2.5 + Math.random() * 3.5,
         dead: false,
+        vx0: 0,
       };
     });
-    // Start-|vx| merken → Kanten-Rotation ab 50 % davon
     for (const part of parts) {
       part.vx0 = Math.abs(part.vx) || 0.0001;
     }
-    const vTerminal = seite * (0.004 + (1 - luft) * 0.008);
+
+    const vTerminal = seite * (0.005 + (1 - luft) * 0.01);
     const t0 = performance.now();
-    const maxDauer = p.dauer; // nur Sicherheits-Obergrenze
+    const maxDauer = p.dauer;
     let done = false;
     function beenden() {
       if (done) return;
       done = true;
-      cctx.clearRect(0, 0, seite, seite);
+      try {
+        cctx.clearRect(0, 0, seite, seite);
+      } catch (_) {
+        /* */
+      }
       layer.remove();
       if (typeof onDone === "function") onDone();
     }
     function frame(now) {
+      if (done) return;
       const elapsed = now - t0;
       const dt = Math.min(40, now - (frame.t || now));
-      const step = dt * 0.032;
+      const step = dt * 0.045;
       frame.t = now;
       cctx.clearRect(0, 0, seite, seite);
       let alleTot = true;
       for (const part of parts) {
         if (part.dead) continue;
         alleTot = false;
-        // Schuss: ~v²-Luft bremst stark. Sinkflug: vx extra dämpfen,
-        // sonst bleibt vx bei begrenztem vy → unnatürliche Gerade diagonal.
         const spd = Math.hypot(part.vx, part.vy) || 0.0001;
         part.vx += -kLuft * part.vx * spd * dt;
         part.vy += -kLuft * part.vy * spd * dt + part.g * dt;
         if (part.vy > 0) {
-          // Horizontal abbauen → Bahn knickt nach unten ab (nicht Mond-Diagonale)
           const sinkDamp = Math.pow(0.92 - luft * 0.08, dt / 16);
           part.vx *= sinkDamp;
-          // Weiche Annäherung an Endgeschwindigkeit statt hartem Clamp
           if (part.vy > vTerminal) {
             part.vy += (vTerminal - part.vy) * Math.min(1, 0.15 * dt);
           }
@@ -2236,18 +2478,19 @@ const EmpfangPuls = (() => {
         part.x += part.vx * step;
         part.y += part.vy * step;
         part.rot += part.vr;
-        // Auftreffen → sofort weg
-        if (part.y >= bodenY) {
+        // Boden oder weit draußen → weg
+        if (part.y >= bodenY || part.x < -40 || part.x > seite + 40 || part.y < -40) {
           part.dead = true;
           continue;
         }
         let fill = part.c;
         if (p.gold) {
           const age = elapsed / 1000;
-          const wave = 0.5 + 0.5 * Math.sin(age * part.shimmerHz * Math.PI * 2 + part.shimmerPhase);
+          const wave = 0.5 + 0.5 * Math.sin(
+            age * part.shimmerHz * Math.PI * 2 + part.shimmerPhase,
+          );
           fill = _lerpRgb(goldDunkel, goldHell, wave);
         }
-        // Ab |vx| ≤ 50 % von Start-vx: schmalere Seite 1…w0 → Kanten-Rotation
         let drawW = part.w0;
         if (Math.abs(part.vx) <= 0.5 * part.vx0) {
           const spin = 0.5 + 0.5 * Math.sin(
@@ -2279,8 +2522,21 @@ const EmpfangPuls = (() => {
     // Sonderatem aus Queue annehmen
     if (!sonder && sonderQueue.length) {
       const next = sonderQueue.shift();
-      sonder = { ...next, t0: ts, phase: next.typ === "incoming" ? "fadeout" : "breath" };
+      sonder = {
+        ...next,
+        t0: ts,
+        phase: next.typ === "incoming"
+          ? "fadeout"
+          : (next.typ === "neuerBlock" ? "titel" : "breath"),
+      };
       gewechseltInZyklus = false;
+      // TxIN: fester Jubel-Text; nächster normaler Atemzug wieder ATEM_WORTE.
+      if (sonder.typ === "incoming") {
+        setzeAtemWort("Ka-Ching!");
+      } else if (sonder.typ === "neuerBlock") {
+        setzeAtemKopfStil({ mehrzeilig: true, mono: false });
+        setzeAtemWort("NEUER\nBLOCK");
+      }
     }
 
     let sicht = 0;
@@ -2288,46 +2544,69 @@ const EmpfangPuls = (() => {
 
     if (sonder && sonder.typ === "incoming") {
       const elapsed = ts - sonder.t0;
+      // Konfetti läuft parallel (in flashIncoming gestartet). Atem: kurz dimmen,
+      // Ka-Ching halten, dann ausklingen — neuer QR erst wenn Konfetti + Atem fertig.
       if (sonder.phase === "fadeout") {
-        sicht = Math.max(0, 1 - elapsed / 420);
-        zeichneOpts = { art: maskenListe()[maskeIx % maskenListe().length] };
-        if (elapsed >= 420) {
+        sicht = Math.max(0, 1 - elapsed / 280);
+        zeichneOpts = { nurSchwarz: true };
+        if (elapsed >= 280) {
           sonder.phase = "konfetti";
           sonder.t0 = ts;
-          const kOpts = Object.assign(
-            { sats: sonder.sats },
-            sonder.konfettiOpts || {},
-          );
-          sonder.konfettiFertig = false;
-          sonder.konfettiDauer = starteKonfetti(kOpts, () => {
-            if (sonder) sonder.konfettiFertig = true;
-          });
-          zeichneOpts = { nurSchwarz: true };
           sicht = 0;
         }
       } else if (sonder.phase === "konfetti") {
         sicht = 0;
         zeichneOpts = { nurSchwarz: true };
-        const kDauer = sonder.konfettiDauer || 3000;
-        // Ende wenn alle Schnipsel liegen — Max-Dauer nur als Notbremse
-        if (sonder.konfettiFertig || elapsed >= kDauer) {
+        // Mind. 1,2 s Ka-Ching + Konfetti, oder bis Schnipsel liegen.
+        const minHold = 1200;
+        if ((sonder.konfettiFertig || incomingKonfettiFertig) && elapsed >= minHold) {
           sonder.phase = "fadein";
           sonder.t0 = ts;
-          const wid = sonder.walletId || Zustand.walletId;
-          if (wid) {
-            Zustand.lernThema = null;
-            ladeEmpfang(wid).catch(() => {});
-          }
+        } else if (elapsed >= 8000) {
+          // Notbremse
+          sonder.phase = "fadein";
+          sonder.t0 = ts;
+          incomingKonfettiFertig = true;
         }
       } else if (sonder.phase === "fadein") {
-        sicht = Math.min(1, elapsed / 500);
-        {
-          const listen = maskenListe();
-          zeichneOpts = { art: listen[maskeIx % listen.length] };
-        }
-        if (elapsed >= 500) {
+        sicht = Math.min(1, elapsed / 400);
+        zeichneOpts = { nurSchwarz: true };
+        if (elapsed >= 400) {
           const halte = sonder.halteDanach;
           sonder = null;
+          startTs = ts;
+          gewechseltInZyklus = false;
+          if (halte || sonderQueue.length) {
+            wortAtemRest = wuerfleWortAtemRest();
+            setzeAtemWort();
+          }
+          beendeSonderWennIdle(halte);
+          _incomingFertigPruefen();
+        }
+      }
+    } else if (sonder && sonder.typ === "neuerBlock") {
+      const tNorm = Math.min(0.999, (ts - sonder.t0) / ATEM_MS);
+      sicht = tNorm < 0.5 ? (tNorm / 0.5) : (1 - (tNorm - 0.5) / 0.5);
+      {
+        const listen = maskenListe();
+        zeichneOpts = { art: listen[maskeIx % listen.length] };
+      }
+      if (tNorm >= 0.97) {
+        if (sonder.phase === "titel") {
+          sonder.phase = "hoehe";
+          sonder.t0 = ts;
+          setzeAtemKopfStil({ mehrzeilig: false, mono: true });
+          setzeAtemWort(formatBlockHoeheAtem(sonder.hoehe));
+        } else {
+          const halte = sonder.halteDanach;
+          sonder = null;
+          startTs = ts;
+          gewechseltInZyklus = false;
+          setzeAtemKopfStil({});
+          if (halte || sonderQueue.length) {
+            wortAtemRest = wuerfleWortAtemRest();
+            setzeAtemWort();
+          }
           beendeSonderWennIdle(halte);
         }
       }
@@ -2352,8 +2631,13 @@ const EmpfangPuls = (() => {
         if (!gewechseltInZyklus && tNorm >= 0.97) {
           maskeIx = (maskeIx + 1) % listen.length;
           payloadIx += 1;
-          wortIx = (wortIx + 1) % ATEM_WORTE.length;
-          setzeAtemWort();
+          // Funny-Text nur alle 2–4 Atemzüge (Ketten dies→das→… bleiben in Reihenfolge).
+          wortAtemRest -= 1;
+          if (wortAtemRest <= 0) {
+            wortIx = (wortIx + 1) % ATEM_WORTE.length;
+            wortAtemRest = wuerfleWortAtemRest();
+            setzeAtemWort();
+          }
           qrBmp = null;
           qrSeite = 0;
           gewechseltInZyklus = true;
@@ -2363,7 +2647,11 @@ const EmpfangPuls = (() => {
       }
     }
 
-    setzeAtemTextSicht(sicht);
+    // TxIN: „Ka-Ching!“ bleibt lesbar (auch bei schwarzem QR / Konfetti).
+    const textSicht = (sonder && sonder.typ === "incoming")
+      ? Math.max(sicht, sonder.phase === "konfetti" ? 1 : 0.35)
+      : sicht;
+    setzeAtemTextSicht(textSicht);
     zeichneGlyphAtem(sicht, zeichneOpts).catch(() => {});
     raf = requestAnimationFrame(tick);
   }
@@ -2374,6 +2662,7 @@ const EmpfangPuls = (() => {
     maskeIx = 0;
     payloadIx = 0;
     wortIx = 0;
+    wortAtemRest = wuerfleWortAtemRest();
     maskLuma = {}; // Masken-Assets können sich ändern (z. B. B ohne Kreisrand)
     const pane = $("#empfang-pane");
     const leer = $("#empfang-leer");
@@ -2414,10 +2703,12 @@ const EmpfangPuls = (() => {
     start,
     stop,
     laeuft,
+    istIncoming,
     flashOrangeB,
     flashOhNo,
     flashIncoming,
     flashHaken,
+    flashNeuerBlock,
     konfettiParamsAusSats,
     konfettiScheineAusSats,
     starteKonfetti,
@@ -2584,8 +2875,13 @@ function setzeEmpfangAnimDebug() {
         EmpfangPuls.flashIncoming(Zustand.walletId, opts.sats, opts);
       } else if (art === "haken") {
         EmpfangPuls.flashHaken();
+      } else if (art === "neuerBlock") {
+        const tip = Zustand.config?.header_tip
+          || Zustand.config?.wallet_watch?.last_block_height
+          || 840000;
+        EmpfangPuls.flashNeuerBlock(tip);
       } else if (art === "stop") {
-        EmpfangPuls.stop();
+        EmpfangPuls.stop({ force: true });
         if (Zustand.walletId) ladeEmpfang(Zustand.walletId).catch(() => {});
       }
     } catch (fehler) {
@@ -2598,6 +2894,14 @@ function empfangQuelleLabel(source) {
   if (source === "fulcrum") return t("dock.empfangSourceFulcrum");
   if (source === "cache_estimate") return t("dock.empfangSourceCache");
   return source || "";
+}
+
+function setzeEmpfangQuelle(source) {
+  const el = $("#empfang-quelle");
+  if (!el) return;
+  el.textContent = empfangQuelleLabel(source);
+  el.classList.toggle("empfang-quelle--warn", source === "cache_estimate");
+  el.title = source === "cache_estimate" ? t("dock.empfangSourceCache") : "";
 }
 
 function lernhinweiseAn() {
@@ -2908,12 +3212,18 @@ function zeichneEmpfangLeer(text, { puls = false } = {}) {
   if (!puls) {
     setzeText($("#empfang-wallet"), "");
     setzeText($("#empfang-index"), "");
-    setzeText($("#empfang-quelle"), "");
+    const quelle = $("#empfang-quelle");
+    if (quelle) {
+      quelle.textContent = "";
+      quelle.classList.remove("empfang-quelle--warn");
+      quelle.removeAttribute("title");
+    }
   }
   const hinweis = $("#empfang-hinweis");
   if (hinweis) {
     hinweis.hidden = true;
     hinweis.textContent = "";
+    hinweis.classList.remove("empfang-hinweis--warn");
   }
   const zurueck = $("#empfang-lern-zurueck");
   if (zurueck) zurueck.hidden = true;
@@ -2943,6 +3253,18 @@ function zeichneEmpfangReadOnly(walletName) {
 }
 
 function zeichneEmpfang(daten, { zahlung = false } = {}) {
+  // Konfetti/Incoming läuft: neuen QR merken, Animation nicht abwürgen.
+  if (
+    typeof EmpfangPuls !== "undefined"
+    && EmpfangPuls.istIncoming
+    && EmpfangPuls.istIncoming()
+  ) {
+    Zustand._empfangNachIncoming = { daten, zahlung: Boolean(zahlung) };
+    if (daten && daten.wallet_id) {
+      Zustand.empfangByWallet[daten.wallet_id] = daten;
+    }
+    return;
+  }
   EmpfangPuls.stop();
   if (daten && daten.read_only) {
     zeichneEmpfangReadOnly(daten.wallet_name);
@@ -2991,18 +3313,24 @@ function zeichneEmpfang(daten, { zahlung = false } = {}) {
     $("#empfang-index"),
     t("dock.empfangIndex", { n: daten.index }),
   );
-  setzeText($("#empfang-quelle"), empfangQuelleLabel(daten.source));
+  setzeEmpfangQuelle(daten.source);
 
   const hinweis = $("#empfang-hinweis");
   if (hinweis) {
     if (zahlung) {
       hinweis.hidden = false;
       hinweis.textContent = t("dock.empfangZahlung");
+      hinweis.classList.remove("empfang-hinweis--warn");
+    } else if (daten.source === "cache_estimate") {
+      hinweis.hidden = false;
+      hinweis.textContent = t("dock.empfangSourceCache");
+      hinweis.classList.add("empfang-hinweis--warn");
     } else if (!hinweis.hidden && Zustand.empfang?.address === daten.address) {
-      /* Hinweis bleibt kurz stehen, bis Adresse wechselt */
+      /* Zahlungshinweis bleibt kurz stehen, bis Adresse wechselt */
     } else {
       hinweis.hidden = true;
       hinweis.textContent = "";
+      hinweis.classList.remove("empfang-hinweis--warn");
     }
   }
   Zustand.empfang = {
@@ -3016,29 +3344,10 @@ function zeichneEmpfang(daten, { zahlung = false } = {}) {
   }
 }
 
-/** Tip-/Start-Aktualisierung betrifft dieses Wallet (oder alle). */
+/** Tip-/Start-Aktualisierung betrifft dieses Wallet. */
 function tipSyncLaeuftFuer(walletId) {
   if (!walletId) return false;
-  if (walletSyncLaeuftFuer(walletId)) return true;
-  const id = Zustand.walletSyncJob || Zustand.config?.wallet_sync_job_id;
-  if (!id) return false;
-  const jobs = Zustand.jobsNav?.jobs || [];
-  const j = jobs.find((x) => x && x.id === id);
-  if (j) {
-    const aktiv = Boolean(
-      j.running
-      || j.status === "running"
-      || j.status === "queued"
-      || j.queue_status === "queued",
-    );
-    if (!aktiv) return false;
-    const ids = j.meta?.wallet_ids;
-    if (Array.isArray(ids) && ids.length) return ids.includes(walletId);
-    if (j.meta?.wallet_id) return j.meta.wallet_id === walletId;
-    return true;
-  }
-  // Folger schon aktiv, jobsNav noch ohne Meta → für gewähltes Wallet atmen.
-  return Boolean(Zustand.walletSyncTimer || Zustand.walletSyncJob);
+  return walletSyncLaeuftFuer(walletId);
 }
 
 /** Empfang noch unsicher: UTXO-/Verlaufs-Scan oder Tip-/Start-Sync. */
@@ -3060,19 +3369,28 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
     return null;
   }
 
-  // Debug-/Ereignis-Animation läuft: Poll darf sie nicht mit der Adresse erschlagen.
+  const walletMeta = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+  const scanLaeuft = empfangScanLaeuftFuer(walletId);
+
+  // TxIN-Konfetti: weder Poll noch zeigeWallet darf QR/Animation ersetzen.
   if (
-    still
-    && typeof EmpfangPuls !== "undefined"
-    && EmpfangPuls.laeuft()
+    typeof EmpfangPuls !== "undefined"
+    && EmpfangPuls.istIncoming
+    && EmpfangPuls.istIncoming()
   ) {
-    return null;
+    return Zustand.empfangByWallet[walletId] || Zustand.empfang || null;
   }
 
-  const walletMeta = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+  // Animation läuft: Poll nicht mit Adresse erschlagen —
+  // * Scan/Sync-Puls: nur überspringen solange Scan wirklich läuft
+  // * Ereignis-Atem (Konfetti/…): Zustand.empfang.puls ist nicht gesetzt
+  if (still && typeof EmpfangPuls !== "undefined" && EmpfangPuls.laeuft()) {
+    if (scanLaeuft) return null;
+    if (!(Zustand.empfang && Zustand.empfang.puls)) return null;
+  }
 
   // Scan/Sync hat Vorrang vor Lern-QR — sonst bleibt Cache-Text ohne Atmung.
-  if (empfangScanLaeuftFuer(walletId)) {
+  if (scanLaeuft) {
     Zustand.lernThema = null;
     if (walletMeta && walletMeta.read_only) {
       zeichneEmpfangReadOnly(walletMeta.name);
@@ -3090,20 +3408,31 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
     return null;
   }
 
+  // Scan-Puls hing nach Scan-Ende (stale tipSync) → stoppen und Adresse holen.
+  // Konfetti/Sonderatem nicht anfassen (kein empfang.puls).
+  if (
+    typeof EmpfangPuls !== "undefined"
+    && EmpfangPuls.laeuft()
+    && Zustand.empfang
+    && Zustand.empfang.puls
+  ) {
+    EmpfangPuls.stop();
+  }
+
   // Lern-QR (Hover/Klick) nicht durch Poll/Cache überschreiben — nur ohne Scan.
   if (still && Zustand.lernThema && lernhinweiseAn() && Zustand.empfang?.lern) {
     return null;
   }
 
-  // Flüchtigkeit: bei Kontextwechsel QR/Adresse sofort ungültig.
+  // Flüchtigkeit: bei Kontextwechsel QR/Adresse sofort ungültig — ohne
+  // Scan-Herzschlag (der nur bei echtem Scan/Sync startet, s. oben).
   const gleicherWallet = Zustand.empfang && Zustand.empfang.wallet_id === walletId
     && !Zustand.empfang.lern;
 
   if (walletMeta && walletMeta.read_only) {
     zeichneEmpfangReadOnly(walletMeta.name);
   } else if (!still || !gleicherWallet) {
-    // Wallet-Wechsel oder Erstladen: scannbaren QR entfernen + Herzschlag.
-    zeichneEmpfangLeer(t("dock.empfangLade"), { puls: true });
+    zeichneEmpfangLeer(t("dock.empfangLade"), { puls: false });
   }
   // still + gleiches Wallet (Poll): sichtbaren QR stehen lassen, bis neue
   // Antwort da ist — Adresse gehört noch zu diesem Wallet.
@@ -3135,9 +3464,36 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
       && daten.address
       && alt.address !== daten.address,
     );
-    zeichneEmpfang(daten, { zahlung });
-    if (zahlung && Zustand.ansicht === "wallet" && Zustand.walletId === walletId) {
-      zeigeWallet(walletId).catch(() => {});
+    if (zahlung) {
+      // Adresse schon merken (kein zweites „Zahlung erkannt“), QR erst nach Konfetti.
+      Zustand.empfangByWallet[walletId] = daten;
+      const sats =
+        Number(daten.payment_sats)
+        || Number(daten.last_payment_sats)
+        || undefined;
+      const hinweis = $("#empfang-hinweis");
+      if (hinweis) {
+        hinweis.hidden = false;
+        hinweis.textContent = t("dock.empfangZahlung");
+        hinweis.classList.remove("empfang-hinweis--warn");
+      }
+      try {
+        Zustand._lastIncomingFlashUm = Date.now();
+        EmpfangPuls.flashIncoming(walletId, sats, {
+          halteDanach: false,
+          onDone: () => {
+            zeichneEmpfang(daten, { zahlung: true });
+            if (Zustand.ansicht === "wallet" && Zustand.walletId === walletId) {
+              // UTXO-Liste aktualisieren, Empfang nicht nochmal (Animation vorbei).
+              zeigeWallet(walletId, { ohneEmpfang: true }).catch(() => {});
+            }
+          },
+        });
+      } catch (_) {
+        zeichneEmpfang(daten, { zahlung: true });
+      }
+    } else {
+      zeichneEmpfang(daten, { zahlung: false });
     }
     return daten;
   } catch (fehler) {
@@ -3324,6 +3680,15 @@ const Zustand = {
   walletSyncJob: null,
   walletSyncTimer: null,
   walletSyncLogStand: { index: 0 },
+  /** Tip-Sync-Ziele (wallet_ids), sobald bekannt — gegen Cross-Wallet-Puls. */
+  walletSyncWalletIds: [],
+  /** Stiller Watch-Fallback-Tip: kein Nav-Marker / kein Empfangs-Puls. */
+  walletSyncStill: false,
+  /** "empfang" = UTXO-Tip fertig, QR-Schärfung läuft noch (Nav schon grün). */
+  walletSyncPhase: null,
+  /** Chain-Tip-Events vom Wallet-Watch (seq-Baseline gegen Reload-Flash). */
+  blockEventSeq: 0,
+  blockEventSeqInit: false,
   llmStatus: null,
   llmTimer: null,
   kurs: null,
@@ -3345,6 +3710,8 @@ const Zustand = {
   slashIndex: 0,
   traceJobs: new Map(),
   traceListe: null,
+  /** Sprung aus Wallet: nur dieses UTXO — null = volle Herkunftsliste. */
+  traceFokus: null,
   steuer: null,
   onchainHinweisSitzungWeg: false,
 };
@@ -3594,12 +3961,22 @@ function ladeHinweisVonQuelle(key) {
   }
 }
 
-async function zeigeWallet(walletId) {
+async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletId = walletId;
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
   const ladeGen = Zustand.walletLadeGen;
   zeigeAnsicht("wallet");
-  ladeEmpfang(walletId).catch(() => {});
+  // Während TxIN-Konfetti Empfang nicht neu laden (würde Animation stoppen).
+  if (
+    !ohneEmpfang
+    && !(
+      typeof EmpfangPuls !== "undefined"
+      && EmpfangPuls.istIncoming
+      && EmpfangPuls.istIncoming()
+    )
+  ) {
+    ladeEmpfang(walletId).catch(() => {});
+  }
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   setzeText($("#wallet-titel"), wallet ? wallet.name : t("common.wallet"));
@@ -3675,7 +4052,10 @@ function zeichneUtxos(daten, wallet) {
     const pendOut = Number(daten.pending_spending_count || 0);
     const pendIn = Number(daten.pending_receive_count || 0);
     if (wallet && wallet.id) {
-      meldePendingAenderung(wallet.id, pendIn, pendOut);
+      const internOut = (daten.utxos || []).some(
+        (u) => u && u.spending_pending && u.spending_internal,
+      );
+      meldePendingAenderung(wallet.id, pendIn, pendOut, { internOut });
     }
     if (pendOut > 0 || pendIn > 0) {
       const bits = [];
@@ -3949,6 +4329,18 @@ function setzeUtxoTraceDaten(el, utxo) {
   if (!el || !utxo) return;
   if (utxo.key) el.dataset.key = utxo.key;
   el.dataset.verfolgtVollstaendig = utxoHatVollenHerkunftstrace(utxo) ? "1" : "0";
+  el.dataset.verfolgt = utxo.verfolgt ? "1" : "0";
+  if (utxo.value_sats != null && utxo.value_sats !== "") {
+    el.dataset.valueSats = String(utxo.value_sats);
+  }
+  if (utxo.address) el.dataset.address = String(utxo.address);
+  if (utxo.hold_days != null && utxo.hold_days !== "") {
+    el.dataset.holdDays = String(utxo.hold_days);
+  }
+  if (utxo.block_height != null && utxo.block_height !== "") {
+    el.dataset.blockHeight = String(utxo.block_height);
+  }
+  if (utxo.time_label) el.dataset.timeLabel = String(utxo.time_label);
   if (utxo.juengste_sats_ts) {
     el.dataset.juengsteSatsTs = String(utxo.juengste_sats_ts);
   } else {
@@ -4426,7 +4818,7 @@ async function starteTipSync() {
     if (Zustand.config) {
       Zustand.config.wallet_sync_job_id = jobId;
     }
-    folgeWalletSyncJob(jobId);
+    folgeWalletSyncJob(jobId, antwort.job || { meta: { wallet_ids: [wid] } });
     await ladeJobsNav();
     setzeWalletScanGesperrt();
     zeichneNav();
@@ -4578,19 +4970,59 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
  * Neu im Mempool = Zähler steigt. Bestätigung ist binär (Tx hat Block) —
  * dafür später Txid-Übergang pending→confirmed, nicht „Zähler sinkt allmählich“.
  */
-function meldePendingAenderung(walletId, pendIn, pendOut) {
+/**
+ * Mempool-Pending → QR-Animation — nur für das *aktuell gewählte* Wallet.
+ *
+ * * internOut: Spend geht an eigenes Wallet (Cash→Bitkey / Self) → nur Konfetti
+ * * sonst Out → OH NO!
+ * * In → Konfetti
+ * * In+Out gleichzeitig (Self) → nur Konfetti
+ */
+function meldePendingAenderung(walletId, pendIn, pendOut, { internOut = false } = {}) {
   if (!walletId) return;
   const prev = Zustand.pendingByWallet[walletId] || { in: 0, out: 0 };
   const neuIn = Number(pendIn) || 0;
   const neuOut = Number(pendOut) || 0;
   Zustand.pendingByWallet[walletId] = { in: neuIn, out: neuOut };
   // Nur steigen zählt (neue Mempool-Tx), nicht der erste Ladezustand.
-  if (prev.seen) {
-    if (neuIn > prev.in && Zustand.walletId === walletId) {
-      EmpfangPuls.flashIncoming(walletId);
-    }
-    if (neuOut > prev.out && Zustand.walletId === walletId) {
-      EmpfangPuls.flashOhNo();
+  if (prev.seen && Zustand.walletId === walletId) {
+    const inNeu = neuIn > prev.in;
+    const outNeu = neuOut > prev.out;
+    const jetzt = Date.now();
+    const darfIncoming = () => {
+      if (
+        Zustand._lastIncomingFlashUm
+        && jetzt - Zustand._lastIncomingFlashUm <= 4000
+      ) {
+        return false;
+      }
+      Zustand._lastIncomingFlashUm = jetzt;
+      return true;
+    };
+    const starteIncoming = () => {
+      if (!darfIncoming()) return;
+      EmpfangPuls.flashIncoming(walletId, undefined, {
+        halteDanach: false,
+        onDone: () => {
+          // Nach Konfetti: nächste freie Adresse holen (ohne erneuten Flash).
+          if (Zustand.walletId === walletId) {
+            ladeEmpfang(walletId).catch(() => {});
+          }
+        },
+      });
+    };
+    if (inNeu && outNeu) {
+      // Self-Send im selben Wallet: nur Konfetti.
+      starteIncoming();
+    } else if (inNeu) {
+      starteIncoming();
+    } else if (outNeu) {
+      if (internOut) {
+        // Interner Transfer (z. B. Cash+Carry → Bitkey): nur Konfetti, kein OH NO.
+        starteIncoming();
+      } else {
+        EmpfangPuls.flashOhNo();
+      }
     }
   }
   Zustand.pendingByWallet[walletId].seen = true;
@@ -4688,6 +5120,27 @@ function beendeRescan(_meldung, _istFehler = false) {
 // Nav: laufende Nutzer-Jobs (Server-Wahrheit, GUI-zu-fest)
 // ---------------------------------------------------------------------------
 
+function nimmBlockEvent(daten) {
+  const ev = daten && daten.block_event;
+  if (!ev || ev.height == null || !ev.seq) return;
+  const seq = Number(ev.seq);
+  const hoehe = Number(ev.height);
+  if (!Number.isFinite(seq) || !Number.isFinite(hoehe)) return;
+  // Erster Poll: nur Baseline — kein Atem beim Seitenladen.
+  if (!Zustand.blockEventSeqInit) {
+    Zustand.blockEventSeqInit = true;
+    Zustand.blockEventSeq = seq;
+    return;
+  }
+  if (seq <= (Zustand.blockEventSeq || 0)) return;
+  Zustand.blockEventSeq = seq;
+  try {
+    EmpfangPuls.flashNeuerBlock(hoehe);
+  } catch (_) {
+    /* Animation optional */
+  }
+}
+
 async function ladeJobsNav() {
   try {
     const daten = await api("/jobs?recent_s=10");
@@ -4696,6 +5149,7 @@ async function ladeJobsNav() {
       scan_pipeline: daten.scan_pipeline || { current: null, queued: [] },
     };
     Zustand.jobsNavFehler = "";
+    nimmBlockEvent(daten);
   } catch (fehler) {
     /* offline / alter Server ohne /api/jobs */
     Zustand.jobsNavFehler = (fehler && fehler.message) || t("common.netError");
@@ -4715,6 +5169,63 @@ async function ladeJobsNav() {
         art,
       },
     );
+  }
+  // Tip-Sync-Job aus Nav übernehmen (Watcher/Start), falls noch kein Poller.
+  // Stille Watch-Fallbacks mitverfolgen (Log), aber Nav-Marker bleiben aus.
+  const tipJob = (Zustand.jobsNav?.jobs || []).find(
+    (j) =>
+      j
+      && j.kind === "wallet_sync"
+      && (j.running || j.status === "running" || j.status === "queued"),
+  );
+  if (tipJob && !Zustand.walletSyncJob) {
+    folgeWalletSyncJob(tipJob.id, tipJob);
+  } else if (tipJob && Zustand.walletSyncJob === tipJob.id) {
+    merkeWalletSyncZiele(tipJob);
+    if (jobIstStillerTip(tipJob)) Zustand.walletSyncStill = true;
+  }
+  // Scan-Puls ohne laufenden Scan/Sync → Empfang neu laden (stoppt hängenden Puls).
+  if (
+    Zustand.walletId
+    && Zustand.empfang
+    && Zustand.empfang.puls
+    && !empfangScanLaeuftFuer(Zustand.walletId)
+  ) {
+    ladeEmpfang(Zustand.walletId).catch(() => {});
+  }
+  // Nav-Marker „aktualisiere…“ nur neu zeichnen, wenn sich Tip-Sync-Lage ändert.
+  const syncSig = (Zustand.jobsNav?.jobs || [])
+    .filter((j) =>
+      j
+      && j.kind === "wallet_sync"
+      && !j.meta?.still
+      && j.meta?.phase !== "empfang"
+      && (j.running || j.status === "running" || j.status === "queued"),
+    )
+    .map((j) => `${j.id}:${(j.meta?.wallet_ids || []).join(",")}`)
+    .sort()
+    .join("|");
+  // Auch Empfangs-Phase aus /jobs-Meta übernehmen (falls Poller vor Job-Detail).
+  const empfangPhase = (Zustand.jobsNav?.jobs || []).some(
+    (j) =>
+      j
+      && j.kind === "wallet_sync"
+      && j.meta?.phase === "empfang"
+      && (j.running || j.status === "running"),
+  );
+  if (empfangPhase && Zustand.walletSyncPhase !== "empfang") {
+    Zustand.walletSyncPhase = "empfang";
+    if (Zustand.walletSyncLogStand) {
+      Zustand.walletSyncLogStand._tipUiFertig = true;
+    }
+  }
+  if (
+    syncSig !== Zustand._walletSyncNavSig
+    || empfangPhase !== Boolean(Zustand._walletSyncEmpfangSig)
+  ) {
+    Zustand._walletSyncNavSig = syncSig;
+    Zustand._walletSyncEmpfangSig = empfangPhase;
+    zeichneNav();
   }
   aktualisiereScanAnzeige(
     Zustand.rescanJob
@@ -4924,19 +5435,127 @@ const PUNKT_KLASSE = {
 /**
  * Oberste Ebene (Adressen) startet zu. Darunter: gespeicherte Bäume offen,
  * ungescannte UTXOs zu — Aufklappen würde den Node fragen.
+ *
+ * *erzwingen*: auch im Fokus-Modus die volle Liste (Nav „Herkunft tracen“).
  */
-async function ladeTraceListe() {
+async function ladeTraceListe({ erzwingen = false } = {}) {
+  if (Zustand.traceFokus && !erzwingen) {
+    await zeichneTraceFokusAnsicht(Zustand.traceFokus);
+    return;
+  }
+  Zustand.traceFokus = null;
+  setzeTraceFokusUi(false);
   const liste = $("#trace-liste");
   // /api/utxos ist Cache — Quellen-Hinweis gehört nur in die Scan-Leiste.
   liste.replaceChildren(hinweisZeile(t("common.loadingFromCache")));
 
   try {
-    const daten = await api("/utxos");
+    // mempool=0: Herkunftsliste braucht keinen Electrs-Rundlauf über alle Wallets.
+    const daten = await api("/utxos?mempool=0");
     Zustand.traceListe = daten;
     zeichneTraceListe(daten);
   } catch (fehler) {
     liste.replaceChildren(hinweisZeile(t("common.couldNotLoad", { msg: fehler.message })));
   }
+}
+
+function setzeTraceFokusUi(an) {
+  const karteTitel = document.querySelector("#ansicht-trace .karte-titel");
+  if (karteTitel) {
+    karteTitel.textContent = an
+      ? (t("trace.focusTitle") !== "trace.focusTitle"
+        ? t("trace.focusTitle")
+        : "Gewähltes UTXO")
+      : (t("trace.currentUtxos") !== "trace.currentUtxos"
+        ? t("trace.currentUtxos")
+        : "Aktuelle UTXOs");
+  }
+  const alle = $("#trace-herkunft-alle");
+  if (alle) alle.hidden = Boolean(an);
+}
+
+/**
+ * Fokus-Ansicht: nur ein UTXO/Tx (Sprung aus Wallet), kein Gesamtbestand.
+ */
+async function zeichneTraceFokusAnsicht(fokus, { neu = false } = {}) {
+  const schluessel = (fokus && fokus.key) || "";
+  if (!schluessel) {
+    Zustand.traceFokus = null;
+    await ladeTraceListe({ erzwingen: true });
+    return;
+  }
+  setzeTraceFokusUi(true);
+  const liste = $("#trace-liste");
+  liste.replaceChildren();
+
+  const leiste = document.createElement("div");
+  leiste.className = "trace-fokus-leiste";
+  const hinweis = document.createElement("span");
+  hinweis.className = "meta";
+  hinweis.textContent =
+    t("trace.focusHint") !== "trace.focusHint"
+      ? t("trace.focusHint")
+      : "Nur dieses UTXO — Sprung aus der Wallet-Ansicht.";
+  const zurueck = document.createElement("button");
+  zurueck.type = "button";
+  zurueck.className = "knopf knopf-klein";
+  zurueck.textContent =
+    t("trace.showAllUtxos") !== "trace.showAllUtxos"
+      ? t("trace.showAllUtxos")
+      : "Alle UTXOs zeigen";
+  zurueck.title =
+    t("trace.showAllUtxosTitle") !== "trace.showAllUtxosTitle"
+      ? t("trace.showAllUtxosTitle")
+      : "Zur vollen Herkunftsliste wie über die Navigation.";
+  zurueck.addEventListener("click", () => {
+    Zustand.traceFokus = null;
+    ladeTraceListe({ erzwingen: true });
+  });
+  leiste.append(hinweis, zurueck);
+  liste.append(leiste);
+
+  setzeText(
+    $("#trace-liste-zusatz"),
+    kuerze(schluessel, 14, 10),
+  );
+
+  const utxo = {
+    key: schluessel,
+    value_sats: fokus.value_sats ?? null,
+    address: fokus.address || "",
+    wallet: fokus.wallet || walletNameZu(Zustand.walletId) || "",
+    time_label: fokus.time_label || "",
+    hold_days: fokus.hold_days,
+    block_height: fokus.block_height,
+    verfolgt: Boolean(fokus.verfolgt),
+    verfolgt_vollstaendig: Boolean(fokus.verfolgt_vollstaendig),
+    receive_pending: Boolean(fokus.receive_pending),
+  };
+
+  const block = zeichneTraceWurzel(utxo);
+  const huelle = document.createElement("div");
+  huelle.className = "trace-fokus";
+  huelle.append(block);
+  liste.append(huelle);
+
+  const kopf = block.querySelector(".utxo-kopf");
+  const zweig = block.querySelector(".utxo-zweig");
+  const klapp = block.querySelector(".klapp");
+  if (!zweig) return;
+
+  setzeKlapp(kopf, klapp, zweig, true);
+  if (neu) {
+    logZeile(
+      `Starte Scan neu für ${kuerze(schluessel, 12, 8)}…`,
+      undefined,
+      walletNameZu(Zustand.walletId),
+    );
+    await starteZweigTrace(utxo, zweig, klapp);
+  } else {
+    await oeffneZweig(utxo, zweig, klapp);
+  }
+  aktualisiereTraceWurzelKopf(utxo, block);
+  huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function hinweisZeile(text) {
@@ -5112,19 +5731,20 @@ function zeichneTraceAdressGruppe(gruppe) {
 
   const inhalt = document.createElement("div");
   inhalt.className = "trace-utxos";
-  for (const utxo of gruppe.utxos) {
-    inhalt.append(zeichneTraceWurzel(utxo));
-  }
+  // Lazy: UTXO-Zeilen erst beim Aufklappen — sonst 30+ Wurzeln + Bäume sofort.
+  let utxosGebaut = false;
   setzeKlapp(kopf, klapp, inhalt, false);
 
   kopf.addEventListener("click", () => {
     const auf = inhalt.hidden;
-    setzeKlapp(kopf, klapp, inhalt, auf);
-    if (auf) {
-      for (const wurzel of inhalt.querySelectorAll(".utxo-wurzel")) {
-        if (typeof wurzel.oeffneAusCache === "function") wurzel.oeffneAusCache();
+    if (auf && !utxosGebaut) {
+      for (const utxo of gruppe.utxos || []) {
+        inhalt.append(zeichneTraceWurzel(utxo));
       }
+      utxosGebaut = true;
     }
+    setzeKlapp(kopf, klapp, inhalt, auf);
+    // Bäume bleiben zu — erst bei Klick aufs einzelne UTXO (oeffneZweig).
   });
 
   const kopfzeile = document.createElement("div");
@@ -5134,6 +5754,14 @@ function zeichneTraceAdressGruppe(gruppe) {
   if (extern) kopfzeile.append(extern);
 
   block.append(kopfzeile, inhalt);
+  // Für Fokus-Sprung / Tests: Wurzeln nachziehbar ohne Gruppen-Klick.
+  block.baueUtxos = () => {
+    if (utxosGebaut) return;
+    for (const utxo of gruppe.utxos || []) {
+      inhalt.append(zeichneTraceWurzel(utxo));
+    }
+    utxosGebaut = true;
+  };
   return block;
 }
 
@@ -5317,9 +5945,12 @@ function zeichneTraceWurzel(utxo) {
 
     const auf = zweig.hidden;
     setzeKlapp(zeile, klapp, zweig, auf);
-    if (auf && !zweig.dataset.geladen) {
-      oeffneZweig(utxo, zweig, klapp);
+    if (!auf) return; // nur zuklappen
+    // Schon geladen: nur aufklappen, kein erneuter Cache-/Analyse-Lauf.
+    if (zweig.dataset.geladen === "ja" || zweig.dataset.geladen === "laeuft") {
+      return;
     }
+    oeffneZweig(utxo, zweig, klapp);
   });
 
   return block;
@@ -5327,28 +5958,77 @@ function zeichneTraceWurzel(utxo) {
 
 /** Liest nur den gespeicherten Baum. Kein Node, kein Job. */
 async function ladeGespeichertenZweig(utxo, zweig, klapp) {
+  if (!utxo || !utxo.key || !zweig) return false;
   zweig.dataset.geladen = "laeuft";
   zweig.replaceChildren(hinweisZeile(t("common.looking")));
   try {
     const gespeichert = await api(`/trace?target=${encodeURIComponent(utxo.key)}`);
-    if (gespeichert && gespeichert.vorhanden) {
+    if (gespeichert && gespeichert.vorhanden && gespeichert.ergebnis) {
       zweig.dataset.geladen = "ja";
-      zeichneZweig(gespeichert.ergebnis, zweig, utxo, klapp);
-      merkeTraceAmUtxo(utxo, gespeichert.ergebnis);
-      aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
-      zweig.prepend(gespeicherterKopf(gespeichert, utxo, zweig, klapp));
+      try {
+        zeichneZweig(gespeichert.ergebnis, zweig, utxo, klapp);
+        merkeTraceAmUtxo(utxo, gespeichert.ergebnis);
+        aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
+        // Snapshot-Kopf inkl. „Alles aufklappen“ ganz oben.
+        zweig.prepend(gespeicherterKopf(gespeichert, utxo, zweig, klapp));
+      } catch (zeichFehler) {
+        zweig.dataset.geladen = "";
+        zweig.replaceChildren(
+          hinweisZeile(
+            t("trace.cacheDrawFail") !== "trace.cacheDrawFail"
+              ? t("trace.cacheDrawFail")
+              : "Gespeicherte Herkunft konnte nicht gezeichnet werden.",
+          ),
+        );
+        return false;
+      }
       return true;
     }
   } catch (fehler) {
-    // Datei fehlt oder ist unlesbar — Aufrufer entscheidet, ob ein Lauf startet.
+    // Datei fehlt oder ist unlesbar — Aufrufer entscheidet.
   }
   zweig.dataset.geladen = "";
   zweig.replaceChildren();
   return false;
 }
 
+/**
+ * Zweig öffnen: zuerst Cache. Neue Analyse nur wenn *nicht* als verfolgt
+ * markiert — sonst würde jedes Aufklappen bei Cache-Hicksern einen Job starten.
+ */
 async function oeffneZweig(utxo, zweig, klapp) {
-  if (await ladeGespeichertenZweig(utxo, zweig, klapp)) return;
+  if (!zweig) return;
+  if (zweig.dataset.geladen === "ja") return;
+  if (zweig.dataset.geladen === "laeuft") return;
+
+  const ausCache = await ladeGespeichertenZweig(utxo, zweig, klapp);
+  if (ausCache) return;
+
+  // Markiert „verfolgt“, aber Datei fehlt/unlesbar → kein stiller Full-Trace.
+  if (utxo && utxo.verfolgt) {
+    zweig.dataset.geladen = "";
+    const kasten = document.createElement("div");
+    kasten.className = "zweig-status";
+    const text = document.createElement("span");
+    text.textContent =
+      t("trace.cacheMissing") !== "trace.cacheMissing"
+        ? t("trace.cacheMissing")
+        : "Gespeicherte Herkunft nicht lesbar. „Scan neu“ startet eine frische Analyse.";
+    const neu = document.createElement("button");
+    neu.type = "button";
+    neu.className = "knopf knopf-klein";
+    neu.textContent =
+      t("trace.rescan") !== "trace.rescan" ? t("trace.rescan") : "Scan neu";
+    neu.addEventListener("click", (e) => {
+      e.stopPropagation();
+      starteZweigTrace(utxo, zweig, klapp);
+    });
+    kasten.append(text, neu);
+    zweig.replaceChildren(kasten);
+    return;
+  }
+
+  // Noch nie verfolgt → Analyse starten.
   starteZweigTrace(utxo, zweig, klapp);
 }
 
@@ -5381,6 +6061,9 @@ function gespeicherterKopf(gespeichert, utxo, zweig, klapp) {
         : t("trace.sinceAnalysisChanged");
     kopf.append(warn);
   }
+
+  // Alles auf-/zuklappen direkt an der Snapshot-Zeile (gut sichtbar).
+  if (zweig) kopf.append(baumKlappLeiste(zweig));
 
   return kopf;
 }
@@ -5462,13 +6145,15 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
         merkeTraceAmUtxo(utxo, job.result);
         // Kopfzeile am konkreten Block (gezielte Suche startet oft mit „…“).
         aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
-        // Stand-Zeile wie nach Cache-Laden — sonst fehlt sie bis zum Refresh.
+        // Stand-Zeile + Alles aufklappen — wie nach Cache-Laden.
         if (job.result.found) {
           zweig.prepend(gespeicherterKopf({
-            erstellt_ts: utxo.verfolgt_ts,
+            erstellt_ts: utxo.verfolgt_ts || Math.floor(Date.now() / 1000),
             veraltet: false,
             adressen_seither: 0,
           }, utxo, zweig, klapp));
+        } else if (!zweig.querySelector(".zweig-klapp-leiste")) {
+          zweig.prepend(baumKlappLeiste(zweig));
         }
       } else if (job.status === "cancelled") {
         fehlschlag(t("trace.cancelled"));
@@ -5682,10 +6367,22 @@ function traceMeldung(text, art) {
 /**
  * Sprung aus der Wallet-Ansicht.
  *
- * Das UTXO liegt seit der Gruppierung eine Ebene tiefer: erst die Adresse
- * aufklappen, dann den Eintrag selbst.
+ * Fokus-Modus: nur dieses UTXO — keine volle Bestandsliste aller Wallets.
  */
 function findeTraceUtxo(schluessel) {
+  if (Zustand.traceFokus && Zustand.traceFokus.key === schluessel) {
+    return {
+      key: schluessel,
+      value_sats: Zustand.traceFokus.value_sats ?? null,
+      address: Zustand.traceFokus.address || "",
+      wallet: Zustand.traceFokus.wallet || "",
+      time_label: Zustand.traceFokus.time_label || "",
+      hold_days: Zustand.traceFokus.hold_days,
+      block_height: Zustand.traceFokus.block_height,
+      verfolgt: Boolean(Zustand.traceFokus.verfolgt),
+      verfolgt_vollstaendig: Boolean(Zustand.traceFokus.verfolgt_vollstaendig),
+    };
+  }
   const listen = [
     ...(Zustand.traceListe?.addresses || []),
     ...(Zustand.traceListe?.verlauf?.addresses || []),
@@ -5698,60 +6395,33 @@ function findeTraceUtxo(schluessel) {
   return { key: schluessel };
 }
 
-async function zeigeHerkunftFuer(schluessel, { neu = false } = {}) {
-  zeigeAnsicht("trace");
-  if (!Zustand.traceListe) {
-    await ladeTraceListe();
-  }
-
-  const block = document.querySelector(
-    `#trace-liste .utxo-wurzel[data-key="${CSS.escape(schluessel)}"]`
+/** Meta aus der Wallet-Ansicht, falls das UTXO dort schon gerendert ist. */
+function utxoMetaAusWalletDom(schluessel) {
+  const el = document.querySelector(
+    `.utxo-zeile[data-key="${CSS.escape(schluessel)}"]`,
   );
-  if (!block) {
-    // Typisch: Output steht unter „Bereits ausgegeben“, fehlt aber in der
-    // Herkunftsliste. Suchfeld vorausfüllen — Start bleibt bewusste Aktion.
-    const feld = $("#trace-ziel");
-    if (feld) {
-      feld.value = schluessel;
-      feld.focus();
-      feld.select();
-    }
-    traceMeldung(
-      `${kuerze(schluessel, 12, 8)} steht nicht in der Herkunftsliste ` +
-      "(oft schon ausgegeben). Steht oben im Suchfeld — „Gezielt tracen“ " +
-      "startet die Analyse.",
-      "warn"
-    );
-    return;
-  }
+  if (!el) return null;
+  const sats = el.dataset.valueSats;
+  return {
+    key: schluessel,
+    value_sats: sats != null && sats !== "" ? Number(sats) : null,
+    address: el.dataset.address || "",
+    wallet: walletNameZu(Zustand.walletId) || "",
+    time_label: el.dataset.timeLabel || "",
+    hold_days: el.dataset.holdDays ? Number(el.dataset.holdDays) : undefined,
+    block_height: el.dataset.blockHeight
+      ? Number(el.dataset.blockHeight)
+      : undefined,
+    verfolgt: el.dataset.verfolgt === "1" || el.dataset.verfolgtVollstaendig === "1",
+    verfolgt_vollstaendig: el.dataset.verfolgtVollstaendig === "1",
+  };
+}
 
-  const gruppe = block.closest(".adress-gruppe");
-  if (gruppe) {
-    const gruppenKopf = gruppe.querySelector(".adress-kopf");
-    if (gruppenKopf.getAttribute("aria-expanded") !== "true") {
-      gruppenKopf.click();
-    }
-  }
-
-  const kopf = block.querySelector(".utxo-kopf");
-  const zweig = block.querySelector(".utxo-zweig");
-  const klapp = block.querySelector(".klapp");
-  if (neu) {
-    if (zweig) {
-      zweig.hidden = false;
-      if (klapp) klapp.textContent = "▾";
-      if (kopf) kopf.setAttribute("aria-expanded", "true");
-      logZeile(
-        `Starte Scan neu für ${kuerze(schluessel, 12, 8)}…`,
-        undefined,
-        walletNameZu(Zustand.walletId),
-      );
-      await starteZweigTrace(findeTraceUtxo(schluessel), zweig, klapp);
-    }
-  } else if (kopf && kopf.getAttribute("aria-expanded") !== "true") {
-    kopf.click();
-  }
-  block.scrollIntoView({ behavior: "smooth", block: "center" });
+async function zeigeHerkunftFuer(schluessel, { neu = false } = {}) {
+  const meta = utxoMetaAusWalletDom(schluessel) || { key: schluessel };
+  Zustand.traceFokus = { ...meta, key: schluessel };
+  zeigeAnsicht("trace");
+  await zeichneTraceFokusAnsicht(Zustand.traceFokus, { neu });
 }
 
 function vorbehaltText(z) {
@@ -5775,6 +6445,9 @@ function vorbehaltText(z) {
   return teile.join(" ");
 }
 
+/** Knoten-Daten am DOM (WeakMap — überlebt Fragment-Append, kein Leak). */
+const BAUM_KNOTEN_DATEN = new WeakMap();
+
 function zeichneKnotenListe(knoten) {
   const huelle = document.createDocumentFragment();
   for (const k of knoten) {
@@ -5783,8 +6456,125 @@ function zeichneKnotenListe(knoten) {
   return huelle;
 }
 
+function baumKnotenEls(block) {
+  if (!block) return {};
+  const zeile = block.querySelector(":scope > .kopf-mit-verweis > .baum-knoten");
+  const klapp = zeile && zeile.querySelector(":scope > .klapp");
+  const kinder = block.querySelector(":scope > .baum-kinder");
+  return { zeile, klapp, kinder };
+}
+
+/**
+ * Einen Baumknoten aufklappen (Kinder ggf. lazy zeichnen).
+ */
+function expandiereKnotenBlock(block) {
+  const knoten = BAUM_KNOTEN_DATEN.get(block);
+  if (!knoten || !knoten.expandable) return false;
+  let { zeile, klapp, kinder } = baumKnotenEls(block);
+  if (!kinder) {
+    kinder = document.createElement("div");
+    kinder.className = "baum-kinder";
+    kinder.hidden = true;
+    block.append(kinder);
+  }
+  if (!kinder.dataset.gezeichnet) {
+    kinder.dataset.gezeichnet = "ja";
+    kinder.replaceChildren();
+    kinder.append(zeichneKnotenListe(knoten.children || []));
+  }
+  kinder.hidden = false;
+  if (klapp && !klapp.classList.contains("leer")) klapp.textContent = "▾";
+  if (zeile) zeile.setAttribute("aria-expanded", "true");
+  return true;
+}
+
+function klappeKnotenBlock(block) {
+  if (!block) return;
+  const { zeile, klapp, kinder } = baumKnotenEls(block);
+  if (kinder) kinder.hidden = true;
+  if (klapp && !klapp.classList.contains("leer")) klapp.textContent = "▸";
+  if (zeile) zeile.setAttribute("aria-expanded", "false");
+}
+
+function toggleKnotenBlock(block) {
+  const { kinder } = baumKnotenEls(block);
+  if (kinder && !kinder.hidden && kinder.dataset.gezeichnet) {
+    klappeKnotenBlock(block);
+  } else {
+    expandiereKnotenBlock(block);
+  }
+}
+
+/** Gesamten Herkunftszweig unter *zweig* (.utxo-zweig) aufklappen. */
+function expandiereBaumAlles(zweig) {
+  if (!zweig) return;
+  // Iterativ: nach jedem Zeichnen neue Blöcke, bis nichts mehr zu öffnen ist.
+  let guard = 0;
+  let fort = true;
+  while (fort && guard++ < 800) {
+    fort = false;
+    const blocks = zweig.querySelectorAll(".baum-knoten-block");
+    for (const block of blocks) {
+      const knoten = BAUM_KNOTEN_DATEN.get(block);
+      if (!knoten || !knoten.expandable) continue;
+      const { kinder } = baumKnotenEls(block);
+      if (!kinder || kinder.hidden || !kinder.dataset.gezeichnet) {
+        if (expandiereKnotenBlock(block)) fort = true;
+      }
+    }
+  }
+}
+
+function klappeBaumAlles(zweig) {
+  if (!zweig) return;
+  // Von innen nach außen zuklappen.
+  const blocks = [...zweig.querySelectorAll(".baum-knoten-block")].reverse();
+  for (const block of blocks) klappeKnotenBlock(block);
+}
+
+function baumKlappLeiste(zweig) {
+  const leiste = document.createElement("div");
+  leiste.className = "zweig-klapp-leiste";
+  const auf = document.createElement("button");
+  auf.type = "button";
+  auf.className = "knopf knopf-klein";
+  auf.textContent =
+    t("trace.expandAll") !== "trace.expandAll"
+      ? t("trace.expandAll")
+      : "Alles aufklappen";
+  auf.title =
+    t("trace.expandAllTitle") !== "trace.expandAllTitle"
+      ? t("trace.expandAllTitle")
+      : "Gesamte Herkunftskette auf einmal öffnen.";
+  auf.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    expandiereBaumAlles(zweig);
+  });
+  const zu = document.createElement("button");
+  zu.type = "button";
+  zu.className = "knopf knopf-klein";
+  zu.textContent =
+    t("trace.collapseAll") !== "trace.collapseAll"
+      ? t("trace.collapseAll")
+      : "Alles zuklappen";
+  zu.title =
+    t("trace.collapseAllTitle") !== "trace.collapseAllTitle"
+      ? t("trace.collapseAllTitle")
+      : "Gesamte Herkunftskette wieder einklappen.";
+  zu.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    klappeBaumAlles(zweig);
+  });
+  leiste.append(auf, zu);
+  return leiste;
+}
+
 function zeichneKnoten(knoten) {
   const block = document.createElement("div");
+  block.className = "baum-knoten-block";
+  BAUM_KNOTEN_DATEN.set(block, knoten);
 
   // Die ganze Zeile ist der Treffer — nicht das Dreieck allein.
   // Erste Ebene unter der UTXO-Wurzel zeichnet zeichneZweig sofort (sichtbar).
@@ -5916,16 +6706,13 @@ function zeichneKnoten(knoten) {
     block.append(kinder);
 
     zeile.addEventListener("click", (ereignis) => {
+      // Nicht auf Bubbling von Copy-Klicks reagieren (die stoppen selbst).
+      if (ereignis.defaultPrevented) return;
       if (ereignis.detail > 1) return;
-      if (window.getSelection().toString()) return;
-      const auf = kinder.hidden;
-      if (auf && !kinder.dataset.gezeichnet) {
-        kinder.dataset.gezeichnet = "ja";
-        kinder.append(zeichneKnotenListe(knoten.children || []));
-      }
-      kinder.hidden = !auf;
-      klapp.textContent = auf ? "▾" : "▸";
-      zeile.setAttribute("aria-expanded", String(auf));
+      if (window.getSelection && window.getSelection().toString()) return;
+      ereignis.preventDefault();
+      ereignis.stopPropagation();
+      toggleKnotenBlock(block);
     });
   }
 
@@ -5936,17 +6723,39 @@ function zeichneKnoten(knoten) {
 // Steuerjahr
 // ---------------------------------------------------------------------------
 
+/** Haltefrist-Label — auch bevor der Locale-Katalog da ist (nie Roh-Key). */
+function haltefristJahreLabel(n) {
+  const zahl = Number(n);
+  const lang =
+    (window.SatSageI18n && typeof window.SatSageI18n.currentLang === "function"
+      && window.SatSageI18n.currentLang())
+    || "de";
+  if (lang === "en") {
+    return zahl === 1 ? "1 year" : `${zahl} years`;
+  }
+  return zahl === 1 ? "1 Jahr" : `${zahl} Jahre`;
+}
+
 function fuelleHaltefristAuswahl(select, gewaehlt, jahre) {
   if (!select) return;
-  const liste = jahre && jahre.length ? jahre : [1, 2, 3, 4, 5, 7, 10, 15, 20];
+  // Dropdown nur 1…10 (plus „keine“); Server-Liste ggf. kürzen.
+  let liste = (jahre && jahre.length ? jahre : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= 10);
+  liste = [...new Set(liste)].sort((a, b) => a - b);
+  if (!liste.length) liste = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const wert = String(gewaehlt ?? 1);
-  // Sprache in den Stempel: sonst bleiben Roh-Keys / DE-Labels nach initI18n bzw. Umschalten.
   const lang =
     (window.SatSageI18n && typeof window.SatSageI18n.currentLang === "function"
       && window.SatSageI18n.currentLang())
     || "de";
   const stempel = JSON.stringify({ liste, lang });
-  if (select.dataset.gefuellt === stempel) {
+  // Neu bauen, wenn Stempel anders ODER noch Roh-Keys in den Optionen stehen
+  // (erster Fill vor initI18n ließ früher „tax.yearsN“ stehen und blieb hängen).
+  const hatRohKey = [...select.options].some(
+    (o) => (o.textContent || "").indexOf("tax.") === 0,
+  );
+  if (select.dataset.gefuellt === stempel && !hatRohKey) {
     select.value = wert;
     if (select.value !== wert) select.value = "1";
     return;
@@ -5954,13 +6763,16 @@ function fuelleHaltefristAuswahl(select, gewaehlt, jahre) {
   select.replaceChildren();
   const keine = document.createElement("option");
   keine.value = "0";
-  keine.textContent = t("common.none");
+  const noneLabel = t("common.none");
+  keine.textContent =
+    noneLabel && noneLabel !== "common.none"
+      ? noneLabel
+      : (lang === "en" ? "none" : "keine");
   select.append(keine);
   for (const n of liste) {
     const option = document.createElement("option");
     option.value = String(n);
-    option.textContent =
-      n === 1 ? t("tax.yearsOne") : t("tax.yearsN", { n });
+    option.textContent = haltefristJahreLabel(n);
     select.append(option);
   }
   select.dataset.gefuellt = stempel;
@@ -6547,7 +7359,11 @@ async function erfrischeHerkunftZwischenstand() {
     if (Zustand.ansicht === "wallet" && Zustand.walletId) {
       await zeigeWallet(Zustand.walletId);
     } else if (Zustand.ansicht === "trace") {
-      await ladeTraceListe();
+      if (Zustand.traceFokus) {
+        await zeichneTraceFokusAnsicht(Zustand.traceFokus);
+      } else {
+        await ladeTraceListe({ erzwingen: true });
+      }
     } else if (Zustand.ansicht === "steuerjahr") {
       await ladeSteuerjahr();
     }
@@ -8961,7 +9777,7 @@ async function speichereStartSync(ereignis) {
       if (Zustand.config) {
         Zustand.config.wallet_sync_job_id = jobId;
       }
-      folgeWalletSyncJob(jobId);
+      folgeWalletSyncJob(jobId, ergebnis.job);
       if (!vonKnownOnly) logZeile(t("settings.startSyncStarted"));
       await ladeJobsNav();
     }
@@ -11176,78 +11992,228 @@ async function pruefeHeaderJob() {
   }
 }
 
-function folgeWalletSyncJob(jobId) {
+function loeseWalletSyncBindung() {
+  if (Zustand.walletSyncTimer) {
+    clearInterval(Zustand.walletSyncTimer);
+    Zustand.walletSyncTimer = null;
+  }
+  Zustand.walletSyncJob = null;
+  Zustand.walletSyncWalletIds = [];
+  Zustand.walletSyncStill = false;
+  Zustand.walletSyncPhase = null;
+  if (Zustand.config) Zustand.config.wallet_sync_job_id = null;
+  Zustand.liveP2pPeers = [];
+  setzePeerTakt(Zustand.config?.sources);
+}
+
+function jobIstStillerTip(jobOrMeta) {
+  if (!jobOrMeta) return false;
+  if (jobOrMeta.still || jobOrMeta.meta?.still) return true;
+  return false;
+}
+
+/** Tip-Sync betraf das gerade gewählte Wallet (Empfang/UTXO nur dann anfassen). */
+function tipSyncBetrifftAktuellesWallet(ids) {
+  const wid = Zustand.walletId;
+  if (!wid) return false;
+  const liste = Array.isArray(ids) && ids.length
+    ? ids
+    : (Zustand.walletSyncWalletIds || []);
+  if (!liste.length) return false;
+  return liste.map(String).includes(String(wid));
+}
+
+function folgeWalletSyncJob(jobId, meta) {
   const id = jobId || Zustand.config?.wallet_sync_job_id;
-  if (!id || Zustand.walletSyncJob === id) return;
+  if (!id || Zustand.walletSyncJob === id) {
+    if (meta) {
+      merkeWalletSyncZiele(meta);
+      if (jobIstStillerTip(meta)) Zustand.walletSyncStill = true;
+    }
+    return;
+  }
+  // Fertiger/staler Job aus Config: nicht als laufend behandeln, Puls nicht starten.
+  const bekannt = (Zustand.jobsNav?.jobs || []).find((x) => x && x.id === id);
+  if (
+    bekannt
+    && !(
+      bekannt.running
+      || bekannt.status === "running"
+      || bekannt.status === "queued"
+      || bekannt.queue_status === "queued"
+    )
+  ) {
+    if (Zustand.config) Zustand.config.wallet_sync_job_id = null;
+    return;
+  }
   Zustand.walletSyncJob = id;
   if (Zustand.config) Zustand.config.wallet_sync_job_id = id;
   Zustand.walletSyncLogStand = { index: 0 };
-  logZeile("Tip-Nachzug der Wallets…");
+  Zustand.walletSyncStill = jobIstStillerTip(meta) || jobIstStillerTip(bekannt);
+  if (meta) merkeWalletSyncZiele(meta);
+  else if (bekannt) merkeWalletSyncZiele(bekannt);
   if (Zustand.walletSyncTimer) clearInterval(Zustand.walletSyncTimer);
   Zustand.walletSyncTimer = setInterval(pruefeWalletSyncJob, 900);
+  // Erst Status prüfen — erst bei running loggen/atmen (siehe pruefeWalletSyncJob).
   pruefeWalletSyncJob();
   setzeWalletScanGesperrt();
-  // Empfangs-QR atmet bis Tip-Nachzug fertig (kein vorschnelles Cache-QR).
-  if (Zustand.walletId && !Zustand.lernThema) {
-    ladeEmpfang(Zustand.walletId).catch(() => {});
-  }
 }
 
 async function pruefeWalletSyncJob() {
   if (!Zustand.walletSyncJob) return;
+  const syncId = Zustand.walletSyncJob;
   try {
-    const job = await api(`/jobs/${Zustand.walletSyncJob}`);
+    const job = await api(`/jobs/${syncId}`);
     nimmJobLogAb(job, Zustand.walletSyncLogStand);
     if (Array.isArray(job.live_p2p_peers)) {
       nimmLiveP2pPeers(job.live_p2p_peers);
     }
-    if (job.running) return;
-    if (Zustand.walletSyncTimer) {
-      clearInterval(Zustand.walletSyncTimer);
-      Zustand.walletSyncTimer = null;
+    merkeWalletSyncZiele(job);
+    if (jobIstStillerTip(job)) Zustand.walletSyncStill = true;
+    if (job.meta?.phase === "empfang") {
+      Zustand.walletSyncPhase = "empfang";
+      // jobsNav-Meta mitziehen (sonst zeigt der Poller weiter „läuft“).
+      const navJob = (Zustand.jobsNav?.jobs || []).find((x) => x && x.id === syncId);
+      if (navJob) {
+        navJob.meta = navJob.meta || {};
+        navJob.meta.phase = "empfang";
+      }
     }
-    // Live-Peers nach Scan freigeben — Pille darf wieder auf Probe-Stand.
-    Zustand.liveP2pPeers = [];
-    Zustand.walletSyncJob = null;
-    setzePeerTakt(Zustand.config?.sources);
+    if (job.running || job.status === "running" || job.status === "queued") {
+      // Echt laufend: einmal loggen; Empfang nur wenn DIESES Wallet im Tip-Sync ist.
+      // Stiller Watch-Fallback: Log ok, kein Puls / keine Nav-Marker.
+      if (!Zustand.walletSyncLogStand?._tipAngekuendigt) {
+        Zustand.walletSyncLogStand = Zustand.walletSyncLogStand || { index: 0 };
+        Zustand.walletSyncLogStand._tipAngekuendigt = true;
+        if (Zustand.walletSyncStill) {
+          logZeile("Tip-Nachzug (still, Hintergrund)…");
+        } else {
+          logZeile("Tip-Nachzug der Wallets…");
+          if (
+            Zustand.walletId
+            && !Zustand.lernThema
+            && tipSyncBetrifftAktuellesWallet()
+          ) {
+            ladeEmpfang(Zustand.walletId).catch(() => {});
+          }
+          zeichneNav();
+        }
+      }
+      // UTXO-Tip fertig, Empfangsadressen laufen noch → Nav grün, QR darf laden.
+      if (
+        (job.meta?.phase === "empfang" || Zustand.walletSyncPhase === "empfang")
+        && !Zustand.walletSyncLogStand?._tipUiFertig
+        && !Zustand.walletSyncStill
+      ) {
+        Zustand.walletSyncLogStand._tipUiFertig = true;
+        Zustand.walletSyncPhase = "empfang";
+        const n = job.result?.wallets;
+        const u = job.result?.utxo_count;
+        if (typeof n === "number") {
+          logZeile(
+            `Tip-Nachzug fertig: ${n} Wallet(s), ${u ?? "?"} UTXO(s) `
+            + "(Empfangsadressen folgen)…",
+          );
+        }
+        if (Zustand.config) Zustand.config.wallet_sync_job_id = null;
+        const betroffene = walletIdsAusSyncJob(job);
+        for (const wid of betroffene) {
+          delete Zustand.empfangByWallet[wid];
+        }
+        try {
+          await ladeConfig();
+        } catch (_) {
+          /* Nav trotzdem */
+        }
+        setzeWalletScanGesperrt();
+        zeichneNav();
+        if (
+          Zustand.walletId
+          && !Zustand.lernThema
+          && tipSyncBetrifftAktuellesWallet(betroffene.length ? betroffene : null)
+        ) {
+          // phase empfang → tipSyncLaeuftFuer false → Electrs-Adresse holen
+          ladeEmpfang(Zustand.walletId).catch(() => {});
+        }
+      }
+      return;
+    }
+    const warAktiv = Boolean(Zustand.walletSyncLogStand?._tipAngekuendigt);
+    const warStill = Zustand.walletSyncStill;
+    const betroffene = walletIdsAusSyncJob(job).length
+      ? walletIdsAusSyncJob(job)
+      : (Zustand.walletSyncWalletIds || []).slice();
+    const betrifftAktuell = !warStill && tipSyncBetrifftAktuellesWallet(betroffene);
+    const pulsAn = EmpfangPuls.laeuft()
+      || Boolean(Zustand.empfang && Zustand.empfang.puls);
+    loeseWalletSyncBindung();
+    // Puls/QR nur anfassen, wenn der Tip-Sync dieses Wallet betraf und wir atmeten.
+    if (betrifftAktuell && pulsAn) {
+      EmpfangPuls.stop();
+    }
+    setzeWalletScanGesperrt();
+    // Stale done-Job aus Config beim Start: nur Slot freigeben, kein Reload-Sturm.
+    if (!warAktiv) {
+      zeichneNav();
+      return;
+    }
     if (job.status === "done") {
       const n = job.result?.wallets;
       const u = job.result?.utxo_count;
-      if (typeof n === "number") {
+      // Fertig-Zeile schon bei phase=empfang geloggt → nicht doppelt.
+      if (typeof n === "number" && !Zustand.walletSyncLogStand?._tipUiFertig) {
         logZeile(
           `Tip-Nachzug fertig: ${n} Wallet(s), ${u ?? "?"} UTXO(s).`,
         );
+      } else if (job.result?.empfang_scharf) {
+        logZeile(
+          `Empfangsadressen nachgezogen (${job.result.empfang_scharf}).`,
+        );
       }
-      EmpfangPuls.stop();
-      Zustand.empfangByWallet = Object.create(null);
+      // Nur Cache der betroffenen Wallets — nicht Firmung-QR wegen Cash+Carry.
+      for (const wid of betroffene) {
+        delete Zustand.empfangByWallet[wid];
+      }
       await ladeConfig();
       await ladeJobsNav();
       setzeWalletScanGesperrt();
-      if (Zustand.ansicht === "wallet" && Zustand.walletId) {
-        await zeigeWallet(Zustand.walletId);
-      } else if (Zustand.walletId && !Zustand.lernThema) {
-        ladeEmpfang(Zustand.walletId).catch(() => {});
-        zeichneNav();
+      if (betrifftAktuell && Zustand.walletId) {
+        if (Zustand.ansicht === "wallet") {
+          await zeigeWallet(Zustand.walletId);
+        } else if (!Zustand.lernThema) {
+          ladeEmpfang(Zustand.walletId).catch(() => {});
+          zeichneNav();
+        } else {
+          zeichneNav();
+        }
       } else {
         zeichneNav();
       }
     } else if (job.status === "cancelled") {
       logZeile("Tip-Nachzug abgebrochen.");
-      EmpfangPuls.stop();
-      setzeWalletScanGesperrt();
-      if (Zustand.walletId && !Zustand.lernThema) {
+      if (betrifftAktuell && Zustand.walletId && !Zustand.lernThema) {
         ladeEmpfang(Zustand.walletId).catch(() => {});
       }
-    } else if (job.error) {
-      logZeile(`Tip-Nachzug: ${job.error}`);
-      EmpfangPuls.stop();
-      setzeWalletScanGesperrt();
-      if (Zustand.walletId && !Zustand.lernThema) {
+      zeichneNav();
+    } else {
+      if (job.error) logZeile(`Tip-Nachzug: ${job.error}`);
+      if (betrifftAktuell && Zustand.walletId && !Zustand.lernThema) {
         ladeEmpfang(Zustand.walletId).catch(() => {});
       }
+      zeichneNav();
     }
   } catch (_) {
-    /* optionaler Hintergrund-Job */
+    // Job weg (404) oder Netz: Bindung lösen, sonst atmet der QR ewig.
+    const betrifftAktuell = tipSyncBetrifftAktuellesWallet();
+    const pulsAn = EmpfangPuls.laeuft()
+      || Boolean(Zustand.empfang && Zustand.empfang.puls);
+    loeseWalletSyncBindung();
+    if (betrifftAktuell && pulsAn) EmpfangPuls.stop();
+    setzeWalletScanGesperrt();
+    if (betrifftAktuell && Zustand.walletId && !Zustand.lernThema) {
+      ladeEmpfang(Zustand.walletId).catch(() => {});
+    }
+    zeichneNav();
   }
 }
 
@@ -11524,8 +12490,15 @@ async function start() {
   document
     .querySelector('[data-ansicht="trace"]')
     .addEventListener("click", () => {
+      // Schon in Herkunft: nichts ändern (Fokus bleibt Fokus, Liste bleibt Liste).
+      // Volle Liste nur beim Wechsel *aus einer anderen* Ansicht.
+      if (Zustand.ansicht === "trace") {
+        zeichneNav();
+        return;
+      }
+      Zustand.traceFokus = null;
       zeigeAnsicht("trace");
-      if (!Zustand.traceListe) ladeTraceListe();
+      ladeTraceListe({ erzwingen: true });
     });
   document
     .querySelector('[data-ansicht="steuerjahr"]')

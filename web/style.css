@@ -267,6 +267,7 @@ button, input, select { font: inherit; color: inherit; }
 .buehne:not(.log-an) #dock-spalter { display: none; }
 .empfang-pane {
   /* Quadrat: Seitenlänge = Dock-Höhe; schrumpft mit, bleibt 1:1. */
+  position: relative;
   height: 100%;
   max-height: 100%;
   aspect-ratio: 1 / 1;
@@ -365,6 +366,11 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--akzent);
 }
 .empfang-index, .empfang-quelle { color: var(--blass); }
+.empfang-quelle--warn,
+.empfang-hinweis--warn {
+  color: var(--warn, #b58100);
+  font-weight: 600;
+}
 .empfang-hinweis {
   color: var(--warn, #b58100);
   font-weight: 600;
@@ -491,6 +497,16 @@ button, input, select { font: inherit; color: inherit; }
   padding: 0.2rem 0.4rem;
   cursor: pointer;
 }
+.empfang-kopf--mehrzeilig {
+  white-space: pre-line;
+  line-height: 1.12;
+  text-align: center;
+}
+.empfang-kopf--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
 .empfang-pane--puls .empfang-kopf {
   transition: none; /* Opacity steuert die Atem-RAF */
   min-height: 1.2em;
@@ -501,7 +517,11 @@ button, input, select { font: inherit; color: inherit; }
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 2;
+  z-index: 20;
+}
+.empfang-pane--konfetti .empfang-qr-wrap {
+  position: relative;
+  z-index: 1;
 }
 
 .empfang-pane--lern .empfang-qr {
@@ -1177,6 +1197,18 @@ select { font-family: var(--mono); font-size: 11px; }
 /* ---------- Herkunftsbaum ---------- */
 
 .suchleiste { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
+.trace-fokus-leiste {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--flaeche, #1a1a1a) 88%, var(--akzent, #f7931a) 12%);
+}
+.trace-fokus-leiste .meta { flex: 1 1 12rem; }
+.trace-fokus { margin-top: 4px; }
 
 .wurzel-zeile { padding: 12px 13px; display: flex; flex-direction: column; gap: 3px; }
 .wurzel-oben { display: flex; align-items: baseline; gap: 11px; flex-wrap: wrap; }
@@ -1398,6 +1430,24 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .zweig-stand { white-space: nowrap; }
 .zweig-warnung { color: var(--warn); flex: 1 1 16rem; min-width: 0; }
+.zweig-klapp-leiste {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+}
+.zweig-klapp-leiste .knopf {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--linie, #444);
+  background: var(--flaeche-2, #222);
+}
+.zweig-klapp-leiste .knopf:hover {
+  border-color: var(--akzent, #f7931a);
+  color: var(--akzent, #f7931a);
+}
+.baum-knoten-block { position: relative; }
 
 /* Marke in der UTXO-Liste: liegt eine Analyse vor? */
 .verfolgt-marke {

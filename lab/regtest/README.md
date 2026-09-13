@@ -55,18 +55,24 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
 
 ### Kalender / Haltefrist (setmocktime)
 
-Die Basis-Szenarien streuen Blockzeiten über **2022 → 2025 → Tip≈heute** (`setmocktime` in `generate_scenarios.py`). So sind Steuerjahr-Zeitstrahl und 1-Jahres-Haltefrist in der GUI testbar — nicht nur Conf-Tiefe.
+Die Basis-Szenarien streuen **unspent UTXO-Alter zufällig** über **gestern … vor 7 Jahren** (`setmocktime` in `generate_scenarios.py`). Blockzeiten steigen monoton (MTP); die Zufallszeiten werden sortiert gemined.
 
 | Phase | Inhalt (kurz) |
 |-------|----------------|
-| 2022-bootstrap | 110 Blocks + Funding Indizes 0–9 (oft unspent → außerhalb Frist) |
-| 2022-mid | Funding 10–14 |
-| 2023 | Funding 15–22; Hop / Self / Consolidation |
-| 2024 | Funding 23–29; Beta-aged-fanout |
-| 2025 | Funding 30–49 + Peers; CoinJoin-Shapes (noch innerhalb Frist) |
+| bootstrap | 110 Blocks am Fensterstart (Coinbase-Reife) |
+| random-age-funding | 40× unspent @0,049 BTC (nur Alter) + 40× Spend-Pool @0,05 BTC — je Index eigene Zufallszeit |
+| shapes | Hop/CJ/Fan-out nur aus Spend-Pool (Alters-Kohorte bleibt liegen) |
 | tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
 
+In der GUI: viele unterschiedliche `hold_days` (nicht nur 1 T / 377 T).
+
 **Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
+
+**Mocktime + Descriptor-Wallets:** `createwallet` setzt die Birthtime auf die Host-Uhr; Blöcke mit `setmocktime` (2022–2025) erscheinen erst nach `rescanblockchain 0` in `listunspent`. `generate_scenarios.py` rescanned Faucet und Lab-Wallets automatisch. `mine_at` ruft `mine` direkt (keine Rekursion über `mine_next`).
+
+**Electrs im Docker:** bitcoind muss P2P im Compose-Netz lauschen (`-bind=0.0.0.0 -port=18444 -whitelist=0.0.0.0/0`). Cookie für electrs: `regtest/.cookie` als `bitcoin:secret` (siehe `start.sh`). Nach Chain-Wipe electrs-DB mitlöschen (`.data/electrs/`).
+
+**GUI mit Lab-Env:** Immer `--env lab/regtest/.data/.regtest.env` (und eigene Cache-Dirs). `main._load_dotenv()` folgt zur Laufzeit `ENV_FILE` (nicht Import-Default) — sonst überschreibt die Root-`.env` (`NETWORK=main`) Regtest-Adressen (`bcrt1` → fälschlich `bc1`).
 
 Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Für die **Tx-Klassifikation / Herkunft**:
 

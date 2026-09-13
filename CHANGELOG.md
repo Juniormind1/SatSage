@@ -9,6 +9,15 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Empfang · interne Transfers:** Animation nur am **aktuell gewählten** Wallet. Ausgang an ein eigenes Wallet (z. B. Cash+Carry→Bitkey) oder Self-Send: nur **Konfetti**, kein „OH NO!“. Fremder Ausgang: weiterhin „OH NO!“.
+- **Herkunftsliste · Tempo:** UTXO-Adressen aus dem Cache in den Wallet-Kontext seedern (kein teures `resolve_address`-Nachableiten). Adressgruppen bauen UTXO-Zeilen erst beim Aufklappen; Bäume weiterhin nur bei Klick aufs UTXO.
+- **Tip-Nachzug · Nav früher grün:** Sobald die UTXOs am Tip sind, zeigt die Wallet-Liste „gerade eben“ — Empfangs-QR-Schärfung (Electrs) läuft danach ohne „aktualisiere…“; Verfügbarkeit am QR.
+- **Herkunft · zwei Einstiege:** Sprung aus dem Wallet = **Fokus nur dieses UTXO**; Knopf „Alle UTXOs zeigen“ → volle Liste. Nav „Herkunft tracen“ nur beim Wechsel *aus einer anderen* Ansicht → volle Liste; erneuter Klick im Fokus ändert nichts. Meta-Sidecar und kein Mempool-Rundlauf für die Liste.
+- **Lab-Regtest · UTXO-Alter:** Funding-Zeiten zufällig über gestern…vor 7 Jahren (monoton gemined); 40 unspent Alters-UTXOs bleiben liegen. Block-Header-Cache netzwerkpräfixiert (`regtest-130.json`) + Lab-`IMMUTABLE_CACHE_DIR`, damit Mainnet-Zeiten Regtest-Alter nicht verfälschen.
+- **Empfangen · neuer Block:** Bei Chain-Tip (Electrs `headers.subscribe`) zwei Atemzüge: „NEUER BLOCK“ (zweizeilig), dann Blockhöhe in Monospace. Debug: `?animdebug=1` → ▣.
+- **Wallets immer aktuell:** Bei greifendem Electrs-Subscribe kein Tip-Nachzug mehr pro neuem Block (nur Adress-Push). Fehlt Subscribe: stiller Hintergrund-Tip ohne Nav-„aktualisiere…“. Start-Aktualisierung und manueller Tip unverändert sichtbar.
+- **Empfangen · unbenutzt bei Electrs:** Ist eigener Electrs/Fulcrum erreichbar, ist die angezeigte Empfangsadresse **immer unbenutzt**. Strategie: Cache-Schätzung (nach Tip oft schon richtig) + **vorwärts** nur wenige `get_history` (typisch 1 RPC) — kein Gap-Walk ab #0 / kein electrs-Fullscan. Electrs-Verbindung wird wiederverwendet (kein TLS-Handshake pro Klick). Ohne Electrs: Schätzung aus Cache mit **Warnhinweis**.
+- **Empfangen · Puls/Sync-Status:** Herzschlag startet nicht mehr bei bloßem Wallet-Wechsel oder veralteter Tip-Sync-Job-ID; stoppt zuverlässig nach Scan/Tip-Ende. „aktualisiere…“ nur noch an wirklich laufenden Tip-Nachzug und nur für betroffene Wallets (nicht pauschal alle). Server gibt `wallet_sync_job_id` nach Job-Ende frei. Tip-Sync-Ende eines *anderen* Wallets lässt Empfangs-QR und Animation des aktuellen Wallets unberührt (`EmpfangPuls.stop` zerstört den QR nicht mehr, wenn nichts atmete).
 - **Empfangen · Subscribe-Gap:** Bei aktivem Wallet-Watch werden die nächste freie Empfangsadresse und die folgenden 20 Indizes abonniert — Zahlungen auf noch nicht in SatSage gezeigte Adressen werden mitbemerkt.
 - **Lab · Faucet-Senden:**
  Unter `NETWORK=regtest` Eingabefeld + OK neben Empfangen — sendet Sats von `lab-faucet` an die aktuelle Empfangsadresse (Mempool, für Animations-Tests).
