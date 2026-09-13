@@ -21,9 +21,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/satsage
-
 jobs:
   image:
     runs-on: ubuntu-latest
@@ -31,9 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Version bestimmen
+      - name: Version und Image-Name bestimmen
         id: version
         run: |
+          # Docker-Repository-Namen muessen kleingeschrieben sein, der
+          # GitHub-Owner ist es nicht zwingend (Juniormind1).
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=ghcr.io/${owner}/satsage" >> "$GITHUB_ENV"
+          echo "Image-Name: ghcr.io/${owner}/satsage"
+
           eingabe="${{ github.event.inputs.version }}"
           if [ -n "$eingabe" ]; then
             version="$eingabe"
