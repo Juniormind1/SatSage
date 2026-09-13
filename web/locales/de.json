@@ -761,6 +761,7 @@
   "trace.externalInput": "Externer Eingang",
   "trace.noteUnresolvedInputs": "{count} weitere Eingänge wurden nicht aufgelöst — nach dem ersten eigenen Eingang bricht die Auflösung ab, um bei Sammel-Transaktionen nicht hunderte Abrufe auszulösen. Beträge dieser Eingänge fehlen.",
   "trace.ownWallet": "eigenes Wallet",
+  "trace.walletTransition": "Wallet-Wechsel · {from} → {to}",
   "trace.placeholder": "Oder gezielt: TxID bzw. UTXO (txid:vout)",
   "trace.receivePending": "Mempool",
   "trace.receivePendingTitle": "Unbestätigter Empfang im Mempool (eigener Electrs) — typisch Change oder Selbstüberweisung.",

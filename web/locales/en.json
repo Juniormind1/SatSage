@@ -761,6 +761,7 @@
   "trace.externalInput": "external input",
   "trace.noteUnresolvedInputs": "{count} further inputs were not resolved — after the first own input the resolution stops to avoid hundreds of lookups on consolidation transactions. Amounts of these inputs are missing.",
   "trace.ownWallet": "own wallet",
+  "trace.walletTransition": "Wallet change · {from} → {to}",
   "trace.placeholder": "Or targeted: TxID or UTXO (txid:vout)",
   "trace.receivePending": "mempool",
   "trace.receivePendingTitle": "Unconfirmed receive in the mempool (own Electrs) — typically change or a self-transfer.",

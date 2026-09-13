@@ -6269,7 +6269,7 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
     return;
   }
 
-  zweig.append(zeichneKnotenListe(ergebnis.children));
+  zweig.append(zeichneKnotenListe(ergebnis.children, utxo ? (utxo.wallet || "") : undefined));
   zeichneFolgeBand(ergebnis, zweig, utxo, klapp);
 
   const vorbehalt = vorbehaltText(ergebnis.summary);
@@ -6448,10 +6448,22 @@ function vorbehaltText(z) {
 /** Knoten-Daten am DOM (WeakMap — überlebt Fragment-Append, kein Leak). */
 const BAUM_KNOTEN_DATEN = new WeakMap();
 
-function zeichneKnotenListe(knoten) {
+/** Leere Labels und „eigenes Wallet“ für Vergleiche auf denselben Wert bringen. */
+function normalisiereWalletLabel(wert) {
+  const s = (wert == null ? "" : String(wert)).trim();
+  if (!s) return "";
+  const eigen = t("trace.ownWallet");
+  return s === eigen ? "" : s;
+}
+
+function walletAnzeigeLabel(wert) {
+  return normalisiereWalletLabel(wert) || t("trace.ownWallet");
+}
+
+function zeichneKnotenListe(knoten, elternWallet) {
   const huelle = document.createDocumentFragment();
   for (const k of knoten) {
-    huelle.append(zeichneKnoten(k));
+    huelle.append(zeichneKnoten(k, elternWallet));
   }
   return huelle;
 }
@@ -6480,7 +6492,10 @@ function expandiereKnotenBlock(block) {
   if (!kinder.dataset.gezeichnet) {
     kinder.dataset.gezeichnet = "ja";
     kinder.replaceChildren();
-    kinder.append(zeichneKnotenListe(knoten.children || []));
+    kinder.append(zeichneKnotenListe(
+      knoten.children || [],
+      knoten.type === "internal" ? (knoten.wallet || "") : undefined,
+    ));
   }
   kinder.hidden = false;
   if (klapp && !klapp.classList.contains("leer")) klapp.textContent = "▾";
@@ -6571,10 +6586,16 @@ function baumKlappLeiste(zweig) {
   return leiste;
 }
 
-function zeichneKnoten(knoten) {
+function zeichneKnoten(knoten, elternWallet) {
   const block = document.createElement("div");
   block.className = "baum-knoten-block";
   BAUM_KNOTEN_DATEN.set(block, knoten);
+
+  const walletUebergang =
+    knoten.type === "internal"
+    && elternWallet !== undefined
+    && normalisiereWalletLabel(elternWallet) !== normalisiereWalletLabel(knoten.wallet);
+  if (walletUebergang) block.classList.add("wallet-uebergang");
 
   // Die ganze Zeile ist der Treffer — nicht das Dreieck allein.
   // Erste Ebene unter der UTXO-Wurzel zeichnet zeichneZweig sofort (sichtbar).
@@ -6635,6 +6656,16 @@ function zeichneKnoten(knoten) {
   if (marke) oben.append(marke);
 
   info.append(oben);
+
+  if (walletUebergang) {
+    const hinweis = document.createElement("span");
+    hinweis.className = "wallet-uebergang-hinweis";
+    hinweis.textContent = t("trace.walletTransition", {
+      from: walletAnzeigeLabel(elternWallet),
+      to: walletAnzeigeLabel(knoten.wallet),
+    });
+    info.append(hinweis);
+  }
 
   const klasseText = softTxClassLabel(knoten);
   const externKurz =

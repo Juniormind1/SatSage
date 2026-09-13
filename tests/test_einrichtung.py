@@ -655,7 +655,7 @@ class TestOberflaeche(unittest.TestCase):
         )
         self.assertIsNotNone(
             re.search(
-                r"function zeichneKnoten\(knoten\) \{.*?kinder\.hidden = true",
+                r"function zeichneKnoten\(knoten(?:,\s*elternWallet)?\) \{.*?kinder\.hidden = true",
                 self.js,
                 re.S,
             ),
