@@ -104,3 +104,5 @@ Den Store-Baum nicht von Hand pflegen, sondern aus `packaging/umbrel/` ableiten:
 ```
 
 Das Ergebnis landet unter `build/umbrel-community-store/` (gitignored) und wird von dort ins Store-Repo committet.
+
+**Nicht mit `rsync` spiegeln.** Ein Versionswechsel wie `0.9.4` → `0.9.5` und ein Digest-Wechsel sind byte-gleich lang, und `rsync` vergleicht standardmäßig nur Größe und Zeitstempel — es hält die Dateien für identisch und überträgt nichts. Das schlägt still fehl und veröffentlicht einen veralteten Stand. Entweder das Zielverzeichnis vorher löschen und neu kopieren, oder `rsync --checksum` verwenden. Gleiches gilt beim Spiegeln aufs Umbrel-Gerät zum Testen.
