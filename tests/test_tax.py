@@ -809,18 +809,30 @@ class TestZeitstrahl(unittest.TestCase):
         self.assertEqual(klassen["01.06.2026"], "mittel")
         self.assertEqual(klassen["01.09.2026"], "klein")
 
-    def test_y_folgt_den_sats(self):
-        """Der größte UTXO sitzt oben, die übrigen anteilig darunter."""
+    def test_y_folgt_den_sats_logarithmisch(self):
+        """Y ist log1p-skaliert: größter UTXO oben, Null unten, dazwischen log."""
+        import math
+
         strahl = self.strahl([
             utxo(1000, "01.03.2026 12:00", marker="a1"),
             utxo(4000, "01.06.2026 12:00", marker="b2"),
             utxo(2000, "01.09.2026 12:00", marker="c3"),
         ])
+        hoechst = 4000
+
+        def erwartet(sats: int) -> float:
+            return round(math.log1p(sats) / math.log1p(hoechst) * 100, 3)
+
         nach_sats = {e["value_sats"]: e["y"] for e in strahl["events"]}
         self.assertEqual(nach_sats[4000], 100.0)
-        self.assertEqual(nach_sats[2000], 50.0)
-        self.assertEqual(nach_sats[1000], 25.0)
+        self.assertEqual(nach_sats[2000], erwartet(2000))
+        self.assertEqual(nach_sats[1000], erwartet(1000))
         self.assertEqual(strahl["max_sats"], 4000)
+        self.assertEqual(strahl["y_scale"], "log")
+        self.assertGreater(nach_sats[1000], 25.0)  # log hebt kleine Beträge
+        self.assertEqual(
+            round(math.log1p(0) / math.log1p(hoechst) * 100, 3), 0.0
+        )
 
     def test_aeltere_sats_summiert_die_vorherigen(self):
         strahl = self.strahl([

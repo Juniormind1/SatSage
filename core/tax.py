@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -832,6 +833,20 @@ def _groessenklasse(sats: int, gesamt: int) -> str:
     return "klein"
 
 
+
+def _y_log_prozent(sats: int, hoechst: int) -> float:
+    """
+    Logarithmische Y-Position 0..100 für den Zeitstrahl.
+
+    ``log1p`` hält 0 Sat unten (kein ``log(0)``) und staucht große Beträge
+    weniger als eine lineare Achse — typisch bei UTXOs von Dust bis BTC.
+    """
+    oben = math.log1p(max(int(hoechst), 0))
+    if oben <= 0:
+        return 0.0
+    return round(math.log1p(max(int(sats), 0)) / oben * 100.0, 3)
+
+
 def zeitstrahl(
     eintraege: list[Eingang],
     ende: datetime,
@@ -844,8 +859,10 @@ def zeitstrahl(
     X: Zeit vom gebündelten linken Rand bis zum Bezugstag. UTXOs vor der
     Haltefrist oder vor dem Stichtag sitzen gemeinsam am Quartalsbeginn
     davor — sonst quetscht ein sehr alter Coin den aktuellen Rand.
-    Y: Betrag dieses UTXO, relativ zum größten. Prozentwerte, damit die
-    Darstellung ohne feste Pixelbreite auskommt.
+    Y: Betrag dieses UTXO auf logarithmischer Skala (``log1p``), relativ
+    zum größten — null und nahe null bleiben unten, große Spreizungen
+    bleiben lesbar. Prozentwerte, damit die Darstellung ohne feste
+    Pixelbreite auskommt.
 
     ``aeltere_sats`` ist die Summe aller zeitlich früheren UTXOs — der
     Saldo, der schon da war, als dieser Eingang dazukam.
@@ -923,7 +940,7 @@ def zeitstrahl(
                wallet: str) -> dict:
         return {
             "pos": round(prozent(_plotzeit(eintrag)), 3),
-            "y": round(sats / hoechst * 100, 3),
+            "y": _y_log_prozent(sats, hoechst),
             "erfuellt": eintrag.erfuellt,
             "geprueft": eintrag.geprueft,
             "neuvermoegen": eintrag.neuvermoegen,
@@ -999,6 +1016,7 @@ def zeitstrahl(
         "events": events,
         "ticks": ticks,
         "max_sats": hoechst,
+        "y_scale": "log",
         "verdeckt": gruppen_zahl["stichtag"] + gruppen_zahl["haltefrist"],
     }
 

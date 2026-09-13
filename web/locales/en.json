@@ -669,6 +669,7 @@
   "tax.selfReport": "Voluntary disclosure report",
   "tax.selfReportHint": "For late filing / voluntary disclosure: outflows and what-if UTXOs load from cache when you open this view — mark them (e.g. exchange deposit) and build the report. Person data are placeholders for now (Donald Duck / 0/8/15 / Duckburg). Not tax advice.",
   "tax.selfReportZusatz": "FiFo · outflows + what-if · preparation",
+  "tax.timelineHint": "Y logarithmic · wheel: zoom time · drag: pan · double-click: reset",
   "tax.timeline": "UTXOs across all wallets",
   "tax.utxos": "UTXOs",
   "tax.year": "Year",

@@ -669,6 +669,7 @@
   "tax.selfReport": "Selbstanzeige-Report",
   "tax.selfReportHint": "Für Nachmeldung / Selbstanzeige: Abflüsse und Was-wäre-wenn-UTXOs werden beim Öffnen aus dem Cache geladen — markieren (z. B. Börsen-Einzahlung) und Report erzeugen. Personendaten sind vorerst Platzhalter (Donald Duck / 0/8/15 / Entenhausen). Keine Steuerberatung.",
   "tax.selfReportZusatz": "FiFo · Abflüsse + Was-wäre-wenn · Vorbereitung",
+  "tax.timelineHint": "Y logarithmisch · Mausrad: Zeit zoomen · Ziehen: verschieben · Doppelklick: zurück",
   "tax.timeline": "UTXOs über alle Wallets",
   "tax.utxos": "UTXOs",
   "tax.year": "Jahr",

@@ -6959,31 +6959,211 @@ function zeichneSteuerjahr(daten) {
 }
 
 /**
+ * Zeitstrahl-Ansicht: X-Fenster (Pan/Zoom) über dem 0..100 %-Datenraum.
+ * Y kommt bereits logarithmisch (log1p) aus core/tax.zeitstrahl.
+ */
+const ZeitstrahlAnsicht = {
+  daten: null,
+  x0: 0,
+  x1: 100,
+  gebunden: false,
+};
+
+const ZEITSTRAHL_MIN_SPAN = 2;
+
+/** Datum dd.mm.yyyy → Date (lokal, Mittag — vermeidet DST-Kanten). */
+function parseDeDatum(text) {
+  const m = String(text || "").match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12, 0, 0);
+}
+
+function formatTickMonatJahr(d) {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${mm}/${d.getFullYear()}`;
+}
+
+/** Daten-% → sichtbare left-% im aktuellen X-Fenster. */
+function zeitstrahlSichtPos(pos) {
+  const span = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0;
+  if (span <= 0) return 50;
+  return ((pos - ZeitstrahlAnsicht.x0) / span) * 100;
+}
+
+function zeitstrahlFensterBegrenzen() {
+  let { x0, x1 } = ZeitstrahlAnsicht;
+  let span = x1 - x0;
+  if (span < ZEITSTRAHL_MIN_SPAN) {
+    const mitte = (x0 + x1) / 2;
+    x0 = mitte - ZEITSTRAHL_MIN_SPAN / 2;
+    x1 = mitte + ZEITSTRAHL_MIN_SPAN / 2;
+    span = ZEITSTRAHL_MIN_SPAN;
+  }
+  if (span > 100) {
+    x0 = 0;
+    x1 = 100;
+  } else {
+    if (x0 < 0) {
+      x1 -= x0;
+      x0 = 0;
+    }
+    if (x1 > 100) {
+      x0 -= x1 - 100;
+      x1 = 100;
+    }
+    x0 = Math.max(0, x0);
+    x1 = Math.min(100, x1);
+  }
+  ZeitstrahlAnsicht.x0 = x0;
+  ZeitstrahlAnsicht.x1 = x1;
+}
+
+/**
+ * Zoom nur auf der Zeitachse. ankerSichtPct: Mausposition im Viewport 0..100.
+ */
+function zeitstrahlZoom(faktor, ankerSichtPct) {
+  zeitstrahlFensterBegrenzen();
+  const { x0, x1 } = ZeitstrahlAnsicht;
+  const span = x1 - x0;
+  const anker = x0 + (ankerSichtPct / 100) * span;
+  const neu = Math.min(100, Math.max(ZEITSTRAHL_MIN_SPAN, span * faktor));
+  const linksAnteil = span > 0 ? (anker - x0) / span : 0.5;
+  ZeitstrahlAnsicht.x0 = anker - linksAnteil * neu;
+  ZeitstrahlAnsicht.x1 = ZeitstrahlAnsicht.x0 + neu;
+  zeitstrahlFensterBegrenzen();
+}
+
+function zeitstrahlPan(deltaSichtPct) {
+  const span = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0;
+  const shift = (deltaSichtPct / 100) * span;
+  ZeitstrahlAnsicht.x0 -= shift;
+  ZeitstrahlAnsicht.x1 -= shift;
+  zeitstrahlFensterBegrenzen();
+}
+
+/** Gleichmäßig verteilte Tick-Labels für das sichtbare X-Fenster. */
+function zeitstrahlTicksImFenster(strahl) {
+  const von = parseDeDatum(strahl.von);
+  const bis = parseDeDatum(strahl.bis);
+  if (!von || !bis) {
+    return (strahl.ticks || []).map((tick) => tick.label);
+  }
+  const gesamtMs = bis.getTime() - von.getTime();
+  const { x0, x1 } = ZeitstrahlAnsicht;
+  const schritte = 4;
+  const labels = [];
+  for (let i = 0; i <= schritte; i += 1) {
+    const dataPct = x0 + ((x1 - x0) * i) / schritte;
+    const tMs = von.getTime() + (gesamtMs * dataPct) / 100;
+    labels.push(formatTickMonatJahr(new Date(tMs)));
+  }
+  return labels;
+}
+
+/**
+ * Y-Achsenbeschriftung zur log1p-Skala (oben = max, unten = 0).
+ * Zwischenwerte: sats = expm1(log1p(max) * Anteil).
+ */
+function zeichneZeitstrahlYAchse(maxSats) {
+  const yAchse = $("#achse-y");
+  if (!yAchse) return;
+  yAchse.replaceChildren();
+  const max = Math.max(Number(maxSats) || 0, 0);
+  const anteile = max > 0 ? [1, 0.5, 0.25, 0] : [0];
+  const gesehen = new Set();
+  for (const anteil of anteile) {
+    const sats = anteil <= 0
+      ? 0
+      : Math.round(Math.expm1(Math.log1p(max) * anteil));
+    if (gesehen.has(sats)) continue;
+    gesehen.add(sats);
+    const span = document.createElement("span");
+    span.textContent = formatBtcDrei(sats);
+    yAchse.append(span);
+  }
+}
+
+function bindeZeitstrahlInteraktion() {
+  if (ZeitstrahlAnsicht.gebunden) return;
+  const viewport = $("#achse-viewport");
+  if (!viewport) return;
+  ZeitstrahlAnsicht.gebunden = true;
+
+  viewport.addEventListener("wheel", (ereignis) => {
+    if (!ZeitstrahlAnsicht.daten) return;
+    ereignis.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const anker = ((ereignis.clientX - rect.left) / rect.width) * 100;
+    // Runter = rauszoomen, hoch = reinzoomen — nur X.
+    const faktor = ereignis.deltaY > 0 ? 1.15 : 1 / 1.15;
+    zeitstrahlZoom(faktor, anker);
+    zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+  }, { passive: false });
+
+  let drag = null;
+  viewport.addEventListener("pointerdown", (ereignis) => {
+    if (!ZeitstrahlAnsicht.daten || ereignis.button !== 0) return;
+    drag = { id: ereignis.pointerId, x: ereignis.clientX };
+    viewport.classList.add("ziehend");
+    try { viewport.setPointerCapture(ereignis.pointerId); } catch (_) { /* */ }
+  });
+  viewport.addEventListener("pointermove", (ereignis) => {
+    if (!drag || ereignis.pointerId !== drag.id) return;
+    const rect = viewport.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const deltaPct = ((ereignis.clientX - drag.x) / rect.width) * 100;
+    drag.x = ereignis.clientX;
+    zeitstrahlPan(deltaPct);
+    zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+  });
+  const dragEnde = (ereignis) => {
+    if (!drag || ereignis.pointerId !== drag.id) return;
+    drag = null;
+    viewport.classList.remove("ziehend");
+  };
+  viewport.addEventListener("pointerup", dragEnde);
+  viewport.addEventListener("pointercancel", dragEnde);
+
+  viewport.addEventListener("dblclick", () => {
+    if (!ZeitstrahlAnsicht.daten) return;
+    ZeitstrahlAnsicht.x0 = 0;
+    ZeitstrahlAnsicht.x1 = 100;
+    zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+  });
+}
+
+/**
  * Zeichnet die Zeitachse der UTXOs.
  *
  * X und Y kommen als Prozentwerte aus core/tax.zeitstrahl — hier wird
- * nur gezeichnet. So bleibt die Rechnerei testbar und die Darstellung
- * unabhängig von der Fensterbreite.
+ * gezeichnet und das X-Fenster (Pan/Zoom) angewendet. Y ist log1p.
  */
-function zeichneZeitstrahl(daten) {
+function zeichneZeitstrahl(daten, optionen = {}) {
   const karte = $("#zeitstrahl-karte");
   const strahl = daten.zeitstrahl;
 
   if (!strahl || !strahl.vorhanden || strahl.events.length === 0) {
     karte.hidden = true;
+    ZeitstrahlAnsicht.daten = null;
     return;
   }
   karte.hidden = false;
 
-  const yAchse = $("#achse-y");
-  if (yAchse) {
-    yAchse.replaceChildren();
-    const oben = document.createElement("span");
-    oben.textContent = formatBtcDrei(strahl.max_sats || 0);
-    const unten = document.createElement("span");
-    unten.textContent = formatBtcDrei(0);
-    yAchse.append(oben, unten);
+  ZeitstrahlAnsicht.daten = daten;
+  if (!optionen.fensterBehalten) {
+    ZeitstrahlAnsicht.x0 = 0;
+    ZeitstrahlAnsicht.x1 = 100;
   }
+  zeitstrahlFensterBegrenzen();
+  bindeZeitstrahlInteraktion();
+
+  const viewport = $("#achse-viewport");
+  if (viewport) {
+    viewport.title = t("tax.timelineHint");
+  }
+
+  zeichneZeitstrahlYAchse(strahl.max_sats || 0);
 
   const spur = $("#achse-spur");
   spur.replaceChildren();
@@ -6993,30 +7173,36 @@ function zeichneZeitstrahl(daten) {
   spur.append(linie);
 
   if (strahl.frist_pos !== null && strahl.frist_pos !== undefined) {
-    const grenze = document.createElement("div");
-    grenze.className = "achse-frist";
-    grenze.style.left = `${strahl.frist_pos}%`;
+    const sicht = zeitstrahlSichtPos(strahl.frist_pos);
+    if (sicht >= -2 && sicht <= 102) {
+      const grenze = document.createElement("div");
+      grenze.className = "achse-frist";
+      grenze.style.left = `${sicht}%`;
 
-    const beschriftung = document.createElement("span");
-    // Nah am rechten Rand würde die Beschriftung sonst abgeschnitten.
-    beschriftung.className =
-      strahl.frist_pos > 70 ? "achse-frist-text rechts" : "achse-frist-text";
-    beschriftung.textContent = t("tax.deadlineLine", { date: strahl.frist_datum });
-    grenze.append(beschriftung);
-    spur.append(grenze);
+      const beschriftung = document.createElement("span");
+      // Nah am rechten Rand würde die Beschriftung sonst abgeschnitten.
+      beschriftung.className =
+        sicht > 70 ? "achse-frist-text rechts" : "achse-frist-text";
+      beschriftung.textContent = t("tax.deadlineLine", { date: strahl.frist_datum });
+      grenze.append(beschriftung);
+      spur.append(grenze);
+    }
   }
 
   for (const eintrag of strahl.events) {
+    const sicht = zeitstrahlSichtPos(eintrag.pos);
+    if (sicht < -5 || sicht > 105) continue;
+
     const punkt = document.createElement("span");
     punkt.className =
       `achse-punkt ${eintrag.groesse} ${eintrag.erfuellt ? "erfuellt" : "offen"}`;
-    punkt.style.left = `${eintrag.pos}%`;
+    punkt.style.left = `${sicht}%`;
     punkt.style.bottom = `${eintrag.y ?? 0}%`;
     const aeltere = eintrag.aeltere_sats || 0;
     const summe = aeltere + (eintrag.value_sats || 0);
     const labelText = formatBtcDrei(eintrag.value_sats);
     const tip = document.createElement("span");
-    tip.className = eintrag.pos > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
+    tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
     const zeilen = [
       `${eintrag.datum} · Σ=${formatBtcDrei(summe)}`,
       formatBtcDrei(eintrag.value_sats),
@@ -7043,15 +7229,18 @@ function zeichneZeitstrahl(daten) {
 
   const ticks = $("#achse-ticks");
   ticks.replaceChildren();
-  for (const tick of strahl.ticks) {
+  for (const label of zeitstrahlTicksImFenster(strahl)) {
     const span = document.createElement("span");
-    span.textContent = tick.label;
+    span.textContent = label;
     ticks.append(span);
   }
 
   const zusatz = [`${strahl.von} bis ${strahl.bis}`];
   if (daten.laufend) {
     zusatz.push("Jahr läuft noch — Fristen gegen heute gerechnet");
+  }
+  if (ZeitstrahlAnsicht.x0 > 0.05 || ZeitstrahlAnsicht.x1 < 99.95) {
+    zusatz.push(t("tax.timelineHint"));
   }
   setzeText($("#zeitstrahl-zusatz"), zusatz.join(" · "));
 }

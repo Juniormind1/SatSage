@@ -1665,6 +1665,15 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .achse-haupt { flex: 1; min-width: 0; }
 
+/* X-Pan/Zoom: Viewport clippt, Spur wird per left-% neu gemappt. */
+.achse-viewport {
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.achse-viewport.ziehend { cursor: grabbing; }
+
 .achse-spur { position: relative; height: 200px; }
 .achse-linie {
   position: absolute; left: 0; right: 0; bottom: 0;
