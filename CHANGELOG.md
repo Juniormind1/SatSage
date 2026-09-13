@@ -9,6 +9,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.5] - 2026-09-13
+
+- **Version:** 0.9.5 — die Sprachwahl aus 0.9.4 greift jetzt auch in der Oberfläche.
+- **Web · Sprache (Nachtrag zu 0.9.4):** Die in 0.9.4 eingeführte Sprachwahl kam in der Hauptoberfläche nicht an. `storedLang()` in `web/i18n.js` gab `normalizeLang(localStorage.getItem(…))` zurück, und `normalizeLang()` macht aus allem Unbekannten — auch aus `null` — ein `"de"`. Damit lieferte `storedLang()` selbst ohne gespeicherte Wahl immer `"de"`, und der Zweig `|| config.ui_lang` in `initI18n` war unerreichbar: die API meldete `ui_lang: en`, die Oberfläche blieb deutsch. Nur die servergerenderte Anmeldeseite funktionierte, weil sie kein JS-i18n nutzt. `storedLang()` gibt jetzt `null` ohne gespeicherten Wert, letzter Rückfall ist die Browsersprache statt eines festen `"de"`. Neue Tests in `tests/test_web_i18n.py` laden `i18n.js` in Node mit gestubbtem `localStorage`/`navigator` und prüfen die Auflösungsreihenfolge.
+
 ## [0.9.4] - 2026-09-13
 
 - **Version:** 0.9.4 — Weboberfläche spricht die Sprache des Browsers; Fußzeile behauptet nichts Falsches mehr.

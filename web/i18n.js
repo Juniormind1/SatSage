@@ -1,7 +1,8 @@
 /**
  * SatSage UI-Sprache: Catalogs unter /locales/{lang}.json.
  *
- * Laden: localStorage["satsage-ui-lang"] → config.ui_lang → "de".
+ * Laden: localStorage["satsage-ui-lang"] → config.ui_lang (Server: UI_LANG,
+ * sonst Accept-Language, sonst Englisch) → Browsersprache.
  * Fehlende EN-Keys fallen auf DE zurück. Kein Build-Schritt.
  */
 (() => {
@@ -27,9 +28,15 @@
     return lang;
   }
 
+  // null, wenn der Nutzer noch nichts gewaehlt hat — sonst faellt initI18n
+  // nie auf config.ui_lang zurueck, weil normalizeLang() alles Unbekannte zu
+  // "de" macht. Genau daran war die Sprachwahl des Servers wirkungslos.
   function storedLang() {
     try {
-      return normalizeLang(localStorage.getItem(STORAGE_KEY));
+      const roh = String(localStorage.getItem(STORAGE_KEY) || "").trim().toLowerCase();
+      if (roh === "en" || roh.startsWith("en-")) return "en";
+      if (roh === "de" || roh.startsWith("de-")) return "de";
+      return null;
     } catch (_) {
       return null;
     }
@@ -141,12 +148,18 @@
     return code;
   }
 
+  // Reihenfolge: ausdrueckliche Wahl des Nutzers (localStorage) → Antwort des
+  // Servers (UI_LANG, sonst Accept-Language, sonst Englisch) → Browsersprache,
+  // falls die Config nicht erreichbar war.
   async function initI18n(opts) {
     const ausConfig = opts && opts.configLang;
+    const vomBrowser = String(
+      (navigator.languages && navigator.languages[0]) || navigator.language || ""
+    ).toLowerCase();
     const gewaehlt =
       storedLang()
       || (ausConfig ? normalizeLang(ausConfig) : null)
-      || "de";
+      || (vomBrowser.startsWith("de") ? "de" : "en");
     return setLang(gewaehlt, { persistEnv: null });
   }
 
