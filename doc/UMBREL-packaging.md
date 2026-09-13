@@ -79,4 +79,28 @@ Laufzeittest gehört auf ein echtes umbrelOS (Skill `umbrel-test-app`): `electrs
 | Community App Store (eigenes Repo) | selbst | sofort |
 | Offizieller Store (`getumbrel/umbrel-apps`) | Umbrel-Team per PR | Review-abhängig |
 
-Im Community-Store präfixt umbrelOS die App-ID mit der Store-ID. Eine dort installierte App ist damit eine **andere** Identität als dieselbe App aus dem offiziellen Store — ein Wechsel migriert die Daten nicht.
+### Community App Store
+
+Nutzer fügen ihn in umbrelOS unter **App Store → Community App Stores** per Repo-URL hinzu — kein SSH nötig. Struktur laut Vorlage [`getumbrel/umbrel-community-app-store`](https://github.com/getumbrel/umbrel-community-app-store):
+
+```text
+umbrel-app-store.yml          # id + name, im Repo-Wurzelverzeichnis
+<store-id>-satsage/           # Verzeichnisname = App-ID
+  umbrel-app.yml              # `id:` muss exakt dem Verzeichnisnamen entsprechen
+  docker-compose.yml
+  exports.sh
+```
+
+Drei Fallstricke:
+
+- umbrelOS liest nur den **Default-Branch** des Store-Repos. Ein Feature-Branch wird nicht gesehen.
+- Die App-ID trägt das Store-Präfix (`juniormind-satsage`). Damit ändern sich auch der injizierte Containername (`APP_HOST`) und das Datenverzeichnis. Eine so installierte App ist eine **andere Identität** als `satsage` aus dem offiziellen Store — ein Wechsel migriert die Daten nicht.
+- `icon:` und `gallery:` sind hier vollständige URLs. Offizielle Pakete lassen beides weg, weil Umbrel die Assets selbst hostet.
+
+Den Store-Baum nicht von Hand pflegen, sondern aus `packaging/umbrel/` ableiten:
+
+```bash
+./scripts/build_umbrel_community_store juniormind
+```
+
+Das Ergebnis landet unter `build/umbrel-community-store/` (gitignored) und wird von dort ins Store-Repo committet.
