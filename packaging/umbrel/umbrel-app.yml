@@ -2,7 +2,7 @@ manifestVersion: 1
 id: satsage
 category: bitcoin
 name: SatSage
-version: "0.9.3-rc2"
+version: "0.9.3-rc3"
 tagline: Know your sats — on-chain holding periods for tax and overview
 description: >-
   SatSage analyses your XPUB wallets and reconstructs when your sats entered or
@@ -48,7 +48,9 @@ description: >-
   public price service is contacted. Sanctions screening downloads its lists
   from the public sources listed above. Public fallbacks for prices, e-mail
   notifications and the optional LLM assistant are switched off by default.
-releaseNotes: ""
+releaseNotes: >-
+  Fixes the app failing to start with a permission error on its data
+  directory. The container image is unchanged.
 
 developer: Juniormind1
 website: https://github.com/Juniormind1/SatSage

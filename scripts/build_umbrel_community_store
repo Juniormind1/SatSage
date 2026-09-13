@@ -37,7 +37,8 @@ id: "${STORE_ID}"
 name: "Juniormind"
 EOF
 
-cp "$SRC/umbrel-app.yml" "$SRC/docker-compose.yml" "$SRC/exports.sh" "$APP_DIR/"
+# Ganzen Baum kopieren — data/.gitkeep und hooks/ gehoeren dazu.
+cp -a "$SRC/." "$APP_DIR/"
 
 # Die App-ID traegt im Community-Store das Store-Praefix. Damit aendern sich
 # auch der vom Framework injizierte Containername und das Datenverzeichnis.
@@ -54,6 +55,11 @@ pruefe() {
 pruefe "$APP_DIR/umbrel-app.yml" "^id: ${APP_ID}$"
 pruefe "$APP_DIR/umbrel-app.yml" "^icon: "
 pruefe "$APP_DIR/docker-compose.yml" "APP_HOST: ${APP_ID}_web_1"
+
+# Ohne diese beiden legt Docker die Bind-Mount-Quelle als root an und der
+# Dienst scheitert mit "Permission denied" auf /data.
+[ -f "$APP_DIR/data/.gitkeep" ] || { echo "data/.gitkeep fehlt im Store-Baum" >&2; exit 1; }
+[ -x "$APP_DIR/hooks/pre-start" ] || { echo "hooks/pre-start fehlt oder ist nicht ausfuehrbar" >&2; exit 1; }
 
 echo "Store-Baum unter: $OUT"
 find "$OUT" -type f | sed "s|$OUT/|  |"
