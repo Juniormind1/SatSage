@@ -245,7 +245,16 @@ def analyze_ownership(
 
     own_outs: list[int] = []
     foreign_outs: list[int] = []
+    n_out = len(vouts)
     for i, vout in enumerate(vouts):
+        # Abbruch/Fortschritt bei großen Fan-Outs (sonst hängt der Job minutenlang
+        # ohne message-Update und Cancel greift nicht).
+        if progress is not None and n_out >= 50 and (i == 0 or (i + 1) % 50 == 0 or i + 1 == n_out):
+            try:
+                progress(f"↻ Herkunft: Eigentum Out {i + 1}/{n_out}…")
+            except TypeError:
+                # Manche Callbacks erwarten kwargs — still weitermachen.
+                pass
         addrs = tuple(chain._extract_addresses(vout))
         if match_own_address(addrs, own_addresses, wallet):
             own_outs.append(i)

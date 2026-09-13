@@ -847,6 +847,35 @@ def _y_log_prozent(sats: int, hoechst: int) -> float:
     return round(math.log1p(max(int(sats), 0)) / oben * 100.0, 3)
 
 
+def _y_achsen_max(hoechst_utxo: int) -> int:
+    """
+    Y-Skalenende: nächste Zehnerpotenz strikt über dem größten UTXO.
+
+    So bleibt Kopfraum („eine 10er-Potenz höher“) und die Tick-Leiter
+    (1, 10, 100, …) endet auf einer runden Dekade.
+    """
+    h = max(int(hoechst_utxo or 0), 1)
+    exp = int(math.floor(math.log10(h))) + 1
+    return int(10 ** exp)
+
+
+def _minus_monate(zeitpunkt: datetime, monate: int) -> datetime:
+    """Kalendermonate zurück (Tag gekappt auf Monatsende)."""
+    y = zeitpunkt.year
+    m = zeitpunkt.month - int(monate)
+    while m <= 0:
+        m += 12
+        y -= 1
+    # Letzter Tag des Zielmonats.
+    if m == 12:
+        naechster = datetime(y + 1, 1, 1, zeitpunkt.hour, zeitpunkt.minute, zeitpunkt.second)
+    else:
+        naechster = datetime(y, m + 1, 1, zeitpunkt.hour, zeitpunkt.minute, zeitpunkt.second)
+    letzter = naechster - timedelta(days=1)
+    tag = min(zeitpunkt.day, letzter.day)
+    return zeitpunkt.replace(year=y, month=m, day=tag)
+
+
 def zeitstrahl(
     eintraege: list[Eingang],
     ende: datetime,
@@ -856,147 +885,101 @@ def zeitstrahl(
     """
     Rechnet die Eingänge auf Positionen einer Fläche um.
 
-    X: Zeit vom gebündelten linken Rand bis zum Bezugstag. UTXOs vor der
-    Haltefrist oder vor dem Stichtag sitzen gemeinsam am Quartalsbeginn
-    davor — sonst quetscht ein sehr alter Coin den aktuellen Rand.
-    Y: Betrag dieses UTXO auf logarithmischer Skala (``log1p``), relativ
-    zum größten — null und nahe null bleiben unten, große Spreizungen
-    bleiben lesbar. Prozentwerte, damit die Darstellung ohne feste
-    Pixelbreite auskommt.
+    X: Anschaffungszeit; Achsenbeginn **6 Monate vor** dem ältesten UTXO
+    bis zum Bezugstag (Zoom/Pan). Y: Einzelbetrag log1p, Skalenende eine
+    Zehnerpotenz über dem größten UTXO.
 
-    ``aeltere_sats`` ist die Summe aller zeitlich früheren UTXOs — der
-    Saldo, der schon da war, als dieser Eingang dazukam.
+    Jeder Eingang wird einzeln gezeichnet. ``aeltere_sats`` ist die Summe
+    der zeitlich früheren UTXOs (Tooltip). Einmalig liefert
+    ``geister_saldo`` die Summe aller UTXOs **außerhalb** der Haltefrist
+    (UI: grüner Ring auf y=0 an der Fristgrenze, Label „sats vor Haltefrist“).
 
     Die Fristgrenze (Bezug minus Haltefrist) trennt sichtbar, was die Frist
     erfüllt hat. Liegt sie außerhalb des dargestellten Zeitraums, wird sie
     nicht gezeichnet — eine Linie am Rand würde etwas Falsches suggerieren.
+
+    *stichtag* fließt nur in ``neuvermoegen`` der Eingänge ein, nicht mehr
+    in eine X-Bündelung.
     """
+    del stichtag  # API stabil; Bündelung entfällt
     if not eintraege:
         return {"vorhanden": False, "events": [], "ticks": [], "frist_pos": None}
 
     frist_grenze = (
         plus_jahre(ende, -haltefrist_jahre) if haltefrist_jahre > 0 else None
     )
-    # Bündelpunkt: Quartalsbeginn vor der jüngeren der beiden Grenzen,
-    # damit die Achse beim aktuellen Rand bleibt.
-    if frist_grenze is not None:
-        anker = frist_grenze.date()
-    elif stichtag is not None:
-        anker = stichtag
-    else:
-        anker = None
-    buendel = (
-        datetime.combine(quartalsbeginn_vor(anker), datetime.min.time())
-        if anker is not None else None
-    )
-
-    def _gruppe(eintrag: Eingang) -> str | None:
-        if anker is None:
-            return None
-        if stichtag is not None and eintrag.zeitpunkt.date() <= stichtag:
-            return "stichtag"
-        if frist_grenze is not None and eintrag.zeitpunkt <= frist_grenze:
-            return "haltefrist"
-        return None
 
     sortiert = sorted(eintraege, key=lambda e: (e.zeitpunkt, e.txid, e.vout))
-    gruppen_zahl = {"stichtag": 0, "haltefrist": 0}
-    for eintrag in sortiert:
-        name = _gruppe(eintrag)
-        if name:
-            gruppen_zahl[name] += 1
-
-    def _plotzeit(eintrag: Eingang) -> datetime:
-        return buendel if _gruppe(eintrag) and buendel is not None else eintrag.zeitpunkt
-
-    plotzeiten = [_plotzeit(e) for e in sortiert]
-    von = min(plotzeiten)
-    bis = max(max(plotzeiten), ende)
+    aeltester = min(e.zeitpunkt for e in sortiert)
+    # Immer 6 Monate vor dem ältesten UTXO — Kopfraum links, Zoom bleibt sinnvoll.
+    von = _minus_monate(aeltester, 6)
+    bis = max(max(e.zeitpunkt for e in sortiert), ende)
 
     spanne = (bis - von).total_seconds()
     if spanne <= 0:
-        # Ein einziger Eingang, oder alle am selben Tag: künstliche Spanne,
-        # damit die Punkte nicht alle auf 0 % liegen.
-        von = von - timedelta(days=180)
-        bis = bis + timedelta(days=180)
+        bis = von + timedelta(days=180)
         spanne = (bis - von).total_seconds()
 
     def prozent(zeitpunkt: datetime) -> float:
         return max(0.0, min(100.0, (zeitpunkt - von).total_seconds() / spanne * 100))
 
     gesamt = sum(e.value_sats for e in eintraege)
-    buendel_summe = {
-        name: sum(e.value_sats for e in sortiert if _gruppe(e) == name)
-        for name in ("stichtag", "haltefrist")
-    }
-    hoechst = max(
-        [e.value_sats for e in sortiert if _gruppe(e) is None]
-        + [s for s in buendel_summe.values() if s]
-        or [0]
-    ) or 1
+    # Y: Einzel-UTXOs; Skalenende eine Dekade über dem Maximum.
+    hoechst_utxo = max((e.value_sats for e in sortiert), default=0) or 1
+    hoechst = _y_achsen_max(hoechst_utxo)
 
-    def _event(eintrag: Eingang, *, sats: int, gruppe: str | None,
-               gruppe_n: int, aeltere_sats: int, datum: str,
-               wallet: str) -> dict:
-        return {
-            "pos": round(prozent(_plotzeit(eintrag)), 3),
+    events: list[dict] = []
+    aeltere = 0
+    erfuellt_sats = 0
+    erfuellt_n = 0
+    erfuellt_letzte_pos: float | None = None
+    for eintrag in sortiert:
+        sats = int(eintrag.value_sats)
+        pos = round(prozent(eintrag.zeitpunkt), 3)
+        events.append({
+            "pos": pos,
             "y": _y_log_prozent(sats, hoechst),
             "erfuellt": eintrag.erfuellt,
             "geprueft": eintrag.geprueft,
             "neuvermoegen": eintrag.neuvermoegen,
             "value_sats": sats,
-            "aeltere_sats": aeltere_sats,
-            "datum": datum,
-            "wallet": wallet,
+            "aeltere_sats": aeltere,
+            "datum": eintrag.zeitpunkt.strftime("%d.%m.%Y"),
+            "wallet": eintrag.wallet,
+            "address": eintrag.address or "",
+            "txid": eintrag.txid,
+            "vout": int(eintrag.vout),
+            "key": f"{eintrag.txid}:{int(eintrag.vout)}",
             "groesse": _groessenklasse(sats, gesamt),
-            "gruppe": gruppe,
-            "gruppe_n": gruppe_n,
-        }
-
-    events: list[dict] = []
-    aeltere = 0
-    ausgegeben = set()
-    for eintrag in sortiert:
-        gruppe = _gruppe(eintrag)
-        if gruppe:
-            if gruppe in ausgegeben:
-                continue
-            ausgegeben.add(gruppe)
-            mitglieder = [e for e in sortiert if _gruppe(e) == gruppe]
-            namen = []
-            for m in mitglieder:
-                if m.wallet and m.wallet not in namen:
-                    namen.append(m.wallet)
-            daten = [m.zeitpunkt.strftime("%d.%m.%Y") for m in mitglieder]
-            ev = _event(
-                eintrag,
-                sats=buendel_summe[gruppe],
-                gruppe=gruppe,
-                gruppe_n=len(mitglieder),
-                aeltere_sats=aeltere,
-                datum=daten[0] if len(daten) == 1 else f"{daten[0]} – {daten[-1]}",
-                wallet=", ".join(namen) if namen else "unbekannt",
-            )
-            ev["gruppe_daten"] = daten
-            events.append(ev)
-            aeltere += buendel_summe[gruppe]
-            continue
-        events.append(_event(
-            eintrag,
-            sats=eintrag.value_sats,
-            gruppe=None,
-            gruppe_n=0,
-            aeltere_sats=aeltere,
-            datum=eintrag.zeitpunkt.strftime("%d.%m.%Y"),
-            wallet=eintrag.wallet,
-        ))
-        aeltere += eintrag.value_sats
+            "gruppe": None,
+            "gruppe_n": 0,
+        })
+        aeltere += sats
+        if eintrag.erfuellt:
+            erfuellt_sats += sats
+            erfuellt_n += 1
+            erfuellt_letzte_pos = pos
 
     frist_pos = None
     frist_datum = ""
     if frist_grenze is not None and von <= frist_grenze <= bis:
         frist_pos = round(prozent(frist_grenze), 3)
         frist_datum = frist_grenze.strftime("%d.%m.%Y")
+
+    # Ein Geister-Saldo: Summe aller UTXOs außerhalb der Haltefrist.
+    # X = Fristlinie (falls gezeichnet), sonst letzter erledigter Eingang.
+    geister_saldo = None
+    if erfuellt_sats > 0:
+        g_pos = frist_pos
+        if g_pos is None:
+            g_pos = erfuellt_letzte_pos if erfuellt_letzte_pos is not None else 0.0
+        geister_saldo = {
+            "pos": float(g_pos),
+            "y": 0.0,
+            "value_sats": int(erfuellt_sats),
+            "count": int(erfuellt_n),
+            "erfuellt": True,
+        }
 
     schritte = 4
     ticks = [
@@ -1014,10 +997,11 @@ def zeitstrahl(
         "frist_pos": frist_pos,
         "frist_datum": frist_datum,
         "events": events,
+        "geister_saldo": geister_saldo,
         "ticks": ticks,
         "max_sats": hoechst,
         "y_scale": "log",
-        "verdeckt": gruppen_zahl["stichtag"] + gruppen_zahl["haltefrist"],
+        "verdeckt": 0,
     }
 
 

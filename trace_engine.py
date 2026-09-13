@@ -164,14 +164,27 @@ def match_own_address(
     own_addresses: set[str],
     wallet: WalletContext | None = None,
 ) -> str | None:
-    """Erste passende eigene Adresse oder None."""
+    """
+    Erste passende eigene Adresse oder None.
+
+    Nur O(1)-Lookups (Set / address_to_wallet). Kein ``resolve_address``:
+    das leitet unbekannte Adressen über alle XPUBs ab und blockiert bei
+    Fan-Outs mit Hunderten Outputs (Minuten, Abbruch greift nicht).
+    Eigene Adressen müssen im Set bzw. Wallet-Kontext stehen (Cache-Seed).
+    """
     for addr in addrs:
         if not addr:
             continue
-        if wallet and wallet.resolve_address(addr):
-            return addr
         if addr in own_addresses:
             return addr
+        if wallet is not None:
+            # own_label = dict-get, keine HD-Suche
+            label = getattr(wallet, "own_label", None)
+            if callable(label) and label(addr):
+                return addr
+            mapping = getattr(wallet, "address_to_wallet", None)
+            if isinstance(mapping, dict) and addr in mapping:
+                return addr
     return None
 
 

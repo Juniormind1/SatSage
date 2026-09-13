@@ -222,22 +222,22 @@
        aria-labelledby="wallet-scan-wahl-titel">
     <h1 id="wallet-scan-wahl-titel" data-i18n="dialog.walletScan.title">Wallet angelegt — was jetzt?</h1>
     <p id="wallet-scan-wahl-text" data-i18n="dialog.walletScan.body">
-      UTXO-Scan holt den aktuellen Bestand. Der Verlaufsscan erfasst auch
-      ausgegebene Beträge (u. a. fürs Steuerjahr) und dauert länger.
+      Bestand holt den aktuellen Stand. Historie erfasst auch ausgegebene
+      Beträge (u. a. fürs Steuerjahr) und dauert länger.
     </p>
     <div class="einrichtung-knoepfe">
       <button type="button" id="wallet-scan-utxo" class="knopf knopf-primaer"
               autofocus
               data-i18n="dialog.walletScan.utxo"
               data-i18n-title="dialog.walletScan.utxoTitle"
-              title="Fragt die Adressen beim Node ab und legt den UTXO-Bestand an.">
-        UTXO-Scan
+              title="Fragt die Adressen beim Node ab und legt den Bestand an.">
+        Bestand
       </button>
       <button type="button" id="wallet-scan-verlauf" class="knopf"
               data-i18n="dialog.walletScan.history"
               data-i18n-title="dialog.walletScan.historyTitle"
               title="Holt die volle Historie inkl. ausgegebener Outputs.">
-        Verlaufsscan
+        Historie
       </button>
       <button type="button" id="wallet-scan-manuell" class="knopf"
               data-i18n="dialog.walletScan.later"
@@ -347,16 +347,19 @@
                 <option value="datum" data-i18n="wallet.sortDate">neueste zuerst</option>
               </select>
             </label>
-            <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür UTXO-Scan." class="knopf">Bis Tip</button>
-            <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den UTXO-Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt der Verlaufsscan daneben." class="knopf">UTXO-Scan</button>
-            <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Verlaufsscan</button>
-            <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht UTXO-Bestand." class="knopf">Herkunft vollständig</button>
+            <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür Bestand." class="knopf">Bis Tip</button>
+            <div class="utxo-aktionen" role="group" aria-label="UTXO">
+              <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO</span>
+              <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Bestand</button>
+              <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Historie</button>
+              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Bestand." class="knopf">Herkunft</button>
+            </div>
           </div>
         </div>
 
         <div id="rescan-lauf" class="hinweis hinweis-lauf" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span id="rescan-text" data-i18n="wallet.scanRunning">UTXO-Scan läuft…</span>
+          <span id="rescan-text" data-i18n="wallet.scanRunning">Bestand läuft…</span>
           <button type="button" id="rescan-abbruch" data-i18n="common.cancel" data-i18n-title="wallet.scanCancelTitle" title="Bricht nur den laufenden Scan ab. Angestellte Scans laufen danach weiter." class="knopf knopf-klein">
             Abbrechen
           </button>
@@ -364,7 +367,7 @@
 
         <div id="herkunft-tief-lauf" class="hinweis hinweis-lauf" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span id="herkunft-tief-text" data-i18n="wallet.originDeepRunning">Herkunft vollständig läuft…</span>
+          <span id="herkunft-tief-text" data-i18n="wallet.originDeepRunning">Herkunft läuft…</span>
           <button type="button" id="herkunft-tief-abbruch" data-i18n="common.cancel" data-i18n-title="wallet.originDeepCancelTitle" title="Bricht ab. Bereits fertige Herkunftsbäume bleiben im Cache." class="knopf knopf-klein">
             Abbrechen
           </button>
@@ -550,6 +553,29 @@
           </div>
         </div>
 
+        <div id="zeitstrahl-karte" class="karte" hidden>
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tax.timeline">UTXOs über alle Wallets</span>
+            <span id="zeitstrahl-zusatz" class="karte-zusatz"></span>
+            <span class="karte-zusatz legende">
+              <span class="punkt punkt-frist-erfuellt"></span> <span data-i18n="tax.legendOut">außerhalb Haltefrist</span>
+              <span class="punkt punkt-frist-offen"></span> <span data-i18n="tax.legendIn">innerhalb Haltefrist</span>
+              <span class="punkt punkt-geister-saldo"></span> <span data-i18n="tax.legendGhost">sats vor Haltefrist</span>
+            </span>
+          </div>
+          <div class="achse">
+            <div id="achse-y" class="achse-y" aria-hidden="true"></div>
+            <div class="achse-haupt">
+              <div id="achse-viewport" class="achse-viewport" title="">
+                <div id="achse-spur" class="achse-spur">
+                  <div class="achse-linie"></div>
+                </div>
+              </div>
+              <div id="achse-ticks" class="achse-ticks"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="karte" id="selbstanzeige-karte">
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="tax.selfReport">Selbstanzeige-Report</span>
@@ -611,28 +637,6 @@
             <span id="abgaenge-zusatz" class="karte-zusatz"></span>
           </div>
           <div id="abgaenge-liste"></div>
-        </div>
-
-        <div id="zeitstrahl-karte" class="karte" hidden>
-          <div class="karte-kopf">
-            <span class="karte-titel" data-i18n="tax.timeline">UTXOs über alle Wallets</span>
-            <span id="zeitstrahl-zusatz" class="karte-zusatz"></span>
-            <span class="karte-zusatz legende">
-              <span class="punkt punkt-frist-erfuellt"></span> <span data-i18n="tax.legendOut">außerhalb Haltefrist</span>
-              <span class="punkt punkt-frist-offen"></span> <span data-i18n="tax.legendIn">innerhalb Haltefrist</span>
-            </span>
-          </div>
-          <div class="achse">
-            <div id="achse-y" class="achse-y" aria-hidden="true"></div>
-            <div class="achse-haupt">
-              <div id="achse-viewport" class="achse-viewport" title="">
-                <div id="achse-spur" class="achse-spur">
-                  <div class="achse-linie"></div>
-                </div>
-              </div>
-              <div id="achse-ticks" class="achse-ticks"></div>
-            </div>
-          </div>
         </div>
 
         <div class="karte">

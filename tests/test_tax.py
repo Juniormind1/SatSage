@@ -710,12 +710,15 @@ class TestZeitstrahl(unittest.TestCase):
         self.assertFalse(strahl["vorhanden"])
         self.assertEqual(strahl["events"], [])
 
-    def test_erster_eingang_liegt_am_anfang(self):
+    def test_erster_eingang_liegt_nach_sechs_monaten_polster(self):
+        """Achse beginnt 6 Monate vor dem ältesten UTXO — nicht bei pos 0."""
         strahl = self.strahl([
             utxo(1000, "14.09.2024 09:00", marker="a1"),
             utxo(2000, "19.05.2026 16:00", marker="b2"),
         ])
-        self.assertEqual(strahl["events"][0]["pos"], 0.0)
+        self.assertEqual(strahl["von"], "14.03.2024")
+        self.assertGreater(strahl["events"][0]["pos"], 0.0)
+        self.assertLess(strahl["events"][0]["pos"], strahl["events"][1]["pos"])
 
     def test_positionen_steigen_mit_der_zeit(self):
         strahl = self.strahl([
@@ -737,14 +740,14 @@ class TestZeitstrahl(unittest.TestCase):
 
     def test_einzelner_eingang_beginnt_die_achse(self):
         """
-        Liegt der einzige Eingang nach der Fristgrenze, beginnt die Achse
-        bei ihm — nicht bei einem leeren Bündelpunkt.
+        Einziger Eingang: Achse startet 6 Monate davor, UTXO nicht am linken Rand.
         """
         strahl = self.strahl([utxo(1000, "01.06.2026 12:00")])
         self.assertTrue(strahl["vorhanden"])
-        self.assertEqual(strahl["events"][0]["pos"], 0.0)
-        self.assertEqual(strahl["von"], "01.06.2026")
+        self.assertEqual(strahl["von"], "01.12.2025")
         self.assertEqual(strahl["bis"], "31.12.2026")
+        self.assertGreater(strahl["events"][0]["pos"], 0.0)
+        self.assertLess(strahl["events"][0]["pos"], 100.0)
 
     def test_eingang_genau_am_stichtag_ergibt_trotzdem_eine_spanne(self):
         """
@@ -763,8 +766,10 @@ class TestZeitstrahl(unittest.TestCase):
         )
         strahl = zeitstrahl([eintrag], ende, 1)
         self.assertTrue(strahl["vorhanden"])
+        # 6 Monate Polster links; Eingang am Stichtag = rechter Rand (100 %).
         self.assertGreater(strahl["events"][0]["pos"], 0.0)
-        self.assertLess(strahl["events"][0]["pos"], 100.0)
+        self.assertLessEqual(strahl["events"][0]["pos"], 100.0)
+        self.assertNotEqual(strahl["von"], strahl["bis"])
 
     def test_fristgrenze_wird_berechnet(self):
         strahl = self.strahl([
@@ -810,7 +815,7 @@ class TestZeitstrahl(unittest.TestCase):
         self.assertEqual(klassen["01.09.2026"], "klein")
 
     def test_y_folgt_den_sats_logarithmisch(self):
-        """Y ist log1p-skaliert: größter UTXO oben, Null unten, dazwischen log."""
+        """Y log1p; Skalenende = nächste Dekade über max UTXO (Kopfraum)."""
         import math
 
         strahl = self.strahl([
@@ -818,21 +823,20 @@ class TestZeitstrahl(unittest.TestCase):
             utxo(4000, "01.06.2026 12:00", marker="b2"),
             utxo(2000, "01.09.2026 12:00", marker="c3"),
         ])
-        hoechst = 4000
+        # max UTXO 4000 → Achse bis 10_000
+        hoechst = 10_000
 
         def erwartet(sats: int) -> float:
             return round(math.log1p(sats) / math.log1p(hoechst) * 100, 3)
 
         nach_sats = {e["value_sats"]: e["y"] for e in strahl["events"]}
-        self.assertEqual(nach_sats[4000], 100.0)
+        self.assertEqual(nach_sats[4000], erwartet(4000))
+        self.assertLess(nach_sats[4000], 100.0)  # Kopfraum über dem Max
         self.assertEqual(nach_sats[2000], erwartet(2000))
         self.assertEqual(nach_sats[1000], erwartet(1000))
-        self.assertEqual(strahl["max_sats"], 4000)
+        self.assertEqual(strahl["max_sats"], hoechst)
         self.assertEqual(strahl["y_scale"], "log")
-        self.assertGreater(nach_sats[1000], 25.0)  # log hebt kleine Beträge
-        self.assertEqual(
-            round(math.log1p(0) / math.log1p(hoechst) * 100, 3), 0.0
-        )
+        self.assertGreater(nach_sats[1000], 25.0)
 
     def test_aeltere_sats_summiert_die_vorherigen(self):
         strahl = self.strahl([
@@ -845,6 +849,24 @@ class TestZeitstrahl(unittest.TestCase):
             [0, 1000, 3000],
         )
 
+    def test_geister_saldo_nur_ausserhalb_haltefrist(self):
+        """Ein Ring: Summe erfuellt, grün, an der Fristgrenze — nicht pro UTXO."""
+        strahl = self.strahl([
+            utxo(1000, "01.01.2024 12:00", marker="a1"),  # erfuellt
+            utxo(2000, "01.06.2026 12:00", marker="b2"),  # offen
+        ])
+        geist = strahl.get("geister_saldo")
+        self.assertIsNotNone(geist)
+        self.assertEqual(geist["value_sats"], 1000)
+        self.assertEqual(geist["count"], 1)
+        self.assertTrue(geist["erfuellt"])
+        self.assertEqual(geist["y"], 0.0)
+        self.assertEqual(geist["pos"], strahl["frist_pos"])
+        # Kein pro-UTXO-Saldo mehr am Event.
+        for e in strahl["events"]:
+            self.assertNotIn("saldo_sats", e)
+            self.assertNotIn("y_saldo", e)
+
     def test_jeder_eintrag_traegt_seine_angaben(self):
         strahl = self.strahl([utxo(84_000_000, "14.09.2024 09:00")])
         eintrag = strahl["events"][0]
@@ -854,6 +876,9 @@ class TestZeitstrahl(unittest.TestCase):
         self.assertIn("erfuellt", eintrag)
         self.assertIn("geprueft", eintrag)
         self.assertIn("neuvermoegen", eintrag)
+        self.assertIn("txid", eintrag)
+        self.assertIn("vout", eintrag)
+        self.assertEqual(eintrag["key"], f"{eintrag['txid']}:{eintrag['vout']}")
 
     def test_beschriftungen_der_achse(self):
         strahl = self.strahl([
@@ -866,26 +891,29 @@ class TestZeitstrahl(unittest.TestCase):
 
     def test_zeitraum_wird_benannt(self):
         strahl = self.strahl([utxo(1, "01.06.2026 09:00")])
-        self.assertIn("2026", strahl["von"])
+        self.assertEqual(strahl["von"], "01.12.2025")
         self.assertIn("2026", strahl["bis"])
 
-    def test_alter_utxo_quetscht_den_aktuellen_rand_nicht(self):
+    def test_alter_utxo_liegt_auf_echtem_datum(self):
         """
-        2020 und 2026 auf einer Achse: der alte Coin sitzt am Quartalsbeginn
-        vor der Fristgrenze, die Achse beginnt dort — nicht 2020.
+        2020 und 2026: kein Bündeln — Achse 6 Monate vor 2020, beide Events.
         """
         strahl = self.strahl([
             utxo(1000, "01.01.2020 12:00", marker="a1"),
             utxo(2000, "01.06.2026 12:00", marker="b2"),
         ])
-        self.assertEqual(strahl["von"], "01.10.2025")
+        self.assertEqual(strahl["von"], "01.07.2019")
         alt, jung = strahl["events"]
-        self.assertEqual(alt["gruppe"], "haltefrist")
-        self.assertEqual(alt["gruppe_n"], 1)
+        self.assertIsNone(alt["gruppe"])
         self.assertIsNone(jung["gruppe"])
-        self.assertGreater(jung["pos"] - alt["pos"], 40)
+        self.assertEqual(alt["datum"], "01.01.2020")
+        self.assertEqual(jung["datum"], "01.06.2026")
+        self.assertGreater(alt["pos"], 0.0)
+        self.assertGreater(jung["pos"], alt["pos"])
+        self.assertTrue(alt["erfuellt"])
+        self.assertFalse(jung["erfuellt"])
 
-    def test_stichtag_buendelt_altbestand_getrennt(self):
+    def test_stichtag_buendelt_nicht_mehr_auf_der_achse(self):
         from datetime import date
 
         ergebnis = auswerten_zum_jahresende(
@@ -897,16 +925,24 @@ class TestZeitstrahl(unittest.TestCase):
             2026, haltefrist_jahre=1, stichtag=date(2021, 2, 28),
         )
         strahl = ergebnis["zeitstrahl"]
+        self.assertEqual(len(strahl["events"]), 3)
         nach_datum = {e["datum"]: e for e in strahl["events"]}
-        self.assertEqual(nach_datum["01.01.2020"]["gruppe"], "stichtag")
-        self.assertEqual(nach_datum["01.06.2024"]["gruppe"], "haltefrist")
+        self.assertIsNone(nach_datum["01.01.2020"]["gruppe"])
+        self.assertIsNone(nach_datum["01.06.2024"]["gruppe"])
         self.assertIsNone(nach_datum["01.06.2026"]["gruppe"])
-        self.assertEqual(nach_datum["01.01.2020"]["gruppe_n"], 1)
-        self.assertEqual(nach_datum["01.06.2024"]["gruppe_n"], 1)
-        self.assertEqual(
+        # Echte Zeitordnung, nicht derselbe Bündelpunkt.
+        self.assertLess(
             nach_datum["01.01.2020"]["pos"],
             nach_datum["01.06.2024"]["pos"],
         )
+        self.assertLess(
+            nach_datum["01.06.2024"]["pos"],
+            nach_datum["01.06.2026"]["pos"],
+        )
+        # Vor Stichtag → kein Neuvermögen; nach Stichtag 2021-02-28.
+        self.assertFalse(nach_datum["01.01.2020"]["neuvermoegen"])
+        self.assertTrue(nach_datum["01.06.2024"]["neuvermoegen"])
+        self.assertTrue(nach_datum["01.06.2026"]["neuvermoegen"])
 
     def test_quartalsbeginn_vor_nimmt_das_letzte_quartal_davor(self):
         from datetime import date
@@ -917,7 +953,7 @@ class TestZeitstrahl(unittest.TestCase):
         self.assertEqual(quartalsbeginn_vor(date(2026, 1, 1)), date(2025, 10, 1))
 
     def test_anzahl_stimmt_mit_der_tabelle_ueberein(self):
-        """Jüngere UTXOs bleiben einzeln; ältere werden zu einem Punkt."""
+        """Jeder UTXO ein Achsenpunkt — wie in der Tabelle."""
         utxos = [
             utxo(1000, "01.03.2026 12:00", marker="a1"),
             utxo(2000, "01.06.2026 12:00", marker="b2"),
@@ -929,17 +965,21 @@ class TestZeitstrahl(unittest.TestCase):
             ergebnis["kennzahlen"]["gesamt_count"],
         )
 
-    def test_aeltere_werden_zu_einem_punkt(self):
+    def test_aeltere_bleiben_einzeln_auf_der_achse(self):
         strahl = self.strahl([
             utxo(1000, "01.01.2020 12:00", marker="a1"),
             utxo(2000, "04.07.2025 12:00", marker="b2"),
             utxo(3000, "01.06.2026 12:00", marker="c3"),
         ])
-        buendel = [e for e in strahl["events"] if e["gruppe"] == "haltefrist"]
-        self.assertEqual(len(buendel), 1)
-        self.assertEqual(buendel[0]["gruppe_n"], 2)
-        self.assertEqual(buendel[0]["value_sats"], 3000)
-        self.assertEqual(len(strahl["events"]), 2)
+        self.assertEqual(len(strahl["events"]), 3)
+        self.assertEqual(strahl["verdeckt"], 0)
+        self.assertTrue(all(e["gruppe"] is None for e in strahl["events"]))
+        erfuellt = [e for e in strahl["events"] if e["erfuellt"]]
+        offen = [e for e in strahl["events"] if not e["erfuellt"]]
+        self.assertEqual(len(erfuellt), 2)
+        self.assertEqual(len(offen), 1)
+        self.assertEqual(erfuellt[0]["value_sats"], 1000)
+        self.assertEqual(erfuellt[1]["value_sats"], 2000)
 
 
 class TestCsvExport(unittest.TestCase):

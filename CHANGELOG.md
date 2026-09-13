@@ -9,6 +9,19 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Chart:** UTXO-Betragsbeschriftungen am Plot entfernt (nur noch Hover-Tooltip).
+- **Herkunft · Abbrechen:** Statuszeile fixiert den Knopf rechts (kein Springen bei wachsendem Text); Abbruch auch vor Job-ID und ohne Event-Bubbling zum UTXO-Kopf.
+- **Herkunft · Fan-Out-Hang:** Bei Txs mit hunderten Outputs (z. B. 608 Outs) hing der Trace in `match_own_address` → `resolve_address` (HD-Suche je fremder Adresse, Abbruch wirkungslos). Jetzt nur O(1)-Lookups; Eigentums-Scan meldet Fortschritt und ist cancelbar.
+- **Herkunft · Job-Klick:** Wallet-Name in Job-Meta (`wallet_name`); nach Browser-Neustart kein „unbekanntes Wallet“ mehr beim Anbinden eines laufenden Trace-Jobs.
+- **Herkunft · Cache-first:** POST `/api/trace` ohne followup liefert bei vorhandenem Trace-Baum sofort aus dem Immutable-Cache (kein Job, kein Electrs). Plot-Klick und Ankunft nutzen das; Electrs nur wenn kein Baum liegt.
+- **Log · FiFo-Kandidaten:** Cache-Nachladen der Abfluss-/Was-wäre-wenn-Liste loggt nicht mehr als „Selbstanzeige:“ (Auto still; manuell „FiFo-Kandidaten:“). Das war kein Trace — nur GET Kandidaten beim Steuerjahr.
+- **Herkunft · Sprung aus Steuerjahr:** Wallet-Name kommt vom angeklickten UTXO (nicht mehr vom zuletzt gewählten Nav-Wallet, z. B. „Firmung“ während des Scans). CLI-Fehler `can't access local variable trace_mod` beim Laden gespeicherter Bäume behoben (Import-Scoping).
+- **Herkunft · externe Blätter:** Eingangsdatum (Blockzeit des Prevouts) an jedem aufgelösten externen TxIN. Die Analyse hatte `time_ts` schon; die UI-Knoten übernahmen es nicht. Alte Bäume: Nachzug aus dem Tx-Cache beim Laden.
+- **Steuerjahr · Zeitstrahl:** Visualisierung ganz oben; X startet 6 Monate vor ältestem UTXO; Y eine Dekade über Max; Labels kontrastreicher; „sats vor Haltefrist: …“ horizontal links vom Ring. Mittelklick-Pan; Bubble → Herkunft.
+- **Herkunft-Jobs:** Doppelstarts desselben UTXO unterbunden (Server: laufenden Job wiedergeben; Client: Race + Nav-Klick bindet an). Fortschritt im Log; Status zeigt letzte Logzeile.
+- **Wallet-Nav · Tip-Lag:** Nach Wallet-Watch/Spend-Settle bleibt die Cache-mtime frisch, `scan_tip_height` hing aber oft zurück („vor 12 Min · −53 Blöcke“). Settle hebt den Tip jetzt wie Light-Sync über Header/Electrs an (nie absenken).
+- **Steuerjahr · Zeitstrahl:** Kein Bündeln mehr vor der Haltefrist — jedes UTXO auf echtem Datum (grün/gelb ausgefüllt). Geister-Saldo als Ring auf y=0 mit volumensabhängigem Radius (Log-Y nur Einzel-UTXOs). X-Pan über window-Listener (nach Zoom). Y-Achse dekadisch (`1 sat` … `100k sat`, ab `0,01 btc`).
+- **Wallet-Knöpfe:** Nach Sortierung steht **UTXO** als Präfix vor **Bestand**, **Historie**, **Herkunft** (früher UTXO-Scan / Verlaufsscan / Herkunft vollständig).
 - **Empfang · interne Transfers:** Animation nur am **aktuell gewählten** Wallet. Ausgang an ein eigenes Wallet (z. B. Cash+Carry→Bitkey) oder Self-Send: nur **Konfetti**, kein „OH NO!“. Fremder Ausgang: weiterhin „OH NO!“.
 - **Herkunftsliste · Tempo:** UTXO-Adressen aus dem Cache in den Wallet-Kontext seedern (kein teures `resolve_address`-Nachableiten). Adressgruppen bauen UTXO-Zeilen erst beim Aufklappen; Bäume weiterhin nur bei Klick aufs UTXO.
 - **Tip-Nachzug · Nav früher grün:** Sobald die UTXOs am Tip sind, zeigt die Wallet-Liste „gerade eben“ — Empfangs-QR-Schärfung (Electrs) läuft danach ohne „aktualisiere…“; Verfügbarkeit am QR.

@@ -557,11 +557,47 @@ function formatZahl(wert) {
   return Number(wert || 0).toLocaleString(formatLocale());
 }
 
-/** Immer BTC mit drei Nachkommastellen — für den Zeitstrahl, nicht für Listen. */
+/**
+ * Zeitstrahl-Beträge: dekadische Lesart statt „0,000 BTC“.
+ * 1 sat … 100k sat, ab 0,01 BTC als btc (1e6 sats).
+ */
+function formatZeitstrahlBetrag(sats) {
+  const n = Math.round(Number(sats) || 0);
+  if (n <= 0) return "0";
+  if (n < 1000) return `${n} sat`;
+  if (n < 1_000_000) {
+    const k = n / 1000;
+    const kText = Number.isInteger(k)
+      ? String(k)
+      : k.toLocaleString(formatLocale(), {
+        maximumFractionDigits: 1,
+        minimumFractionDigits: 0,
+      });
+    return `${kText}k sat`;
+  }
+  const btc = n / 1e8;
+  let btcText;
+  if (btc >= 1 && Number.isInteger(btc)) {
+    btcText = String(btc);
+  } else if (btc >= 0.01) {
+    // 0.01 / 0.1 / 1.5 — wenige Stellen, Locale-Dezimaltrenner
+    const stellen = btc >= 1 ? 2 : (btc >= 0.1 ? 1 : 2);
+    btcText = btc.toLocaleString(formatLocale(), {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: stellen,
+    });
+  } else {
+    btcText = btc.toLocaleString(formatLocale(), {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 8,
+    });
+  }
+  return `${btcText} btc`;
+}
+
+/** @deprecated Alias — Punkt/Achse nutzen formatZeitstrahlBetrag. */
 function formatBtcDrei(sats) {
-  return `${(Number(sats || 0) / 1e8).toLocaleString(formatLocale(), {
-    minimumFractionDigits: 3, maximumFractionDigits: 3,
-  })} BTC`;
+  return formatZeitstrahlBetrag(sats);
 }
 
 /**
@@ -5143,7 +5179,7 @@ function nimmBlockEvent(daten) {
 
 async function ladeJobsNav() {
   try {
-    const daten = await api("/jobs?recent_s=10");
+    const daten = await api("/jobs?recent_s=3");
     Zustand.jobsNav = {
       jobs: daten.jobs || [],
       scan_pipeline: daten.scan_pipeline || { current: null, queued: [] },
@@ -5283,10 +5319,21 @@ function springeZuJob(job) {
       zeigeWallet(job.meta.wallet_id);
       return;
     }
-    zeigeAnsicht("trace");
-    if (kind === "trace" && job.meta?.target && $("#trace-ziel")) {
-      $("#trace-ziel").value = job.meta.target;
+    if (kind === "trace" && job.meta?.target) {
+      if ($("#trace-ziel")) $("#trace-ziel").value = job.meta.target;
+      // Laufenden Job anbinden — Wallet aus Job-Meta (überlebt Browser-Neustart).
+      zeigeHerkunftFuer(job.meta.target, {
+        jobId: job.running ? job.id : null,
+        meta: {
+          key: job.meta.target,
+          wallet: job.meta.wallet_name || job.meta.wallet || "",
+          value_sats: job.meta.value_sats ?? null,
+          address: job.meta.address || "",
+        },
+      });
+      return;
     }
+    zeigeAnsicht("trace");
     return;
   }
   if (kind === "labels" || kind === "sanctions") {
@@ -5477,7 +5524,7 @@ function setzeTraceFokusUi(an) {
 /**
  * Fokus-Ansicht: nur ein UTXO/Tx (Sprung aus Wallet), kein Gesamtbestand.
  */
-async function zeichneTraceFokusAnsicht(fokus, { neu = false } = {}) {
+async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {}) {
   const schluessel = (fokus && fokus.key) || "";
   if (!schluessel) {
     Zustand.traceFokus = null;
@@ -5523,7 +5570,9 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false } = {}) {
     key: schluessel,
     value_sats: fokus.value_sats ?? null,
     address: fokus.address || "",
-    wallet: fokus.wallet || walletNameZu(Zustand.walletId) || "",
+    // Kein Fallback auf Zustand.walletId — sonst steht während des Scans
+    // z. B. „Firmung“, obwohl das UTXO zu einem anderen Wallet gehört.
+    wallet: fokus.wallet || "",
     time_label: fokus.time_label || "",
     hold_days: fokus.hold_days,
     block_height: fokus.block_height,
@@ -5550,9 +5599,9 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false } = {}) {
       undefined,
       walletNameZu(Zustand.walletId),
     );
-    await starteZweigTrace(utxo, zweig, klapp);
+    await starteZweigTrace(utxo, zweig, klapp, null, jobId);
   } else {
-    await oeffneZweig(utxo, zweig, klapp);
+    await oeffneZweig(utxo, zweig, klapp, jobId);
   }
   aktualisiereTraceWurzelKopf(utxo, block);
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -5578,7 +5627,7 @@ function zeichneTraceListe(daten) {
   if (daten.total_count === 0 && !daten.hat_verlauf) {
     liste.append(hinweisZeile(
       "Keine UTXOs im Cache. Wallets zuerst scannen — in der Wallet-Ansicht " +
-      "über „UTXO-Scan“."
+      "über „Bestand“."
     ));
     return;
   }
@@ -5604,7 +5653,7 @@ function zeichneAusgegeben(daten) {
   const verlauf = daten.verlauf || {};
   if (!daten.hat_verlauf) {
     block.append(hinweisZeile(
-      "Ausgegebene Beträge sind nicht erfasst. „Verlaufsscan“ in der " +
+      "Ausgegebene Beträge sind nicht erfasst. „Historie“ in der " +
       "Wallet-Ansicht holt die Historie dieses Wallets — danach lassen sich " +
       "auch längst abgeflossene Sats hier verfolgen."
     ));
@@ -5995,11 +6044,23 @@ async function ladeGespeichertenZweig(utxo, zweig, klapp) {
 /**
  * Zweig öffnen: zuerst Cache. Neue Analyse nur wenn *nicht* als verfolgt
  * markiert — sonst würde jedes Aufklappen bei Cache-Hicksern einen Job starten.
+ *
+ * *jobId*: laufenden Job anbinden (Nav-Klick), kein zweiter POST.
  */
-async function oeffneZweig(utxo, zweig, klapp) {
+async function oeffneZweig(utxo, zweig, klapp, jobId = null) {
   if (!zweig) return;
   if (zweig.dataset.geladen === "ja") return;
+  // Schon in Arbeit: kein zweiter Lauf (Timer/POST).
   if (zweig.dataset.geladen === "laeuft") return;
+  // Sofort sperren — sonst starten zwei parallele oeffneZweig denselben Trace.
+  zweig.dataset.geladen = "laeuft";
+
+  // Laufender Job für dieses UTXO → anbinden statt Cache-Hop und neuem POST.
+  const bekannt = jobId || (utxo && Zustand.traceJobs.get(utxo.key));
+  if (bekannt) {
+    starteZweigTrace(utxo, zweig, klapp, null, bekannt);
+    return;
+  }
 
   const ausCache = await ladeGespeichertenZweig(utxo, zweig, klapp);
   if (ausCache) return;
@@ -6028,7 +6089,7 @@ async function oeffneZweig(utxo, zweig, klapp) {
     return;
   }
 
-  // Noch nie verfolgt → Analyse starten.
+  // Noch nie verfolgt → Analyse starten (Server dedupliziert gleiches target).
   starteZweigTrace(utxo, zweig, klapp);
 }
 
@@ -6073,7 +6134,7 @@ function gespeicherterKopf(gespeichert, utxo, zweig, klapp) {
  * *followup*: optional ``full`` (Lücken schließen), Legacy ``tx_oriented`` /
  * ``resolve_unresolved``.
  */
-async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
+async function starteZweigTrace(utxo, zweig, klapp, followup = null, jobIdVorgabe = null) {
   zweig.dataset.geladen = "laeuft";
 
   const status = document.createElement("div");
@@ -6082,6 +6143,7 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
   spinner.className = "spinner";
   spinner.setAttribute("aria-hidden", "true");
   const text = document.createElement("span");
+  text.className = "zweig-status-text";
   text.textContent = followup
     ? t("trace.folgeStart")
     : t("trace.analyseStart");
@@ -6093,23 +6155,34 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
   status.append(spinner, text, abbruch);
   zweig.replaceChildren(status);
 
-  let jobId = null;
+  let jobId = jobIdVorgabe || Zustand.traceJobs.get(utxo.key) || null;
   let timer = null;
+  let abbruchWunsch = false;
 
   const aufraeumen = () => {
     clearInterval(timer);
-    Zustand.traceJobs.delete(utxo.key);
+    const gemerkt = Zustand.traceJobs.get(utxo.key);
+    if (gemerkt === jobId) Zustand.traceJobs.delete(utxo.key);
   };
 
-  abbruch.addEventListener("click", async () => {
-    text.textContent = t("common.abortRequested");
-    if (jobId) {
-      try {
-        await api(`/jobs/${jobId}`, { methode: "DELETE" });
-      } catch (_) {
-        /* war bereits beendet */
-      }
+  const sendeAbbruch = async () => {
+    const id = jobId;
+    if (!id || String(id).startsWith("cache-")) return;
+    try {
+      await api(`/jobs/${id}`, { methode: "DELETE" });
+    } catch (_) {
+      /* war bereits beendet */
     }
+  };
+
+  abbruch.addEventListener("click", async (ereignis) => {
+    // Nicht zum UTXO-Kopf durchbubbeln (Aufklappen / Fokus).
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    abbruchWunsch = true;
+    abbruch.disabled = true;
+    text.textContent = t("common.abortRequested");
+    await sendeAbbruch();
   });
 
   const fehlschlag = (meldung) => {
@@ -6118,48 +6191,131 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null) {
     zweig.replaceChildren(hinweisZeile(meldung));
   };
 
+  const statusText = (job) => {
+    const msg = (job && job.message) || "";
+    const log = (job && job.log) || [];
+    const letzte = log.length ? log[log.length - 1] : "";
+    if (msg && letzte && letzte !== msg) return `${msg} · ${letzte}`;
+    return msg || letzte || t("common.running");
+  };
+
   try {
-    const daten = { target: utxo.key };
-    if (followup) daten.followup = followup;
-    const job = await api("/trace", {
-      methode: "POST",
-      daten,
-    });
-    jobId = job.id;
-    Zustand.traceJobs.set(utxo.key, jobId);
+    if (jobId) {
+      // Vorhandenen Job anbinden (Nav-Klick / zweiter Klick) — kein POST.
+      try {
+        const bestehend = await api(`/jobs/${jobId}`);
+        if (!bestehend || (!bestehend.running && bestehend.status !== "done")) {
+          jobId = null;
+          Zustand.traceJobs.delete(utxo.key);
+        } else if (bestehend.status === "done" && bestehend.result) {
+          aufraeumen();
+          zweig.dataset.geladen = "ja";
+          zeichneZweig(bestehend.result, zweig, utxo, klapp);
+          merkeTraceAmUtxo(utxo, bestehend.result);
+          aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
+          if (bestehend.result.found) {
+            zweig.prepend(gespeicherterKopf({
+              erstellt_ts: utxo.verfolgt_ts || Math.floor(Date.now() / 1000),
+              veraltet: false,
+              adressen_seither: 0,
+            }, utxo, zweig, klapp));
+          }
+          return;
+        } else {
+          text.textContent = statusText(bestehend);
+        }
+      } catch (_) {
+        jobId = null;
+        Zustand.traceJobs.delete(utxo.key);
+      }
+    }
+    if (!jobId) {
+      const daten = { target: utxo.key };
+      if (followup) daten.followup = followup;
+      if (utxo.wallet) daten.wallet = utxo.wallet;
+      if (utxo.address) daten.address = utxo.address;
+      if (utxo.value_sats != null) daten.value_sats = utxo.value_sats;
+      const job = await api("/trace", {
+        methode: "POST",
+        daten,
+      });
+      // Server-Cache-Hit: fertig ohne Job/Electrs (from_cache oder sofort done).
+      if (
+        (job.from_cache || job.status === "done")
+        && job.result
+        && job.result.found
+      ) {
+        aufraeumen();
+        zweig.dataset.geladen = "ja";
+        zeichneZweig(job.result, zweig, utxo, klapp);
+        merkeTraceAmUtxo(utxo, job.result);
+        aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
+        zweig.prepend(gespeicherterKopf({
+          erstellt_ts: job.erstellt_ts
+            || utxo.verfolgt_ts
+            || Math.floor(Date.now() / 1000),
+          veraltet: Boolean(job.veraltet),
+          adressen_seither: job.adressen_seither || 0,
+        }, utxo, zweig, klapp));
+        return;
+      }
+      jobId = job.id;
+      if (!jobId) {
+        fehlschlag(job.error || t("trace.analyseFailShort"));
+        return;
+      }
+      Zustand.traceJobs.set(utxo.key, jobId);
+      // Abbruch schon vor Job-ID geklickt → jetzt nachreichen.
+      if (abbruchWunsch) {
+        text.textContent = t("common.abortRequested");
+        abbruch.disabled = true;
+        await sendeAbbruch();
+      } else {
+        text.textContent = statusText(job);
+      }
+    } else {
+      Zustand.traceJobs.set(utxo.key, jobId);
+      if (abbruchWunsch) {
+        text.textContent = t("common.abortRequested");
+        abbruch.disabled = true;
+        await sendeAbbruch();
+      }
+    }
   } catch (fehler) {
     fehlschlag(t("trace.analyseFail", { msg: fehler.message }));
     return;
   }
 
+  const fertigAusJob = (job) => {
+    aufraeumen();
+    if (job.status === "done" && job.result) {
+      zweig.dataset.geladen = "ja";
+      delete zweig.dataset.teilbaum;
+      zeichneZweig(job.result, zweig, utxo, klapp);
+      merkeTraceAmUtxo(utxo, job.result);
+      aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
+      if (job.result.found) {
+        zweig.prepend(gespeicherterKopf({
+          erstellt_ts: utxo.verfolgt_ts || Math.floor(Date.now() / 1000),
+          veraltet: false,
+          adressen_seither: 0,
+        }, utxo, zweig, klapp));
+      } else if (!zweig.querySelector(".zweig-klapp-leiste")) {
+        zweig.prepend(baumKlappLeiste(zweig));
+      }
+    } else if (job.status === "cancelled") {
+      fehlschlag(t("trace.cancelled"));
+    } else {
+      fehlschlag(job.error || t("trace.analyseFailShort"));
+    }
+  };
+
   timer = setInterval(async () => {
     try {
       const job = await api(`/jobs/${jobId}`);
-      text.textContent = job.message || t("common.running");
+      text.textContent = statusText(job);
       if (job.running) return;
-
-      aufraeumen();
-      if (job.status === "done" && job.result) {
-        zweig.dataset.geladen = "ja";
-        zeichneZweig(job.result, zweig, utxo, klapp);
-        merkeTraceAmUtxo(utxo, job.result);
-        // Kopfzeile am konkreten Block (gezielte Suche startet oft mit „…“).
-        aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
-        // Stand-Zeile + Alles aufklappen — wie nach Cache-Laden.
-        if (job.result.found) {
-          zweig.prepend(gespeicherterKopf({
-            erstellt_ts: utxo.verfolgt_ts || Math.floor(Date.now() / 1000),
-            veraltet: false,
-            adressen_seither: 0,
-          }, utxo, zweig, klapp));
-        } else if (!zweig.querySelector(".zweig-klapp-leiste")) {
-          zweig.prepend(baumKlappLeiste(zweig));
-        }
-      } else if (job.status === "cancelled") {
-        fehlschlag(t("trace.cancelled"));
-      } else {
-        fehlschlag(job.error || t("trace.analyseFailShort"));
-      }
+      fertigAusJob(job);
     } catch (fehler) {
       fehlschlag(fehler.message);
     }
@@ -6417,11 +6573,58 @@ function utxoMetaAusWalletDom(schluessel) {
   };
 }
 
-async function zeigeHerkunftFuer(schluessel, { neu = false } = {}) {
-  const meta = utxoMetaAusWalletDom(schluessel) || { key: schluessel };
-  Zustand.traceFokus = { ...meta, key: schluessel };
+async function zeigeHerkunftFuer(schluessel, { neu = false, jobId = null, meta: metaExtra = null } = {}) {
+  // Reihenfolge: explizite Meta (Steuerjahr-Chart) → DOM der Wallet-Liste
+  // → Trace-Liste. Nie pauschal Zustand.walletId — das ist oft ein anderes
+  // Wallet als das angeklickte UTXO (z. B. immer „Firmung“).
+  const ausDom = utxoMetaAusWalletDom(schluessel);
+  const ausListe = findeTraceUtxo(schluessel);
+  const meta = {
+    key: schluessel,
+    ...(ausListe && ausListe.key ? ausListe : {}),
+    ...(ausDom || {}),
+    ...(metaExtra && typeof metaExtra === "object" ? metaExtra : {}),
+    key: schluessel,
+  };
+  if (!meta.wallet) {
+    // Letzter Versuch: Steuerjahr-Tabelle / Chart-Event ohne Fallback-WalletId.
+    const ausSteuer = utxoMetaAusSteuerjahr(schluessel);
+    if (ausSteuer) Object.assign(meta, ausSteuer);
+  }
+  Zustand.traceFokus = meta;
   zeigeAnsicht("trace");
-  await zeichneTraceFokusAnsicht(Zustand.traceFokus, { neu });
+  await zeichneTraceFokusAnsicht(Zustand.traceFokus, { neu, jobId });
+}
+
+/** Meta aus Steuerjahr-Tabelle oder zuletzt gezeichnetem Zeitstrahl. */
+function utxoMetaAusSteuerjahr(schluessel) {
+  if (!schluessel) return null;
+  const zeile = document.querySelector(
+    `#steuer-tabelle tr[data-key="${CSS.escape(schluessel)}"]`,
+  );
+  if (zeile) {
+    return {
+      key: schluessel,
+      wallet: zeile.dataset.wallet || "",
+      value_sats: zeile.dataset.valueSats
+        ? Number(zeile.dataset.valueSats)
+        : null,
+      address: zeile.dataset.address || "",
+    };
+  }
+  const events = Zustand.steuer?.zeitstrahl?.events || [];
+  const treffer = events.find(
+    (e) => e.key === schluessel
+      || (e.txid != null && `${e.txid}:${e.vout}` === schluessel),
+  );
+  if (!treffer) return null;
+  return {
+    key: schluessel,
+    wallet: treffer.wallet || "",
+    value_sats: treffer.value_sats ?? null,
+    address: treffer.address || "",
+    time_label: treffer.datum || "",
+  };
 }
 
 function vorbehaltText(z) {
@@ -6979,7 +7182,7 @@ function zeichneSteuerjahr(daten) {
     zelle.className = "zart";
     zelle.style.padding = "20px 0";
     zelle.textContent =
-      "Keine UTXOs bis zum Stichtag. Wallets zuerst scannen (UTXO-Scan in der " +
+      "Keine UTXOs bis zum Stichtag. Wallets zuerst scannen (Bestand in der " +
       "Wallet-Ansicht).";
     zeile.append(zelle);
     koerper.append(zeile);
@@ -7092,25 +7295,75 @@ function zeitstrahlTicksImFenster(strahl) {
 }
 
 /**
+ * Dekaden-Ticks für die log1p-Y-Achse: 1, 10, 100, 1k … bis max.
+ * max selbst nur, wenn er deutlich über der letzten Dekade liegt.
+ */
+function zeitstrahlYTickSats(maxSats) {
+  const max = Math.max(0, Math.round(Number(maxSats) || 0));
+  if (max <= 0) return [0];
+  const ticks = [0];
+  for (let s = 1; s <= max && s <= 1e15; s *= 10) {
+    ticks.push(s);
+  }
+  const letzte = ticks[ticks.length - 1];
+  // Oberkante beschriften, wenn max spürbar über der letzten Dekade liegt.
+  if (max > letzte && max / letzte >= 1.4) {
+    ticks.push(max);
+  } else if (max > letzte) {
+    // eng an Dekade: max gewinnt (exakter Top-Wert)
+    ticks[ticks.length - 1] = max;
+  }
+  // Nur bei extremen Spannen ausdünnen (normale BTC-Bereiche: alle Dekaden).
+  const maxLabels = 14;
+  if (ticks.length <= maxLabels) return ticks;
+  const oben = ticks[ticks.length - 1];
+  const dekaden = ticks.slice(1, -1);
+  const behalten = [0];
+  const schritt = Math.ceil(dekaden.length / (maxLabels - 2));
+  for (let i = 0; i < dekaden.length; i += schritt) {
+    behalten.push(dekaden[i]);
+  }
+  if (behalten[behalten.length - 1] !== oben) behalten.push(oben);
+  return behalten;
+}
+
+/**
+ * Durchmesser des einen Geister-Saldos (außerhalb Haltefrist) auf y=0.
+ * Logarithmisch am größeren von Saldo und max. Einzel-UTXO.
+ */
+function geisterSaldoDurchmesserPx(saldoSats, maxUtxoSats) {
+  const minD = 10;
+  const maxD = 40;
+  const s = Math.max(0, Number(saldoSats) || 0);
+  const m = Math.max(s, Math.max(0, Number(maxUtxoSats) || 0), 1);
+  if (s <= 0) return minD;
+  const t = Math.log1p(s) / Math.log1p(m);
+  return Math.round(minD + Math.max(0, Math.min(1, t)) * (maxD - minD));
+}
+
+/**
  * Y-Achsenbeschriftung zur log1p-Skala (oben = max, unten = 0).
- * Zwischenwerte: sats = expm1(log1p(max) * Anteil).
+ * Ticks an Zehnerpotenzen, positioniert wie die Punkte (bottom %).
  */
 function zeichneZeitstrahlYAchse(maxSats) {
   const yAchse = $("#achse-y");
   if (!yAchse) return;
   yAchse.replaceChildren();
   const max = Math.max(Number(maxSats) || 0, 0);
-  const anteile = max > 0 ? [1, 0.5, 0.25, 0] : [0];
-  const gesehen = new Set();
-  for (const anteil of anteile) {
-    const sats = anteil <= 0
-      ? 0
-      : Math.round(Math.expm1(Math.log1p(max) * anteil));
-    if (gesehen.has(sats)) continue;
-    gesehen.add(sats);
+  const skala = document.createElement("div");
+  skala.className = "achse-y-skala";
+  yAchse.append(skala);
+
+  const logMax = Math.log1p(max);
+  for (const sats of zeitstrahlYTickSats(max)) {
     const span = document.createElement("span");
-    span.textContent = formatBtcDrei(sats);
-    yAchse.append(span);
+    span.className = "achse-y-tick";
+    span.textContent = formatZeitstrahlBetrag(sats);
+    const y = max <= 0 || logMax <= 0
+      ? 0
+      : (Math.log1p(sats) / logMax) * 100;
+    span.style.bottom = `${y}%`;
+    skala.append(span);
   }
 }
 
@@ -7132,29 +7385,52 @@ function bindeZeitstrahlInteraktion() {
     zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
   }, { passive: false });
 
-  let drag = null;
+  // Mittelklick soll pannen, nicht Autoscroll/Paste.
+  viewport.addEventListener("auxclick", (ereignis) => {
+    if (ereignis.button === 1) ereignis.preventDefault();
+  });
+
+  // Move/Up am window: sonst verliert man den Drag, sobald der Zeiger
+  // die Spur verlässt oder Punkte beim Neuzeichnen ausgetauscht werden.
+  // Links (0) und Mittel (1) pannen — nur wenn reingezoomt.
+  // Klick auf UTXO-Bubble (links) startet keinen Drag.
   viewport.addEventListener("pointerdown", (ereignis) => {
-    if (!ZeitstrahlAnsicht.daten || ereignis.button !== 0) return;
-    drag = { id: ereignis.pointerId, x: ereignis.clientX };
+    if (!ZeitstrahlAnsicht.daten) return;
+    if (ereignis.button !== 0 && ereignis.button !== 1) return;
+    if (ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0 >= 99.9) return;
+    if (
+      ereignis.button === 0
+      && ereignis.target
+      && ereignis.target.closest
+      && ereignis.target.closest(".achse-punkt:not(.geister)")
+    ) {
+      return;
+    }
+    ereignis.preventDefault();
+    const drag = { id: ereignis.pointerId, x: ereignis.clientX };
     viewport.classList.add("ziehend");
-    try { viewport.setPointerCapture(ereignis.pointerId); } catch (_) { /* */ }
+
+    const onMove = (ev) => {
+      if (ev.pointerId !== drag.id) return;
+      const rect = viewport.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const deltaPct = ((ev.clientX - drag.x) / rect.width) * 100;
+      drag.x = ev.clientX;
+      if (deltaPct === 0) return;
+      zeitstrahlPan(deltaPct);
+      zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+    };
+    const onUp = (ev) => {
+      if (ev.pointerId !== drag.id) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      viewport.classList.remove("ziehend");
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   });
-  viewport.addEventListener("pointermove", (ereignis) => {
-    if (!drag || ereignis.pointerId !== drag.id) return;
-    const rect = viewport.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const deltaPct = ((ereignis.clientX - drag.x) / rect.width) * 100;
-    drag.x = ereignis.clientX;
-    zeitstrahlPan(deltaPct);
-    zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
-  });
-  const dragEnde = (ereignis) => {
-    if (!drag || ereignis.pointerId !== drag.id) return;
-    drag = null;
-    viewport.classList.remove("ziehend");
-  };
-  viewport.addEventListener("pointerup", dragEnde);
-  viewport.addEventListener("pointercancel", dragEnde);
 
   viewport.addEventListener("dblclick", () => {
     if (!ZeitstrahlAnsicht.daten) return;
@@ -7191,7 +7467,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
 
   const viewport = $("#achse-viewport");
   if (viewport) {
-    viewport.title = t("tax.timelineHint");
+    viewport.removeAttribute("title");
   }
 
   zeichneZeitstrahlYAchse(strahl.max_sats || 0);
@@ -7220,41 +7496,86 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     }
   }
 
+  // Sats vor Haltefrist: ein grüner Ring auf y=0 an der Fristgrenze,
+  // Label horizontal links davon, knapp über der X-Achse.
+  const geist = strahl.geister_saldo;
+  if (geist && Number(geist.value_sats || 0) > 0) {
+    const gSicht = zeitstrahlSichtPos(geist.pos);
+    if (gSicht >= -5 && gSicht <= 105) {
+      const gruppe = document.createElement("div");
+      gruppe.className = "achse-geister";
+      gruppe.style.left = `${gSicht}%`;
+      const gLabel = document.createElement("span");
+      gLabel.className = "achse-geister-label";
+      const saldoText = formatZeitstrahlBetrag(geist.value_sats);
+      gLabel.textContent = t("tax.satsBeforeHolding", { saldo: saldoText })
+        !== "tax.satsBeforeHolding"
+        ? t("tax.satsBeforeHolding", { saldo: saldoText })
+        : `sats vor Haltefrist: ${saldoText}`;
+      const ring = document.createElement("span");
+      ring.className = "achse-punkt geister erfuellt";
+      const d = geisterSaldoDurchmesserPx(
+        geist.value_sats,
+        strahl.max_sats || geist.value_sats,
+      );
+      ring.style.width = `${d}px`;
+      ring.style.height = `${d}px`;
+      gruppe.append(gLabel, ring);
+      spur.append(gruppe);
+    }
+  }
+
   for (const eintrag of strahl.events) {
     const sicht = zeitstrahlSichtPos(eintrag.pos);
     if (sicht < -5 || sicht > 105) continue;
 
+    const lage = haltefristBeschriftung(
+      eintrag, Boolean(daten.stichtag_regel),
+    );
+    const y = Number(eintrag.y ?? 0);
+    const key = eintrag.key
+      || (eintrag.txid != null && eintrag.vout != null
+        ? `${eintrag.txid}:${eintrag.vout}`
+        : "");
+
     const punkt = document.createElement("span");
     punkt.className =
       `achse-punkt ${eintrag.groesse} ${eintrag.erfuellt ? "erfuellt" : "offen"}`;
+    if (key) {
+      punkt.classList.add("klickbar");
+      punkt.title = t("tax.bubbleToOrigin") !== "tax.bubbleToOrigin"
+        ? t("tax.bubbleToOrigin")
+        : "Herkunft dieses UTXO zeigen";
+    }
     punkt.style.left = `${sicht}%`;
-    punkt.style.bottom = `${eintrag.y ?? 0}%`;
-    const aeltere = eintrag.aeltere_sats || 0;
-    const summe = aeltere + (eintrag.value_sats || 0);
-    const labelText = formatBtcDrei(eintrag.value_sats);
+    punkt.style.bottom = `${y}%`;
+    // Betrag/Datum/Wallet nur im Hover-Tooltip — feste Labels überladen den Plot.
     const tip = document.createElement("span");
     tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
-    const zeilen = [
-      `${eintrag.datum} · Σ=${formatBtcDrei(summe)}`,
-      formatBtcDrei(eintrag.value_sats),
-      `${eintrag.wallet || "unbekannt"} · ${haltefristBeschriftung(
-        eintrag, Boolean(daten.stichtag_regel),
-      )}`,
-    ];
-    if (eintrag.gruppe && eintrag.gruppe_n) {
-      const n = eintrag.gruppe_n;
-      const wort = n === 1 ? "UTXO" : "UTXOs";
-      zeilen.push(
-        eintrag.gruppe === "stichtag"
-          ? `${n} ${wort} vor Stichtag`
-          : `${n} ${wort} älter als Haltefrist`,
-      );
+    tip.textContent = [
+      eintrag.datum || "",
+      formatZeitstrahlBetrag(eintrag.value_sats),
+      `${eintrag.wallet || "unbekannt"} · ${lage}`,
+    ].join("\n");
+    punkt.append(tip);
+    if (key) {
+      punkt.addEventListener("click", (ereignis) => {
+        ereignis.preventDefault();
+        ereignis.stopPropagation();
+        zeigeHerkunftFuer(key, {
+          meta: {
+            key,
+            wallet: eintrag.wallet || "",
+            value_sats: eintrag.value_sats ?? null,
+            address: eintrag.address || "",
+            time_label: eintrag.datum || "",
+            // geprueft = Ingress da; voller Baum kann trotzdem fehlen.
+            verfolgt: Boolean(eintrag.geprueft || eintrag.verfolgt),
+            verfolgt_vollstaendig: Boolean(eintrag.verfolgt_vollstaendig),
+          },
+        });
+      });
     }
-    tip.textContent = zeilen.join("\n");
-    const label = document.createElement("span");
-    label.className = "achse-punkt-label";
-    label.textContent = labelText;
-    punkt.append(label, tip);
     spur.append(punkt);
   }
 
@@ -7269,9 +7590,6 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   const zusatz = [`${strahl.von} bis ${strahl.bis}`];
   if (daten.laufend) {
     zusatz.push("Jahr läuft noch — Fristen gegen heute gerechnet");
-  }
-  if (ZeitstrahlAnsicht.x0 > 0.05 || ZeitstrahlAnsicht.x1 < 99.95) {
-    zusatz.push(t("tax.timelineHint"));
   }
   setzeText($("#zeitstrahl-zusatz"), zusatz.join(" · "));
 }
@@ -7866,16 +8184,25 @@ Zustand.saVerlauf = null;
 Zustand.saStichtag = "";
 
 /**
- * Selbstanzeige-Kandidaten aus dem Cache (kein Netz).
- * *opts.auto*: kurzer Log-Hinweis — beim Öffnen der Steuerjahr-Ansicht.
+ * FiFo-/Report-Kandidaten aus dem Cache (Abflüsse + Was-wäre-wenn-UTXOs).
+ *
+ * Technisch: GET /tax/selbstanzeige/kandidaten — reiner Cache-Read, kein Trace.
+ * Wird beim Öffnen des Steuerjahrs und bei Tip-Nachzug/Jahr-Wechsel oft
+ * mitgeladen; das ist **kein** Herkunfts-Job.
+ *
+ * *opts.auto*: still nachladen (kein Log-Spam).
+ * *opts.laut*: manuell (Knopf) — eine Zeile „FiFo-Kandidaten: …“ ins Log.
  */
 async function ladeSelbstanzeigeKandidaten(opts = {}) {
   const auto = Boolean(opts.auto);
+  const laut = Boolean(opts.laut) || !auto;
   const jahr = $("#jahr-wahl").value;
   const txid = ($("#sa-txid")?.value || "").trim();
   const liste = $("#sa-liste");
   if (!liste) return;
-  if (auto) logZeile("Selbstanzeige: Kandidaten aus Cache…");
+  // Nur bei bewusstem Laden loggen — Auto-Refresh (Jahr, Tip, Fokus) sonst
+  // flutet das Log mit „Selbstanzeige:“ während ganz anderer Arbeit (Trace).
+  if (laut) logZeile("FiFo-Kandidaten: aus Cache…");
   liste.textContent = t("common.loading");
   try {
     let pfad = `/tax/selbstanzeige/kandidaten?jahr=${encodeURIComponent(jahr)}`;
@@ -7886,20 +8213,22 @@ async function ladeSelbstanzeigeKandidaten(opts = {}) {
     Zustand.saVerlauf = daten.verlauf || null;
     Zustand.saStichtag = daten.stichtag_hypothese || "";
     zeichneSelbstanzeigeKandidaten();
-    if (auto) {
+    if (laut) {
       const n = Zustand.saKandidaten.length;
       const u = Zustand.saUtxos.length;
       logZeile(
-        `Selbstanzeige: ${n} Abfluss-Kandidat(en) · ${u} UTXO(s) Was-wäre-wenn.`,
+        `FiFo-Kandidaten: ${n} Abfluss(e) · ${u} UTXO(s) Was-wäre-wenn.`,
       );
     }
   } catch (fehler) {
     liste.textContent = t("common.errorPrefix", { msg: fehler.message });
-    if (auto) logZeile(`Selbstanzeige: Kandidaten fehlgeschlagen — ${fehler.message}`);
+    if (laut) {
+      logZeile(`FiFo-Kandidaten: fehlgeschlagen — ${fehler.message}`);
+    }
   }
 }
 
-/** Steuerjahr öffnen bzw. Jahr gewechselt: Auswertung + Kandidaten. */
+/** Steuerjahr öffnen bzw. Jahr gewechselt: Auswertung + Kandidaten (still). */
 async function ladeSteuerjahrMitKandidaten() {
   await ladeSteuerjahr();
   await ladeSelbstanzeigeKandidaten({ auto: true });
@@ -8061,7 +8390,7 @@ function zeichneSelbstanzeigeKandidaten() {
       ausklappbar: utxos.length > 0,
       leerText: utxos.length
         ? ""
-        : "Keine offenen UTXOs im Cache. Zuerst UTXO-Scan.",
+        : "Keine offenen UTXOs im Cache. Zuerst Bestand.",
     },
   );
   if (utxos.length) {
@@ -12879,7 +13208,9 @@ async function start() {
   $("#export-csv").addEventListener("click", () => ladeExport("export.csv"));
   $("#export-bericht").addEventListener("click", () => ladeExport("bericht.html"));
   const saLaden = $("#sa-laden");
-  if (saLaden) saLaden.addEventListener("click", () => ladeSelbstanzeigeKandidaten());
+  if (saLaden) {
+    saLaden.addEventListener("click", () => ladeSelbstanzeigeKandidaten({ laut: true }));
+  }
   const saHtml = $("#sa-html");
   if (saHtml) saHtml.addEventListener("click", () => ladeSelbstanzeigeExport("html"));
   const saCsv = $("#sa-csv");
@@ -12887,7 +13218,7 @@ async function start() {
   const saTxid = $("#sa-txid");
   if (saTxid) {
     saTxid.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") ladeSelbstanzeigeKandidaten();
+      if (e.key === "Enter") ladeSelbstanzeigeKandidaten({ laut: true });
     });
   }
 

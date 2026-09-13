@@ -70,6 +70,14 @@ class TestEinfacherBaum(unittest.TestCase):
         self.assertEqual(kinder[0]["address"], EXTERN_A)
         self.assertEqual(kinder[0]["from_utxo"], f"{TXID_EXTERN}:0")
 
+    def test_externer_zufluss_traegt_eingangsdatum(self):
+        """Jüngste sats nutzen time_ts — die UI muss es am Blatt sehen."""
+        kind = self.ergebnis["children"][0]
+        self.assertTrue(
+            kind.get("time_label") or kind.get("block_time"),
+            msg=f"externes Blatt ohne Zeit: {kind!r}",
+        )
+
     def test_vollstaendiger_baum_meldet_sich_an_der_wurzel(self):
         """Die Liste braucht das, sonst erscheint „jüngste sats" erst nach Refresh."""
         self.assertTrue(self.ergebnis["verfolgt_vollstaendig"])

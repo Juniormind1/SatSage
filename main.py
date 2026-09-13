@@ -4350,6 +4350,72 @@ def load_xpub_utxo_cache(xpub: str, cache_dir: Path) -> list[dict] | None:
     return entry["utxos"] if entry else None
 
 
+def _scan_tip_anheben(
+    tip_i: int | None,
+    cache_dir: Path,
+    *,
+    fulcrum=None,
+    extra_heights: list[int] | tuple[int, ...] | None = None,
+) -> int | None:
+    """
+    Hebt ``scan_tip_height`` nur an (nie absenken).
+
+    Reihenfolge: bisheriger Tip → optionale Höhen (Spends/UTXOs) →
+    Electrs-Tip → Header-Datei. Sonst bleibt nach Wallet-Watch-Settle die
+    mtime frisch, der Tip aber Wochen hinter dem Chain-Tip („vor 12 Min · −53 Blöcke“).
+    """
+    tip = tip_i
+    for roh in extra_heights or ():
+        try:
+            h = int(roh or 0)
+        except (TypeError, ValueError):
+            continue
+        if h > 0 and (tip is None or h > tip):
+            tip = h
+    if fulcrum is not None:
+        try:
+            from fulcrum import get_chain_tip_height
+
+            et = int(get_chain_tip_height(fulcrum, force=True))
+            if tip is None or et > int(tip):
+                tip = et
+        except Exception:
+            pass
+    try:
+        from core.p2p import header_datei_tip, p2p_headers_path
+
+        header_tip = header_datei_tip(
+            p2p_headers_path(
+                resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
+            )
+        )
+        if header_tip is not None:
+            ht = int(header_tip)
+            if tip is None or ht > int(tip):
+                tip = ht
+    except Exception:
+        pass
+    return tip
+
+
+def _blockhoehe_aus_utxo(utxo: dict) -> int:
+    """Bestätigungshöhe aus UTXO-Dict (status oder height)."""
+    status = utxo.get("status") if isinstance(utxo.get("status"), dict) else {}
+    for roh in (
+        status.get("block_height"),
+        utxo.get("height"),
+        utxo.get("block_height"),
+        utxo.get("spent_height"),
+    ):
+        try:
+            h = int(roh or 0)
+        except (TypeError, ValueError):
+            continue
+        if h > 0:
+            return h
+    return 0
+
+
 def settle_gezielte_spends_im_cache(
     xpub: str,
     cache_dir: Path,
@@ -4357,6 +4423,7 @@ def settle_gezielte_spends_im_cache(
     confirmed_spent: list[dict],
     live_auf_adressen: list[dict],
     source: str = "fulcrum",
+    fulcrum=None,
 ) -> list[dict] | None:
     """
     Bestätigte Spends und frisches listunspent nur für betroffene Adressen.
@@ -4366,6 +4433,8 @@ def settle_gezielte_spends_im_cache(
       (Change/neue Empfänge), andere Adressen unangetastet
 
     Kein Gap, kein Fullscan. Rückgabe: neue UTXO-Liste oder None ohne Cache.
+    ``scan_tip_height`` wird mit Header-/Electrs-Tip und bekannten Höhen
+    angehoben — sonst wirkt der Cache frisch (mtime), bleibt aber „−N Blöcke“.
     """
     entry = load_xpub_cache_entry(xpub, cache_dir)
     if entry is None:
@@ -4414,14 +4483,24 @@ def settle_gezielte_spends_im_cache(
         tip_i = int(tip) if tip is not None else None
     except (TypeError, ValueError):
         tip_i = None
-    # Tip: höchste Bestätigungshöhe der Settles, falls höher
+    # Nur Spend-Höhe bzw. Live-UTXO-Höhe — nicht die Empfangshöhe des
+    # ausgegebenen Outputs (die kann weit hinter dem Tip liegen und würde
+    # fälschlich als „Scan-Tip“ wirken).
+    extra: list[int] = []
     for s in confirmed_spent:
         try:
             h = int(s.get("spent_height") or 0)
         except (TypeError, ValueError):
             h = 0
-        if h > 0 and (tip_i is None or h > tip_i):
-            tip_i = h
+        if h > 0:
+            extra.append(h)
+    for u in live_auf_adressen:
+        h = _blockhoehe_aus_utxo(u)
+        if h > 0:
+            extra.append(h)
+    tip_i = _scan_tip_anheben(
+        tip_i, cache_dir, fulcrum=fulcrum, extra_heights=extra,
+    )
 
     max_addr = int((entry.get("raw") or {}).get("max_addresses") or DEFAULT_MAX_ADDRESSES)
     save_xpub_utxo_cache(
@@ -6429,30 +6508,7 @@ def sync_xpub_zum_tip(
     # Electrs light: Tip auf Live-Electrs (bevorzugt) bzw. Header-Datei
     # anheben — sonst bleibt „−N Blöcke“ hängen, wenn p2p_headers hinter
     # dem Node liegt oder stundenlang nicht nachgezogen wurde.
-    tip_fuer_cache = tip_i
-    if fulcrum is not None:
-        try:
-            from fulcrum import get_chain_tip_height
-
-            et = int(get_chain_tip_height(fulcrum, force=True))
-            if tip_fuer_cache is None or et > int(tip_fuer_cache):
-                tip_fuer_cache = et
-        except Exception:
-            pass
-    try:
-        from core.p2p import header_datei_tip, p2p_headers_path
-
-        header_tip = header_datei_tip(
-            p2p_headers_path(
-                resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
-            )
-        )
-        if header_tip is not None:
-            ht = int(header_tip)
-            if tip_fuer_cache is None or ht > int(tip_fuer_cache):
-                tip_fuer_cache = ht
-    except Exception:
-        pass
+    tip_fuer_cache = _scan_tip_anheben(tip_i, cache_dir, fulcrum=fulcrum)
     cache_path = save_xpub_utxo_cache(
         xpub,
         merged,

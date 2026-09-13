@@ -15,6 +15,7 @@ Zwei Eigenheiten des Bestands, die hier sichtbar gemacht werden müssen:
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import analyze
@@ -166,6 +167,111 @@ def erklaere_fehler(roh: str) -> str:
     return text
 
 
+def _format_time_ts(ts) -> str:
+    """Unix-Zeit → Anzeige wie bei Tx-Zeiten (ohne Block-Präfix)."""
+    try:
+        wert = int(ts)
+    except (TypeError, ValueError):
+        return ""
+    if wert <= 0:
+        return ""
+    try:
+        from datetime import UTC, datetime
+
+        return datetime.fromtimestamp(wert, UTC).strftime("%d.%m.%Y %H:%M:%S")
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
+def _setze_externe_zeit(knoten: dict, quelle: dict | None = None) -> None:
+    """
+    Füllt time_label / block_time am UI-Knoten aus Analyse-Source oder
+    bereits gesetzten Feldern (Cache-Nachzug).
+    """
+    quelle = quelle or {}
+    if knoten.get("time_label") and knoten.get("block_time"):
+        return
+    ts = knoten.get("block_time") or knoten.get("time_ts") or quelle.get("time_ts")
+    label = (knoten.get("time_label") or quelle.get("time") or "").strip()
+    if not label and ts:
+        label = _format_time_ts(ts)
+    if not label and not ts:
+        return
+    if label:
+        knoten["time_label"] = label
+    try:
+        if ts is not None and int(ts) > 0:
+            knoten["block_time"] = int(ts)
+            knoten["time_ts"] = int(ts)
+    except (TypeError, ValueError):
+        pass
+
+
+def _anreichere_externe_zeiten(
+    knoten_liste: list,
+    immutable_cache_dir: Path | str | None = None,
+) -> None:
+    """
+    Nachträglich Zeiten an externe Blätter hängen (alte Caches ohne time_label).
+
+    Reihenfolge: vorhandenes time_ts → Tx-Cache zum from_utxo.
+    """
+    if not knoten_liste:
+        return
+    immutable: Path | None = None
+    if immutable_cache_dir:
+        try:
+            immutable = Path(immutable_cache_dir)
+        except TypeError:
+            immutable = None
+
+    def _aus_tx_cache(from_utxo: str) -> tuple[int | None, str]:
+        if not immutable or not from_utxo or ":" not in str(from_utxo):
+            return None, ""
+        try:
+            txid, _vout = str(from_utxo).rsplit(":", 1)
+            txid = main._normalize_txid(txid)
+        except Exception:
+            return None, ""
+        pfad = immutable / "tx" / f"{txid}.json"
+        if not pfad.is_file():
+            return None, ""
+        try:
+            roh = json.loads(pfad.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None, ""
+        if not isinstance(roh, dict):
+            return None, ""
+        # Flatfile oft {txid, source, tx: {...}} — Zeit sitzt im inneren tx.
+        tx = roh.get("tx") if isinstance(roh.get("tx"), dict) else roh
+        if not isinstance(tx, dict):
+            return None, ""
+        ts = main._tx_block_time(tx)
+        if ts is None:
+            return None, ""
+        return int(ts), main._format_tx_time(tx)
+
+    def _walk(knoten: dict) -> None:
+        if not isinstance(knoten, dict):
+            return
+        if knoten.get("type") == "external":
+            if not (knoten.get("time_label") and knoten.get("block_time")):
+                _setze_externe_zeit(knoten)
+            if not knoten.get("time_label") and not knoten.get("block_time"):
+                ts, label = _aus_tx_cache(knoten.get("from_utxo") or "")
+                if ts or label:
+                    if label:
+                        knoten["time_label"] = label
+                    if ts:
+                        knoten["block_time"] = ts
+                        knoten["time_ts"] = ts
+        for kind in knoten.get("children") or []:
+            _walk(kind)
+
+    for knoten in knoten_liste:
+        _walk(knoten)
+
+
 def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
     """Baut einen Knoten aus einem Quellen-Eintrag des Analysebaums."""
     typ = quelle.get("type", "unknown")
@@ -248,6 +354,11 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
         # Genau hier endet die Verfolgung — und genau hier ist die Frage
         # „von wem kam das eigentlich" am interessantesten.
         knoten["label"] = labels.beschrifte(adresse)
+        # Blockzeit des Prevouts: wann diese Sats die fremde Adresse erreichten
+        # (bzw. der Funding-Output bestätigt wurde). analyze legt time_ts ab;
+        # ohne das blieb die UI-Zeile ohne Datum, obwohl die jüngsten sats
+        # genau aus diesen Zeiten berechnet werden.
+        _setze_externe_zeit(knoten, quelle)
     elif typ == "external_unresolved":
         anzahl = int(quelle.get("input_count", 0) or 0)
         knoten["input_count"] = anzahl
@@ -437,6 +548,7 @@ def trace_utxo(
         }
 
     kinder = _quellen_zu_knoten(roh, wallet, "0", 1)
+    _anreichere_externe_zeiten(kinder, immutable_cache_dir)
     adressen = roh.get("addresses") or []
     wurzel_adresse = adressen[0] if adressen else ""
 

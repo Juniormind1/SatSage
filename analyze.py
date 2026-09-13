@@ -361,12 +361,25 @@ def trace_utxo_origin(
                 # Fremd-Peer trotz Walk — ignorieren (Rauschen).
                 continue
             else:
+                ext_ts = edge.prev_time_ts
+                ext_time = ""
+                if ext_ts:
+                    try:
+                        # Anzeige wie bei internen Hops (ohne extra get_tx).
+                        from datetime import UTC, datetime
+
+                        ext_time = datetime.fromtimestamp(
+                            int(ext_ts), UTC
+                        ).strftime("%d.%m.%Y %H:%M:%S")
+                    except (OSError, OverflowError, TypeError, ValueError):
+                        ext_time = ""
                 node["sources"].append({
                     "type": "external",
                     "address": prev_addrs[0] if prev_addrs else "unbekannt",
                     "amount_sats": amount_sats,
                     "from_utxo": prev_ref,
-                    "time_ts": edge.prev_time_ts,
+                    "time_ts": ext_ts,
+                    "time": ext_time,
                 })
         except Exception:
             continue

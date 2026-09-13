@@ -774,7 +774,20 @@ button, input, select { font: inherit; color: inherit; }
   margin-bottom: 16px;
 }
 .bereich-kopf h1 { font-family: var(--mono); font-size: 18px; margin: 0; }
-.bereich-aktionen { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.bereich-aktionen { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.utxo-aktionen {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.utxo-aktionen-praefix {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blass);
+  letter-spacing: 0.02em;
+  user-select: none;
+}
 .meta { margin: 2px 0 0; color: var(--blass); font-size: 12px; }
 
 /* ---------- Bedienelemente ---------- */
@@ -1393,8 +1406,26 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .utxo-wurzel > .baum-knoten { align-items: center; }
 .utxo-zweig { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie); }
 .zweig-status {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 11px; color: var(--gedaempft); padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  color: var(--gedaempft);
+  padding: 6px 0;
+}
+/* Text wächst/schrumpft — Abbrechen bleibt rechts, springt nicht. */
+.zweig-status > .zweig-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zweig-status > .knopf {
+  margin-left: auto;
+  flex: none;
 }
 
 /* Kopfzeile über einem gespeicherten Baum: Stand, ggf. Vorbehalt, Neustart. */
@@ -1667,33 +1698,88 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
    abweichen lassen. */
 .punkt-frist-erfuellt { background: var(--gut); border-radius: 50%; }
 .punkt-frist-offen    { background: var(--warn); border-radius: 50%; }
+.punkt-geister-saldo {
+  background: transparent;
+  border: 2px solid var(--gut);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
 
 .achse {
   display: flex; align-items: stretch; gap: 8px;
-  /* Oben Platz für die senkrechten Punktbeschriftungen. */
-  padding: 13rem 22px 14px;
+  /* Wenig Rand: UTXO-Beträge nur noch im Tooltip, nicht als Labels. */
+  padding: 1.2rem 22px 14px;
 }
 .achse-y {
-  display: flex; flex-direction: column; justify-content: space-between;
-  font-family: var(--mono); font-size: 9px; color: var(--blass);
-  text-align: right; min-width: 4.8rem;
-  padding-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--mono); font-size: 10px; color: var(--gedaempft);
+  text-align: right; min-width: 6.2rem;
+  padding-bottom: 18px; /* wie .achse-ticks — Skala = Spurhöhe */
+}
+.achse-y-skala {
+  position: relative;
+  flex: 0 0 220px; /* = .achse-spur height */
+  width: 100%;
+}
+.achse-y-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%); /* Mitte auf dem Tick wie Punkt-bottom */
+  white-space: nowrap;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--text);
 }
 .achse-haupt { flex: 1; min-width: 0; }
 
 /* X-Pan/Zoom: Viewport clippt, Spur wird per left-% neu gemappt. */
 .achse-viewport {
-  overflow: hidden;
+  /* visible: senkrechte Betrags-Labels und „sats vor Haltefrist“ nicht abschneiden.
+     Außerhalb des X-Fensters werden Punkte ohnehin nicht gezeichnet. */
+  overflow: visible;
   touch-action: none;
   cursor: grab;
   user-select: none;
 }
 .achse-viewport.ziehend { cursor: grabbing; }
 
-.achse-spur { position: relative; height: 200px; }
+.achse-spur { position: relative; height: 220px; overflow: visible; }
 .achse-linie {
   position: absolute; left: 0; right: 0; bottom: 0;
   height: 1px; background: var(--linie);
+}
+/* Sats vor Haltefrist: Ring exakt auf der Frist-X (wie andere Punkte),
+   Label absolut links davon — verschiebt den Ring nicht. */
+.achse-geister {
+  position: absolute;
+  bottom: 0;
+  /* left = Frist-% ; Anker = Ringmitte (nicht Gruppenmitte inkl. Text) */
+  transform: translate(-50%, 50%);
+  z-index: 2;
+  pointer-events: none;
+  line-height: 0; /* kein extra Box-Offset durch Inline-Layout */
+}
+.achse-geister .achse-punkt {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  display: block;
+}
+.achse-geister-label {
+  position: absolute;
+  right: calc(100% + 6px); /* links vom Ring */
+  bottom: 50%;
+  transform: translateY(50%);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gut);
+  white-space: nowrap;
+  line-height: 1.2;
+  background: color-mix(in srgb, var(--flaeche) 88%, transparent);
+  padding: 1px 3px;
 }
 
 /* Fristgrenze: senkrechte Linie mit Beschriftung */
@@ -1711,10 +1797,22 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   border-radius: 50%;
   border: 2px solid var(--flaeche);
   transform: translate(-50%, 50%);
-  cursor: default;
+  cursor: inherit; /* Ziehen am Viewport; Bubble mit .klickbar → pointer */
+  z-index: 2;
+  box-sizing: border-box;
 }
+.achse-punkt.klickbar { cursor: pointer; }
 .achse-punkt.erfuellt { background: var(--gut); }
 .achse-punkt.offen    { background: var(--warn); }
+/* Geister-Saldo: Ring auf der X-Achse (y=0), Größe per Inline-width/height. */
+.achse-punkt.geister {
+  background: transparent;
+  z-index: 1;
+  border-width: 2px;
+}
+/* Geister-Saldo ist immer „außerhalb Haltefrist“ → grün. */
+.achse-punkt.geister,
+.achse-punkt.geister.erfuellt { border-color: var(--gut); }
 .achse-punkt.klein  { width: 8px;  height: 8px; }
 .achse-punkt.mittel { width: 11px; height: 11px; }
 .achse-punkt.gross  { width: 15px; height: 15px; }
@@ -1733,17 +1831,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .achse-punkt:hover .achse-punkt-tip { display: block; }
 .achse-punkt-tip.links { left: auto; right: 16px; }
-.achse-punkt-label {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 3px);
-  transform: rotate(-90deg);
-  transform-origin: left bottom;
-  white-space: nowrap;
-  font-family: var(--mono); font-size: 9px; font-weight: 600;
-  color: var(--text); background: var(--flaeche);
-  padding: 0 3px; pointer-events: none;
-}
+
 
 .achse-ticks {
   display: flex; justify-content: space-between;

@@ -2087,6 +2087,20 @@ class TestGespeicherterBaum(ApiTestBasis):
         )
         self.assertEqual(status, 403)
 
+    def test_post_trace_nutzt_cache_ohne_job(self):
+        """Plot-Klick / Ankunft: Cache-Hit → sofort done, kein Electrs-Job."""
+        self.ablegen()
+        status, körper = self.anfrage(
+            "/api/trace",
+            methode="POST",
+            daten={"target": f"{self.ZIEL}:0"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper.get("from_cache") or körper.get("status") == "done")
+        self.assertFalse(körper.get("running"))
+        self.assertTrue(körper.get("result", {}).get("found"))
+        self.assertEqual(körper["result"]["root"]["txid"], self.ZIEL)
+
 
 class TestCacheLeeren(ApiTestBasis):
 

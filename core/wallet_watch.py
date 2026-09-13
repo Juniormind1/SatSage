@@ -593,6 +593,7 @@ class WalletWatchService:
                         confirmed_spent=confirmed,
                         live_auf_adressen=live_merge,
                         source="fulcrum",
+                        fulcrum=client,
                     )
                 if neue_addrs and self._session is not None:
                     self._subscribe_extra(neue_addrs, xpub)

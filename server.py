@@ -2841,34 +2841,47 @@ def _mit_mempool_pending(
                 intern_tx = set()
     except Exception:
         return gecacht, anhang
-    finally:
-        try:
-            client.close()
-        except Exception:
-            pass
-
-    # Auch ohne aktuelle Pending/Confirmed: Cache-Flags bereinigen
-    # (Electrs erreichbar, klassifiziere lief durch).
-
-    # --- Bestätigte Spends settlen -----------------------------------------
-    if confirmed and xpub:
-        try:
-            neu = main.settle_gezielte_spends_im_cache(
-                xpub,
-                state.cache_dir,
-                confirmed_spent=confirmed,
-                live_auf_adressen=live,
-                source="fulcrum",
-            )
-            if neu is not None:
-                gecacht = neu
-            anhang = _verlauf_anhang_fuer_xpub(
-                state, xpub, limit=limit, sort=sort,
-            )
-        except Exception:
+    else:
+        # Settle bevor close — Electrs-Tip für scan_tip_height noch erreichbar.
+        if confirmed and xpub:
+            try:
+                neu = main.settle_gezielte_spends_im_cache(
+                    xpub,
+                    state.cache_dir,
+                    confirmed_spent=confirmed,
+                    live_auf_adressen=live,
+                    source="fulcrum",
+                    fulcrum=client,
+                )
+                if neu is not None:
+                    gecacht = neu
+                anhang = _verlauf_anhang_fuer_xpub(
+                    state, xpub, limit=limit, sort=sort,
+                )
+            except Exception:
+                conf_keys = {
+                    f"{str(c.get('txid') or '').lower()}:"
+                    f"{int(c.get('vout') or 0)}"
+                    for c in confirmed
+                }
+                gecacht = [
+                    u for u in gecacht
+                    if f"{str(u.get('txid') or '').lower()}:"
+                    f"{int(u.get('vout') or 0)}" not in conf_keys
+                ]
+                anhang = utxos_mod.merge_pending_spends_in_verlauf(
+                    anhang,
+                    [{**c, "spent_pending": False} for c in confirmed],
+                    wallet=state.wallet_ctx,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    own_addresses=_eigene_adressen(state),
+                    limit=limit,
+                    sort=sort,
+                )
+        elif confirmed:
+            # Kein XPUB: nur aus der Anzeige streichen, kein Cache-Settle.
             conf_keys = {
-                f"{str(c.get('txid') or '').lower()}:"
-                f"{int(c.get('vout') or 0)}"
+                f"{str(c.get('txid') or '').lower()}:{int(c.get('vout') or 0)}"
                 for c in confirmed
             }
             gecacht = [
@@ -2885,25 +2898,15 @@ def _mit_mempool_pending(
                 limit=limit,
                 sort=sort,
             )
-    elif confirmed:
-        conf_keys = {
-            f"{str(c.get('txid') or '').lower()}:{int(c.get('vout') or 0)}"
-            for c in confirmed
-        }
-        gecacht = [
-            u for u in gecacht
-            if f"{str(u.get('txid') or '').lower()}:"
-            f"{int(u.get('vout') or 0)}" not in conf_keys
-        ]
-        anhang = utxos_mod.merge_pending_spends_in_verlauf(
-            anhang,
-            [{**c, "spent_pending": False} for c in confirmed],
-            wallet=state.wallet_ctx,
-            immutable_cache_dir=state.immutable_cache_dir,
-            own_addresses=_eigene_adressen(state),
-            limit=limit,
-            sort=sort,
-        )
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    # Auch ohne aktuelle Pending/Confirmed: Cache-Flags bereinigen
+    # (Electrs erreichbar, klassifiziere lief durch). Bestätigte Spends
+    # sind oben im try/else bereits gesettled.
 
     # --- Pending: markieren + ausgegeben + eigene Empfänge (Change/Self) ---
     by_key = {
@@ -5213,6 +5216,17 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
     baum = gespeichert["baum"] or {}
     if isinstance(baum, dict):
         baum = dict(baum)
+        # Alte Bäume: externe Blätter ohne time_label nachziehen (Tx-Cache).
+        # Kein lokales ``import trace as trace_mod`` — sonst UnboundLocalError
+        # auf dem Modul-Import weiter unten (Python-Scoping).
+        try:
+            kinder0 = baum.get("children") or []
+            if kinder0:
+                trace_mod._anreichere_externe_zeiten(
+                    kinder0, state.immutable_cache_dir,
+                )
+        except Exception:
+            pass
         # Vollständigkeit und Done-Flag frisch aus den Blättern — nicht dem
         # ggf. veralteten Cache-Flag vertrauen (ältere Läufe markierten
         # Bäume mit leeren grünen Blättern fälschlich als fertig).
@@ -5328,6 +5342,66 @@ def _trace_ein_utxo_tief(
     return ergebnis
 
 
+def _wallet_name_fuer_utxo(
+    state: AppState,
+    txid: str,
+    vout: int,
+    *,
+    hinweis: str = "",
+) -> str:
+    """
+    Anzeigename des Wallets zu txid:vout — für Job-Meta und UI nach Reload.
+
+    Reihenfolge: Client-Hinweis → gespeicherter Trace-Root → UTXO-Cache-Adresse
+    → Adressauflösung im Wallet-Kontext.
+    """
+    name = str(hinweis or "").strip()
+    if name:
+        return name
+    try:
+        treffer = trace_cache.laden(
+            txid, vout, state.immutable_cache_dir, None,
+        )
+        if treffer:
+            root = (treffer.get("baum") or {}).get("root") or {}
+            w = str(root.get("wallet") or "").strip()
+            if w:
+                return w
+            addr = str(root.get("address") or "").strip()
+            ctx = state.wallet_ctx
+            if addr and ctx is not None:
+                w = str(ctx.resolve_address(addr) or "").strip()
+                if w:
+                    return w
+    except Exception:
+        pass
+    try:
+        ctx = state.wallet_ctx
+        if ctx is None:
+            return ""
+        for entry in state.entries or []:
+            schluessel = getattr(entry, "analyse_schluessel", None) or getattr(
+                entry, "xpub", None,
+            )
+            if not schluessel:
+                continue
+            cached = main.load_xpub_utxo_cache(schluessel, state.cache_dir) or []
+            for u in cached:
+                if (
+                    str(u.get("txid") or "").lower() == str(txid).lower()
+                    and int(u.get("vout") or -1) == int(vout)
+                ):
+                    addr = str(u.get("address") or "").strip()
+                    if addr:
+                        w = str(ctx.resolve_address(addr) or "").strip()
+                        if w:
+                            return w
+                    return str(entry.display_name or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def api_trace(state: AppState, payload: dict) -> dict:
     """
     Startet die Herkunftsanalyse als Hintergrund-Vorgang.
@@ -5368,9 +5442,42 @@ def api_trace(state: AppState, payload: dict) -> dict:
     if wallet_ctx is None:
         raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
     eigene = set(wallet_ctx.address_to_wallet)
+    wallet_name = _wallet_name_fuer_utxo(
+        state,
+        txid,
+        vout,
+        hinweis=str(
+            payload.get("wallet")
+            or payload.get("wallet_name")
+            or ""
+        ),
+    )
 
     def lauf(job):
-        job.progress("Verbinde mit der Datenquelle…")
+        # Nochmals Cache (Race: GET und POST parallel) — bevor Electrs startet.
+        if followup is None:
+            treffer = trace_cache.laden(
+                txid, vout, state.immutable_cache_dir, eigene,
+            )
+            if treffer is not None:
+                baum = treffer.get("baum") or {}
+                if isinstance(baum, dict) and baum.get("found"):
+                    baum = dict(baum)
+                    try:
+                        kinder = baum.get("children") or []
+                        if kinder:
+                            trace_mod._anreichere_externe_zeiten(
+                                kinder, state.immutable_cache_dir,
+                            )
+                        baum.update(trace_mod.folge_meta(baum))
+                    except Exception:
+                        pass
+                    baum["source"] = "cache"
+                    job.message = "Aus Herkunfts-Cache."
+                    return baum
+
+        # log=True: Nav und Fokus-UI sehen mehr als nur die letzte message.
+        job.progress("Verbinde mit der Datenquelle…", log=True)
         args = state.args_namespace()
         quelle, backend = main._setup_blockchain_client(args, state.env().values())
         job.raise_if_cancelled()
@@ -5388,7 +5495,23 @@ def api_trace(state: AppState, payload: dict) -> dict:
             "tx_oriented": f"Speichere gründlichere Herkunft über {quelle}…",
             "resolve_unresolved": f"Löse gebündelte Eingänge über {quelle}…",
         }[followup]
-        job.progress(label)
+        job.progress(label, log=True)
+
+        def _fortschritt(text: str) -> None:
+            """Engine-Fortschritt → Job-message + Log (ohne jede Zeile zu fluten)."""
+            job.progress(str(text or ""), log=False)
+            # Längere Meilensteine ins Log (Hop-Wechsel, Lücken-Phasen).
+            t = str(text or "").strip()
+            if t and (
+                t.startswith("↻")
+                or t.startswith("Lücken")
+                or t.startswith("Eigene Vorgänger")
+                or t.startswith("Aktualisiere")
+                or t.startswith("Folgeanalyse")
+                or t.startswith("Schließe")
+                or t.startswith("Verfolge")
+            ):
+                job.progress(t, log=True)
 
         if folge_tx or folge_bundled:
             ergebnis = _trace_ein_utxo_tief(
@@ -5401,7 +5524,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 immutable_cache_dir=state.immutable_cache_dir,
                 fetch_addr=fetch_addr,
                 cache_source=quelle,
-                progress=job.progress,
+                progress=_fortschritt,
                 folge_bundled=folge_bundled,
                 folge_tx=folge_tx,
             )
@@ -5416,7 +5539,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 immutable_cache_dir=state.immutable_cache_dir,
                 fetch_address_utxos=fetch_addr,
                 cache_source=quelle,
-                progress=job.progress,
+                progress=_fortschritt,
             )
         ergebnis["source"] = quelle
         ergebnis["followup"] = followup
@@ -5426,6 +5549,70 @@ def api_trace(state: AppState, payload: dict) -> dict:
         )
         return ergebnis
 
+    target = f"{txid}:{vout}"
+    followup_meta = followup or ""
+    # Derselbe UTXO + derselbe followup: laufenden Job wiederverwenden —
+    # sonst stapeln sich „Herkunft …:1“ in der Nav und blockieren sich.
+    bestehend = state.jobs.finde_laufenden(
+        "trace",
+        meta={"target": target, "followup": followup_meta},
+    )
+    if bestehend is not None:
+        return bestehend.as_dict()
+
+    # Cache-first (ohne followup): fertiger Baum → kein Job, kein Electrs.
+    # Plot-Klick / Ankunft am sollen den Immutable-Trace nutzen, wenn er liegt.
+    if followup is None:
+        eigene_cache = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
+        treffer = trace_cache.laden(
+            txid, vout, state.immutable_cache_dir, eigene_cache,
+        )
+        if treffer is not None:
+            baum = treffer.get("baum") or {}
+            if isinstance(baum, dict) and baum.get("found"):
+                baum = dict(baum)
+                try:
+                    kinder = baum.get("children") or []
+                    if kinder:
+                        trace_mod._anreichere_externe_zeiten(
+                            kinder, state.immutable_cache_dir,
+                        )
+                    baum.update(trace_mod.folge_meta(baum))
+                except Exception:
+                    pass
+                baum.setdefault("source", "cache")
+                if wallet_name and not (baum.get("root") or {}).get("wallet"):
+                    root = dict(baum.get("root") or {})
+                    root["wallet"] = wallet_name
+                    baum["root"] = root
+                return {
+                    "id": f"cache-{txid[:12]}-{vout}",
+                    "kind": "trace",
+                    "label": f"Herkunft {txid[:12]}…:{vout} (Cache)",
+                    "status": "done",
+                    "message": "Aus Herkunfts-Cache.",
+                    "log": [],
+                    "running": False,
+                    "elapsed_s": 0,
+                    "error": "",
+                    "meta": {
+                        "art": "trace",
+                        "target": target,
+                        "txid": txid,
+                        "vout": vout,
+                        "followup": "",
+                        "from_cache": True,
+                        "wallet_name": wallet_name,
+                    },
+                    "started_at": treffer.get("erstellt_ts") or 0,
+                    "finished_at": treffer.get("erstellt_ts") or 0,
+                    "result": baum,
+                    "from_cache": True,
+                    "erstellt_ts": treffer.get("erstellt_ts"),
+                    "veraltet": treffer.get("veraltet"),
+                    "adressen_seither": treffer.get("adressen_seither"),
+                }
+
     titel = f"Herkunft {txid[:12]}…:{vout}"
     if followup == "full":
         titel = f"Lücken schließen {txid[:12]}…:{vout}"
@@ -5433,16 +5620,19 @@ def api_trace(state: AppState, payload: dict) -> dict:
         titel = f"Folgeanalyse {txid[:12]}…:{vout}"
     elif followup == "resolve_unresolved":
         titel = f"Nachziehen {txid[:12]}…:{vout}"
+    if wallet_name:
+        titel = f"{titel} · {wallet_name}"
     job = state.jobs.start(
         "trace",
         titel,
         lauf,
         meta={
             "art": "trace",
-            "target": f"{txid}:{vout}",
+            "target": target,
             "txid": txid,
             "vout": vout,
-            "followup": followup or "",
+            "followup": followup_meta,
+            "wallet_name": wallet_name,
         },
     )
     return job.as_dict()
@@ -5454,11 +5644,31 @@ def api_jobs(state: AppState, query: dict) -> dict:
     plus Scan-Pipeline (aktuell + Warteschlange).
     """
     try:
-        recent = float((query.get("recent_s") or ["10"])[0])
+        recent = float((query.get("recent_s") or ["3"])[0])
     except (TypeError, ValueError, IndexError):
-        recent = 10.0
+        recent = 3.0
     recent = max(0.0, min(recent, 120.0))
     jobs = [j.as_dict() for j in state.jobs.nutzer_jobs(recent_s=recent)]
+    # Laufende Traces ohne wallet_name (vor dem Fix gestartet / Browser-Reload):
+    # Name aus Cache nachziehen, damit der Job-Klick kein „unbekanntes Wallet“ zeigt.
+    for eintrag in jobs:
+        if eintrag.get("kind") != "trace":
+            continue
+        meta = eintrag.get("meta") or {}
+        if meta.get("wallet_name") or meta.get("wallet"):
+            continue
+        txid = meta.get("txid") or ""
+        try:
+            vout = int(meta.get("vout"))
+        except (TypeError, ValueError):
+            continue
+        if not txid:
+            continue
+        name = _wallet_name_fuer_utxo(state, str(txid), vout)
+        if name:
+            meta = dict(meta)
+            meta["wallet_name"] = name
+            eintrag["meta"] = meta
     # Teil-Ergebnis an hanging result für rescan
     for daten in jobs:
         job = state.jobs.get(daten["id"])
@@ -6203,7 +6413,9 @@ class Handler(BaseHTTPRequestHandler):
         if teile == ["trace", "alle"] and methode == "POST":
             return 202, api_trace_alle(state, self._body())
         if teile == ["trace"] and methode == "POST":
-            return 202, api_trace(state, self._body())
+            body = api_trace(state, self._body())
+            # Cache-Hit: 200 sofort. Live-Job: 202 Accepted.
+            return (200 if body.get("from_cache") else 202), body
         if teile == ["trace"] and methode == "GET":
             return 200, api_trace_gespeichert(state, query)
         if teile == ["config", "deskriptor"] and methode == "POST":

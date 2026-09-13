@@ -471,7 +471,10 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_verlaufsscan_steht_neben_dem_utxo_scan(self):
         self.assertIn('id="verlauf-knopf"', self.html)
-        self.assertIn("Verlaufsscan", self.html)
+        self.assertIn("Historie", self.html)
+        self.assertIn('class="utxo-aktionen-praefix"', self.html)
+        self.assertIn(">Bestand<", self.html)
+        self.assertIn(">Herkunft<", self.html)
         self.assertIn("starteVerlaufsscan", self.js)
         self.assertIn("Verlauf aller Wallets", self.html)
 

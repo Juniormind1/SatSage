@@ -1,4 +1,5 @@
 """Fortschritt langer Jobs: Phasen sofort, Zwischenstand spätestens alle 10s."""
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -610,6 +611,47 @@ class TestJobRegistry(unittest.TestCase):
         self.assertIn("Keine Datenquelle erreichbar", job.error)
         self.assertIn("Keine Datenquelle erreichbar", job.message)
         self.assertIsNotNone(job.finished_at)
+
+    def test_finde_laufenden_nach_meta(self):
+        registry = JobRegistry()
+        tor = threading.Event()
+
+        def hang(job):
+            while not job.cancelled and not tor.wait(0.05):
+                pass
+
+        a = registry.start(
+            "trace", "A", hang,
+            meta={"target": "aa" * 32 + ":0", "followup": ""},
+        )
+        b = registry.start(
+            "trace", "B", hang,
+            meta={"target": "bb" * 32 + ":1", "followup": ""},
+        )
+        self.assertIs(
+            registry.finde_laufenden(
+                "trace", meta={"target": "aa" * 32 + ":0", "followup": ""},
+            ),
+            a,
+        )
+        self.assertIs(
+            registry.finde_laufenden(
+                "trace", meta={"target": "bb" * 32 + ":1", "followup": ""},
+            ),
+            b,
+        )
+        self.assertIsNone(
+            registry.finde_laufenden(
+                "trace", meta={"target": "cc" * 32 + ":0", "followup": ""},
+            )
+        )
+        a.cancel()
+        b.cancel()
+        tor.set()
+        for _ in range(80):
+            if a.status != "running" and b.status != "running":
+                break
+            time.sleep(0.02)
 
 
 if __name__ == "__main__":

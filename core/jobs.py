@@ -430,6 +430,31 @@ class JobRegistry:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def finde_laufenden(
+        self,
+        kind: str,
+        *,
+        meta: dict | None = None,
+    ) -> Job | None:
+        """
+        Laufender Job derselben Art; optional Meta-Felder müssen übereinstimmen.
+
+        Verhindert Doppelstarts (z. B. Herkunft desselben UTXO zweimal).
+        """
+        soll = {str(k): v for k, v in (meta or {}).items()}
+        with self._lock:
+            kandidaten = [
+                j for j in self._jobs.values()
+                if j.status == "running" and j.kind == kind
+            ]
+        for job in kandidaten:
+            if not soll:
+                return job
+            hat = job.meta or {}
+            if all(hat.get(k) == v for k, v in soll.items()):
+                return job
+        return None
+
     def cancel(self, job_id: str) -> bool:
         job = self.get(job_id)
         if job is None or job.status != "running":
@@ -442,7 +467,7 @@ class JobRegistry:
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.started_at, reverse=True)
 
-    def nutzer_jobs(self, *, recent_s: float = 10.0) -> list[Job]:
+    def nutzer_jobs(self, *, recent_s: float = 3.0) -> list[Job]:
         """
         Nutzer-Jobs: alle running plus finished der letzten *recent_s* Sekunden.
         """
