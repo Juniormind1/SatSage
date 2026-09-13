@@ -7,7 +7,7 @@ services:
       APP_PORT: 8730
 
   web:
-    image: ghcr.io/juniormind1/satsage:0.9.3@sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST
+    image: ghcr.io/juniormind1/satsage:0.9.3-rc2@sha256:f7e215c294a9563010c472c1342f3dca0f74a99da539ee19948622c8dcc62c52
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m
