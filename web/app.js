@@ -675,11 +675,21 @@ function merkeWalletSyncZiele(jobOrIds) {
   if (ids.length) Zustand.walletSyncWalletIds = ids;
 }
 
+function tipSyncDoneWalletIds(job) {
+  const roh = job?.meta?.done_wallet_ids;
+  if (!Array.isArray(roh)) return [];
+  return roh.map(String);
+}
+
 function walletSyncLaeuftFuer(walletId) {
   if (!walletId) return false;
+  const wid = String(walletId);
   // UTXO-Tip fertig, Empfangsadressen trudeln noch → Nav schon „gerade eben“.
   if (Zustand.walletSyncPhase === "empfang") return false;
   if (Zustand.walletSyncLogStand?._tipUiFertig) return false;
+  // Dieses Wallet schon im laufenden Job fertig → mtime / „gerade eben“.
+  const lokalFertig = Zustand.walletSyncDoneIds || [];
+  if (lokalFertig.map(String).includes(wid)) return false;
   const jobs = Zustand.jobsNav?.jobs || [];
   for (const job of jobs) {
     if (job.kind !== "wallet_sync") continue;
@@ -690,9 +700,11 @@ function walletSyncLaeuftFuer(walletId) {
     if (!(job.running || job.status === "running" || job.status === "queued")) {
       continue;
     }
+    // Pro Wallet: sobald Tip für diese ID steht, nicht mehr „aktualisiere…“.
+    if (tipSyncDoneWalletIds(job).includes(wid)) return false;
     const ids = walletIdsAusSyncJob(job);
     if (ids.length) {
-      if (ids.includes(String(walletId))) return true;
+      if (ids.includes(wid)) return true;
       continue;
     }
     // Meta fehlt: nicht pauschal alle Wallets markieren.
@@ -708,7 +720,8 @@ function walletSyncLaeuftFuer(walletId) {
     && Zustand.walletSyncPhase !== "empfang"
     && !Zustand.walletSyncLogStand?._tipUiFertig
   ) {
-    return Zustand.walletSyncWalletIds.includes(String(walletId));
+    if ((Zustand.walletSyncDoneIds || []).map(String).includes(wid)) return false;
+    return Zustand.walletSyncWalletIds.includes(wid);
   }
   return false;
 }
@@ -3280,12 +3293,37 @@ function zeichneEmpfangLeer(text, { puls = false } = {}) {
   if (inhalt) inhalt.hidden = true;
 }
 
-function zeichneEmpfangReadOnly(walletName) {
-  zeichneEmpfangLeer(t("dock.empfangReadOnly"));
+function zeichneEmpfangReadOnly(walletName, { puls = false } = {}) {
+  // Während Tip/Scan: Atem statt statischem „Read-only“ — der Bestand
+  // läuft noch, auch wenn kein QR kommt.
+  const text = puls
+    ? t("dock.empfangSyncing")
+    : t("dock.empfangReadOnly");
+  zeichneEmpfangLeer(text, { puls });
   const leer = $("#empfang-leer");
-  if (leer && walletName) {
+  if (leer && !puls && walletName) {
     leer.textContent = t("dock.empfangReadOnly");
   }
+}
+
+/**
+ * Empfangspanel im „beschäftigt“-Zustand: QR weg, Atem an.
+ * Gilt für UTXO-/Verlaufs-Scan und Tip-/Start-Sync — auch Read-only-Wallets.
+ */
+function zeichneEmpfangBeschaeftigt(walletId) {
+  const walletMeta = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+  Zustand.lernThema = null;
+  if (walletMeta && walletMeta.read_only) {
+    zeichneEmpfangReadOnly(walletMeta.name, { puls: true });
+  } else {
+    zeichneEmpfangLeer(t("dock.empfangPuls"), { puls: true });
+  }
+  Zustand.empfang = {
+    wallet_id: walletId || "",
+    address: "",
+    index: 0,
+    puls: true,
+  };
 }
 
 function zeichneEmpfang(daten, { zahlung = false } = {}) {
@@ -3425,22 +3463,9 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
     if (!(Zustand.empfang && Zustand.empfang.puls)) return null;
   }
 
-  // Scan/Sync hat Vorrang vor Lern-QR — sonst bleibt Cache-Text ohne Atmung.
+  // Scan/Sync hat Vorrang vor Lern-QR und Read-only-Text — Atem bis „gerade eben“.
   if (scanLaeuft) {
-    Zustand.lernThema = null;
-    if (walletMeta && walletMeta.read_only) {
-      zeichneEmpfangReadOnly(walletMeta.name);
-      return null;
-    }
-    if (!EmpfangPuls.laeuft()) {
-      EmpfangPuls.start();
-    }
-    Zustand.empfang = {
-      wallet_id: walletId,
-      address: "",
-      index: 0,
-      puls: true,
-    };
+    zeichneEmpfangBeschaeftigt(walletId);
     return null;
   }
 
@@ -3482,14 +3507,7 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
     }
     // Scan kann während dem Request gestartet haben — Cache-QR unterdrücken.
     if (empfangScanLaeuftFuer(walletId)) {
-      Zustand.lernThema = null;
-      if (!EmpfangPuls.laeuft()) EmpfangPuls.start();
-      Zustand.empfang = {
-        wallet_id: walletId,
-        address: "",
-        index: 0,
-        puls: true,
-      };
+      zeichneEmpfangBeschaeftigt(walletId);
       return null;
     }
     const alt = Zustand.empfangByWallet[walletId];
@@ -3535,8 +3553,7 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
   } catch (fehler) {
     if (gen !== Zustand.empfangLadeGen) return null;
     if (empfangScanLaeuftFuer(walletId)) {
-      Zustand.lernThema = null;
-      if (!EmpfangPuls.laeuft()) EmpfangPuls.start();
+      zeichneEmpfangBeschaeftigt(walletId);
       return null;
     }
     if (!still) {
@@ -12548,6 +12565,7 @@ function loeseWalletSyncBindung() {
   }
   Zustand.walletSyncJob = null;
   Zustand.walletSyncWalletIds = [];
+  Zustand.walletSyncDoneIds = [];
   Zustand.walletSyncStill = false;
   Zustand.walletSyncPhase = null;
   if (Zustand.config) Zustand.config.wallet_sync_job_id = null;
@@ -12598,6 +12616,7 @@ function folgeWalletSyncJob(jobId, meta) {
   Zustand.walletSyncJob = id;
   if (Zustand.config) Zustand.config.wallet_sync_job_id = id;
   Zustand.walletSyncLogStand = { index: 0 };
+  Zustand.walletSyncDoneIds = [];
   Zustand.walletSyncStill = jobIstStillerTip(meta) || jobIstStillerTip(bekannt);
   if (meta) merkeWalletSyncZiele(meta);
   else if (bekannt) merkeWalletSyncZiele(bekannt);
@@ -12646,6 +12665,34 @@ async function pruefeWalletSyncJob() {
             ladeEmpfang(Zustand.walletId).catch(() => {});
           }
           zeichneNav();
+        }
+      }
+      // Je fertigem Wallet: Config/Nav nachziehen → „gerade eben“ statt warten
+      // bis alle Wallets durch sind.
+      const fertigIds = tipSyncDoneWalletIds(job);
+      const vorher = Zustand.walletSyncDoneIds || [];
+      if (
+        fertigIds.length > vorher.length
+        && !Zustand.walletSyncStill
+      ) {
+        Zustand.walletSyncDoneIds = fertigIds.slice();
+        // jobsNav-Meta mitziehen (walletSyncLaeuftFuer liest beides).
+        const navJob = (Zustand.jobsNav?.jobs || []).find((x) => x && x.id === syncId);
+        if (navJob) {
+          navJob.meta = navJob.meta || {};
+          navJob.meta.done_wallet_ids = fertigIds.slice();
+        }
+        try {
+          await ladeConfig();
+        } catch (_) {
+          /* Nav trotzdem */
+        }
+        setzeWalletScanGesperrt();
+        zeichneNav();
+        // Empfangspanel an aktuellem Wallet ausrichten: fertig → QR/Read-only,
+        // noch Tip → weiter Atem (auch Read-only).
+        if (Zustand.walletId && !Zustand.lernThema) {
+          ladeEmpfang(Zustand.walletId).catch(() => {});
         }
       }
       // UTXO-Tip fertig, Empfangsadressen laufen noch → Nav grün, QR darf laden.

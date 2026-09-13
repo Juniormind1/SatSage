@@ -5355,10 +5355,20 @@ def _prune_cached_utxos(
     fetch_address_utxos,
     *,
     verify_utxo_spent=None,
-) -> list[dict]:
-    """Entfernt aus dem Cache UTXOs, die nicht mehr unspent sind."""
+    fetch_addresses_utxos=None,
+    on_progress=None,
+    progress_label: str | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Entfernt aus dem Cache UTXOs, die nicht mehr unspent sind.
+
+    Rückgabe ``(noch_unspent, live_auf_adressen)``:
+    *live_auf_adressen* ist das frische ``listunspent`` der Cache-Adressen
+    (ein RPC-Durchgang) — der Tip-Light-Pfad nutzt es für Prune **und**
+    neue Empfänge auf denselben Adressen, ohne zweites listunspent.
+    """
     if not cached:
-        return []
+        return [], []
 
     if verify_utxo_spent is not None:
         pruned = []
@@ -5369,23 +5379,35 @@ def _prune_cached_utxos(
                 continue
             if live_value is not None and live_value == utxo["value"]:
                 pruned.append(utxo)
-        return pruned
+        # Kein Adress-Snapshot — Aufrufer holt listunspent nur bei Bedarf.
+        return pruned, []
 
-    live_sig: dict[str, int] = {}
     addresses = {u["address"] for u in cached if u.get("address")}
-    for address in sorted(addresses):
+    live_list = _fetch_address_batch_utxos(
+        addresses,
+        fetch_address_utxos,
+        fetch_addresses_utxos,
+        progress_label=progress_label or "Live",
+        on_progress=on_progress,
+    )
+    live_sig: dict[str, int] = {}
+    for utxo in live_list:
         try:
-            for utxo in fetch_address_utxos(address):
-                live_sig[f"{utxo['txid']}:{utxo['vout']}"] = utxo["value"]
-        except Exception:
+            key = f"{str(utxo.get('txid') or '').lower()}:{int(utxo.get('vout') or 0)}"
+            live_sig[key] = int(utxo.get("value") or 0)
+        except (TypeError, ValueError):
             continue
 
     pruned = []
     for utxo in cached:
-        key = f"{utxo['txid']}:{utxo['vout']}"
-        if key in live_sig and live_sig[key] == utxo["value"]:
+        key = f"{str(utxo.get('txid') or '').lower()}:{int(utxo.get('vout') or 0)}"
+        try:
+            wert = int(utxo.get("value") or 0)
+        except (TypeError, ValueError):
+            continue
+        if key in live_sig and live_sig[key] == wert:
             pruned.append(utxo)
-    return pruned
+    return pruned, live_list
 
 
 def _mempool_pending_nach_prune(
@@ -5625,10 +5647,11 @@ def _verify_cached_utxo_set(
             f"+ Indizes #{scan_end_index}–#{next_end} pro Chain...",
             flush=True,
         )
-        pruned = _prune_cached_utxos(
+        pruned, _live_snapshot = _prune_cached_utxos(
             cached,
             fetch_address_utxos,
             verify_utxo_spent=verify_utxo_spent,
+            fetch_addresses_utxos=None,
         )
         from display import summarize_utxo_cache_usage
 
@@ -5726,7 +5749,9 @@ def _light_rescan_xpub(
         flush=True,
     )
 
-    pruned = _prune_cached_utxos(cached, fetch_address_utxos)
+    pruned, _live_snapshot = _prune_cached_utxos(
+        cached, fetch_address_utxos,
+    )
     pruned = _mempool_pending_nach_prune(
         xpub,
         cached,
@@ -6410,11 +6435,29 @@ def sync_xpub_zum_tip(
                 f"{label}: prüfe {len(alt)} bekannte UTXO(s), Gap ab #{scan_end}…"
             )
 
-    live = _prune_cached_utxos(
+    # Ein listunspent-Durchgang: Prune + neue Empfänge auf denselben Adressen.
+    # Früher: prune listunspent + extra_same listunspent = doppelt so langsam.
+    live, extra_same = _prune_cached_utxos(
         alt,
         fetch_address_utxos,
         verify_utxo_spent=verify_utxo_spent,
+        fetch_addresses_utxos=fetch_addresses_utxos,
+        on_progress=on_progress,
+        progress_label=f"Live {label}",
     )
+    # verify_utxo_spent-Pfad liefert kein Adress-Snapshot → einmal nachholen.
+    if (
+        not extra_same
+        and addrs_cache
+        and (fetch_address_utxos or fetch_addresses_utxos)
+    ):
+        extra_same = _fetch_address_batch_utxos(
+            addrs_cache,
+            fetch_address_utxos,
+            fetch_addresses_utxos,
+            progress_label=f"Live {label}",
+            on_progress=on_progress,
+        )
     live = _mempool_pending_nach_prune(
         xpub,
         alt,
@@ -6423,15 +6466,6 @@ def sync_xpub_zum_tip(
         wallet=wallet,
         cache_dir=cache_dir,
     )
-    extra_same: list[dict] = []
-    if addrs_cache and (fetch_address_utxos or fetch_addresses_utxos):
-        extra_same = _fetch_address_batch_utxos(
-            addrs_cache,
-            fetch_address_utxos,
-            fetch_addresses_utxos,
-            progress_label=f"Live {label}",
-            on_progress=on_progress,
-        )
     new_end = scan_end
     extra_utxos: list[dict] = []
     extra_window: list[dict] = []

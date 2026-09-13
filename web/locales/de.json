@@ -235,6 +235,7 @@
   "dock.empfangIndex": "Index #{n}",
   "dock.empfangLade": "Empfangsadresse wird ermittelt…",
   "dock.empfangPuls": "Einen Moment — ich denke nach…",
+  "dock.empfangSyncing": "Einen Moment — Wallet wird aktualisiert…",
   "dock.empfangQrFehlt": "QR nicht darstellbar",
   "dock.empfangReadOnly": "Read-only-Wallet ausgewählt",
   "dock.empfangSourceCache": "Schätzung aus Cache — Electrs/Fulcrum nicht erreichbar; Adresse könnte schon benutzt sein",

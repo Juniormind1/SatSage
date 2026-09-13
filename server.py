@@ -6870,11 +6870,41 @@ def starte_wallet_aktualisierung(
                     stand.tick(text)
 
             zaehler = {"ok": 0, "utxos": 0}
+            # xpub → Nav-ID, damit die GUI je fertigem Wallet „gerade eben“ zeigt
+            # (nicht erst wenn alle Wallets durch sind).
+            id_nach_schluessel = {
+                e.analyse_schluessel: wallets_mod.eintrag_id(e)
+                for e in eintraege
+            }
+            if isinstance(job.meta, dict):
+                job.meta["done_wallet_ids"] = []
+                job.meta["total_wallets"] = len(eintraege)
 
             def on_done(xpub, utxos):
                 if utxos is not None:
                     zaehler["ok"] += 1
                     zaehler["utxos"] += len(utxos)
+                wid = id_nach_schluessel.get(xpub)
+                if not wid or not isinstance(job.meta, dict):
+                    return
+                fertig = list(job.meta.get("done_wallet_ids") or [])
+                if wid in fertig:
+                    return
+                fertig.append(wid)
+                job.meta["done_wallet_ids"] = fertig
+                job.meta["done_wallets"] = len(fertig)
+                # Leichte Message für Poller — ohne Log-Flut.
+                name = next(
+                    (
+                        e.display_name for e in eintraege
+                        if wallets_mod.eintrag_id(e) == wid
+                    ),
+                    wid,
+                )
+                job.message = (
+                    f"Wallet-Tip {len(fertig)}/{len(eintraege)}: "
+                    f"„{name}“ aktuell"
+                )
 
             main.sync_wallets_zum_tip(
                 [e.analyse_schluessel for e in eintraege],

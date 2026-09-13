@@ -10,6 +10,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 ## [Unveröffentlicht]
 
 - **Steuerjahr · Chart:** UTXO-Betragsbeschriftungen am Plot entfernt (nur noch Hover-Tooltip).
+- **Start-/Tip-Aktualisierung:** Nav zeigt „gerade eben“ je Wallet, sobald dessen Tip fertig ist — nicht erst, wenn alle Wallets durch sind (`done_wallet_ids` im Job-Meta). Light-Tip: ein `listunspent`-Durchgang pro bekannter Adresse (vorher Prune + Live doppelt). Empfangs-Atem läuft auch bei Read-only und nach Wallet-Wechsel, solange dieses Wallet noch „aktualisiere…“ ist (nicht nur beim ersten schnellen Wallet).
+
 - **Herkunft · Abbrechen:** Statuszeile fixiert den Knopf rechts (kein Springen bei wachsendem Text); Abbruch auch vor Job-ID und ohne Event-Bubbling zum UTXO-Kopf.
 - **Herkunft · Fan-Out-Hang:** Bei Txs mit hunderten Outputs (z. B. 608 Outs) hing der Trace in `match_own_address` → `resolve_address` (HD-Suche je fremder Adresse, Abbruch wirkungslos). Jetzt nur O(1)-Lookups; Eigentums-Scan meldet Fortschritt und ist cancelbar.
 - **Herkunft · Job-Klick:** Wallet-Name in Job-Meta (`wallet_name`); nach Browser-Neustart kein „unbekanntes Wallet“ mehr beim Anbinden eines laufenden Trace-Jobs.
