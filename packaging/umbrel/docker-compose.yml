@@ -7,7 +7,7 @@ services:
       APP_PORT: 8730
 
   web:
-    image: ghcr.io/juniormind1/satsage:0.9.3-rc2@sha256:f7e215c294a9563010c472c1342f3dca0f74a99da539ee19948622c8dcc62c52
+    image: ghcr.io/juniormind1/satsage:0.9.3@sha256:76419761ccd6fba6442eeba91e5fec4fd76deb141354d24075e787b936dc8e0a
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m
