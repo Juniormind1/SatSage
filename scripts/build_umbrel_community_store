@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Derive a Community App Store tree from packaging/umbrel/.
+#
+# umbrelOS requires a community store repo to look like this:
+#   umbrel-app-store.yml          (store id + name, repo root)
+#   <store-id>-<app-id>/          (app dir; manifest `id` must match it)
+#
+# That prefixed ID is a different app identity than the official store's
+# `satsage`, so data does not carry over between the two.
+#
+# Usage:
+#   ./scripts/build_umbrel_community_store [store-id] [ziel]
+#
+# Full guide: doc/UMBREL-packaging.md
+set -euo pipefail
+
+STORE_ID="${1:-juniormind}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${2:-$ROOT/build/umbrel-community-store}"
+SRC="$ROOT/packaging/umbrel"
+APP_ID="${STORE_ID}-satsage"
+APP_DIR="$OUT/$APP_ID"
+
+ICON_BASE="https://raw.githubusercontent.com/Juniormind1/SatSage/main"
+ICON_URL="${ICON_BASE}/web/img/pfeiffe-icon.png"
+
+case "$STORE_ID" in
+  *[!a-z-]*) echo "store-id darf nur a-z und '-' enthalten: $STORE_ID" >&2; exit 1 ;;
+esac
+[ -f "$SRC/umbrel-app.yml" ] || { echo "$SRC fehlt" >&2; exit 1; }
+
+rm -rf "$OUT"
+mkdir -p "$APP_DIR"
+
+cat > "$OUT/umbrel-app-store.yml" <<EOF
+id: "${STORE_ID}"
+name: "Juniormind"
+EOF
+
+cp "$SRC/umbrel-app.yml" "$SRC/docker-compose.yml" "$SRC/exports.sh" "$APP_DIR/"
+
+# Die App-ID traegt im Community-Store das Store-Praefix. Damit aendern sich
+# auch der vom Framework injizierte Containername und das Datenverzeichnis.
+sed -i "s|^id: satsage$|id: ${APP_ID}|" "$APP_DIR/umbrel-app.yml"
+sed -i "s|^      APP_HOST: satsage_web_1$|      APP_HOST: ${APP_ID}_web_1|" "$APP_DIR/docker-compose.yml"
+
+# Offizielle Pakete lassen `icon` weg (Umbrel hostet die Assets selbst);
+# Community-Stores geben es als URL an.
+sed -i "s|^name: SatSage$|name: SatSage\nicon: ${ICON_URL}|" "$APP_DIR/umbrel-app.yml"
+
+pruefe() {
+  grep -q "$2" "$1" || { echo "Ableitung fehlgeschlagen: $2 nicht in $1" >&2; exit 1; }
+}
+pruefe "$APP_DIR/umbrel-app.yml" "^id: ${APP_ID}$"
+pruefe "$APP_DIR/umbrel-app.yml" "^icon: "
+pruefe "$APP_DIR/docker-compose.yml" "APP_HOST: ${APP_ID}_web_1"
+
+echo "Store-Baum unter: $OUT"
+find "$OUT" -type f | sed "s|$OUT/|  |"
+echo
+echo "Naechster Schritt: Inhalt von $OUT in das Store-Repo committen"
+echo "(Default-Branch! umbrelOS liest nur den Default-Branch)."
