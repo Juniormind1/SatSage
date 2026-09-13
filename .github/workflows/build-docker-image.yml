@@ -1,0 +1,99 @@
+name: Build container image (multi-arch)
+
+# Baut das SatSage-Container-Image für linux/amd64 + linux/arm64 und schiebt es
+# nach ghcr.io. Der Umbrel App Store verlangt beide Architekturen (Raspberry Pi
+# 4/5) und ein per Digest gepinntes, öffentlich ziehbares Image — compose `build:`
+# ist dort nicht erlaubt.
+#
+# Der ausgegebene Manifest-List-Digest gehört in die `image:`-Zeile des
+# Umbrel-Pakets (packaging/umbrel/docker-compose.yml).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image-Tag (Vorgabe: Inhalt von VERSION)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/satsage
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version bestimmen
+        id: version
+        run: |
+          eingabe="${{ github.event.inputs.version }}"
+          if [ -n "$eingabe" ]; then
+            version="$eingabe"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(tr -d '[:space:]' < VERSION)"
+          fi
+          datei="$(tr -d '[:space:]' < VERSION)"
+          if [ "$version" != "$datei" ]; then
+            echo "::warning::Image-Tag '$version' weicht von VERSION ('$datei') ab."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Image-Tag: $version"
+
+      - name: BTC-Preis-Bundle bis Tip
+        run: |
+          chmod +x scripts/refresh_btc_price_bundle.py
+          python3 scripts/refresh_btc_price_bundle.py
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build und Push (amd64 + arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Digest und Architekturen prüfen
+        run: |
+          ref="${IMAGE}:${{ steps.version.outputs.version }}"
+          digest="${{ steps.build.outputs.digest }}"
+          echo "Manifest-List-Digest: $digest"
+          docker buildx imagetools inspect "$ref"
+          beschreibung="$(docker buildx imagetools inspect "$ref")"
+          for arch in linux/amd64 linux/arm64; do
+            echo "$beschreibung" | grep -q "Platform: *${arch}$" \
+              || { echo "::error::${arch} fehlt im Manifest"; exit 1; }
+          done
+          {
+            echo "## Umbrel-Paket aktualisieren"
+            echo
+            echo "Zeile in \`packaging/umbrel/docker-compose.yml\`:"
+            echo
+            echo '```yaml'
+            echo "    image: ${ref}@${digest}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

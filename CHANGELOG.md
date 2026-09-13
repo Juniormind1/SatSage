@@ -9,6 +9,14 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.3] - 2026-09-13
+
+- **Version:** 0.9.3 — Umbrel-Paketierung: SatSage läuft als App im Umbrel App Store und nutzt den dort installierten Bitcoin Node, Electrum-Server und mempool.
+- **Umbrel · Managed-Modus:** Neuer Wert `SATSAGE_MANAGED_BY=umbrel`. Electrum-, Core- und Mempool-Adressen kommen als Compose-Env aus den Umbrel-Dependencies (`electrs`, transitiv `bitcoin`) und werden zur Laufzeit übernommen, ohne in die `.env` geschrieben zu werden. Die Datenquellen-Felder `own_fulcrum`/`own_core` sind wie unter StartOS gesperrt; der Managed-Hinweis nennt Umbrel und den erkannten Indexer.
+- **Umbrel · Login:** Umbrel reicht `APP_PASSWORD` als `SATSAGE_BOOTSTRAP_PASSWORD` herein; SatSage hinterlegt daraus seinen Passwort-Hash und verlangt hinter dem `app_proxy` weiterhin den eigenen Login — das Docker-Netz gilt als nicht vertrauenswürdig. Die Login-Seite verweist auf die Umbrel-App-Details.
+- **Intern:** Die Start9-spezifischen Modus-Abfragen laufen jetzt über die Mengen `_NODE_MANAGED`/`_MANAGED_MODI`; `_start9_electrum_indexer` heißt `_electrum_indexer`, die Bridge-Konstanten heißen `_BRIDGE_QUELLEN`/`_BRIDGE_SCHLUESSEL`. Verhalten unter StartOS und Specter unverändert.
+- **Container:** `packaging/Dockerfile` setzt `SATSAGE_MANAGED_BY` nicht mehr fest auf `start9` — der Modus kommt von der Plattform (StartOS-Daemon-Env bzw. Umbrel-Compose). `/data` gehört `1000:1000`, weil Umbrel den Dienst unter dieser UID startet.
+
 ## [0.9.2] - 2026-09-11
 
 - **Version:** 0.9.2 — Wallet-Öffnen/Tip-Sync schneller, „Nur bekannte UTXOs“, Bisq-Soft-Labels, Wallet-Einstellungen klarer.

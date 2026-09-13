@@ -178,17 +178,27 @@ button:hover{filter:brightness(1.08)}
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
 
+# Plattformen, die Node- und Indexer-Adressen per Prozess-Env vorgeben und
+# deren Datenquellen-Felder deshalb in der UI gesperrt sind.
+_NODE_MANAGED = frozenset(("start9", "umbrel"))
+# Alle Modi, in denen SatSage nicht allein über die eigene .env konfiguriert wird.
+_MANAGED_MODI = frozenset(("specter", "start9", "umbrel"))
+# Anzeigename je Modus für Hinweise und Fehlermeldungen.
+_MANAGED_PLATTFORM = {"start9": "Start9", "umbrel": "Umbrel", "specter": "Specter"}
+
 
 def _managed_by_from_env(explicit: str | None, env_path: Path) -> str | None:
-    if explicit in ("specter", "start9"):
+    if explicit in _MANAGED_MODI:
         return explicit
     try:
         values = EnvFile.load(env_path).values()
     except (OSError, UnicodeError):
         values = {}
-    managed = os.environ.get("SATSAGE_MANAGED_BY") or values.get("SATSAGE_MANAGED_BY", "")
-    if str(managed).strip().lower() == "start9":
-        return "start9"
+    managed = str(
+        os.environ.get("SATSAGE_MANAGED_BY") or values.get("SATSAGE_MANAGED_BY", "")
+    ).strip().lower()
+    if managed in _NODE_MANAGED:
+        return managed
     flag = os.environ.get("SATSAGE_START9")
     if flag is None:
         flag = values.get("SATSAGE_START9", "")
@@ -198,7 +208,7 @@ def _managed_by_from_env(explicit: str | None, env_path: Path) -> str | None:
 
 
 def _managed_mode(state: AppState) -> bool:
-    return state.managed_by in ("specter", "start9")
+    return state.managed_by in _MANAGED_MODI
 
 
 def _env_setting(state: AppState | None, key: str) -> str:
@@ -399,14 +409,15 @@ def _write_password_hash(state, password: str) -> None:
 
 
 def _seed_managed_password(state) -> None:
-    """Keep StartOS uiPassword and the app hash in sync.
+    """Keep the platform password and the app hash in sync.
 
-    On StartOS the store password is the single source of truth (Basic Auth +
-    SatSage login). Re-hash whenever the bootstrap value no longer verifies,
-    e.g. after rotate-password while SatSage was stopped.
+    On StartOS (uiPassword) and Umbrel (``APP_PASSWORD``) the platform value is
+    the single source of truth for the SatSage login. Re-hash whenever the
+    bootstrap value no longer verifies, e.g. after a password rotation while
+    SatSage was stopped.
     """
     bootstrap = os.environ.get("SATSAGE_BOOTSTRAP_PASSWORD", "")
-    if state.managed_by != "start9" and not bootstrap:
+    if state.managed_by not in _NODE_MANAGED and not bootstrap:
         return
     path = _auth_file(state)
     try:
@@ -416,8 +427,9 @@ def _seed_managed_password(state) -> None:
     except (OSError, UnicodeError) as exc:
         raise RuntimeError("SatSage-Passwortdatei kann nicht gelesen werden") from exc
     if not bootstrap:
-        if state.managed_by == "start9" and not existing:
-            raise RuntimeError("StartOS-Bootstrap-Passwort fehlt")
+        if state.managed_by in _NODE_MANAGED and not existing:
+            plattform = _MANAGED_PLATTFORM.get(state.managed_by, state.managed_by)
+            raise RuntimeError(f"{plattform}-Bootstrap-Passwort fehlt")
         return
     if existing and _verify_password(bootstrap, existing):
         os.environ.pop("SATSAGE_BOOTSTRAP_PASSWORD", None)
@@ -497,9 +509,10 @@ class AppState:
 
     def env(self) -> EnvFile:
         env = EnvFile.load(self.env_path)
-        if self.managed_by == "start9":
-            # Daemon env from StartOS (bridges) is process env, not .env —
-            # promote into runtime_values without overriding a user .env value.
+        if self.managed_by in _NODE_MANAGED:
+            # Daemon env from the platform (StartOS bridges, Umbrel compose)
+            # is process env, not .env — promote it into runtime_values without
+            # overriding a value the user set in their own .env.
             for key in (
                 "BITCOIND_HOST",
                 "ELECTRS_HOST",
@@ -524,8 +537,9 @@ class AppState:
                 if proc and key not in env.values():
                     env.runtime_values[key] = proc
             values = env.values()
-            # Prefer explicit FULCRUM_* from the StartOS daemon (electrs or Fulcrum
-            # package). Only fall back to ELECTRS_HOST when FULCRUM_HOST is empty.
+            # Prefer explicit FULCRUM_* from the platform (StartOS daemon or the
+            # Umbrel electrs dependency). Only fall back to ELECTRS_HOST when
+            # FULCRUM_HOST is empty.
             if not (values.get("FULCRUM_HOST") or "").strip():
                 bridge = (values.get("ELECTRS_HOST") or "electrs").strip()
                 if bridge:
@@ -534,14 +548,15 @@ class AppState:
                 bridge = (values.get("BITCOIND_HOST") or "bitcoind").strip()
                 if bridge:
                     env.runtime_values["NODE_IP"] = bridge
-            # StartOS mounts bitcoind's cookie read-only. Keep the credentials
-            # runtime-only; never write them into the user's .env file.
+            # StartOS mounts bitcoind's cookie read-only, Umbrel passes RPC
+            # credentials as compose env. Keep them runtime-only; never write
+            # them into the user's .env file.
             cookie_user, cookie_password = rpc_credentials_from_env(values)
             if cookie_user and not (values.get("RPCUSER") or "").strip():
                 env.runtime_values["RPCUSER"] = cookie_user
             if cookie_password and not (values.get("RPCPASSWORD") or "").strip():
                 env.runtime_values["RPCPASSWORD"] = cookie_password
-        elif self.managed_by not in ("specter", "start9"):
+        elif self.managed_by not in _MANAGED_MODI:
             # Desktop: lokaler bitcoind → UTXO-Slot (still); Lookup nur wenn leer.
             _apply_local_core_runtime(env)
         return env
@@ -1222,8 +1237,8 @@ def _wallets_config_gesperrt(state: AppState) -> None:
         raise ApiError(403, "Wallets werden von Specter verwaltet und können hier nicht geändert werden.")
 
 
-_START9_BRIDGE_QUELLEN = frozenset(("own_fulcrum", "own_core"))
-_START9_BRIDGE_SCHLUESSEL = frozenset((
+_BRIDGE_QUELLEN = frozenset(("own_fulcrum", "own_core"))
+_BRIDGE_SCHLUESSEL = frozenset((
     "FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_PORT", "FULCRUM_SSL",
     "FULCRUM_TOR_PORT", "FULCRUM_TOR_SSL",
     "NODE_IP", "RPCHOST", "BITCOIN_RPC_HOST", "RPCPORT", "RPCUSER",
@@ -1231,8 +1246,12 @@ _START9_BRIDGE_SCHLUESSEL = frozenset((
 ))
 
 
-def _start9_electrum_indexer(werte: dict | None) -> str:
-    """``electrs`` oder ``fulcrum`` aus StartOS-Daemon-Env (Select Indexer)."""
+def _electrum_indexer(werte: dict | None) -> str:
+    """``electrs`` oder ``fulcrum`` aus Plattform-Env.
+
+    StartOS setzt den Wert über die Action „Select Indexer“, Umbrel über die
+    gewählte ``electrs``-Dependency. Ohne Angabe bleibt es bei ``electrs``.
+    """
     roh = str((werte or {}).get("SATSAGE_ELECTRUM_INDEXER") or "").strip().lower()
     if roh in ("fulcrum", "electrs"):
         return roh
@@ -1348,7 +1367,7 @@ def _discover_local_core_cached(werte: dict | None = None):
 
 def _local_core_status_for_api(state: AppState) -> dict | None:
     """Erkennung für die Datenquellen-UI — ohne Secrets, ohne Managed-Modi."""
-    if state.managed_by in ("specter", "start9"):
+    if state.managed_by in _MANAGED_MODI:
         return None
     from core import local_bitcoind as local_core
 
@@ -1407,12 +1426,20 @@ def _managed_hint(state: AppState, werte: dict | None) -> str | None:
             "Specters Cache gesedet; Herkunft läuft weiter über SatSage."
         )
     if state.managed_by == "start9":
-        indexer = _start9_electrum_indexer(werte)
+        indexer = _electrum_indexer(werte)
         label = "Fulcrum" if indexer == "fulcrum" else "Electrs"
         return (
             f"{label} und Core RPC kommen aus Start9-Dependencies "
             f"(Indexer: {indexer}; Wechsel über StartOS-Action „Select Indexer“); "
             "Wallets und übrige Einstellungen werden hier konfiguriert."
+        )
+    if state.managed_by == "umbrel":
+        indexer = _electrum_indexer(werte)
+        label = "Fulcrum" if indexer == "fulcrum" else "Electrs"
+        return (
+            f"{label} und Bitcoin Core kommen aus den auf diesem Umbrel "
+            "installierten Apps — hier nicht doppelt pflegen. Wallets und "
+            "übrige Einstellungen werden hier konfiguriert."
         )
     return None
 
@@ -1424,26 +1451,26 @@ def _datenquellen_config_gesperrt(
     werte: dict | None = None,
     aktion: str = "speichern",
 ) -> None:
-    """Schützt Specter komplett und Start9 nur seine beiden Bridge-Quellen."""
+    """Schützt Specter komplett, StartOS/Umbrel nur ihre Bridge-Quellen."""
     if state.managed_by == "specter":
         raise ApiError(403, "Datenquellen werden von Specter verwaltet und können hier nicht geändert werden.")
-    if state.managed_by != "start9":
+    if state.managed_by not in _NODE_MANAGED:
         return
+    if state.managed_by == "umbrel":
+        quelle_text = "Electrum-Server und Bitcoin Core kommen aus den Umbrel-Apps"
+        schluessel_text = "Electrum-/Core-Bridge-Schlüssel werden von den Umbrel-Apps verwaltet."
+    else:
+        quelle_text = "Electrs und Core RPC werden von Start9-Dependencies verwaltet"
+        schluessel_text = "Electrs/Core-Bridge-Schlüssel werden von Start9-Dependencies verwaltet."
 
-    if quelle in _START9_BRIDGE_QUELLEN or (
-        aktion == "verwerfen" and quelle in _START9_BRIDGE_QUELLEN
+    if quelle in _BRIDGE_QUELLEN or (
+        aktion == "verwerfen" and quelle in _BRIDGE_QUELLEN
     ):
-        raise ApiError(
-            403,
-            "Electrs und Core RPC werden von Start9-Dependencies verwaltet und können hier nicht geändert werden.",
-        )
+        raise ApiError(403, f"{quelle_text} und können hier nicht geändert werden.")
     if werte:
-        gesperrt = sorted(set(werte) & _START9_BRIDGE_SCHLUESSEL)
+        gesperrt = sorted(set(werte) & _BRIDGE_SCHLUESSEL)
         if gesperrt:
-            raise ApiError(
-                403,
-                "Electrs/Core-Bridge-Schlüssel werden von Start9-Dependencies verwaltet.",
-            )
+            raise ApiError(403, schluessel_text)
 
 
 def api_config(state: AppState, query: dict) -> dict:
@@ -1505,7 +1532,7 @@ def api_config(state: AppState, query: dict) -> dict:
         "managed_by": state.managed_by,
         "managed_hint": _managed_hint(state, werte),
         "electrum_indexer": (
-            _start9_electrum_indexer(werte) if state.managed_by == "start9" else None
+            _electrum_indexer(werte) if state.managed_by in _NODE_MANAGED else None
         ),
         "specter_labels": (
             _specter_labels_for_api(state) if state.managed_by == "specter" else None
@@ -3148,8 +3175,8 @@ def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
 def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
     """Übernimmt erkannten Loopback-bitcoind in die .env (UTXO-Slot; Lookup nur wenn leer)."""
     _datenquellen_config_gesperrt(state)
-    if state.managed_by in ("specter", "start9"):
-        raise ApiError(403, "Im Managed-Modus kommt Core von Start9/Specter.")
+    if state.managed_by in _MANAGED_MODI:
+        raise ApiError(403, "Im Managed-Modus kommt Core von der Plattform.")
     from core import local_bitcoind as local_core
 
     werte = state.env().values()
@@ -5108,17 +5135,23 @@ class Handler(BaseHTTPRequestHandler):
                 '<button type="submit">Passwort setzen</button></form>'
             )
         if password_set:
-            start9_hinweis = (
-                '<p class="hinweis">StartOS: Benutzername <strong>admin</strong>. '
-                "Bei gestopptem Dienst finden oder rotieren Sie das Passwort unter "
-                "<strong>Actions &amp; Config</strong>.</p>"
-                if self.state.managed_by == "start9"
-                else ""
-            )
+            if self.state.managed_by == "start9":
+                plattform_hinweis = (
+                    '<p class="hinweis">StartOS: Benutzername <strong>admin</strong>. '
+                    "Bei gestopptem Dienst finden oder rotieren Sie das Passwort unter "
+                    "<strong>Actions &amp; Config</strong>.</p>"
+                )
+            elif self.state.managed_by == "umbrel":
+                plattform_hinweis = (
+                    '<p class="hinweis">Umbrel zeigt dieses Passwort in den '
+                    "App-Details von SatSage an.</p>"
+                )
+            else:
+                plattform_hinweis = ""
             inhalt = (
                 "<h1>Anmelden</h1>"
                 "<p>Bitte Passwort eingeben.</p>"
-                f"{start9_hinweis}"
+                f"{plattform_hinweis}"
                 '<form action="/api/auth/login" method="post">'
                 '<label for="password">Passwort</label>'
                 '<input id="password" name="password" type="password" '
