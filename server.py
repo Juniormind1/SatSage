@@ -272,6 +272,105 @@ def _bind_host(bind: str | None = None, *, state=None, args=None) -> str:
         return str(cli_bind).strip()
     return _env_setting(state, "SATSAGE_BIND") or BIND_HOST
 
+
+def _ist_local_only(state=None) -> bool:
+    """Ob der Listener tatsächlich nur über Loopback erreichbar ist.
+
+    Hinter Umbrels ``app_proxy`` bindet SatSage an ``0.0.0.0`` und ist aus
+    dem ganzen LAN erreichbar — die Fußzeile darf dann nicht das Gegenteil
+    behaupten.
+    """
+    try:
+        return ipaddress.ip_address(_bind_host(state=state)).is_loopback
+    except ValueError:
+        return False
+
+
+#: Die Anmeldeseite wird vom Server gerendert und erreicht die Kataloge unter
+#: ``web/locales/`` nicht. Sie ist außerdem das Erste, was ein Nutzer aus dem
+#: App Store sieht — sie darf nicht einsprachig sein.
+_LOGIN_TEXTE = {
+    "de": {
+        "titel": "SatSage – Anmeldung",
+        "anmelden": "Anmelden",
+        "passwort": "Passwort",
+        "passwort_eingeben": "Bitte Passwort eingeben.",
+        "willkommen": "Willkommen",
+        "noch_kein_passwort": (
+            "Noch kein Passwort — unten einrichten, "
+            "oder mit Token von der Konsole öffnen."
+        ),
+        "ersteinrichtung": "Ersteinrichtung",
+        "nur_loopback": "Ohne Passwort ist die Einrichtung nur über Loopback möglich.",
+        "neues_passwort": "Neues Passwort",
+        "wiederholen": "Wiederholen",
+        "passwort_setzen": "Passwort setzen",
+        "status_pruefen": "Status prüfen",
+        "hinweis_start9": (
+            "StartOS: Benutzername <strong>admin</strong>. Bei gestopptem Dienst "
+            "finden oder rotieren Sie das Passwort unter "
+            "<strong>Actions &amp; Config</strong>."
+        ),
+        "hinweis_umbrel": "Umbrel zeigt dieses Passwort in den App-Details von SatSage an.",
+    },
+    "en": {
+        "titel": "SatSage – Sign in",
+        "anmelden": "Sign in",
+        "passwort": "Password",
+        "passwort_eingeben": "Please enter your password.",
+        "willkommen": "Welcome",
+        "noch_kein_passwort": (
+            "No password yet — set one below, "
+            "or open with the token from the console."
+        ),
+        "ersteinrichtung": "First-time setup",
+        "nur_loopback": "Without a password, setup is only possible over loopback.",
+        "neues_passwort": "New password",
+        "wiederholen": "Repeat",
+        "passwort_setzen": "Set password",
+        "status_pruefen": "Check status",
+        "hinweis_start9": (
+            "StartOS: username <strong>admin</strong>. While the service is "
+            "stopped you can find or rotate the password under "
+            "<strong>Actions &amp; Config</strong>."
+        ),
+        "hinweis_umbrel": "Umbrel shows this password in the SatSage app details.",
+    },
+}
+
+
+def _sprache_aus_accept_language(header: str | None) -> str | None:
+    """Beste unterstützte Sprache aus einem ``Accept-Language``-Header.
+
+    Unterstützt werden nur ``de`` und ``en``. ``*`` zählt nicht als Treffer,
+    weil sich daraus keine Absicht ablesen lässt, und ``q=0`` heißt
+    ausdrücklich „nicht akzeptabel“. Ohne Treffer ``None``.
+    """
+    beste: tuple[float, str] | None = None
+    for eintrag in str(header or "").split(","):
+        tag, _, parameter = eintrag.strip().partition(";")
+        tag = tag.strip().lower()
+        if tag.startswith("en"):
+            code = "en"
+        elif tag.startswith("de"):
+            code = "de"
+        else:
+            continue
+        gewicht = 1.0
+        for param in parameter.split(";"):
+            name, _, wert = param.partition("=")
+            if name.strip().lower() == "q":
+                try:
+                    gewicht = float(wert.strip())
+                except ValueError:
+                    gewicht = 0.0
+        if gewicht <= 0:
+            continue
+        if beste is None or gewicht > beste[0]:
+            beste = (gewicht, code)
+    return beste[1] if beste else None
+
+
 class ApiError(Exception):
     """Fehler mit HTTP-Status und Meldung für die Oberfläche."""
 
@@ -1473,7 +1572,7 @@ def _datenquellen_config_gesperrt(
             raise ApiError(403, schluessel_text)
 
 
-def api_config(state: AppState, query: dict) -> dict:
+def api_config(state: AppState, query: dict, accept_language: str | None = None) -> dict:
     from core.version import version as app_version
 
     entries = state.entries
@@ -1527,7 +1626,10 @@ def api_config(state: AppState, query: dict) -> dict:
         # Ohne Netzprobe — die Pille bleibt grau, bis /api/llm/status?check=1.
         "llm": llm_mod.status_dict(werte, check=False),
         "status_mail": status_mail_mod.als_dict(werte),
-        "ui_lang": _ui_lang_aus_env(werte),
+        "ui_lang": _ui_lang_fuer_web(werte, accept_language),
+        # Hinter Umbrels app_proxy bindet SatSage an 0.0.0.0 — die Fußzeile
+        # darf dann nicht "nur lokal erreichbar" behaupten.
+        "local_only": _ist_local_only(state),
         "ui_theme": _ui_theme_aus_env(werte),
         "managed_by": state.managed_by,
         "managed_hint": _managed_hint(state, werte),
@@ -1541,12 +1643,22 @@ def api_config(state: AppState, query: dict) -> dict:
     }
 
 
-def _ui_lang_aus_env(werte: dict) -> str:
-    """``de`` oder ``en`` aus UI_LANG; Default Deutsch."""
+def _ui_lang_fuer_web(werte: dict, accept_language: str | None = None) -> str:
+    """``de`` oder ``en`` für die Weboberfläche.
+
+    Eine ausdrückliche Wahl (``UI_LANG``) gewinnt immer. Ohne sie entscheidet
+    der Browser über ``Accept-Language`` — umbrelOS reicht seine eigene
+    Spracheinstellung nicht an Apps durch, das ist also das einzige Signal.
+    Gibt auch der nichts her, ist Englisch die Vorgabe: die Web-GUI hat im
+    App Store internationales Publikum. CLI und Terminal-Menü bleiben davon
+    unberührt und antworten weiter auf Deutsch.
+    """
     roh = str((werte or {}).get("UI_LANG") or "").strip().lower()
     if roh.startswith("en"):
         return "en"
-    return "de"
+    if roh.startswith("de"):
+        return "de"
+    return _sprache_aus_accept_language(accept_language) or "en"
 
 
 def _ui_theme_aus_env(werte: dict) -> str:
@@ -5120,56 +5232,52 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/")
             return
         password_set = _password_is_set(self.state)
+        lang = _ui_lang_fuer_web(
+            self.state.env().values(), self.headers.get("Accept-Language")
+        )
+        t = _LOGIN_TEXTE[lang]
         setup = ""
         if not password_set:
             setup = (
-                "<h2>Ersteinrichtung</h2>"
-                "<p>Ohne Passwort ist die Einrichtung nur über Loopback möglich.</p>"
+                f"<h2>{t['ersteinrichtung']}</h2>"
+                f"<p>{t['nur_loopback']}</p>"
                 '<form action="/api/auth/setup" method="post">'
-                '<label for="new-password">Neues Passwort</label>'
+                f'<label for="new-password">{t["neues_passwort"]}</label>'
                 '<input id="new-password" name="password" type="password" '
                 'autocomplete="new-password" required autofocus>'
-                '<label for="confirm-password">Wiederholen</label>'
+                f'<label for="confirm-password">{t["wiederholen"]}</label>'
                 '<input id="confirm-password" name="confirm" type="password" '
                 'autocomplete="new-password" required>'
-                '<button type="submit">Passwort setzen</button></form>'
+                f'<button type="submit">{t["passwort_setzen"]}</button></form>'
             )
         if password_set:
             if self.state.managed_by == "start9":
-                plattform_hinweis = (
-                    '<p class="hinweis">StartOS: Benutzername <strong>admin</strong>. '
-                    "Bei gestopptem Dienst finden oder rotieren Sie das Passwort unter "
-                    "<strong>Actions &amp; Config</strong>.</p>"
-                )
+                plattform_hinweis = f'<p class="hinweis">{t["hinweis_start9"]}</p>'
             elif self.state.managed_by == "umbrel":
-                plattform_hinweis = (
-                    '<p class="hinweis">Umbrel zeigt dieses Passwort in den '
-                    "App-Details von SatSage an.</p>"
-                )
+                plattform_hinweis = f'<p class="hinweis">{t["hinweis_umbrel"]}</p>'
             else:
                 plattform_hinweis = ""
             inhalt = (
-                "<h1>Anmelden</h1>"
-                "<p>Bitte Passwort eingeben.</p>"
+                f"<h1>{t['anmelden']}</h1>"
+                f"<p>{t['passwort_eingeben']}</p>"
                 f"{plattform_hinweis}"
                 '<form action="/api/auth/login" method="post">'
-                '<label for="password">Passwort</label>'
+                f'<label for="password">{t["passwort"]}</label>'
                 '<input id="password" name="password" type="password" '
                 'autocomplete="current-password" required autofocus>'
-                '<button type="submit">Anmelden</button></form>'
+                f'<button type="submit">{t["anmelden"]}</button></form>'
             )
         else:
             inhalt = (
-                "<h1>Willkommen</h1>"
-                "<p>Noch kein Passwort — unten einrichten, "
-                "oder mit Token von der Konsole öffnen.</p>"
+                f"<h1>{t['willkommen']}</h1>"
+                f"<p>{t['noch_kein_passwort']}</p>"
             )
         body = (
-            "<!doctype html><html lang=\"de\">"
+            f'<!doctype html><html lang="{lang}">'
             "<head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
             "<meta name=\"color-scheme\" content=\"light dark\">"
-            "<title>SatSage – Anmeldung</title>"
+            f"<title>{t['titel']}</title>"
             "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"/img/favicon-32.png\">"
             "<link rel=\"apple-touch-icon\" href=\"/img/apple-touch-icon.png\">"
             "<script>(function(){try{var t=localStorage.getItem('satsage-ui-theme');"
@@ -5185,7 +5293,7 @@ class Handler(BaseHTTPRequestHandler):
             "<span class=\"marke-zusatz\">know your sats</span>"
             "</div></div>"
             f"{inhalt}{setup}"
-            "<p class=\"fuss\"><a href=\"/api/health\">Status prüfen</a></p>"
+            f'<p class="fuss"><a href="/api/health">{t["status_pruefen"]}</a></p>'
             "</main></body></html>"
         ).encode("utf-8")
         self._send(200, body, "text/html; charset=utf-8")
@@ -5387,7 +5495,9 @@ class Handler(BaseHTTPRequestHandler):
         teile = [t for t in pfad.split("/") if t][1:]  # ohne 'api'
 
         if teile == ["config"] and methode == "GET":
-            return 200, api_config(state, query)
+            return 200, api_config(
+                state, query, self.headers.get("Accept-Language")
+            )
         if teile == ["config", "wallets"] and methode == "PUT":
             return 200, api_save_wallets(state, self._body())
         if teile == ["config", "wallets", "cache-vorschau"] and methode == "POST":

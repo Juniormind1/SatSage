@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.4] - 2026-09-13
+
+- **Version:** 0.9.4 — Weboberfläche spricht die Sprache des Browsers; Fußzeile behauptet nichts Falsches mehr.
+- **Web · Sprache:** Ohne gesetztes `UI_LANG` entscheidet jetzt der `Accept-Language`-Header des Browsers über die Oberflächensprache, sonst Englisch. Hintergrund: umbrelOS reicht seine eigene Spracheinstellung nicht an Apps durch, der Browser-Header ist das einzige verfügbare Signal. Der DE/EN-Umschalter überschreibt weiterhin alles und wird in `UI_LANG` gespeichert. CLI und Terminal-Menü bleiben unverändert bei Deutsch.
+- **Web · Anmeldeseite:** War hartcodiert Deutsch und damit die einzige Ansicht ohne Übersetzung — im App Store das Erste, was ein Nutzer sieht. Alle Texte inklusive der StartOS- und Umbrel-Hinweise liegen jetzt zweisprachig in `_LOGIN_TEXTE`; `<html lang>` und Seitentitel folgen der gewählten Sprache.
+- **Web · Fußzeile:** „127.0.0.1 — nur lokal erreichbar“ stand unabhängig von der tatsächlichen Bind-Adresse im HTML. Hinter Umbrels `app_proxy` bindet SatSage an `0.0.0.0` und ist aus dem ganzen LAN erreichbar — die Zeile erscheint jetzt nur noch, wenn der Listener wirklich auf Loopback sitzt (`local_only` in `/api/config`).
+
 ## [0.9.3] - 2026-09-13
 
 - **Version:** 0.9.3 — Umbrel-Paketierung: SatSage läuft als App im Umbrel App Store und nutzt den dort installierten Bitcoin Node, Electrum-Server und mempool.
