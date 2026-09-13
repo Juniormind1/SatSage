@@ -1682,12 +1682,37 @@ const EmpfangPuls = (() => {
   let payloadIx = 0;
   let wortIx = 0;
   const ATEM_MS = 2200;
+  /** Sonderatem: orangeB | ohNo | incoming */
+  let sonderQueue = [];
+  let sonder = null; // { typ, t0, phase?, walletId? }
+  const BTC_ORANGE = { r: 247, g: 147, b: 26 };
 
   function setzeAtemWort() {
     const kopf = $("#empfang-kopf");
     if (!kopf) return;
     const wort = ATEM_WORTE[wortIx % ATEM_WORTE.length];
     kopf.textContent = wort;
+  }
+
+  function setzeAtemTextSicht(sicht) {
+    const kopf = $("#empfang-kopf");
+    if (!kopf) return;
+    if (!document.querySelector(".empfang-pane--puls")) {
+      kopf.style.opacity = "";
+      kopf.style.color = "";
+      return;
+    }
+    const s = Math.max(0, Math.min(1, sicht));
+    kopf.style.opacity = String(s);
+    const dark = (typeof liesUiTheme === "function" ? liesUiTheme() : "dark") !== "light";
+    // Farbe mitatmen: dimm ↔ hell
+    if (dark) {
+      const v = Math.round(90 + 150 * s);
+      kopf.style.color = `rgb(${v},${v},${v})`;
+    } else {
+      const v = Math.round(180 - 140 * s);
+      kopf.style.color = `rgb(${v},${v},${v})`;
+    }
   }
 
   function stop() {
@@ -1697,8 +1722,10 @@ const EmpfangPuls = (() => {
     }
     startTs = 0;
     gewechseltInZyklus = false;
+    sonderQueue = [];
+    sonder = null;
     const pane = $("#empfang-pane");
-    if (pane) pane.classList.remove("empfang-pane--puls");
+    if (pane) pane.classList.remove("empfang-pane--puls", "empfang-pane--konfetti");
     const qr = $("#empfang-qr");
     if (qr) {
       qr.classList.remove("empfang-qr--puls");
@@ -1712,11 +1739,77 @@ const EmpfangPuls = (() => {
     const kopf = $("#empfang-kopf");
     if (kopf) {
       kopf.textContent = t("dock.empfangHead");
+      kopf.style.opacity = "";
+      kopf.style.color = "";
     }
+    const konfetti = document.getElementById("empfang-konfetti");
+    if (konfetti) konfetti.remove();
     canvas = null;
     ctx = null;
     qrBmp = null;
     qrSeite = 0;
+  }
+
+  function ensureRunning() {
+    if (!raf) start();
+  }
+
+  function queueSonder(eintrag) {
+    sonderQueue.push(eintrag);
+    ensureRunning();
+  }
+
+  function flashOrangeB() {
+    queueSonder({
+      typ: "orangeB",
+      halteDanach: typeof empfangScanLaeuftFuer === "function"
+        && empfangScanLaeuftFuer(Zustand.walletId),
+    });
+  }
+
+  function flashOhNo() {
+    queueSonder({
+      typ: "ohNo",
+      halteDanach: typeof empfangScanLaeuftFuer === "function"
+        && empfangScanLaeuftFuer(Zustand.walletId),
+    });
+  }
+
+  function flashIncoming(walletId, sats, konfettiOpts) {
+    const wid = walletId || Zustand.walletId;
+    // auto: < 1 Mio bunt, ≥ 1 Mio alle Schnipsel gold/silber (goldAb überschreibbar)
+    const opts = Object.assign({ modus: "auto", goldAb: 1_000_000 }, konfettiOpts || {});
+    if (sats != null && sats !== "") opts.sats = Number(sats);
+    queueSonder({
+      typ: "incoming",
+      walletId: wid,
+      sats: opts.sats,
+      konfettiOpts: opts,
+      halteDanach: typeof empfangScanLaeuftFuer === "function"
+        && empfangScanLaeuftFuer(wid),
+    });
+  }
+
+  /** Tx im Block bestätigt — grüner Haken, einen Atemzug. */
+  function flashHaken() {
+    queueSonder({
+      typ: "haken",
+      halteDanach: typeof empfangScanLaeuftFuer === "function"
+        && empfangScanLaeuftFuer(Zustand.walletId),
+    });
+  }
+
+  function beendeSonderWennIdle(halteDanach) {
+    if (halteDanach || sonderQueue.length) return;
+    // Nach Event-Atem wieder Empfangsadresse, wenn kein Scan/Sync läuft.
+    setTimeout(() => {
+      if (raf && !sonder && !sonderQueue.length) {
+        stop();
+        if (Zustand.walletId && !Zustand.lernThema) {
+          ladeEmpfang(Zustand.walletId).catch(() => {});
+        }
+      }
+    }, 0);
   }
 
   function ladeBild(src) {
@@ -1805,23 +1898,78 @@ const EmpfangPuls = (() => {
     });
   }
 
-  async function zeichne(sichtQr) {
+  function zeichneOhNoMaske(seite, aScale, dark) {
+    const bg = dark ? 0 : 255;
+    const out = ctx.createImageData(seite, seite);
+    const od = out.data;
+    for (let i = 0; i < od.length; i += 4) {
+      od[i] = od[i + 1] = od[i + 2] = bg;
+      od[i + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, aScale));
+    ctx.fillStyle = dark ? "#fff" : "#111";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // Zwei Zeilen füllen zusammen ~80 % der Quadratfläche.
+    const fs = Math.max(28, Math.floor(seite * 0.38));
+    ctx.font = `bold ${fs}px system-ui, sans-serif`;
+    ctx.fillText("OH", seite / 2, seite * 0.34);
+    ctx.fillText("NO!", seite / 2, seite * 0.70);
+    ctx.restore();
+  }
+
+  function zeichneHakenMaske(seite, aScale, dark) {
+    const bg = dark ? 0 : 255;
+    const out = ctx.createImageData(seite, seite);
+    const od = out.data;
+    for (let i = 0; i < od.length; i += 4) {
+      od[i] = od[i + 1] = od[i + 2] = bg;
+      od[i + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, aScale));
+    ctx.fillStyle = "#3ddc84"; // grüner Haken
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // ~80 % der Quadratseite
+    const fs = Math.max(40, Math.floor(seite * 0.8));
+    ctx.font = `bold ${fs}px system-ui, "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
+    ctx.fillText("✓", seite / 2, seite / 2 + fs * 0.06);
+    ctx.restore();
+  }
+
+  async function zeichneGlyphAtem(sichtQr, { art, orange = false, nurSchwarz = false } = {}) {
     const c = stelleCanvas();
     if (!c || !ctx) return;
     const seite = c.width;
-    const listen = maskenListe();
-    const art = listen[maskeIx % listen.length];
-    const luma = await bereiteMaskeLuma(art, seite);
-    const qr = await baueQrBitmap(seite);
-
     const dark = (typeof liesUiTheme === "function" ? liesUiTheme() : "dark") !== "light";
-    // Dark: schwarzer Grund, weißer Randglanz; Light: umgekehrt.
     const bg = dark ? 0 : 255;
     const glow = dark ? 255 : 0;
+    const aScale = Math.max(0, Math.min(1, sichtQr));
+
+    if (nurSchwarz) {
+      ctx.fillStyle = dark ? "#000" : "#fff";
+      ctx.fillRect(0, 0, seite, seite);
+      return;
+    }
+
+    if (art === "ohNo") {
+      zeichneOhNoMaske(seite, aScale, dark);
+      return;
+    }
+    if (art === "haken") {
+      zeichneHakenMaske(seite, aScale, dark);
+      return;
+    }
+
+    const luma = await bereiteMaskeLuma(art || "btc", seite);
+    const qr = orange ? null : await baueQrBitmap(seite);
     const out = ctx.createImageData(seite, seite);
     const od = out.data;
     const qd = qr ? qr.data : null;
-    const aScale = Math.max(0, Math.min(1, sichtQr));
     const innen = new Uint8Array(seite * seite);
     if (luma) {
       for (let p = 0; p < luma.length; p++) {
@@ -1833,13 +1981,21 @@ const EmpfangPuls = (() => {
       for (let x = 0; x < seite; x++, p++) {
         const i = p * 4;
         const maskA = luma ? Math.max(0, Math.min(1, (luma[p] - 40) / 180)) : 0;
+        let r = bg;
         let g = bg;
-        if (qd && maskA > 0.02 && aScale > 0) {
+        let b = bg;
+        if (maskA > 0.02 && aScale > 0) {
           const a = aScale * maskA;
-          g = Math.round(qd[i] * a + bg * (1 - a));
+          if (orange) {
+            r = Math.round(BTC_ORANGE.r * a + bg * (1 - a));
+            g = Math.round(BTC_ORANGE.g * a + bg * (1 - a));
+            b = Math.round(BTC_ORANGE.b * a + bg * (1 - a));
+          } else if (qd) {
+            const qg = qd[i];
+            r = g = b = Math.round(qg * a + bg * (1 - a));
+          }
         }
-        // Rand des Glyphs „erstrahlen“ lassen (Nachbar außerhalb).
-        if (innen[p]) {
+        if (innen[p] && !orange) {
           let rand = false;
           if (x === 0 || y === 0 || x === seite - 1 || y === seite - 1) {
             rand = true;
@@ -1849,44 +2005,366 @@ const EmpfangPuls = (() => {
           ) {
             rand = true;
           }
-          if (rand) {
-            // Einatmen: Rand darf scharf kommen; Ausatmen: mitdimmen (kein Abriss).
+          if (rand && aScale > 0.01) {
             const glowA = aScale;
-            if (glowA > 0.01) {
-              g = Math.round(glow * glowA + g * (1 - glowA));
-            }
+            r = Math.round(glow * glowA + r * (1 - glowA));
+            g = Math.round(glow * glowA + g * (1 - glowA));
+            b = Math.round(glow * glowA + b * (1 - glowA));
           }
         }
-        od[i] = od[i + 1] = od[i + 2] = g;
+        od[i] = r;
+        od[i + 1] = g;
+        od[i + 2] = b;
         od[i + 3] = 255;
       }
     }
     ctx.putImageData(out, 0, 0);
   }
 
+  /**
+   * Parameter aus Satoshi-Betrag.
+   * 1…(goldAb−1): bunte Schnipsel, Schussstärke wächst (log) bis fast goldAb.
+   * ≥ goldAb: goldene Schnipsel, Physik wie bei goldAb−1.
+   */
+  /**
+   * Sats → Geldscheine (greedy, auf 10 gerundet).
+   * Losgrößen: 100000, 10000, 1000, 100, 10. Staub = 10.
+   */
+  function konfettiScheineAusSats(sats) {
+    let rest = Math.max(0, Math.round(Number(sats) / 10) * 10);
+    if (rest <= 0 && Number(sats) > 0) rest = 10; // unter 5 → 0; 5–9 → 10
+    const denoms = [100000, 10000, 1000, 100, 10];
+    const scheine = [];
+    for (const d of denoms) {
+      const n = Math.floor(rest / d);
+      for (let i = 0; i < n; i++) scheine.push(d);
+      rest -= n * d;
+    }
+    return scheine;
+  }
+
+  /** Pixelgröße je Schein — 100k ≈ 2× bisherige max. Länge. */
+  function konfettiGroesseFuerSchein(denom) {
+    switch (denom) {
+      case 10:
+        return { w0: 1, h: 1 }; // Staub
+      case 100:
+        return { w0: 3 + Math.random() * 1.2, h: 1.2 + Math.random() * 0.5 };
+      case 1000:
+        return { w0: 6 + Math.random() * 2.5, h: 1.8 + Math.random() * 0.7 };
+      case 10000:
+        return { w0: 10 + Math.random() * 3.5, h: 2.4 + Math.random() * 0.9 };
+      case 100000:
+        return { w0: 16 + Math.random() * 6, h: 3.8 + Math.random() * 1.8 };
+      default:
+        return { w0: 6, h: 2 };
+    }
+  }
+
+  function konfettiParamsAusSats(sats, overrides) {
+    const o = overrides || {};
+    const goldAb = Math.max(2, Number(o.goldAb) || 1_000_000);
+    const s = Math.max(0, Number(sats != null && sats !== "" ? sats : o.sats) || 0);
+    const modus = o.modus || "auto"; // auto | bunt | gold
+    // < 1 Mio: bunt; ≥ 1 Mio: alle Schnipsel gold/silber (Debug kann erzwingen).
+    let gold = s >= goldAb;
+    if (modus === "bunt") gold = false;
+    if (modus === "gold") gold = true;
+    const ref = Math.min(Math.max(1, s), goldAb - 1);
+    const staerkeAuto = Math.min(1, Math.log10(Math.max(1, ref)) / Math.log10(goldAb - 1));
+    let staerke = staerkeAuto;
+    if (o.staerke != null && o.staerke !== "" && Number(o.staerke) >= 0) {
+      staerke = Math.max(0, Math.min(1, Number(o.staerke)));
+    }
+    if (gold && modus === "auto") staerke = Math.max(staerke, staerkeAuto);
+    let impuls = Number(o.impuls);
+    if (!Number.isFinite(impuls) || impuls <= 0) {
+      impuls = 5 + staerke * 495;
+    }
+    impuls = Math.max(5, Math.min(500, impuls));
+    const impulsStreu = Math.max(0, Math.min(90, Number(o.impulsStreu) || 80)) / 100;
+    const speed = 0.008 + (impuls / 500) * 0.14;
+    const grav = Math.max(0, Math.min(100, Number(o.grav) != null && o.grav !== "" ? Number(o.grav) : 5));
+    let scheine = konfettiScheineAusSats(s);
+    // Optik: jeder Schuss +45 Staub (1 px), sonst wirkt z. B. 100 k wie ein einsamer Batzen.
+    const STAUB_EXTRA = 45;
+    for (let i = 0; i < STAUB_EXTRA; i++) scheine.push(10);
+    // Performance-Deckel: größte Scheine zuerst behalten, Staub am Ende kürzen
+    const maxParts = 200;
+    if (scheine.length > maxParts) {
+      const wert = scheine.filter((d) => d > 10);
+      const staub = scheine.filter((d) => d === 10);
+      const room = Math.max(0, maxParts - wert.length);
+      scheine = wert.concat(staub.slice(0, room));
+    }
+    const zählung = { 10: 0, 100: 0, 1000: 0, 10000: 0, 100000: 0 };
+    for (const d of scheine) zählung[d] = (zählung[d] || 0) + 1;
+    return {
+      sats: s,
+      gold,
+      goldAb,
+      modus,
+      staerke,
+      staerkeAuto,
+      impuls,
+      impulsStreu,
+      grav,
+      scheine,
+      zählung,
+      count: scheine.length,
+      dauer: Math.max(1000, Math.min(60000, Number(o.dauer) || 3000)),
+      winkelMin: Number(o.winkelMin) || 30,
+      winkelMax: Number(o.winkelMax) || 80,
+      luft: Math.max(0, Math.min(100, Number(o.luft) != null && o.luft !== "" ? Number(o.luft) : 2)),
+      speed,
+    };
+  }
+
+  function _hexRgb(hex) {
+    const h = hex.replace("#", "");
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+
+  function _lerpRgb(a, b, t) {
+    const u = Math.max(0, Math.min(1, t));
+    return `rgb(${Math.round(a[0] + (b[0] - a[0]) * u)},${Math.round(a[1] + (b[1] - a[1]) * u)},${Math.round(a[2] + (b[2] - a[2]) * u)})`;
+  }
+
+  function starteKonfetti(opts, onDone) {
+    const wrap = document.querySelector(".empfang-qr-wrap");
+    if (!wrap) {
+      if (typeof onDone === "function") onDone();
+      return 3000;
+    }
+    let layer = document.getElementById("empfang-konfetti");
+    if (!layer) {
+      layer = document.createElement("canvas");
+      layer.id = "empfang-konfetti";
+      layer.className = "empfang-konfetti";
+      wrap.appendChild(layer);
+    }
+    const seite = Math.max(64, Math.floor(Math.min(wrap.clientWidth || 160, wrap.clientHeight || 160)));
+    layer.width = seite;
+    layer.height = seite;
+    const cctx = layer.getContext("2d");
+    const p = konfettiParamsAusSats(opts && opts.sats, opts);
+    // Bunt: feste Palette. Gold: Phasen-Offset, Lerp goldgelb ↔ silberweiß.
+    const farbenBunt = ["#f7931a", "#ff5c5c", "#5cff8a", "#5cb8ff", "#ffd15c", "#d45cff", "#fff4c4"];
+    const goldDunkel = _hexRgb("#e6b422");
+    const goldHell = _hexRgb("#fff8e7");
+    const wMin = Math.min(p.winkelMin, p.winkelMax);
+    const wMax = Math.max(p.winkelMin, p.winkelMax);
+    const luft = (p.luft != null ? p.luft : 2) / 100;
+    const kLuft = 0.00025 + luft * 0.0022;
+    const bodenY = seite - 4;
+    const scheine = (p.scheine && p.scheine.length)
+      ? p.scheine
+      : konfettiScheineAusSats(p.sats);
+    // Kanone: ein Schnipsel pro Schein, Größe nach Denomination.
+    const parts = scheine.map((denom) => {
+      const grad = wMin + Math.random() * Math.max(1, wMax - wMin);
+      const rad = (grad * Math.PI) / 180;
+      const streu = 1 + (Math.random() * 2 - 1) * p.impulsStreu;
+      const speed = seite * p.speed * Math.max(0.15, streu);
+      const gravMul = (p.grav != null ? p.grav : 5) / 5;
+      const sz = konfettiGroesseFuerSchein(denom);
+      return {
+        denom,
+        x: seite * (0.02 + Math.random() * 0.06),
+        y: seite * (0.92 + Math.random() * 0.05),
+        vx: Math.cos(rad) * speed,
+        vy: -Math.sin(rad) * speed,
+        g: (seite * 0.00012 + Math.random() * seite * 0.00008) * gravMul,
+        // Bei gold wird c ignoriert (Shimmer); sonst bunte Palette.
+        c: p.gold
+          ? "#e6b422"
+          : farbenBunt[Math.floor(Math.random() * farbenBunt.length)],
+        shimmerPhase: Math.random() * Math.PI * 2,
+        shimmerHz: 1.2 + Math.random() * 2.4,
+        w0: sz.w0,
+        h: sz.h,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.04,
+        spinPhase: Math.random() * Math.PI * 2,
+        spinHz: 2.5 + Math.random() * 3.5,
+        dead: false,
+      };
+    });
+    // Start-|vx| merken → Kanten-Rotation ab 50 % davon
+    for (const part of parts) {
+      part.vx0 = Math.abs(part.vx) || 0.0001;
+    }
+    const vTerminal = seite * (0.004 + (1 - luft) * 0.008);
+    const t0 = performance.now();
+    const maxDauer = p.dauer; // nur Sicherheits-Obergrenze
+    let done = false;
+    function beenden() {
+      if (done) return;
+      done = true;
+      cctx.clearRect(0, 0, seite, seite);
+      layer.remove();
+      if (typeof onDone === "function") onDone();
+    }
+    function frame(now) {
+      const elapsed = now - t0;
+      const dt = Math.min(40, now - (frame.t || now));
+      const step = dt * 0.032;
+      frame.t = now;
+      cctx.clearRect(0, 0, seite, seite);
+      let alleTot = true;
+      for (const part of parts) {
+        if (part.dead) continue;
+        alleTot = false;
+        // Schuss: ~v²-Luft bremst stark. Sinkflug: vx extra dämpfen,
+        // sonst bleibt vx bei begrenztem vy → unnatürliche Gerade diagonal.
+        const spd = Math.hypot(part.vx, part.vy) || 0.0001;
+        part.vx += -kLuft * part.vx * spd * dt;
+        part.vy += -kLuft * part.vy * spd * dt + part.g * dt;
+        if (part.vy > 0) {
+          // Horizontal abbauen → Bahn knickt nach unten ab (nicht Mond-Diagonale)
+          const sinkDamp = Math.pow(0.92 - luft * 0.08, dt / 16);
+          part.vx *= sinkDamp;
+          // Weiche Annäherung an Endgeschwindigkeit statt hartem Clamp
+          if (part.vy > vTerminal) {
+            part.vy += (vTerminal - part.vy) * Math.min(1, 0.15 * dt);
+          }
+        }
+        part.x += part.vx * step;
+        part.y += part.vy * step;
+        part.rot += part.vr;
+        // Auftreffen → sofort weg
+        if (part.y >= bodenY) {
+          part.dead = true;
+          continue;
+        }
+        let fill = part.c;
+        if (p.gold) {
+          const age = elapsed / 1000;
+          const wave = 0.5 + 0.5 * Math.sin(age * part.shimmerHz * Math.PI * 2 + part.shimmerPhase);
+          fill = _lerpRgb(goldDunkel, goldHell, wave);
+        }
+        // Ab |vx| ≤ 50 % von Start-vx: schmalere Seite 1…w0 → Kanten-Rotation
+        let drawW = part.w0;
+        if (Math.abs(part.vx) <= 0.5 * part.vx0) {
+          const spin = 0.5 + 0.5 * Math.sin(
+            elapsed / 1000 * part.spinHz * Math.PI * 2 + part.spinPhase,
+          );
+          drawW = 1 + spin * Math.max(0, part.w0 - 1);
+        }
+        cctx.save();
+        cctx.globalAlpha = 1;
+        cctx.translate(part.x, part.y);
+        cctx.rotate(part.rot);
+        cctx.fillStyle = fill;
+        cctx.fillRect(-drawW / 2, -part.h / 2, drawW, part.h);
+        cctx.restore();
+      }
+      if (alleTot || elapsed >= maxDauer) {
+        beenden();
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    return maxDauer;
+  }
+
   function tick(ts) {
     if (!startTs) startTs = ts;
-    const tNorm = ((ts - startTs) % ATEM_MS) / ATEM_MS;
-    // Einatmen 0→1, Ausatmen 1→0
-    const sicht = tNorm < 0.5
-      ? (tNorm / 0.5)
-      : (1 - (tNorm - 0.5) / 0.5);
-    // Am Talboden (alles Hintergrund): Maske wechseln, einmal pro Zyklus.
-    if (tNorm >= 0.97 || tNorm <= 0.03) {
-      if (!gewechseltInZyklus && tNorm >= 0.97) {
-        const n = maskenListe().length;
-        maskeIx = (maskeIx + 1) % n;
-        payloadIx += 1;
-        wortIx = (wortIx + 1) % ATEM_WORTE.length;
-        setzeAtemWort();
-        qrBmp = null;
-        qrSeite = 0;
-        gewechseltInZyklus = true;
-      }
-    } else {
+
+    // Sonderatem aus Queue annehmen
+    if (!sonder && sonderQueue.length) {
+      const next = sonderQueue.shift();
+      sonder = { ...next, t0: ts, phase: next.typ === "incoming" ? "fadeout" : "breath" };
       gewechseltInZyklus = false;
     }
-    zeichne(sicht).catch(() => {});
+
+    let sicht = 0;
+    let zeichneOpts = {};
+
+    if (sonder && sonder.typ === "incoming") {
+      const elapsed = ts - sonder.t0;
+      if (sonder.phase === "fadeout") {
+        sicht = Math.max(0, 1 - elapsed / 420);
+        zeichneOpts = { art: maskenListe()[maskeIx % maskenListe().length] };
+        if (elapsed >= 420) {
+          sonder.phase = "konfetti";
+          sonder.t0 = ts;
+          const kOpts = Object.assign(
+            { sats: sonder.sats },
+            sonder.konfettiOpts || {},
+          );
+          sonder.konfettiFertig = false;
+          sonder.konfettiDauer = starteKonfetti(kOpts, () => {
+            if (sonder) sonder.konfettiFertig = true;
+          });
+          zeichneOpts = { nurSchwarz: true };
+          sicht = 0;
+        }
+      } else if (sonder.phase === "konfetti") {
+        sicht = 0;
+        zeichneOpts = { nurSchwarz: true };
+        const kDauer = sonder.konfettiDauer || 3000;
+        // Ende wenn alle Schnipsel liegen — Max-Dauer nur als Notbremse
+        if (sonder.konfettiFertig || elapsed >= kDauer) {
+          sonder.phase = "fadein";
+          sonder.t0 = ts;
+          const wid = sonder.walletId || Zustand.walletId;
+          if (wid) {
+            Zustand.lernThema = null;
+            ladeEmpfang(wid).catch(() => {});
+          }
+        }
+      } else if (sonder.phase === "fadein") {
+        sicht = Math.min(1, elapsed / 500);
+        {
+          const listen = maskenListe();
+          zeichneOpts = { art: listen[maskeIx % listen.length] };
+        }
+        if (elapsed >= 500) {
+          const halte = sonder.halteDanach;
+          sonder = null;
+          beendeSonderWennIdle(halte);
+        }
+      }
+    } else if (sonder && (sonder.typ === "orangeB" || sonder.typ === "ohNo" || sonder.typ === "haken")) {
+      const tNorm = Math.min(0.999, (ts - sonder.t0) / ATEM_MS);
+      sicht = tNorm < 0.5 ? (tNorm / 0.5) : (1 - (tNorm - 0.5) / 0.5);
+      if (sonder.typ === "orangeB") zeichneOpts = { art: "btc", orange: true };
+      else if (sonder.typ === "ohNo") zeichneOpts = { art: "ohNo" };
+      else zeichneOpts = { art: "haken" };
+      if (tNorm >= 0.97) {
+        const halte = sonder.halteDanach;
+        sonder = null;
+        startTs = ts;
+        beendeSonderWennIdle(halte);
+      }
+    } else {
+      const tNorm = ((ts - startTs) % ATEM_MS) / ATEM_MS;
+      sicht = tNorm < 0.5 ? (tNorm / 0.5) : (1 - (tNorm - 0.5) / 0.5);
+      const listen = maskenListe();
+      zeichneOpts = { art: listen[maskeIx % listen.length] };
+      if (tNorm >= 0.97 || tNorm <= 0.03) {
+        if (!gewechseltInZyklus && tNorm >= 0.97) {
+          maskeIx = (maskeIx + 1) % listen.length;
+          payloadIx += 1;
+          wortIx = (wortIx + 1) % ATEM_WORTE.length;
+          setzeAtemWort();
+          qrBmp = null;
+          qrSeite = 0;
+          gewechseltInZyklus = true;
+        }
+      } else {
+        gewechseltInZyklus = false;
+      }
+    }
+
+    setzeAtemTextSicht(sicht);
+    zeichneGlyphAtem(sicht, zeichneOpts).catch(() => {});
     raf = requestAnimationFrame(tick);
   }
 
@@ -1932,8 +2410,189 @@ const EmpfangPuls = (() => {
     return Boolean(raf);
   }
 
-  return { start, stop, laeuft };
+  return {
+    start,
+    stop,
+    laeuft,
+    flashOrangeB,
+    flashOhNo,
+    flashIncoming,
+    flashHaken,
+    konfettiParamsAusSats,
+    konfettiScheineAusSats,
+    starteKonfetti,
+  };
 })();
+
+function liesKonfettiProtoOpts() {
+  const num = (id, fallback) => {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    const v = Number(el.value);
+    return Number.isFinite(v) ? v : fallback;
+  };
+  const modus = ($("#konfetti-modus") && $("#konfetti-modus").value) || "auto";
+  return {
+    sats: num("konfetti-sats", 100000),
+    goldAb: num("konfetti-gold-ab", 1_000_000),
+    modus,
+    impuls: num("konfetti-impuls", 500),
+    impulsStreu: num("konfetti-impuls-streu", 80),
+    grav: num("konfetti-grav", 5),
+    count: num("konfetti-count", 64),
+    dauer: num("konfetti-dauer", 3000),
+    winkelMin: num("konfetti-winkel-min", 30),
+    winkelMax: num("konfetti-winkel-max", 80),
+    luft: num("konfetti-luft", 2),
+  };
+}
+
+function aktualisiereKonfettiProtoStatus() {
+  const status = $("#konfetti-proto-status");
+  if (!status || typeof EmpfangPuls.konfettiParamsAusSats !== "function") return;
+  const opts = liesKonfettiProtoOpts();
+  const p = EmpfangPuls.konfettiParamsAusSats(opts.sats, opts);
+  const setTxt = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  setTxt("konfetti-impuls-wert", String(Math.round(p.impuls)));
+  setTxt("konfetti-impuls-streu-wert", String(Math.round(p.impulsStreu * 100)));
+  setTxt("konfetti-grav-wert", String(Math.round(p.grav)));
+  setTxt(
+    "konfetti-staerke-wert",
+    `Vorschlag ${Math.round(5 + p.staerkeAuto * 495)}`,
+  );
+  setTxt("konfetti-count-wert", String(opts.count));
+  setTxt("konfetti-dauer-wert", String(opts.dauer));
+  setTxt("konfetti-winkel-min-wert", String(opts.winkelMin));
+  setTxt("konfetti-winkel-max-wert", String(opts.winkelMax));
+  setTxt("konfetti-luft-wert", String(Math.round(p.luft)));
+  const z = p.zählung || {};
+  const teile = [];
+  if (z[100000]) teile.push(`${z[100000]}×100k`);
+  if (z[10000]) teile.push(`${z[10000]}×10k`);
+  if (z[1000]) teile.push(`${z[1000]}×1k`);
+  if (z[100]) teile.push(`${z[100]}×100`);
+  if (z[10]) teile.push(`${z[10]}×Staub`);
+  const mix = teile.length ? teile.join(" + ") : "—";
+  const farbe = p.gold ? "GOLD" : "BUNT";
+  status.textContent = (
+    `${farbe} · ${opts.sats.toLocaleString("de-DE")} sats → ${p.count} Schnipsel (${mix}) · `
+    + `Impuls ${Math.round(p.impuls)} · Luft ${Math.round(p.luft)} · Grav ${Math.round(p.grav)}`
+  );
+}
+
+function istRegtestNetz() {
+  const n = String(Zustand.config?.network || "").toLowerCase();
+  return n === "regtest" || n === "reg";
+}
+
+function setzeEmpfangLabSenden() {
+  const box = $("#empfang-lab-senden");
+  if (!box) return;
+  const an = istRegtestNetz();
+  box.hidden = !an;
+  if (!an || box.dataset.gebunden === "1") return;
+  box.dataset.gebunden = "1";
+  const knopf = $("#empfang-lab-ok");
+  if (!knopf) return;
+  knopf.addEventListener("click", () => {
+    sendeLabFaucetSats().catch((fehler) => {
+      meldung(fehler.message || String(fehler), "krit");
+    });
+  });
+}
+
+async function sendeLabFaucetSats() {
+  const feld = $("#empfang-lab-sats");
+  const sats = Math.floor(Number(feld && feld.value) || 0);
+  if (sats < 546) {
+    throw new Error("Mindestens 546 sats.");
+  }
+  let adresse = Zustand.empfang?.address || Zustand.empfangByWallet?.[Zustand.walletId]?.address;
+  if (!adresse && Zustand.walletId) {
+    const daten = await ladeEmpfang(Zustand.walletId);
+    adresse = daten && daten.address;
+  }
+  if (!adresse) {
+    throw new Error("Keine Empfangsadresse — Wallet wählen.");
+  }
+  const ergebnis = await api("/lab/faucet-senden", {
+    methode: "POST",
+    daten: { address: adresse, sats },
+  });
+  meldung(
+    `Faucet → Empfang: ${sats.toLocaleString("de-DE")} sats (${String(ergebnis.txid || "").slice(0, 12)}…)`,
+    "gut",
+  );
+  // Incoming-Animation mit Betrag; Mempool-Pending folgt über Watch/Refresh.
+  EmpfangPuls.flashIncoming(Zustand.walletId, sats);
+  if (Zustand.walletId) {
+    setTimeout(() => {
+      zeigeWallet(Zustand.walletId).catch(() => {});
+    }, 800);
+  }
+  return ergebnis;
+}
+
+/** Debug-Leiste neben Empfangen — nur mit ?animdebug=1 (nicht für Releases). */
+function setzeEmpfangAnimDebug() {
+  const leiste = $("#empfang-anim-debug");
+  const proto = $("#empfang-konfetti-proto");
+  if (!leiste) return;
+  const an = empfangAnimDebugAn();
+  leiste.hidden = !an;
+  if (proto) proto.hidden = !an;
+  if (an) stoppeEmpfangPoll();
+  if (!an || leiste.dataset.gebunden === "1") return;
+  leiste.dataset.gebunden = "1";
+  if (proto) {
+    proto.addEventListener("input", aktualisiereKonfettiProtoStatus);
+    proto.addEventListener("change", aktualisiereKonfettiProtoStatus);
+    const ausSats = $("#konfetti-impuls-aus-sats");
+    if (ausSats) {
+      ausSats.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const opts = liesKonfettiProtoOpts();
+        const p = EmpfangPuls.konfettiParamsAusSats(opts.sats, { ...opts, impuls: 0 });
+        const impulsEl = $("#konfetti-impuls");
+        if (impulsEl) impulsEl.value = String(Math.round(5 + p.staerkeAuto * 495));
+        aktualisiereKonfettiProtoStatus();
+      });
+    }
+    aktualisiereKonfettiProtoStatus();
+  }
+  leiste.addEventListener("click", (e) => {
+    const btn = e.target && e.target.closest && e.target.closest("button[data-anim]");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const art = btn.getAttribute("data-anim");
+    Zustand.lernThema = null;
+    try {
+      if (art === "puls") {
+        EmpfangPuls.stop();
+        EmpfangPuls.start();
+      } else if (art === "orangeB") {
+        EmpfangPuls.flashOrangeB();
+      } else if (art === "ohNo") {
+        EmpfangPuls.flashOhNo();
+      } else if (art === "incoming" || art === "konfetti-tune") {
+        const opts = liesKonfettiProtoOpts();
+        EmpfangPuls.flashIncoming(Zustand.walletId, opts.sats, opts);
+      } else if (art === "haken") {
+        EmpfangPuls.flashHaken();
+      } else if (art === "stop") {
+        EmpfangPuls.stop();
+        if (Zustand.walletId) ladeEmpfang(Zustand.walletId).catch(() => {});
+      }
+    } catch (fehler) {
+      meldung(fehler.message || String(fehler), "krit");
+    }
+  });
+}
 
 function empfangQuelleLabel(source) {
   if (source === "fulcrum") return t("dock.empfangSourceFulcrum");
@@ -2198,6 +2857,15 @@ async function speichereLernhinweiseEinstellung() {
   }
 }
 
+function empfangAnimDebugAn() {
+  try {
+    return new URLSearchParams(location.search).get("animdebug") === "1"
+      || localStorage.getItem("empfangAnimDebug") === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
 function stoppeEmpfangPoll() {
   if (Zustand.empfangTimer) {
     clearInterval(Zustand.empfangTimer);
@@ -2207,6 +2875,8 @@ function stoppeEmpfangPoll() {
 
 function setzeEmpfangPoll() {
   stoppeEmpfangPoll();
+  // Bei Animations-Debug keinen Empfangs-Poll — sonst überschreibt er die Demos.
+  if (empfangAnimDebugAn()) return;
   Zustand.empfangTimer = setInterval(() => {
     const pane = $("#empfang-pane");
     if (!pane || pane.offsetParent === null) return;
@@ -2387,6 +3057,15 @@ function empfangScanLaeuftFuer(walletId) {
 async function ladeEmpfang(walletId, { still = false } = {}) {
   if (!walletId) {
     zeichneEmpfangLeer();
+    return null;
+  }
+
+  // Debug-/Ereignis-Animation läuft: Poll darf sie nicht mit der Adresse erschlagen.
+  if (
+    still
+    && typeof EmpfangPuls !== "undefined"
+    && EmpfangPuls.laeuft()
+  ) {
     return null;
   }
 
@@ -2658,6 +3337,8 @@ const Zustand = {
   empfangByWallet: Object.create(null),
   empfangTimer: null,
   empfangLadeGen: 0,
+  /** Mempool-Pending-Zähler je Wallet für Animations-Trigger. */
+  pendingByWallet: Object.create(null),
   /** Lernhinweise für Plebs (Experiment). */
   lernhinweise: null,
   lernThema: null,
@@ -2993,6 +3674,9 @@ function zeichneUtxos(daten, wallet) {
     }
     const pendOut = Number(daten.pending_spending_count || 0);
     const pendIn = Number(daten.pending_receive_count || 0);
+    if (wallet && wallet.id) {
+      meldePendingAenderung(wallet.id, pendIn, pendOut);
+    }
     if (pendOut > 0 || pendIn > 0) {
       const bits = [];
       if (pendOut > 0) bits.push(t("wallet.metaPendingOut", { n: pendOut }));
@@ -3854,6 +4538,24 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   const jetzt = Date.now();
   if (jetzt - Zustand.scanRefreshUm < SCAN_REFRESH_MS && vorher != null) return;
 
+  // Pro neu gefundenem UTXO: einen orangen-B-Atemzug (gedrosselt).
+  if (
+    Zustand.walletId === scanId
+    && typeof utxoZahl === "number"
+    && typeof vorher === "number"
+    && utxoZahl > vorher
+  ) {
+    const delta = Math.min(5, utxoZahl - vorher);
+    for (let i = 0; i < delta; i++) EmpfangPuls.flashOrangeB();
+  } else if (
+    Zustand.walletId === scanId
+    && typeof utxoZahl === "number"
+    && vorher == null
+    && utxoZahl > 0
+  ) {
+    EmpfangPuls.flashOrangeB();
+  }
+
   Zustand.scanRefreshLaeuft = true;
   Zustand.scanRefreshUm = jetzt;
   if (utxoZahl != null) Zustand.scanUtxoZahl = utxoZahl;
@@ -3869,6 +4571,29 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   } finally {
     Zustand.scanRefreshLaeuft = false;
   }
+}
+
+/**
+ * Mempool-Pending → Empfangs-QR-Animation.
+ * Neu im Mempool = Zähler steigt. Bestätigung ist binär (Tx hat Block) —
+ * dafür später Txid-Übergang pending→confirmed, nicht „Zähler sinkt allmählich“.
+ */
+function meldePendingAenderung(walletId, pendIn, pendOut) {
+  if (!walletId) return;
+  const prev = Zustand.pendingByWallet[walletId] || { in: 0, out: 0 };
+  const neuIn = Number(pendIn) || 0;
+  const neuOut = Number(pendOut) || 0;
+  Zustand.pendingByWallet[walletId] = { in: neuIn, out: neuOut };
+  // Nur steigen zählt (neue Mempool-Tx), nicht der erste Ladezustand.
+  if (prev.seen) {
+    if (neuIn > prev.in && Zustand.walletId === walletId) {
+      EmpfangPuls.flashIncoming(walletId);
+    }
+    if (neuOut > prev.out && Zustand.walletId === walletId) {
+      EmpfangPuls.flashOhNo();
+    }
+  }
+  Zustand.pendingByWallet[walletId].seen = true;
 }
 
 async function pruefeWalletScan() {
@@ -10638,6 +11363,7 @@ async function ladeConfig() {
   fuellOnchainHinweisTexte();
   zeichneStartSync();
   zeichneLernhinweiseEinstellung();
+  setzeEmpfangLabSenden();
   zeichneLlmEinstellungen();
   zeichneStatusMailEinstellungen();
   zeichneMempoolStatus();
@@ -10689,6 +11415,8 @@ async function start() {
   macheDockSpalter();
   setzeEmpfangPoll();
   setzeLernhinweiseDelegates();
+  setzeEmpfangAnimDebug();
+  setzeEmpfangLabSenden();
 
   try {
     await ladeConfig();

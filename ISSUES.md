@@ -2,6 +2,25 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Eastereggs · SatSage-würdige Ereignis-Atemzüge
+
+**Stand:** 2026-09-13 · **offen** · Ideen (Form: Ereignis → ein Atemzug → fertig; Flüchtigkeit beachten)
+
+Anschluss an bestehende Empfangs-Animationen (Konfetti/OH-NO/✓/oranges B) und Lernhinweise. Kein Streak-/Push-Gamification.
+
+1. **21-Millionen-Moment:** Session-Gesamtsaldo erstmals ≥ 21 000 000 sats → einmal ∞/21M-Maske atmen.
+2. **Haltefrist-Grenzübergang:** Ein UTXO wird „grün“ (außerhalb Frist) → einmal grüner Haken am Zeitstrahl (nicht nur Farbwechsel).
+3. **Privatsphäre-Pille:** Wechsel öffentlich → eigener Node/Electrs/P2P → kurzer „aufatmen“-Atem am QR (ruhiger Text).
+4. **Lern-Wo-ist-Walter:** Nach 5 gefundenen Lern-Tooltips in einer Session einmal Student-Maske (nur wenn Lernhinweise an).
+5. **Dust-Humor:** Versuch &lt;546 sats (Lab-Faucet) → OH NO! oder „Dust…“ — lehrreich.
+6. **Erste BIP-158-Treffer:** Compact Filter lädt zum ersten Mal einen Trefferblock → einmal Lupe-Atem.
+
+**Optional / nah an Technik:** Gap-Catch-Logzeile (*„Fremde Zahlung auf #n+k — Gap hat’s gefangen“*) + einmal Lupe, wenn Subscribe-Gap einen Empfang außerhalb der QR-Adresse meldet.
+
+**Nicht tun:** Daily Streaks, laut FOMO, Animationen die einen scannbaren Empfangs-QR während Zahlungsabsicht verdecken.
+
+---
+
 ## Empfangen · Mempool-Lebenszeichen (Herzschlag + Wallet-Blink)
 
 **Stand:** 2026-09-12 · **offen** · Idee / Experiment
@@ -15,12 +34,12 @@ Wenn eine für ein Wallet **relevante Tx im Mempool** auftaucht (Wallet-Watch / 
    - **≥ 10 000 und &lt; 1 000 000** → **sat**
    - **&lt; 10 000 sats** → **Pfeiffe**
 
-Wenn dieselbe Tx **bestätigt** (erster Block):
+Wenn dieselbe Tx **bestätigt** (erster Block — binär, nicht „Pending sinkt“):
 
-4. Nochmal Herzschlag, diesmal mit **Ausrufezeichen**-Maske (oder Overlay).
-5. Wallet **nochmals** kurz aufblinken.
+4. Grüner **✓**-Atemzug (~80 % der QR-Fläche) — `EmpfangPuls.flashHaken()` ist vorbereitet.
+5. Wallet **nochmals** kurz aufblinken (Nav-Blink noch offen).
 
-**Hinweise:** Flüchtigkeit beachten — Empfangs-QR eines *anderen* gewählten Wallets nicht mit fremdem Mempool-Puls überschreiben (oder Puls nur am betroffenen Wallet + ggf. dezent global). Bestehenden `WalletWatch` / Pending-Pfad nutzen, nicht neuen Poll erfinden. Ausrufezeichen-Asset noch nicht vorhanden (Maske analog zu B/sat/Pfeiffe anlegen).
+**Hinweise:** Flüchtigkeit beachten. Trigger für Bestätigung: Txid war pending und hat jetzt `block_height` — nicht Zähler-Heuristik. Debug: `?animdebug=1` zeigt Test-Buttons neben Empfangen (nicht für Releases).
 
 **Abgrenzung:** Lernhinweise-QR und Scan-Herzschlag bleiben getrennte Modi; Mempool-Puls ist Ereignis, kein Dauerzustand.
 

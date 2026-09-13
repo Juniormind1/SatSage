@@ -27,6 +27,7 @@ Kein Pflicht-„?“-Tour-Modus. Entdecken ist optional und belohnt Aufmerksamke
 5. **Tiefe auf Abruf.** Neugierige: Tooltip → ggf. Handbuch. Uninteressierte: null Aufwand.
 6. **Kein Widerspruch zur Flüchtigkeit.** Hinweise ersetzen keine Absicherung ([`design-fluchtigkeit.md`](design-fluchtigkeit.md)).
 7. **Bitcoin-Mechanismen, keine SatSage-Internals.** Lernstoff richtet sich an den lernfaulen Pleb: Was ist ein UTXO, XPUB, bc1 — nicht „wie SatSage scantxoutset aufruft“. Dealbreaker T13: nur Bitcoin-only-URLs; Shitcoins/Eth im Zweifel warnen, nicht durchwinken. **Nur konkrete Artikel** — keine Startseiten, Shops, „Buch kaufen“ ([`merge-dealbreakers.md`](merge-dealbreakers.md), [`lernhinweise-kuratierung.md`](lernhinweise-kuratierung.md)).
+8. **Handbuch mitziehen.** Jede kuratierte Pleb-Lern-URL gehört in `web/lernhinweise.json` **und** dieselbe Runde in Handbuch §14 (`doc/handbuch.html`, DE+EN).
 
 ## Beispiele (Richtung, keine Pflichtliste)
 

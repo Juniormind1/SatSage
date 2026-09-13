@@ -1300,9 +1300,78 @@
       </section>
       <section id="empfang-pane" class="empfang-pane"
                data-i18n-aria-label="dock.empfangAria" aria-label="Empfangsadresse">
-        <div class="empfang-kopf" data-lern="empfang" data-i18n="dock.empfangHead"
-             data-i18n-title="dock.empfangHeadTitle"
-             title="Nächste Empfangsadresse dieses Wallets">Empfangen</div>
+        <div class="empfang-kopf-zeile">
+          <div id="empfang-kopf" class="empfang-kopf" data-lern="empfang" data-i18n="dock.empfangHead"
+               data-i18n-title="dock.empfangHeadTitle"
+               title="Nächste Empfangsadresse dieses Wallets">Empfangen</div>
+          <!-- Lab-Regtest: Sats von lab-faucet an aktuelle Empfangsadresse. -->
+          <div id="empfang-lab-senden" class="empfang-lab-senden" hidden>
+            <input type="number" id="empfang-lab-sats" min="546" step="1" value="100000"
+                   title="Sats von lab-faucet (Fremd-Wallet) an die Empfangsadresse">
+            <button type="button" id="empfang-lab-ok" title="Von lab-faucet senden (Mempool)">OK</button>
+          </div>
+          <!-- Nur mit ?animdebug=1 sichtbar — nie für Releases aktiv lassen. -->
+          <div id="empfang-anim-debug" class="empfang-anim-debug" hidden>
+            <button type="button" data-anim="puls" title="Atem-Zyklus">Atem</button>
+            <button type="button" data-anim="orangeB" title="UTXO gefunden">₿</button>
+            <button type="button" data-anim="ohNo" title="Outgoing Mempool">OH</button>
+            <button type="button" data-anim="incoming" title="Incoming Mempool">🎉</button>
+            <button type="button" data-anim="haken" title="Tx bestätigt">✓</button>
+            <button type="button" data-anim="stop" title="Stop">■</button>
+            <button type="button" data-anim="konfetti-tune" title="Konfetti mit aktuellen Reglern">🎉 tune</button>
+          </div>
+        </div>
+        <div id="empfang-konfetti-proto" class="empfang-konfetti-proto" hidden>
+          <div class="empfang-konfetti-proto-titel">Konfetti-Prototyp (Sats → Stärke / Gold)</div>
+          <label class="empfang-konfetti-modus">Modus
+            <select id="konfetti-modus">
+              <option value="auto">auto (Sats)</option>
+              <option value="bunt">bunt</option>
+              <option value="gold">gold</option>
+            </select>
+          </label>
+          <label>Sats in Tx
+            <input type="number" id="konfetti-sats" min="1" step="1" value="100000">
+          </label>
+          <label>Gold ab (sats)
+            <input type="number" id="konfetti-gold-ab" min="1" step="1" value="1000000">
+          </label>
+          <label>Impuls (Mündungsgeschwindigkeit) <span id="konfetti-impuls-wert">500</span>
+            <input type="range" id="konfetti-impuls" min="5" max="500" value="500"
+                   title="Wie stark die Kanone schießt — DAS steuert die Flugweite">
+          </label>
+          <label>Impuls-Streuung % <span id="konfetti-impuls-streu-wert">80</span>
+            <input type="range" id="konfetti-impuls-streu" min="0" max="90" value="80"
+                   title="Zufällige Abweichung ± um den Impuls je Schnipsel">
+          </label>
+          <label>Gravitation <span id="konfetti-grav-wert">5</span>
+            <input type="range" id="konfetti-grav" min="0" max="100" value="5"
+                   title="Erdanziehung auf vy im Flug (0 = schwerelos)">
+          </label>
+          <label>Sats→Impuls vorschlagen <span id="konfetti-staerke-wert">—</span>
+            <button type="button" id="konfetti-impuls-aus-sats" class="empfang-konfetti-proto-btn"
+                    title="Setzt den Impuls-Regler aus dem Sats-Betrag (log)">aus Sats setzen</button>
+          </label>
+          <label>Schnipsel (aus Sats) <span id="konfetti-count-wert">auto</span>
+            <input type="range" id="konfetti-count" min="1" max="200" value="64" disabled
+                   title="Anzahl kommt aus der Schein-Aufteilung des Sat-Betrags">
+          </label>
+          <label>Max-Dauer ms <span id="konfetti-dauer-wert">3000</span>
+            <input type="range" id="konfetti-dauer" min="1000" max="60000" step="500" value="3000"
+                   title="Nur Sicherheits-Obergrenze — Ende wenn alle Schnipsel liegen">
+          </label>
+          <label>Winkel min° <span id="konfetti-winkel-min-wert">30</span>
+            <input type="range" id="konfetti-winkel-min" min="10" max="70" value="30">
+          </label>
+          <label>Winkel max° <span id="konfetti-winkel-max-wert">80</span>
+            <input type="range" id="konfetti-winkel-max" min="40" max="90" value="80">
+          </label>
+          <label>Luftwiderstand <span id="konfetti-luft-wert">2</span>
+            <input type="range" id="konfetti-luft" min="0" max="100" value="2"
+                   title="Bremst den Kanonenschuss ab; danach Blattfall statt Mondgestein">
+          </label>
+          <div id="konfetti-proto-status" class="empfang-konfetti-proto-status mono"></div>
+        </div>
         <div id="empfang-leer" class="empfang-leer" data-i18n="dock.empfangEmpty">
           Wallet wählen, um eine Empfangsadresse zu zeigen.
         </div>

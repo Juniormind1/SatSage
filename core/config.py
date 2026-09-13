@@ -1120,13 +1120,68 @@ def _ist_verbindungsversuch(zeile: str) -> bool:
     )
 
 
+#: Anzahl rotierender Start-Sicherungen: ``.env.backup0`` … ``.env.backup9``.
+ENV_BACKUP_SLOTS = 10
+
+
+def env_backup_path(env_path: Path, index: int) -> Path:
+    """Pfad ``.env.backup{n}`` neben der .env."""
+    return env_path.with_name(f"{env_path.name}.backup{int(index)}")
+
+
+def rotate_env_backups_at_start(
+    env_path: Path,
+    *,
+    slots: int = ENV_BACKUP_SLOTS,
+) -> Path | None:
+    """
+    Beim Serverstart: vorgefundene ``.env`` nach ``.env.backup0`` kopieren.
+
+    Ältere Sicherungen wandern ``0→1→…→{slots-1}``; die älteste fällt weg.
+    Zur Laufzeit schreibt ``EnvFile.save`` **kein** Backup mehr — nur ``.env``.
+
+    Gibt den Pfad von ``backup0`` zurück, wenn eine Sicherung entstand.
+    """
+    env_path = Path(env_path)
+    if not env_path.is_file() or slots < 1:
+        return None
+    # Von hinten nach vorne verschieben, damit nichts überschrieben wird.
+    for i in range(slots - 1, 0, -1):
+        quelle = env_backup_path(env_path, i - 1)
+        ziel = env_backup_path(env_path, i)
+        if quelle.is_file():
+            try:
+                os.replace(quelle, ziel)
+            except OSError:
+                try:
+                    shutil.copy2(quelle, ziel)
+                    quelle.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            try:
+                os.chmod(ziel, 0o600)
+            except OSError:
+                pass
+        elif ziel.is_file():
+            # Lücke: nichts nachschieben
+            pass
+    backup0 = env_backup_path(env_path, 0)
+    try:
+        shutil.copy2(env_path, backup0)
+        os.chmod(backup0, 0o600)
+    except OSError:
+        return None
+    return backup0
+
+
 @dataclass
 class EnvFile:
     """
     Strukturerhaltender Zugriff auf eine .env.
 
     set()/unset() ändern nur die betroffene Zeile; alles andere bleibt, wie es
-    war. save() schreibt atomar und legt vorher eine Sicherung an.
+    war. save() schreibt atomar. Rotierende Sicherungen nur beim Serverstart
+    (``rotate_env_backups_at_start``).
     """
 
     path: Path
@@ -1231,17 +1286,15 @@ class EnvFile:
     def render(self) -> str:
         return "\n".join(self.lines) + "\n"
 
-    def save(self, *, backup: bool = True) -> Path | None:
+    def save(self, *, backup: bool = False) -> Path | None:
         """
-        Schreibt atomar (temporäre Datei + os.replace) und legt vorher eine
-        Sicherung an. Gibt den Pfad der Sicherung zurück, falls eine entstand.
+        Schreibt atomar (temporäre Datei + os.replace).
+
+        ``backup`` ist veraltet und wird ignoriert: Rotierende Sicherungen
+        entstehen nur beim Serverstart (``rotate_env_backups_at_start``), nicht
+        bei jedem Speichern während der Laufzeit. Rückgabe bleibt ``None``.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        sicherung: Path | None = None
-        if backup and self.path.is_file():
-            sicherung = self.path.with_suffix(self.path.suffix + ".bak")
-            shutil.copy2(self.path, sicherung)
-
         temp = self.path.with_name(self.path.name + ".tmp")
         temp.write_text(self.render(), encoding="utf-8")
         try:
@@ -1249,7 +1302,7 @@ class EnvFile:
         except OSError:
             pass
         os.replace(temp, self.path)
-        return sicherung
+        return None
 
 
 # ---------------------------------------------------------------------------

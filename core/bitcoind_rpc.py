@@ -55,6 +55,8 @@ class CoreRpcConfig:
     password: str
     use_ssl: bool
     tor_proxy: tuple[str, int] | None = None
+    #: Optional: Wallet-RPC-Pfad ``/wallet/<name>`` (z. B. Lab ``lab-faucet``).
+    wallet: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -63,7 +65,8 @@ class CoreRpcConfig:
     @property
     def ziel(self) -> str:
         tls = "TLS" if self.use_ssl else "ohne TLS"
-        return f"{self.host}:{self.port} ({tls})"
+        w = f" wallet={self.wallet}" if self.wallet else ""
+        return f"{self.host}:{self.port} ({tls}){w}"
 
 
 def _rpc_credentials(
@@ -263,8 +266,14 @@ class BitcoinRpcClient:
             f"{self.cfg.user}:{self.cfg.password}".encode("utf-8")
         ).decode("ascii")
         host = outbound_policy.ensure_resolves_to_allowed_host(self.cfg.host, service="core")
+        if self.cfg.wallet:
+            from urllib.parse import quote
+
+            pfad = f"/wallet/{quote(str(self.cfg.wallet), safe='')}"
+        else:
+            pfad = "/"
         headers = (
-            f"POST / HTTP/1.1\r\n"
+            f"POST {pfad} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
             f"Authorization: Basic {auth}\r\n"
             f"Content-Type: application/json\r\n"

@@ -226,8 +226,13 @@ def _max_parallel_jobs(state=None, env_values=None) -> int:
 
 
 def _pruefe_env_modus(env_path: Path) -> None:
-    """Sichert .env und die atomare Sicherung beim Start gegen Mitlesen."""
-    for pfad in (env_path, env_path.with_suffix(env_path.suffix + ".bak")):
+    """Sichert .env und Start-Backups (backup0–9, legacy .bak) gegen Mitlesen."""
+    from core.config import ENV_BACKUP_SLOTS, env_backup_path
+
+    kandidaten = [env_path, env_path.with_suffix(env_path.suffix + ".bak")]
+    for i in range(ENV_BACKUP_SLOTS):
+        kandidaten.append(env_backup_path(env_path, i))
+    for pfad in kandidaten:
         try:
             if not pfad.is_file() or not stat.S_ISREG(pfad.stat().st_mode):
                 continue
@@ -458,6 +463,17 @@ class AppState:
                  immutable_cache_dir: Path, sanctions_dir: Path | None = None,
                  label_dir: Path | None = None, managed_by: str | None = None):
         self.env_path = env_path
+        # Vor dem ersten Laufzeit-Schreiben: vorgefundene .env rotieren.
+        try:
+            from core.config import rotate_env_backups_at_start
+
+            sicherung = rotate_env_backups_at_start(self.env_path)
+            if sicherung is not None:
+                meldung = ".env in .env.backup[0-9] gesichert."
+                print(meldung, flush=True)
+                LOGGER.info("%s (%s)", meldung, sicherung.name)
+        except OSError as exc:
+            LOGGER.warning("env-backup Rotation fehlgeschlagen: %s", exc)
         _pruefe_env_modus(self.env_path)
         self.cache_dir = cache_dir
         self.immutable_cache_dir = immutable_cache_dir
@@ -1507,6 +1523,7 @@ def api_config(state: AppState, query: dict) -> dict:
         "ui_lang": _ui_lang_aus_env(werte),
         "ui_theme": _ui_theme_aus_env(werte),
         "lernhinweise_plebs": _lernhinweise_plebs_aus_env(werte),
+        "network": (werte.get("NETWORK") or "main").strip().lower() or "main",
         "managed_by": state.managed_by,
         "managed_hint": _managed_hint(state, werte),
         "electrum_indexer": (
@@ -2942,19 +2959,23 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
     if not _empfang_gehoert_zu_wallet(state, entry, address):
         raise ApiError(500, "Abgeleitete Adresse gehört nicht zu diesem Wallet.")
 
-    lookahead = [address]
-    plus = main.derive_receive_address_at_index(
-        xpub, index + 1, script_type=skript,
-    )
-    if plus and plus[0]:
-        lookahead.append(plus[0])
+    # Gap-Lookahead: nächste freie + weitere Empfangsadressen (BIP44-üblich 20).
+    # Fängt Zahlungen auf Adressen, die SatSage nicht selbst „ausgegeben“ hat.
+    gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+    lookahead: list[str] = []
+    for i in range(index, min(index + gap + 1, max_index)):
+        dest = main.derive_receive_address_at_index(
+            xpub, i, script_type=skript,
+        )
+        if dest and dest[0] and dest[0] not in lookahead:
+            lookahead.append(dest[0])
 
     from core import wallet_watch
 
     watch = wallet_watch.wallet_watch_status()
     watch_active = bool(watch.get("running"))
     subscribed = False
-    if watch_active:
+    if watch_active and lookahead:
         subscribed = bool(
             wallet_watch.subscribe_addresses(lookahead, xpub)
         )
@@ -2971,6 +2992,68 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
     )
     state.empfang_cache[kennung] = dict(antwort)
     return antwort
+
+
+#: Lab-Regtest: Fountain/Faucet — nicht in SatSage-WALLET_*, nur als Fremdquelle.
+_LAB_FAUCET_WALLET = "lab-faucet"
+
+
+def api_lab_faucet_senden(state: AppState, payload: dict) -> dict:
+    """
+    Regtest: sendet Sats von ``lab-faucet`` an eine Empfangsadresse.
+
+    Nur bei ``NETWORK=regtest``. Lässt die Tx im Mempool (kein Auto-Mine),
+    damit Incoming-Animationen testbar bleiben.
+    """
+    werte = state.env().values()
+    netz = (werte.get("NETWORK") or "").strip().lower()
+    if netz not in ("regtest", "reg"):
+        raise ApiError(403, "Lab-Faucet nur unter NETWORK=regtest.")
+
+    adresse = str(payload.get("address") or payload.get("adresse") or "").strip()
+    if not adresse:
+        raise ApiError(400, "Empfangsadresse fehlt.")
+    try:
+        sats = int(payload.get("sats") or payload.get("amount_sats") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "Ungültige Satoshi-Menge.") from exc
+    if sats < 546:
+        raise ApiError(400, "Mindestens 546 sats (Dust-Grenze).")
+    if sats > 50_000_000_000:
+        raise ApiError(400, "Menge zu groß.")
+
+    from core import bitcoind_rpc
+
+    from dataclasses import replace
+
+    cfg = bitcoind_rpc.config_from_env(werte) or bitcoind_rpc.config_utxo_from_env(werte)
+    if cfg is None or not cfg.configured:
+        raise ApiError(503, "Kein Core-RPC konfiguriert (NODE_IP / RPC*).")
+    btc = sats / 100_000_000.0
+    try:
+        # loadwallet am Node-Root; Senden am Wallet-Pfad.
+        root = bitcoind_rpc.BitcoinRpcClient(cfg, timeout=60.0)
+        try:
+            root.call("loadwallet", [_LAB_FAUCET_WALLET])
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "already loaded" not in msg and "duplicate" not in msg:
+                pass
+        client = bitcoind_rpc.BitcoinRpcClient(
+            replace(cfg, wallet=_LAB_FAUCET_WALLET), timeout=60.0,
+        )
+        txid = client.call("sendtoaddress", [adresse, btc])
+    except Exception as exc:
+        raise ApiError(502, f"Faucet-Send fehlgeschlagen: {exc}") from exc
+
+    return {
+        "ok": True,
+        "txid": txid,
+        "address": adresse,
+        "sats": sats,
+        "from_wallet": _LAB_FAUCET_WALLET,
+        "network": netz,
+    }
 
 
 def api_alle_utxos(state: AppState, query: dict) -> dict:
@@ -5641,6 +5724,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_wallet_utxos(state, teile[1], query)
         if len(teile) == 3 and teile[0] == "wallets" and teile[2] == "empfang" and methode == "GET":
             return 200, api_wallet_empfang(state, teile[1])
+        if teile == ["lab", "faucet-senden"] and methode == "POST":
+            return 200, api_lab_faucet_senden(state, self._body())
         if teile == ["utxos"] and methode == "GET":
             return 200, api_alle_utxos(state, query)
         if teile == ["sanctions"] and methode == "GET":

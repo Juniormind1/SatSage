@@ -28,8 +28,10 @@ EN-Fallback nur mit konkretem Pfad: bitcoin.org-Unterseiten, learnmeabitcoin-Art
 
 1. URL in `web/lernhinweise.json` setzen (konkreter Inhalt!).
 2. `status` auf `ok` oder `verworfen`.
-3. Handbuch-FAQ (§14) nachziehen / regenerieren.
+3. **Handbuch-FAQ (§14 in `doc/handbuch.html`) immer im selben Schritt nachziehen** — Deutsch und Englisch. Wenn der Maintainer eine kuratierte Pleb-Lern-URL angibt, ist das Handbuch **Pflicht**, nicht optional.
 4. `data-lern="<id>"` nur an passende UI-Elemente.
+
+Assistenten: Bei jeder Kuratierungs-URL sofort `web/lernhinweise.json` **und** `doc/handbuch.html` §14 aktualisieren (Tabellen aus der JSON regenerieren, externe Links mit `target="_blank"`).
 
 ## Verhalten (wenn an)
 

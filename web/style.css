@@ -395,6 +395,114 @@ button, input, select { font: inherit; color: inherit; }
   display: block;
   border-radius: 4px;
 }
+.empfang-kopf-zeile {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-height: 1.2em;
+}
+.empfang-kopf-zeile .empfang-kopf {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.empfang-lab-senden {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+.empfang-lab-senden[hidden] {
+  display: none !important;
+}
+.empfang-lab-senden input {
+  width: 7.5rem;
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.3rem;
+}
+.empfang-lab-senden button {
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+.empfang-anim-debug {
+  display: flex;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+}
+.empfang-anim-debug[hidden] {
+  display: none !important;
+}
+.empfang-anim-debug button {
+  font: inherit;
+  font-size: 0.65rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--blass, #666);
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.empfang-anim-debug button:hover {
+  opacity: 1;
+}
+.empfang-konfetti-proto {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 0.5rem;
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px dashed var(--blass, #666);
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+.empfang-konfetti-proto[hidden] {
+  display: none !important;
+}
+.empfang-konfetti-proto-titel {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  opacity: 0.85;
+}
+.empfang-konfetti-proto label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.empfang-konfetti-proto input[type="range"],
+.empfang-konfetti-proto input[type="number"],
+.empfang-konfetti-proto select {
+  width: 100%;
+  font: inherit;
+  font-size: 0.7rem;
+}
+.empfang-konfetti-proto-status {
+  grid-column: 1 / -1;
+  opacity: 0.8;
+  font-size: 0.65rem;
+}
+.empfang-konfetti-proto-btn {
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
+.empfang-pane--puls .empfang-kopf {
+  transition: none; /* Opacity steuert die Atem-RAF */
+  min-height: 1.2em;
+}
+.empfang-konfetti {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
 
 .empfang-pane--lern .empfang-qr {
   cursor: pointer;

@@ -9,11 +9,15 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Empfangen · Subscribe-Gap:** Bei aktivem Wallet-Watch werden die nächste freie Empfangsadresse und die folgenden 20 Indizes abonniert — Zahlungen auf noch nicht in SatSage gezeigte Adressen werden mitbemerkt.
+- **Lab · Faucet-Senden:**
+ Unter `NETWORK=regtest` Eingabefeld + OK neben Empfangen — sendet Sats von `lab-faucet` an die aktuelle Empfangsadresse (Mempool, für Animations-Tests).
+- **.env-Backup:** Beim Serverstart Rotation `.env.backup0`…`.env.backup9` (vorgefundene `.env` → backup0). Zur Laufzeit schreibt SatSage nur noch `.env` — kein `.bak` mehr bei jedem Speichern.
 - **Handbuch · FAQ Lernstoff:** Anhang mit allen Pleb-Lern-URLs aus `web/lernhinweise.json` — Deutsch und Englisch (`doc/handbuch.html` §14). Externe Links öffnen in neuem Tab. Kuratierung: nur konkrete Artikel (keine Anbieter-Startseiten/Shops); u. a. Österr. Schule, XPUB, UTXO, SegWit.
 - **UI · Flüchtigkeit:** Richtlinie `doc/design-fluchtigkeit.md` — Nutzer in Eile; Fehlerverhinderung statt Hinweis. Empfangs-QR beim Wallet-Wechsel sofort weg (kein Cache-Vorzeigen), erst wieder wenn die Adresse des neuen Wallets feststeht.
 - **UI · Neugier:** Richtlinie `doc/design-neugier.md` — unwissend/lernfaul aber neugierig; bevorzugt Tooltips („Wo ist Walter?“): Eilige ungestört, Neugierige lernen nebenbei.
 - **Dealbreaker T13:** Lern-URLs nur Bitcoin-only; Shitcoins/Eth im Zweifel warnen, nicht durchwinken. Lernstoff = Bitcoin-Mechanismen für Plebs, keine SatSage-Internals (`doc/merge-dealbreakers.md`, `doc/lernhinweise-kuratierung.md`).
-- **Empfangen · Herzschlag:** Während Adresssuche, UTXO-Scan **oder Tip-/Start-Aktualisierung** am gewählten Wallet: gedimmter QR nur durch Glyph-Maske (**₿ → sat → Pfeife → Lupe → ∞/21M**, mit Lernhinweisen zusätzlich **Student**), atmet; Wechsel bei „alles Hintergrund“. Kein vorschnelles „Schätzung aus Cache“. Nie scanbar.
+- **Empfangen · Herzschlag:** Glyph-Atmung (**₿ → sat → Pfeife → Lupe → ∞/21M**, +Student mit Lernhinweisen); Text über dem QR atmet mit. Mempool eingehend: Fade-to-black + Konfetti + ggf. neue Empfangsadresse; ausgehend: „OH NO!“ einen Atemzug; pro gefundenem Scan-UTXO: oranges B.
 - **Lernhinweise für Plebs (Experiment):** Einstellung (default aus); Tooltips mit „geeignete Quelle für einen Einstieg in diesen Kaninchenbau“; optional Lern-QR (Klick = kopieren + neuer Tab). Kuratierung: `web/lernhinweise.json`, DE u. a. Aprycot/Blocktrainer/Einundzwanzig.
 - **Empfangen · schneller & genauer:** Wallet-Wechsel zeigt sofort den QR des neuen Wallets (Client-Cache) bzw. „wird ermittelt…“ — nie länger den alten. Nächste freie Adresse = höchster bekannter Empfangs-Index + 1 aus UTXO/Verlauf (kein Electrs-Rundlauf bei jedem Klick). Wallets können „Nur lesen“ markiert werden → kein QR, Hinweis „Read-only-Wallet ausgewählt“.
 - **Empfangen · bc1 zuerst:** Bei generischem `xpub`/`tpub` und Skripttyp „Automatisch“ ist die Empfangsadresse (QR, Ableitung #0) natives SegWit (`bc1q`), nicht mehr Legacy (`1…`). Gap-Scan prüft weiter alle Skriptformen; in den Wallet-Einstellungen bleibt Legacy/Nested/Taproot wählbar.
