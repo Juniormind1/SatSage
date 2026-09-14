@@ -76,14 +76,21 @@ def public_opt_in(values: dict[str, str] | None = None, service: str = "") -> bo
     # sonst blockiert die Allowlist Clearnet-IPs trotz OEFFENTLICHE_ELECTRUM=1.
     if service_key in ("", "FULCRUM", "ELECTRUM"):
         keys.append("OEFFENTLICHE_ELECTRUM")
-    # Kurs-Historie-Nachzug (Bitstamp/CDD) — eigener Schalter.
-    if service_key in ("", "PRICEHISTORY", "MEMPOOL", "PRICE"):
-        keys.append("SATSAGE_PRICE_HISTORY_OPT_IN")
     return any(_truthy(_setting(values, key)) for key in keys)
+
+
+def _price_service(service: str) -> bool:
+    """Spot/Historie: nur Fiat-Kurse, keine Wallet-Daten — immer freigegeben."""
+    key = "".join(ch for ch in service.upper() if ch.isalnum())
+    return key in ("PRICE", "PRICEHISTORY")
 
 
 def allowed_host(host: str, *, service: str = "", values=None, opt_in=None) -> bool:
     if classify_host(host) != "public":
+        return True
+    # BTC/Fiat-Kurse (mempool.space Spot, Coinbase, Bitstamp/CDD, …):
+    # vertrauenswürdige Kursquellen, kein Opt-in. CSV-Import bleibt optional.
+    if _price_service(service):
         return True
     return public_opt_in(values, service) if opt_in is None else bool(opt_in)
 

@@ -1,9 +1,9 @@
-"""Täglicher Nachzug der BTC-Tageskurs-Historie (Bitstamp / CryptoDataDownload).
+"""Täglicher Nachzug der BTC-Tageskurs-Historie.
 
-Niedrigschwellig: einmal pro UTC-Tag prüfen, bei Lücke bis gestern die
-CDD-CSV holen, 4 Wochen überlappen, Diskrepanzen loggen, optional 7-Tage-
-Smoothing am Quellenwechsel. Schreibt nur in ``immutable_cache/btc_price/``,
-nie ins Bundle unter ``data/``.
+Einmal pro UTC-Tag: Lücke bis gestern füllen. Primär Bitstamp-CSV
+(CryptoDataDownload), bei Ausfall Mempool-Tageskurse Tag für Tag.
+Kein Opt-in — nur Fiat-Kurse, keine Wallet-Daten. CSV-Import bleibt
+für Puristen. Schreibt nur ``immutable_cache/btc_price/``, nie das Bundle.
 """
 from __future__ import annotations
 
@@ -30,21 +30,16 @@ CDD_BITSTAMP = {
 OVERLAP_TAGE = 28
 DISKREPANZ_MEDIAN_PCT = 1.5
 SMOOTH_TAGE = 7
+#: Veraltet — Historie braucht kein Opt-in mehr; bleibt für alte API/Tests.
 ENV_OPT_IN = "SATSAGE_PRICE_HISTORY_OPT_IN"
 
 _USER_AGENT = "SatSage/1.0"
 
 
 def price_history_opt_in(values: dict[str, str] | None) -> bool:
-    """Eigener Schalter — unabhängig vom allgemeinen Public-Opt-in."""
-    raw = ""
-    if values:
-        raw = str(values.get(ENV_OPT_IN) or "").strip()
-    if not raw:
-        import os
-
-        raw = str(os.environ.get(ENV_OPT_IN, "") or "").strip()
-    return raw.lower() in ("1", "true", "yes", "ja", "on")
+    """Immer an — Nachzug läuft ohne Einstellungs-Schalter."""
+    _ = values
+    return True
 
 
 def _log(on_log: LogFn | None, text: str) -> None:
@@ -140,6 +135,106 @@ def hole_bitstamp_cdd_csv(
         raise price_mod.PriceError(f"Netzfehler bei Historie-Download: {e.reason}") from e
     except TimeoutError as e:
         raise price_mod.PriceError("Zeitüberschreitung bei Historie-Download") from e
+
+
+def _mempool_basis(values: dict[str, str] | None) -> str | None:
+    if values:
+        roh = (values.get("MEMPOOL_URL") or "").strip().rstrip("/")
+        if roh:
+            return roh
+    return price_mod.MEMPOOL_PRICE_DEFAULT
+
+
+def hole_historie_mempool_luecke(
+    currency: str,
+    *,
+    ab: date,
+    bis: date,
+    values: dict[str, str] | None = None,
+    timeout: float = 20.0,
+    on_log: LogFn | None = None,
+) -> dict[str, float]:
+    """
+    Fehlende Tage einzeln über Mempool ``/historical-price`` (UTC-Tageskurs).
+
+    Fallback, wenn die Bitstamp-CSV nicht greifbar ist. Begrenzt auf 400 Tage
+    pro Lauf, damit ein leerer Cache nicht ewig tagweise pullt.
+    """
+    w = price_mod.normalisiere_historie_waehrung(currency)
+    if w not in ("EUR", "USD"):
+        return {}
+    basis_liste: list[str] = []
+    konfiguriert = _mempool_basis(values)
+    if konfiguriert:
+        basis_liste.append(konfiguriert)
+    if price_mod.MEMPOOL_PRICE_DEFAULT not in basis_liste:
+        basis_liste.append(price_mod.MEMPOOL_PRICE_DEFAULT)
+
+    serie: dict[str, float] = {}
+    d = ab
+    geholt = 0
+    max_tage = 400
+    while d <= bis and geholt < max_tage:
+        ds = d.isoformat()
+        preis = None
+        for basis in basis_liste:
+            try:
+                preis = price_mod.hole_tageskurs_mempool(
+                    d, w, base_url=basis, timeout=timeout,
+                )
+                break
+            except price_mod.PriceError:
+                continue
+        if preis is not None and preis.amount > 0:
+            serie[ds] = float(preis.amount)
+            geholt += 1
+        d += timedelta(days=1)
+    if serie:
+        _log(
+            on_log,
+            f"Kurs-Historie {w}: Mempool lieferte {len(serie)} Tag(e) "
+            f"({min(serie)}…{max(serie)}).",
+        )
+    return serie
+
+
+def lade_remote_historie(
+    currency: str,
+    *,
+    luecke_ab: date,
+    bis: date,
+    values: dict[str, str] | None = None,
+    timeout: float = 60.0,
+    fetch: Callable[[str, float], str] | None = None,
+    on_log: LogFn | None = None,
+) -> tuple[dict[str, float], str]:
+    """
+    Remote-Serie: Bitstamp/CDD zuerst, sonst Mempool-Tageskurse.
+
+    Rückgabe ``(serie, quelle)``.
+    """
+    w = price_mod.normalisiere_historie_waehrung(currency)
+    try:
+        roh = hole_bitstamp_cdd_csv(
+            w, timeout=timeout, fetch=fetch, values=values,
+        )
+        remote = price_mod.parse_kurs_csv(roh)
+        if remote:
+            return remote, "bitstamp-cdd"
+    except price_mod.PriceError as exc:
+        _log(on_log, f"Kurs-Historie {w}: Bitstamp/CDD nicht nutzbar ({exc}).")
+
+    if fetch is not None:
+        # Tests injizieren nur CDD-Fetch — kein stiller Mempool-Pfad.
+        raise price_mod.PriceError("keine Remote-Historie (Fetch-Stub ohne Treffer)")
+
+    mem = hole_historie_mempool_luecke(
+        w, ab=luecke_ab, bis=bis, values=values, timeout=min(timeout, 25.0),
+        on_log=on_log,
+    )
+    if mem:
+        return mem, "mempool-day"
+    raise price_mod.PriceError("keine vertrauenswürdige Kurs-Quelle erreichbar")
 
 
 def _median_abs_pct(
@@ -288,8 +383,8 @@ def historie_nachziehen(
     """
     Einmal prüfen/nachziehen für *currency*.
 
-    Ohne Opt-in: nur Status, kein Netz. ``force`` ignoriert den Tages-Stamp
-    (manueller Knopf), nicht das Opt-in.
+    Immer Netz, wenn Lücke — kein Opt-in. ``force`` ignoriert den Tages-Stamp
+    (manueller Knopf „Jetzt nachziehen“).
     """
     w = price_mod.normalisiere_historie_waehrung(currency)
     root = Path(immutable_cache_dir)
@@ -299,24 +394,6 @@ def historie_nachziehen(
     if not force and schon_heute_geprueft(root, jetzt=jetzt):
         return {"ok": True, "noop": True, "reason": "already_checked_today", "currency": w}
 
-    if not price_history_opt_in(values):
-        luecke = historie_luecke_bis(root, w, bis=bis)
-        _merke_check(root, jetzt=jetzt)
-        if luecke is not None:
-            _log(
-                on_log,
-                f"Kurs-Historie {w}: Lücke ab {luecke.isoformat()} — Nachzug "
-                f"braucht {ENV_OPT_IN}=1 (Bitstamp via CryptoDataDownload).",
-            )
-            return {
-                "ok": False,
-                "reason": "opt_in",
-                "currency": w,
-                "gap_from": luecke.isoformat(),
-            }
-        _log(on_log, f"Kurs-Historie {w}: aktuell bis {bis.isoformat()}.")
-        return {"ok": True, "noop": True, "reason": "current", "currency": w}
-
     luecke = historie_luecke_bis(root, w, bis=bis)
     if luecke is None:
         _merke_check(root, jetzt=jetzt)
@@ -325,13 +402,18 @@ def historie_nachziehen(
 
     _log(
         on_log,
-        f"Kurs-Historie {w}: Lücke ab {luecke.isoformat()} — lade Bitstamp-CSV…",
+        f"Kurs-Historie {w}: Lücke ab {luecke.isoformat()} — hole Kurse…",
     )
     try:
-        roh = hole_bitstamp_cdd_csv(
-            w, timeout=timeout, fetch=fetch, values=values,
+        remote, quelle = lade_remote_historie(
+            w,
+            luecke_ab=luecke,
+            bis=bis,
+            values=values,
+            timeout=timeout,
+            fetch=fetch,
+            on_log=on_log,
         )
-        remote = price_mod.parse_kurs_csv(roh)
     except price_mod.PriceError as exc:
         _merke_check(root, jetzt=jetzt)
         _log(on_log, f"Kurs-Historie {w}: Nachzug fehlgeschlagen — {exc}")
@@ -358,19 +440,20 @@ def historie_nachziehen(
         ziel,
         merged,
         currency=w,
-        quelle="bitstamp-cdd-sync",
+        quelle=f"{quelle}-sync",
     )
     _merke_check(root, jetzt=jetzt)
     _log(
         on_log,
         f"Kurs-Historie {w}: {meta['neu_tage']} Tag(e) ergänzt "
-        f"(bis {bis.isoformat()}, vorher {herkunft}).",
+        f"(bis {bis.isoformat()}, Quelle {quelle}, vorher {herkunft}).",
     )
     return {
         "ok": True,
         "currency": w,
         "gap_from": luecke.isoformat(),
         "to": bis.isoformat(),
+        "source": quelle,
         **meta,
     }
 

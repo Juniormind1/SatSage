@@ -920,12 +920,25 @@ select { font-family: var(--mono); font-size: 11px; }
   display: flex; align-items: flex-start; gap: 10px;
   padding: 8px 4px; border-bottom: 1px solid var(--linie);
   font-size: 13px;
+  cursor: pointer;
 }
 .sa-zeile:last-child { border-bottom: 0; }
-.sa-zeile input { margin-top: 3px; flex-shrink: 0; }
+.sa-zeile:hover { background: var(--flaeche-2); }
+.sa-zeile input {
+  margin-top: 3px; flex-shrink: 0;
+  width: 1.1rem; height: 1.1rem;
+  cursor: pointer;
+  accent-color: var(--akzent);
+}
 .sa-zeile.eigen { opacity: .65; }
 .sa-zeile .sa-meta { color: var(--blass); font-size: 11px; margin-top: 2px; }
 .sa-zeile .mono { word-break: break-all; }
+.sa-werkzeug {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 4px 4px 10px;
+}
+.sa-mehr { margin: 8px 4px 4px; }
+.sa-utxo-host { display: flex; flex-direction: column; }
 .sa-inputs {
   margin: 4px 0 0 1.6rem; font-size: 11px; color: var(--gedaempft);
   font-family: var(--mono);

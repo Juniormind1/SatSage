@@ -3736,7 +3736,14 @@ class WalletContext:
         if _is_known_external_address(address, self.xpubs, max_search):
             return None
         for xpub in self.xpubs:
-            if _address_belongs_to_xpub(xpub, address, max_search):
+            # Pro Wallet nicht tiefer als nötig + max_search (Gap/Trace).
+            xpub_cap = max(
+                int(self.max_addresses_for(xpub, max_search) or 0),
+                int(max_search or 0),
+            )
+            if xpub_cap <= 0:
+                xpub_cap = max_search
+            if _address_belongs_to_xpub(xpub, address, xpub_cap):
                 _register_wallet_address(self, xpub, address)
                 _mark_wallet_address_positive(xpub, address)
                 _remove_external_address_if_present(address)
@@ -3885,6 +3892,35 @@ def seed_wallet_addresses_from_utxo_cache(
         cache_dir=cache_dir,
         xpubs=xpubs,
     )
+
+
+def seed_wallet_addresses_from_verlauf_cache(
+    wallet: WalletContext | None,
+    xpubs: list[str],
+    cache_dir: Path,
+) -> int:
+    """
+    Adressen aus dem Verlaufs-Cache ins Mapping — **ohne** HD-Suche.
+
+    Nach Gap-Scan liegen oft hunderte Indizes über ``max_addresses`` im
+    Verlauf. ``resolve_address`` würde sonst je Adresse bis
+    ``MAX_TRACE_ADDRESS_SEARCH`` über alle XPUBs ableiten (Minuten).
+    Zugehörigkeit ist hier durch die Cache-Datei pro XPUB bekannt.
+    """
+    if wallet is None:
+        return 0
+    n = 0
+    for xpub in xpubs:
+        eintraege = load_xpub_verlauf_cache(xpub, cache_dir) or []
+        for e in eintraege:
+            addr = (e.get("address") or "").strip()
+            if not addr:
+                continue
+            if addr in wallet.address_to_wallet:
+                continue
+            _register_wallet_address(wallet, xpub, addr)
+            n += 1
+    return n
 
 
 def _merge_cached_utxos(

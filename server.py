@@ -3575,7 +3575,7 @@ def api_lab_faucet_senden(state: AppState, payload: dict) -> dict:
 
 
 def _seed_wallet_ctx_aus_caches(state: AppState) -> None:
-    """UTXO-/Resolution-Adressen ins Mapping — vor Listen/Trace ohne teure Ableitung."""
+    """UTXO-/Verlauf-/Resolution-Adressen ins Mapping — ohne teure HD-Suche."""
     ctx = state.wallet_ctx
     if ctx is None:
         return
@@ -3584,6 +3584,14 @@ def _seed_wallet_ctx_aus_caches(state: AppState) -> None:
         return
     try:
         main.seed_wallet_addresses_from_utxo_cache(
+            ctx, schluessel, state.cache_dir,
+        )
+    except Exception:
+        pass
+    try:
+        # Verlauf kann weit über max_addresses reichen (Gap-Scan) —
+        # ohne Seed hängt /api/utxos an resolve_address × MAX_TRACE.
+        main.seed_wallet_addresses_from_verlauf_cache(
             ctx, schluessel, state.cache_dir,
         )
     except Exception:
@@ -4125,7 +4133,7 @@ def api_price_history(state: AppState, query: dict) -> dict:
                     state.immutable_cache_dir, roh, mit_serie=mit_serie,
                 ),
             ],
-            "price_history_opt_in": hist_sync.price_history_opt_in(werte),
+            "price_history_opt_in": True,
         }
     return {
         "histories": [
@@ -4134,28 +4142,17 @@ def api_price_history(state: AppState, query: dict) -> dict:
             )
             for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
         ],
-        "price_history_opt_in": hist_sync.price_history_opt_in(werte),
+        "price_history_opt_in": True,
     }
 
 
 def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict:
-    """Manueller oder erzwungener Historie-Nachzug (Bitstamp/CDD)."""
+    """Manueller Historie-Nachzug (Lücken füllen — Bitstamp/CDD, sonst Mempool)."""
     from core import price_history_sync as hist_sync
 
-    payload = payload or {}
-    an = payload.get("opt_in")
-    env = state.env()
-    if an is not None:
-        env.apply({
-            hist_sync.ENV_OPT_IN: "1" if bool(an) else "0",
-        })
-        try:
-            env.save()
-        except OSError as exc:
-            raise ApiError(500, "Interner Serverfehler.") from exc
-        state.reload()
+    _ = payload  # früher opt_in — Nachzug braucht keine Erlaubnis mehr
     logs: list[str] = []
-    # Manueller API-Lauf: Stamp ignorieren, Opt-in weiter beachten.
+    # Manueller API-Lauf: Tages-Stamp ignorieren, immer versuchen.
     ergebnisse = hist_sync.historie_nachziehen_alle(
         state.immutable_cache_dir,
         values=state.env().values(),
@@ -4168,9 +4165,7 @@ def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict
         "ok": all(e.get("ok") for e in ergebnisse),
         "results": ergebnisse,
         "log": logs,
-        "price_history_opt_in": hist_sync.price_history_opt_in(
-            state.env().values()
-        ),
+        "price_history_opt_in": True,
         "histories": [
             price_mod.historie_status(state.immutable_cache_dir, w)
             for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
@@ -4682,6 +4677,9 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     Liefert *(eintraege, wallets_ohne_verlauf)*; die zweite Liste gehört in die
     Anzeige, damit eine gemischte Grundlage auffällt.
     """
+    # Verlaufsadressen vor resolve_address (sonst HD-Suche × MAX_TRACE).
+    _seed_wallet_ctx_aus_caches(state)
+
     eintraege: list[dict] = []
     ohne_verlauf: list[str] = []
     phantome_gesamt = 0
@@ -4795,13 +4793,17 @@ def api_selbstanzeige_kandidaten(state: AppState, query: dict) -> dict:
         jahre = tax_mod.verfuegbare_jahre(utxos)
         jahr = jahre[0] if jahre else __import__("datetime").date.today().year
     txid = (query.get("txid", [""])[0] or "").strip() or None
-    return sa.kandidaten(
-        utxos,
-        jahr,
-        wallet=state.wallet_ctx,
-        immutable_cache_dir=state.immutable_cache_dir,
-        txid=txid,
-    )
+    try:
+        return sa.kandidaten(
+            utxos,
+            jahr,
+            wallet=state.wallet_ctx,
+            immutable_cache_dir=state.immutable_cache_dir,
+            txid=txid,
+        )
+    except ValueError as exc:
+        # z. B. ungültige TxID im Filterfeld
+        raise ApiError(400, str(exc)) from exc
 
 
 def _selbstanzeige_report(state: AppState, payload: dict) -> dict:
@@ -4826,18 +4828,31 @@ def _selbstanzeige_report(state: AppState, payload: dict) -> dict:
     utxo_keys = payload.get("utxos") or []
     if not isinstance(utxo_keys, list):
         raise ApiError(400, "utxos muss eine Liste sein.")
-    return sa.auswerten(
-        utxos,
-        jahr,
-        [str(t) for t in txids],
-        haltefrist_jahre=max(0, frist),
-        anschaffung=einstellungen.get(
-            "anschaffung", tax_mod.STANDARD_ANSCHAFFUNG
-        ),
-        wallet=state.wallet_ctx,
-        immutable_cache_dir=state.immutable_cache_dir,
-        utxo_keys=[str(u) for u in utxo_keys],
-    )
+    # TxIDs sanft normalisieren — ungültige → 400 statt Traceback 500
+    saubere_txids: list[str] = []
+    for roh in txids:
+        text = str(roh or "").strip()
+        if not text:
+            continue
+        try:
+            saubere_txids.append(sa._norm_txid(text, strict=True))
+        except ValueError as exc:
+            raise ApiError(400, str(exc)) from exc
+    try:
+        return sa.auswerten(
+            utxos,
+            jahr,
+            saubere_txids,
+            haltefrist_jahre=max(0, frist),
+            anschaffung=einstellungen.get(
+                "anschaffung", tax_mod.STANDARD_ANSCHAFFUNG
+            ),
+            wallet=state.wallet_ctx,
+            immutable_cache_dir=state.immutable_cache_dir,
+            utxo_keys=[str(u) for u in utxo_keys],
+        )
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
 
 
 def _ingress_veraltet(eintrag: dict | None) -> bool:
@@ -6644,15 +6659,53 @@ class Handler(BaseHTTPRequestHandler):
         utxo_keys = [
             t.strip() for t in roh_u.replace(";", ",").split(",") if t.strip()
         ]
-        report = _selbstanzeige_report(
-            self.state,
-            {
-                "jahr": jahr,
-                "haltefrist_jahre": frist,
-                "txids": txids,
-                "utxos": utxo_keys,
-            },
-        )
+        try:
+            report = _selbstanzeige_report(
+                self.state,
+                {
+                    "jahr": jahr,
+                    "haltefrist_jahre": frist,
+                    "txids": txids,
+                    "utxos": utxo_keys,
+                },
+            )
+        except ApiError as exc:
+            # Browser-Tab erwartet HTML — JSON wirkt wie „leere/kaputte Seite“.
+            if pfad.endswith(".html"):
+                body = (
+                    "<!DOCTYPE html><html lang=de><meta charset=utf-8>"
+                    f"<title>Report-Fehler</title><body style='font-family:system-ui;"
+                    f"max-width:36rem;margin:2rem auto;padding:0 1rem'>"
+                    f"<h1>Report nicht erzeugbar</h1><p>{tax_mod._html_escape(exc.message)}</p>"
+                    f"<p style='color:#666'>Fenster schließen und in SatSage "
+                    f"TxID/Jahr prüfen.</p></body></html>"
+                ).encode("utf-8")
+                self._send(exc.status, body, "text/html; charset=utf-8")
+            else:
+                self._send(
+                    exc.status,
+                    json.dumps({"error": exc.message}).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+            return
+        except Exception as exc:
+            msg = f"Interner Serverfehler: {exc}"
+            if pfad.endswith(".html"):
+                body = (
+                    "<!DOCTYPE html><html lang=de><meta charset=utf-8>"
+                    f"<title>Report-Fehler</title><body style='font-family:system-ui;"
+                    f"max-width:36rem;margin:2rem auto;padding:0 1rem'>"
+                    f"<h1>Report fehlgeschlagen</h1>"
+                    f"<p>{tax_mod._html_escape(msg)}</p></body></html>"
+                ).encode("utf-8")
+                self._send(500, body, "text/html; charset=utf-8")
+            else:
+                self._send(
+                    500,
+                    json.dumps({"error": msg}).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+            return
         jahr = report["jahr"]
         if pfad.endswith(".csv"):
             inhalt = sa.als_csv(report)
@@ -6667,11 +6720,15 @@ class Handler(BaseHTTPRequestHandler):
             # inline: Tab zeigt den Report (Druck → PDF). Die Oberfläche
             # löst parallel noch einen Datei-Download aus.
             disposition = f'inline; filename="{name}"'
+        if isinstance(inhalt, str):
+            inhalt = inhalt.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", typ)
         self.send_header("Content-Length", str(len(inhalt)))
         self.send_header("Content-Disposition", disposition)
         self.send_header("X-Content-Type-Options", "nosniff")
+        # Report ist standalone HTML — kein CSP der App-Shell (bricht sonst
+        # eingebettetes CSS / Druck-@page).
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(inhalt)

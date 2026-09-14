@@ -77,11 +77,29 @@ def _parse_utxo_schluessel(wert: str) -> tuple[str, int] | None:
         return None
 
 
-def _norm_txid(txid: str) -> str:
+def _norm_txid(txid: str, *, strict: bool = False) -> str:
+    """
+    Kanonische 64-Hex-TxID.
+
+    Akzeptiert auch ``txid:vout`` / ``utxo:txid:vout`` (Outpoint) — nur der
+    Tx-Teil zählt. *strict=False*: ungültig → ``""``; *strict=True*: ValueError.
+    """
     text = (txid or "").strip()
     if not text:
         return ""
-    return main._normalize_txid(text)
+    if text.lower().startswith("utxo:"):
+        text = text[5:].strip()
+    # Outpoint txid:vout → nur TxID (Report-Filter / Copy-Paste aus Liste)
+    if ":" in text:
+        links, _, rechts = text.partition(":")
+        if rechts.isdigit() or (rechts and rechts.lstrip("-").isdigit()):
+            text = links.strip()
+    try:
+        return main._normalize_txid(text)
+    except ValueError:
+        if strict:
+            raise
+        return ""
 
 
 def _wallet_name(utxo: dict, wallet) -> str:
@@ -350,7 +368,10 @@ def kandidaten(
     netto, zurueck, eingesetzt = _netto_und_eigen(utxos)
     jahresbeginn = datetime(jahr, 1, 1)
     jahresende = datetime(jahr, 12, 31, 23, 59, 59)
-    hinweis_txid = _norm_txid(txid) if txid else ""
+    hinweis_txid = ""
+    if txid and str(txid).strip():
+        # Nutzer-Filter: ungültige ID → ValueError (API → 400, kein 500).
+        hinweis_txid = _norm_txid(str(txid).strip(), strict=True)
 
     liste = []
     for spender, betrag in sorted(netto.items(), key=lambda kv: kv[0]):
@@ -811,6 +832,18 @@ def als_csv(report: dict) -> bytes:
     return b"\xef\xbb\xbf" + puffer.getvalue().encode("utf-8")
 
 
+def _css_str(text: str) -> str:
+    """String für CSS ``content: "…"`` — keine HTML-Entities (brechen CSS)."""
+    return (
+        str(text or "")
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace("</", "<\\/")
+    )
+
+
 def als_html(report: dict) -> bytes:
     person = report["person"]
     esc = tax_mod._html_escape
@@ -892,13 +925,18 @@ def als_html(report: dict) -> bytes:
         f"{person['name']} · {person['steuernummer']} · "
         f"Selbstanzeige-Report {report['jahr']}"
     )
+    # CSS content: eigene Escapes — HTML-&quot; zerstört @page-Strings.
+    kopf_css = _css_str(f"{kopf_text} · {report['erstellt']}")
+    fuss_css = _css_str(fuss_text)
 
     html = f"""<!DOCTYPE html>
 <html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Selbstanzeige-Report {report['jahr']} — {esc(person['name'])}</title>
 <style>
   body {{ font-family: Georgia, "Times New Roman", serif; color: #1a1a1a;
-         max-width: 22cm; margin: 1.5cm auto; line-height: 1.45; }}
+         max-width: 22cm; margin: 1.5cm auto; line-height: 1.45;
+         padding: 0 12px; background: #fff; }}
   h1 {{ font-size: 18pt; margin: 0 0 6pt; }}
   h2 {{ font-size: 13pt; margin: 22pt 0 6pt; }}
   h3 {{ font-size: 11pt; margin: 14pt 0 4pt; }}
@@ -920,18 +958,19 @@ def als_html(report: dict) -> bytes:
     font-size: 9pt; color: #333; border-bottom: 1px solid #ccc;
     padding-bottom: 6pt; margin-bottom: 12pt;
   }}
+  .leer {{ padding: 16pt; background: #f8f8f4; border: 1px solid #ddd; }}
   @media print {{
-    body {{ margin: 0; max-width: none; }}
+    body {{ margin: 0; max-width: none; padding: 0; }}
     .vorgang {{ page-break-inside: avoid; }}
     .bildschirm-kopf {{ display: none; }}
     @page {{
       margin: 2cm 1.5cm 2.2cm 1.5cm;
       @top-center {{
-        content: "{esc(kopf_text)} · {esc(report['erstellt'])}";
+        content: "{kopf_css}";
         font-size: 8pt; color: #333;
       }}
       @bottom-center {{
-        content: "{esc(fuss_text)} · Seite " counter(page);
+        content: "{fuss_css} · Seite " counter(page);
         font-size: 8pt; color: #333;
       }}
     }}
@@ -950,7 +989,7 @@ Haltefrist {report['haltefrist_jahre']} Jahr(e) · erstellt {esc(report['erstell
   <dt>Anschrift</dt><dd>{esc(person['anschrift'])}</dd>
 </dl>
 
-{''.join(vorgang_html) if vorgang_html else '<p>Keine Vorgänge ausgewählt.</p>'}
+{''.join(vorgang_html) if vorgang_html else '<p class="leer"><strong>Keine Vorgänge in diesem Report.</strong><br>TxID passt nicht zum gewählten Steuerjahr, oder FiFo fand keine Lose im Cache. Bitte Jahr prüfen, Abfluss ankreuzen oder „Aktualisieren“.</p>'}
 
 <div class="hinweise"><ul>{hinweise}</ul>
 <p>Erzeugt mit SatSage aus lokal vorliegenden Wallet-/Cache-Daten.

@@ -16,7 +16,7 @@ import json
 import os
 import re
 import ssl
-from outbound_policy import ensure_url_allowed
+from outbound_policy import ensure_url_allowed, tls_context
 import time
 import urllib.error
 import urllib.request
@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from core.paths import resource_dir
 
@@ -518,22 +518,45 @@ def importiere_kurs_csv(
 
 FetchFn = Callable[[str, float], dict]
 
-def _ssl_context() -> ssl.SSLContext:
-    """SSL-Kontext mit brauchbarem CA-Bündel (siehe core.tls)."""
-    from core.tls import ssl_context
 
-    return ssl_context()
+def _outbound_values() -> dict[str, str] | None:
+    """``.env`` für Outbound (MEMPOOL_URL, TLS-Policy) — Kurs braucht kein Opt-in."""
+    try:
+        from core.config import EnvFile
+        from core.paths import app_dir
+
+        return EnvFile.load(app_dir() / ".env").values()
+    except Exception:
+        try:
+            import main as main_mod
+
+            return main_mod._load_dotenv()
+        except Exception:
+            return None
+
+
+def _ssl_context(host: str | None = None) -> ssl.SSLContext:
+    """
+    TLS je Zielhost.
+
+    LAN/Self-Signed (eigene Mempool-URL) wie Node-Anbindung: prüfen aus.
+    Öffentliche Clearnet-Hosts streng (CA-Bündel über ``outbound_policy``).
+    """
+    return tls_context(values=_outbound_values(), host=host)
 
 
 def _fetch_json(url: str, timeout: float = 15.0) -> dict:
+    values = _outbound_values()
     try:
-        ensure_url_allowed(url, service="mempool")
+        # service=price: Fiat-Kursquellen sind outbound immer freigegeben.
+        ensure_url_allowed(url, service="price", values=values)
     except Exception as exc:
         raise PriceError(str(exc)) from exc
+    host = urlparse(url).hostname
     anfrage = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(
-            anfrage, timeout=timeout, context=_ssl_context(),
+            anfrage, timeout=timeout, context=_ssl_context(host),
         ) as ant:
             roh = ant.read()
     except urllib.error.HTTPError as e:

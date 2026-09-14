@@ -1173,23 +1173,16 @@
             </span>
           </div>
           <p class="klein" style="padding: 0 13px 8px; margin: 0;" data-i18n-html="sources.ratesHintHtml">
-            Mitgeliefert: Bitstamp-Schlusskurse (CryptoDataDownload). Eigene
-            CSV (Bloomberg o. Ä.) mit Datum- und Preisspalte überschreibt
-            gleiche Tage im Cache. Format z. B. <span class="mono">date,price</span>
-            oder Semikolon; Kopfzeile wird erkannt. Täglicher Lücken-Nachzug
-            (Bitstamp) nur mit Opt-in.
+            Mitgeliefert: Bitstamp-Schlusskurse (CryptoDataDownload). Fehlende
+            Tage werden automatisch nachgezogen (Bitstamp, sonst Mempool).
+            Eigene CSV (Bloomberg o. Ä.) überschreibt gleiche Tage im Cache —
+            Format z. B. <span class="mono">date,price</span> oder Semikolon.
           </p>
           <div id="kurs-historie-status" class="sanktions-zeile"></div>
           <div class="karte-fuss" style="gap: 8px; flex-wrap: wrap; align-items: center;">
-            <label class="feld feld-klein" style="flex: 0 1 auto;">
-              <input type="checkbox" id="kurs-historie-opt-in"
-                     data-i18n-title="sources.ratesOptInTitle"
-                     title="Erlaubt einmal täglich den Abruf der Bitstamp-Tageskurse von CryptoDataDownload, wenn die lokale Serie hinter gestern zurückliegt. 4 Wochen Überlappung, bei großer Diskrepanz Hinweis im Log.">
-              <span data-i18n="sources.ratesOptIn">Historie täglich nachziehen (Bitstamp)</span>
-            </label>
             <button type="button" id="kurs-historie-sync" class="knopf knopf-klein"
                     data-i18n="sources.ratesSync" data-i18n-title="sources.ratesSyncTitle"
-                    title="Jetzt Lücken prüfen und bei Opt-in Bitstamp-CSV nachladen.">
+                    title="Lücken jetzt prüfen und Kurse nachladen (Bitstamp/Mempool).">
               Jetzt nachziehen
             </button>
             <button type="button" id="kurs-import-eur" class="knopf knopf-klein"

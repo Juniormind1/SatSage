@@ -12,6 +12,8 @@
   let lang = "de";
   let catalog = {};
   let fallbackCatalog = {};
+  /** Steigt bei jedem setLang — ältere parallele Läufe verwerfen ihr Ergebnis. */
+  let langEpoch = 0;
 
   function normalizeLang(roh) {
     const w = String(roh || "").trim().toLowerCase();
@@ -122,7 +124,8 @@
       fallbackCatalog = await fetchCatalog("de");
       try {
         catalog = await fetchCatalog(code);
-      } catch (_) {
+      } catch (err) {
+        console.warn("locale load failed", code, err);
         catalog = {};
       }
     }
@@ -131,7 +134,12 @@
   }
 
   async function setLang(ziel, opts) {
+    const epoch = ++langEpoch;
     const code = await loadCatalogs(ziel);
+    // Neuerer setLang (z. B. Nutzer-Klick EN) hat Vorrang vor initI18n.
+    if (epoch !== langEpoch) {
+      return lang;
+    }
     rememberLang(code);
     document.documentElement.lang = code;
     applyDom(document);
@@ -160,6 +168,11 @@
       storedLang()
       || (ausConfig ? normalizeLang(ausConfig) : null)
       || (vomBrowser.startsWith("de") ? "de" : "en");
+    // Schon per Klick gesetzt und Catalog geladen? Nicht überschreiben.
+    if (langEpoch > 0 && lang === gewaehlt) {
+      applyDom(document);
+      return lang;
+    }
     return setLang(gewaehlt, { persistEnv: null });
   }
 
