@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Umbrel · App-Store-Paket:** `packaging/umbrel/` (Manifest, Compose, `exports.sh`, pre-start), Doku `doc/UMBREL-packaging.md`, Community-Store-Generator `scripts/build_umbrel_community_store`, Dev-Install `scripts/umbrel_dev_install`, Image-Build-Workflow `.github/workflows/build-docker-image.yml`. Dev-Pin: `ghcr.io/juniormind1/satsage:latest` (ohne Digest); Manifest-`version` folgt `VERSION` (0.9.2). Fester Tag+Digest und Store-Release erst mit **0.9.6** beim nächsten Merge nach main.
+- **Umbrel · Managed-Modus:** `SATSAGE_MANAGED_BY=umbrel` — Electrum/Core/Mempool aus Compose-Env (runtime-only), Bridge-Quellen in der UI gesperrt, Bootstrap-Passwort aus `APP_PASSWORD`, Login hinter `app_proxy` bleibt. Gemeinsame Mengen `_NODE_MANAGED`/`_MANAGED_MODI`; `_electrum_indexer` statt `_start9_electrum_indexer`.
+- **Container:** Dockerfile/Entrypoint setzen `SATSAGE_MANAGED_BY` nicht mehr fest auf `start9`; `/data` gehört `1000:1000` (Umbrel-UID).
+- **Web · Sprache:** Ohne `UI_LANG` folgt die Web-UI `Accept-Language` (sonst EN); Login-Seite zweisprachig. `storedLang()` blockiert Config-Sprache nicht mehr mit falschem Default-`de`.
+- **Web · Fußzeile:** „nur lokal erreichbar“ nur wenn `local_only` (Listener wirklich Loopback) — relevant hinter Umbrel `0.0.0.0`.
+
+
 - **Steuerjahr · Chart:** UTXO-Betragsbeschriftungen am Plot entfernt (nur noch Hover-Tooltip).
 - **Start-/Tip-Aktualisierung:** Nav zeigt „gerade eben“ je Wallet, sobald dessen Tip fertig ist — nicht erst, wenn alle Wallets durch sind (`done_wallet_ids` im Job-Meta). Light-Tip: ein `listunspent`-Durchgang pro bekannter Adresse (vorher Prune + Live doppelt). Empfangs-Atem läuft auch bei Read-only und nach Wallet-Wechsel, solange dieses Wallet noch „aktualisiere…“ ist (nicht nur beim ersten schnellen Wallet).
 

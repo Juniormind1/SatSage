@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Build and install SatSage on YOUR OWN Umbrel for testing — no ghcr, no PR.
+#
+# Runs ON the Umbrel device. Builds the image locally, drops the app package
+# into the app-store source and installs it through umbreld. The compose image
+# reference is rewritten to the local tag, because a digest-pinned ghcr image
+# does not exist yet.
+#
+# Usage (on the device):
+#   ./scripts/umbrel_dev_install            # build + install
+#   ./scripts/umbrel_dev_install reinstall  # uninstall first, then install
+#
+# Full guide: doc/UMBREL-packaging.md
+set -euo pipefail
+
+APP_ID="satsage"
+LOCAL_TAG="satsage:dev"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MODE="${1:-install}"
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || { echo "fehlt: $1" >&2; exit 1; }
+}
+need docker
+need umbreld
+need rsync
+
+if [ ! -f "$ROOT/packaging/umbrel/umbrel-app.yml" ]; then
+  echo "packaging/umbrel/ nicht gefunden — laeuft das Skript im SatSage-Repo?" >&2
+  exit 1
+fi
+
+STORE="$(find /home/umbrel/umbrel/app-stores -maxdepth 1 -name 'getumbrel-umbrel-apps-github-*' | head -1)"
+if [ -z "$STORE" ]; then
+  echo "App-Store-Quelle nicht gefunden unter /home/umbrel/umbrel/app-stores" >&2
+  exit 1
+fi
+echo "App-Store-Quelle: $STORE"
+
+echo
+echo "==> 1/4  Image bauen ($LOCAL_TAG, $(uname -m))"
+docker build -f "$ROOT/packaging/Dockerfile" -t "$LOCAL_TAG" "$ROOT"
+
+echo
+echo "==> 2/4  Paket in die Store-Quelle spiegeln"
+sudo mkdir -p "$STORE/$APP_ID"
+sudo rsync -a --delete --exclude='.gitkeep' \
+  "$ROOT/packaging/umbrel/" "$STORE/$APP_ID/"
+# Lokales Image statt des noch nicht veroeffentlichten ghcr-Digests.
+sudo sed -i "s|^\( *image: \).*satsage.*|\1${LOCAL_TAG}|" "$STORE/$APP_ID/docker-compose.yml"
+echo "image-Zeile:"
+grep -n "image:" "$STORE/$APP_ID/docker-compose.yml"
+
+echo
+echo "==> 3/4  Abhaengigkeit pruefen (electrs)"
+if umbreld client apps.list.query 2>/dev/null | grep -q '"electrs"'; then
+  echo "electrs ist installiert."
+else
+  echo "WARNUNG: electrs scheint zu fehlen. SatSage braucht es als Dependency." >&2
+  echo "Installieren mit: umbreld client apps.install.mutate --appId electrs" >&2
+fi
+
+echo
+echo "==> 4/4  Installieren"
+if [ "$MODE" = "reinstall" ]; then
+  umbreld client apps.uninstall.mutate --appId "$APP_ID" 2>/dev/null || true
+  sleep 3
+fi
+umbreld client apps.install.mutate --appId "$APP_ID"
+
+echo
+echo "Status:"
+umbreld client apps.state.query --appId "$APP_ID" || true
+echo
+echo "Fertig. Oeffnen:  http://$(hostname).local:8732"
+echo "Passwort zeigt Umbrel in den App-Details (deterministicPassword)."
+echo "Logs:             umbreld client apps.logs.query --appId $APP_ID"

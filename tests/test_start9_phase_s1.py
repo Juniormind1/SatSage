@@ -139,7 +139,10 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertIn("know your sats", html)
         self.assertIn("data-theme", html)
         self.assertIn("--grund:#1A1E22", html)
-        self.assertIn("StartOS: Benutzername", html)
+        # Sprachunabhaengig: die Anmeldeseite folgt seit 0.9.4 dem
+        # Accept-Language des Browsers und faellt sonst auf Englisch.
+        self.assertIn("StartOS", html)
+        self.assertIn("Actions &amp; Config", html)
         self.assertIn('class="karte"', html)
 
         logo = urllib.request.Request(

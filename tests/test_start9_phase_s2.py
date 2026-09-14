@@ -113,15 +113,15 @@ class TestStart9ManagedMode(unittest.TestCase):
                 werte = state.env().values()
                 self.assertEqual(werte["FULCRUM_HOST"], "10.0.3.9")
                 self.assertEqual(werte["FULCRUM_PORT"], "50001")
-                self.assertEqual(server._start9_electrum_indexer(werte), "fulcrum")
+                self.assertEqual(server._electrum_indexer(werte), "fulcrum")
                 hint = server._managed_hint(state, werte)
                 self.assertIn("Fulcrum", hint)
                 self.assertIn("fulcrum", hint)
 
     def test_start9_indexer_default_electrs(self):
-        self.assertEqual(server._start9_electrum_indexer({}), "electrs")
+        self.assertEqual(server._electrum_indexer({}), "electrs")
         self.assertEqual(
-            server._start9_electrum_indexer({"SATSAGE_ELECTRUM_INDEXER": "ELECTRS"}),
+            server._electrum_indexer({"SATSAGE_ELECTRUM_INDEXER": "ELECTRS"}),
             "electrs",
         )
 

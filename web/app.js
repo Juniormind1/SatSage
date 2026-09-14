@@ -12814,6 +12814,7 @@ async function pruefeWalletSyncJob() {
 }
 
 function zeichneFussVersion() {
+  zeichneFussLocalOnly();
   const ziel = $("#fuss-version");
   if (!ziel) return;
   const ver = (Zustand.config?.version || "").trim();
@@ -12822,6 +12823,14 @@ function zeichneFussVersion() {
     return;
   }
   ziel.textContent = `v${ver} · `;
+}
+
+// "nur lokal erreichbar" nur behaupten, wenn es stimmt. Hinter Umbrels
+// app_proxy bindet der Server an 0.0.0.0 und ist aus dem ganzen LAN offen.
+function zeichneFussLocalOnly() {
+  const ziel = $("#fuss-local-only");
+  if (!ziel) return;
+  ziel.hidden = Zustand.config?.local_only !== true;
 }
 
 function zeichneUiLang() {

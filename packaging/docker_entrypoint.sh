@@ -1,5 +1,6 @@
 #!/bin/sh
-# StartOS container entrypoint. Volume `main` is mounted at /data.
+# Container entrypoint for StartOS and Umbrel.
+# StartOS mounts volume `main` at /data, Umbrel bind-mounts ${APP_DATA_DIR}/data.
 set -eu
 
 DATA="${SATSAGE_DATA_DIR:-/data}"
@@ -18,7 +19,8 @@ if [ -f "$DATA/.env.bak" ]; then
   chmod 600 "$DATA/.env.bak" 2>/dev/null || true
 fi
 
-export SATSAGE_MANAGED_BY="${SATSAGE_MANAGED_BY:-start9}"
+# SATSAGE_MANAGED_BY stays whatever the platform set (start9 / umbrel) and is
+# deliberately not defaulted here — a plain Docker run should behave normally.
 export PYTHONUNBUFFERED=1
 
 exec python3 /opt/satsage/server.py \
