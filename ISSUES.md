@@ -187,7 +187,7 @@ Wenn SatSage **standalone** auf derselben Maschine wie ein laufendes `bitcoind` 
 
 ## Immutable-Cache · SQLite statt Winz-JSONs (tx / utxo_ingress)
 
-**Stand:** 2026-09-09 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
+**Stand:** 2026-09-15 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
 
 ### Entscheidungsgrundlage (nicht vorab bauen)
 
@@ -197,15 +197,51 @@ Punktzugriff per TxID / `(txid, vout)` ist mit Flatfiles schon O(1). SQLite lohn
 |------------------------------------------|---------|
 | < ~1 000 | Flatfiles behalten |
 | ~2 000–5 000 | Grauzone — messen (Walk-Zeit, Windows); SQLite wenn Batch-Walks/Reports stocken |
-| ≥ ~10 000 | SQLite sinnvoll bis geboten |
+| ≥ ~10 000 | SQLite sinnvoll bis geboten (**Implementierungs-Schwelle** / Log-Hinweis) |
+
+**Feldbeobachtung (echte XPUBs):** `immutable_cache` inkl. `tx/` kann schon **über ~5 000 Dateien** laufen, bevor die 10k-Schwelle greift — Grauzone ist real, nicht nur theoretisch. Schwelle für den einmaligen Log-Hinweis und für „jetzt bauen“ bleibt bewusst **≥ ~10 000**.
 
 **Wachstumstreiber:** Herkunft in der Breite (viele UTXOs → `utxo_ingress/`) und/oder Tiefe/Breite des Graphen (viele `get_tx` → `tx/`), v. a. „Herkunft vollständig“, hohe `max_hops`, aufgelöste große Sammel-/CoinJoin-Txs. Reiner UTXO-/Specter-Seed füllt diese Ordner nicht.
 
-**Scope später:** nur `immutable_cache/tx` + `utxo_ingress` (zwei Tabellen, PK); XPUB-UTXO/Verlauf-JSON bleiben. Optional lazy Migration / Schwellwert-Opt-in. Windows/StartOS + Antivirus stärker betroffen als warmer Linux-Page-Cache.
+**Scope / Reihenfolge:** SQLite-Umbau **zunächst nur** die Immutable-Seite — konkret **`immutable_cache/tx`** (Tx-Cache) und mitgedacht **`utxo_ingress`** (zwei Tabellen, PK). **Nicht** in der ersten Welle: `utxo_cache/` (XPUB-UTXO, Verlauf, Alter, Adress-Auflösung), **`utxo_trace/`**, `cfilter/`, Header-Binaries, Sanktions-Cache, Labels. Optional lazy Migration / Schwellwert-Opt-in. Windows/StartOS + Antivirus stärker betroffen als warmer Linux-Page-Cache.
 
 **Laufzeit-Hinweis:** Ab ≥10 000 JSON-Dateien in `tx/` oder `utxo_ingress/` schreibt SatSage einmalig ins Log: *Cache wächst — sqlite ab jetzt sinnvoll* (+ Bitte um GitHub-Issue). Zählung nur alle 500 Writes, damit das Zählen selbst nicht teuer wird.
 
 **Abgrenzung:** Kein Drive-by vor CoinJoin-Hybrid-Walk — CJ-Auflösung treibt `tx/` voraussichtlich erst richtig in die Tausender.
+
+### Skalierung · Gedankenexperiment (Gesamt-UTXO-Set × bis Coinbase)
+
+**Kontext (Theorie, 2026-09-15):** Jemand lädt das **gesamte aktuelle UTXO-Set** in SatSage (grundlegende Modifikation, UTXOs ohne XPUB) und veranlasst den **Gesamtverlauf aller UTXOs bis Coinbase** (z. B. Sanktions-Check mit „1 Mio Hops“ ≈ kein künstlicher Tiefenstopp). Vergleichsgröße: Full-Node **mit Index ~1,3 TB**.
+
+**Größenordnung Cache danach (sehr grob):**
+
+| Teil | Charakter | vs. ~1,3 TB Node |
+|------|-----------|------------------|
+| `tx/` | unique TxIDs im Vorfahren-DAG ≈ großer Teil der Tx-Historie; JSON-Flatfile dicker als Wire | oft **~1×–wenige ×** Node (≈ 1–5 TB+, dickere JSONs mehr) |
+| `utxo_ingress/` | 1 schlanke Datei pro UTXO (~10⁸) | **~0,1–0,4 TB** — lästig, nicht dominant |
+| `utxo_trace/` | **1 Vollbaum pro UTXO**, geteilte Vorfahren **ohne Sharing erneut serialisiert** | leicht **~10–100 TB+** (CJ/breit: deutlich mehr) — **dominiert** |
+| Header / cfilter / UTXO-Liste | Nebenkosten | ≪ Trace/Tx |
+
+**Key takeaway:** Ja — **`utxo_trace`-Flatfiles sind massiv redundant**, weil **geteilte Vergangenheiten** (gemeinsame Vorfahren bis Coinbase) **pro UTXO erneut weggeschrieben** werden. `tx/` ist dagegen schon **pro TxID dedupliziert** (ein File je Transaktion); der Schmerz dort ist vor allem **JSON-Aufblähung + Millionen Dateien/Syscalls**, nicht Baum-Kopie. Ohne Voll-Traces: Cache eher „Node-Liga oder etwas drüber“. Mit Voll-Trace je Output: **Größenordnungen über** 1,3 TB; OS/AV sterben an **Dateianzahl** oft vor der TB-Zahl. Node bleibt effizienter: Historie **einmal** binär, kein materialisierter Baum je Coin.
+
+**Erkenntnis · geteiltes DAG-/Graph-Modell:** Die **Blockchain selbst** *ist* bereits das Funding-DAG in **höchstkomprimierter** Form (binäre Txs, Blöcke, optional txindex/UTXO-Set). Ein SatSage-internes „shared Graph gegen Trace-Redundanz“ für den **Vollgraphen** (alle Coins, multi-user, bis Coinbase) konvergiert gegen **Node-/Indexer-Arbeit** — Konsens-Historie plus Wallet-Färbung (own/external, Fingerprint, CJ, Steuer) in einem eigenen Store zu halten wäre **sehr komplex** und meist eine **schlechtere zweite Chain**. Schichten grob: (1) `tx`+`ingress`-Tabellen = mittel, Datei-Schmerz; (2) App-Kanten-Cache + lazy Walk = schon semantisch heikel (Invalidierung, Färbung); (3) chain-gleicher Vollgraph = falsch investiert. Redundanz der Traces stirbt primär durch **Nicht-Materialisieren**, nicht durch Ultra-Graph-Eigenbau.
+
+**SQLite — was hilft (ohne zweite Chain):**
+
+- **Erste Welle (`tx` + `ingress` als Tabellen/PK):** mildert **Inode-/Open-/AV-Kosten** und Backup-Chaos; speichert **nicht magisch weniger Nutzdaten**, wenn jede Tx weiter als fetter JSON-Blob in einer Zeile liegt. Kompression kann JSON-Bloat mindern, nicht die „fast volle Historie“-Menge.
+- **Traces nur als Blob-pro-UTXO in SQLite** (1:1-Port): **behebt die Redundanz nicht** — weniger Dateien, ähnliche TB-Lage.
+- **Nicht-Ziel:** SatSage als Exchange-Backend mit privatem Voll-Trace-Clone je Kunde. Multi-User-Fantasie → **Indexer/Node** als DAG, SatSage = Policy/Steuer/UI.
+
+### Designentscheidung · keine „bessere Blockchain“, Cache-Grenze, Trace on demand
+
+**Stand:** 2026-09-15 · **beschlossen (Richtung)**
+
+1. **SatSage soll keine „bessere Blockchain“ als DAG-/Graph-Modell neu erfinden.** Die Chain (bzw. ein fähiger Index darüber) bleibt Source of Truth für den Funding-Graphen. Kein Projektziel „shared Herkunfts-DAG parallel zur Node“.
+2. **Cache hat einen Grenzfall, den wir bei Bedarf scharf ziehen** — wenn Skalierung weh tut (viele Traces, ggf. multi-user / viele XPUB-Welten): geeigneten **Cache-Ceiling** identifizieren (was darf persistent sein: typisch schlankes `tx`/`ingress`/UTXO-Meta; was nicht: Vollbäume auf Vorrat).
+3. **Darüber hinaus:** Herkunfts-/Sanktions-Bäume **nur individuell je Anforderung** erzeugen (Job/Request), **nicht auf Vorrat in den Cache verklappen**. Optional ephemer in RAM/Session; Persistenz von Voll-`utxo_trace` ist Komfort unter der Grenze, kein Pflichtpfad für Masse.
+4. **Performance jenseits der Grenze:** nicht mehr Cache-Philosophie, sondern **bessere Datenquelle/Indexer**. Orientierung: **Libbitcoin** (bzw. vergleichbar starker Stack) schafft grob **~vierfache electrs-Performance** — das muss für schwere Walks **dann mal reichen**, statt Graph-DB in-process.
+
+**Konsequenz für diese Issue:** SQLite-Welle 1 bleibt **`tx` + `ingress`** (Zugriffskosten). **Kein** Folge-Epic „Graph-DB / shared trace DAG“. Trace-Redundanz und Exchange-Skalen → **Ceiling + on-demand + Indexer**, nicht Denormalisierungs-Kunst in SatSage.
 
 ---
 

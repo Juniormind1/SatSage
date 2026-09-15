@@ -238,6 +238,34 @@ Assistenten sollen:
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 
+### Remote-Stand prüfen (Pflicht, multi-machine)
+
+Entwicklung läuft parallel (z. B. MacBook + Windows-Worktree). Pushes auf `dev-juniormind` können von einem anderen Rechner kommen. **Niemals** den Remote-Stand nur aus dem lokalen Tracking-Ref `origin/<branch>` ableiten und als Wahrheit melden.
+
+**Harte Falle in manchen Clones/Worktrees:** `remote.origin.fetch` ist auf nur `main` eingeengt, z. B.
+
+```text
+remote.origin.fetch=+refs/heads/main:refs/remotes/origin/main
+```
+
+Dann aktualisiert `git fetch` / `git fetch --prune` **`origin/dev-juniormind` nicht**. Der Ref kann tagelang auf einem alten Commit stehen, während GitHub schon weiter ist — und der Assistent meldet fälschlich „Remote = 11.09.“ obwohl gerade gepusht wurde.
+
+**Pflichtablauf bei jeder Frage nach Remote / Sync / „wo steht origin?“ / vor Pull-Empfehlung:**
+
+1. `git config --get remote.origin.fetch` lesen (Refspec-Falle erkennen).
+2. **Wahrheit vom Server:** `git ls-remote origin refs/heads/dev-juniormind refs/heads/main` (SHA live von GitHub).
+3. Tracking-Ref aktualisieren, explizit und mit Force-Refspec wenn nötig:
+   - `git fetch origin +refs/heads/dev-juniormind:refs/remotes/origin/dev-juniormind`
+   - analog für andere Branches; nicht darauf vertrauen, dass ein bare `git fetch` alle Heads holt.
+4. Erst danach `git log -1` auf `origin/dev-juniormind`, Divergenz `HEAD...origin/dev-juniormind` (`rev-list --left-right --count`), und bei Non-Fast-Forward / Rewrite klar sagen.
+5. `FETCH_HEAD` allein oder ein veraltetes `origin/*` ohne Schritt 2–3 **reicht nicht** als Remote-Antwort.
+
+Optional dauerhaft heilen (nur wenn der Nutzer das will, nicht stillschweigend global umbiegen):
+
+```bash
+git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+```
+
 ### Merge-Dealbreaker
 
 Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Produkt-Semantik): [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Assistenten und Reviews sollen diese Liste kennen; CI deckt sie schrittweise ab (zuerst u. a. Unittests).
@@ -257,7 +285,6 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 
 - **Node verbinden:** Leitbild in `doc/design-node-anbindung.md` â€” dem Nutzer den Node so einfach wie mÃ¶glich machen; typische Heimnetz-/TLS-/Port-Fallen selbst abfangen; HÃ¤rte nur wo nÃ¶tig (Clearnet, Opt-in), nicht als Kollateralschaden auf Desktop-LAN oder Start9-Bridge.
 - **FlÃ¼chtigkeit / Eile:** Leitbild in `doc/design-fluchtigkeit.md` â€” von unaufmerksamem, eiligem Nutzer ausgehen; gefÃ¤hrliche ZwischenzustÃ¤nde unmÃ¶glich machen (nicht nur beschriften). Beispiel Empfangs-QR: bei Wallet-Wechsel sofort entwerten, erst wieder zeigen wenn die Adresse des neuen Wallets feststeht.
-- **Anfänger belohnen:** Fehleranfällige Schritte (Node, TLS, Datenquelle) bei Erfolg spürbar quittieren — z. B. einmal Staub-Konfetti (`jubelDatenquelleErfolg`). Leitbild: `doc/design-node-anbindung.md` Prinzip 8; nicht gamifizieren.
 - **Neugier / Lernen nebenbei:** Leitbild in `doc/design-neugier.md` â€” Tooltips (`title` / `data-i18n-title`); Kuratierung `doc/lernhinweise-kuratierung.md`. **Pflicht:** Jede vom Maintainer angegebene Pleb-Lern-URL sofort in `web/lernhinweise.json` **und** Handbuch-FAQ §14 (`doc/handbuch.html`, DE+EN) nachziehen. Kein Widerspruch zur FlÃ¼chtigkeit.
 
 - **Verbose:** Default `nein` (`VERBOSE` in `.env` oder Einstellungen [4]); gekÃ¼rzte TxIDs/Adressen
