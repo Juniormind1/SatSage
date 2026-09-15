@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Git · commit-Skripte:** `scripts/commit.sh` / `commit.bat` stagen im Default untracked **Textdateien** mit; untracked **Binärdateien** nur nach Nachfrage (`-A` = alles, `-u` = nur getrackt). Verhindert Commits ohne neue Skripte/Quellen.
 - **Steuerjahr · Punkte ohne Herkunft grau:** UTXOs **innerhalb** der Haltefrist ohne Herkunftsanalyse sind im Zeitstrahl grau statt gelb (dunkelgrau Light-Mode, hellgrau Dark-Mode). **Außerhalb** der Frist bzw. prä-Stichtag bleiben sie grün — auch ohne Trace. Legende: „ohne Herkunft“.
 - **Log · Job-Start/Ende greppbar:** Lange Vorgänge (UTXO-Scan, Verlauf aller Wallets, Herkunft aller UTXOs, Herkunft vollständig, u. a.) schreiben `JOB-START` und `JOB-ENDE` mit kind, id, Wanduhr, Status und Dauer ins Log — im Log-Bereich und Terminal-Spiegel suchbar.
 - **Steuerbericht · Hop-Kette:** HTML-Aufstellung und Selbstanzeige-Report enthalten den vollständigen on-chain Herkunftsnachweis (Trace-Cache, nested Hops) — Beleg für Haltedauer, keine Börsen-/Konto-Belege.

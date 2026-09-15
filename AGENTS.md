@@ -218,7 +218,8 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 - **Nur** `user.name=Juniormind1` / `user.email=juniormind@proton.me`
 - **Kein** Push/Commit unter anderer Identität — auch nicht versehentlich (OS-Default, alte Config, Assistent)
-- Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Abweichung ab; `--fix-identity` setzt name/email/hooks)
+- Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Abweichung ab; `--fix-identity` setzt name/email/hooks). Commit-Default: getrackte + untracked **Text** auto; untracked **Binär** nach Nachfrage (`-A` alles, `-u` nur getrackt)
+- **Windows `.bat`:** echte `cmd.exe`-Dateien — **CRLF**-Zeilenenden (LF-only zerlegt CMD in Müll-Befehle), `REM`/`::` statt `#`, kein Bash-Syntax. Nach dem Schreiben Bytes prüfen (`\r\n`, kein UTF-16/NUL). `.sh` bleibt LF/Bash.
 
 Pflicht in **diesen** Clones:
 
