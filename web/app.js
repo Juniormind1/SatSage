@@ -6943,10 +6943,27 @@ function walletAnzeigeLabel(wert) {
   return normalisiereWalletLabel(wert) || t("trace.ownWallet");
 }
 
-function zeichneKnotenListe(knoten, elternWallet) {
+/**
+ * True, wenn *kind* das Wallet-Segment von *eltern* verlässt.
+ *
+ * Gleiche-Wallet-Hops bleiben flach; Einrückung nur bei Wallet-Wechsel
+ * oder Übergang zu Extern/Coinbase/unaufgelöst.
+ */
+function knotenIstWalletAustritt(eltern, kind) {
+  if (!eltern || eltern.type !== "internal" || !kind) return false;
+  if (kind.type === "internal") {
+    return (
+      normalisiereWalletLabel(eltern.wallet)
+      !== normalisiereWalletLabel(kind.wallet)
+    );
+  }
+  return true;
+}
+
+function zeichneKnotenListe(knoten, elternWallet, elternKnoten) {
   const huelle = document.createDocumentFragment();
   for (const k of knoten) {
-    huelle.append(zeichneKnoten(k, elternWallet));
+    huelle.append(zeichneKnoten(k, elternWallet, elternKnoten));
   }
   return huelle;
 }
@@ -6959,6 +6976,14 @@ function baumKnotenEls(block) {
   return { zeile, klapp, kinder };
 }
 
+function baumKinderKlasse(elternKnoten) {
+  // Interne Knoten: Kinder standardmäßig flach; Austritte per .knoten-austritt.
+  if (elternKnoten && elternKnoten.type === "internal") {
+    return "baum-kinder flach";
+  }
+  return "baum-kinder";
+}
+
 /**
  * Einen Baumknoten aufklappen (Kinder ggf. lazy zeichnen).
  */
@@ -6968,7 +6993,7 @@ function expandiereKnotenBlock(block) {
   let { zeile, klapp, kinder } = baumKnotenEls(block);
   if (!kinder) {
     kinder = document.createElement("div");
-    kinder.className = "baum-kinder";
+    kinder.className = baumKinderKlasse(knoten);
     kinder.hidden = true;
     block.append(kinder);
   }
@@ -6978,6 +7003,7 @@ function expandiereKnotenBlock(block) {
     kinder.append(zeichneKnotenListe(
       knoten.children || [],
       knoten.type === "internal" ? (knoten.wallet || "") : undefined,
+      knoten,
     ));
   }
   kinder.hidden = false;
@@ -7069,7 +7095,7 @@ function baumKlappLeiste(zweig) {
   return leiste;
 }
 
-function zeichneKnoten(knoten, elternWallet) {
+function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   const block = document.createElement("div");
   block.className = "baum-knoten-block";
   BAUM_KNOTEN_DATEN.set(block, knoten);
@@ -7079,6 +7105,10 @@ function zeichneKnoten(knoten, elternWallet) {
     && elternWallet !== undefined
     && normalisiereWalletLabel(elternWallet) !== normalisiereWalletLabel(knoten.wallet);
   if (walletUebergang) block.classList.add("wallet-uebergang");
+  // Visuelle Stufe nur bei Wallet-Wechsel / Extern — nicht pro Hop im selben Wallet.
+  if (knotenIstWalletAustritt(elternKnoten, knoten)) {
+    block.classList.add("knoten-austritt");
+  }
 
   // Die ganze Zeile ist der Treffer — nicht das Dreieck allein.
   // Erste Ebene unter der UTXO-Wurzel zeichnet zeichneZweig sofort (sichtbar).
@@ -7217,7 +7247,7 @@ function zeichneKnoten(knoten, elternWallet) {
 
   if (knoten.expandable) {
     const kinder = document.createElement("div");
-    kinder.className = "baum-kinder";
+    kinder.className = baumKinderKlasse(knoten);
     kinder.hidden = true;
     block.append(kinder);
 
@@ -14014,16 +14044,24 @@ function setzeUiTheme(theme) {
   return wert;
 }
 
+function liesUiThemeAusRadios() {
+  const aktiv = document.querySelector('input[name="ui-theme"]:checked');
+  if (aktiv && (aktiv.value === "dark" || aktiv.value === "light")) {
+    return aktiv.value;
+  }
+  return liesUiTheme();
+}
+
 function zeichneUiTheme() {
-  const wahl = $("#ui-theme");
-  if (!wahl) return;
-  wahl.value = liesUiTheme();
+  const theme = liesUiTheme();
+  const hell = $("#ui-theme-light");
+  const dunkel = $("#ui-theme-dark");
+  if (hell) hell.checked = theme === "light";
+  if (dunkel) dunkel.checked = theme === "dark";
 }
 
 async function speichereUiTheme() {
-  const wahl = $("#ui-theme");
-  if (!wahl) return;
-  const theme = setzeUiTheme(wahl.value);
+  const theme = setzeUiTheme(liesUiThemeAusRadios());
   const ergebnis = await api("/config/ui-theme", {
     methode: "PUT",
     daten: { ui_theme: theme },
@@ -14136,10 +14174,9 @@ async function start() {
     }
     // Select-Listener falls #ui-lang erst jetzt im DOM wäre (idempotent).
     bindeSprachUmschalter();
-    const themeWahl = $("#ui-theme");
-    if (themeWahl) {
-      themeWahl.addEventListener("change", () => {
-        speichereUiTheme();
+    for (const radio of document.querySelectorAll('input[name="ui-theme"]')) {
+      radio.addEventListener("change", () => {
+        if (radio.checked) speichereUiTheme();
       });
     }
     window.addEventListener("satsage:lang", () => {

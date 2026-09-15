@@ -50,6 +50,7 @@ class TestOwnership(unittest.TestCase):
 
 class TestFanOutPayJoinExchange(unittest.TestCase):
     def test_fan_out_own(self):
+        """1→viele: echtes Fan-Out (Auszahlung/Split)."""
         vins = [core_vin(txid("a0"), 0)]
         vins[0]["prevout"] = {
             "value": 1.0,
@@ -63,6 +64,53 @@ class TestFanOutPayJoinExchange(unittest.TestCase):
         c = tx_classify.classify_tx(t, EIGENE)
         self.assertEqual(c.kind, "fan_out_own")
         self.assertFalse(c.walk_own_inputs_only)
+
+    def test_fan_in_own_konsolidierung(self):
+        """n→1: Fan-In / Konsolidierung — nicht mehr als Fan-Out labeln."""
+        vins = [core_vin(txid(f"c{i}"), 0) for i in range(4)]
+        for i, v in enumerate(vins):
+            v["prevout"] = {
+                "value": 0.05,
+                "scriptPubKey": {
+                    "address": BIP84_RECEIVE_0 if i % 2 == 0 else BIP84_CHANGE_0
+                },
+            }
+        outs = [core_vout(0, BIP84_RECEIVE_1, 0.19)]
+        t = core_tx(txid("fi"), vins, outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "fan_in_own")
+        self.assertFalse(c.walk_own_inputs_only)
+        self.assertEqual(
+            tx_classify.soft_label("fan_in_own", lang="de"),
+            "Wahrscheinlich eigene Konsolidierung (Fan-In)",
+        )
+
+    def test_fan_in_own_mit_change(self):
+        """n→2 (Ziel + Change): weiterhin Fan-In."""
+        vins = [core_vin(txid(f"d{i}"), 0) for i in range(3)]
+        for i, v in enumerate(vins):
+            v["prevout"] = {
+                "value": 0.1,
+                "scriptPubKey": {"address": BIP84_RECEIVE_0},
+            }
+        outs = [
+            core_vout(0, BIP84_RECEIVE_1, 0.25),
+            core_vout(1, BIP84_CHANGE_0, 0.04),
+        ]
+        t = core_tx(txid("fi2"), vins, outs)
+        c = tx_classify.classify_tx(t, EIGENE)
+        self.assertEqual(c.kind, "fan_in_own")
+
+    def test_own_spend_shape_richtung(self):
+        self.assertEqual(tx_classify._own_spend_shape(1, 10), "fan_out_own")
+        self.assertEqual(tx_classify._own_spend_shape(2, 8), "fan_out_own")
+        self.assertEqual(tx_classify._own_spend_shape(5, 1), "fan_in_own")
+        self.assertEqual(tx_classify._own_spend_shape(5, 2), "fan_in_own")
+        self.assertEqual(tx_classify._own_spend_shape(10, 3), "fan_in_own")
+        # 1→2 Payment+Change und n:n ohne Richtung
+        self.assertIsNone(tx_classify._own_spend_shape(1, 2))
+        self.assertIsNone(tx_classify._own_spend_shape(4, 4))
+        self.assertIsNone(tx_classify._own_spend_shape(2, 2))
 
     def test_exchange_batch(self):
         vins = [core_vin(txid(f"ex{i}"), 0) for i in range(5)]

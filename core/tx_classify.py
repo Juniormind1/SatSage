@@ -1,5 +1,6 @@
 """
-Klassifikation von Transaktionen für Herkunft (CoinJoin vs. Fan-Out / PayJoin / Exchange).
+Klassifikation von Transaktionen für Herkunft
+(CoinJoin vs. Fan-Out / Fan-In / PayJoin / Exchange).
 
 Eigentum zuerst, dann Formheuristik. Soft-Labels („Wahrscheinlich …“) —
 keine forensische Sicherheit.
@@ -133,6 +134,10 @@ _LABELS: dict[str, tuple[str, str]] = {
         "Wahrscheinlich eigene Auszahlung (Fan-Out)",
         "Likely own fan-out spend",
     ),
+    "fan_in_own": (
+        "Wahrscheinlich eigene Konsolidierung (Fan-In)",
+        "Likely own consolidation (fan-in)",
+    ),
     "exchange_batch": (
         "Wahrscheinlich Batch-Auszahlung von Exchange",
         "Likely exchange batch payout",
@@ -152,6 +157,25 @@ _LABELS: dict[str, tuple[str, str]] = {
 def soft_label(kind: str, *, lang: str = "de") -> str:
     de, en = _LABELS.get(kind, ("", ""))
     return de if lang == "de" else en
+
+
+def _own_spend_shape(n_in: int, n_out: int) -> str | None:
+    """
+    Richtung einer rein eigenen Tx (alle Ins eigen, kein Fremd).
+
+    · Fan-In: mehr Inputs als Outputs — UTXOs laufen zusammen (Konsolidierung).
+    · Fan-Out: mehr Outputs als Inputs und mindestens 3 Outs — Geld spreizt sich.
+    · Sonst None (z. B. 1→2 Payment+Change, oder n:n ohne klare Richtung).
+    """
+    if n_in < 1 or n_out < 1:
+        return None
+    # Konsolidierung: n→1 / n→2 (Change) / allgemein n_in > n_out
+    if n_in >= 2 and n_in > n_out:
+        return "fan_in_own"
+    # Auszahlung / Split: 1→viele oder wenige→deutlich mehr Outs
+    if n_out >= 3 and n_out > n_in:
+        return "fan_out_own"
+    return None
 
 
 def _classification(kind: str, ownership: TxOwnership | None) -> TxClassification:
@@ -488,9 +512,11 @@ def classify_tx(
     1. Eigentum klären
     2. Bisq-Deposit / Bisq-Payout (Form + optional OP_RETURN am Prevout)
     3. 0 eigene Ins + eigene Outs → Exchange-Batch (bei Fan-out-Form)
-    4. alle Ins eigen → Fan-Out (eigen), **außer** die Form ist klar Mix
+    4. alle Ins eigen → Fan-In / Fan-Out (eigen), **außer** die Form ist klar Mix
        (Wasabi/WabiSabi/Whirlpool/…) — Soft-Label der Form bleibt nützlich,
        auch wenn alle Teilnehmer eigene XPUBs sind (Lab / Multi-Wallet)
+       · Fan-In: mehr Inputs als Outputs (Konsolidierung, n→wenige)
+       · Fan-Out: mehr Outputs als Inputs und ≥3 Outs (Auszahlung/Split, wenige→n)
     5. wenige Ins, wenige Fremd → PayJoin
     6. Whirlpool → Wasabi Classic → WabiSabi → JoinMarket → coinjoin
     """
@@ -532,8 +558,7 @@ def classify_tx(
     if own.own_input_count >= 1 and own.own_output_count >= 1:
         form_kind = _form_coinjoin_kind(n_in, n_out, values)
 
-    # 3. Fan-Out (eigen): alle Inputs eigen — Soft-Label nur bei erkennbarer
-    # Auszahlungs-/Konsolidierungsform, nicht bei klarer Mix-Struktur.
+    # 3. Eigene reine Spends: Fan-In vs. Fan-Out (Richtung), kein Mix.
     if (
         own.ownership_complete
         and own.own_input_count == n_in
@@ -542,8 +567,9 @@ def classify_tx(
     ):
         if form_kind:
             return _classification(form_kind, own)
-        if n_out >= 3 or n_in >= 2:
-            return _classification("fan_out_own", own)
+        own_shape = _own_spend_shape(n_in, n_out)
+        if own_shape:
+            return _classification(own_shape, own)
         return _classification("unknown", own)
 
     # 4. PayJoin: gemischt, übersichtlich, wenige Fremd-Ins.

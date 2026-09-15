@@ -530,16 +530,17 @@ Verwandt mit „Gründlichere Herkunft in der Web-GUI“.
 
 Vor Formheuristik: **alle** `vin`/`vout` gegen konfigurierte XPUBs matchen. Sonst kein Exchange-/PayJoin-Label. Soft: „Wahrscheinlich …“.
 
-| Label | Eigene Inputs | Eigene Outputs | Lesart |
-|--------|---------------|----------------|--------|
-| **Fan-Out (eigen)** | **alle** Ins eigen | 0 oder nur Change | du zahlst aus |
+| Label | Eigene Inputs | Form (In/Out) | Lesart |
+|--------|---------------|---------------|--------|
+| **Fan-Out (eigen)** | **alle** Ins eigen | mehr Outs als Ins, ≥3 Outs | Auszahlung/Split (wenige→n) |
+| **Fan-In (eigen)** | **alle** Ins eigen | mehr Ins als Outs, ≥2 Ins | Konsolidierung (n→wenige) |
 | **PayJoin** | gemischt; übersichtlich viele Ins, **wenige** Fremd (typisch 1, selten 2) | Sender oft Change; Empfänger oft 1 Netto-Out | kollaborative Zahlung, **kein** Mix |
-| **Exchange-Batch** | **0** eigen | genau 1 (selten mehr) | nur Empfang; **kein** CJ (Risiko gering, wenn Input-Eigentum vollständig) |
+| **Exchange-Batch** | **0** eigen | typisch viele Outs, ≥1 eigen | nur Empfang; **kein** CJ |
 | **CoinJoin** (Wasabi / Whirlpool / JM) | ≥1 eigen | ≥1 eigen | Mix; Fremde = Rauschen |
 
-**Detektor-Reihenfolge:** (1) Eigentum klären → (2) 0 eigene Ins + eigene Outs → Exchange-Batch → (3) alle Ins eigen → Fan-Out → (4) wenige Ins/wenige Fremd → PayJoin → (5) Whirlpool → Wasabi → JoinMarket → unklar.
+**Detektor-Reihenfolge:** (1) Eigentum klären → (2) 0 eigene Ins + eigene Outs → Exchange-Batch → (3) alle Ins eigen → Fan-In/Fan-Out nach Richtung → (4) wenige Ins/wenige Fremd → PayJoin → (5) Whirlpool → Wasabi → JoinMarket → unklar.
 
-**Abgrenzung:** Fan-Out = 0 Fremd-Ins; PayJoin = ≥1 Fremd-In bei kleinem Ins-Set (Richtwert ≤5–8 Ins, ≤2 Fremd); Exchange ohne eigenen Input kein CJ. PayJoin/Fan-Out/Exchange **nicht** in die CJ-Stop-/Auflös-Optionen.
+**Abgrenzung:** Fan-In/Out = 0 Fremd-Ins, Richtung `n_in` vs. `n_out` (nicht pauschal „alle eigenen Ins“); PayJoin = ≥1 Fremd-In bei kleinem Ins-Set (Richtwert ≤5–8 Ins, ≤2 Fremd); Exchange ohne eigenen Input kein CJ. PayJoin/Fan-In/Fan-Out/Exchange **nicht** in die CJ-Stop-/Auflös-Optionen.
 
 ### Umsetzungsstrategie (Reihenfolge)
 
@@ -592,12 +593,13 @@ Rückwärts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein*
 - Mit XPUB: eigene Inputs + typisch ein CJ-Out + ggf. eigenes Change; Fremde = Rauschen.  
 - In die CoinJoin-Einstellung aufnehmen; Cache-Typ `joinmarket`.
 
-**5. PayJoin / Fan-Out / Exchange-Batch — eigene Labels, kein CJ**
+**5. PayJoin / Fan-In / Fan-Out / Exchange-Batch — eigene Labels, kein CJ**
 
 - Siehe Tabelle „Klassifikation · Eigentum zuerst“.  
 - PayJoin (BIP78/BIP77): weicher Hinweis möglich; **nicht** in CJ-Stop-/Auflös-Optionen.  
 - Exchange-Batch erst nach vollständigem Input-Eigentum (0 eigene Ins).  
-- Fan-Out (eigen): alle Ins eigen.
+- Fan-Out (eigen): alle Ins eigen, mehr Outs als Ins (≥3 Outs).  
+- Fan-In (eigen): alle Ins eigen, mehr Ins als Outs (Konsolidierung).
 
 **Erledigt (MVP):** Detektor + Soft-Labels + Own-Input-Walk + Lab-Fixtures.  
 **Wenn wir wieder drankommen:** Einstellungs-Enum A/B/C → Whirlpool-Kette (Remix × n) → Handbuch-Abschnitt Trace-Verhalten.

@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft · Fan-In vs. Fan-Out:** Rein eigene Spends trennen nach Richtung — Fan-Out nur noch bei mehr Outputs als Inputs (≥3 Outs, Auszahlung/Split); Fan-In bei mehr Inputs als Outputs (Konsolidierung n→wenige). Soft-Label „eigene Konsolidierung (Fan-In)“.
+- **Einstellungen · Darstellung:** Hell/Dunkel als Radiobuttons statt Dropdown.
+- **Herkunft · flache Hierarchie im Wallet:** Einrückung nur bei Wallet-Wechsel (oder Extern/Coinbase), nicht mehr pro Hop innerhalb desselben Wallets — Web-Baum und HTML-Hop-Bericht.
 - **Einstellungen · Persönliche Daten:** Name, Steuernummer, Anschrift, E-Mail sowie zuständiges Finanzamt, FA-Adresse und Sachbearbeiter für HTML-/CSV-Berichte; Name/FA-Defaults Donald Duck / 0/8/15 / Entenhausen. Lokal in `.env` (`STEUER_PERSON_*`).
 - **Block-Explorer · öffentlich mit Warnung:** Öffentliche Adressen (z. B. mempool.space) speichern nur nach Bestätigung im Warndialog; Abbruch leert das Feld und speichert nicht. Kopf-Pille **Block-Explorer** (privat grün / öffentlich rot / unkonfiguriert grau ohne Zusatztext).
 - **Steuerjahr · klären:** Knopf „Herkünfte UTXOs“ → **klären** (EN: **trace**), nur in der Scorecard „Ohne Herkunftsanalyse“ (sichtbar solange graue UTXOs fehlen).

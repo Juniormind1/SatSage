@@ -786,6 +786,7 @@
   "trace.txClass.coinjoin": "Likely CoinJoin/Mix",
   "trace.txClass.payjoin": "Likely PayJoin",
   "trace.txClass.fan_out_own": "Likely own fan-out spend",
+  "trace.txClass.fan_in_own": "Likely own consolidation (fan-in)",
   "trace.txClass.exchange_batch": "Likely exchange batch payout",
   "trace.txClass.bisq_payout": "Likely Bisq payout",
   "trace.txClass.bisq_deposit": "Likely Bisq deposit (escrow)",

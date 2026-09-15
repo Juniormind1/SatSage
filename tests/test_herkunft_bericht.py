@@ -73,6 +73,68 @@ class TestHopKetteHtml(unittest.TestCase):
         self.assertIn(txid("e1"), html)
         self.assertIn("hop-wurzel", html)
 
+    def test_hop_kette_flach_im_selben_wallet(self):
+        """Einrückung nur bei Wallet-Austritt, nicht pro internem Hop."""
+        t = txid("f1")
+        baum = {
+            "found": True,
+            "error": "",
+            "root": {
+                "type": "utxo",
+                "txid": t,
+                "vout": 0,
+                "wallet": "A",
+                "amount_sats": 50_000,
+            },
+            "children": [
+                {
+                    "type": "internal",
+                    "wallet": "A",
+                    "amount_sats": 50_000,
+                    "from_utxo": f"{txid('a1')}:0",
+                    "children": [
+                        {
+                            "type": "internal",
+                            "wallet": "A",
+                            "amount_sats": 50_000,
+                            "from_utxo": f"{txid('a2')}:0",
+                            "children": [
+                                {
+                                    "type": "internal",
+                                    "wallet": "B",
+                                    "amount_sats": 50_000,
+                                    "from_utxo": f"{txid('b1')}:0",
+                                    "children": [
+                                        {
+                                            "type": "external",
+                                            "address": "bc1qextern",
+                                            "amount_sats": 50_000,
+                                            "from_utxo": f"{txid('e9')}:0",
+                                            "children": [],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "summary": {"external_count": 1, "node_count": 5},
+            "verfolgt_vollstaendig": True,
+        }
+        trace_cache.speichern(t, 0, baum, self.cache)
+        html = hb.hop_kette_html(
+            t, 0, immutable_cache_dir=self.cache, wallet="A",
+        )
+        self.assertIn("hop-kinder flach", html)
+        self.assertIn("hop-austritt", html)
+        self.assertIn("hop-wallet-uebergang", html)
+        self.assertIn("hop-external", html)
+        # Zweiter Hop im selben Wallet A: kein Austritt an der inneren A-Zeile
+        # (nur B und Extern tragen hop-austritt).
+        self.assertGreaterEqual(html.count("hop-austritt"), 2)
+        self.assertIn(txid("b1"), html)
+
     def test_steuerbericht_haengt_hop_abschnitt_an(self):
         t = self._speichere_mini_baum("c3")
         aus = {

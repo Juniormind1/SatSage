@@ -76,34 +76,68 @@ def _kinder(knoten: dict) -> list[dict]:
     return []
 
 
+def _wallet_norm(wert: Any) -> str:
+    return str(wert or "").strip()
+
+
+def _ist_wallet_austritt(eltern: dict | None, kind: dict) -> bool:
+    """
+    True, wenn *kind* das Wallet-Segment von *eltern* verlässt.
+
+    Gleiche-Wallet-Hops bleiben flach; Einrückung nur bei Wallet-Wechsel
+    oder Übergang zu Extern/Coinbase/unaufgelöst (wie Web-UI).
+    """
+    if not isinstance(eltern, dict):
+        return False
+    if str(eltern.get("type") or "") != "internal":
+        return False
+    if str(kind.get("type") or "") == "internal":
+        return _wallet_norm(eltern.get("wallet")) != _wallet_norm(kind.get("wallet"))
+    return True
+
+
 def _baum_als_ol(knoten: dict, *, max_knoten: int = 50_000) -> tuple[str, int]:
     """
     Nested ``<ol>`` der Hop-Kette. Rückgabe (html, anzahl_gerendert).
 
-    *max_knoten* schützt vor pathologischen Bäumen (CoinJoin-Fan-Out).
+    Visuell flach innerhalb desselben Wallets (``.hop-kinder.flach`` /
+    ``.hop-austritt``); *max_knoten* schützt vor pathologischen Bäumen.
     """
     gezaehlt = [0]
     abgeschnitten = [False]
 
-    def render(k: dict) -> str:
+    def render(k: dict, eltern: dict | None = None) -> str:
         if gezaehlt[0] >= max_knoten:
             abgeschnitten[0] = True
             return ""
         gezaehlt[0] += 1
         label = _esc(_knoten_label(k))
         typ = str(k.get("type") or "")
-        klasse = f"hop hop-{_esc(typ)}" if typ else "hop"
+        klassen = [f"hop hop-{_esc(typ)}" if typ else "hop"]
+        if _ist_wallet_austritt(eltern, k):
+            klassen.append("hop-austritt")
+            if (
+                typ == "internal"
+                and eltern is not None
+                and _wallet_norm(eltern.get("wallet")) != _wallet_norm(k.get("wallet"))
+            ):
+                klassen.append("hop-wallet-uebergang")
+        klasse = " ".join(klassen)
         kinder_html = []
         for kind in _kinder(k):
             if gezaehlt[0] >= max_knoten:
                 abgeschnitten[0] = True
                 break
-            stueck = render(kind)
+            stueck = render(kind, eltern=k)
             if stueck:
                 kinder_html.append(stueck)
         innen = ""
         if kinder_html:
-            innen = f"<ol class='hop-kinder'>{''.join(kinder_html)}</ol>"
+            # Interne Segmente: Kinder standardmäßig flach; Austritte per Klasse.
+            kinder_cls = (
+                "hop-kinder flach" if typ == "internal" else "hop-kinder"
+            )
+            innen = f"<ol class='{kinder_cls}'>{''.join(kinder_html)}</ol>"
         return (
             f"<li class='{klasse}'>"
             f"<span class='hop-zeile'>{label}</span>{innen}</li>"
@@ -335,6 +369,15 @@ HOP_KETTE_CSS = """
     margin: 4pt 0 4pt 14pt; padding: 0 0 0 10pt;
     font-size: 7.5pt; font-family: "Courier New", monospace;
   }
+  /* Gleiches Wallet: keine extra Einrückung pro Hop. */
+  ol.hop-kinder.flach {
+    margin-left: 0; padding-left: 0;
+  }
+  ol.hop-kinder.flach > li.hop-austritt {
+    margin-left: 14pt; padding-left: 10pt;
+    border-left: 1.5px solid var(--line-mid, #ccc);
+  }
+  li.hop-wallet-uebergang > .hop-zeile { font-weight: bold; }
   li.hop { margin: 2pt 0; }
   li.hop-external > .hop-zeile { font-weight: bold; }
   li.hop-external_unresolved > .hop-zeile { color: var(--muted, #666); }

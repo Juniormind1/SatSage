@@ -849,15 +849,23 @@
             </span>
           </div>
           <div class="karte-fuss steuer-einstellungen">
-            <label class="feld">
-              <span class="feld-titel" data-i18n="settings.theme.label">Farbmodus</span>
-              <select id="ui-theme"
-                      data-i18n-title="settings.theme.titleAttr"
-                      title="Sofort wirksam. Wird in der .env (UI_THEME) und im Browser gespeichert.">
-                <option value="light" data-i18n="settings.theme.light">Hell</option>
-                <option value="dark" data-i18n="settings.theme.dark">Dunkel</option>
-              </select>
-            </label>
+            <div class="feld"
+                 role="radiogroup"
+                 aria-labelledby="ui-theme-titel"
+                 data-i18n-title="settings.theme.titleAttr"
+                 title="Sofort wirksam. Wird in der .env (UI_THEME) und im Browser gespeichert.">
+              <span class="feld-titel" id="ui-theme-titel" data-i18n="settings.theme.label">Farbmodus</span>
+              <div class="radio-zeile">
+                <label class="check-zeile" for="ui-theme-light">
+                  <input type="radio" name="ui-theme" id="ui-theme-light" value="light">
+                  <span data-i18n="settings.theme.light">Hell</span>
+                </label>
+                <label class="check-zeile" for="ui-theme-dark">
+                  <input type="radio" name="ui-theme" id="ui-theme-dark" value="dark">
+                  <span data-i18n="settings.theme.dark">Dunkel</span>
+                </label>
+              </div>
+            </div>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.theme.hint">
             Hell: bisheriges Erscheinungsbild. Dunkel: sehr dunkler grauer Grund —

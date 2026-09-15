@@ -1057,6 +1057,13 @@ select { font-family: var(--mono); font-size: 11px; }
   color: var(--text); font-size: 14px;
 }
 .check-zeile input { margin: 0; width: 1rem; height: 1rem; flex-shrink: 0; }
+/* Hell/Dunkel nebeneinander — mutual exclusive via name=ui-theme. */
+.radio-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 1.25rem;
+}
 /* Spezifischer als .karte-fuss { align-items: center } (steht weiter unten). */
 .karte-fuss.start-sync-fuss {
   flex-direction: column;
@@ -1388,8 +1395,21 @@ select { font-family: var(--mono); font-size: 11px; }
 
 .baum { padding: 12px 13px; }
 .baum-knoten { display: flex; align-items: center; gap: 9px; padding: 5px 0; }
+/* Standard: eine Einrückstufe. Interne Ketten nutzen .flach + .knoten-austritt. */
 .baum-kinder {
   margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie);
+}
+/* Gleiches Wallet: Hops ohne extra Hierarchie (keine Treppen). */
+.baum-kinder.flach {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+/* Wallet-Wechsel oder Extern/Coinbase unter internem Segment → eine Stufe. */
+.baum-kinder.flach > .baum-knoten-block.knoten-austritt {
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--linie);
 }
 .klapp {
   flex: none; width: 22px; height: 22px; padding: 0; background: none; border: 0;

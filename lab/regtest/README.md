@@ -83,7 +83,7 @@ Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolid
 | `Whirlpool-like-5x5` | `whirlpool` — 1× Alpha + 4× Faucet |
 | `JoinMarket-like` | `joinmarket` — 1× Beta + 3× Faucet |
 | `PayJoin-like` | `payjoin` |
-| `Beta-aged-fanout` / Fan-out-own | `fan_out_own` |
+| `Beta-aged-fanout` / Fan-out-own | `fan_out_own` (1→viele; n→1 wäre `fan_in_own`) |
 | `Exchange-batch-like` | `exchange_batch` |
 
 **Fremd-Peers:** `lab-faucet` finanziert alle Lab-Sats und stellt Mix-Peer-Inputs. Die Faucet-XPUB steht **nicht** in SatSage `WALLET_*` — in der App sind das fremde Inputs. Alles Einzelsignatur (kein Multisig). Keine Coordinator-/echte WabiSabi-Implementierung, nur On-Chain-Form. Expectations: `.data/scenario-report-txclass.json`.
