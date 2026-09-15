@@ -654,6 +654,7 @@
   "tax.legendGhost": "sats vor Haltefrist",
   "tax.legendIn": "innerhalb Haltefrist",
   "tax.legendOut": "außerhalb Haltefrist",
+  "tax.legendUnchecked": "innerhalb Frist, ohne Herkunft",
   "tax.loadCandidates": "Kandidaten laden",
   "tax.loadCandidatesTitle": "Lädt Abflüsse des Steuerjahres und offene UTXOs als Was-wäre-wenn.",
   "tax.refreshCandidates": "Aktualisieren",

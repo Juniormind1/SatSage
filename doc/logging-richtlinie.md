@@ -1,6 +1,6 @@
 # Log-Richtlinie (Web-GUI + gespiegelter Strom)
 
-**Stand:** 2026-09-10  
+**Stand:** 2026-09-15  
 **Verankert in:** [`AGENTS.md`](../AGENTS.md) (UI-Konventionen)
 
 ## Zweck
@@ -34,6 +34,10 @@ Das Log baut **Vertrauen** und hilft bei der **Fehlersuche** — es ist kein Deb
 4. **Wallet-Aktionen:** Name nach der Uhrzeit.
 5. **Ein Strom** (`on_log` / NDJSON) — nicht erst im fertigen JSON-Block.
 6. **Terminal** bei offener GUI: Fortschritt primär in der Web-GUI; stdout nicht verdoppeln (Prozess-Steuerung / harte Fehler reichen).
+7. **Lange Jobs (Start/Ende):** Schwere Vorgänge (`rescan`, `verlauf`, `trace`/`trace-alle`/`trace-tief`, Labels, Sanktionen, Header, Tip-Sync) schreiben greppbare Klammern ins Job-Log:
+   - `JOB-START kind=… id=… at=YYYY-MM-DDThh:mm:ss · <Label>`
+   - `JOB-ENDE kind=… id=… status=done|failed|cancelled elapsed_s=… dauer=… at=… · <Label>`
+   Damit sind „Herkunft aller UTXOs“, „Verlauf aller Wallets“ und UTXO-Scans im Log-Bereich per Suche nach `JOB-START` / `JOB-ENDE` oder `kind=trace-alle` / `kind=verlauf` / `kind=rescan` findbar. Tokens nicht übersetzen.
 
 ## Nicht ins Log
 

@@ -611,6 +611,55 @@ class TestJobAbbruchUeberall(unittest.TestCase):
         self.assertFalse(gesehen["abgebrochen"])
         self.assertIsNone(jobs_mod.aktueller_job())
 
+    def test_schwere_jobs_loggen_start_und_ende(self):
+        """JOB-START/JOB-ENDE greppbar — Herkunft/Verlauf/UTXO-Scan im Log."""
+        registry = JobRegistry()
+        gesehen = {}
+
+        def lauf(job):
+            gesehen["log_mitte"] = list(job.as_dict()["log"])
+            time.sleep(0.05)
+            return "ok"
+
+        for kind, label in (
+            ("trace-alle", "Herkunft für 3 UTXOs"),
+            ("verlauf", "Verlauf aller Wallets"),
+            ("rescan", "UTXO-Scan Demo"),
+        ):
+            job = registry.start(kind, label, lauf)
+            for _ in range(100):
+                if job.status != "running":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(job.status, "done", kind)
+            log = job.as_dict()["log"]
+            self.assertGreaterEqual(len(log), 2, kind)
+            start = log[0]
+            ende = log[-1]
+            self.assertTrue(start.startswith("JOB-START "), start)
+            self.assertIn(f"kind={kind}", start)
+            self.assertIn(f"id={job.id}", start)
+            self.assertIn("at=", start)
+            self.assertIn(label, start)
+            self.assertTrue(ende.startswith("JOB-ENDE "), ende)
+            self.assertIn(f"kind={kind}", ende)
+            self.assertIn(f"id={job.id}", ende)
+            self.assertIn("status=done", ende)
+            self.assertIn("elapsed_s=", ende)
+            self.assertIn("dauer=", ende)
+            self.assertIn("at=", ende)
+            # Während der Arbeit schon die Start-Zeile sichtbar.
+            self.assertTrue(
+                any(z.startswith("JOB-START ") for z in gesehen["log_mitte"]),
+                gesehen["log_mitte"],
+            )
+
+    def test_format_job_dauer(self):
+        self.assertEqual(jobs_mod.format_job_dauer(0), "0s")
+        self.assertEqual(jobs_mod.format_job_dauer(9.4), "9s")
+        self.assertEqual(jobs_mod.format_job_dauer(65), "1m 05s")
+        self.assertEqual(jobs_mod.format_job_dauer(3661), "1h 01m 01s")
+
     def test_cancel_endet_mit_abgebrochen_meldung(self):
         registry = JobRegistry()
         tor = threading.Event()

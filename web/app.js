@@ -1565,7 +1565,8 @@ function logZeitstempel(wann = new Date()) {
 function logIstWichtig(text) {
   // Erfolg, Misserfolg und die Diagnose danach. Fortschritt
   // (Verbinde, Fallback, Tor-Start, Bootstrap) bleibt normal.
-  return /^(Verbunden\.|Verbindung fehlgeschlagen|TLS-Handshake fehlgeschlagen|Port geschlossen|Zertifikat nicht überprüfbar|Verbindung ohne TLS abgebrochen|Wechsel:|Neuer Peer |Peer .+ ausgefallen|Header-Cache fertig|Port 8333 wirkt blockiert|Filter-Treffer|Nur \d+)/.test(
+  // JOB-START/JOB-ENDE: Dauer langer Sammelläufe greppbar und sichtbar.
+  return /^(JOB-START|JOB-ENDE|Verbunden\.|Verbindung fehlgeschlagen|TLS-Handshake fehlgeschlagen|Port geschlossen|Zertifikat nicht überprüfbar|Verbindung ohne TLS abgebrochen|Wechsel:|Neuer Peer |Peer .+ ausgefallen|Header-Cache fertig|Port 8333 wirkt blockiert|Filter-Treffer|Nur \d+)/.test(
     String(text),
   );
 }
@@ -7755,8 +7756,19 @@ function zeichneZeitstrahl(daten, optionen = {}) {
         : "");
 
     const punkt = document.createElement("span");
-    punkt.className =
-      `achse-punkt ${eintrag.groesse} ${eintrag.erfuellt ? "erfuellt" : "offen"}`;
+    // Farbe:
+    // - außerhalb Haltefrist / prä-Stichtag → grün (auch ohne Herkunft)
+    // - innerhalb Haltefrist + Herkunft → gelb
+    // - innerhalb Haltefrist + ohne Herkunft → grau (nicht gelb)
+    let farbe;
+    if (eintrag.erfuellt) {
+      farbe = "erfuellt";
+    } else if (eintrag.geprueft) {
+      farbe = "offen";
+    } else {
+      farbe = "ungeprueft";
+    }
+    punkt.className = `achse-punkt ${eintrag.groesse} ${farbe}`;
     if (key) {
       punkt.classList.add("klickbar");
       punkt.title = t("tax.bubbleToOrigin") !== "tax.bubbleToOrigin"
@@ -7768,11 +7780,17 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     // Betrag/Datum/Wallet nur im Hover-Tooltip — feste Labels überladen den Plot.
     const tip = document.createElement("span");
     tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
+    const herkunftHinweis = (!eintrag.geprueft && !eintrag.erfuellt)
+      ? (t("tax.legendUnchecked") !== "tax.legendUnchecked"
+        ? t("tax.legendUnchecked")
+        : "ohne Herkunft")
+      : "";
     tip.textContent = [
       eintrag.datum || "",
       formatZeitstrahlBetrag(eintrag.value_sats),
       `${eintrag.wallet || "unbekannt"} · ${lage}`,
-    ].join("\n");
+      herkunftHinweis,
+    ].filter(Boolean).join("\n");
     punkt.append(tip);
     if (key) {
       punkt.addEventListener("click", (ereignis) => {

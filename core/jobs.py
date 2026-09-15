@@ -196,6 +196,56 @@ NUTZER_JOB_KINDS = frozenset({
 
 HEAVY_JOB_KINDS = NUTZER_JOB_KINDS | frozenset({"headers"})
 
+#: Schwere Jobs bekommen greppbare Start-/Ende-Zeilen im Log (JOB-START / JOB-ENDE).
+JOB_ZEIT_LOG_KINDS = HEAVY_JOB_KINDS
+
+
+def format_job_uhr(ts: float | None = None) -> str:
+    """Lokale Wanduhr, ISO-ähnlich ohne TZ — greppbar und lesbar."""
+    return time.strftime(
+        "%Y-%m-%dT%H:%M:%S",
+        time.localtime(time.time() if ts is None else float(ts)),
+    )
+
+
+def format_job_dauer(sekunden: float) -> str:
+    """Kompakte Dauer für JOB-ENDE (z. B. ``2m 03s``, ``1h 05m 00s``)."""
+    s = max(0, int(round(float(sekunden))))
+    if s < 60:
+        return f"{s}s"
+    m, rest = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {rest:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m {rest:02d}s"
+
+
+def job_start_zeile(job: "Job") -> str:
+    """
+    Erste Log-Zeile langer Jobs — greppbar mit ``JOB-START``.
+
+    Felder kind/id/at stabil für Suche; Label am Ende (Wallet-Name, Anzahl).
+    """
+    return (
+        f"JOB-START kind={job.kind} id={job.id} "
+        f"at={format_job_uhr(job.started_at)} · {job.label}"
+    )
+
+
+def job_ende_zeile(job: "Job") -> str:
+    """
+    Letzte Log-Zeile langer Jobs — greppbar mit ``JOB-ENDE``.
+
+    status, elapsed_s und dauer erlauben Dauer-Auswertung ohne Job-API.
+    """
+    ende = job.finished_at if job.finished_at is not None else time.time()
+    elapsed = max(0.0, float(ende) - float(job.started_at))
+    return (
+        f"JOB-ENDE kind={job.kind} id={job.id} status={job.status} "
+        f"elapsed_s={elapsed:.1f} dauer={format_job_dauer(elapsed)} "
+        f"at={format_job_uhr(ende)} · {job.label}"
+    )
+
 
 @dataclass
 class Job:
@@ -432,7 +482,11 @@ class JobRegistry:
 
         def lauf():
             token = _aktueller_job.set(job)
+            zeit_log = job.kind in JOB_ZEIT_LOG_KINDS
             try:
+                if zeit_log:
+                    # Vor der Arbeit — greppbar im Log-Bereich / Terminal-Spiegel.
+                    job._haenge_log_an(job_start_zeile(job))
                 try:
                     job.result = func(job)
                     if job.cancelled:
@@ -469,6 +523,12 @@ class JobRegistry:
             finally:
                 _aktueller_job.reset(token)
                 job.finished_at = time.time()
+                if zeit_log:
+                    # Nach Status/finished_at — auch bei Abbruch/Fehler.
+                    try:
+                        job._haenge_log_an(job_ende_zeile(job))
+                    except Exception:
+                        pass
                 if job._on_done is not None:
                     try:
                         job._on_done(job)

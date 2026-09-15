@@ -654,6 +654,7 @@
   "tax.legendGhost": "sats before holding period",
   "tax.legendIn": "within holding period",
   "tax.legendOut": "outside holding period",
+  "tax.legendUnchecked": "within period, no origin",
   "tax.loadCandidates": "Load candidates",
   "tax.loadCandidatesTitle": "Loads tax-year outflows and open UTXOs as what-if.",
   "tax.refreshCandidates": "Refresh",

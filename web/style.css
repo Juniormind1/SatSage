@@ -5,6 +5,8 @@
 :root,
 html[data-theme="light"] {
   color-scheme: light;
+  /* Steuerjahr-Punkte ohne Herkunft: dunkelgrau (unterscheidet sich von gelb/grün). */
+  --achse-ungeprueft: #5A6570;
   --grund:      #E7EAE7;
   --flaeche:    #F7F9F6;
   --flaeche-2:  #EDF0EC;
@@ -43,6 +45,8 @@ html[data-theme="light"] {
 /* Dark: sehr dunkelgrau (nicht pechschwarz). Markierungsfarben hell genug. */
 html[data-theme="dark"] {
   color-scheme: dark;
+  /* Steuerjahr-Punkte ohne Herkunft: hellgrau. */
+  --achse-ungeprueft: #B0B8BE;
   --grund:      #1A1E22;
   --flaeche:    #22272C;
   --flaeche-2:  #2A3036;
@@ -1736,6 +1740,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
    abweichen lassen. */
 .punkt-frist-erfuellt { background: var(--gut); border-radius: 50%; }
 .punkt-frist-offen    { background: var(--warn); border-radius: 50%; }
+.punkt-frist-ungeprueft { background: var(--achse-ungeprueft); border-radius: 50%; }
 .punkt-geister-saldo {
   background: transparent;
   border: 2px solid var(--gut);
@@ -1842,6 +1847,9 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .achse-punkt.klickbar { cursor: pointer; }
 .achse-punkt.erfuellt { background: var(--gut); }
 .achse-punkt.offen    { background: var(--warn); }
+/* Innerhalb Haltefrist + ohne Herkunft: grau statt gelb.
+   Außerhalb der Frist bleibt .erfuellt (grün), auch ohne Trace. */
+.achse-punkt.ungeprueft { background: var(--achse-ungeprueft); }
 /* Geister-Saldo: Ring auf der X-Achse (y=0), Größe per Inline-width/height. */
 .achse-punkt.geister {
   background: transparent;
