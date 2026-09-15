@@ -1,4 +1,4 @@
-"""Selbstanzeige-Report: FiFo und Auswahl."""
+"""Bericht Sat-Geschichte (Modul selbstanzeige): FiFo und Auswahl."""
 from __future__ import annotations
 
 import unittest

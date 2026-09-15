@@ -105,7 +105,7 @@ Nach den Basis-Szenarien legt `scripts/generate_sanctions_scenarios.py` (von `ru
 - Pseudo-Liste unter `.data/sanctioned_cache/` (nur `bcrt1…`)
 - Expectations: `.data/scenario-report-sanctions.json`
 
-GUI-Lab setzt `--sanctions-dir lab/regtest/.data/sanctioned_cache` und `SANKTION_MAX_HOPS_CAP=100` (Produkt-Default bleibt 20). Das testet die **externe Vorgeschichte** (`scan_external_sanction_hops`), nicht den Listen-UTXO-Bestandsscan.
+GUI-Lab setzt `--sanctions-dir lab/regtest/.data/sanctioned_cache` und `SANKTION_MAX_HOPS_CAP=100` (Produkt-Default bleibt 20). Das testet die **xpub-blinde Hop-Vorgeschichte** (`scan_external_sanction_hops`), nicht den Listen-UTXO-Bestandsscan.
 
 Verify (Lab muss laufen):
 

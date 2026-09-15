@@ -1624,6 +1624,7 @@ def _datenquellen_config_gesperrt(
 
 def api_config(state: AppState, query: dict, accept_language: str | None = None) -> dict:
     from core.version import version as app_version
+    from core import selbstanzeige as sa_mod
 
     entries = state.entries
     zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
@@ -1648,6 +1649,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         "rpc_password_set": bool((werte.get("RPCUSER") or "").strip() and (werte.get("RPCPASSWORD") or "").strip()),
         "mempool": mempool_info(werte.get("MEMPOOL_URL", "")),
         "steuer": tax_mod.lese_steuer_einstellungen(werte),
+        "person": sa_mod.lese_steuer_person(werte),
         "wallets_beim_start_aktualisieren": (
             main.resolve_wallets_beim_start_aktualisieren(werte)
         ),
@@ -2041,19 +2043,41 @@ def api_save_mempool(state: AppState, payload: dict) -> dict:
 
     Geprüft wird nur die Form. Ein Verbindungstest wäre schon der erste
     Abruf — und genau den soll der Benutzer selbst auslösen.
+
+    Öffentliche Explorer (mempool.space u. ä.) brauchen ``public_opt_in``
+    nach Warndialog in der UI — sonst bleibt die Outbound-Policy hart.
     """
     try:
         url = normalize_mempool_url(str(payload.get("url", "")))
     except ValueError as exc:
         raise ApiError(400, str(exc)) from exc
+
+    info = mempool_info(url)
+    oeffentlich = bool(info.get("configured") and not info.get("local"))
+    public_opt_in = bool(
+        _payload_bool(payload, "public_opt_in", "confirm_public", default=False)
+    )
+
     if url:
         try:
-            outbound_policy.ensure_url_allowed(url, service="mempool", values=state.env().values())
+            outbound_policy.ensure_url_allowed(
+                url,
+                service="mempool",
+                values=state.env().values(),
+                # Nach expliziter Bestätigung in der UI freigeben.
+                opt_in=True if (oeffentlich and public_opt_in) else None,
+            )
         except outbound_policy.OutboundPolicyError as exc:
             raise ApiError(400, str(exc)) from exc
 
     env = state.env()
-    env.apply({"MEMPOOL_URL": url or None})
+    updates: dict[str, str | None] = {"MEMPOOL_URL": url or None}
+    if not url or not oeffentlich:
+        # Kein öffentlicher Explorer mehr → Opt-in zurücknehmen.
+        updates["SATSAGE_MEMPOOL_PUBLIC_OPT_IN"] = None
+    elif public_opt_in:
+        updates["SATSAGE_MEMPOOL_PUBLIC_OPT_IN"] = "1"
+    env.apply(updates)
     try:
         env.save()
     except OSError as exc:
@@ -2205,6 +2229,66 @@ def api_save_steuer(state: AppState, payload: dict) -> dict:
         "saved": True,
         "steuer": tax_mod.lese_steuer_einstellungen(env.values()),
     }
+
+
+def api_save_steuer_person(state: AppState, payload: dict) -> dict:
+    """
+    Speichert persönliche Daten und Finanzamt-Angaben für HTML/CSV-Berichte.
+
+    Leere Felder → Env-Key entfernen → Name/Steuernummer/Anschrift wieder
+    Donald-Duck-Defaults; optionale Felder (E-Mail, Finanzamt, …) bleiben leer.
+    """
+    from core import selbstanzeige as sa_mod
+
+    def _feld(*keys: str) -> str:
+        for key in keys:
+            if key in payload and payload.get(key) is not None:
+                return str(payload.get(key) or "").strip()
+        return ""
+
+    name = _feld("name", "person_name")
+    steuernummer = _feld("steuernummer", "tax_id")
+    anschrift = _feld("anschrift", "address", "adresse")
+    email = _feld("email", "e_mail", "mail")
+    finanzamt = _feld("finanzamt", "tax_office")
+    finanzamt_anschrift = _feld(
+        "finanzamt_anschrift", "finanzamt_address", "tax_office_address",
+    )
+    sachbearbeiter = _feld("sachbearbeiter", "case_worker", "clerk")
+
+    if len(name) > 200:
+        raise ApiError(400, "Name ist zu lang (max. 200 Zeichen).")
+    if len(steuernummer) > 80:
+        raise ApiError(400, "Steuernummer ist zu lang (max. 80 Zeichen).")
+    if len(anschrift) > 400:
+        raise ApiError(400, "Anschrift ist zu lang (max. 400 Zeichen).")
+    if len(email) > 200:
+        raise ApiError(400, "E-Mail ist zu lang (max. 200 Zeichen).")
+    if email and ("@" not in email or " " in email):
+        raise ApiError(400, "E-Mail sieht ungültig aus.")
+    if len(finanzamt) > 200:
+        raise ApiError(400, "Finanzamt ist zu lang (max. 200 Zeichen).")
+    if len(finanzamt_anschrift) > 400:
+        raise ApiError(400, "Finanzamt-Anschrift ist zu lang (max. 400 Zeichen).")
+    if len(sachbearbeiter) > 200:
+        raise ApiError(400, "Sachbearbeiter ist zu lang (max. 200 Zeichen).")
+
+    env = state.env()
+    env.apply({
+        "STEUER_PERSON_NAME": name or None,
+        "STEUER_PERSON_STEUERNUMMER": steuernummer or None,
+        "STEUER_PERSON_ANSCHRIFT": anschrift or None,
+        "STEUER_PERSON_EMAIL": email or None,
+        "STEUER_PERSON_FINANZAMT": finanzamt or None,
+        "STEUER_PERSON_FINANZAMT_ANSCHRIFT": finanzamt_anschrift or None,
+        "STEUER_PERSON_SACHBEARBEITER": sachbearbeiter or None,
+    })
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+
+    return {"saved": True, "person": sa_mod.lese_steuer_person(env.values())}
 
 
 def api_save_hinweis_onchain(state: AppState, payload: dict) -> dict:
@@ -3853,8 +3937,8 @@ def api_sanctions_check_verwerfen(state: AppState) -> dict:
 
 def api_sanctions_check(state: AppState, payload: dict) -> dict:
     """
-    Prüft Wallet-UTXOs auf sanktionierte Adressen in der externen
-    Vorgeschichte (CLI-Menü 6.1) — als Hintergrund-Vorgang.
+    Prüft Wallet-UTXOs xpub-blind auf sanktionierte Adressen (CLI-Menü 6.1)
+    — Drittperspektive ohne XPUB, bis *max_hops* Prevouts — als Job.
 
     Payload: {"wallet_id": "<kennung|leer=alle>", "max_hops": 3}
     """
@@ -3957,6 +4041,7 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 gesehene_adressen=gesehen,
                 get_tx_je_worker=get_tx_je_worker,
                 worker_count=verbindungen,
+                immutable_cache_dir=state.immutable_cache_dir,
             )
             ergebnisse.append({
                 "wallet": name,
@@ -4901,7 +4986,7 @@ def _selbstanzeige_report(state: AppState, payload: dict) -> dict:
         except ValueError as exc:
             raise ApiError(400, str(exc)) from exc
     try:
-        return sa.auswerten(
+        report = sa.auswerten(
             utxos,
             jahr,
             saubere_txids,
@@ -4915,6 +5000,8 @@ def _selbstanzeige_report(state: AppState, payload: dict) -> dict:
         )
     except ValueError as exc:
         raise ApiError(400, str(exc)) from exc
+    report["person"] = sa.lese_steuer_person(state.env().values())
+    return report
 
 
 def _ingress_veraltet(eintrag: dict | None) -> bool:
@@ -4955,37 +5042,63 @@ def _utxos_fuer_trace(
     return list(gecacht or [])
 
 
-def _trace_offen_basis(
-    state: AppState,
-    utxos: list[dict],
-    eigene_jetzt,
-) -> list[tuple[str, int]]:
-    """UTXOs ohne brauchbaren Ingress oder mit veraltetem Baum."""
-    offen: list[tuple[str, int]] = []
-    for utxo in utxos:
-        txid = utxo.get("txid", "")
-        vout = int(utxo.get("vout", 0))
-        nachholen = _ingress_veraltet(
-            main.load_utxo_ingress_cache(txid, vout, state.immutable_cache_dir)
-        )
-        if not nachholen:
-            kopf = trace_cache.kopf(
-                txid, vout, state.immutable_cache_dir, eigene_jetzt
-            )
-            nachholen = bool(kopf and kopf["veraltet"])
-        if nachholen:
-            offen.append((txid, vout))
-    return offen
-
-
-def _trace_offen_tief(
+def _trace_offen_steuer(
     state: AppState,
     utxos: list[dict],
     eigene_jetzt,
 ) -> list[tuple[str, int]]:
     """
-    UTXOs ohne vollständigen Baum (rot/lila-Blätter) — auch wenn schon
-    einmal getraced. Veraltete Bäume und fehlender Ingress ebenso.
+    UTXOs ohne steuerlich ausreichenden Herkunftsbaum.
+
+    Reicht: Blätter extern/Coinbase **oder** Steuer-Horizont (vor Stichtag/
+    Haltefrist-Anfang). Volle Graphen bis Coinbase sind nicht nötig.
+    """
+    offen: list[tuple[str, int]] = []
+    gesehen: set[tuple[str, int]] = set()
+    for utxo in utxos:
+        txid = str(utxo.get("txid") or "").strip()
+        if not txid:
+            continue
+        try:
+            vout = int(utxo.get("vout", 0))
+        except (TypeError, ValueError):
+            continue
+        key = (txid, vout)
+        if key in gesehen:
+            continue
+        gesehen.add(key)
+        kopf = trace_cache.kopf(
+            txid, vout, state.immutable_cache_dir, eigene_jetzt
+        )
+        if kopf is None:
+            # Kein Baum: alter Ingress mit Extern reicht für Steuerjahr.
+            if not _ingress_veraltet(
+                main.load_utxo_ingress_cache(
+                    txid, vout, state.immutable_cache_dir
+                )
+            ):
+                continue
+            offen.append(key)
+            continue
+        if kopf.get("veraltet"):
+            offen.append(key)
+            continue
+        if kopf.get("vollstaendig") or kopf.get("steuer_ausreichend"):
+            continue
+        offen.append(key)
+    return offen
+
+
+def _trace_offen_basis(
+    state: AppState,
+    utxos: list[dict],
+    eigene_jetzt,
+) -> list[tuple[str, int]]:
+    """
+    Herkunft tracen: UTXOs ohne **vollen** Baum bis extern/Coinbase.
+
+    Steuer-Horizont allein reicht nicht — diese Lücken werden nachgezogen,
+    idealerweise auf dem gespeicherten origin_tree (kein Komplett-Neulauf).
     """
     offen: list[tuple[str, int]] = []
     gesehen: set[tuple[str, int]] = set()
@@ -5010,25 +5123,62 @@ def _trace_offen_tief(
         if kopf.get("veraltet"):
             offen.append(key)
             continue
-        if not kopf.get("vollstaendig"):
-            offen.append(key)
+        if kopf.get("vollstaendig"):
             continue
-        # Baum ist vollständig und aktuell — fertig. Fehlenden Ingress holt
-        # „Herkunft aller UTXOs“ bzw. der nächste Einzel-Trace; der Tiefenlauf
-        # soll nicht alles nochmal kneten.
+        offen.append(key)
     return offen
+
+
+def _trace_offen_tief(
+    state: AppState,
+    utxos: list[dict],
+    eigene_jetzt,
+) -> list[tuple[str, int]]:
+    """
+    UTXOs ohne vollständigen Baum (rot/lila-Blätter) — auch wenn schon
+    einmal getraced. Veraltete Bäume und fehlender Ingress ebenso.
+    """
+    # Gleicher Maßstab wie Herkunft-tracen-Massenlauf (voll bis extern).
+    return _trace_offen_basis(state, utxos, eigene_jetzt)
+
+
+def _stop_before_ts_aus_payload(roh: dict) -> int | None:
+    """Steuer-Horizont aus Job-Payload (Jahr, Haltefrist, Stichtag)."""
+    try:
+        jahr = int(roh.get("jahr") or 0)
+    except (TypeError, ValueError):
+        jahr = 0
+    if jahr < 2009:
+        from datetime import datetime as _dt
+        jahr = _dt.now().year
+    try:
+        frist = int(
+            roh.get("haltefrist_jahre")
+            if roh.get("haltefrist_jahre") is not None
+            else roh.get("frist") or tax_mod.STANDARD_HALTEFRIST_JAHRE
+        )
+    except (TypeError, ValueError):
+        frist = tax_mod.STANDARD_HALTEFRIST_JAHRE
+    stichtag_roh = roh.get("stichtag") or roh.get("stichtag_iso") or ""
+    stichtag_tag = tax_mod.parse_stichtag(
+        str(stichtag_roh) if stichtag_roh else None
+    )
+    return tax_mod.stop_before_ts_fuer_steuer(jahr, frist, stichtag_tag)
 
 
 def api_trace_alle(state: AppState, payload: dict) -> dict:
     """
     Verfolgt die Herkunft von UTXOs.
 
-    Standard: alle Wallets, nur fehlender/veralteter Ingress (Steuerjahr).
+    *modus*:
+    - ``steuer`` (Steuerjahr): Stop an Stichtag/Haltefrist-Anfang oder
+      extern/Coinbase — schneller, für Anschaffungsdatum ausreichend.
+    - ``voll`` / Default (Herkunft tracen): immer bis extern/Coinbase;
+      setzt Steuer-Teilbäume fort (origin_tree), rechnet nicht alles neu.
+    - ``vollstaendig=true`` (Wallet „Herkunft“): Tiefenlauf inkl. Lücken.
 
-    Mit ``vollstaendig=true`` (Wallet-Knopf „Herkunft vollständig“): optional
-    ``wallet_id``, alle UTXOs ohne vollständigen Baum — derselbe Pfad wie
-    „Herkunftslücken schließen“ (gebündelte Eingänge **und** Vorgänger-Txs).
-    Kann sehr lange dauern; danach sitzt alles im Cache.
+    Mit ``vollstaendig=true``: optional ``wallet_id``, alle UTXOs ohne
+    vollständigen Baum — derselbe Pfad wie „Herkunftslücken schließen“.
     """
     wallet_ctx = state.wallet_ctx
     if wallet_ctx is None:
@@ -5039,6 +5189,15 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
 
     roh = payload if isinstance(payload, dict) else {}
     vollstaendig = bool(roh.get("vollstaendig") or roh.get("tief") or roh.get("deep"))
+    modus_roh = str(roh.get("modus") or "").strip().lower()
+    if vollstaendig:
+        modus = "tief"
+    elif modus_roh in ("steuer", "tax", "haltefrist"):
+        modus = "steuer"
+    else:
+        # Herkunft tracen / Default: voll bis extern
+        modus = "voll"
+
     wallet_id = str(roh.get("wallet_id") or "").strip()
     if vollstaendig and not wallet_id:
         raise ApiError(
@@ -5047,10 +5206,29 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "(Knopf in der Wallet-Ansicht).",
         )
 
+    stop_before_ts = None
+    if modus == "steuer":
+        stop_before_ts = _stop_before_ts_aus_payload(roh)
+
     eigene_jetzt = _eigene_adressen(state)
     utxos = _utxos_fuer_trace(state, wallet_id=wallet_id)
+
+    # Optional: nur bestimmte UTXOs tracen (z. B. nur gelbe aus Steuerjahr)
+    nur_keys = roh.get("utxo_keys")
+    if nur_keys:
+        gewuenscht = set()
+        for k in nur_keys:
+            if isinstance(k, str) and ":" in k:
+                try:
+                    tx, vo = k.split(":", 1)
+                    gewuenscht.add((tx.strip(), int(vo)))
+                except (ValueError, TypeError):
+                    pass
+        if gewuenscht:
+            utxos = [u for u in utxos if (u.get("txid"), int(u.get("vout", -1))) in gewuenscht]
+
     if not utxos:
-        # Leerer Bestand ≠ „alles schon getracet“ — sonst wirkt „Herkunft aller
+        # Leerer Bestand ≠ „alles schon getracet“ — sonst wirkt „Herkünfte
         # UTXOs“ nach frischem Lab/Cache fälschlich fertig (grüner Hinweis).
         return {
             "nichts_zu_tun": True,
@@ -5058,10 +5236,13 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "offen": 0,
             "utxos": 0,
             "vollstaendig": vollstaendig,
+            "modus": modus,
             "wallet_id": wallet_id,
         }
-    if vollstaendig:
+    if modus == "tief":
         offen = _trace_offen_tief(state, utxos, eigene_jetzt)
+    elif modus == "steuer":
+        offen = _trace_offen_steuer(state, utxos, eigene_jetzt)
     else:
         offen = _trace_offen_basis(state, utxos, eigene_jetzt)
 
@@ -5072,6 +5253,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "offen": 0,
             "utxos": len(utxos),
             "vollstaendig": vollstaendig,
+            "modus": modus,
             "wallet_id": wallet_id,
         }
 
@@ -5091,11 +5273,22 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         ).start()
         gesamt = len(offen)
         try:
-            if vollstaendig and wallet_name:
+            if modus == "tief" and wallet_name:
                 stand.phase(
                     f"Herkunft vollständig für „{wallet_name}“ "
                     f"({gesamt} UTXOs)…"
                 )
+            elif modus == "steuer":
+                stand.phase(
+                    f"Steuerrelevantes Alter für {gesamt} UTXOs"
+                    + (
+                        f" (Horizont bis {stop_before_ts})…"
+                        if stop_before_ts
+                        else "…"
+                    )
+                )
+            else:
+                stand.phase(f"Herkunft bis extern für {gesamt} UTXOs…")
             stand.phase(f"Verbinde für {gesamt} UTXOs…")
             args = state.args_namespace()
             quelle, backend = main._setup_blockchain_client(args, state.env().values())
@@ -5110,6 +5303,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             fehler = 0
             juengste = 0
             voll_ok = 0
+            steuer_ok_n = 0
 
             def _zwischenstand() -> None:
                 job.result = {
@@ -5118,16 +5312,23 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     "offen": gesamt,
                     "juengste_sats": juengste,
                     "vollstaendig_ok": voll_ok,
+                    "steuer_ok": steuer_ok_n,
                     "vollstaendig": vollstaendig,
+                    "modus": modus,
                     "partial": True,
                 }
 
             for index, (txid, vout) in enumerate(offen):
                 job.raise_if_cancelled()
                 rest = gesamt - index
-                if vollstaendig:
+                if modus == "tief":
                     text = (
                         f"Herkunft vollständig — noch {rest} von {gesamt} UTXOs"
+                        f" · {txid[:12]}…:{vout}"
+                    )
+                elif modus == "steuer":
+                    text = (
+                        f"Steuerrelevantes Alter — noch {rest} von {gesamt} UTXOs"
                         f" · {txid[:12]}…:{vout}"
                     )
                 else:
@@ -5141,7 +5342,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     stand.tick(text)
                 try:
                     fetch_addr = fetchers.get("fetch_address_utxos")
-                    if vollstaendig:
+                    if modus == "tief":
                         # Gleicher Pfad wie Einzel-Knopf „Herkunftslücken schließen“.
                         def _tief_fortschritt(text: str) -> None:
                             t = str(text or "").strip()
@@ -5169,6 +5370,13 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             folge_tx=True,
                         )
                     else:
+                        resume = None
+                        if modus == "voll":
+                            geladen = trace_cache.laden(
+                                txid, vout, state.immutable_cache_dir, eigene,
+                            )
+                            if geladen and isinstance(geladen.get("baum"), dict):
+                                resume = geladen["baum"].get("origin_tree")
                         ergebnis = trace_mod.trace_utxo(
                             fetchers["get_tx"], txid, vout, eigene,
                             wallet=wallet_ctx,
@@ -5176,14 +5384,19 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             immutable_cache_dir=state.immutable_cache_dir,
                             fetch_address_utxos=fetch_addr,
                             cache_source=quelle,
+                            stop_before_ts=(
+                                stop_before_ts if modus == "steuer" else None
+                            ),
+                            resume_origin=resume if modus == "voll" else None,
                         )
                     fertig += 1
-                    if (
-                        isinstance(ergebnis, dict)
-                        and ergebnis.get("found")
-                        and ergebnis.get("verfolgt_vollstaendig")
-                    ):
-                        voll_ok += 1
+                    if isinstance(ergebnis, dict) and ergebnis.get("found"):
+                        if ergebnis.get("verfolgt_vollstaendig"):
+                            voll_ok += 1
+                        if ergebnis.get("steuer_ausreichend") or ergebnis.get(
+                            "verfolgt_vollstaendig"
+                        ):
+                            steuer_ok_n += 1
                         if ergebnis.get("juengste_sats_ts"):
                             juengste += 1
                     _zwischenstand()
@@ -5194,15 +5407,22 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     _zwischenstand()
                     continue
 
-            if vollstaendig:
+            if modus == "tief":
                 fertig_text = (
                     f"{fertig} von {gesamt} durchgezogen"
                     f" · {voll_ok} vollständig"
                     + (f", {fehler} fehlgeschlagen" if fehler else "")
                 )
+            elif modus == "steuer":
+                fertig_text = (
+                    f"{fertig} von {gesamt} verfolgt"
+                    f" · {steuer_ok_n} steuerlich ok"
+                    + (f", {fehler} fehlgeschlagen" if fehler else "")
+                )
             else:
                 fertig_text = (
                     f"{fertig} von {gesamt} verfolgt"
+                    f" · {voll_ok} bis extern"
                     + (f", {fehler} fehlgeschlagen" if fehler else "")
                 )
             stand.phase(fertig_text)
@@ -5212,19 +5432,24 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 "offen": gesamt,
                 "juengste_sats": juengste,
                 "vollstaendig_ok": voll_ok,
+                "steuer_ok": steuer_ok_n,
                 "vollstaendig": vollstaendig,
+                "modus": modus,
                 "partial": False,
             }
         finally:
             halt.set()
             stand.close()
 
-    if vollstaendig:
+    if modus == "tief":
         titel = (
             f"Herkunft vollständig {wallet_name or wallet_id} "
             f"({len(offen)} UTXOs)"
         )
         art = "trace-tief"
+    elif modus == "steuer":
+        titel = f"Steuerrelevantes Alter für {len(offen)} UTXOs"
+        art = "trace-alle"
     else:
         titel = f"Herkunft für {len(offen)} UTXOs"
         art = "trace-alle"
@@ -5238,6 +5463,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "wallet_id": wallet_id,
             "wallet_name": wallet_name,
             "vollstaendig": vollstaendig,
+            "modus": modus,
+            "stop_before_ts": stop_before_ts,
         },
     )
     return job.as_dict()
@@ -6647,6 +6874,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_save_lernhinweise_plebs(state, self._body())
         if teile == ["config", "steuer"] and methode == "PUT":
             return 200, api_save_steuer(state, self._body())
+        if teile == ["config", "person"] and methode == "PUT":
+            return 200, api_save_steuer_person(state, self._body())
         if teile == ["config", "hinweis-onchain"] and methode == "PUT":
             return 200, api_save_hinweis_onchain(state, self._body())
         if teile == ["config", "llm"] and methode == "PUT":
@@ -6761,6 +6990,14 @@ class Handler(BaseHTTPRequestHandler):
         """
         auswertung = _steuer_auswertung(self.state, query)
         jahr = auswertung["jahr"]
+        from core import herkunft_bericht as hb_mod
+        try:
+            theme_roh = (query.get("theme") or [""])[0]
+        except (TypeError, IndexError):
+            theme_roh = ""
+        if not theme_roh:
+            theme_roh = _ui_theme_aus_env(self.state.env().values())
+        theme = hb_mod.normalize_bericht_theme(theme_roh)
 
         if pfad.endswith(".csv"):
             inhalt = tax_mod.als_csv(auswertung)
@@ -6770,6 +7007,7 @@ class Handler(BaseHTTPRequestHandler):
             inhalt = tax_mod.als_bericht(
                 auswertung,
                 immutable_cache_dir=self.state.immutable_cache_dir,
+                theme=theme,
             )
             typ = "text/html; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.html"
@@ -6784,7 +7022,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(inhalt)
 
     def _download_selbstanzeige(self, pfad: str, query: dict) -> None:
-        """Selbstanzeige-Report als HTML oder CSV (Query: jahr, frist, txids)."""
+        """Bericht Sat-Geschichte als HTML oder CSV (Query: jahr, frist, txids)."""
         from core import selbstanzeige as sa
 
         try:
@@ -6849,19 +7087,29 @@ class Handler(BaseHTTPRequestHandler):
                 )
             return
         jahr = report["jahr"]
+        from core import herkunft_bericht as hb_mod
+        try:
+            theme_roh = (query.get("theme") or [""])[0]
+        except (TypeError, IndexError):
+            theme_roh = ""
+        if not theme_roh:
+            theme_roh = _ui_theme_aus_env(self.state.env().values())
+        theme = hb_mod.normalize_bericht_theme(theme_roh)
+
         if pfad.endswith(".csv"):
             inhalt = sa.als_csv(report)
             typ = "text/csv; charset=utf-8"
-            name = f"satsage-selbstanzeige-{jahr}.csv"
+            name = f"satsage-sat-geschichte-{jahr}.csv"
             # CSV immer als Download — im Tab wäre es nur Rohtext.
             disposition = f'attachment; filename="{name}"'
         else:
             inhalt = sa.als_html(
                 report,
                 immutable_cache_dir=self.state.immutable_cache_dir,
+                theme=theme,
             )
             typ = "text/html; charset=utf-8"
-            name = f"satsage-selbstanzeige-{jahr}.html"
+            name = f"satsage-sat-geschichte-{jahr}.html"
             # inline: Tab zeigt den Report (Druck → PDF). Die Oberfläche
             # löst parallel noch einen Datei-Download aus.
             disposition = f'inline; filename="{name}"'

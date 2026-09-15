@@ -535,7 +535,7 @@ def _menu_sanctions_wallet(session: MenuSession) -> None:
 
             print(
                 f"\nPrüfe {len(utxos)} UTXO(s) in {wallet_name} "
-                f"({max_hops} externe Hop(s))…",
+                f"({max_hops} Hop(s) xpub-blind)…",
                 flush=True,
             )
             get_tx = session.get_tx
@@ -547,6 +547,28 @@ def _menu_sanctions_wallet(session: MenuSession) -> None:
                 print(f"  ⚠️  {t('cli.warn.noTxFetch')}", flush=True)
                 break
 
+            import main as main_mod
+
+            imm = getattr(session, "immutable_cache_dir", None)
+            if imm is None:
+                try:
+                    imm = main_mod.resolve_immutable_cache_dir(
+                        session.args,
+                        utxo_cache_dir=getattr(session, "cache_dir", None),
+                    )
+                except Exception:
+                    imm = None
+            # CLI-get_tx ggf. mit Tx-Cache umwickeln (Herkunft/Sanktion teilen ihn).
+            if imm is not None and get_tx is not None:
+                raw = get_tx
+                if not getattr(raw, "_satsage_imm_wrapped", False):
+                    get_tx = main_mod.wrap_get_tx_with_immutable_cache(
+                        raw, imm, "sanctions-cli",
+                    )
+                    try:
+                        get_tx._satsage_imm_wrapped = True
+                    except Exception:
+                        pass
             hits, checked, abort_hit = check_wallet_utxos_sanctions(
                 get_tx,
                 utxos,
@@ -555,6 +577,7 @@ def _menu_sanctions_wallet(session: MenuSession) -> None:
                 max_hops=max_hops,
                 wallet=session.wallet_ctx,
                 abort_on_hit=True,
+                immutable_cache_dir=imm,
             )
             if wallet_ctx.aborted:
                 break

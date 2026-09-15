@@ -204,6 +204,47 @@ def bezugsdatum(jahr: int, jetzt: datetime | None = None) -> tuple[datetime, boo
     return ende, False
 
 
+def stop_before_ts_fuer_steuer(
+    jahr: int,
+    haltefrist_jahre: int,
+    stichtag_tag: date | None = None,
+    *,
+    jetzt: datetime | None = None,
+) -> int | None:
+    """
+    Unix-Zeit, ab der der Steuer-Trace rückwärts abbrechen darf.
+
+    Sobald ein Hop **älter oder gleich** diesem Zeitpunkt ist, reichen die
+    bekannten Fakten für Haltefrist und (falls gesetzt) Stichtagsregel —
+    tiefer bis Coinbase/extern ist fürs Steuerjahr unnötig. Herkunft tracen
+    geht trotzdem weiter bis extern/Coinbase.
+
+    Schwelle = frühester (strengster) der aktiven Cutoffs:
+    * Haltefrist-Anfang = Bezug minus *haltefrist_jahre*
+    * Stichtag (Tagesende)
+
+    Ohne Haltefrist und ohne Stichtag: ``None`` (kein Frühabbruch).
+    """
+    bezug, _ = bezugsdatum(int(jahr), jetzt=jetzt)
+    kandidaten: list[int] = []
+    try:
+        frist = int(haltefrist_jahre or 0)
+    except (TypeError, ValueError):
+        frist = 0
+    if frist > 0:
+        kandidaten.append(int(plus_jahre(bezug, -frist).timestamp()))
+    if stichtag_tag is not None:
+        kandidaten.append(
+            int(datetime(
+                stichtag_tag.year, stichtag_tag.month, stichtag_tag.day,
+                23, 59, 59,
+            ).timestamp())
+        )
+    if not kandidaten:
+        return None
+    return min(kandidaten)
+
+
 #: Grundlage, auf der das Anschaffungsdatum eines UTXO beruht.
 GRUNDLAGE_HERKUNFT = "herkunft"   # jüngster externer Zufluss — steuerlich richtig
 #: Herkunftsanalyse liegt vor, aber ohne datierte externe Zuflüsse (die
@@ -430,6 +471,20 @@ def _anschaffung(
     modus = parse_anschaffung(anschaffung)
     if ingress:
         untergrenze = bool(ingress.get("external_untergrenze"))
+        # Variante A: tax_horizon vor Haltefrist-Grenze → erfuellt (grün)
+        # Wenn wir nur einen Horizont-Hopf haben und dieser schon vor der
+        # Frist-Grenze liegt, gilt die Mindest-Haltedauer als erfüllt.
+        horizon_ts = ingress.get("tax_horizon_time_ts")
+        if horizon_ts is not None:
+            try:
+                horizon_dt = datetime.fromtimestamp(int(horizon_ts))
+                # Wird später in haltefrist_entscheidung geprüft; hier nur
+                # untergrenze auf False setzen, damit er nicht als "vorsichtig"
+                # behandelt wird. Die eigentliche erfuellt-Entscheidung
+                # passiert in haltefrist_entscheidung mit diesem Datum.
+                untergrenze = False
+            except (ValueError, OSError, OverflowError):
+                pass
         if modus == ANSCHAFFUNG_AELTESTE:
             stempel = ingress.get("external_oldest_time_ts")
             if stempel:
@@ -466,6 +521,18 @@ def _anschaffung(
                     )
                 except (ValueError, OSError, OverflowError):
                     pass
+        # Variante A: tax_horizon als ausreichendes Anschaffungsdatum nutzen
+        horizon_ts = ingress.get("tax_horizon_time_ts")
+        if horizon_ts:
+            try:
+                return (
+                    datetime.fromtimestamp(int(horizon_ts)),
+                    GRUNDLAGE_HERKUNFT,
+                    False,
+                    False,
+                )
+            except (ValueError, OSError, OverflowError):
+                pass
         stempel = ingress.get("youngest_time_ts")
         if stempel:
             try:
@@ -1145,6 +1212,7 @@ def als_bericht(
     auswertung: dict,
     *,
     immutable_cache_dir: Path | str | None = None,
+    theme: str | None = None,
 ) -> bytes:
     """
     Druckbarer Bericht als eigenständige HTML-Datei.
@@ -1221,31 +1289,39 @@ def als_bericht(
 </table>
 """
 
+    theme_css = hb.BERICHT_THEME_CSS
+    theme_name = hb.normalize_bericht_theme(theme)
     return f"""<!DOCTYPE html>
-<html lang="de"><head><meta charset="utf-8">
+<html lang="de" data-theme="{theme_name}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="{theme_name}">
 <title>Aufstellung Steuerjahr {auswertung['jahr']}</title>
 <style>
-  body {{ font-family: Georgia, "Times New Roman", serif; color: #1a1a1a;
-         max-width: 20cm; margin: 2cm auto; line-height: 1.5; }}
-  h1 {{ font-size: 20pt; margin: 0 0 4pt; }}
-  .unter {{ color: #555; margin: 0 0 20pt; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 9pt; }}
-  th {{ text-align: left; border-bottom: 1.5px solid #333; padding: 4pt 6pt 4pt 0;
-        font-size: 8pt; text-transform: uppercase; letter-spacing: .06em; }}
-  td {{ border-bottom: 1px solid #ddd; padding: 4pt 6pt 4pt 0; }}
+  {theme_css}
+  body {{ font-family: Georgia, "Times New Roman", serif; color: var(--fg);
+         max-width: 20cm; margin: 2cm auto; line-height: 1.5;
+         background: var(--bg); padding: 0 12px; }}
+  h1 {{ font-size: 20pt; margin: 0 0 4pt; color: var(--fg); }}
+  h2 {{ color: var(--fg); }}
+  .unter {{ color: var(--muted2); margin: 0 0 20pt; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 9pt; color: var(--fg); }}
+  th {{ text-align: left; border-bottom: 1.5px solid var(--line); padding: 4pt 6pt 4pt 0;
+        font-size: 8pt; text-transform: uppercase; letter-spacing: .06em;
+        color: var(--fg); }}
+  td {{ border-bottom: 1px solid var(--line-soft); padding: 4pt 6pt 4pt 0; }}
   .r {{ text-align: right; }}
   .mono {{ font-family: "Courier New", monospace; }}
-  .klein {{ font-size: 7.5pt; }}
+  .klein {{ font-size: 7.5pt; color: var(--muted); }}
   .kennzahlen {{ display: flex; gap: 24pt; margin: 0 0 20pt; flex-wrap: wrap; }}
-  .kennzahl {{ border-left: 2px solid #333; padding-left: 8pt; }}
+  .kennzahl {{ border-left: 2px solid var(--line); padding-left: 8pt; color: var(--fg); }}
   .kennzahl b {{ display: block; font-size: 14pt; }}
   .kennzahl span {{ font-size: 8pt; text-transform: uppercase;
-                    letter-spacing: .06em; color: #555; }}
-  .hinweise {{ margin-top: 24pt; padding-top: 10pt; border-top: 1px solid #333;
-               font-size: 8.5pt; color: #444; }}
+                    letter-spacing: .06em; color: var(--muted2); }}
+  .hinweise {{ margin-top: 24pt; padding-top: 10pt; border-top: 1px solid var(--line);
+               font-size: 8.5pt; color: var(--muted); }}
   .hinweise li {{ margin-bottom: 5pt; }}
   {hop_css}
-  @media print {{ body {{ margin: 0; }} }}
+  @media print {{ body {{ margin: 0; max-width: none; padding: 0; }} }}
 </style></head><body>
 
 <h1>Aufstellung Steuerjahr {auswertung['jahr']}</h1>

@@ -321,7 +321,7 @@ class TestCheckReachable(unittest.TestCase):
         p2p.assert_not_called()
         nach_key = {q.key: q for q in ergebnis}
         self.assertTrue(nach_key["own_fulcrum"].reachable)
-        self.assertEqual(peer_status(ergebnis)["label"], "Eigener Peer verbunden")
+        self.assertEqual(peer_status(ergebnis)["label"], "1 electrs verbunden")
         self.assertEqual(
             nach_key["bip158"].note,
             "P2P als Datenquelle nicht erforderlich (Electrs erreichbar).",
@@ -445,15 +445,31 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(stand["kind"], "p2p")
         self.assertEqual(stand["label"], "3 Peers verbunden")
 
-    def test_peer_status_eigener_electrum_sticht_p2p(self):
+    def test_peer_status_peers_und_electrs_gemeinsam(self):
         from types import SimpleNamespace
 
-        own = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
-        p2p = SimpleNamespace(key="bip158", reachable=True, peer_count=4)
+        own = SimpleNamespace(
+            key="own_fulcrum", reachable=True, peer_count=1, peer_hosts=["192.0.2.10"],
+        )
+        p2p = SimpleNamespace(
+            key="bip158", reachable=True, peer_count=4, peer_hosts=["a", "b", "c", "d"],
+        )
         pub = SimpleNamespace(key="public_onion", reachable=True, peer_count=7)
         with _ohne_live_p2p():
             stand = peer_status([own, p2p, pub])
-        self.assertEqual(stand["label"], "Eigener Peer verbunden")
+        self.assertEqual(stand["label"], "4 Peers · 1 electrs verbunden")
+        self.assertEqual(stand["kind"], "mixed")
+        self.assertEqual(stand["peers_n"], 4)
+        self.assertEqual(stand["electrs_n"], 1)
+
+    def test_peer_status_nur_electrs(self):
+        from types import SimpleNamespace
+
+        own = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
+        p2p = SimpleNamespace(key="bip158", reachable=False, peer_count=0)
+        with _ohne_live_p2p():
+            stand = peer_status([own, p2p])
+        self.assertEqual(stand["label"], "1 electrs verbunden")
         self.assertEqual(stand["kind"], "own")
 
     def test_peer_status_oeffentliche_electrum(self):
@@ -567,7 +583,8 @@ class TestCheckReachable(unittest.TestCase):
             )
         pruefe.assert_called()
 
-    def test_peer_aenderungen_ausfall_und_zugang(self):
+    def test_peer_aenderungen_p2p_host_rotation_stumm(self):
+        """Probe-Hosts rotieren — bei gleichem Label kein Spam."""
         alt = {
             "kind": "p2p", "count": 2, "label": "2 Peers verbunden",
             "peers": ["192.0.2.1:8333", "192.0.2.2:8333"],
@@ -576,28 +593,33 @@ class TestCheckReachable(unittest.TestCase):
             "kind": "p2p", "count": 2, "label": "2 Peers verbunden",
             "peers": ["192.0.2.2:8333", "192.0.2.3:8333"],
         }
-        zeilen = peer_aenderungen(alt, neu)
-        self.assertEqual(
-            zeilen,
-            [
-                "Peer 192.0.2.1:8333 ausgefallen.",
-                "Neuer Peer 192.0.2.3:8333.",
-            ],
-        )
+        self.assertEqual(peer_aenderungen(alt, neu), [])
 
-    def test_peer_aenderungen_sorte_wechselt(self):
+    def test_peer_aenderungen_zahl_wechselt(self):
         alt = {
-            "kind": "own", "count": 1, "label": "Eigener Peer verbunden",
-            "peers": ["192.0.2.10:50001"],
+            "kind": "mixed", "count": 3, "label": "2 Peers · 1 electrs verbunden",
+            "peers": [],
         }
         neu = {
-            "kind": "p2p", "count": 2, "label": "2 Peers verbunden",
-            "peers": ["192.0.2.1:8333", "192.0.2.2:8333"],
+            "kind": "mixed", "count": 4, "label": "3 Peers · 1 electrs verbunden",
+            "peers": [],
         }
         self.assertEqual(
             peer_aenderungen(alt, neu),
-            ["Wechsel: Eigener Peer verbunden → 2 Peers verbunden"],
+            ["Wechsel: 2 Peers · 1 electrs verbunden → 3 Peers · 1 electrs verbunden"],
         )
+
+    def test_peer_aenderungen_kein_quatsch_peers_zu_onion(self):
+        """Peers+electrs bleiben; nicht fälschlich nur onion-electrs."""
+        alt = {
+            "kind": "mixed", "count": 3, "label": "2 Peers · 1 electrs verbunden",
+            "peers": [],
+        }
+        neu = {
+            "kind": "mixed", "count": 3, "label": "2 Peers · 1 electrs verbunden",
+            "peers": [],
+        }
+        self.assertEqual(peer_aenderungen(alt, neu), [])
 
     def test_peer_aenderungen_erster_stand_bleibt_stumm(self):
         neu = {

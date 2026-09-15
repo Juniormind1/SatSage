@@ -77,6 +77,108 @@ def meta_pfad(
     return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.meta.json"
 
 
+#: Sanktions-Hop-Walk (xpub-blind) — Graph/Adressen; Liste wird neu gematcht.
+SANKTION_WALK_VERSION = 1
+
+
+def sanction_walk_pfad(
+    txid: str, vout: int, immutable_cache_dir: Path | str | None,
+) -> Path | None:
+    """Neben dem Herkunftsbaum: Hop-Walk für Sanktionscheck."""
+    ordner = verzeichnis(immutable_cache_dir)
+    if ordner is None:
+        return None
+    return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.sanction_walk.json"
+
+
+def sanction_walk_laden(
+    txid: str,
+    vout: int,
+    immutable_cache_dir: Path | str | None,
+) -> dict | None:
+    """
+    Gespeicherter xpub-blinder Hop-Walk.
+
+    Liefert ``{max_hops, complete, events}`` oder None. Events = Adress-Hops
+    (Graph); die aktuelle Sanktionsliste wird beim Lesen neu gematcht.
+    """
+    ziel = sanction_walk_pfad(txid, vout, immutable_cache_dir)
+    if ziel is None or not ziel.is_file():
+        return None
+    try:
+        daten = json.loads(ziel.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(daten, dict) or daten.get("version") != SANKTION_WALK_VERSION:
+        return None
+    if daten.get("txid") != main._normalize_txid(txid):
+        return None
+    if int(daten.get("vout", -1)) != int(vout):
+        return None
+    events = daten.get("events")
+    if not isinstance(events, list):
+        return None
+    try:
+        max_hops = int(daten.get("max_hops") or 0)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "max_hops": max_hops,
+        "complete": bool(daten.get("complete")),
+        "events": events,
+    }
+
+
+def sanction_walk_speichern(
+    txid: str,
+    vout: int,
+    *,
+    max_hops: int,
+    complete: bool,
+    events: list,
+    immutable_cache_dir: Path | str | None,
+) -> Path | None:
+    """Schreibt den Hop-Walk neben dem Herkunftsbaum."""
+    ziel = sanction_walk_pfad(txid, vout, immutable_cache_dir)
+    if ziel is None:
+        return None
+    if not main.cache_disk_write_allowed(ziel.parent):
+        return None
+    nutzlast = {
+        "version": SANKTION_WALK_VERSION,
+        "txid": main._normalize_txid(txid),
+        "vout": int(vout),
+        "erstellt_ts": int(time.time()),
+        "max_hops": int(max_hops),
+        "complete": bool(complete),
+        "events": list(events or []),
+    }
+    try:
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ziel.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(nutzlast, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(ziel)
+    except OSError:
+        return None
+    return ziel
+
+
+def origin_tree_laden(
+    txid: str,
+    vout: int,
+    immutable_cache_dir: Path | str | None,
+) -> dict | None:
+    """Roh-Herkunftsbaum (``origin_tree``), falls vorhanden."""
+    geladen = laden(txid, vout, immutable_cache_dir, adressen=None)
+    if not geladen:
+        return None
+    baum = geladen.get("baum")
+    if not isinstance(baum, dict):
+        return None
+    origin = baum.get("origin_tree")
+    return origin if isinstance(origin, dict) else None
+
+
 def _tx_class_aus_baum(baum: dict | None) -> str:
     if not isinstance(baum, dict):
         return ""
@@ -107,6 +209,7 @@ def _schreibe_meta(
         "adressen_fingerprint": adressen_fingerprint or "",
         "adressen_anzahl": int(adressen_anzahl or 0),
         "vollstaendig": bool(baum_ist_vollstaendig(baum)),
+        "steuer_ausreichend": bool(baum_ist_steuer_ausreichend(baum)),
         "mix_arten": mix_arten_im_baum(baum),
         "tx_class": _tx_class_aus_baum(baum),
     }
@@ -247,16 +350,42 @@ def baum_ist_vollstaendig(baum: dict | None) -> bool:
     existieren. „Irgendwo external_count > 0“ genügt nicht: CoinJoin-Bäume
     können hunderte grüne Blätter ohne Kinder haben und trotzdem externe
     Zähler > 0 führen.
+
+    Steuer-Horizont-Blätter (``tax_horizon``) zählen **nicht** — Herkunft
+    tracen muss sie noch bis extern/Coinbase nachziehen.
     """
     if not baum or not baum.get("found"):
         return False
     z = baum.get("summary") or {}
     if int(z.get("unresolved_inputs") or 0) > 0:
         return False
-    return _blaetter_ohne_luecke(baum.get("children") or [])
+    return _blaetter_ohne_luecke(
+        baum.get("children") or [], erlaube_tax_horizon=False,
+    )
 
 
-def _blaetter_ohne_luecke(knoten: list) -> bool:
+def baum_ist_steuer_ausreichend(baum: dict | None) -> bool:
+    """
+    Fürs Steuerjahr reicht extern/Coinbase **oder** Horizont vor
+    Stichtag/Haltefrist-Anfang. Voller Graph bis Coinbase ist optional.
+    """
+    if not baum or not baum.get("found"):
+        return False
+    z = baum.get("summary") or {}
+    if int(z.get("unresolved_inputs") or 0) > 0:
+        return False
+    if baum.get("tax_horizon") or (baum.get("root") or {}).get("tax_horizon"):
+        kinder = baum.get("children") or []
+        if not kinder:
+            return True
+    if baum_ist_vollstaendig(baum):
+        return True
+    return _blaetter_ohne_luecke(
+        baum.get("children") or [], erlaube_tax_horizon=True,
+    )
+
+
+def _blaetter_ohne_luecke(knoten: list, *, erlaube_tax_horizon: bool = False) -> bool:
     """Jedes Blatt muss external oder coinbase sein — sonst Lücke."""
     if not knoten:
         return False
@@ -272,6 +401,11 @@ def _blaetter_ohne_luecke(knoten: list) -> bool:
             continue
         typ = aktuell.get("type")
         if typ in ("external", "coinbase"):
+            hat_ende = True
+            continue
+        if erlaube_tax_horizon and (
+            typ == "tax_horizon" or aktuell.get("tax_horizon")
+        ):
             hat_ende = True
             continue
         # CoinJoin: absichtlich nur eigene Ins — Blatt mit Soft-Label und
@@ -368,11 +502,18 @@ def kopf(
                 seither = len(adressen) - int(
                     daten.get("adressen_anzahl", 0) or 0
                 )
+            voll = bool(daten.get("vollstaendig"))
+            # Alt-Meta ohne Flag: voll ⇒ auch steuerlich ok.
+            if "steuer_ausreichend" in daten:
+                steuer_ok = bool(daten.get("steuer_ausreichend"))
+            else:
+                steuer_ok = voll
             return {
                 "erstellt_ts": int(daten.get("erstellt_ts", 0) or 0),
                 "veraltet": veraltet,
                 "adressen_seither": seither,
-                "vollstaendig": bool(daten.get("vollstaendig")),
+                "vollstaendig": voll,
+                "steuer_ausreichend": steuer_ok,
                 "mix_arten": list(daten.get("mix_arten") or []),
                 "tx_class": str(daten.get("tx_class") or ""),
             }
@@ -383,6 +524,7 @@ def kopf(
     # Veraltet (neue Adressen) ändert nicht, ob jeder Sat außen endet.
     baum = geladen["baum"]
     vollstaendig = baum_ist_vollstaendig(baum)
+    steuer_ok = baum_ist_steuer_ausreichend(baum)
     mix_arten = mix_arten_im_baum(baum)
     tx_class = _tx_class_aus_baum(baum)
     # Alte Caches: Meta nachziehen, damit der nächste Listen-Lauf billig bleibt.
@@ -415,6 +557,7 @@ def kopf(
         "veraltet": geladen["veraltet"],
         "adressen_seither": geladen["adressen_seither"],
         "vollstaendig": vollstaendig,
+        "steuer_ausreichend": steuer_ok,
         "mix_arten": mix_arten,
         "tx_class": tx_class,
     }

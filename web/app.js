@@ -4084,7 +4084,7 @@ function zeichneNav() {
   }
 
   for (const name of [
-    "trace", "steuerjahr", "sanktionen",
+    "steuerjahr", "trace", "sanktionen",
     "wallets", "einstellungen", "datenquellen",
   ]) {
     const knopf = document.querySelector(`[data-ansicht="${name}"]`);
@@ -4096,7 +4096,7 @@ function zeichneNav() {
 }
 
 const ANSICHTEN = [
-  "wallet", "trace", "steuerjahr", "sanktionen",
+  "wallet", "steuerjahr", "trace", "sanktionen",
   "wallets", "einstellungen", "datenquellen",
 ];
 
@@ -5690,6 +5690,7 @@ const PUNKT_KLASSE = {
   external: "knoten-extern",
   external_unresolved: "knoten-offen",
   coinbase: "knoten-coinbase",
+  tax_horizon: "knoten-offen",
 };
 
 /**
@@ -5827,6 +5828,11 @@ function hinweisZeile(text) {
   return zeile;
 }
 
+// Sortiermodus für Herkunft-tracen (persistiert während der Sitzung)
+if (!Zustand.traceSort) {
+  Zustand.traceSort = "volume-desc";
+}
+
 function zeichneTraceListe(daten) {
   const liste = $("#trace-liste");
   liste.replaceChildren();
@@ -5837,6 +5843,40 @@ function zeichneTraceListe(daten) {
   }
   setzeText($("#trace-liste-zusatz"), teile.join(" · "));
 
+  // Sortier-Dropdown in der gleichen Zeile wie Anzahl + Legende
+  let sortWrap = $("#trace-sort-wrap");
+  if (!sortWrap) {
+    sortWrap = document.createElement("span");
+    sortWrap.id = "trace-sort-wrap";
+    sortWrap.className = "karte-zusatz";
+    const sel = document.createElement("select");
+    sel.id = "trace-sort";
+    sel.className = "knopf knopf-klein";
+    sel.innerHTML = `
+      <option value="volume-desc">Volumen (absteigend)</option>
+      <option value="age-desc">Alter (neueste zuerst)</option>
+      <option value="age-asc">Alter (älteste zuerst)</option>
+    `;
+    sel.value = Zustand.traceSort;
+    sel.addEventListener("change", () => {
+      Zustand.traceSort = sel.value;
+      // Neu rendern mit gleicher Datenbasis (client-seitig sortiert)
+      if (Zustand.traceLastData) {
+        zeichneTraceListe(Zustand.traceLastData);
+      }
+    });
+    sortWrap.appendChild(sel);
+    // In die Karte-Kopf-Zeile einfügen (nach dem Zusatz-Text)
+    const kopf = document.querySelector("#ansicht-trace .karte-kopf");
+    if (kopf) kopf.appendChild(sortWrap);
+  } else {
+    const sel = $("#trace-sort");
+    if (sel) sel.value = Zustand.traceSort;
+  }
+
+  // Daten für spätere Sortier-Wechsel merken
+  Zustand.traceLastData = daten;
+
   if (daten.total_count === 0 && !daten.hat_verlauf) {
     liste.append(hinweisZeile(
       "Keine UTXOs im Cache. Wallets zuerst scannen — in der Wallet-Ansicht " +
@@ -5845,8 +5885,35 @@ function zeichneTraceListe(daten) {
     return;
   }
 
-  for (const gruppe of daten.addresses || []) {
-    liste.append(zeichneTraceAdressGruppe(gruppe));
+  const sortMode = Zustand.traceSort || "volume-desc";
+  if (sortMode === "volume-desc") {
+    // Standard: nach Adresse gruppiert (Server-Lieferreihenfolge = Volumen absteigend)
+    for (const gruppe of daten.addresses || []) {
+      liste.append(zeichneTraceAdressGruppe(gruppe));
+    }
+  } else {
+    // Client-seitig sortiert: flache Liste nach Alter oder Volumen
+    const alle = [];
+    for (const gruppe of daten.addresses || []) {
+      for (const utxo of gruppe.utxos || []) {
+        alle.push({ ...utxo, _address: gruppe.address });
+      }
+    }
+    if (sortMode === "age-desc") {
+      alle.sort((a, b) => (b.block_height || 0) - (a.block_height || 0));
+    } else if (sortMode === "age-asc") {
+      alle.sort((a, b) => (a.block_height || 0) - (b.block_height || 0));
+    } else if (sortMode === "volume-desc") {
+      alle.sort((a, b) => (b.value_sats || 0) - (a.value_sats || 0));
+    }
+    for (const utxo of alle) {
+      // Minimale Adress-Info am Wurzel-Block anzeigen, wenn nicht gruppiert
+      const block = zeichneTraceWurzel(utxo);
+      if (utxo._address) {
+        block.dataset.address = utxo._address;
+      }
+      liste.append(block);
+    }
   }
 
   liste.append(zeichneAusgegeben(daten));
@@ -7049,6 +7116,8 @@ function zeichneKnoten(knoten, elternWallet) {
   const wer = document.createElement("span");
   if (knoten.type === "internal") {
     wer.textContent = knoten.wallet || t("trace.ownWallet");
+  } else if (knoten.type === "tax_horizon") {
+    wer.textContent = knoten.wallet || "Steuer-Horizont";
   } else if (knoten.type === "external_unresolved") {
     wer.textContent = t("trace.bundledInputs", { count: knoten.input_count });
   } else if (knoten.type === "coinbase") {
@@ -7284,33 +7353,57 @@ function zeichneSteuerjahr(daten) {
      `${k.erfuellt_count} UTXOs`, "gut"],
     ["innerhalb Haltefrist", formatSats(k.offen_sats),
      k.naechste_frist ? `nächste am ${k.naechste_frist}` : `${k.offen_count} UTXOs`,
-     "warn"],
+     "warn",
+     true], // separater „klären“ nur für gelbe UTXOs
   ];
   if (k.ungeprueft_count > 0) {
     kennzahlen.push([
       "Ohne Herkunftsanalyse", formatSats(k.ungeprueft_sats),
-      `${k.ungeprueft_count} UTXOs — Frist evtl. länger`, "warn",
+      `${k.ungeprueft_count} UTXOs — Frist evtl. länger`, "ungeprueft",
+      true, // Aktion „klären“ nur für graue UTXOs
     ]);
   }
   if (k.ohne_datum > 0) {
     kennzahlen.push([
       "Ohne Datum", String(k.ohne_datum), "unbestätigt, nicht gewertet", "",
+      false,
     ]);
   }
 
-  for (const [titel, wert, zusatz, art] of kennzahlen) {
+  for (const [titel, wert, zusatz, art, mitKlaeren] of kennzahlen) {
     const zelle = document.createElement("div");
     zelle.className = "kennzahl";
-    const t = document.createElement("span");
-    t.className = "kennzahl-titel";
-    t.textContent = titel;
+    const titelEl = document.createElement("span");
+    titelEl.className = "kennzahl-titel";
+    titelEl.textContent = titel;
     const w = document.createElement("span");
     w.className = `kennzahl-wert ${art}`.trim();
     w.textContent = wert;
     const z = document.createElement("span");
     z.className = "kennzahl-zusatz";
     z.textContent = zusatz;
-    zelle.append(t, w, z);
+    zelle.append(titelEl, w, z);
+    if (mitKlaeren) {
+      const knopf = document.createElement("button");
+      knopf.type = "button";
+      // Unterschiedliche IDs je Scorecard, damit wir gezielt nur gelbe oder nur graue tracen können
+      knopf.id = art === "warn" ? "herkunft-gelb" : "herkunft-grau";
+      knopf.className = "knopf knopf-klein kennzahl-aktion";
+      knopf.textContent = t("tax.originAll");
+      knopf.setAttribute("data-i18n", "tax.originAll");
+      if (art === "warn") {
+        // Gelber Scorecard-Knopf: nur gelbe UTXOs (innerhalb Frist / nach Stichtag)
+        knopf.title = "alle gelben UTXOs, d.h. UTXOs innerhalb der Haltefrist bzw. später als Stichtag datiert, werden noch gründlicher untersucht und können dabei evtl. grün werden.";
+        knopf.setAttribute("data-i18n-title", "");
+        knopf.addEventListener("click", () => herkunftGelbUtxos());
+      } else {
+        // Grauer Scorecard-Knopf: alle noch nie analysierten UTXOs
+        knopf.title = "Alle noch grauen, d.h. UTXOs unklarer Vergangenheit, werden analysiert bis sie grün oder gelb sind";
+        knopf.setAttribute("data-i18n-title", "");
+        knopf.addEventListener("click", () => herkunftAllerUtxos());
+      }
+      w.append(knopf);
+    }
     kasten.append(zelle);
   }
 
@@ -7323,76 +7416,210 @@ function zeichneSteuerjahr(daten) {
     (daten.stichtag_regel ? ` · Altbestand bis ${daten.stichtag_regel}` : "")
   );
 
-  const koerper = $("#steuer-koerper");
-  koerper.replaceChildren();
+  zeichneSteuerUtxoGruppen(daten);
 
-  // DocumentFragment: viele Zeilen blockieren sonst den Main-Thread länger.
-  const frag = document.createDocumentFragment();
-  for (const eintrag of daten.eintraege) {
-    const zeile = document.createElement("tr");
+  setzeText($("#steuer-vorbehalt"), (daten.hinweise || []).join(" "));
+  $("#steuer-meldung").hidden = true;
+}
 
-    const datum = document.createElement("td");
-    datum.className = "zahl";
-    datum.textContent = eintrag.datum;
-    if (eintrag.herkunft) {
-      const h = document.createElement("div");
-      h.className = "zart";
-      h.textContent = eintrag.herkunft;
-      datum.append(h);
-    }
+/** UTXO-Schlüssel in der Steuerjahr-Tabelle (Trace-Sprung, Meta). */
+function steuerUtxoSchluessel(eintrag) {
+  if (!eintrag) return "";
+  if (eintrag.key) return String(eintrag.key);
+  if (eintrag.txid == null || eintrag.vout == null) return "";
+  return `${eintrag.txid}:${eintrag.vout}`;
+}
 
-    const betrag = document.createElement("td");
-    betrag.className = "r betrag";
-    // Ohne Fiat-Lookup je Zeile — Tabelle bleibt flink.
-    betrag.textContent = formatSatsBasis(eintrag.value_sats);
+/**
+ * Eine Datenzeile der UTXO-Tabelle (Steuerjahr).
+ * *versteckt*: Startzustand in eingeklappten Gruppen.
+ */
+function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
+  const zeile = document.createElement("tr");
+  zeile.className = "steuer-utxo-zeile";
+  if (versteckt) zeile.hidden = true;
 
-    const wallet = document.createElement("td");
-    wallet.textContent = eintrag.wallet;
-
-    const adresse = document.createElement("td");
-    adresse.className = "mono zart";
-    adresse.textContent = kuerze(eintrag.address, 12, 6);
-    macheKopierbar(adresse, eintrag.address, "Adresse");
-
-    const dauer = document.createElement("td");
-    dauer.className = "r zahl";
-    dauer.textContent = `${eintrag.haltedauer_tage} T`;
-
-    const grundlage = document.createElement("td");
-    const marke = document.createElement("span");
-    marke.className = eintrag.geprueft ? "grundlage-ok" : "grundlage-offen";
-    marke.textContent = eintrag.grundlage_label;
-    marke.title = eintrag.geprueft
-      ? "Anschaffungsdatum aus der Herkunftsanalyse"
-      : "Nur das Entstehungsdatum des Outputs. Bei Wechselgeld oder " +
-        "Konsolidierung ist das zu jung — die Haltefrist kann in Wahrheit " +
-        "länger sein.";
-    grundlage.append(marke);
-    if (eintrag.herkunft) {
-      const zusatz = document.createElement("div");
-      zusatz.className = "zart";
-      zusatz.textContent = eintrag.herkunft;
-      grundlage.append(zusatz);
-    }
-
-    const status = document.createElement("td");
-    status.className = "r";
-    const hatStichtag = Boolean(daten.stichtag_regel);
-    let statusText = haltefristBeschriftung(eintrag, hatStichtag);
-    if (!eintrag.erfuellt && eintrag.frist_ende && !eintrag.neuvermoegen) {
-      statusText += ` · ab ${eintrag.frist_ende}`;
-    }
-    status.append(pille(eintrag.erfuellt ? "gut" : "warn", statusText));
-
-    const extern = mempoolVerweis("tx", eintrag.txid);
-    if (extern) status.append(extern);
-
-    zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status);
-    frag.append(zeile);
+  const schluessel = steuerUtxoSchluessel(eintrag);
+  if (schluessel) zeile.dataset.key = schluessel;
+  if (eintrag.wallet) zeile.dataset.wallet = eintrag.wallet;
+  if (eintrag.address) zeile.dataset.address = eintrag.address;
+  if (eintrag.value_sats != null) {
+    zeile.dataset.valueSats = String(eintrag.value_sats);
   }
-  koerper.append(frag);
 
-  if (daten.eintraege.length === 0) {
+  const datum = document.createElement("td");
+  datum.className = "zahl";
+  datum.textContent = eintrag.datum;
+  if (eintrag.herkunft) {
+    const h = document.createElement("div");
+    h.className = "zart";
+    h.textContent = eintrag.herkunft;
+    datum.append(h);
+  }
+
+  const betrag = document.createElement("td");
+  betrag.className = "r betrag";
+  // Ohne Fiat-Lookup je Zeile — Tabelle bleibt flink.
+  betrag.textContent = formatSatsBasis(eintrag.value_sats);
+
+  const wallet = document.createElement("td");
+  wallet.textContent = eintrag.wallet;
+
+  const adresse = document.createElement("td");
+  adresse.className = "mono zart";
+  adresse.textContent = kuerze(eintrag.address, 12, 6);
+  macheKopierbar(adresse, eintrag.address, "Adresse");
+
+  const dauer = document.createElement("td");
+  dauer.className = "r zahl";
+  dauer.textContent = `${eintrag.haltedauer_tage} T`;
+
+  const grundlage = document.createElement("td");
+  const marke = document.createElement("span");
+  // „nur Wallet-Eingang“: Analyse liegt vor, aber nur Wallet-Zeit — weiterer
+  // Trace kann noch grün machen → gelb, nicht grün.
+  const nurWallet = eintrag.grundlage === "wallet_eingang";
+  marke.className = (eintrag.geprueft && !nurWallet)
+    ? "grundlage-ok"
+    : "grundlage-offen";
+  marke.textContent = eintrag.grundlage_label;
+  marke.title = nurWallet
+    ? "Bisher nur der Wallet-Eingang bekannt. Gründlicherer Trace kann ein "
+      + "älteres Anschaffungsdatum finden und die Haltefrist erfüllen."
+    : (eintrag.geprueft
+      ? "Anschaffungsdatum aus der Herkunftsanalyse"
+      : "Nur das Entstehungsdatum des Outputs. Bei Wechselgeld oder "
+        + "Konsolidierung ist das zu jung — die Haltefrist kann in Wahrheit "
+        + "länger sein.");
+  grundlage.append(marke);
+  if (eintrag.herkunft) {
+    const zusatz = document.createElement("div");
+    zusatz.className = "zart";
+    zusatz.textContent = eintrag.herkunft;
+    grundlage.append(zusatz);
+  }
+  // Innerhalb Haltefrist + nur Wallet-Eingang → klären (wie Scorecard).
+  if (nurWallet && !eintrag.erfuellt) {
+    const klaeren = document.createElement("button");
+    klaeren.type = "button";
+    klaeren.className = "knopf knopf-klein steuer-utxo-klaeren";
+    klaeren.textContent = t("tax.originAll") !== "tax.originAll"
+      ? t("tax.originAll")
+      : "klären";
+    klaeren.title =
+      t("tax.originAllTitle") !== "tax.originAllTitle"
+        ? t("tax.originAllTitle")
+        : "Steuerrelevantes Alter gründlicher prüfen — kann gelb → grün werden.";
+    klaeren.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = steuerUtxoSchluessel(eintrag);
+      if (!key) return;
+      herkunftAllerUtxos({
+        knopf: klaeren,
+        lauf: "#herkunft-lauf",
+        text: "#herkunft-text",
+        abbruch: "#herkunft-abbruch",
+        meldung: "#steuer-meldung",
+        danach: ladeSteuerjahrMitKandidaten,
+        utxo_keys: [key],
+        steuer: true,
+      });
+    });
+    grundlage.append(klaeren);
+  }
+
+  const status = document.createElement("td");
+  status.className = "r";
+  const hatStichtag = Boolean(daten.stichtag_regel);
+  let statusText = haltefristBeschriftung(eintrag, hatStichtag);
+  if (!eintrag.erfuellt && eintrag.frist_ende && !eintrag.neuvermoegen) {
+    statusText += ` · ab ${eintrag.frist_ende}`;
+  }
+  status.append(pille(eintrag.erfuellt ? "gut" : "warn", statusText));
+
+  const extern = mempoolVerweis("tx", eintrag.txid);
+  if (extern) status.append(extern);
+
+  zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status);
+  return zeile;
+}
+
+/**
+ * Klappbare Haltefrist-Gruppe in der UTXO-Tabelle.
+ * Startet zugeklappt — lange Listen sonst erdrücken die Ansicht.
+ */
+function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten }) {
+  const tbody = document.createElement("tbody");
+  tbody.className = `steuer-gruppe${art ? ` ${art}` : ""}`;
+
+  const sats = eintraege.reduce(
+    (summe, e) => summe + (Number(e.value_sats) || 0),
+    0,
+  );
+  const anzahl = eintraege.length;
+  const anzahlText = anzahl === 1 ? "1 UTXO" : `${anzahl} UTXOs`;
+
+  const kopfZeile = document.createElement("tr");
+  kopfZeile.className = "steuer-gruppe-kopf";
+
+  const kopfZelle = document.createElement("td");
+  kopfZelle.colSpan = 7;
+
+  const kopf = document.createElement("button");
+  kopf.type = "button";
+  kopf.className = "steuer-gruppe-taste";
+
+  const klapp = document.createElement("span");
+  klapp.className = "klapp";
+  klapp.setAttribute("aria-hidden", "true");
+
+  const name = document.createElement("span");
+  name.className = "steuer-gruppe-titel";
+  name.textContent = titel;
+
+  const meta = document.createElement("span");
+  meta.className = "steuer-gruppe-meta zart";
+  meta.textContent = `${anzahlText} · ${formatSatsBasis(sats)}`;
+
+  kopf.append(klapp, name, meta);
+  kopfZelle.append(kopf);
+  kopfZeile.append(kopfZelle);
+
+  const datenZeilen = eintraege.map((eintrag) =>
+    zeichneSteuerUtxoZeile(eintrag, daten, { versteckt: true })
+  );
+
+  const setzeGruppe = (auf) => {
+    for (const z of datenZeilen) z.hidden = !auf;
+    klapp.textContent = auf ? "▾" : "▸";
+    kopf.setAttribute("aria-expanded", String(auf));
+  };
+  setzeGruppe(false);
+
+  kopf.addEventListener("click", () => {
+    const istZu = datenZeilen.every((z) => z.hidden);
+    setzeGruppe(istZu);
+  });
+
+  tbody.append(kopfZeile, ...datenZeilen);
+  return tbody;
+}
+
+/** UTXO-Tabelle: außerhalb / innerhalb Haltefrist, initial zugeklappt. */
+function zeichneSteuerUtxoGruppen(daten) {
+  const tabelle = $("#steuer-tabelle");
+  if (!tabelle) return;
+
+  // Alte Gruppen-tbodys und den leeren Default-Körper ersetzen.
+  for (const alt of tabelle.querySelectorAll("tbody")) {
+    alt.remove();
+  }
+
+  const liste = daten.eintraege || [];
+  if (liste.length === 0) {
+    const koerper = document.createElement("tbody");
+    koerper.id = "steuer-koerper";
     const zeile = document.createElement("tr");
     const zelle = document.createElement("td");
     zelle.colSpan = 7;
@@ -7403,10 +7630,28 @@ function zeichneSteuerjahr(daten) {
       "Wallet-Ansicht).";
     zeile.append(zelle);
     koerper.append(zeile);
+    tabelle.append(koerper);
+    return;
   }
 
-  setzeText($("#steuer-vorbehalt"), (daten.hinweise || []).join(" "));
-  $("#steuer-meldung").hidden = true;
+  const erfuellt = liste.filter((e) => e.erfuellt);
+  const offen = liste.filter((e) => !e.erfuellt);
+
+  // Reihenfolge wie Scorecard: außerhalb (grün), dann innerhalb (gelb).
+  if (erfuellt.length) {
+    tabelle.append(zeichneSteuerUtxoGruppe(
+      t("tax.haltefristOut"),
+      erfuellt,
+      { art: "erfuellt", daten },
+    ));
+  }
+  if (offen.length) {
+    tabelle.append(zeichneSteuerUtxoGruppe(
+      t("tax.haltefristIn"),
+      offen,
+      { art: "offen", daten },
+    ));
+  }
 }
 
 /**
@@ -7560,16 +7805,23 @@ function geisterSaldoDurchmesserPx(saldoSats, maxUtxoSats) {
 
 /**
  * Y-Achsenbeschriftung zur log1p-Skala (oben = max, unten = 0).
- * Ticks an Zehnerpotenzen, positioniert wie die Punkte (bottom %).
+ * Stil wie X-Achse: Linie + mono/blass-Ticks an Zehnerpotenzen.
  */
 function zeichneZeitstrahlYAchse(maxSats) {
   const yAchse = $("#achse-y");
   if (!yAchse) return;
   yAchse.replaceChildren();
+  yAchse.removeAttribute("aria-hidden");
+
   const max = Math.max(Number(maxSats) || 0, 0);
   const skala = document.createElement("div");
   skala.className = "achse-y-skala";
-  yAchse.append(skala);
+
+  // Senkrechte Linie — Pendant zu .achse-linie auf der X-Achse.
+  const linie = document.createElement("div");
+  linie.className = "achse-y-linie";
+  linie.setAttribute("aria-hidden", "true");
+  skala.append(linie);
 
   const logMax = Math.log1p(max);
   for (const sats of zeitstrahlYTickSats(max)) {
@@ -7582,6 +7834,7 @@ function zeichneZeitstrahlYAchse(maxSats) {
     span.style.bottom = `${y}%`;
     skala.append(span);
   }
+  yAchse.append(skala);
 }
 
 function bindeZeitstrahlInteraktion() {
@@ -7771,9 +8024,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     punkt.className = `achse-punkt ${eintrag.groesse} ${farbe}`;
     if (key) {
       punkt.classList.add("klickbar");
-      punkt.title = t("tax.bubbleToOrigin") !== "tax.bubbleToOrigin"
-        ? t("tax.bubbleToOrigin")
-        : "Herkunft dieses UTXO zeigen";
+      punkt.title =
+        "HTML-Report für dieses UTXO (Was-wäre-wenn). "
+        + "Angekreuzte Abflüsse/UTXOs unten werden mit einbezogen.";
     }
     punkt.style.left = `${sicht}%`;
     punkt.style.bottom = `${y}%`;
@@ -7796,18 +8049,14 @@ function zeichneZeitstrahl(daten, optionen = {}) {
       punkt.addEventListener("click", (ereignis) => {
         ereignis.preventDefault();
         ereignis.stopPropagation();
-        zeigeHerkunftFuer(key, {
-          meta: {
-            key,
-            wallet: eintrag.wallet || "",
-            value_sats: eintrag.value_sats ?? null,
-            address: eintrag.address || "",
-            time_label: eintrag.datum || "",
-            // geprueft = Ingress da; voller Baum kann trotzdem fehlen.
-            verfolgt: Boolean(eintrag.geprueft || eintrag.verfolgt),
-            verfolgt_vollstaendig: Boolean(eintrag.verfolgt_vollstaendig),
-          },
-        });
+        // HTML-Report: angekreuzte Zeilen, sonst nur dieses UTXO.
+        const angekreuzt = saAnkreuzAuswahl();
+        const hatAuswahl =
+          angekreuzt.txids.length > 0 || angekreuzt.utxos.length > 0;
+        const auswahl = hatAuswahl
+          ? angekreuzt
+          : { txids: [], utxos: [key] };
+        ladeSelbstanzeigeExport("html", auswahl);
       });
     }
     spur.append(punkt);
@@ -7908,6 +8157,12 @@ function zeichneAbgaenge(daten) {
     wer.textContent = abgang.wallet || "";
 
     zeile.append(marke, betrag, zeitraum, wer);
+    // Abgangs-Tx (Spend) bevorzugen; sonst der UTXO-Erzeuger.
+    const extern = mempoolVerweis(
+      "tx",
+      abgang.abgang_txid || abgang.txid,
+    );
+    if (extern) zeile.append(extern);
     liste.append(zeile);
   }
 }
@@ -8269,6 +8524,31 @@ async function scanneAlleWalletsUtxo({
   }
 }
 
+async function herkunftGelbUtxos() {
+  // Nur UTXOs der gelben Scorecard (geprueft && !erfuellt) tracen
+  const daten = await api("/tax/steuerjahr");
+  const liste = daten?.utxos || [];
+  const keys = liste
+    .filter((e) => e.geprueft && !e.erfuellt)
+    .map((e) => `${e.txid}:${e.vout}`);
+  if (!keys.length) {
+    const k = $("#steuer-meldung");
+    k.className = "hinweis hinweis-warn";
+    setzeText(k, "Keine gelben UTXOs zu klären.");
+    k.hidden = false;
+    return;
+  }
+  herkunftAllerUtxos({
+    knopf: "#herkunft-gelb",
+    lauf: "#herkunft-lauf",
+    text: "#herkunft-text",
+    abbruch: "#herkunft-abbruch",
+    meldung: "#steuer-meldung",
+    danach: ladeSteuerjahrMitKandidaten,
+    utxo_keys: keys,
+  });
+}
+
 async function herkunftAllerUtxos(ziele = {
   knopf: "#herkunft-alle",
   lauf: "#herkunft-lauf",
@@ -8276,9 +8556,14 @@ async function herkunftAllerUtxos(ziele = {
   abbruch: "#herkunft-abbruch",
   meldung: "#steuer-meldung",
   danach: ladeSteuerjahrMitKandidaten,
+  utxo_keys: null,
+  steuer: false,
 }) {
-  const knopf = $(ziele.knopf);
-  knopf.disabled = true;
+  // Selector-String oder bereits aufgelöstes Element (Zeilen-„klären“).
+  const knopf = typeof ziele.knopf === "string"
+    ? $(ziele.knopf)
+    : ziele.knopf;
+  if (knopf) knopf.disabled = true;
   $(ziele.lauf).hidden = false;
   setzeText($(ziele.text), "Wird vorbereitet…");
 
@@ -8292,7 +8577,7 @@ async function herkunftAllerUtxos(ziele = {
 
   const fertig = (meldung, art) => {
     clearInterval(timer);
-    knopf.disabled = false;
+    if (knopf) knopf.disabled = false;
     $(ziele.lauf).hidden = true;
     if (meldung) {
       const kasten = $(ziele.meldung);
@@ -8315,18 +8600,42 @@ async function herkunftAllerUtxos(ziele = {
     }
   };
 
-  logZeile("Starte Herkunft aller UTXOs…");
+  const steuerModus = Boolean(ziele.steuer)
+    || ziele.knopf === "#herkunft-alle"
+    || ziele.knopf === "#herkunft-gelb"
+    || ziele.knopf === "#herkunft-grau";
+  logZeile(
+    steuerModus
+      ? "Starte Steuerrelevantes Alter (Horizont Stichtag/Haltefrist)…"
+      : "Starte Herkunft bis extern/Coinbase…",
+  );
   try {
-    let antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+    const traceDaten = steuerModus
+      ? {
+          modus: "steuer",
+          jahr: Number($("#jahr-wahl")?.value) || new Date().getFullYear(),
+          haltefrist_jahre: Number($("#frist-wahl")?.value)
+            || Number(steuerEinstellungen().haltefrist_jahre)
+            || 1,
+          stichtag: steuerEinstellungen().stichtag_iso
+            || steuerEinstellungen().stichtag
+            || "",
+          utxo_keys: ziele.utxo_keys || null,
+        }
+      : { modus: "voll" };
+    let antwort = await api("/trace/alle", {
+      methode: "POST",
+      daten: traceDaten,
+    });
     if (antwort.nichts_zu_tun && antwort.keine_utxos) {
       // Bestand fehlt: nach Bestätigung erst alle Wallets scannen, dann Trace.
-      knopf.disabled = false;
+      if (knopf) knopf.disabled = false;
       $(ziele.lauf).hidden = true;
       if (!window.confirm(t("trace.allOriginsNeedUtxoConfirm"))) {
         fertig(t("trace.allOriginsScanAbort"), "warn");
         return;
       }
-      knopf.disabled = true;
+      if (knopf) knopf.disabled = true;
       $(ziele.lauf).hidden = false;
       abbruchWunsch = false;
       await scanneAlleWalletsUtxo({
@@ -8340,7 +8649,10 @@ async function herkunftAllerUtxos(ziele = {
       }
       setzeText($(ziele.text), t("trace.allOriginsScanDone"));
       await ladeConfig();
-      antwort = await api("/trace/alle", { methode: "POST", daten: {} });
+      antwort = await api("/trace/alle", {
+        methode: "POST",
+        daten: traceDaten,
+      });
     }
     if (antwort.nichts_zu_tun) {
       if (antwort.keine_utxos) {
@@ -8408,6 +8720,17 @@ async function herkunftAllerUtxos(ziele = {
   }, 1200);
 }
 
+/** Aktueller GUI-Farbmodus für HTML-Berichte (data-theme / UI_THEME). */
+function guiThemeFuerBericht() {
+  const attr = document.documentElement.getAttribute("data-theme");
+  if (attr === "dark" || attr === "light") return attr;
+  try {
+    const lokal = localStorage.getItem("satsage-ui-theme");
+    if (lokal === "dark" || lokal === "light") return lokal;
+  } catch (_) { /* private mode */ }
+  return Zustand.config?.ui_theme === "dark" ? "dark" : "light";
+}
+
 function ladeExport(pfad) {
   const jahr = $("#jahr-wahl").value;
   const frist = $("#frist-wahl").value;
@@ -8418,6 +8741,7 @@ function ladeExport(pfad) {
     `/api/tax/${pfad}?jahr=${encodeURIComponent(jahr)}` +
     `&frist=${encodeURIComponent(frist)}` +
     `&stichtag=${encodeURIComponent(stichtag)}` +
+    `&theme=${encodeURIComponent(guiThemeFuerBericht())}` +
     `&t=${encodeURIComponent(Token)}`;
   window.open(adresse, "_blank", "noopener");
 }
@@ -8573,6 +8897,13 @@ function zeichneSaAbflussZeile(k) {
     text.append(inp);
   }
   zeile.append(box, text);
+  zeile.append(
+    saZeilenReportAktionen({
+      art: "abfluss",
+      id: box.value,
+      txid: k.txid,
+    }),
+  );
   return zeile;
 }
 
@@ -8599,7 +8930,69 @@ function zeichneSaUtxoZeile(u) {
     (u.address ? ` · ${u.address}` : "");
   text.append(titel, meta);
   zeile.append(box, text);
+  const utxoId = box.value.startsWith("utxo:")
+    ? box.value.slice(5)
+    : box.value;
+  zeile.append(
+    saZeilenReportAktionen({
+      art: "utxo",
+      id: utxoId,
+      txid: u.txid,
+    }),
+  );
   return zeile;
+}
+
+/**
+ * Pro Zeile: HTML + CSV, dann ↗ rechts daneben.
+ * Mit Ankreuzungen → Report für alle angekreuzten;
+ * ohne Ankreuzung → nur diese Zeile (Fallback, wenn der Kopf-Knopf außer Sicht ist).
+ */
+function saZeilenReportAktionen({ art, id, txid }) {
+  const wrap = document.createElement("span");
+  wrap.className = "sa-zeile-aktionen";
+
+  const zeilenAuswahl =
+    art === "utxo"
+      ? { txids: [], utxos: [id] }
+      : { txids: [id], utxos: [] };
+
+  for (const { key, label, title } of [
+    {
+      key: "html",
+      label: "HTML",
+      title:
+        "HTML-Report: alle angekreuzten Abflüsse/UTXOs, sonst nur diese Zeile.",
+    },
+    {
+      key: "csv",
+      label: "CSV",
+      title:
+        "CSV-Export: alle angekreuzten Abflüsse/UTXOs, sonst nur diese Zeile.",
+    },
+  ]) {
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "knopf knopf-klein sa-zeile-report";
+    knopf.textContent = label;
+    knopf.title = title;
+    knopf.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const angekreuzt = saAnkreuzAuswahl();
+      const hatAuswahl =
+        angekreuzt.txids.length > 0 || angekreuzt.utxos.length > 0;
+      ladeSelbstanzeigeExport(
+        key,
+        hatAuswahl ? angekreuzt : zeilenAuswahl,
+      );
+    });
+    wrap.append(knopf);
+  }
+
+  const extern = mempoolVerweis("tx", txid);
+  if (extern) wrap.append(extern);
+  return wrap;
 }
 
 /** Wie viele UTXO-Zeilen sofort; Rest per „Weitere laden“ (UI bleibt bedienbar). */
@@ -8620,7 +9013,7 @@ function zeichneSelbstanzeigeKandidaten() {
       ? `${abfluesse.length} Kandidat(en)`
       : "keine",
     {
-      offen: abfluesse.length > 0,
+      offen: false,
       ausklappbar: abfluesse.length > 0,
       leerText: abfluesse.length
         ? ""
@@ -8759,7 +9152,8 @@ function saTxidAusFeld() {
   return tip.trim();
 }
 
-function saAuswahl() {
+/** Nur angekreuzte Zeilen (ohne Einzahl-Tx-Feld). */
+function saAnkreuzAuswahl() {
   const txids = [];
   const utxos = [];
   for (const el of document.querySelectorAll(
@@ -8773,16 +9167,26 @@ function saAuswahl() {
       txids.push(wert);
     }
   }
+  return { txids, utxos };
+}
+
+function saAuswahl() {
+  const { txids, utxos } = saAnkreuzAuswahl();
   // TxID im Filterfeld zählt mit, wenn nichts angekreuzt ist (Einzahl-Tx).
-  const tip = saTxidAusFeld();
-  if (!txids.length && !utxos.length && tip) {
-    txids.push(tip);
+  if (!txids.length && !utxos.length) {
+    const tip = saTxidAusFeld();
+    if (tip) txids.push(tip);
   }
   return { txids, utxos };
 }
 
-function ladeSelbstanzeigeExport(art) {
-  const { txids, utxos } = saAuswahl();
+function ladeSelbstanzeigeExport(art, auswahl = null) {
+  const { txids, utxos } = auswahl && typeof auswahl === "object"
+    ? {
+        txids: Array.isArray(auswahl.txids) ? auswahl.txids : [],
+        utxos: Array.isArray(auswahl.utxos) ? auswahl.utxos : [],
+      }
+    : saAuswahl();
   if (!txids.length && !utxos.length) {
     const kasten = $("#steuer-meldung");
     if (kasten) {
@@ -8802,7 +9206,8 @@ function ladeSelbstanzeigeExport(art) {
     `jahr=${encodeURIComponent(jahr)}` +
     `&frist=${encodeURIComponent(frist)}` +
     `&txids=${encodeURIComponent(txids.join(","))}` +
-    `&utxos=${encodeURIComponent(utxos.join(","))}`;
+    `&utxos=${encodeURIComponent(utxos.join(","))}` +
+    `&theme=${encodeURIComponent(guiThemeFuerBericht())}`;
 
   if (art === "csv") {
     const adresse =
@@ -8825,7 +9230,7 @@ function ladeSelbstanzeigeExport(art) {
     try {
       fenster.document.write(
         "<!DOCTYPE html><title>Report…</title><body style='font-family:system-ui;"
-        + "padding:2rem'><p>Selbstanzeige-Report wird erzeugt…</p></body>",
+        + "padding:2rem'><p>Bericht Sat-Geschichte wird erzeugt…</p></body>",
       );
       fenster.document.close();
     } catch (_) { /* cross-origin edge */ }
@@ -10400,7 +10805,7 @@ function meldungListen(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Sanktionscheck (externe Vorgeschichte)
+// Sanktionscheck (xpub-blind, Hop-Vorgeschichte)
 // ---------------------------------------------------------------------------
 
 function fuellSankWallets() {
@@ -10631,8 +11036,20 @@ function mempoolVerweis(art, wert) {
     : t("sources.mempool.targetTx");
   // Host in zweiter Zeile — native title zeigt Zeilenumbruch.
   link.title = `${kopf}\n${zielArt}\n${instanz.host}`;
-  // Der Klick darf nicht die darunterliegende Zeile aufklappen.
-  link.addEventListener("click", (e) => e.stopPropagation());
+  // stopPropagation: Zeile/Baum nicht aufklappen.
+  // preventDefault auf dem Bubbling reicht nicht gegen <label>-Toggle —
+  // deshalb defaultAction am Link belassen (Navigation), Label-Aktivierung
+  // per stopImmediatePropagation + explizitem Fenster-Open vermeiden wir nicht;
+  // Link liegt oft in label: Klick darf die Checkbox nicht umschalten.
+  link.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // In <label>: ohne preventDefault würde der Klick die Checkbox togglen.
+    // Navigation bleibt über target=_blank + eigenem open, falls nötig.
+    if (e.currentTarget.closest("label")) {
+      e.preventDefault();
+      window.open(link.href, "_blank", "noopener,noreferrer");
+    }
+  });
   return link;
 }
 
@@ -10675,6 +11092,69 @@ function zeichneSteuerEinstellungen() {
   if (anschaffung) {
     anschaffung.value =
       steuer.anschaffung === "aelteste" ? "aelteste" : "juengste";
+  }
+  zeichnePersonEinstellungen();
+}
+
+function personEinstellungen() {
+  const p = Zustand.config?.person || {};
+  return {
+    name: p.name || "Donald Duck",
+    steuernummer: p.steuernummer || "0/8/15",
+    anschrift: p.anschrift || "Entenhausen",
+    email: p.email || "",
+    finanzamt: p.finanzamt || "",
+    finanzamt_anschrift: p.finanzamt_anschrift || "",
+    sachbearbeiter: p.sachbearbeiter || "",
+  };
+}
+
+function zeichnePersonEinstellungen() {
+  const p = personEinstellungen();
+  const name = $("#person-name");
+  const sn = $("#person-steuernummer");
+  const adr = $("#person-anschrift");
+  const mail = $("#person-email");
+  const fa = $("#person-finanzamt");
+  const faAdr = $("#person-finanzamt-anschrift");
+  const sb = $("#person-sachbearbeiter");
+  if (name) name.value = p.name;
+  if (sn) sn.value = p.steuernummer;
+  if (adr) adr.value = p.anschrift;
+  if (mail) mail.value = p.email;
+  if (fa) fa.value = p.finanzamt;
+  if (faAdr) faAdr.value = p.finanzamt_anschrift;
+  if (sb) sb.value = p.sachbearbeiter;
+}
+
+async function speicherePersonEinstellungen() {
+  const knopf = $("#person-uebernehmen");
+  if (knopf) knopf.disabled = true;
+  try {
+    const ergebnis = await api("/config/person", {
+      methode: "PUT",
+      daten: {
+        name: $("#person-name")?.value || "",
+        steuernummer: $("#person-steuernummer")?.value || "",
+        anschrift: $("#person-anschrift")?.value || "",
+        email: $("#person-email")?.value || "",
+        finanzamt: $("#person-finanzamt")?.value || "",
+        finanzamt_anschrift: $("#person-finanzamt-anschrift")?.value || "",
+        sachbearbeiter: $("#person-sachbearbeiter")?.value || "",
+      },
+    });
+    if (Zustand.config) Zustand.config.person = ergebnis.person;
+    zeichnePersonEinstellungen();
+    meldung(
+      t("settings.personSaved") !== "settings.personSaved"
+        ? t("settings.personSaved")
+        : "Persönliche Daten gespeichert.",
+      "gut",
+    );
+  } catch (fehler) {
+    meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
+  } finally {
+    if (knopf) knopf.disabled = false;
   }
 }
 
@@ -10799,6 +11279,48 @@ async function speichereSteuerEinstellungen() {
   }
 }
 
+/**
+ * Grobe Client-Schätzung: öffentliche Clearnet-Domain vs. LAN/Loopback/Onion.
+ * Server entscheidet final (mempool_info / outbound_policy).
+ */
+function mempoolUrlWirktOeffentlich(roh) {
+  let text = String(roh || "").trim();
+  if (!text) return false;
+  try {
+    if (!/^https?:\/\//i.test(text)) text = `https://${text}`;
+    const u = new URL(text);
+    const host = String(u.hostname || "").toLowerCase();
+    if (!host) return false;
+    if (host === "localhost" || host.endsWith(".localhost")) return false;
+    if (host.endsWith(".onion")) return false;
+    if (
+      host.endsWith(".local")
+      || host.endsWith(".lan")
+      || host.endsWith(".internal")
+      || host.endsWith(".home")
+      || host.endsWith(".home.arpa")
+      || host.endsWith(".test")
+      || host.endsWith(".example")
+      || host.endsWith(".invalid")
+    ) {
+      return false;
+    }
+    if (
+      /^127\./.test(host)
+      || /^10\./.test(host)
+      || /^192\.168\./.test(host)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) {
+      return false;
+    }
+    // Hostname ohne Punkt → typisch LAN-Kurzname.
+    if (!host.includes(".")) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function speichereMempool() {
   const managed = sourcesFullyManaged();
   const knopf = document.getElementById(managed ? "mempool-speichern-managed" : "mempool-speichern");
@@ -10806,9 +11328,30 @@ async function speichereMempool() {
   knopf.disabled = true;
   try {
     const feld = document.getElementById(managed ? "mempool-url-managed" : "mempool-url");
-    await api("/config/mempool", { methode: "PUT", daten: { url: feld ? feld.value : "" } });
+    const url = feld ? String(feld.value || "").trim() : "";
+    let publicOptIn = false;
+    if (url && mempoolUrlWirktOeffentlich(url)) {
+      const ok = window.confirm(
+        t("sources.mempool.publicConfirm") !== "sources.mempool.publicConfirm"
+          ? t("sources.mempool.publicConfirm")
+          : "Du trägst einen öffentlich erreichbaren Block-Explorer ein.\n\n"
+            + "Jeder Klick auf ↗ verrät diesem Server, welche Adresse oder "
+            + "Transaktion dich interessiert.\n\nTrotzdem speichern und nutzen?",
+      );
+      if (!ok) {
+        // Abbruch: nicht speichern, Eingabe leeren.
+        if (feld) feld.value = "";
+        return;
+      }
+      publicOptIn = true;
+    }
+    await api("/config/mempool", {
+      methode: "PUT",
+      daten: { url, public_opt_in: publicOptIn },
+    });
     await ladeConfig();
     zeichneMempoolStatus();
+    zeichneKopfStatus(Zustand.config?.quellen || []);
     Zustand.traceListe = null;
     verwerfeGezeichneteVerweise();
     meldung(t("sources.explorerSaved"), "gut");
@@ -11664,23 +12207,36 @@ function peerStatusAusQuellen(quellen, apiStand) {
   const nach = {};
   for (const q of quellen || []) nach[q.key] = q;
   const own = nach.own_fulcrum;
-  if (own && own.reachable) {
+  const core = nach.own_core;
+  const p2p = nach.bip158;
+  const peersN = p2p?.peer_count || 0;
+  const electrsN = own && own.reachable ? 1 : 0;
+
+  if (peersN > 0 || electrsN > 0) {
+    const hosts = [];
+    if (peersN > 0) hosts.push(...(p2p.peer_hosts || []));
+    if (electrsN > 0) hosts.push(...(own.peer_hosts || []));
+    let kind = "p2p";
+    if (peersN > 0 && electrsN > 0) kind = "mixed";
+    else if (electrsN > 0) kind = "own";
+    return {
+      n: peersN + electrsN,
+      kind,
+      label: verbindungLabel({ peersN, electrsN }),
+      peers: hosts,
+      peers_n: peersN,
+      electrs_n: electrsN,
+      gut: true,
+    };
+  }
+  if (core && core.reachable) {
     return {
       n: 1,
       kind: "own",
       label: "Eigener Peer verbunden",
-      peers: own.peer_hosts || [],
-      gut: true,
-    };
-  }
-  const p2p = nach.bip158;
-  if (p2p && (p2p.peer_count || 0) > 0) {
-    const n = p2p.peer_count;
-    return {
-      n,
-      kind: "p2p",
-      label: n === 1 ? "1 Peer verbunden" : `${n} Peers verbunden`,
-      peers: p2p.peer_hosts || [],
+      peers: core.peer_hosts || [],
+      peers_n: 0,
+      electrs_n: 0,
       gut: true,
     };
   }
@@ -11699,10 +12255,26 @@ function peerStatusAusQuellen(quellen, apiStand) {
       peers: hosts,
       onion_electrs: onionN,
       clearnet_electrs: clearN,
+      peers_n: 0,
+      electrs_n: 0,
       gut: true,
     };
   }
-  return { n: 0, kind: "none", label: "0 Peers verbunden", peers: [], gut: false };
+  return {
+    n: 0, kind: "none", label: "0 Peers verbunden", peers: [],
+    peers_n: 0, electrs_n: 0, gut: false,
+  };
+}
+
+/** Peers (BIP-158) + eigenes electrs nebeneinander. */
+function verbindungLabel({ peersN = 0, electrsN = 0, onionN = 0, clearN = 0 } = {}) {
+  const teile = [];
+  if (peersN > 0) teile.push(peersN === 1 ? "1 Peer" : `${peersN} Peers`);
+  if (electrsN > 0) teile.push(electrsN === 1 ? "1 electrs" : `${electrsN} electrs`);
+  if (onionN > 0) teile.push(`${onionN} onion-electrs`);
+  if (clearN > 0) teile.push(`${clearN} clearnet-electrs`);
+  if (!teile.length) return "0 Peers verbunden";
+  return `${teile.join(" · ")} verbunden`;
 }
 
 /** Öffentliche Electrum: onion-electrs / clearnet-electrs — nicht „Peers“. */
@@ -11716,13 +12288,14 @@ function oeffentlicheElectrumLabel(onionN, clearN) {
 
 function peerAenderungen(alt, neu) {
   if (!alt) return [];
-  if (alt.kind !== neu.kind) {
-    if (alt.n || neu.n) return [`Wechsel: ${alt.label} → ${neu.label}`];
+  const altLabel = alt.label || "0 Peers verbunden";
+  const neuLabel = neu.label || "0 Peers verbunden";
+  if (altLabel !== neuLabel) {
+    if (alt.n || neu.n) return [`Wechsel: ${altLabel} → ${neuLabel}`];
     return [];
   }
-  // P2P-/Public-Probe-Peers wechseln oft — kein Ausgefallen/Neu-Spam pro Host.
-  if (alt.kind === "p2p" || alt.kind === "public") {
-    if (alt.n !== neu.n) return [`Wechsel: ${alt.label} → ${neu.label}`];
+  // P2P/public/mixed: Host-Probe rotiert — kein Spam.
+  if (alt.kind === "p2p" || alt.kind === "public" || alt.kind === "mixed") {
     return [];
   }
   const vorher = new Set(alt.peers || []);
@@ -11806,15 +12379,11 @@ function nimmLiveP2pPeers(hosts, opts = {}) {
   });
   Zustand.config.sources = sources;
   if (uniq.length && setzeStatus) {
-    Zustand.peerStatus = {
-      n: uniq.length,
-      kind: "p2p",
-      label: uniq.length === 1 ? "1 Peer verbunden" : `${uniq.length} Peers verbunden`,
-      peers: uniq,
-      gut: true,
-    };
-    Zustand.peers = uniq.length;
-    Zustand.peerLabel = Zustand.peerStatus.label;
+    // Volle Formel: Peers + electrs, nicht nur P2P (sonst „→ onion-electrs“-Quatsch).
+    const stand = peerStatusAusQuellen(Zustand.config.sources);
+    Zustand.peerStatus = stand;
+    Zustand.peers = stand.n;
+    Zustand.peerLabel = stand.label;
     Zustand.peersGeprueft = true;
   }
   zeichneKopfStatus(sources);
@@ -12263,6 +12832,50 @@ function zeichneKopfStatus(quellen) {
     });
   }
 
+  // Block-Explorer: immer sichtbar (Konfiguration, kein Live-Peer).
+  // privat=grün, öffentlich=rot, unkonfiguriert=grau ohne Zusatztext.
+  const mp = Zustand.config?.mempool || {};
+  const blockExplorerOeffentlich = Boolean(
+    mp.configured && !(mp.local || mp.stufe === "lokal"),
+  );
+  {
+    let beLabel;
+    let beStufe;
+    let beTitle;
+    if (!mp.configured) {
+      beLabel = t("header.blockExplorer") !== "header.blockExplorer"
+        ? t("header.blockExplorer")
+        : "Block-Explorer";
+      beStufe = "neutral";
+      beTitle = t("header.blockExplorerNoneTitle") !== "header.blockExplorerNoneTitle"
+        ? t("header.blockExplorerNoneTitle")
+        : "Kein Block-Explorer eingetragen — keine ↗-Verweise nach außen.";
+    } else if (mp.local || mp.stufe === "lokal") {
+      beLabel = t("header.blockExplorerPrivate") !== "header.blockExplorerPrivate"
+        ? t("header.blockExplorerPrivate")
+        : "Block-Explorer privat";
+      beStufe = "gut";
+      beTitle = t("header.blockExplorerPrivateTitle") !== "header.blockExplorerPrivateTitle"
+        ? t("header.blockExplorerPrivateTitle")
+        : `Eigener/LAN-Explorer${mp.host ? `: ${mp.host}` : ""} — Aufrufe bleiben bei dir.`;
+    } else {
+      beLabel = t("header.blockExplorerPublic") !== "header.blockExplorerPublic"
+        ? t("header.blockExplorerPublic")
+        : "Block-Explorer öffentlich";
+      beStufe = "krit";
+      beTitle = t("header.blockExplorerPublicTitle") !== "header.blockExplorerPublicTitle"
+        ? t("header.blockExplorerPublicTitle")
+        : `Öffentlicher Explorer${mp.host ? `: ${mp.host}` : ""} — jeder ↗-Klick verrät Interesse.`;
+    }
+    eintraege.push({
+      key: "mempool",
+      lern: "privatsphaere",
+      label: beLabel,
+      stufe: beStufe,
+      title: beTitle,
+    });
+  }
+
   const privateVerbunden =
     coreVerbunden || electrsVerbunden || (p2pVerbunden && p2pAnzahl > 0);
   const privateAufbau =
@@ -12272,7 +12885,9 @@ function zeichneKopfStatus(quellen) {
 
   let privText;
   let privStufe;
-  if (oeffentlichVerbunden) {
+  // Öffentlicher Electrum ODER öffentlicher Block-Explorer → keine Privatsphäre.
+  // Explorer zählt schon bei Konfiguration (↗-Klicks), nicht erst bei Electrs-Link.
+  if (oeffentlichVerbunden || blockExplorerOeffentlich) {
     privText = t("privacy.pillNone");
     privStufe = "krit";
   } else if (privateVerbunden && p2pVerbunden && p2pAnzahl === 1
@@ -13677,6 +14292,8 @@ async function start() {
     ladeSteuerjahr();
   });
   $("#steuer-uebernehmen").addEventListener("click", speichereSteuerEinstellungen);
+  const personBtn = $("#person-uebernehmen");
+  if (personBtn) personBtn.addEventListener("click", speicherePersonEinstellungen);
   const lernPlebs = $("#lernhinweise-plebs");
   if (lernPlebs) {
     lernPlebs.addEventListener("change", () => {
@@ -13762,7 +14379,7 @@ async function start() {
       window.setTimeout(schliesseSlashListe, 0);
     });
   }
-  $("#herkunft-alle").addEventListener("click", () => herkunftAllerUtxos());
+  // Steuerjahr „klären“ sitzt in der Scorecard (wird in zeichneSteuerjahr gebunden).
   $("#trace-herkunft-alle").addEventListener("click", () => herkunftAllerUtxos({
     knopf: "#trace-herkunft-alle",
     lauf: "#trace-herkunft-lauf",

@@ -91,7 +91,7 @@ class TestVertragMitDerApi(unittest.TestCase):
             "Verbunden. Compact Filter 192.0.2.2:8333",
             "Verbunden. 2 Compact-Filter-Peers.",
             "Verbunden. 5 öffentliche Electrum-Peers.",
-            "Wechsel: Eigener Peer verbunden → 2 Peers verbunden",
+            "Wechsel: 1 electrs verbunden → 2 Peers · 1 electrs verbunden",
             "Neuer Peer 192.0.2.3:8333.",
             "Peer 192.0.2.1:8333 ausgefallen.",
             "Verbindung fehlgeschlagen: timeout",
@@ -174,6 +174,8 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("Nur ${neu.n}", self.js)
         self.assertIn("pruefePeersLeise", self.js)
         self.assertIn("Eigener Peer verbunden", self.js)
+        self.assertIn("verbindungLabel", self.js)
+        self.assertIn("1 electrs", self.js)
         self.assertIn("oeffentlicheElectrumLabel", self.js)
         self.assertIn("onion-electrs", self.js)
         self.assertIn("clearnet-electrs", self.js)
@@ -476,7 +478,14 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn(">Bestand<", self.html)
         self.assertIn(">Herkunft<", self.html)
         self.assertIn("starteVerlaufsscan", self.js)
-        self.assertIn("Verlauf aller Wallets", self.html)
+        self.assertIn('id="verlauf-erheben"', self.html)
+        self.assertIn("tax.historyAll", self.html)
+        # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in app.js
+        self.assertIn("tax.originAll", self.js)
+        self.assertIn("herkunft-alle", self.js)
+        import json
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertEqual(de.get("tax.originAll"), "klären")
 
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""

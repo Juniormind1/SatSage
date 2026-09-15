@@ -286,17 +286,20 @@
       <div id="wallet-nav" class="nav-liste"></div>
       <div class="nav-titel" data-i18n="nav.sectionAnalyze">Auswerten</div>
       <div class="nav-liste">
-        <button type="button" class="nav-eintrag" data-ansicht="trace"
-                data-i18n="nav.trace" data-i18n-title="nav.traceTitle">
-          Herkunft tracen
-        </button>
         <button type="button" class="nav-eintrag" data-ansicht="steuerjahr"
                 data-lern="haltefrist"
-                data-i18n="nav.tax" data-i18n-title="nav.taxTitle">
+                data-i18n="nav.tax" data-i18n-title="nav.taxTitle"
+                title="Verfolgt bis vor Stichtag oder Haltefrist">
           Steuerjahr
         </button>
+        <button type="button" class="nav-eintrag" data-ansicht="trace"
+                data-i18n="nav.trace" data-i18n-title="nav.traceTitle"
+                title="Verfolgt bis zum ersten externen Zufluss oder Mining">
+          Herkunft tracen
+        </button>
         <button type="button" class="nav-eintrag" data-ansicht="sanktionen"
-                data-i18n="nav.sanctions" data-i18n-title="nav.sanctionsTitle">
+                data-i18n="nav.sanctions" data-i18n-title="nav.sanctionsTitle"
+                title="Verfolgt xpub-blind so viele Hops wie gewünscht">
           Sanktionscheck
         </button>
       </div>
@@ -400,7 +403,9 @@
             <h1 data-i18n="trace.heading">Herkunft tracen</h1>
             <p class="meta" data-i18n="trace.meta">
               Verfolgt rückwärts, woher die Sats eines Outputs kamen — bis zu
-              einer fremden Adresse oder einer Coinbase.
+              einer fremden Adresse oder einer Coinbase. Das kann bei der
+              Erstellung von mit dem Geldwäschegesetz begründeten Forderungen
+              nach Herkunftsnachweisen helfen.
             </p>
           </div>
         </div>
@@ -414,7 +419,7 @@
             Gezielt tracen
           </button>
           <button type="button" id="trace-herkunft-alle" data-i18n="trace.allOrigins" data-i18n-title="trace.allOriginsTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen — dieselbe Analyse wie im Steuerjahr. Einmal ermittelt, bleibt sie gespeichert." class="knopf knopf-primaer">
-            Herkunft aller UTXOs
+            Herkünfte UTXOs
           </button>
         </div>
 
@@ -448,8 +453,10 @@
           <div>
             <h1 data-i18n="sanctions.heading">Sanktionscheck</h1>
             <p class="meta" data-i18n="sanctions.meta">
-              Prüft die externe Vorgeschichte deiner UTXOs gegen die
-              Sanktions- und Blacklists — bis zur gewählten Hop-Tiefe.
+              Prüft die Vorgeschichte deiner UTXOs xpub-blind (Drittperspektive,
+              ohne XPUB-Wissen) gegen die Sanktions- und Blacklists — bis zur
+              gewählten Hop-Tiefe. Nutzt Herkunfts- und Tx-Cache mit; Folge-Läufe
+              oft ohne erneuten Chain-Walk. Grün = keine gelistete Adresse in diesem Fenster.
             </p>
           </div>
         </div>
@@ -465,7 +472,7 @@
               <select id="sank-wallet"></select>
             </label>
             <label class="feld-inline">
-              <span data-i18n="sanctions.hops">Externe Hops</span>
+              <span data-i18n="sanctions.hops">Hops</span>
               <input type="number" id="sank-hops" min="1" max="20" value="3"
                      data-default-max="20" style="width:5em">
             </label>
@@ -522,13 +529,11 @@
             </p>
             <p class="meta" id="steuer-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
             <p class="meta" data-i18n-html="tax.metaHtml">
-              <strong>Verlaufsscan</strong> (Wallet) oder
-              <strong>Verlauf aller Wallets</strong> holt <em>welche</em>
+              <strong>Historien</strong> holt <em>welche</em>
               Beträge es je gab, auch längst ausgegebene — erst damit werden
               Veräußerungen sichtbar.
-              <strong>Herkunft aller UTXOs</strong> klärt, <em>woher</em> die
-              Sats kamen, und liefert das Anschaffungsdatum. Für eine
-              vollständige Aufstellung braucht es beides.
+              Fehlt die Herkunft (Scorecard grau), klärt <strong>klären</strong>
+              dort die Anschaffung bis Stichtag/Haltefrist.
             </p>
           </div>
           <div class="bereich-aktionen">
@@ -540,11 +545,8 @@
               <span data-i18n="tax.holding">Haltefrist</span>
               <select id="frist-wahl" data-lern="haltefrist" data-i18n-title="tax.holdingTitle" title="Jahre bis zur Steuerfreiheit. Vorgabe 1 Jahr (Deutschland). Mehrjährige Fristen im Dropdown."></select>
             </label>
-            <button type="button" id="verlauf-erheben" data-i18n="tax.historyAll" data-i18n-title="tax.historyAllTitle" title="Holt die Historie aller Wallets — auch ausgegebene Beträge. Einzelnes Wallet: Verlaufsscan in der Wallet-Ansicht. Derselbe Cache. Braucht einen Electrum-Server." class="knopf">
-              Verlauf aller Wallets
-            </button>
-            <button type="button" id="herkunft-alle" data-i18n="tax.originAll" data-i18n-title="tax.originAllTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen. Liefert das On-Chain-Anschaffungsdatum dieser Wallet — ohne diese Analyse gilt nur das Entstehungsdatum des Outputs, das bei Wechselgeld und Eigenüberträgen zu jung ist. Börsenkauf und Haltedauer außerhalb der Chain stehen hier nicht." class="knopf">
-              Herkunft aller UTXOs
+            <button type="button" id="verlauf-erheben" data-i18n="tax.historyAll" data-i18n-title="tax.historyAllTitle" title="Holt die Historien aller Wallets — auch ausgegebene Beträge. Einzelnes Wallet: Historie in der Wallet-Ansicht. Derselbe Cache. Braucht einen Electrum-Server." class="knopf">
+              Historien
             </button>
             <button type="button" id="export-csv" data-i18n="tax.csv" data-i18n-title="tax.csvTitle" title="Aufstellung als CSV für Tabellenkalkulation und Steuerberatung — mit Semikolon und Dezimalkomma, damit Excel sie ohne Nacharbeit liest." class="knopf">CSV</button>
             <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf knopf-primaer">
@@ -552,6 +554,8 @@
             </button>
           </div>
         </div>
+
+        <div id="steuer-kennzahlen" class="kennzahlen"></div>
 
         <div id="zeitstrahl-karte" class="karte" hidden>
           <div class="karte-kopf">
@@ -565,7 +569,7 @@
             </span>
           </div>
           <div class="achse">
-            <div id="achse-y" class="achse-y" aria-hidden="true"></div>
+            <div id="achse-y" class="achse-y" aria-label="Betrag"></div>
             <div class="achse-haupt">
               <div id="achse-viewport" class="achse-viewport" title="">
                 <div id="achse-spur" class="achse-spur">
@@ -579,17 +583,16 @@
 
         <div class="karte" id="selbstanzeige-karte">
           <div class="karte-kopf">
-            <span class="karte-titel" data-i18n="tax.selfReport">Selbstanzeige-Report</span>
+            <span class="karte-titel" data-i18n="tax.selfReport">Bericht Sat-Geschichte</span>
             <span class="karte-zusatz" data-i18n="tax.selfReportZusatz">
               FiFo · Abflüsse + Was-wäre-wenn · Vorbereitung
             </span>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="tax.selfReportHint">
-            Für Nachmeldung / Selbstanzeige: Abflüsse und Was-wäre-wenn-UTXOs
-            werden beim Öffnen aus dem Cache geladen — markieren
-            (z. B. Börsen-Einzahlung) und Report erzeugen. Personendaten sind
-            vorerst Platzhalter (Donald Duck / 0/8/15 / Entenhausen). Keine
-            Steuerberatung.
+            Abflüsse und Was-wäre-wenn-UTXOs werden beim Öffnen aus dem Cache
+            geladen — markieren (z. B. Börsen-Einzahlung) und Report erzeugen.
+            Personendaten sind vorerst Platzhalter (Donald Duck / 0/8/15 /
+            Entenhausen). Keine Steuerberatung.
           </p>
           <div class="karte-fuss steuer-einstellungen">
             <label class="feld" style="flex: 1 1 22rem;">
@@ -629,8 +632,6 @@
             Abbrechen
           </button>
         </div>
-
-        <div id="steuer-kennzahlen" class="kennzahlen"></div>
 
         <div id="abgaenge-karte" class="karte" hidden>
           <div class="karte-kopf">
@@ -898,7 +899,7 @@
                    data-i18n-title="settings.start.syncTitle"
                    title="Wenn an: Tip-Nachzug beim Start und Dauer-Watch über eigenen Electrs (Adress-Subscribe). Kein Fullscan. Ohne eigenen Electrs nur Start-Nachzug.">
               <input type="checkbox" id="start-sync">
-              <span data-i18n="settings.start.sync">Wallets immer aktuell halten?</span>
+              <span data-i18n="settings.start.sync">Wallets immer aktuell halten</span>
             </label>
             <label class="check-zeile check-zeile-unter"
                    id="start-sync-known-only-zeile"
@@ -978,6 +979,89 @@
             Andere europäische Länder haben keinen vergleichbaren Cutoff.
           </p>
           <p class="meta steuer-einstellungen-hinweis" id="frist-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.person.title">Persönliche Daten</span>
+            <span class="karte-zusatz" data-i18n="settings.person.zusatz">
+              Für HTML-/CSV-Berichte (Sat-Geschichte)
+            </span>
+          </div>
+          <div class="karte-fuss person-einstellungen">
+            <div class="person-spalten">
+              <div class="person-spalte person-spalte-user">
+                <div class="person-spalte-titel" data-i18n="settings.person.userCol">
+                  Person
+                </div>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.name">Name</span>
+                  <input type="text" id="person-name" class="feld-breit"
+                         autocomplete="name" spellcheck="false"
+                         data-i18n-placeholder="settings.person.namePlaceholder"
+                         placeholder="Donald Duck">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.taxId">Steuernummer</span>
+                  <input type="text" id="person-steuernummer" class="feld-breit mono"
+                         autocomplete="off" spellcheck="false"
+                         data-i18n-placeholder="settings.person.taxIdPlaceholder"
+                         placeholder="0/8/15">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.address">Anschrift</span>
+                  <input type="text" id="person-anschrift" class="feld-breit"
+                         autocomplete="street-address" spellcheck="false"
+                         data-i18n-placeholder="settings.person.addressPlaceholder"
+                         placeholder="Entenhausen">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.email">E-Mail</span>
+                  <input type="email" id="person-email" class="feld-breit"
+                         autocomplete="email" spellcheck="false"
+                         data-i18n-placeholder="settings.person.emailPlaceholder"
+                         placeholder="optional">
+                </label>
+              </div>
+              <div class="person-spalte person-spalte-fa">
+                <div class="person-spalte-titel" data-i18n="settings.person.taxOfficeCol">
+                  Finanzamt
+                </div>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.taxOffice">Zuständiges Finanzamt</span>
+                  <input type="text" id="person-finanzamt" class="feld-breit"
+                         autocomplete="organization" spellcheck="false"
+                         data-i18n-placeholder="settings.person.taxOfficePlaceholder"
+                         placeholder="optional">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.taxOfficeAddress">Adresse Finanzamt</span>
+                  <input type="text" id="person-finanzamt-anschrift" class="feld-breit"
+                         autocomplete="off" spellcheck="false"
+                         data-i18n-placeholder="settings.person.taxOfficeAddressPlaceholder"
+                         placeholder="optional">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.caseWorker">Sachbearbeiter</span>
+                  <input type="text" id="person-sachbearbeiter" class="feld-breit"
+                         autocomplete="off" spellcheck="false"
+                         data-i18n-placeholder="settings.person.caseWorkerPlaceholder"
+                         placeholder="optional">
+                </label>
+              </div>
+            </div>
+            <button type="button" id="person-uebernehmen" class="knopf"
+                    data-i18n="common.save" data-i18n-title="settings.person.applyTitle"
+                    title="Schreibt die persönlichen und Finanzamt-Angaben in die .env. Berichte nutzen diese Felder.">
+              Übernehmen
+            </button>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.person.hint">
+            Vorbelegt mit Donald Duck / 0/8/15 / Entenhausen — nur Platzhalter,
+            keine echten Daten. Finanzamt und Sachbearbeiter optional.
+            Erscheint im Kopf der HTML-/CSV-Berichte. Bleibt lokal in der .env;
+            wird nicht hochgeladen.
+          </p>
         </div>
 
         <div class="karte">

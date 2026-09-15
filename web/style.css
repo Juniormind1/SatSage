@@ -654,7 +654,15 @@ button, input, select { font: inherit; color: inherit; }
   border: 1px solid var(--linie);
 }
 .chat-warte { font-style: italic; color: var(--blass); }
-.llm-einstellungen { align-items: flex-end; }
+.llm-einstellungen { align-items: flex-end; width: 100%; box-sizing: border-box; }
+/* Opt-in/Checks und Hinweise immer eigene Zeile, volle Breite. */
+.llm-einstellungen > .check-zeile,
+.llm-einstellungen > .steuer-einstellungen-hinweis {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
 /* flex nur am Label — am Input würde flex:1 in der Spalte die Box aufblasen. */
 .llm-einstellungen > .feld.feld-breit { min-width: 16rem; flex: 1 1 16rem; }
 .llm-einstellungen input.feld-breit,
@@ -902,8 +910,61 @@ select { font-family: var(--mono); font-size: 11px; }
   box-sizing: border-box;
   resize: none;
 }
-.steuer-einstellungen { align-items: flex-end; }
+.steuer-einstellungen { align-items: flex-end; width: 100%; box-sizing: border-box; }
 .steuer-einstellungen .feld { min-width: 11rem; }
+.steuer-einstellungen > .steuer-einstellungen-hinweis {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: none;
+}
+
+/* Persönliche Daten: zwei Spalten (Person | Finanzamt). */
+.karte-fuss.person-einstellungen {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.person-spalten {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  width: 100%;
+  min-width: 0;
+}
+.person-spalte {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.person-spalte-titel {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--blass);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--linie-zart);
+}
+.person-spalte .feld {
+  width: 100%;
+  min-width: 0;
+}
+.person-spalte .feld-breit,
+.person-spalte input.feld-breit {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.person-einstellungen > .knopf {
+  align-self: flex-start;
+}
+@media (max-width: 720px) {
+  .person-spalten {
+    grid-template-columns: 1fr;
+  }
+}
 .sa-liste { padding: 4px 13px 12px; display: flex; flex-direction: column; gap: 8px; }
 .sa-abschnitt {
   border: 1px solid var(--linie);
@@ -962,6 +1023,24 @@ select { font-family: var(--mono); font-size: 11px; }
 .sa-zeile.eigen { opacity: .65; }
 .sa-zeile .sa-meta { color: var(--blass); font-size: 11px; margin-top: 2px; }
 .sa-zeile .mono { word-break: break-all; }
+/* Text wächst; Aktionen (HTML/CSV/↗) rechtsbündig. */
+.sa-zeile > span:not(.sa-zeile-aktionen) { flex: 1; min-width: 0; }
+.sa-zeile-aktionen {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+}
+.sa-zeile-aktionen .sa-zeile-report {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.sa-zeile-aktionen .extern-link {
+  margin-left: 0;
+}
 .sa-werkzeug {
   display: flex; flex-wrap: wrap; gap: 8px;
   padding: 4px 4px 10px;
@@ -978,13 +1057,20 @@ select { font-family: var(--mono); font-size: 11px; }
   color: var(--text); font-size: 14px;
 }
 .check-zeile input { margin: 0; width: 1rem; height: 1rem; flex-shrink: 0; }
-.start-sync-fuss {
+/* Spezifischer als .karte-fuss { align-items: center } (steht weiter unten). */
+.karte-fuss.start-sync-fuss {
   flex-direction: column;
   align-items: flex-start;
+  justify-content: flex-start;
   gap: 6px;
 }
+.karte-fuss.start-sync-fuss > .check-zeile {
+  align-self: flex-start;
+  justify-content: flex-start;
+  width: auto;
+  margin-right: auto;
+}
 .check-zeile-unter {
-  margin-left: 1.6rem;
   font-size: 13px;
   color: var(--gedaempft);
 }
@@ -993,8 +1079,15 @@ select { font-family: var(--mono); font-size: 11px; }
   opacity: 0.55;
   cursor: default;
 }
+/* Volle Kartenbreite — nicht in schmaler Spalte umbrechen (früher max-width: 78ch). */
 .steuer-einstellungen-hinweis {
-  margin: 0; padding: 8px 13px 12px; max-width: 78ch; line-height: 1.55;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 8px 13px 12px;
+  line-height: 1.55;
 }
 
 .pille {
@@ -1110,6 +1203,22 @@ select { font-family: var(--mono); font-size: 11px; }
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
   padding: 11px 13px; background: var(--flaeche-2);
   border-top: 1px solid var(--linie);
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Erläuterung unter den Feldern: volle Kartenbreite, nie Flex-Spalte. */
+.karte > .steuer-einstellungen-hinweis,
+.karte-fuss > .steuer-einstellungen-hinweis {
+  display: block;
+  float: none;
+  clear: both;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  /* Im Flex-Fuß: eigene Zeile über die volle Breite. */
+  flex: 0 0 auto;
+  flex-basis: 100%;
+  align-self: stretch;
 }
 
 .wallet-zeile {
@@ -1614,7 +1723,54 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .kennzahl-wert.gut { color: var(--gut); }
 .kennzahl-wert.warn { color: var(--warn); }
+/* Wie Zeitstrahl-Dots ohne Herkunft (grau, nicht gelb). */
+.kennzahl-wert.ungeprueft { color: var(--achse-ungeprueft); }
 .kennzahl-zusatz { font-size: 11px; color: var(--gedaempft); }
+.kennzahl-aktion {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* UTXO-Tabelle: Haltefrist-Gruppen (initial zugeklappt) */
+.steuer-gruppe-kopf td {
+  padding: 0;
+  border-bottom: 1px solid var(--linie);
+  background: var(--flaeche-2);
+}
+.steuer-gruppe-taste {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.steuer-gruppe-taste:hover { background: var(--flaeche-3); }
+.steuer-gruppe-taste .klapp { flex: 0 0 auto; }
+.steuer-gruppe-titel {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .02em;
+  text-transform: capitalize;
+  font-weight: 600;
+}
+.steuer-gruppe.erfuellt .steuer-gruppe-titel { color: var(--gut); }
+.steuer-gruppe.offen .steuer-gruppe-titel { color: var(--warn); }
+.steuer-gruppe-meta {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.tabelle tbody.steuer-gruppe:last-child tr:last-child:not([hidden]) td {
+  border-bottom: 0;
+}
 
 /* ---------- Cache-Dashboard (Belegung) ---------- */
 
@@ -1731,6 +1887,14 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .grundlage-ok    { color: var(--gut); }
 .grundlage-offen { color: var(--warn); }
+/* „klären“ neben Wallet-Eingang in der UTXO-Tabelle */
+.steuer-utxo-klaeren {
+  margin-left: 8px;
+  vertical-align: middle;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+}
 
 /* ---------- Zeitstrahl ---------- */
 
@@ -1749,30 +1913,49 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 
 .achse {
-  display: flex; align-items: stretch; gap: 8px;
+  display: flex; align-items: stretch; gap: 0;
   /* Wenig Rand: UTXO-Beträge nur noch im Tooltip, nicht als Labels. */
   padding: 1.2rem 22px 14px;
 }
+/* Y-Achse: gleiche Typo/Farbe wie .achse-ticks, senkrechte Linie wie .achse-linie. */
 .achse-y {
   display: flex;
   flex-direction: column;
-  font-family: var(--mono); font-size: 10px; color: var(--gedaempft);
-  text-align: right; min-width: 6.2rem;
-  padding-bottom: 18px; /* wie .achse-ticks — Skala = Spurhöhe */
+  position: relative;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--blass);
+  text-align: right;
+  min-width: 5.5rem;
+  padding-bottom: 18px; /* wie .achse-ticks-Zeile — Skala = Spurhöhe */
+  padding-right: 6px; /* Abstand Labels → Linie, analog X-Ticks padding-top */
+  box-sizing: border-box;
 }
 .achse-y-skala {
   position: relative;
   flex: 0 0 220px; /* = .achse-spur height */
   width: 100%;
 }
+/* Senkrechte Achsenlinie: trifft X-Linie in der Ecke (gap: 0). */
+.achse-y-linie {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 220px;
+  background: var(--linie);
+  pointer-events: none;
+}
 .achse-y-tick {
   position: absolute;
-  right: 0;
+  right: 6px;
   transform: translateY(50%); /* Mitte auf dem Tick wie Punkt-bottom */
   white-space: nowrap;
   line-height: 1;
-  font-weight: 600;
-  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--blass);
 }
 .achse-haupt { flex: 1; min-width: 0; }
 
@@ -1797,11 +1980,11 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .achse-geister {
   position: absolute;
   bottom: 0;
-  /* left = Frist-% ; Anker = Ringmitte (nicht Gruppenmitte inkl. Text) */
-  transform: translate(-50%, 50%);
+  /* right edge on Fristgrenze, lower edge on X-axis */
+  transform: translate(-100%, 0);
   z-index: 2;
   pointer-events: none;
-  line-height: 0; /* kein extra Box-Offset durch Inline-Layout */
+  line-height: 0;
 }
 .achse-geister .achse-punkt {
   position: relative;
@@ -1937,6 +2120,11 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .abgang-zeile:last-child { border-bottom: 0; }
 .abgang-zeile .mono { min-width: 9rem; }
+.abgang-zeile .extern-link {
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+}
 
 /* XPUB und Multisig: gleiche Feldbreite, rechts dieselbe Spalte. */
 .wallet-einfuegen {

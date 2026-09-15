@@ -269,16 +269,40 @@ def oeffentliche_electrum_label(onion_n: int, clear_n: int) -> str:
     return f"{' · '.join(teile)} verbunden"
 
 
+def verbindung_label(
+    *,
+    peers_n: int = 0,
+    electrs_n: int = 0,
+    onion_n: int = 0,
+    clear_n: int = 0,
+) -> str:
+    """
+    Kopf/Log: Peers (BIP-158) und eigenes electrs nebeneinander — nicht
+    „entweder Peers oder onion-electrs“.
+    """
+    teile: list[str] = []
+    if peers_n > 0:
+        teile.append("1 Peer" if peers_n == 1 else f"{peers_n} Peers")
+    if electrs_n > 0:
+        teile.append("1 electrs" if electrs_n == 1 else f"{electrs_n} electrs")
+    if onion_n > 0:
+        teile.append(f"{onion_n} onion-electrs")
+    if clear_n > 0:
+        teile.append(f"{clear_n} clearnet-electrs")
+    if not teile:
+        return "0 Peers verbunden"
+    return f"{' · '.join(teile)} verbunden"
+
+
 def peer_status(
     quellen: list[SourceInfo],
     values: dict[str, str] | None = None,
 ) -> dict:
     """
-    Kopfzeilen-Pille: welche Sorte und wie viele.
+    Kopfzeilen-Pille: Peers (Compact Filter) und eigenes electrs **gemeinsam**.
 
-    Eigener Electrum-Server sticht Compact Filter, die wieder öffentliche
-    Server. Die Zahl ist nur die der gewählten Sorte, nicht die Summe.
-    Öffentliche Electrum: onion-electrs / clearnet-electrs (nicht „Peers“).
+    Öffentliche Electrum nur, wenn weder Peers noch eigenes electrs da sind
+    (onion-electrs / clearnet-electrs). Core allein bleibt „Eigener Peer“.
     """
     quellen = anreichere_live_p2p(quellen)
     nach = {q.key: q for q in quellen}
@@ -293,15 +317,34 @@ def peer_status(
         "count": 0,
         "label": "0 Peers verbunden",
         "peers": [],
+        "peers_n": 0,
+        "electrs_n": 0,
     }
     own = nach.get("own_fulcrum")
     core = nach.get("own_core")
-    if own and own.reachable:
+    p2p = nach.get("bip158")
+    peers_n = int(getattr(p2p, "peer_count", 0) or 0) if p2p else 0
+    electrs_n = 1 if (own and own.reachable) else 0
+
+    if peers_n > 0 or electrs_n > 0:
+        hosts: list[str] = []
+        if peers_n > 0:
+            hosts.extend(_hosts(p2p))
+        if electrs_n > 0:
+            hosts.extend(_hosts(own))
+        if peers_n > 0 and electrs_n > 0:
+            kind = "mixed"
+        elif electrs_n > 0:
+            kind = "own"
+        else:
+            kind = "p2p"
         stand = {
-            "kind": "own",
-            "count": 1,
-            "label": "Eigener Peer verbunden",
-            "peers": _hosts(own),
+            "kind": kind,
+            "count": peers_n + electrs_n,
+            "label": verbindung_label(peers_n=peers_n, electrs_n=electrs_n),
+            "peers": hosts,
+            "peers_n": peers_n,
+            "electrs_n": electrs_n,
         }
     elif core and core.reachable:
         stand = {
@@ -309,35 +352,29 @@ def peer_status(
             "count": 1,
             "label": "Eigener Peer verbunden",
             "peers": _hosts(core),
+            "peers_n": 0,
+            "electrs_n": 0,
         }
     else:
-        p2p = nach.get("bip158")
-        if p2p and p2p.peer_count > 0:
-            n = p2p.peer_count
+        onion_q = nach.get("public_onion")
+        clear_q = nach.get("clearnet")
+        onion_n = int(getattr(onion_q, "peer_count", 0) or 0) if onion_q else 0
+        clear_n = int(getattr(clear_q, "peer_count", 0) or 0) if clear_q else 0
+        public = onion_n + clear_n
+        if public > 0:
+            public_hosts: list[str] = []
+            public_hosts.extend(_hosts(onion_q))
+            public_hosts.extend(_hosts(clear_q))
             stand = {
-                "kind": "p2p",
-                "count": n,
-                "label": "1 Peer verbunden" if n == 1 else f"{n} Peers verbunden",
-                "peers": _hosts(p2p),
+                "kind": "public",
+                "count": public,
+                "label": oeffentliche_electrum_label(onion_n, clear_n),
+                "peers": public_hosts,
+                "onion_electrs": onion_n,
+                "clearnet_electrs": clear_n,
+                "peers_n": 0,
+                "electrs_n": 0,
             }
-        else:
-            onion_q = nach.get("public_onion")
-            clear_q = nach.get("clearnet")
-            onion_n = int(getattr(onion_q, "peer_count", 0) or 0) if onion_q else 0
-            clear_n = int(getattr(clear_q, "peer_count", 0) or 0) if clear_q else 0
-            public = onion_n + clear_n
-            if public > 0:
-                public_hosts: list[str] = []
-                public_hosts.extend(_hosts(onion_q))
-                public_hosts.extend(_hosts(clear_q))
-                stand = {
-                    "kind": "public",
-                    "count": public,
-                    "label": oeffentliche_electrum_label(onion_n, clear_n),
-                    "peers": public_hosts,
-                    "onion_electrs": onion_n,
-                    "clearnet_electrs": clear_n,
-                }
     stand["braucht_oeffentliche"] = (
         stand["count"] == 0
         and not oeffentliche_electrum_erlaubt(values)
@@ -364,6 +401,8 @@ def peer_aenderungen(vorher: dict | None, nachher: dict) -> list[str]:
     Log-Zeilen, wenn Peers ausfallen, dazukommen oder die Sorte wechselt.
 
     Beim ersten Stand (vorher None) keine Zeilen — das ist der Start, kein Wechsel.
+    Label-Vergleich: „2 Peers · 1 electrs“ vs. nur Zahlenwechsel — kein
+    Quatsch-Wechsel Peers → onion-electrs, solange das Label gleich bleibt.
     """
     if not vorher:
         return []
@@ -371,9 +410,20 @@ def peer_aenderungen(vorher: dict | None, nachher: dict) -> list[str]:
     neu_art = nachher.get("kind") or "none"
     alt_label = vorher.get("label") or "0 Peers verbunden"
     neu_label = nachher.get("label") or "0 Peers verbunden"
-    if alt_art != neu_art:
+    if alt_label == neu_label and alt_art == neu_art:
+        # Gleiches Label: bei own/mixed/p2p/public nur Host-Diff bei own
+        pass
+    elif alt_label != neu_label:
         if (vorher.get("count") or 0) or (nachher.get("count") or 0):
             return [f"Wechsel: {alt_label} → {neu_label}"]
+        return []
+    if alt_art != neu_art:
+        if (vorher.get("count") or 0) or (nachher.get("count") or 0):
+            if alt_label != neu_label:
+                return [f"Wechsel: {alt_label} → {neu_label}"]
+        return []
+    # P2P/public/mixed: kein Host-Spam (Probe-Hosts rotieren).
+    if alt_art in ("p2p", "public", "mixed"):
         return []
     alt = set(vorher.get("peers") or [])
     neu = set(nachher.get("peers") or [])

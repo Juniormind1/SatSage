@@ -25,7 +25,7 @@ from core import trace_cache
 
 #: Typen, die ein Knoten annehmen kann.
 KNOTEN_TYPEN = ("utxo", "internal", "external", "external_unresolved",
-                "coinbase", "cycle", "error", "unknown")
+                "coinbase", "cycle", "error", "unknown", "tax_horizon")
 
 
 def parse_ziel(eingabe: str) -> tuple[str, int] | None:
@@ -311,7 +311,19 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
                 if knoten["tx_class_label"]:
                     knoten["note"] = knoten["tx_class_label"]
             quellen = unterbaum.get("sources") or []
-            if quellen:
+            if unterbaum.get("tax_horizon") and not quellen:
+                # Steuer-Frühabbruch: Blatt bis Stichtag/Haltefrist-Anfang.
+                knoten["type"] = "tax_horizon"
+                knoten["tax_horizon"] = True
+                knoten["children"] = []
+                knoten["note"] = (
+                    "Für Steuerjahr ausreichend (vor Stichtag bzw. "
+                    "Haltefrist-Anfang). Herkunft tracen führt bis "
+                    "extern/Coinbase weiter."
+                )
+                if unterbaum.get("time_ts"):
+                    knoten["block_time"] = int(unterbaum["time_ts"])
+            elif quellen:
                 knoten["children"] = _quellen_zu_knoten(
                     unterbaum, wallet, pfad, tiefe + 1
                 )
@@ -326,6 +338,8 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
                 marker = unterbaum.get("type") or "unknown"
                 if marker == "utxo":
                     marker = "unknown"
+                if unterbaum.get("tax_horizon"):
+                    marker = "tax_horizon"
                 knoten["children"] = [{
                     "id": f"{pfad}.0",
                     "type": marker,
@@ -334,21 +348,34 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
                     "amount_sats": 0,
                     "from_utxo": unterbaum.get("utxo") or quelle.get("from_utxo", ""),
                     "wallet": None,
-                    "time_label": "",
+                    "time_label": unterbaum.get("time") or "",
                     "block_height": None,
+                    "block_time": unterbaum.get("time_ts"),
+                    "tax_horizon": bool(unterbaum.get("tax_horizon")),
                     "children": [],
                     "expandable": False,
                     "note": (
                         unterbaum.get("error")
                         or (
-                            "Zyklus oder Maximaltiefe — Herkunft hier abgebrochen."
-                            if marker == "cycle"
-                            else "Herkunft dieses Zweigs konnte nicht ermittelt werden."
+                            "Für Steuerjahr ausreichend (vor Stichtag/Haltefrist)."
+                            if marker == "tax_horizon"
+                            else (
+                                "Zyklus oder Maximaltiefe — Herkunft hier abgebrochen."
+                                if marker == "cycle"
+                                else "Herkunft dieses Zweigs konnte nicht ermittelt werden."
+                            )
                         )
                     ),
                     "label": None,
                 }]
             knoten["expandable"] = bool(knoten["children"])
+    elif typ == "tax_horizon":
+        knoten["tax_horizon"] = True
+        knoten["note"] = (
+            "Für Steuerjahr ausreichend (vor Stichtag bzw. "
+            "Haltefrist-Anfang)."
+        )
+        _setze_externe_zeit(knoten, quelle)
     elif typ == "external":
         knoten["note"] = "Externe Zweige werden nicht weiterverfolgt."
         # Genau hier endet die Verfolgung — und genau hier ist die Frage
@@ -479,6 +506,8 @@ def trace_utxo(
     progress=None,
     resolve_bundled: bool = False,
     merke_tx_oriented_done: bool = False,
+    stop_before_ts: int | None = None,
+    resume_origin: dict | None = None,
 ) -> dict:
     """
     Führt die Herkunftsanalyse durch und liefert sie als Baum aus Wörterbüchern.
@@ -496,6 +525,12 @@ def trace_utxo(
 
     *merke_tx_oriented_done*: nach erfolgreicher Folgeanalyse am Baum
     speichern — UI zeigt dann Hinweis statt Knopf.
+
+    *stop_before_ts*: Steuer-Horizont — Trace endet an Hops vor Stichtag/
+    Haltefrist-Anfang (siehe ``analyze.trace_utxo_origin``).
+
+    *resume_origin*: gespeicherter Analyse-Rohbaum; bei vollem Lauf werden
+    nur ``tax_horizon``-Blätter nachgezogen (kein Komplett-Neulauf).
     """
     fortschritt = _FortschrittsAdapter(progress) if progress else None
     txid_n = main._normalize_txid(txid)
@@ -511,18 +546,42 @@ def trace_utxo(
         except Exception:
             pass
 
-    roh = analyze.trace_utxo_origin(
-        get_tx,
-        txid_n,
-        vout_n,
-        own_addresses,
-        wallet=wallet,
-        cache_dir=cache_dir,
-        fetch_address_utxos=fetch_address_utxos,
-        cache_source=cache_source,
-        progress=fortschritt,
-        alle_eigenen_inputs=bool(resolve_bundled),
-    )
+    if (
+        resume_origin
+        and isinstance(resume_origin, dict)
+        and stop_before_ts is None
+        and analyze._hat_tax_horizon(resume_origin)
+    ):
+        if progress:
+            try:
+                progress("Setze Steuer-Horizont bis extern/Coinbase fort…")
+            except Exception:
+                pass
+        roh = analyze.vertiefe_tax_horizon(
+            resume_origin,
+            get_tx,
+            own_addresses,
+            wallet=wallet,
+            cache_dir=cache_dir,
+            fetch_address_utxos=fetch_address_utxos,
+            cache_source=cache_source,
+            progress=fortschritt,
+            alle_eigenen_inputs=bool(resolve_bundled),
+        )
+    else:
+        roh = analyze.trace_utxo_origin(
+            get_tx,
+            txid_n,
+            vout_n,
+            own_addresses,
+            wallet=wallet,
+            cache_dir=cache_dir,
+            fetch_address_utxos=fetch_address_utxos,
+            cache_source=cache_source,
+            progress=fortschritt,
+            alle_eigenen_inputs=bool(resolve_bundled),
+            stop_before_ts=stop_before_ts,
+        )
 
     if roh is None:
         return {
@@ -548,6 +607,29 @@ def trace_utxo(
         }
 
     kinder = _quellen_zu_knoten(roh, wallet, "0", 1)
+    # Wurzel selbst ist Steuer-Horizont (Output alt genug) → künstliches Blatt.
+    if roh.get("tax_horizon") and not kinder:
+        kinder = [{
+            "id": "0.0",
+            "type": "tax_horizon",
+            "depth": 1,
+            "address": (roh.get("addresses") or [""])[0] if roh.get("addresses") else "",
+            "amount_sats": int(roh.get("amount_sats", 0) or 0),
+            "from_utxo": f"{roh.get('txid', '')}:{int(roh.get('vout', 0) or 0)}",
+            "wallet": None,
+            "time_label": roh.get("time") or "",
+            "block_height": None,
+            "block_time": roh.get("time_ts"),
+            "tax_horizon": True,
+            "children": [],
+            "expandable": False,
+            "note": (
+                "Für Steuerjahr ausreichend (vor Stichtag bzw. "
+                "Haltefrist-Anfang). Herkunft tracen führt bis "
+                "extern/Coinbase weiter."
+            ),
+            "label": None,
+        }]
     _anreichere_externe_zeiten(kinder, immutable_cache_dir)
     adressen = roh.get("addresses") or []
     wurzel_adresse = adressen[0] if adressen else ""
@@ -574,16 +656,21 @@ def trace_utxo(
         "children": kinder,
         "tx_class": roh.get("tx_class"),
         "coinjoin_noise_skipped": bool(roh.get("coinjoin_noise_skipped")),
+        "tax_horizon": bool(roh.get("tax_horizon")),
     }
     voll = trace_cache.baum_ist_vollstaendig(baum_probe)
+    steuer_ok = trace_cache.baum_ist_steuer_ausreichend(baum_probe)
     juengste = None
-    if voll:
+    if voll or steuer_ok:
         extern = analyze._youngest_external_ingress(roh)
         wallet_eingang = analyze._youngest_wallet_ingress(roh, wallet)
+        horizon = analyze._youngest_tax_horizon(roh)
         if extern and extern.get("time_ts"):
             juengste = int(extern["time_ts"])
         elif wallet_eingang and wallet_eingang.get("time_ts"):
             juengste = int(wallet_eingang["time_ts"])
+        elif horizon and horizon.get("time_ts"):
+            juengste = int(horizon["time_ts"])
 
     root = {
         "id": "0",
@@ -595,6 +682,8 @@ def trace_utxo(
         "time_label": roh.get("time", ""),
         "type": roh.get("type", "utxo"),
     }
+    if roh.get("tax_horizon"):
+        root["tax_horizon"] = True
     if roh.get("tx_class"):
         root["tx_class"] = roh.get("tx_class")
         root["tx_class_label"] = roh.get("tx_class_label") or ""
@@ -608,10 +697,13 @@ def trace_utxo(
         "children": kinder,
         "summary": summary,
         "verfolgt_vollstaendig": voll,
+        "steuer_ausreichend": steuer_ok,
         "juengste_sats_ts": juengste,
         "max_trace_depth": analyze.MAX_TRACE_DEPTH,
         "tx_class": roh.get("tx_class"),
         "tx_class_label": roh.get("tx_class_label") or "",
+        # Rohbaum für späteren Voll-Lauf (nur Horizont nachziehen).
+        "origin_tree": roh,
     }
     ergebnis.update(folge_meta(ergebnis))
     # Done nur bei echtem Blatt-Ende (external/coinbase). Sonst bleibt

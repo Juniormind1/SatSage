@@ -1286,10 +1286,19 @@ ein leeres Ergebnis kein Freibrief.</p>
 
 <h3>Sanktionscheck der Vorgeschichte</h3>
 
-<p>Der Bereich <strong>Sanktionscheck</strong> prüft die externe Vorgeschichte
-der UTXOs — dasselbe wie Menüpunkt 6.1 im CLI. Gewählt werden Wallet (oder
-alle) und die Zahl <strong>externer Hops</strong> (1–20, Standard 3). Treffer
-nennen Hop, Adresse, Betrag und die Herkunfts-UTXO.</p>
+<p>Der Bereich <strong>Sanktionscheck</strong> prüft die Vorgeschichte der
+UTXOs <strong>xpub-blind</strong> (Perspektive eines Dritten ohne XPUB-Wissen)
+— dasselbe wie Menüpunkt 6.1 im CLI. Jeder Prevout-Hop zählt; eigene
+Wallet-Adressen werden nicht übersprungen. Gewählt werden Wallet (oder alle)
+und die <strong>Hop-Tiefe</strong> (1–20, Standard 3). Grünes Licht = keine
+gelistete Adresse in diesem Fenster. Treffer nennen Hop, Adresse, Betrag und
+die Herkunfts-UTXO.</p>
+
+<p>Der Lauf nutzt vorhandene <strong>Herkunftsbäume</strong> und den
+<strong>Tx-Immutable-Cache</strong>; der Hop-Graph wird als
+<code>*.sanction_walk.json</code> neben dem Trace-Cache abgelegt. Ein erneuter
+Check (oder Listen-Update) matcht oft nur noch die Liste, ohne die Chain
+noch einmal abzulaufen.</p>
 
 <p>Ein Lauf über mehrere Hops dauert Minuten und kostet hunderte bis tausende
 Tx-Abrufe. Er wird deshalb <strong>nicht</strong> bei jedem Seitenaufruf

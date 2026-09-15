@@ -265,10 +265,70 @@ def abschnitt_hop_ketten(
 """
 
 
+def normalize_bericht_theme(roh: str | None) -> str:
+    """``light`` oder ``dark`` — wie GUI-``UI_THEME`` / ``data-theme``."""
+    text = str(roh or "").strip().lower()
+    if text in ("dark", "dunkel"):
+        return "dark"
+    return "light"
+
+
+#: Screen Dark/Light folgt ``html[data-theme]`` (GUI-Farbmodus beim Erzeugen),
+#: nicht dem OS. Print immer hell (kein schwarzes Papier).
+#: In alle SatSage-HTML-Berichte einbetten; Farben nur über diese Variablen.
+BERICHT_THEME_CSS = """
+  :root, html[data-theme="light"] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #444444;
+    --muted2: #555555;
+    --line: #333333;
+    --line-soft: #dddddd;
+    --line-mid: #cccccc;
+    --panel: #f4f4f0;
+    --panel2: #f8f8f4;
+  }
+  /* Explizit GUI-Dark — nicht prefers-color-scheme (OS kann abweichen). */
+  html[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12141a;
+    --fg: #e8eaed;
+    --muted: #a8adb6;
+    --muted2: #9aa0a8;
+    --line: #c5c9d0;
+    --line-soft: #3a3f4a;
+    --line-mid: #4a5060;
+    --panel: #1c2028;
+    --panel2: #181c24;
+  }
+  /* Druck/PDF: immer hell — spart Tinte und bleibt lesbar. */
+  @media print {
+    :root, html[data-theme="light"], html[data-theme="dark"] {
+      color-scheme: light only;
+      --bg: #ffffff !important;
+      --fg: #1a1a1a !important;
+      --muted: #444444 !important;
+      --muted2: #555555 !important;
+      --line: #333333 !important;
+      --line-soft: #dddddd !important;
+      --line-mid: #cccccc !important;
+      --panel: #f4f4f0 !important;
+      --panel2: #f8f8f4 !important;
+    }
+    body {
+      background: #ffffff !important;
+      color: #1a1a1a !important;
+      print-color-adjust: economy;
+      -webkit-print-color-adjust: economy;
+    }
+  }
+"""
+
 #: CSS-Fragment für nested Hop-Listen (in Bericht einbetten).
 HOP_KETTE_CSS = """
   .herkunft-nachweis { margin-top: 28pt; padding-top: 12pt;
-                       border-top: 1.5px solid #333; }
+                       border-top: 1.5px solid var(--line, #333); }
   .herkunft-utxo { margin: 16pt 0 20pt; }
   .herkunft-utxo h3 { font-size: 10pt; margin: 0 0 4pt; word-break: break-all; }
   ol.hop-wurzel, ol.hop-kinder {
@@ -277,6 +337,6 @@ HOP_KETTE_CSS = """
   }
   li.hop { margin: 2pt 0; }
   li.hop-external > .hop-zeile { font-weight: bold; }
-  li.hop-external_unresolved > .hop-zeile { color: #666; }
+  li.hop-external_unresolved > .hop-zeile { color: var(--muted, #666); }
   .hop-zeile { word-break: break-all; }
 """

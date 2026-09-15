@@ -9,6 +9,20 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Einstellungen · Persönliche Daten:** Name, Steuernummer, Anschrift, E-Mail sowie zuständiges Finanzamt, FA-Adresse und Sachbearbeiter für HTML-/CSV-Berichte; Name/FA-Defaults Donald Duck / 0/8/15 / Entenhausen. Lokal in `.env` (`STEUER_PERSON_*`).
+- **Block-Explorer · öffentlich mit Warnung:** Öffentliche Adressen (z. B. mempool.space) speichern nur nach Bestätigung im Warndialog; Abbruch leert das Feld und speichert nicht. Kopf-Pille **Block-Explorer** (privat grün / öffentlich rot / unkonfiguriert grau ohne Zusatztext).
+- **Steuerjahr · klären:** Knopf „Herkünfte UTXOs“ → **klären** (EN: **trace**), nur in der Scorecard „Ohne Herkunftsanalyse“ (sichtbar solange graue UTXOs fehlen).
+- **Steuerjahr · Bericht Sat-Geschichte:** Karte und Export heißen nicht mehr „Selbstanzeige“ (Titel, HTML/CSV, Dateiname).
+- **Log · Verbindung:** Kopf/Wechsel zeigt **Peers und electrs gemeinsam** (z. B. `3 Peers · 1 electrs verbunden`) — kein Quatsch-Wechsel „Peers → onion-electrs“, solange beides parallel da ist.
+- **Nav · Auswerten:** Steuerjahr steht über Herkunft tracen.
+- **Herkunft tracen · Erklärtext:** Hinweis auf Herkunftsnachweise im Kontext Geldwäschegesetz (EN: AML laws).
+- **Sanktionscheck · xpub-blind:** Vorgeschichte wie ein Dritter ohne XPUB — jeder Prevout-Hop zählt (keine Skip-Logik für eigene Adressen). Hop 0 = UTXO-Adresse selbst. Grün = keine gelistete Adresse im Hop-Fenster.
+- **Sanktionscheck · Cache:** Nutzt Herkunfts-``origin_tree`` und speichert den Hop-Graphen als ``*.sanction_walk.json`` neben dem Trace-Cache; Live-``get_tx`` füllt den Tx-Immutable-Cache. Zweiter Lauf / Listen-Update matcht nur noch die Liste, ohne Chain erneut abzulaufen.
+- **Herkunft · zwei Tiefen:** Steuerjahr **Herkünfte UTXOs** bricht am Stichtag/Haltefrist-Anfang ab (oder extern/Coinbase) — schneller für Anschaffungsdatum. Herkunft tracen geht immer bis extern/Coinbase und setzt Steuer-Teilbäume fort (`origin_tree`), statt alles neu zu rechnen.
+- **Herkunft · Knopftext:** „Herkunft aller UTXOs“ / „UTXO Herkunft“ → **Herkünfte UTXOs** (Steuerjahr und Herkunft tracen; Funktion unverändert).
+- **Steuerjahr · UTXO-Liste klappbar:** „außerhalb Haltefrist“ und „innerhalb Haltefrist“ sind Gruppen, initial zugeklappt (Anzahl + Summe in der Kopfzeile) — die lange Tabelle erdrückt die Ansicht nicht mehr.
+- **Steuerjahr · Kennzahlen oben:** Scorecard (Bestand gesamt, außerhalb/innerhalb Haltefrist, ohne Herkunftsanalyse) steht über dem Zeitstrahl-Dotplot.
+- **Steuerjahr · Knopftexte:** „Verlauf aller Wallets“ → **Historien** (Plural, alle Wallet-Historien; Wallet-Ansicht bleibt „Historie“).
 - **Git · commit-Skripte:** `scripts/commit.sh` / `commit.bat` stagen im Default untracked **Textdateien** mit; untracked **Binärdateien** nur nach Nachfrage (`-A` = alles, `-u` = nur getrackt). Verhindert Commits ohne neue Skripte/Quellen.
 - **Steuerjahr · Punkte ohne Herkunft grau:** UTXOs **innerhalb** der Haltefrist ohne Herkunftsanalyse sind im Zeitstrahl grau statt gelb (dunkelgrau Light-Mode, hellgrau Dark-Mode). **Außerhalb** der Frist bzw. prä-Stichtag bleiben sie grün — auch ohne Trace. Legende: „ohne Herkunft“.
 - **Log · Job-Start/Ende greppbar:** Lange Vorgänge (UTXO-Scan, Verlauf aller Wallets, Herkunft aller UTXOs, Herkunft vollständig, u. a.) schreiben `JOB-START` und `JOB-ENDE` mit kind, id, Wanduhr, Status und Dauer ins Log — im Log-Bereich und Terminal-Spiegel suchbar.

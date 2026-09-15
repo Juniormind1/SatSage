@@ -156,6 +156,7 @@ def trace_utxo_origin(
     alle_eigenen_inputs: bool = False,
     *,
     memo: dict | None = None,
+    stop_before_ts: int | None = None,
 ) -> dict | None:
     """
     Verfolgt, wie der Output creator_txid:vout_index finanziert wurde.
@@ -170,6 +171,12 @@ def trace_utxo_origin(
     über *memo* wiederverwendet, nicht als leerer „cycle“-Blattknoten
     abgeschnitten. Sonst bleiben bei CoinJoin/Mix hunderte grüne Blätter
     ohne rot/lila-Ende stehen.
+
+    *stop_before_ts*: optionaler Steuer-Horizont (Unix). Hop mit
+    ``time_ts <= stop_before_ts`` wird als ``tax_horizon``-Blatt beendet —
+    tiefer bis extern/Coinbase braucht das Steuerjahr nicht. Herkunft tracen
+    übergibt ``None`` und führt Horizont-Blätter später nach (siehe
+    ``vertiefe_tax_horizon``).
     """
     # Pfad-lokal: Aufrufer dürfen ein Set übergeben (Tests), aber Geschwister
     # dürfen sich die besuchten Knoten nicht teilen — sonst wird jede Raute
@@ -239,6 +246,18 @@ def trace_utxo_origin(
         "time_ts": _main()._tx_block_time(tx),
         "sources": [],
     }
+
+    # Steuer-Horizont: Hop ist alt genug für Haltefrist/Stichtag — nicht tiefer.
+    # depth==0 (Wurzel-UTXO): ebenfalls, wenn das Output selbst schon reicht.
+    if stop_before_ts is not None and node.get("time_ts") is not None:
+        try:
+            if int(node["time_ts"]) <= int(stop_before_ts):
+                node["tax_horizon"] = True
+                memo[utxo_key] = node
+                visited_utxos.discard(utxo_key)
+                return node
+        except (TypeError, ValueError):
+            pass
 
     progress_cb = progress.update if progress else None
 
@@ -353,6 +372,7 @@ def trace_utxo_origin(
                     progress=progress,
                     alle_eigenen_inputs=alle_eigenen_inputs,
                     memo=memo,
+                    stop_before_ts=stop_before_ts,
                 )
                 node["sources"].append({
                     "type": "internal",
@@ -412,6 +432,93 @@ def trace_utxo_origin(
     memo[utxo_key] = node
     visited_utxos.discard(utxo_key)
     return node
+
+
+def vertiefe_tax_horizon(
+    node: dict | None,
+    get_tx,
+    own_addresses: set,
+    *,
+    wallet: WalletContext | None = None,
+    cache_dir: Path | None = None,
+    fetch_address_utxos=None,
+    cache_source: str | None = None,
+    progress: _EphemeralProgress | None = None,
+    alle_eigenen_inputs: bool = False,
+    memo: dict | None = None,
+) -> dict | None:
+    """
+    Setzt einen Steuer-Teilbaum fort: ``tax_horizon``-Blätter bis extern/Coinbase.
+
+    Bereits voll aufgelöste Zweige bleiben unangetastet — Herkunft tracen nach
+    Steuerjahr-Trace rechnet nur die Lücken nach, nicht den ganzen Graphen.
+    """
+    if not isinstance(node, dict):
+        return node
+    if memo is None:
+        memo = {}
+
+    if node.get("tax_horizon"):
+        txid = str(node.get("txid") or "").strip()
+        try:
+            vout = int(node.get("vout", 0))
+        except (TypeError, ValueError):
+            return node
+        if not txid:
+            return node
+        # Frischen Lauf ohne Horizont — Memo-Key freigeben falls Altlast.
+        key = f"{txid}:{vout}"
+        memo.pop(key, None)
+        return trace_utxo_origin(
+            get_tx,
+            txid,
+            vout,
+            own_addresses,
+            wallet=wallet,
+            cache_dir=cache_dir,
+            fetch_address_utxos=fetch_address_utxos,
+            cache_source=cache_source,
+            progress=progress,
+            alle_eigenen_inputs=alle_eigenen_inputs,
+            memo=memo,
+            stop_before_ts=None,
+        )
+
+    quellen = node.get("sources")
+    if not isinstance(quellen, list):
+        return node
+    for src in quellen:
+        if not isinstance(src, dict) or src.get("type") != "internal":
+            continue
+        kind = src.get("trace")
+        if isinstance(kind, dict):
+            src["trace"] = vertiefe_tax_horizon(
+                kind,
+                get_tx,
+                own_addresses,
+                wallet=wallet,
+                cache_dir=cache_dir,
+                fetch_address_utxos=fetch_address_utxos,
+                cache_source=cache_source,
+                progress=progress,
+                alle_eigenen_inputs=alle_eigenen_inputs,
+                memo=memo,
+            )
+    return node
+
+
+def _hat_tax_horizon(node: dict | None) -> bool:
+    """Ob irgendwo ein Steuer-Horizont-Blatt steckt (Teilbaum)."""
+    if not isinstance(node, dict):
+        return False
+    if node.get("tax_horizon"):
+        return True
+    for src in node.get("sources") or []:
+        if not isinstance(src, dict):
+            continue
+        if src.get("type") == "internal" and _hat_tax_horizon(src.get("trace")):
+            return True
+    return False
 
 
 def _sum_external_sats(node: dict | None) -> int:
@@ -777,6 +884,37 @@ def _external_ingress_extrema(trace: dict | None) -> dict | None:
     }
 
 
+def _collect_tax_horizon_events(node: dict | None) -> list[dict]:
+    """Blätter, an denen der Steuer-Trace absichtlich endete."""
+    if not node:
+        return []
+    events: list[dict] = []
+    if node.get("tax_horizon") and node.get("time_ts"):
+        addrs = node.get("addresses") or []
+        events.append({
+            "time": node.get("time") or "",
+            "time_ts": int(node["time_ts"]),
+            "amount_sats": int(node.get("amount_sats") or 0),
+            "address": addrs[0] if addrs else "",
+            "wallet": None,
+        })
+        return events
+    for src in node.get("sources") or []:
+        if not isinstance(src, dict):
+            continue
+        if src.get("type") == "internal":
+            events.extend(_collect_tax_horizon_events(src.get("trace")))
+    return events
+
+
+def _youngest_tax_horizon(trace: dict | None) -> dict | None:
+    events = _collect_tax_horizon_events(trace)
+    bekannte = [e for e in events if e.get("time_ts")]
+    if not bekannte:
+        return None
+    return max(bekannte, key=lambda e: e["time_ts"])
+
+
 def _youngest_external_ingress(trace: dict | None) -> dict | None:
     """
     Jüngster bekannter externer Zufluss — defensive Anschaffungslesart.
@@ -837,6 +975,16 @@ def persist_utxo_ingress(
     youngest = _youngest_wallet_ingress(trace, wallet)
     external = _youngest_external_ingress(trace)
     oldest = _oldest_external_ingress(trace)
+    horizon = _youngest_tax_horizon(trace)
+    # Steuer-Horizont ohne Extern: Horizont-Zeit als Wallet-Eingang-Ersatz
+    # (wahrer Extern ist älter → Haltedauer hier höchstens unterschätzt).
+    if not youngest and horizon:
+        youngest = {
+            "time": horizon.get("time"),
+            "time_ts": horizon.get("time_ts"),
+            "wallet": horizon.get("wallet"),
+            "amount_sats": horizon.get("amount_sats") or amount_sats,
+        }
     if not (youngest or external):
         return None
 
@@ -846,37 +994,42 @@ def persist_utxo_ingress(
         Path(immutable_cache_dir) if immutable_cache_dir
         else resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
     )
+    nutzlast = {
+        "youngest_time": youngest["time"] if youngest else None,
+        "youngest_time_ts": youngest["time_ts"] if youngest else None,
+        "youngest_wallet": youngest["wallet"] if youngest else None,
+        "youngest_sats": (
+            min(youngest["amount_sats"], amount_sats) if youngest and amount_sats
+            else (youngest["amount_sats"] if youngest else None)
+        ),
+        # Steuerliches Anschaffungsdatum: jüngster und ältester externer
+        # Zufluss (Report wählt per STEUER_ANSCHAFFUNG). Interne Überträge
+        # zwischen eigenen XPUBs/Seeds verändern die Haltedauer nicht.
+        "external_time_ts": external["time_ts"] if external else None,
+        "external_sats": external["amount_sats"] if external else None,
+        "external_address": external["address"] if external else None,
+        "external_oldest_time_ts": (
+            oldest["time_ts"] if oldest else None
+        ),
+        "external_oldest_sats": (
+            oldest["amount_sats"] if oldest else None
+        ),
+        "external_oldest_address": (
+            oldest["address"] if oldest else None
+        ),
+        "external_untergrenze": (
+            external["untergrenze"] if external else False
+        ),
+        "address": address,
+    }
+    # Schlüssel setzen, auch wenn Wert None: „getraced, kein Extern“ vs. Alt-Cache.
+    if external is None and horizon is not None:
+        nutzlast["external_time_ts"] = None
+        nutzlast["tax_horizon_time_ts"] = horizon.get("time_ts")
     return save_utxo_ingress_cache(
         txid,
         vout,
-        {
-            "youngest_time": youngest["time"] if youngest else None,
-            "youngest_time_ts": youngest["time_ts"] if youngest else None,
-            "youngest_wallet": youngest["wallet"] if youngest else None,
-            "youngest_sats": (
-                min(youngest["amount_sats"], amount_sats) if youngest and amount_sats
-                else (youngest["amount_sats"] if youngest else None)
-            ),
-            # Steuerliches Anschaffungsdatum: jüngster und ältester externer
-            # Zufluss (Report wählt per STEUER_ANSCHAFFUNG). Interne Überträge
-            # zwischen eigenen XPUBs/Seeds verändern die Haltedauer nicht.
-            "external_time_ts": external["time_ts"] if external else None,
-            "external_sats": external["amount_sats"] if external else None,
-            "external_address": external["address"] if external else None,
-            "external_oldest_time_ts": (
-                oldest["time_ts"] if oldest else None
-            ),
-            "external_oldest_sats": (
-                oldest["amount_sats"] if oldest else None
-            ),
-            "external_oldest_address": (
-                oldest["address"] if oldest else None
-            ),
-            "external_untergrenze": (
-                external["untergrenze"] if external else False
-            ),
-            "address": address,
-        },
+        nutzlast,
         imm_root,
     )
 
@@ -1510,8 +1663,8 @@ def scan_external_sanction_hops(
     get_tx,
     creator_txid: str,
     vout_index: int,
-    own_addresses: set,
-    sanctioned_addresses: frozenset[str],
+    own_addresses: set | None = None,
+    sanctioned_addresses: frozenset[str] | None = None,
     *,
     max_hops: int,
     wallet: WalletContext | None = None,
@@ -1525,15 +1678,21 @@ def scan_external_sanction_hops(
     gesehene_adressen: set[str] | None = None,
 ) -> list[dict]:
     """
-    Verfolgt externe Vorgänger (ohne eigene Wallet-Adressen) rückwärts und
-    meldet Treffer auf der OFAC-Sanktionsliste.
+    Verfolgt die Finanzierung eines UTXO **xpub-blind** bis *max_hops* rückwärts
+    und meldet Treffer auf der Sanktionsliste.
 
-    *gesehene_adressen* sammelt, wenn übergeben, jede geprüfte externe
-    Adresse. Anders als ``counters["addrs_checked"]`` zählt das Set jede
-    Adresse einmal, auch wenn sie in der Vorgeschichte mehrerer UTXOs
-    auftaucht — es beantwortet „was wurde geprüft", nicht „wie viele
-    Vergleiche liefen".
+    Perspektive eines Dritten **ohne** XPUB-Wissen: Jeder Prevout-Hop zählt,
+    eigene Wallet-Adressen werden nicht übersprungen. Grünes Licht = keine
+    gelistete Adresse in diesem Fenster. (``own_addresses`` / ``wallet``
+    bleiben API-kompatibel, steuern den Walk aber nicht mehr.)
+
+    *gesehene_adressen* sammelt, wenn übergeben, jede geprüfte Adresse.
+    Anders als ``counters["addrs_checked"]`` zählt das Set jede Adresse
+    einmal — „was wurde geprüft“, nicht „wie viele Vergleiche liefen“.
     """
+    del own_addresses, wallet  # xpub-blind: keine Eigentumsfilter
+    if sanctioned_addresses is None:
+        sanctioned_addresses = frozenset()
     if counters is None:
         counters = {"addrs_checked": 0}
     if hits is None:
@@ -1573,9 +1732,6 @@ def scan_external_sanction_hops(
             if isinstance(inp, CoinbaseFunding):
                 continue
             edge: FundingEdge = inp
-            if is_own_output(edge.addresses, own_addresses, wallet):
-                continue
-
             prev_ref = edge.prevout.key
             for addr in edge.addresses:
                 if not addr:
@@ -1612,14 +1768,15 @@ def scan_external_sanction_hops(
                     if abort_on_hit:
                         raise SanctionHitFound(hit)
 
+            # Jeder Prevout weiter — auch „eigene“ Adressen (xpub-blind).
             scan_external_sanction_hops(
                 get_tx,
                 edge.prevout.txid,
                 edge.prevout.vout,
-                own_addresses,
+                None,
                 sanctioned_addresses,
                 max_hops=max_hops,
-                wallet=wallet,
+                wallet=None,
                 wallet_utxo_ref=ref,
                 visited_utxos=visited_utxos,
                 depth=depth + 1,
@@ -1655,24 +1812,234 @@ class _FortschrittsAdapter:
             self._callback(felder)
 
 
+def _event_gegen_liste(
+    event: dict,
+    sanctioned_addresses: frozenset[str],
+    *,
+    wallet_utxo_ref: str,
+) -> dict | None:
+    """Ein Hop-Event gegen die aktuelle Liste — None wenn kein Treffer."""
+    addr = str(event.get("address") or "").strip()
+    if not addr or addr not in sanctioned_addresses:
+        return None
+    return {
+        "hop": int(event.get("hop") or 0),
+        "address": addr,
+        "from_utxo": str(event.get("from_utxo") or ""),
+        "in_tx": str(event.get("in_tx") or ""),
+        "amount_sats": int(event.get("amount_sats") or 0),
+        "wallet_utxo": wallet_utxo_ref,
+    }
+
+
+def _events_aus_origin_tree(
+    node: dict | None,
+    *,
+    max_hops: int,
+    wallet_utxo_ref: str,
+    depth: int = 0,
+    events: list | None = None,
+    frontiers: list | None = None,
+) -> tuple[list, list]:
+    """
+    Liest Adress-Hops aus dem Herkunfts-Rohbaum (xpub-blind nutzbar).
+
+    *frontiers*: (txid, vout, next_depth) wo der Baum endet, aber noch
+    Hops bis *max_hops* fehlen (typisch externes Blatt).
+    """
+    if events is None:
+        events = []
+    if frontiers is None:
+        frontiers = []
+    if not isinstance(node, dict) or depth > max_hops:
+        return events, frontiers
+
+    txid = str(node.get("txid") or "").strip()
+    try:
+        vout = int(node.get("vout", 0))
+    except (TypeError, ValueError):
+        vout = 0
+    utxo_k = f"{txid}:{vout}" if txid else ""
+    amount = int(node.get("amount_sats") or 0)
+
+    for addr in node.get("addresses") or []:
+        if not addr:
+            continue
+        events.append({
+            "hop": depth,
+            "address": addr,
+            "from_utxo": utxo_k or wallet_utxo_ref,
+            "in_tx": txid,
+            "amount_sats": amount,
+        })
+
+    if node.get("tax_horizon"):
+        # Teilbaum: tiefer nur per get_tx
+        if depth < max_hops and txid:
+            frontiers.append((txid, vout, depth + 1))
+        return events, frontiers
+
+    quellen = node.get("sources") or []
+    if not quellen:
+        if depth < max_hops and txid and depth > 0:
+            # Unvollständiger Knoten — Finanzierung unbekannt
+            frontiers.append((txid, vout, depth + 1))
+        return events, frontiers
+
+    for src in quellen:
+        if not isinstance(src, dict):
+            continue
+        typ = src.get("type")
+        hop = depth + 1
+        if hop > max_hops:
+            continue
+        if typ == "coinbase":
+            continue
+        if typ == "external_unresolved":
+            continue
+        addr = str(src.get("address") or "").strip()
+        from_utxo = str(src.get("from_utxo") or "")
+        amt = int(src.get("amount_sats") or 0)
+        if addr:
+            events.append({
+                "hop": hop,
+                "address": addr,
+                "from_utxo": from_utxo,
+                "in_tx": txid,
+                "amount_sats": amt,
+            })
+        if typ == "internal" and isinstance(src.get("trace"), dict):
+            _events_aus_origin_tree(
+                src["trace"],
+                max_hops=max_hops,
+                wallet_utxo_ref=wallet_utxo_ref,
+                depth=hop,
+                events=events,
+                frontiers=frontiers,
+            )
+        elif typ == "external" and hop < max_hops and ":" in from_utxo:
+            # Externes Blatt: tiefer nur per Chain-Walk
+            try:
+                pt, _, pv = from_utxo.rpartition(":")
+                frontiers.append((pt, int(pv), hop + 1))
+            except ValueError:
+                pass
+        elif typ == "external" and hop < max_hops and src.get("txid") is not None:
+            try:
+                frontiers.append(
+                    (str(src["txid"]), int(src.get("vout", 0)), hop + 1)
+                )
+            except (TypeError, ValueError):
+                pass
+    return events, frontiers
+
+
+def _sammle_sanction_events_live(
+    get_tx,
+    txid: str,
+    vout_index: int,
+    utxo: dict,
+    *,
+    max_hops: int,
+    wallet_utxo_ref: str,
+    start_depth: int = 1,
+    visited: set | None = None,
+) -> list[dict]:
+    """
+    xpub-blinder Hop-Walk → Event-Liste (get_tx füllt den Tx-Immutable-Cache).
+
+    *start_depth*: 1 = Inputs der UTXO-Tx; >1 = Fortsetzung an einem Frontier.
+    """
+    events: list[dict] = []
+    if visited is None:
+        visited = set()
+
+    if start_depth <= 1:
+        hop0: list[str] = []
+        raw = str(utxo.get("address") or "").strip()
+        if raw:
+            hop0.append(raw)
+        amount0 = int(utxo.get("value") or utxo.get("value_sats") or 0)
+        try:
+            tx0 = get_tx(txid)
+            outs = tx0.get("vout") or []
+            if 0 <= vout_index < len(outs):
+                for a in _main()._extract_addresses(outs[vout_index]):
+                    if a and a not in hop0:
+                        hop0.append(a)
+                try:
+                    amount0 = int(_main()._extract_value_sats(outs[vout_index]))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        for a in hop0:
+            events.append({
+                "hop": 0,
+                "address": a,
+                "from_utxo": wallet_utxo_ref,
+                "in_tx": txid,
+                "amount_sats": amount0,
+            })
+
+    def _walk(creator_txid: str, depth: int) -> None:
+        if depth > max_hops:
+            return
+        key = f"{creator_txid}:walk"
+        # creator-weit: Inputs einer Tx nur einmal (vout irrelevant für vin)
+        if key in visited:
+            return
+        visited.add(key)
+        try:
+            for inp in iter_funding_inputs(get_tx, creator_txid):
+                if isinstance(inp, CoinbaseFunding):
+                    continue
+                edge: FundingEdge = inp
+                prev_ref = edge.prevout.key
+                for addr in edge.addresses:
+                    if not addr:
+                        continue
+                    events.append({
+                        "hop": depth,
+                        "address": addr,
+                        "from_utxo": prev_ref,
+                        "in_tx": creator_txid,
+                        "amount_sats": edge.amount_sats,
+                    })
+                if depth < max_hops:
+                    _walk(edge.prevout.txid, depth + 1)
+        except Exception:
+            return
+
+    _walk(txid, max(1, int(start_depth)))
+    return events
+
+
 def _pruefe_ein_utxo(
     get_tx,
     utxo: dict,
-    own_addresses: set,
+    own_addresses: set | None,
     sanctioned_addresses: frozenset[str],
     *,
     max_hops: int,
     wallet: WalletContext | None,
     abort_on_hit: bool,
     progress,
+    immutable_cache_dir: Path | None = None,
 ) -> tuple[str, list[dict], set[str]] | None:
     """
-    Ein UTXO prüfen. Rückgabe: (ref, treffer, gesehene Adressen) oder None,
-    wenn der Eintrag keine brauchbare txid/vout trägt.
+    Ein UTXO prüfen. Rückgabe: (ref, treffer, gesehene Adressen) oder None.
 
-    Eigene Ergebnisbehälter je Aufruf — das macht den Parallel-Lauf möglich,
-    ohne dass Worker sich gegenseitig in die Listen schreiben.
+    Cache-Reihenfolge:
+    1. ``sanction_walk`` (Graph) → aktuelle Liste matchen
+    2. Herkunfts-``origin_tree`` + ggf. Live-Lücken (get_tx / Tx-Cache)
+    3. Live-Walk ab Root; Ergebnis als sanction_walk speichern
+
+    Hop 0 = UTXO-Adresse; danach xpub-blind bis *max_hops*.
     """
+    del own_addresses, wallet
+    from core import trace_cache
+
     txid = str(utxo.get("txid", "")).strip()
     vout = utxo.get("vout")
     if not txid or vout is None:
@@ -1685,36 +2052,135 @@ def _pruefe_ein_utxo(
     ref = f"{txid}:{vout_index}"
     treffer: list[dict] = []
     gesehen: set[str] = set()
-    if progress is not None:
+    counters = {"addrs_checked": 0}
+
+    def _fortschritt(hop: int) -> None:
+        if progress is None:
+            return
         progress.update(
             wallet_utxo=ref,
-            hop=0,
+            hop=min(hop, max_hops),
             max_hops=max_hops,
-            addrs_checked=0,
-            status="noch keine sanktionierte Adresse gefunden",
+            addrs_checked=counters["addrs_checked"],
+            status=_sanction_progress_status(treffer),
         )
-    scan_external_sanction_hops(
-        get_tx,
-        txid,
-        vout_index,
-        own_addresses,
-        sanctioned_addresses,
-        max_hops=max_hops,
-        wallet=wallet,
-        wallet_utxo_ref=ref,
-        progress=progress,
-        counters={"addrs_checked": 0},
-        hits=treffer,
-        abort_on_hit=abort_on_hit,
-        gesehene_adressen=gesehen,
+
+    def _match_events(events: list) -> None:
+        for ev in events:
+            hop = int(ev.get("hop") or 0)
+            if hop > max_hops:
+                continue
+            addr = str(ev.get("address") or "").strip()
+            if not addr:
+                continue
+            counters["addrs_checked"] += 1
+            gesehen.add(addr)
+            _fortschritt(hop)
+            hit = _event_gegen_liste(
+                ev, sanctioned_addresses, wallet_utxo_ref=ref,
+            )
+            if hit:
+                treffer.append(hit)
+                _fortschritt(hop)
+                if abort_on_hit:
+                    raise SanctionHitFound(hit)
+
+    if progress is not None:
+        _fortschritt(0)
+
+    # 1) Fertiger Sanktions-Walk
+    walk = (
+        trace_cache.sanction_walk_laden(txid, vout_index, immutable_cache_dir)
+        if immutable_cache_dir
+        else None
     )
+    if (
+        walk
+        and walk.get("complete")
+        and int(walk.get("max_hops") or 0) >= max_hops
+    ):
+        _match_events(walk.get("events") or [])
+        return ref, treffer, gesehen
+
+    # 2+3) origin_tree und/oder Live-Walk → Event-Liste aufbauen
+    events: list[dict] = []
+    origin = (
+        trace_cache.origin_tree_laden(txid, vout_index, immutable_cache_dir)
+        if immutable_cache_dir
+        else None
+    )
+    frontiers: list[tuple[str, int, int]] = []
+    if origin:
+        events, frontiers = _events_aus_origin_tree(
+            origin,
+            max_hops=max_hops,
+            wallet_utxo_ref=ref,
+        )
+
+    if not origin or frontiers:
+        visited: set = set()
+        if not origin:
+            events = _sammle_sanction_events_live(
+                get_tx,
+                txid,
+                vout_index,
+                utxo,
+                max_hops=max_hops,
+                wallet_utxo_ref=ref,
+                start_depth=1,
+                visited=visited,
+            )
+        else:
+            # Lücken hinter externen Blättern nachziehen
+            for f_txid, f_vout, f_depth in frontiers:
+                if f_depth > max_hops:
+                    continue
+                extra = _sammle_sanction_events_live(
+                    get_tx,
+                    f_txid,
+                    f_vout,
+                    {"address": "", "value": 0},
+                    max_hops=max_hops,
+                    wallet_utxo_ref=ref,
+                    start_depth=f_depth,
+                    visited=visited,
+                )
+                # start_depth>1: keine Hop-0-Events; Inputs bei f_depth
+                events.extend(extra)
+
+    _match_events(events)
+
+    if immutable_cache_dir and events:
+        # Dedup Events (gleiche hop/address/from_utxo)
+        gesehen_k: set[tuple] = set()
+        unique: list[dict] = []
+        for ev in events:
+            k = (
+                int(ev.get("hop") or 0),
+                str(ev.get("address") or ""),
+                str(ev.get("from_utxo") or ""),
+                str(ev.get("in_tx") or ""),
+            )
+            if k in gesehen_k:
+                continue
+            gesehen_k.add(k)
+            unique.append(ev)
+        trace_cache.sanction_walk_speichern(
+            txid,
+            vout_index,
+            max_hops=max_hops,
+            complete=True,
+            events=unique,
+            immutable_cache_dir=immutable_cache_dir,
+        )
+
     return ref, treffer, gesehen
 
 
 def _check_wallet_utxos_parallel(
     get_tx_je_worker,
     utxos: list[dict],
-    own_addresses: set,
+    own_addresses: set | None,
     sanctioned_addresses: frozenset[str],
     *,
     max_hops: int,
@@ -1723,6 +2189,7 @@ def _check_wallet_utxos_parallel(
     progress_cb,
     cancel_cb,
     gesehene_adressen: set[str] | None,
+    immutable_cache_dir: Path | None = None,
 ) -> tuple[list[dict], int, dict | None]:
     """
     Verteilt die UTXOs auf mehrere Verbindungen — je Worker eine eigene.
@@ -1765,6 +2232,7 @@ def _check_wallet_utxos_parallel(
                 get_tx, utxo, own_addresses, sanctioned_addresses,
                 max_hops=max_hops, wallet=wallet, abort_on_hit=False,
                 progress=fortschritt,
+                immutable_cache_dir=immutable_cache_dir,
             )
             if ergebnis is None:
                 continue
@@ -1792,8 +2260,8 @@ def _check_wallet_utxos_parallel(
 def check_wallet_utxos_sanctions(
     get_tx,
     utxos: list[dict],
-    own_addresses: set,
-    sanctioned_addresses: frozenset[str],
+    own_addresses: set | None = None,
+    sanctioned_addresses: frozenset[str] | None = None,
     *,
     max_hops: int,
     wallet: WalletContext | None = None,
@@ -1803,10 +2271,20 @@ def check_wallet_utxos_sanctions(
     gesehene_adressen: set[str] | None = None,
     get_tx_je_worker=None,
     worker_count: int = 1,
+    immutable_cache_dir: Path | None = None,
 ) -> tuple[list[dict], int, dict | None]:
     """
-    Prüft Wallet-UTXOs auf sanktionierte Adressen in der externen Vorgeschichte.
+    Prüft Wallet-UTXOs xpub-blind auf sanktionierte Adressen (Drittperspektive).
+
+    Je UTXO: Output-Adresse (Hop 0) plus bis *max_hops* Prevout-Hops rückwärts
+    — ohne XPUB-Filter. Grün = keine gelistete Adresse in diesem Fenster.
     Rückgabe: (treffer, geprüfte_utxos, abbruch_treffer|None)
+
+    Cache: ``sanction_walk`` und Herkunfts-``origin_tree`` unter
+    *immutable_cache_dir*; Live-``get_tx`` füllt den Tx-Immutable-Cache
+    (später Herkunft/Sanktion wiederverwendbar).
+
+    *own_addresses* / *wallet* sind API-kompatibel und werden ignoriert.
 
     *progress_cb* ist ein Callable[[dict], None] mit Feldern
     (wallet_utxo, hop, max_hops, addrs_checked, status). *cancel_cb* ist ein
@@ -1814,14 +2292,16 @@ def check_wallet_utxos_sanctions(
     Beides optional; ohne Angabe läuft die CLI-Ausgabe über
     SanctionCheckProgressLine und die Tastatur-Abfrage.
 
-    *gesehene_adressen* wird, wenn übergeben, mit jeder geprüften externen
-    Adresse befüllt — der Aufrufer liest das Set nach dem Lauf aus.
+    *gesehene_adressen* wird, wenn übergeben, mit jeder geprüften Adresse
+    befüllt — der Aufrufer liest das Set nach dem Lauf aus.
 
     *get_tx_je_worker* ist ein Callable[[int], get_tx]: Liefert es zusammen
     mit *worker_count* > 1 eine eigene Verbindung je Worker, laufen die
     UTXOs parallel. Ohne das bleibt es beim seriellen Lauf über *get_tx* —
     der Weg, den die CLI mit ihrem Treffer-Abbruch nimmt.
     """
+    if sanctioned_addresses is None:
+        sanctioned_addresses = frozenset()
     if not utxos or not sanctioned_addresses or max_hops < 1:
         return [], 0, None
 
@@ -1831,6 +2311,7 @@ def check_wallet_utxos_sanctions(
             max_hops=max_hops, wallet=wallet, worker_count=worker_count,
             progress_cb=progress_cb, cancel_cb=cancel_cb,
             gesehene_adressen=gesehene_adressen,
+            immutable_cache_dir=immutable_cache_dir,
         )
 
     import threading
@@ -1862,6 +2343,7 @@ def check_wallet_utxos_sanctions(
                     get_tx, utxo, own_addresses, sanctioned_addresses,
                     max_hops=max_hops, wallet=wallet,
                     abort_on_hit=abort_on_hit, progress=progress,
+                    immutable_cache_dir=immutable_cache_dir,
                 )
             except SanctionHitFound as exc:
                 checked += 1
@@ -1894,7 +2376,7 @@ def print_sanction_check_report(
     print(f"\n{'═' * 72}")
     print(f"  Sanktionsprüfung: {wallet_name}")
     print(
-        f"  {utxo_count} UTXO(s) geprüft, {max_hops} externe Hop(s), "
+        f"  {utxo_count} UTXO(s) geprüft, {max_hops} Hop(s) xpub-blind, "
         f"{sanctioned_count:,} Adressen in der Liste"
     )
     if aborted:
@@ -1926,7 +2408,7 @@ def print_sanction_check_report(
 
     print(
         f"\n  ⚠️  {len(by_key)} Treffer "
-        f"(sanktionierte Adresse in externer Vorgeschichte):\n"
+        f"(sanktionierte Adresse in der Hop-Vorgeschichte):\n"
     )
     with cancellable_output(hint="Trefferliste — q zum Abbrechen"):
         for index, entry in enumerate(
