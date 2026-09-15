@@ -214,12 +214,13 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 ### Commit-Identität (Maintainer / Assistent)
 
-**Maintainer-Clones und Assistenten-Worktrees** committen/pushen nur unter der Projekt-Identität:
+**Von Maintainer-Rechnern und Assistenten-Worktrees** (Juniormind1-Maschinen, Grok/Cursor-Worktrees, `scripts/commit.*` / `scripts/push.*`) gilt hart:
 
-- `user.name=Juniormind1`
-- `user.email=juniormind@proton.me`
+- **Nur** `user.name=Juniormind1` / `user.email=juniormind@proton.me`
+- **Kein** Push/Commit unter anderer Identität — auch nicht versehentlich (OS-Default, alte Config, Assistent)
+- Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Abweichung ab; `--fix-identity` setzt name/email/hooks)
 
-Pflicht in diesen Clones:
+Pflicht in **diesen** Clones:
 
 ```bash
 git config user.name Juniormind1
@@ -227,9 +228,9 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **in diesen Worktrees**. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
 
-**Fremde Contributor-Commits und PRs:** eigene Autor-/Committer-IDs sind erlaubt (übliche OSS-Praxis). CI verlangt nicht „jeder Commit = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
+**Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
 Assistenten sollen:
 
@@ -237,6 +238,7 @@ Assistenten sollen:
 - Nicht nach jedem Task „Soll ich committen/pushen?“ fragen
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
+- Für Commit/Push ohne Token-Verbrauch die Maintainer-Skripte vorschlagen (`scripts/commit.*`, `scripts/push.*`)
 
 ### Remote-Stand prüfen (Pflicht, multi-machine)
 

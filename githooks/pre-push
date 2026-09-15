@@ -1,6 +1,8 @@
 #!/bin/sh
 # SatSage: refuse pushes whose tip is not authored as Juniormind1.
-# Activate once per clone: git config core.hooksPath githooks
+# Activate once per Maintainer-Clone: git config core.hooksPath githooks
+# Contributor-Clones (tbusch u. a.) setzen hooksPath nicht — eigene IDs OK.
+# Greift nur, wenn dieser Hook installiert ist (Maintainer-Rechner).
 
 set -e
 
