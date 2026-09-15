@@ -472,6 +472,12 @@ def _hole(url: str, ziel: Path, fortschritt=None) -> int:
         gesamt = int(antwort.headers.get("Content-Length") or 0)
         with tmp.open("wb") as datei:
             while True:
+                try:
+                    from core.jobs import raise_if_job_cancelled
+
+                    raise_if_job_cancelled()
+                except ImportError:
+                    pass
                 block = antwort.read(65536)
                 if not block:
                     break
@@ -498,6 +504,12 @@ def aktualisiere(cache_dir: Path | None = None, *, variante: str = "kern",
 
     groessen = {}
     for name, url in VARIANTEN[variante].items():
+        try:
+            from core.jobs import raise_if_job_cancelled
+
+            raise_if_job_cancelled()
+        except ImportError:
+            pass
         groessen[name] = _hole(url, verzeichnis / name, fortschritt)
 
     meta = {

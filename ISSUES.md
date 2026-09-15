@@ -2,6 +2,48 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Steuerbericht · zwei Berichtsarten (Geldwäsche vs. Haltefrist/Stichtag)
+
+**Stand:** 2026-09-15 · **offen** · Produkt / Export
+
+Der HTML-Herkunftsnachweis (Hop-Kette aus Trace-Cache) braucht **zwei getrennte Berichtsarten** — nicht eine Vollkette für alles:
+
+1. **Geldwäsche / vollständiger Herkunftsnachweis**  
+   Hop-Kette bis zum **externen Zugang** (Kauf-/Zuflussdatum außerhalb der eigenen Wallets). Länger, für Nachvollziehbarkeit „woher die Sats kamen“.
+
+2. **Haltefrist / Stichtag**  
+   Hop-Kette nur so weit, bis die Sats **älter als Haltefrist bzw. vor dem Stichtag** sind — dann Abbruch. Kürzer, reicht zur Untermauerung der Haltedauer-/Altbestand-Behauptung.
+
+**Abgrenzung:** On-chain Hops only. Börsen-/Konto-/Kaufbelege („externe Belege“ im Sinne von Drittunterlagen) baut SatSage **nicht**.
+
+**Ist:** Ein Hop-Abschnitt im Steuer-/Selbstanzeige-HTML, immer volle Trace-Tiefe (sofern Cache vorhanden).
+
+**Soll:** UI/API-Wahl der Berichtsart; Haltefrist-Modus schneidet den Baum am Frist-/Stichtags-Horizont; Dateiname/Titel kennzeichnen die Art; Tests für Abbruchkriterium.
+
+---
+
+## Config · EnvFile vs. plain `dict` — Aufrufstellen härten
+
+**Stand:** 2026-09-15 · **offen** · API-Klarheit / Härtung
+
+Wiederkehrende Stolperfalle (Assistenten und Skripte): Manche Einstiege erwarten ein **`EnvFile`** (`.values()` → `dict[str, str]`), andere ein **plain `dict`**. Wer ein `dict` an eine EnvFile-API übergibt, bekommt still `dict_values` statt Key-Zugriff (`AttributeError: 'dict_values' object has no attribute 'get'` — z. B. `read_wallets(env)` ruft `env.values()` auf).
+
+**Ist-Zustand (Stichprobe):**
+- `EnvFile` in `core/config.py` — `values()` liefert den Key/Value-Dict.
+- `read_wallets(env: EnvFile)`, ähnliche Block-APIs: brauchen **EnvFile**, nicht Dict.
+- Viele interne Helfer und Tests: erwarten bereits **`dict`** / `env.values()`.
+- `_load_dotenv()` in `main` liefert **Dict**, nicht EnvFile — Verwechslung vorprogrammiert.
+
+**Ziel:**
+1. Pro öffentlicher Funktion eindeutig: Param-Name + Typ (`env: EnvFile` vs. `values: Mapping[str, str]`), Docstring eine Zeile.
+2. An EnvFile-Grenzen **tolerant oder klar**: entweder `isinstance`-Normalisierung (`EnvFile` | `Mapping` → values-dict) **oder** harter TypeError mit lesbarer Meldung („EnvFile erwartet, got dict“).
+3. Keine stillen `env.values()`-Aufrufe auf Objekten, die schon ein Dict sind.
+4. Optional: schmaler Helfer `als_env_values(env_or_dict) -> dict[str, str]` an einer Stelle, alle Config-Leser darüber.
+
+**Nicht:** Drive-by-Refactor aller Call-Sites ohne Nutzen; zuerst die öffentlichen Config/Wallet-Leser und die Stellen, an denen Assistenten/Tests typisch anecken.
+
+---
+
 ## Eastereggs · SatSage-würdige Ereignis-Atemzüge
 
 **Stand:** 2026-09-13 · **offen** · Ideen (Form: Ereignis → ein Atemzug → fertig; Flüchtigkeit beachten)

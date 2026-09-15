@@ -18,6 +18,8 @@ Wenn die Oberfläche ihn **ohne Lernaufwand** schlauer machen kann, nutzen wir d
 
 Kein Pflicht-„?“-Tour-Modus. Entdecken ist optional und belohnt Aufmerksamkeit.
 
+**Anfänger / fehleranfällige Interaktionen:** Wo die Software typischerweise „hakt“ (Node, TLS, Datenquelle), soll ein **erfolgreicher** Abschluss belohnt werden — kurze, freudige Animation (z. B. Staub-Konfetti), nicht Belehrung. Siehe `design-node-anbindung.md` § Prinzip 8.
+
 ## Prinzipien
 
 1. **Entdecken statt belehren.** Kein Modal „Wussten Sie schon?“, kein Pflicht-Walkthrough. Wissen entsteht nebenbei beim Benutzen — vor allem per Tooltip.

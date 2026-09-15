@@ -3668,12 +3668,13 @@ def api_sanctions_update(state: AppState, payload: dict) -> dict:
     """Lädt die Listen neu. Läuft als Job, der Download dauert."""
 
     def lauf(job):
-        job.progress("Lade Sanktions- und Blacklists…")
+        job.progress("Lade Sanktions- und Blacklists…", log=True)
         import sanctioned
 
         adressen, meta = sanctioned.update_sanctioned_lists(
             cache_dir=state.sanctions_dir
         )
+        job.raise_if_cancelled()
         job.message = f"{len(adressen):,} Adressen geladen.".replace(",", ".")
         return {"adressen": len(adressen)}
 
@@ -3704,10 +3705,11 @@ def api_labels_update(state: AppState, payload: dict) -> dict:
                 f"{dateiname}: {geladen // 1024:,} KB{anteil}".replace(",", ".")
             )
 
-        job.progress("Lade Adress-Labels…")
+        job.progress("Lade Adress-Labels…", log=True)
         stand = labels.aktualisiere(
             state.label_dir, variante=variante, fortschritt=fortschritt
         )
+        job.raise_if_cancelled()
         job.message = (
             f"{stand['adressen']:,} Adressen, davon {stand['benannt']:,} benannt."
             .replace(",", ".")
@@ -4332,21 +4334,81 @@ def api_llm_chat(state: AppState, payload: dict) -> dict:
         raise ApiError(exc.status, exc.message) from exc
 
 
+def _persist_tls_auto(state: AppState, quellen: list, *, on_log=None) -> list:
+    """
+    Schreibt TLS-Auto-Ergebnis (FULCRUM_SSL / FULCRUM_TOR_SSL) in die .env.
+
+    Nur Desktop/.env — nicht Start9/Umbrel-Bridge. Liefert Quellenliste mit
+    aktualisierten Schalter-Feldern und geleertem ssl_persist.
+    """
+    from dataclasses import replace
+
+    if state.managed_by in _NODE_MANAGED:
+        return quellen
+    erlaubt = source_mod.EDITIERBARE_FELDER.get("own_fulcrum", ())
+    persist: dict[str, str | None] = {}
+    for q in quellen:
+        if q.key != "own_fulcrum" or not q.ssl_persist:
+            continue
+        for k, v in q.ssl_persist.items():
+            if k in erlaubt:
+                persist[k] = v
+    if not persist:
+        return quellen
+    try:
+        env = state.env()
+        env.apply(persist)
+        env.save()
+        state.reload()
+    except OSError:
+        return quellen
+    if on_log:
+        bits = ", ".join(f"{k}={v}" for k, v in persist.items())
+        on_log(f"TLS-Einstellung gespeichert: {bits}")
+    werte = state.env().values()
+    frisch = {q.key: q for q in source_mod.describe_sources(werte)}
+    out: list = []
+    for q in quellen:
+        basis = frisch.get(q.key, q)
+        out.append(
+            replace(
+                basis,
+                reachable=q.reachable,
+                error=q.error,
+                peer_count=q.peer_count,
+                peer_hosts=list(q.peer_hosts),
+                software=q.software,
+                software_raw=q.software_raw,
+                ssl_effective=q.ssl_effective,
+                ssl_persist={},
+                note=q.note or basis.note,
+                detail=q.detail or basis.detail,
+                log=list(q.log),
+            )
+        )
+    return out
+
+
 def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     werte = state.env().values()
     quellen = source_mod.describe_sources(werte)
     still = query.get("still", ["0"])[0] in ("1", "true", "ja")
-    if query.get("check", ["0"])[0] in ("1", "true", "ja"):
+    check_an = query.get("check", ["0"])[0] in ("1", "true", "ja")
+    if check_an:
         quellen = source_mod.check_sources(
             quellen, werte, on_log=None if still else on_log, still=still,
         )
+        quellen = _persist_tls_auto(
+            state, quellen, on_log=None if still else on_log,
+        )
+        werte = state.env().values()
     quellen = source_mod.anreichere_live_p2p(quellen)
     stand = source_mod.peer_status(quellen, werte)
     # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
     # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
     # Header laufen über Start, /headers und eigenen Cooldown.
     sources_dicts = [q.as_dict() for q in quellen]
-    if query.get("check", ["0"])[0] in ("1", "true", "ja"):
+    if check_an:
         state.sources_last = sources_dicts
     return {
         "sources": sources_dicts,
@@ -4972,6 +5034,9 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     if wallet_ctx is None:
         raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
 
+    # scan_end_index → Change jenseits max_addresses (sonst Intern→Extern)
+    _seed_wallet_ctx_aus_caches(state)
+
     roh = payload if isinstance(payload, dict) else {}
     vollstaendig = bool(roh.get("vollstaendig") or roh.get("tief") or roh.get("deep"))
     wallet_id = str(roh.get("wallet_id") or "").strip()
@@ -5078,6 +5143,16 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     fetch_addr = fetchers.get("fetch_address_utxos")
                     if vollstaendig:
                         # Gleicher Pfad wie Einzel-Knopf „Herkunftslücken schließen“.
+                        def _tief_fortschritt(text: str) -> None:
+                            t = str(text or "").strip()
+                            job.raise_if_cancelled()
+                            if not t:
+                                return
+                            if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
+                                stand.tick(t)
+                            else:
+                                stand.phase(t)
+
                         ergebnis = _trace_ein_utxo_tief(
                             get_tx=fetchers["get_tx"],
                             txid=txid,
@@ -5088,7 +5163,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             immutable_cache_dir=state.immutable_cache_dir,
                             fetch_addr=fetch_addr,
                             cache_source=quelle,
-                            progress=job.progress,
+                            progress=_tief_fortschritt,
+                            cancel_cb=lambda: job.cancelled,
                             folge_bundled=True,
                             folge_tx=True,
                         )
@@ -5213,6 +5289,8 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
         ).start()
         try:
             stand.phase(f"Starte Verlaufsscan für {namen}…")
+            # Adressen bis scan_end_index (Change jenseits max_addresses)
+            _seed_wallet_ctx_aus_caches(state)
             stand.phase("Verbinde mit der Verlaufs-Datenquelle…")
             args = state.args_namespace()
             # Eigene Priorität: Electrs LAN → Onion → BIP-158 → öffentlich.
@@ -5369,6 +5447,9 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
     txid, vout = ziel
 
     wallet_ctx = state.wallet_ctx
+    # Vor Fingerprint/veraltet: Mapping bis scan_end (Change jenseits max_addresses)
+    if wallet_ctx is not None:
+        _seed_wallet_ctx_aus_caches(state)
     eigene = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
 
     gespeichert = trace_cache.laden(txid, vout, state.immutable_cache_dir, eigene)
@@ -5415,6 +5496,7 @@ def _trace_ein_utxo_tief(
     fetch_addr,
     cache_source: str,
     progress=None,
+    cancel_cb=None,
     folge_bundled: bool = True,
     folge_tx: bool = True,
 ) -> dict:
@@ -5427,17 +5509,32 @@ def _trace_ein_utxo_tief(
 
     Wird vom Einzel-Trace und von „Herkunft vollständig“ genutzt — sonst
     bliebe der Superscan hinter dem Lücken-Knopf zurück.
+
+    *progress* und *cancel_cb* müssen greifen — sonst hängt Phase 1/2 ohne
+    Log und Abbruch (bare except in der Engine schluckte Cancelled früher).
     """
     import contextlib
     import io
 
     log = progress if callable(progress) else (lambda _m: None)
+    abbruch = cancel_cb if callable(cancel_cb) else None
+    # analyze.trace_utxo_origin erwartet .update(text); Jobs liefern Callables.
+    fortschritt = (
+        trace_mod._FortschrittsAdapter(progress) if callable(progress) else None
+    )
+
+    def _check_abbruch() -> None:
+        if abbruch and abbruch():
+            raise Cancelled()
 
     if folge_tx or folge_bundled:
+        _check_abbruch()
         if folge_bundled:
             log("Lücken: eigene Eingänge großer Sammel-Txs nachziehen…")
         else:
             log("Folgeanalyse: erst Herkunft, dann Vorgänger…")
+        # Fortschritt/Abbruch hier mitgeben — Phase 1 war sonst stumm und
+        # unabbrechbar (CoinJoin/Remix: Minuten ohne job.progress).
         roh = analyze.trace_utxo_origin(
             get_tx,
             txid,
@@ -5447,8 +5544,10 @@ def _trace_ein_utxo_tief(
             cache_dir=cache_dir,
             fetch_address_utxos=fetch_addr,
             cache_source=cache_source,
+            progress=fortschritt,
             alle_eigenen_inputs=folge_bundled,
         )
+        _check_abbruch()
         if folge_tx:
             vorgaenger: set[str] = set()
             if roh:
@@ -5460,7 +5559,7 @@ def _trace_ein_utxo_tief(
             if vorgaenger:
                 buf = io.StringIO()
 
-                def _log_zeilen():
+                def _log_zeilen() -> None:
                     text = buf.getvalue()
                     if not text:
                         return
@@ -5470,6 +5569,11 @@ def _trace_ein_utxo_tief(
                         zeile = zeile.strip()
                         if zeile:
                             log(zeile)
+
+                def _folge_fortschritt(text: str) -> None:
+                    _check_abbruch()
+                    _log_zeilen()
+                    log(str(text or ""))
 
                 with contextlib.redirect_stdout(buf):
                     analyze._run_tx_oriented_followups(
@@ -5483,8 +5587,11 @@ def _trace_ein_utxo_tief(
                         cache_dir,
                         fetch_addr,
                         cache_source,
+                        cancel_cb=abbruch,
+                        progress_cb=_folge_fortschritt,
                     )
                 _log_zeilen()
+        _check_abbruch()
         log("Aktualisiere Herkunftsbaum…")
 
     ergebnis = trace_mod.trace_utxo(
@@ -5603,6 +5710,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
     wallet_ctx = state.wallet_ctx
     if wallet_ctx is None:
         raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
+    _seed_wallet_ctx_aus_caches(state)
     eigene = set(wallet_ctx.address_to_wallet)
     wallet_name = _wallet_name_fuer_utxo(
         state,
@@ -5616,6 +5724,8 @@ def api_trace(state: AppState, payload: dict) -> dict:
     )
 
     def lauf(job):
+        from core.jobs import Fortschritt, herzschlag
+
         # Nochmals Cache (Race: GET und POST parallel) — bevor Electrs startet.
         if followup is None:
             treffer = trace_cache.laden(
@@ -5638,78 +5748,96 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     job.message = "Aus Herkunfts-Cache."
                     return baum
 
-        # log=True: Nav und Fokus-UI sehen mehr als nur die letzte message.
-        job.progress("Verbinde mit der Datenquelle…", log=True)
-        args = state.args_namespace()
-        quelle, backend = main._setup_blockchain_client(args, state.env().values())
-        job.raise_if_cancelled()
+        stand = Fortschritt(job)
+        halt = threading.Event()
+        threading.Thread(
+            target=herzschlag, args=(stand, halt), daemon=True,
+        ).start()
+        try:
+            # log=True: Nav und Fokus-UI sehen mehr als nur die letzte message.
+            stand.phase("Verbinde mit der Datenquelle…")
+            args = state.args_namespace()
+            quelle, backend = main._setup_blockchain_client(args, state.env().values())
+            job.raise_if_cancelled()
 
-        fetchers = main._build_blockchain_fetchers(
-            quelle, backend, args, wallet_ctx,
-            immutable_cache_dir=state.immutable_cache_dir,
-        )
-        get_tx = fetchers["get_tx"]
-        fetch_addr = fetchers.get("fetch_address_utxos")
-
-        label = {
-            None: f"Verfolge Herkunft über {quelle}…",
-            "full": f"Schließe Herkunftslücken über {quelle}…",
-            "tx_oriented": f"Speichere gründlichere Herkunft über {quelle}…",
-            "resolve_unresolved": f"Löse gebündelte Eingänge über {quelle}…",
-        }[followup]
-        job.progress(label, log=True)
-
-        def _fortschritt(text: str) -> None:
-            """Engine-Fortschritt → Job-message + Log (ohne jede Zeile zu fluten)."""
-            job.progress(str(text or ""), log=False)
-            # Längere Meilensteine ins Log (Hop-Wechsel, Lücken-Phasen).
-            t = str(text or "").strip()
-            if t and (
-                t.startswith("↻")
-                or t.startswith("Lücken")
-                or t.startswith("Eigene Vorgänger")
-                or t.startswith("Aktualisiere")
-                or t.startswith("Folgeanalyse")
-                or t.startswith("Schließe")
-                or t.startswith("Verfolge")
-            ):
-                job.progress(t, log=True)
-
-        if folge_tx or folge_bundled:
-            ergebnis = _trace_ein_utxo_tief(
-                get_tx=get_tx,
-                txid=txid,
-                vout=vout,
-                eigene=eigene,
-                wallet_ctx=wallet_ctx,
-                cache_dir=state.cache_dir,
+            fetchers = main._build_blockchain_fetchers(
+                quelle, backend, args, wallet_ctx,
                 immutable_cache_dir=state.immutable_cache_dir,
-                fetch_addr=fetch_addr,
-                cache_source=quelle,
-                progress=_fortschritt,
-                folge_bundled=folge_bundled,
-                folge_tx=folge_tx,
             )
-        else:
-            ergebnis = trace_mod.trace_utxo(
-                get_tx,
-                txid,
-                vout,
-                eigene,
-                wallet=wallet_ctx,
-                cache_dir=state.cache_dir,
-                immutable_cache_dir=state.immutable_cache_dir,
-                fetch_address_utxos=fetch_addr,
-                cache_source=quelle,
-                progress=_fortschritt,
+            get_tx = fetchers["get_tx"]
+            fetch_addr = fetchers.get("fetch_address_utxos")
+
+            label = {
+                None: f"Verfolge Herkunft über {quelle}…",
+                "full": f"Schließe Herkunftslücken über {quelle}…",
+                "tx_oriented": f"Speichere gründlichere Herkunft über {quelle}…",
+                "resolve_unresolved": f"Löse gebündelte Eingänge über {quelle}…",
+            }[followup]
+            stand.phase(label)
+
+            def _fortschritt(text: str) -> None:
+                """Engine-Fortschritt → Job-message + Log (Meilensteine)."""
+                t = str(text or "").strip()
+                job.raise_if_cancelled()
+                if not t:
+                    return
+                # Längere Meilensteine / Hop-Wechsel: sofort ins Log.
+                if (
+                    t.startswith("↻")
+                    or t.startswith("Lücken")
+                    or t.startswith("Eigene Vorgänger")
+                    or t.startswith("Aktualisiere")
+                    or t.startswith("Folgeanalyse")
+                    or t.startswith("Schließe")
+                    or t.startswith("Verfolge")
+                ):
+                    # tick speichert Stand; phase bei echten Phasen-Texten.
+                    if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
+                        stand.tick(t)
+                    else:
+                        stand.phase(t)
+                else:
+                    stand.tick(t)
+
+            if folge_tx or folge_bundled:
+                ergebnis = _trace_ein_utxo_tief(
+                    get_tx=get_tx,
+                    txid=txid,
+                    vout=vout,
+                    eigene=eigene,
+                    wallet_ctx=wallet_ctx,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    fetch_addr=fetch_addr,
+                    cache_source=quelle,
+                    progress=_fortschritt,
+                    cancel_cb=lambda: job.cancelled,
+                    folge_bundled=folge_bundled,
+                    folge_tx=folge_tx,
+                )
+            else:
+                ergebnis = trace_mod.trace_utxo(
+                    get_tx,
+                    txid,
+                    vout,
+                    eigene,
+                    wallet=wallet_ctx,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    fetch_address_utxos=fetch_addr,
+                    cache_source=quelle,
+                    progress=_fortschritt,
+                )
+            ergebnis["source"] = quelle
+            ergebnis["followup"] = followup
+            job.message = (
+                f"{ergebnis['summary'].get('node_count', 0)} Zuflüsse ermittelt."
+                if ergebnis.get("found") else "Keine Herkunft ermittelbar."
             )
-        ergebnis["source"] = quelle
-        ergebnis["followup"] = followup
-        job.message = (
-            f"{ergebnis['summary'].get('node_count', 0)} Zuflüsse ermittelt."
-            if ergebnis.get("found") else "Keine Herkunft ermittelbar."
-        )
-        return ergebnis
+            return ergebnis
+        finally:
+            halt.set()
+            stand.close()
 
     target = f"{txid}:{vout}"
     followup_meta = followup or ""
@@ -5872,9 +6000,20 @@ def api_job(state: AppState, job_id: str) -> dict:
 
 
 def api_cancel_job(state: AppState, job_id: str) -> dict:
-    if not state.jobs.cancel(job_id):
-        raise ApiError(409, "Vorgang läuft nicht mehr.")
-    return {"cancelled": True}
+    """
+    Bricht einen laufenden Job ab — oder einen wartenden Scan in der Pipeline.
+
+    Scan-Queue: ``queue_id`` der Warteschlange wird entfernt, ohne zu starten.
+    """
+    jid = str(job_id or "").strip()
+    if not jid:
+        raise ApiError(400, "Keine Job-ID.")
+    # Zuerst Scan-Pipeline (wartend + aktiv), sonst allgemeine Registry.
+    if state.scan_queue.cancel(jid):
+        return {"cancelled": True}
+    if state.jobs.cancel(jid):
+        return {"cancelled": True}
+    raise ApiError(409, "Vorgang läuft nicht mehr.")
 
 
 # ---------------------------------------------------------------------------
@@ -6628,7 +6767,10 @@ class Handler(BaseHTTPRequestHandler):
             typ = "text/csv; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.csv"
         else:
-            inhalt = tax_mod.als_bericht(auswertung)
+            inhalt = tax_mod.als_bericht(
+                auswertung,
+                immutable_cache_dir=self.state.immutable_cache_dir,
+            )
             typ = "text/html; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.html"
 
@@ -6714,7 +6856,10 @@ class Handler(BaseHTTPRequestHandler):
             # CSV immer als Download — im Tab wäre es nur Rohtext.
             disposition = f'attachment; filename="{name}"'
         else:
-            inhalt = sa.als_html(report)
+            inhalt = sa.als_html(
+                report,
+                immutable_cache_dir=self.state.immutable_cache_dir,
+            )
             typ = "text/html; charset=utf-8"
             name = f"satsage-selbstanzeige-{jahr}.html"
             # inline: Tab zeigt den Report (Druck → PDF). Die Oberfläche

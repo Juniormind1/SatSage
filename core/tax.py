@@ -1141,14 +1141,23 @@ def _html_escape(text: str) -> str:
     )
 
 
-def als_bericht(auswertung: dict) -> bytes:
+def als_bericht(
+    auswertung: dict,
+    *,
+    immutable_cache_dir: Path | str | None = None,
+) -> bytes:
     """
     Druckbarer Bericht als eigenständige HTML-Datei.
 
     Bewusst ohne externe Ressourcen: Die Datei lässt sich weitergeben, im
     Browser öffnen und über „Drucken → Als PDF sichern" in ein PDF wandeln —
     auf allen drei Plattformen gleich, ohne Zusatzsoftware.
+
+    Mit *immutable_cache_dir* folgt ein Abschnitt mit vollständiger
+    on-chain Hop-Kette je UTXO (gespeicherter Herkunfts-Trace).
     """
+    from core import herkunft_bericht as hb
+
     kennzahlen = auswertung["kennzahlen"]
     zeilen = []
     for eintrag in auswertung["eintraege"]:
@@ -1168,6 +1177,11 @@ def als_bericht(auswertung: dict) -> bytes:
     hinweise = "".join(
         f"<li>{_html_escape(h)}</li>" for h in auswertung["hinweise"]
     )
+    hop_abschnitt = hb.abschnitt_hop_ketten(
+        list(auswertung.get("eintraege") or []),
+        immutable_cache_dir=immutable_cache_dir,
+    )
+    hop_css = hb.HOP_KETTE_CSS if hop_abschnitt else ""
 
     # Veräußerungen als eigener Abschnitt — der steuerlich maßgebliche Vorgang
     # gehört in den Bericht, nicht nur in die Bildschirmansicht.
@@ -1230,6 +1244,7 @@ def als_bericht(auswertung: dict) -> bytes:
   .hinweise {{ margin-top: 24pt; padding-top: 10pt; border-top: 1px solid #333;
                font-size: 8.5pt; color: #444; }}
   .hinweise li {{ margin-bottom: 5pt; }}
+  {hop_css}
   @media print {{ body {{ margin: 0; }} }}
 </style></head><body>
 
@@ -1262,8 +1277,10 @@ def als_bericht(auswertung: dict) -> bytes:
   <tbody>{''.join(zeilen)}</tbody>
 </table>
 {abgang_block}
+{hop_abschnitt}
 <div class="hinweise"><ul>{hinweise}</ul>
-<p>Erzeugt mit SatSage aus lokal abgefragten Blockchain-Daten.</p></div>
+<p>Erzeugt mit SatSage aus lokal abgefragten Blockchain-Daten.
+Herkunftsnachweis: on-chain Hop-Kette aus dem Trace-Cache (keine Börsenbelege).</p></div>
 
 </body></html>
 """.encode("utf-8")

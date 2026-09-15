@@ -17,6 +17,7 @@ Der Nutzer soll **seinen** Bitcoin-Node (Electrs/Fulcrum, Core-RPC, ggf. P2P) mi
 5. **Sicherheit ohne Reibungstheater.** Echte Risiken (öffentliches Clearnet, Opt-in, Secrets) bleiben hart. Typische Heimnetz-Realität (privates LAN, Onion, Loopback) bleibt bedienbar, ohne „Labor-Flag setzen“.
 6. **Minimal sichtbare Komplexität.** Interne Retry-, Probe- und Fallback-Logik darf reich sein; UI und Log bleiben ruhig, verständlich, ohne Forensik-Lärm — Details: [`logging-richtlinie.md`](logging-richtlinie.md).
 7. **Vertrauen durch Vorhersehbarkeit.** Eine Zeile kündigt den nächsten Schritt an, bevor er startet; Ergebnis kommt danach. Kein stummes Hängen, kein „du hast etwas falsch konfiguriert“ ohne Beleg. Erstnutzer brauchen sichtbare Erfolge; im stabilen Betrieb sparsam, bei Störungen wieder gesprächig.
+8. **Anfänger belohnen.** Typisch fehleranfällige Schritte (Node verbinden, TLS, Quelle wechseln) sollen bei Erfolg **spürbar** quittiert werden — z. B. einmal Staub-Konfetti ohne große Scheine. Nicht gamifizieren (keine Streaks), aber den Moment feiern, an dem die App und der Nutzer „es geschafft“ haben.
 
 ## Konkret (Beispiele)
 
@@ -24,6 +25,7 @@ Der Nutzer soll **seinen** Bitcoin-Node (Electrs/Fulcrum, Core-RPC, ggf. P2P) mi
 |-----------|-----------|-----------------|
 | Start9-LAN, Self-Signed-TLS | Verbinden; Zertifikat im privaten Netz nicht als Blocker | Nutzer muss `SATSAGE_TLS_INSECURE=1` setzen |
 | Port spricht kein TLS / doch TLS | Automatisch oder mit einem klaren Umschalt-Hinweis | Nur `CERTIFICATE_VERIFY_FAILED` / `WRONG_VERSION_NUMBER` roh |
+| Node-Config/Quelle speichern + Test grün | Einmal Staub-Konfetti (viel Staub, keine Scheine) | Stille Erfolgsmeldung ohne spürbaren Erfolg |
 | Electrs kurz weg, P2P noch da | Fallback nach Priorität, später wieder Preferenz | Dauerhaft auf schlechterer Quelle kleben ohne Erklärung |
 | Start9-Package | Bridge-Hosts, SSL aus, UI-Felder gesperrt | Dieselbe TLS-Härtung wie öffentliches Clearnet auf die Bridge legen |
 | Öffentliches Clearnet | Opt-in + echte Zertifikatsprüfung | Still `CERT_NONE` „weil bequemer“ |

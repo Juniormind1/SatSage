@@ -880,9 +880,20 @@ def verteile_cfilter_chunks(
     block_stop = threading.Event()
     block_threads: list[threading.Thread] = []
 
+    def _soll_enden() -> bool:
+        try:
+            from core.jobs import job_abgebrochen
+            from display import is_list_abort_requested
+
+            return bool(job_abgebrochen() or is_list_abort_requested())
+        except ImportError:
+            return False
+
     def block_arbeit(peer) -> None:
         lock = peer_locks[id(peer)]
         while not block_stop.is_set():
+            if _soll_enden():
+                return
             try:
                 auftrag = block_queue.get(timeout=0.4) if block_queue else None
             except queue.Empty:
@@ -893,7 +904,14 @@ def verteile_cfilter_chunks(
             try:
                 with lock:
                     roh = peer.fetch_block(block_hash)
-            except Exception:
+            except Exception as exc:
+                try:
+                    from core.jobs import ist_abbruch
+
+                    if ist_abbruch(exc):
+                        return
+                except ImportError:
+                    pass
                 roh = None
             with block_wach:
                 block_ergebnisse[hoehe] = roh
@@ -945,6 +963,8 @@ def verteile_cfilter_chunks(
             nonlocal lebendig
             try:
                 while True:
+                    if _soll_enden():
+                        return
                     try:
                         index, chunk, versuche = auftraege.get(timeout=0.4)
                     except queue.Empty:
@@ -956,6 +976,13 @@ def verteile_cfilter_chunks(
                     try:
                         zeilen = _chunk_laden(peer, von, bis, stop)
                     except Exception as exc:
+                        try:
+                            from core.jobs import ist_abbruch
+
+                            if ist_abbruch(exc):
+                                return
+                        except ImportError:
+                            pass
                         try:
                             peer.close()
                         except Exception:
@@ -1036,8 +1063,18 @@ def verteile_cfilter_chunks(
 
         try:
             for index in range(len(chunks)):
+                if _soll_enden():
+                    try:
+                        from core.jobs import raise_if_job_cancelled
+
+                        raise_if_job_cancelled()
+                    except ImportError:
+                        pass
+                    return
                 with wach:
                     while index not in fertig:
+                        if _soll_enden():
+                            break
                         if lebendig <= 0 and index not in fertig:
                             break
                         wach.wait(timeout=1.0)
@@ -1282,8 +1319,20 @@ class BIP158Scanner:
             from display import melde_zwischenstand
 
             melde_zwischenstand(text, ersetze_praefix=ersetze_praefix)
-        except Exception:
+        except Exception as exc:
+            # Job-Abbruch darf hier nicht verschwinden (sonst läuft BIP-158
+            # trotz Abbruch-Knopf bis zum Tip weiter).
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
             pass
+
+    def _check_abbruch(self) -> None:
+        """Web-Job-Abbruch → Cancelled; CLI-q → soft über is_list_abort."""
+        from core.jobs import raise_if_job_cancelled
+
+        raise_if_job_cancelled()
 
     def _log_block_treffer(
         self,
@@ -1297,6 +1346,7 @@ class BIP158Scanner:
 
     def _emit(self, height: int, tip: int, checked: int, matches: int, phase: str,
               utxo_id: str | None = None) -> None:
+        self._check_abbruch()
         if not self._progress_callback:
             return
         self._progress_callback(
@@ -1627,7 +1677,12 @@ class BIP158Scanner:
                 ])
 
         for name, von, bis, scripts in passe:
-            from display import melde_zwischenstand
+            from display import is_list_abort_requested, melde_zwischenstand
+
+            self._check_abbruch()
+            if is_list_abort_requested():
+                self._log("BIP-158 abgebrochen.")
+                break
 
             # Historie-Pass beim Erstscan: Hits aus Turbo + Gap nachziehen.
             if name == "historie" and erstscan and xpub:
@@ -1664,8 +1719,14 @@ class BIP158Scanner:
                 cache_dir=cache_dir,
                 stats=filter_stats,
             )
+            abgebrochen = False
             for zeilen in geladen:
+                self._check_abbruch()
+                if is_list_abort_requested():
+                    abgebrochen = True
+                    break
                 for h, block_hash, _blob, roh in zeilen:
+                    self._check_abbruch()
                     display = hash_to_hex(block_hash)
                     geprueft += 1
                     if roh is None:
@@ -1677,6 +1738,9 @@ class BIP158Scanner:
                         h, display, roh, name,
                         provisional=True,
                     )
+            if abgebrochen or is_list_abort_requested():
+                self._log("BIP-158 abgebrochen.")
+                break
 
         if erstscan and block_events:
             _rebuild_chronologisch()

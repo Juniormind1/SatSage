@@ -257,6 +257,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 
 - **Node verbinden:** Leitbild in `doc/design-node-anbindung.md` â€” dem Nutzer den Node so einfach wie mÃ¶glich machen; typische Heimnetz-/TLS-/Port-Fallen selbst abfangen; HÃ¤rte nur wo nÃ¶tig (Clearnet, Opt-in), nicht als Kollateralschaden auf Desktop-LAN oder Start9-Bridge.
 - **FlÃ¼chtigkeit / Eile:** Leitbild in `doc/design-fluchtigkeit.md` â€” von unaufmerksamem, eiligem Nutzer ausgehen; gefÃ¤hrliche ZwischenzustÃ¤nde unmÃ¶glich machen (nicht nur beschriften). Beispiel Empfangs-QR: bei Wallet-Wechsel sofort entwerten, erst wieder zeigen wenn die Adresse des neuen Wallets feststeht.
+- **Anfänger belohnen:** Fehleranfällige Schritte (Node, TLS, Datenquelle) bei Erfolg spürbar quittieren — z. B. einmal Staub-Konfetti (`jubelDatenquelleErfolg`). Leitbild: `doc/design-node-anbindung.md` Prinzip 8; nicht gamifizieren.
 - **Neugier / Lernen nebenbei:** Leitbild in `doc/design-neugier.md` â€” Tooltips (`title` / `data-i18n-title`); Kuratierung `doc/lernhinweise-kuratierung.md`. **Pflicht:** Jede vom Maintainer angegebene Pleb-Lern-URL sofort in `web/lernhinweise.json` **und** Handbuch-FAQ §14 (`doc/handbuch.html`, DE+EN) nachziehen. Kein Widerspruch zur FlÃ¼chtigkeit.
 
 - **Verbose:** Default `nein` (`VERBOSE` in `.env` oder Einstellungen [4]); gekÃ¼rzte TxIDs/Adressen

@@ -111,6 +111,14 @@ def _funding_edge_from_vin(
     )
 
 
+def _abbruch_durchreichen(exc: BaseException) -> None:
+    """Job-Abbruch nicht in bare except schlucken."""
+    from core.jobs import ist_abbruch
+
+    if ist_abbruch(exc):
+        raise
+
+
 def iter_funding_inputs(
     get_tx: Callable[[str], dict],
     creator_txid: str,
@@ -124,7 +132,8 @@ def iter_funding_inputs(
     """
     try:
         tx = get_tx(creator_txid)
-    except Exception:
+    except Exception as exc:
+        _abbruch_durchreichen(exc)
         return
 
     for vin in tx.get("vin", []):
@@ -136,7 +145,8 @@ def iter_funding_inputs(
             if not prev_out:
                 continue
             yield _funding_edge_from_vin(vin, prev_out, creator_txid)
-        except Exception:
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
             continue
 
 
@@ -228,7 +238,8 @@ def _mit_vorgaengerzeit(
         progress(f"↻ Herkunft: Blockzeit zu {edge.prevout.txid[:16]}…")
     try:
         prev_tx = get_tx(edge.prevout.txid)
-    except Exception:
+    except Exception as exc:
+        _abbruch_durchreichen(exc)
         return edge
     zeit = _chain()._tx_block_time(prev_tx)
     if zeit is None:
@@ -268,7 +279,8 @@ def iter_trace_funding_inputs(
     """
     try:
         tx = get_tx(creator_txid)
-    except Exception:
+    except Exception as exc:
+        _abbruch_durchreichen(exc)
         return
 
     known_own = {
@@ -317,7 +329,8 @@ def iter_trace_funding_inputs(
             if klar is True and vin.get("prevout"):
                 try:
                     edge = _funding_edge_from_vin(vin, vin["prevout"], creator_txid)
-                except Exception:
+                except Exception as exc:
+                    _abbruch_durchreichen(exc)
                     deferred.append(vin)
                     continue
                 yield edge
@@ -332,7 +345,8 @@ def iter_trace_funding_inputs(
         if prev_out:
             try:
                 inline.append(_funding_edge_from_vin(vin, prev_out, creator_txid))
-            except Exception:
+            except Exception as exc:
+                _abbruch_durchreichen(exc)
                 continue
         else:
             deferred.append(vin)
@@ -354,8 +368,8 @@ def iter_trace_funding_inputs(
     if vorladen is not None:
         try:
             vorladen([vin["txid"] for vin in deferred if vin.get("txid")])
-        except Exception:
-            pass
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
 
     if voll:
         # Alle Eingänge auflösen — bei Opt-in / CJ auch jenseits des 20er-Limits.
@@ -380,7 +394,8 @@ def iter_trace_funding_inputs(
                 if not match_own_address(edge.addresses, own_addresses, wallet):
                     edge = _mit_vorgaengerzeit(get_tx, edge, progress=progress)
                 yield edge
-            except Exception:
+            except Exception as exc:
+                _abbruch_durchreichen(exc)
                 continue
         return
 
@@ -391,7 +406,8 @@ def iter_trace_funding_inputs(
             if not prev_out:
                 continue
             edge = _funding_edge_from_vin(vin, prev_out, creator_txid)
-        except Exception:
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
             continue
 
         if match_own_address(edge.addresses, own_addresses, wallet):

@@ -5,17 +5,22 @@ Prüft die Herkunftsanalyse gegen erfundene Ketten: Wo endet der Walk, was
 zählt als eigener und was als externer Zufluss, und bricht er bei Zyklen und
 zu großer Tiefe zuverlässig ab.
 """
+import tempfile
 import unittest
+from pathlib import Path
 
 import analyze
+import main
 import trace_engine
 from tests.fixtures import (
     BIP84_CHANGE_0,
     BIP84_RECEIVE_0,
+    BIP84_ZPUB,
     EXTERN_A,
     EXTERN_B,
     TXID_EXTERN,
     TXID_WALLET_IN,
+    ZWEITER_ZPUB,
     core_tx,
     core_vin,
     core_vout,
@@ -113,6 +118,84 @@ class TestInterneKette(unittest.TestCase):
         enkel = node["sources"][0]["trace"]["sources"]
         self.assertEqual(enkel[0]["type"], "external")
         self.assertEqual(enkel[0]["address"], EXTERN_A)
+
+
+class TestInternUeberChangeJenseitsMaxAddresses(unittest.TestCase):
+    """
+    Wallet A sendet von Change-Index ≫ max_addresses an Wallet B.
+
+    Ohne Seed bis scan_end_index kennt match_own_address die Change-Adresse
+    nicht → fälschlich „Extern“ (Firmung ← Cash+Carry Change #91).
+    """
+
+    def test_scan_end_seed_macht_change_intern(self):
+        change_hi = main.derive_address_at_index(BIP84_ZPUB, 1, 91)
+        self.assertTrue(change_hi)
+        empfaenger = main.derive_address_at_index(ZWEITER_ZPUB, 0, 0)
+        self.assertTrue(empfaenger)
+
+        t_fund = txid("f1")
+        t_sende = txid("f2")
+        chain = {
+            t_fund: core_tx(
+                t_fund,
+                [core_vin(TXID_EXTERN, 0)],
+                # vout-Index = Listenindex (resolve_vin_prevout)
+                [
+                    core_vout(0, EXTERN_B, 0.0002),
+                    core_vout(1, change_hi, 0.014),
+                ],
+            ),
+            t_sende: core_tx(
+                t_sende,
+                [core_vin(t_fund, 1)],
+                [core_vout(0, empfaenger, 0.0018)],
+            ),
+            TXID_EXTERN: core_tx(
+                TXID_EXTERN,
+                [core_vin(txid("c0"), 0)],
+                [core_vout(0, EXTERN_A, 1.0)],
+            ),
+        }
+        get_tx = make_get_tx(chain)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            # Nur leerer Bestand, aber Scan-Horizont bis Index 206 (wie CC).
+            main.save_xpub_utxo_cache(
+                BIP84_ZPUB, [], cache, "test",
+                scan_end_index=206, max_addresses=50,
+            )
+            main.save_xpub_utxo_cache(
+                ZWEITER_ZPUB, [], cache, "test",
+                scan_end_index=10, max_addresses=50,
+            )
+            ctx = main.build_wallet_context(
+                [BIP84_ZPUB, ZWEITER_ZPUB],
+                ["Cash+Carry", "Firmung"],
+                max_addresses=50,
+                max_addresses_per_xpub=[50, 50],
+                script_types=["segwit", "segwit"],
+            )
+            # Ohne Seed: Change #91 unbekannt → Extern
+            self.assertNotIn(change_hi, ctx.address_to_wallet)
+            own_ohne = set(ctx.address_to_wallet)
+            node_ohne = analyze.trace_utxo_origin(
+                get_tx, t_sende, 0, own_ohne, wallet=ctx,
+            )
+            self.assertEqual(node_ohne["sources"][0]["type"], "external")
+
+            main.seed_wallet_addresses_from_utxo_cache(
+                ctx, [BIP84_ZPUB, ZWEITER_ZPUB], cache,
+            )
+            self.assertEqual(ctx.address_to_wallet.get(change_hi), "Cash+Carry")
+            own = set(ctx.address_to_wallet)
+            node = analyze.trace_utxo_origin(
+                get_tx, t_sende, 0, own, wallet=ctx,
+            )
+            src = node["sources"][0]
+            self.assertEqual(src["type"], "internal")
+            self.assertEqual(src["address"], change_hi)
 
 
 class TestRauteGemeinsamerVorgaenger(unittest.TestCase):

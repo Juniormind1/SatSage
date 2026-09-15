@@ -519,6 +519,15 @@ button, input, select { font: inherit; color: inherit; }
   pointer-events: none;
   z-index: 20;
 }
+/* Datenquellen-Erfolg: Staub über der ganzen App (keine großen Scheine). */
+.satsage-staub-konfetti {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9000;
+}
 .empfang-pane--konfetti .empfang-qr-wrap {
   position: relative;
   z-index: 1;
@@ -696,6 +705,22 @@ button, input, select { font: inherit; color: inherit; }
 .nav-eintrag.nav-warn.aktiv {
   color: var(--warn);
   border-left-color: var(--warn);
+}
+.nav-job-zeile {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+}
+.nav-job-zeile .nav-job {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.nav-job-abbruch {
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
 }
 .nav-jobs {
   display: flex;

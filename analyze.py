@@ -203,6 +203,10 @@ def trace_utxo_origin(
     try:
         tx = get_tx(creator_txid)
     except Exception as e:
+        from core.jobs import ist_abbruch
+
+        if ist_abbruch(e):
+            raise
         node = {
             "type": "error",
             "utxo": utxo_key,
@@ -381,7 +385,13 @@ def trace_utxo_origin(
                     "time_ts": ext_ts,
                     "time": ext_time,
                 })
-        except Exception:
+        except Exception as exc:
+            # Job-Abbruch (Cancelled) darf hier nicht verschwinden — sonst
+            # bleibt „Lücken schließen“ trotz Abbruch-Knopf ewig laufen.
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
             continue
 
     if not node["sources"]:
@@ -1002,23 +1012,37 @@ def _run_tx_oriented_followups(
     cache_dir: Path | None,
     fetch_address_utxos,
     cache_source: str | None,
+    *,
+    cancel_cb=None,
+    progress_cb=None,
 ):
     """Führt die transaktionsorientierte Folge-Analyse für Vorgänger-Txs aus."""
-    for pred_txid in sorted(internal_predecessors):
-        if pred_txid != current_txid:
-            analyze_tx(
-                get_tx,
-                pred_txid,
-                own_addresses,
-                analyzed_txs=analyzed_txs,
-                depth=depth + 1,
-                trace_funding=True,
-                wallet=wallet,
-                cache_dir=cache_dir,
-                fetch_address_utxos=fetch_address_utxos,
-                cache_source=cache_source,
-                allow_tx_followup=True,
+    from core.jobs import Cancelled
+
+    preds = [t for t in sorted(internal_predecessors) if t != current_txid]
+    gesamt = len(preds)
+    for index, pred_txid in enumerate(preds, start=1):
+        if cancel_cb and cancel_cb():
+            raise Cancelled()
+        if progress_cb:
+            progress_cb(
+                f"Eigene Vorgänger-Txs {index}/{gesamt}: {pred_txid[:16]}…"
             )
+        analyze_tx(
+            get_tx,
+            pred_txid,
+            own_addresses,
+            analyzed_txs=analyzed_txs,
+            depth=depth + 1,
+            trace_funding=True,
+            wallet=wallet,
+            cache_dir=cache_dir,
+            fetch_address_utxos=fetch_address_utxos,
+            cache_source=cache_source,
+            allow_tx_followup=True,
+            cancel_cb=cancel_cb,
+            progress_cb=progress_cb,
+        )
 
 def analyze_tx(
     get_tx,
@@ -1032,10 +1056,17 @@ def analyze_tx(
     fetch_address_utxos=None,
     cache_source: str | None = None,
     allow_tx_followup: bool = False,
+    cancel_cb=None,
+    progress_cb=None,
 ) -> TxFollowupContext | None:
     """Analysiert die Tx und zeigt eigene Adressen als Input/Output."""
+    from core.jobs import Cancelled, ist_abbruch
+
     if analyzed_txs is None:
         analyzed_txs = set()
+
+    if cancel_cb and cancel_cb():
+        raise Cancelled()
 
     if txid in analyzed_txs:
         return
@@ -1047,6 +1078,8 @@ def analyze_tx(
         print(f"Fehler beim Laden der Tx: HTTP {e.code} ({e.reason})")
         return
     except Exception as e:
+        if ist_abbruch(e):
+            raise
         print(f"Fehler beim Laden der Tx: {e}")
         return
 
@@ -1072,7 +1105,9 @@ def analyze_tx(
                         "amount_sats": inp.amount_sats,
                         "from_tx": inp.prevout.key,
                     })
-        except Exception:
+        except Exception as exc:
+            if ist_abbruch(exc):
+                raise
             continue
 
     for vout in tx.get("vout", []):
@@ -1218,6 +1253,8 @@ def analyze_tx(
             cache_dir,
             fetch_address_utxos,
             cache_source,
+            cancel_cb=cancel_cb,
+            progress_cb=progress_cb,
         )
         return None
     if predecessors:

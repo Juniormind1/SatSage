@@ -87,7 +87,20 @@ def format_sats(sats: int | float) -> str:
 
 
 def is_list_abort_requested() -> bool:
-    return _cancel_abort_event is not None and _cancel_abort_event.is_set()
+    """
+    CLI-``q`` *oder* Web-Job-Abbruch.
+
+    Scan-/Gap-/Fulcrum-Schleifen prüfen nur diese Funktion — ohne Job-Anbindung
+    wirkte der GUI-Abbruch-Knopf dort nicht (BIP-158, Electrs-Gap, …).
+    """
+    if _cancel_abort_event is not None and _cancel_abort_event.is_set():
+        return True
+    try:
+        from core.jobs import job_abgebrochen
+
+        return bool(job_abgebrochen())
+    except ImportError:
+        return False
 
 
 def _abort_input_available() -> bool:
@@ -270,7 +283,16 @@ def melde_zwischenstand(
 
     *ersetze_praefix*: statt neuer Zeile die letzte Log-Zeile mit diesem
     Anfang überschreiben (Filter-Treffer → False Positive / UTXO-Fund).
+
+    Wirft ``Cancelled``, wenn der Web-Job abgebrochen wurde — damit greift
+    Abbruch an jeder BIP-158-/Scan-Logzeile, nicht erst am Job-Ende.
     """
+    try:
+        from core.jobs import raise_if_job_cancelled
+
+        raise_if_job_cancelled()
+    except ImportError:
+        pass
     text = (message or "").strip()
     if not text:
         return

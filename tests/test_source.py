@@ -30,6 +30,100 @@ def _ohne_live_p2p():
     )
 
 
+class TestTlsAutoProbe(unittest.TestCase):
+    """TLS ja/nein: Gegenprobe und Festschreiben."""
+
+    def test_should_try_opposite_bei_wrong_version(self):
+        import main
+
+        self.assertTrue(
+            main.tls_should_try_opposite("WRONG_VERSION_NUMBER")
+        )
+        self.assertTrue(
+            main.tls_should_try_opposite(
+                "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF"
+            )
+        )
+        self.assertFalse(main.tls_should_try_opposite("connection refused"))
+        self.assertFalse(main.tls_should_try_opposite("timed out"))
+        self.assertFalse(
+            main.tls_should_try_opposite("listunspent nicht unterstützt")
+        )
+
+    def test_check_reachable_probiert_ohne_tls_und_meldet_persist(self):
+        from fulcrum import FulcrumClient
+
+        client = mock.Mock(spec=FulcrumClient)
+        client.server_software = "libbitcoin"
+        client.server_software_raw = "/libbitcoin:4.0.0/"
+        client.close = mock.Mock()
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "true",  # falsch für Klartext-Port
+        }
+        quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
+        calls = {"n": 0}
+
+        def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                    require_listunspent=False):
+            calls["n"] += 1
+            if use_ssl:
+                return None, "WRONG_VERSION_NUMBER"
+            return client, None
+
+        with mock.patch("fulcrum.connect_fulcrum", side_effect=connect):
+            out = check_reachable(quelle, werte, timeout=1)
+        self.assertTrue(out.reachable)
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(out.ssl_effective, False)
+        self.assertEqual(out.ssl_persist.get("FULCRUM_SSL"), "false")
+        self.assertIn("festgeschrieben", out.note)
+
+
+class TestElectrumSoftwareLabel(unittest.TestCase):
+    """server.version → Pillen-Name (electrs / fulcrum / libbitcoin)."""
+
+    def test_libbitcoin_pfad_form(self):
+        from fulcrum import parse_electrum_server_software
+
+        label, roh = parse_electrum_server_software(["/libbitcoin:4.0.0/", "1.4"])
+        self.assertEqual(label, "libbitcoin")
+        self.assertIn("libbitcoin", roh)
+
+    def test_electrs_und_fulcrum(self):
+        from fulcrum import parse_electrum_server_software
+
+        self.assertEqual(
+            parse_electrum_server_software(["electrs/0.10.5", "1.4"])[0],
+            "electrs",
+        )
+        self.assertEqual(
+            parse_electrum_server_software(["Fulcrum 1.9.1", "1.4"])[0],
+            "fulcrum",
+        )
+
+    def test_check_reachable_uebernimmt_software(self):
+        from fulcrum import FulcrumClient
+
+        client = mock.Mock(spec=FulcrumClient)
+        client.server_software = "libbitcoin"
+        client.server_software_raw = "/libbitcoin:4.0.0/"
+        client.close = mock.Mock()
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
+        with mock.patch("fulcrum.connect_fulcrum", return_value=(client, None)):
+            out = check_reachable(quelle, werte, timeout=1)
+        self.assertTrue(out.reachable)
+        self.assertEqual(out.software, "libbitcoin")
+        self.assertIn("libbitcoin", out.detail)
+        self.assertIn("libbitcoin", out.as_dict()["software"])
+
+
 class TestCheckReachable(unittest.TestCase):
 
     def test_kopie_funktioniert_fuer_alle_quellen(self):

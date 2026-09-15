@@ -92,7 +92,41 @@ def _is_unknown_method_error(exc: BaseException, method: str) -> bool:
     return "unknown method" in msg and method.lower() in msg
 
 
-def supports_listunspent(client: FulcrumClient) -> bool:
+def parse_electrum_server_software(version_result: Any) -> tuple[str, str]:
+    """
+    Kurzer Implementierungsname + Rohstring aus ``server.version``.
+
+    Electrum-RPC liefert typisch ``[server_string, protocol]``, z. B.
+    ``["/libbitcoin:4.0.0/", "1.4"]``, ``["electrs/0.10.5", "1.4"]``,
+    ``["Fulcrum 1.9.1", "1.4"]``. Rückgabe: ``(label, roh)`` — label für
+    die UI-Pille (``electrs`` / ``fulcrum`` / ``libbitcoin`` / …).
+    """
+    roh = ""
+    if isinstance(version_result, (list, tuple)) and version_result:
+        roh = str(version_result[0] or "").strip()
+    elif isinstance(version_result, str):
+        roh = version_result.strip()
+    if not roh:
+        return "", ""
+    klein = roh.lower().strip().strip("/")
+    # "/libbitcoin:4.0.0/" · electrs/0.10 · Fulcrum 1.9
+    if "libbitcoin" in klein:
+        return "libbitcoin", roh
+    if "fulcrum" in klein:
+        return "fulcrum", roh
+    if "electrs" in klein:
+        return "electrs", roh
+    if "electrumx" in klein or "electrum-x" in klein:
+        return "electrumx", roh
+    if "rostrum" in klein:
+        return "rostrum", roh
+    # Unbekannt: erstes Token (ohne Versionszahlen-Pfad)
+    token = klein.split("/")[0].split(":")[0].split()[0]
+    token = "".join(c for c in token if c.isalnum() or c in "-_")[:24]
+    return (token or "electrum"), roh
+
+
+def supports_listunspent(client: "FulcrumClient") -> bool:
     """Prüft, ob der Server blockchain.scripthash.listunspent unterstützt."""
     try:
         client.request(_LISTUNSPENT_METHOD, [_PROBE_SCRIPT_HASH])
@@ -145,6 +179,11 @@ class FulcrumClient:
         self._sock: socket.socket | ssl.SSLSocket | None = None
         self._request_id = 0
         self._lock = threading.Lock()
+        # Genau ein server.version pro TCP-Session (libbitcoin: zweites → bad_request).
+        self._handshaked = False
+        self.server_version: Any = None
+        self.server_software: str = ""
+        self.server_software_raw: str = ""
 
     @staticmethod
     def _outbound_values() -> dict[str, str] | None:
@@ -174,6 +213,10 @@ class FulcrumClient:
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
         else:
             self._sock = raw
+        self._handshaked = False
+        self.server_version = None
+        self.server_software = ""
+        self.server_software_raw = ""
         # Connect-Timeout gilt sonst nicht zuverlässig für spätere recv —
         # ohne das hängt get_history über Tor minutenlang ohne Abbruch.
         try:
@@ -188,6 +231,33 @@ class FulcrumClient:
             except OSError:
                 pass
             self._sock = None
+        self._handshaked = False
+
+    def _apply_server_version(self, version_result: Any) -> None:
+        label, roh = parse_electrum_server_software(version_result)
+        self.server_version = version_result
+        self.server_software = label
+        self.server_software_raw = roh
+
+    def _handshake_locked(self) -> Any:
+        """
+        ``server.version`` genau einmal pro TCP-Session.
+
+        libbitcoin antwortet auf ein zweites Handshake mit bad_request /
+        „moin moin“-Geschwätz — deshalb kein erneutes ``server.version``.
+        Aufruf nur unter ``self._lock``.
+        """
+        if self._handshaked:
+            return self.server_version
+        ver = self._request_once("server.version", [CLIENT_NAME, PROTOCOL_VERSION])
+        self._apply_server_version(ver)
+        self._handshaked = True
+        return ver
+
+    def handshake(self) -> Any:
+        """Electrum-Handshake (einmalig). Siehe ``_handshake_locked``."""
+        with self._lock:
+            return self._handshake_locked()
 
     def _request_once(self, method: str, params: list | None = None) -> Any:
         if not self._sock:
@@ -223,10 +293,15 @@ class FulcrumClient:
         JSON-RPC-Aufruf. Bei Timeout/Abbrecher (typisch Tor + große Tx)
         bis ``FULCRUM_REQUEST_RETRIES`` neu verbinden und wiederholen.
         """
+        if method == "server.version":
+            # Immer über handshake — kein zweites version auf derselben Session.
+            return self.handshake()
         letzter: BaseException | None = None
         with self._lock:
             for versuch in range(1, FULCRUM_REQUEST_RETRIES + 1):
                 try:
+                    if not self._handshaked and self._sock is not None:
+                        self._handshake_locked()
                     return self._request_once(method, params)
                 except (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError) as exc:
                     letzter = exc
@@ -235,6 +310,7 @@ class FulcrumClient:
                     self.close()
                     try:
                         self.connect()
+                        self._handshake_locked()
                     except Exception as reconnect_exc:
                         letzter = reconnect_exc
                         continue
@@ -472,7 +548,8 @@ def connect_fulcrum(
     )
     try:
         client.connect()
-        client.request("server.version", [CLIENT_NAME, PROTOCOL_VERSION])
+        # Ein Handshake — Ergebnis liegt an client.server_software (Pille).
+        client.handshake()
         if require_listunspent and not supports_listunspent(client):
             client.close()
             return None, "listunspent nicht unterstützt"
@@ -1700,7 +1777,14 @@ def fetch_wallet_history_fulcrum(
         neu: list[dict] = []
         try:
             scripthash = address_to_scripthash(address)
-        except Exception:
+        except Exception as exc:
+            try:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
+            except ImportError:
+                pass
             if on_address_done:
                 on_address_done(address, [])
             continue

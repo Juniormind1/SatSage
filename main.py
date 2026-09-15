@@ -1457,6 +1457,36 @@ def _probe_public_onion_endpoint(
     return index, client, error
 
 
+def tls_should_try_opposite(error: str | None) -> bool:
+    """
+    Ob nach Fehlversuch die andere TLS-Einstellung sinnvoll ist.
+
+    Reine Netzfehler (Timeout, refused) nicht — da hilft SSL-Umschalten nicht.
+    Protokoll-Mismatch (wrong version, EOF, SSL) und unklare Handshake-Fehler ja.
+    """
+    if not error:
+        return False
+    text = str(error).lower()
+    if "listunspent" in text:
+        return False
+    if any(
+        x in text
+        for x in (
+            "timed out",
+            "timeout",
+            "connection refused",
+            "network is unreachable",
+            "no route to host",
+            "name or service not known",
+            "nodename nor servname",
+            "getaddrinfo failed",
+            "temporary failure in name resolution",
+        )
+    ):
+        return False
+    return True
+
+
 def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     """
     Übersetzt typische Verbindungsfehler in einen umsetzbaren Hinweis.
@@ -1472,7 +1502,7 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     if use_ssl and "wrong version number" in text:
         return (
             "TLS-Handshake fehlgeschlagen — der Port spricht vermutlich kein SSL. "
-            "FULCRUM_SSL=false in .env setzen oder --fulcrum-no-ssl verwenden."
+            "SatSage probiert beim nächsten Check ohne TLS und schreibt es fest."
         )
     if use_ssl and "certificate verify failed" in text:
         return (
@@ -1483,7 +1513,7 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     if not use_ssl and ("unexpected eof" in text or "not enough data" in text):
         return (
             "Verbindung ohne TLS abgebrochen — der Port erwartet vermutlich SSL. "
-            "FULCRUM_SSL=true in .env setzen."
+            "SatSage probiert beim nächsten Check mit TLS und schreibt es fest."
         )
     if "connection refused" in text:
         return "Port geschlossen — läuft Fulcrum, und stimmt FULCRUM_PORT?"
@@ -1547,20 +1577,36 @@ def _try_fulcrum_endpoint(
             tor_proxy=None,
             require_listunspent=True,
         )
-    if (
-        not client
-        and use_ssl
-        and tor_proxy
-        and error
-        and "wrong version number" in error.lower()
-    ):
+    # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung (LAN + Onion).
+    if not client and error and tls_should_try_opposite(error):
+        alt = not use_ssl
         print(
-            "  → TLS-Handshake fehlgeschlagen, versuche denselben Port ohne TLS…",
+            f"  → {'TLS' if use_ssl else 'ohne TLS'} fehlgeschlagen "
+            f"({error}) — versuche {'ohne TLS' if use_ssl else 'mit TLS'}…",
             flush=True,
         )
-        return _try_fulcrum_endpoint(label, host, port, False, tor_proxy)
+        if tor_proxy:
+            _index, client, error = _probe_public_onion_endpoint(
+                0, host, port, alt, tor_proxy,
+            )
+        else:
+            from fulcrum import connect_fulcrum
+
+            client, error = connect_fulcrum(
+                host,
+                port,
+                use_ssl=alt,
+                timeout=FULCRUM_CONNECT_TIMEOUT,
+                tor_proxy=None,
+                require_listunspent=True,
+            )
+        use_ssl = alt
     if client:
-        print(f"  → {label} erreichbar", flush=True)
+        print(
+            f"  → {label} erreichbar"
+            + (f" ({'TLS' if use_ssl else 'ohne TLS'})"),
+            flush=True,
+        )
         return client
     if error and "listunspent" in error:
         print(f"  → ungeeignet: {error}", flush=True)
@@ -3892,6 +3938,55 @@ def seed_wallet_addresses_from_utxo_cache(
         cache_dir=cache_dir,
         xpubs=xpubs,
     )
+    # Ausgegebene Change-Adressen jenseits max_addresses: nicht in utxos[],
+    # oft auch nicht im Verlauf — scan_end_index kennt den Scan-Horizont.
+    seed_wallet_addresses_from_scan_end(wallet, xpubs, cache_dir)
+
+
+def seed_wallet_addresses_from_scan_end(
+    wallet: WalletContext | None,
+    xpubs: list[str],
+    cache_dir: Path,
+) -> int:
+    """
+    Leitet Adressen bis ``scan_end_index`` ab und registriert sie.
+
+    Der UTXO-Scan hat diese Indizes bereits geprüft. Ausgegebene Change-
+    Adressen stehen danach oft weder in ``utxos[]`` noch im Verlauf (wenn
+    der Verlauf nur bis ``max_addresses`` geplant war). ``match_own_address``
+    macht absichtlich keine HD-Suche — ohne diesen Seed stuft die Herkunft
+    interne Überträge (Change jenseits der Start-Ableitung) als Extern ein.
+    """
+    if wallet is None:
+        return 0
+    n = 0
+    for xpub in xpubs:
+        if xpub not in wallet.names_by_xpub:
+            continue
+        entry = load_xpub_cache_entry(xpub, cache_dir)
+        if not entry:
+            continue
+        try:
+            scan_end = int(entry.get("scan_end_index") or 0)
+        except (TypeError, ValueError):
+            scan_end = 0
+        if scan_end <= 0:
+            continue
+        # derive_addresses: max//2 Indizes je Chain → Indizes 0 .. scan_end-1
+        max_addr = max(scan_end * 2, int(wallet.max_addresses_for(xpub) or 0))
+        configured = int(wallet.max_addresses_for(xpub) or 0)
+        # Schon in build_wallet_context abgedeckt?
+        if scan_end <= max(1, configured // 2):
+            continue
+        script = wallet.script_type_for(xpub)
+        for addr in derive_addresses(xpub, max_addr, script_type=script):
+            if addr in wallet.address_to_wallet:
+                continue
+            _register_wallet_address(wallet, xpub, addr)
+            n += 1
+        if max_addr > configured:
+            wallet.max_addresses_by_xpub[xpub] = max_addr
+    return n
 
 
 def seed_wallet_addresses_from_verlauf_cache(
@@ -6072,6 +6167,10 @@ def _try_scantxoutset_xpub(
             on_progress=on_progress,
         )
     except Exception as exc:
+        from core.jobs import ist_abbruch
+
+        if ist_abbruch(exc):
+            raise
         print(f"  scantxoutset übersprungen: {exc}", flush=True)
         return None
     if ergebnis is None:
@@ -6404,6 +6503,10 @@ def sync_xpub_zum_tip(
                 allow_scantxoutset=False,
             )
         except Exception as exc:
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
             # Multisig/Deskriptor oder Peer-Fehler: nicht den ganzen Wallet
             # überspringen — Electrs light hält den Cache frisch.
             msg = (
@@ -6642,6 +6745,10 @@ def sync_wallets_zum_tip(
                 nur_bekannte=nur_bekannte,
             )
         except Exception as exc:
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
             label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."
             msg = f"{label}: Aktualisierung fehlgeschlagen ({exc})"
             print(f"  ⚠️  {msg}", flush=True)

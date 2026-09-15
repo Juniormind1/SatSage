@@ -227,7 +227,11 @@ def analyze_ownership(
         elif get_tx is not None:
             try:
                 resolved = resolve_vin_prevout(get_tx, vin, progress=progress)
-            except Exception:
+            except Exception as exc:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
                 resolved = None
             if resolved:
                 addrs = tuple(chain._extract_addresses(resolved))
@@ -405,7 +409,11 @@ def _prev_tx_via_single_vin(
         return None
     try:
         return get_tx(str(vin["txid"]))
-    except Exception:
+    except Exception as exc:
+        from core.jobs import ist_abbruch
+
+        if ist_abbruch(exc):
+            raise
         return None
 
 

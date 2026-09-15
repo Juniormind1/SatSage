@@ -102,6 +102,13 @@ class SourceInfo:
     laden_filter: str = ""  # onion | clearnet | ""
     #: Zeilen für den Log-Bereich. Ankündigung vor dem Schritt, nicht danach.
     log: list[str] = field(default_factory=list)
+    #: Electrum-Implementierung aus ``server.version`` (electrs/fulcrum/libbitcoin).
+    software: str = ""
+    software_raw: str = ""
+    #: Effektives TLS nach Auto-Probe (None = unverändert / nicht geprüft).
+    ssl_effective: bool | None = None
+    #: Wenn Auto-Probe von der .env abwich: Schlüssel → "true"/"false" zum Speichern.
+    ssl_persist: dict[str, str] = field(default_factory=dict)
 
     @property
     def editierbar(self) -> bool:
@@ -133,6 +140,10 @@ class SourceInfo:
             "laden_url": self.laden_url,
             "laden_filter": self.laden_filter,
             "log": list(self.log),
+            "software": self.software,
+            "software_raw": self.software_raw,
+            "ssl_effective": self.ssl_effective,
+            "ssl_persist": dict(self.ssl_persist) if self.ssl_persist else {},
         }
 
 
@@ -167,6 +178,8 @@ def mergere_erreichbarkeit(
                     error="",
                     peer_count=0,
                     peer_hosts=[],
+                    software="",
+                    software_raw="",
                 )
             )
             continue
@@ -181,6 +194,8 @@ def mergere_erreichbarkeit(
                 error=str(alt_q.get("error") or ""),
                 peer_count=int(alt_q.get("peer_count") or 0),
                 peer_hosts=hosts,
+                software=str(alt_q.get("software") or ""),
+                software_raw=str(alt_q.get("software_raw") or ""),
             )
         )
     return out
@@ -419,7 +434,8 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
                  "Fulcrum meist 50002 (TLS) oder 50001, electrs oft 50001"),
             Feld("FULCRUM_SSL", "TLS verwenden", "schalter",
                  "true" if ssl_an else "false",
-                 "Start9-Onion auf Port 50001 meist ohne TLS; 50002 oft mit"),
+                 "Beim Verbinden wird die andere Einstellung mitprobiert "
+                 "und der Erfolg in .env festgeschrieben"),
             Feld("FULCRUM_TOR_PROXY", "Tor-SOCKS-Proxy", "text",
                  values.get("FULCRUM_TOR_PROXY", "").strip(),
                  "nur für .onion nötig, z. B. 127.0.0.1:9150"),
@@ -1154,6 +1170,12 @@ def check_reachable(
             )
         timeout = max(timeout, FULCRUM_ONION_TIMEOUT)
 
+    ssl_gewuenscht = use_ssl
+    # UI-Schalter ist FULCRUM_SSL; Onion-Sonderfall FULCRUM_TOR_SSL mitziehen.
+    ssl_env_keys = ["FULCRUM_SSL"]
+    if not lan and (values.get("FULCRUM_TOR_SSL") or "").strip():
+        ssl_env_keys.append("FULCRUM_TOR_SSL")
+
     try:
         from fulcrum import connect_fulcrum
 
@@ -1162,28 +1184,24 @@ def check_reachable(
             host, port, use_ssl=use_ssl, timeout=timeout,
             tor_proxy=tor_proxy, require_listunspent=True,
         )
-        # Start9-Onion auf 50001 spricht kein TLS — der GUI-Default „ja“
-        # führt sonst zu WRONG_VERSION_NUMBER und „nicht erreichbar“.
-        if (
-            not client
-            and use_ssl
-            and host.endswith(".onion")
-            and fehler
-            and "wrong version number" in fehler.lower()
-        ):
-            log(f"TLS-Handshake fehlgeschlagen: {fehler}")
-            log("Fallback: derselbe Port ohne TLS")
-            use_ssl = False
-            log(f"Verbinde mit {_verbindung_ziel(host, port, False, tor_proxy)}")
+        # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung
+        # (LAN + Onion, Design Node-Anbindung — Nutzer soll nicht raten).
+        if not client and fehler and main.tls_should_try_opposite(fehler):
+            alt = not use_ssl
+            log(
+                f"{'TLS' if use_ssl else 'Ohne TLS'} fehlgeschlagen: {fehler}"
+            )
+            log(
+                f"Fallback: derselbe Port "
+                f"{'ohne TLS' if use_ssl else 'mit TLS'}"
+            )
+            log(f"Verbinde mit {_verbindung_ziel(host, port, alt, tor_proxy)}")
             client, fehler = connect_fulcrum(
-                host, port, use_ssl=False, timeout=timeout,
+                host, port, use_ssl=alt, timeout=timeout,
                 tor_proxy=tor_proxy, require_listunspent=True,
             )
             if client:
-                ergebnis.note = (
-                    "Verbunden ohne TLS — FULCRUM_SSL=false setzen "
-                    "(Start9-Onion typisch)."
-                )
+                use_ssl = alt
     except Exception as exc:  # Import- oder Laufzeitfehler
         ergebnis.reachable = False
         ergebnis.error = str(exc)
@@ -1191,10 +1209,37 @@ def check_reachable(
         return ergebnis
 
     if client:
+        soft = str(getattr(client, "server_software", "") or "")
+        soft_raw = str(getattr(client, "server_software_raw", "") or "")
         ergebnis.reachable = True
         ergebnis.peer_count = 1
         ergebnis.peer_hosts = [f"{host}:{port}"]
-        log(f"Verbunden. Privatsphäre: {ergebnis.privacy}")
+        ergebnis.software = soft
+        ergebnis.software_raw = soft_raw
+        ergebnis.ssl_effective = use_ssl
+        # Detail: Implementierung sichtbar (Pille + Datenquellen-Karte)
+        basis = f"{host}:{port}"
+        if soft:
+            basis = f"{soft} · {basis}"
+        if soft_raw and soft_raw.lower().strip("/") != soft.lower():
+            basis = f"{basis} · {soft_raw}"
+        ergebnis.detail = basis + (
+            f" · {'mit TLS' if use_ssl else 'ohne TLS'}"
+        )
+        if use_ssl != ssl_gewuenscht:
+            wert = "true" if use_ssl else "false"
+            ergebnis.ssl_persist = {k: wert for k in ssl_env_keys}
+            ergebnis.note = (
+                f"TLS automatisch auf "
+                f"{'an' if use_ssl else 'aus'} gestellt "
+                f"(FULCRUM_SSL={wert}) — wird in .env festgeschrieben."
+            )
+            log(ergebnis.note)
+        log(
+            f"Verbunden"
+            + (f" ({soft})" if soft else "")
+            + f". Privatsphäre: {ergebnis.privacy}"
+        )
         try:
             client.close()
         except Exception:

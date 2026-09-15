@@ -20,6 +20,10 @@ from dataclasses import dataclass, field
 _zwischenstand: contextvars.ContextVar["Fortschritt | None"] = contextvars.ContextVar(
     "job_zwischenstand", default=None
 )
+#: Job, der *diesen* Thread gerade ausführt (für Abbruch in main/fulcrum/bip158).
+_aktueller_job: contextvars.ContextVar["Job | None"] = contextvars.ContextVar(
+    "aktueller_job", default=None
+)
 _fortschritt_lock = threading.Lock()
 _fortschritte: list["Fortschritt"] = []
 
@@ -134,6 +138,42 @@ def aktueller_zwischenstand() -> "Fortschritt | None":
 
 class Cancelled(Exception):
     """Wird geworfen, wenn ein Vorgang abgebrochen wurde."""
+
+
+def ist_abbruch(exc: BaseException) -> bool:
+    """
+    True bei Job-Abbruch (Cancelled) — auch über Modulgrenzen hinweg.
+
+    Bare ``except Exception`` in Trace/Engine darf Abbruch nicht schlucken,
+    sonst bleibt „Lücken schließen“ trotz Knopf ewig auf running.
+    """
+    if isinstance(exc, Cancelled):
+        return True
+    # Duck-Typing: anderer Import-Pfad / Reload darf denselben Namen tragen.
+    return type(exc).__name__ == "Cancelled"
+
+
+def aktueller_job() -> "Job | None":
+    """Der Job dieses Worker-Threads, sonst None (CLI ohne Web-Job)."""
+    return _aktueller_job.get()
+
+
+def job_abgebrochen() -> bool:
+    """True, wenn der aktuelle Job abgebrochen wurde (Web-Abbruch-Knopf)."""
+    job = _aktueller_job.get()
+    return job is not None and job.cancelled
+
+
+def raise_if_job_cancelled() -> None:
+    """
+    Wirft Cancelled, sobald der Web-Job abgebrochen wurde.
+
+    Aufruf in engen Schleifen (BIP-158-Filter, Gap-Scan, Downloads) — sonst
+    greift der Abbruch-Knopf erst beim nächsten job.progress.
+    """
+    job = _aktueller_job.get()
+    if job is not None:
+        job.raise_if_cancelled()
 
 
 class JobQuotaExceeded(Exception):
@@ -391,30 +431,43 @@ class JobRegistry:
             self._aufraeumen()
 
         def lauf():
+            token = _aktueller_job.set(job)
             try:
-                job.result = func(job)
-                job.status = "cancelled" if job.cancelled else "done"
-            except Cancelled:
-                job.status = "cancelled"
-                job.message = "Abgebrochen."
-            except SystemExit as exc:
-                # main._setup_blockchain_client bricht so ab — sonst bleibt
-                # der Job ewig auf running (letzte Log-Zeile klebt).
-                job.status = "failed"
-                if isinstance(exc.code, str) and exc.code.strip():
-                    text = exc.code.strip()
-                elif exc.code not in (None, 0):
-                    text = str(exc.code)
-                else:
-                    text = str(exc) or "Vorgang beendet."
-                job.error = text
-                job.message = text
-            except Exception as exc:
-                job.status = "failed"
-                job.error = f"{type(exc).__name__}: {exc}"
-                job.message = "Fehlgeschlagen."
-                traceback.print_exc()
+                try:
+                    job.result = func(job)
+                    if job.cancelled:
+                        job.status = "cancelled"
+                        # Immer klare Endmeldung — nicht die letzte Scan-Zeile.
+                        job.message = "Abgebrochen."
+                    else:
+                        job.status = "done"
+                except Cancelled:
+                    job.status = "cancelled"
+                    job.message = "Abgebrochen."
+                except SystemExit as exc:
+                    # main._setup_blockchain_client bricht so ab — sonst bleibt
+                    # der Job ewig auf running (letzte Log-Zeile klebt).
+                    job.status = "failed"
+                    if isinstance(exc.code, str) and exc.code.strip():
+                        text = exc.code.strip()
+                    elif exc.code not in (None, 0):
+                        text = str(exc.code)
+                    else:
+                        text = str(exc) or "Vorgang beendet."
+                    job.error = text
+                    job.message = text
+                except Exception as exc:
+                    # Abbruch, der irgendwo als Exception ankam (Duck-Typing).
+                    if ist_abbruch(exc):
+                        job.status = "cancelled"
+                        job.message = "Abgebrochen."
+                    else:
+                        job.status = "failed"
+                        job.error = f"{type(exc).__name__}: {exc}"
+                        job.message = "Fehlgeschlagen."
+                        traceback.print_exc()
             finally:
+                _aktueller_job.reset(token)
                 job.finished_at = time.time()
                 if job._on_done is not None:
                     try:
@@ -682,4 +735,25 @@ class ScanQueue:
         key = (kind, str(wallet_id or "").strip())
         with self._lock:
             return key in self._belegte_keys()
+
+    def cancel(self, job_or_queue_id: str) -> bool:
+        """
+        Bricht laufenden Scan-Job ab oder entfernt einen Warteschlangen-Eintrag.
+
+        *job_or_queue_id*: echte Job-ID oder ``queue_id`` eines wartenden Scans.
+        """
+        jid = str(job_or_queue_id or "").strip()
+        if not jid:
+            return False
+        with self._lock:
+            # Wartend: rausnehmen, bevor der Job startet.
+            for i, eintrag in enumerate(self._wartend):
+                if eintrag.get("queue_id") == jid:
+                    self._wartend.pop(i)
+                    return True
+            aktiv = self._aktiv_job_id
+        if aktiv and aktiv == jid:
+            return self._jobs.cancel(jid)
+        # Auch wenn die ID nur im Job-Registry steckt (nicht Scan-Queue-aktiv).
+        return self._jobs.cancel(jid)
 

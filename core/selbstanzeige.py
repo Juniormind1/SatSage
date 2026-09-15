@@ -844,10 +844,39 @@ def _css_str(text: str) -> str:
     )
 
 
-def als_html(report: dict) -> bytes:
+def als_html(
+    report: dict,
+    *,
+    immutable_cache_dir: Path | str | None = None,
+) -> bytes:
+    from core import herkunft_bericht as hb
+
     person = report["person"]
     esc = tax_mod._html_escape
     vorgang_html = []
+    # Hop-Ketten für alle FiFo-Lose (und Hypothese-UTXOs als Los).
+    hop_eintraege: list[dict] = []
+    gesehen: set[str] = set()
+    for vg in report.get("vorgaenge") or []:
+        for los in vg.get("lose") or []:
+            key = f"{los.get('lot_txid')}:{los.get('lot_vout')}"
+            if key in gesehen:
+                continue
+            gesehen.add(key)
+            hop_eintraege.append({
+                "txid": los.get("lot_txid") or "",
+                "vout": los.get("lot_vout", 0),
+                "wallet": los.get("wallet") or "",
+                "address": los.get("address") or "",
+                "value_sats": los.get("sats"),
+            })
+    hop_abschnitt = hb.abschnitt_hop_ketten(
+        hop_eintraege,
+        immutable_cache_dir=immutable_cache_dir,
+        ueberschrift="Herkunftsnachweis (on-chain Hop-Kette der Lose)",
+    )
+    hop_css = hb.HOP_KETTE_CSS if hop_abschnitt else ""
+
     for vg in report["vorgaenge"]:
         los_zeilen = "".join(
             "<tr>"
@@ -959,6 +988,7 @@ def als_html(report: dict) -> bytes:
     padding-bottom: 6pt; margin-bottom: 12pt;
   }}
   .leer {{ padding: 16pt; background: #f8f8f4; border: 1px solid #ddd; }}
+  {hop_css}
   @media print {{
     body {{ margin: 0; max-width: none; padding: 0; }}
     .vorgang {{ page-break-inside: avoid; }}
@@ -991,10 +1021,12 @@ Haltefrist {report['haltefrist_jahre']} Jahr(e) · erstellt {esc(report['erstell
 
 {''.join(vorgang_html) if vorgang_html else '<p class="leer"><strong>Keine Vorgänge in diesem Report.</strong><br>TxID passt nicht zum gewählten Steuerjahr, oder FiFo fand keine Lose im Cache. Bitte Jahr prüfen, Abfluss ankreuzen oder „Aktualisieren“.</p>'}
 
+{hop_abschnitt}
+
 <div class="hinweise"><ul>{hinweise}</ul>
 <p>Erzeugt mit SatSage aus lokal vorliegenden Wallet-/Cache-Daten.
-TxIDs und Adressen sind vollständig angegeben. PDF: Im Browser
-„Drucken → Als PDF sichern“ (Kopf-/Fußzeile mit Seitenzahl erscheinen im Druck).</p></div>
+TxIDs und Adressen sind vollständig angegeben. Herkunft: on-chain Hop-Kette
+(keine Börsenbelege). PDF: Im Browser „Drucken → Als PDF sichern“.</p></div>
 
 </body></html>
 """

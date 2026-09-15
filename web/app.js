@@ -1062,6 +1062,8 @@ const T_FALLBACK = {
   "header.p2pPeers": "P2P {n}",
   "header.sourceCore": "Core",
   "header.sourceElectrumOwn": "Electrum privat",
+  "header.sourceElectrumImpl": "{name}",
+  "header.sourceElectrumImplTitle": "Eigener Electrum-Indexer: {name} ({raw}). {detail}",
   "header.sourceElectrumPublic": "Electrum öffentlich",
   "privacy.pillHigh": "Privatsphäre hoch",
   "privacy.pillMedium": "Privatsphäre mittel",
@@ -2524,10 +2526,35 @@ const EmpfangPuls = (() => {
     return `rgb(${Math.round(a[0] + (b[0] - a[0]) * u)},${Math.round(a[1] + (b[1] - a[1]) * u)},${Math.round(a[2] + (b[2] - a[2]) * u)})`;
   }
 
+  /**
+   * Belohnung nach kniffliger Config (z. B. Datenquelle/TLS): viel Staub,
+   * keine großen Scheine. Full-Viewport, einmalig — Anfänger-Erfolg feiern.
+   */
+  function starteStaubKonfetti(onDone) {
+    const nStaub = 140;
+    return starteKonfetti({
+      scheine: Array.from({ length: nStaub }, () => 10),
+      staubExtra: 0,
+      sats: 10,
+      modus: "bunt",
+      impuls: 380,
+      impulsStreu: 90,
+      grav: 4,
+      luft: 8,
+      winkelMin: 20,
+      winkelMax: 95,
+      dauer: 2800,
+      fullViewport: true,
+    }, onDone);
+  }
+
   function starteKonfetti(opts, onDone) {
     const wrap = document.querySelector(".empfang-qr-wrap");
     const pane = document.getElementById("empfang-pane");
-    const host = wrap || pane;
+    const fullVp = Boolean(opts && opts.fullViewport);
+    let host = fullVp
+      ? (document.getElementById("app") || document.body)
+      : (wrap || pane);
     if (!host) {
       if (typeof onDone === "function") onDone();
       return 3000;
@@ -2535,29 +2562,42 @@ const EmpfangPuls = (() => {
     // Altes Layer weg — sonst hängt ein totes Canvas.
     const alt = document.getElementById("empfang-konfetti");
     if (alt) alt.remove();
+    const altVp = document.getElementById("satsage-staub-konfetti");
+    if (altVp) altVp.remove();
 
     const layer = document.createElement("canvas");
-    layer.id = "empfang-konfetti";
-    layer.className = "empfang-konfetti";
+    layer.id = fullVp ? "satsage-staub-konfetti" : "empfang-konfetti";
+    layer.className = fullVp ? "satsage-staub-konfetti" : "empfang-konfetti";
     host.appendChild(layer);
 
-    // Echte Pixelgröße des QR-Quadrats (nicht 0 durch flex/hidden).
-    const rect = host.getBoundingClientRect();
-    let seite = Math.floor(Math.min(rect.width || 0, rect.height || 0));
-    if (seite < 80) {
-      seite = Math.floor(Math.min(
-        host.clientWidth || 0,
-        host.clientHeight || 0,
-        pane?.clientWidth || 0,
-        pane?.clientHeight || 0,
-      ));
+    let seiteW;
+    let seiteH;
+    if (fullVp) {
+      seiteW = Math.max(280, Math.floor(window.innerWidth || 800));
+      seiteH = Math.max(280, Math.floor(window.innerHeight || 600));
+      layer.width = seiteW;
+      layer.height = seiteH;
+    } else {
+      // Echte Pixelgröße des QR-Quadrats (nicht 0 durch flex/hidden).
+      const rect = host.getBoundingClientRect();
+      let seite = Math.floor(Math.min(rect.width || 0, rect.height || 0));
+      if (seite < 80) {
+        seite = Math.floor(Math.min(
+          host.clientWidth || 0,
+          host.clientHeight || 0,
+          pane?.clientWidth || 0,
+          pane?.clientHeight || 0,
+        ));
+      }
+      if (seite < 80) seite = 200;
+      seiteW = seite;
+      seiteH = seite;
+      layer.width = seite;
+      layer.height = seite;
+      // CSS-Größe = Bitmap — kein verzerrtes Hochskalieren.
+      layer.style.width = `${seite}px`;
+      layer.style.height = `${seite}px`;
     }
-    if (seite < 80) seite = 200;
-    layer.width = seite;
-    layer.height = seite;
-    // CSS-Größe = Bitmap — kein verzerrtes Hochskalieren.
-    layer.style.width = `${seite}px`;
-    layer.style.height = `${seite}px`;
 
     const cctx = layer.getContext("2d");
     if (!cctx) {
@@ -2567,6 +2607,12 @@ const EmpfangPuls = (() => {
     }
 
     const p = konfettiParamsAusSats(opts && opts.sats, opts);
+    // Explizite Scheine (z. B. nur Staub) — Params nicht nochmal mit Sats füllen.
+    if (opts && Array.isArray(opts.scheine) && opts.scheine.length) {
+      p.scheine = opts.scheine.slice();
+      p.staubExtra = 0;
+    }
+    const seite = Math.min(seiteW, seiteH);
     const farbenBunt = [
       "#f7931a", "#ff5c5c", "#5cff8a", "#5cb8ff", "#ffd15c", "#d45cff", "#fff4c4",
     ];
@@ -2576,14 +2622,14 @@ const EmpfangPuls = (() => {
     const wMax = Math.max(p.winkelMin, p.winkelMax);
     const luft = (p.luft != null ? p.luft : 2) / 100;
     const kLuft = 0.00025 + luft * 0.0022;
-    const bodenY = seite - 3;
+    const bodenY = seiteH - 3;
     const scheine = (p.scheine && p.scheine.length)
       ? p.scheine.slice()
       : konfettiScheineAusSats(p.sats).concat(
         Array.from({ length: KONFETTI_DEFAULTS.staubExtra }, () => 10),
       );
 
-    // Kanone: unten links, Schuss nach oben-rechts in den QR.
+    // Kanone: unten links (QR) bzw. unten-mitte (Viewport-Staub).
     const parts = scheine.map((denom) => {
       const grad = wMin + Math.random() * Math.max(1, wMax - wMin);
       const rad = (grad * Math.PI) / 180;
@@ -2591,11 +2637,15 @@ const EmpfangPuls = (() => {
       const speed = seite * p.speed * Math.max(0.35, streu);
       const gravMul = (p.grav != null ? p.grav : 5) / 5;
       const sz = konfettiGroesseFuerSchein(denom);
+      const originX = fullVp
+        ? seiteW * (0.35 + Math.random() * 0.3)
+        : seiteW * (0.04 + Math.random() * 0.08);
+      const originY = seiteH * (0.88 + Math.random() * 0.06);
       return {
         denom,
-        x: seite * (0.04 + Math.random() * 0.08),
-        y: seite * (0.88 + Math.random() * 0.06),
-        vx: Math.cos(rad) * speed,
+        x: originX,
+        y: originY,
+        vx: Math.cos(rad) * speed * (fullVp && Math.random() < 0.5 ? -1 : 1),
         vy: -Math.sin(rad) * speed,
         g: (seite * 0.00018 + Math.random() * seite * 0.0001) * gravMul,
         c: p.gold
@@ -2625,7 +2675,7 @@ const EmpfangPuls = (() => {
       if (done) return;
       done = true;
       try {
-        cctx.clearRect(0, 0, seite, seite);
+        cctx.clearRect(0, 0, seiteW, seiteH);
       } catch (_) {
         /* */
       }
@@ -2638,7 +2688,7 @@ const EmpfangPuls = (() => {
       const dt = Math.min(40, now - (frame.t || now));
       const step = dt * 0.045;
       frame.t = now;
-      cctx.clearRect(0, 0, seite, seite);
+      cctx.clearRect(0, 0, seiteW, seiteH);
       let alleTot = true;
       for (const part of parts) {
         if (part.dead) continue;
@@ -2657,7 +2707,12 @@ const EmpfangPuls = (() => {
         part.y += part.vy * step;
         part.rot += part.vr;
         // Boden oder weit draußen → weg
-        if (part.y >= bodenY || part.x < -40 || part.x > seite + 40 || part.y < -40) {
+        if (
+          part.y >= bodenY
+          || part.x < -40
+          || part.x > seiteW + 40
+          || part.y < -40
+        ) {
           part.dead = true;
           continue;
         }
@@ -2895,12 +2950,24 @@ const EmpfangPuls = (() => {
     flashIncoming,
     flashHaken,
     flashNeuerBlock,
+    flashStaubBelohnung: starteStaubKonfetti,
     orangeBScaleFromSats,
     konfettiParamsAusSats,
     konfettiScheineAusSats,
     starteKonfetti,
   };
 })();
+
+/** Einmal Staub-Konfetti nach gelungener Datenquellen-Config (Anfänger-Jubel). */
+function jubelDatenquelleErfolg() {
+  try {
+    if (typeof EmpfangPuls.flashStaubBelohnung === "function") {
+      EmpfangPuls.flashStaubBelohnung();
+    }
+  } catch (_) {
+    /* Animation optional */
+  }
+}
 
 function liesKonfettiProtoOpts() {
   const num = (id, fallback) => {
@@ -5532,6 +5599,8 @@ function zeichneJobsNav() {
     return;
   }
   for (const z of zeilen) {
+    const zeile = document.createElement("div");
+    zeile.className = "nav-job-zeile";
     const knopf = document.createElement("button");
     knopf.type = "button";
     knopf.className = "nav-job";
@@ -5554,7 +5623,35 @@ function zeichneJobsNav() {
     if (klickbar) {
       knopf.addEventListener("click", () => springeZuJob(z.job));
     }
-    kasten.append(knopf);
+    zeile.append(knopf);
+    // Abbruch an jedem laufenden Vorgang — nicht nur an speziellen Statuszeilen.
+    const laeuft = z.status === "running" || z.status === "queued";
+    const jobId = (z.job && z.job.id)
+      || (z.key === "scan-pipe" ? (pipe.current && pipe.current.job_id) : z.key);
+    if (laeuft && jobId && !String(jobId).startsWith("cache-")) {
+      const abbruch = document.createElement("button");
+      abbruch.type = "button";
+      abbruch.className = "knopf knopf-klein nav-job-abbruch";
+      abbruch.textContent = t("common.cancel");
+      abbruch.title = t("common.cancel");
+      abbruch.addEventListener("click", async (ereignis) => {
+        ereignis.preventDefault();
+        ereignis.stopPropagation();
+        abbruch.disabled = true;
+        try {
+          await api(`/jobs/${jobId}`, { methode: "DELETE" });
+        } catch (_) {
+          /* schon beendet */
+        }
+        // Rescan-Statuszeile mitziehen, falls es der aktive Scan war.
+        if (Zustand.rescanJob === jobId) {
+          setzeText($("#rescan-text"), t("common.abortRequested"));
+        }
+        await ladeJobsNav();
+      });
+      zeile.append(abbruch);
+    }
+    kasten.append(zeile);
   }
 }
 
@@ -7946,7 +8043,7 @@ async function verlaufErheben() {
   let timer = null;
   const logStand = { index: 0 };
 
-  const fertig = (meldung, art) => {
+  const fertig = async (meldung, art) => {
     clearInterval(timer);
     knopf.disabled = false;
     $("#herkunft-lauf").hidden = true;
@@ -7956,7 +8053,15 @@ async function verlaufErheben() {
       setzeText(kasten, meldung);
       kasten.hidden = false;
     }
-    ladeSteuerjahrMitKandidaten();
+    // UTXO-Cache-mtime / scan_tip → Nav „gerade eben“ (wie Einzel-Verlaufsscan).
+    // Ohne ladeConfig blieb Zustand.config alt, bis zum Browser-Refresh.
+    try {
+      await ladeConfig();
+    } catch (_) {
+      zeichneNav();
+    }
+    await ladeSteuerjahrMitKandidaten();
+    await ladeJobsNav();
   };
 
   logZeile("Starte Verlauf aller Wallets…");
@@ -7965,7 +8070,7 @@ async function verlaufErheben() {
     jobId = start.id;
     nimmJobLogAb(start, logStand);
   } catch (fehler) {
-    fertig(`Verlauf fehlgeschlagen: ${fehler.message}`, "krit");
+    await fertig(`Verlauf fehlgeschlagen: ${fehler.message}`, "krit");
     return;
   }
 
@@ -7979,20 +8084,26 @@ async function verlaufErheben() {
   };
 
   timer = setInterval(async () => {
+    if (!timer) return;
     try {
       const job = await api(`/jobs/${jobId}`);
       nimmJobLogAb(job, logStand);
       setzeText($("#herkunft-text"), übersetzeLogText(job.message || t("common.runningEllipsis")));
       if (job.running) return;
+      // Intervall sofort stoppen — sonst läuft der nächste Tick parallel zu fertig.
+      clearInterval(timer);
+      timer = null;
       if (job.status === "done") {
-        fertig(job.message || "Verlauf erfasst.", "gut");
+        await fertig(job.message || "Verlauf erfasst.", "gut");
       } else if (job.status === "cancelled") {
-        fertig("Abgebrochen — bereits erfasste Wallets bleiben erhalten.", "warn");
+        await fertig("Abgebrochen — bereits erfasste Wallets bleiben erhalten.", "warn");
       } else {
-        fertig(job.error || "Verlauf fehlgeschlagen.", "krit");
+        await fertig(job.error || "Verlauf fehlgeschlagen.", "krit");
       }
     } catch (fehler) {
-      fertig(fehler.message, "krit");
+      clearInterval(timer);
+      timer = null;
+      await fertig(fehler.message, "krit");
     }
   }, 1200);
 }
@@ -9816,6 +9927,7 @@ function quellenFormular(quelle, behaelter) {
           t("sources.appliedResult", { stand: stand.label }),
           stand.gut ? "gut" : "krit",
         );
+        // Jubel steckt in testeEigenenNode (Knopf gesetzt).
         if (p2pWirdAn && hatteOeffentlich && p2pQuelleVerbunden()) {
           await frageP2pPrivatsphaereKappen();
         }
@@ -9903,6 +10015,11 @@ async function aktualisiereListen() {
   const imp = $("#listen-import");
   if (imp) imp.disabled = true;
   $("#listen-lauf").hidden = false;
+  const abbruchKnopf = $("#listen-abbruch");
+  if (abbruchKnopf) {
+    abbruchKnopf.hidden = false;
+    abbruchKnopf.disabled = false;
+  }
   setzeText($("#listen-text"), t("common.downloadStarting"));
 
   const fertig = (meldung) => {
@@ -9910,12 +10027,26 @@ async function aktualisiereListen() {
     knopf.disabled = false;
     if (imp) imp.disabled = false;
     $("#listen-lauf").hidden = true;
+    if (abbruchKnopf) abbruchKnopf.hidden = true;
     if (meldung) meldungListen(meldung);
     ladeListenStatus();
   };
 
   let jobId = null;
   let timer = null;
+  if (abbruchKnopf) {
+    abbruchKnopf.onclick = async () => {
+      abbruchKnopf.disabled = true;
+      setzeText($("#listen-text"), t("common.abortRequested"));
+      if (jobId) {
+        try {
+          await api(`/jobs/${jobId}`, { methode: "DELETE" });
+        } catch (_) {
+          /* schon beendet */
+        }
+      }
+    };
+  }
   try {
     const job = await api("/sanctions/update", { methode: "POST", daten: {} });
     jobId = job.id;
@@ -9929,6 +10060,10 @@ async function aktualisiereListen() {
       const job = await api(`/jobs/${jobId}`);
       setzeText($("#listen-text"), übersetzeLogText(job.message || t("common.runningEllipsis")));
       if (job.running) return;
+      if (job.status === "cancelled") {
+        fertig(t("common.cancelled"));
+        return;
+      }
       fertig(job.status === "done" ? "" : (übersetzeServerMeldung(job.error) || t("common.failed")));
     } catch (fehler) {
       fertig(fehler.message);
@@ -10123,18 +10258,37 @@ async function ladeLabels() {
   const imp = $("#label-import");
   if (imp) imp.disabled = true;
   $("#label-lauf").hidden = false;
+  const abbruchKnopf = $("#label-abbruch");
+  if (abbruchKnopf) {
+    abbruchKnopf.hidden = false;
+    abbruchKnopf.disabled = false;
+  }
   setzeText($("#label-text"), t("common.downloadStarting"));
   const fertig = (meldung) => {
     clearInterval(timer);
     knopf.disabled = false;
     if (imp) imp.disabled = false;
     $("#label-lauf").hidden = true;
+    if (abbruchKnopf) abbruchKnopf.hidden = true;
     if (meldung) meldungListen(meldung);
     ladeLabelStatus();
   };
 
   let jobId = null;
   let timer = null;
+  if (abbruchKnopf) {
+    abbruchKnopf.onclick = async () => {
+      abbruchKnopf.disabled = true;
+      setzeText($("#label-text"), t("common.abortRequested"));
+      if (jobId) {
+        try {
+          await api(`/jobs/${jobId}`, { methode: "DELETE" });
+        } catch (_) {
+          /* schon beendet */
+        }
+      }
+    };
+  }
   try {
     const job = await api("/labels", {
       methode: "POST",
@@ -10153,6 +10307,10 @@ async function ladeLabels() {
       if (job.running) return;
       if (job.status === "done") {
         fertig("");
+        return;
+      }
+      if (job.status === "cancelled") {
+        fertig(t("common.cancelled"));
         return;
       }
       // Fehler sichtbar halten — sonst wirkt es wie „nicht geladen“ ohne Grund
@@ -12052,15 +12210,28 @@ function zeichneKopfStatus(quellen) {
   }
 
   if (electrsVerbunden || kopfQuelleAufbau(electrs) || kopfQuelleFehler(electrs)) {
+    // Konkrete Implementierung aus server.version (electrs/fulcrum/libbitcoin).
+    const soft = String(electrs?.software || "").trim();
+    const softRaw = String(electrs?.software_raw || "").trim();
+    const electrsLabel = soft
+      ? t("header.sourceElectrumImpl", { name: soft })
+      : t("header.sourceElectrumOwn");
+    const electrsTitle = electrs?.error
+      || (soft
+        ? t("header.sourceElectrumImplTitle", {
+          name: soft,
+          raw: softRaw || soft,
+          detail: electrs?.detail || "",
+        })
+        : t("header.sourceElectrumOwnTitle"));
     eintraege.push({
       key: "own_fulcrum",
       lern: "electrum",
-      label: t("header.sourceElectrumOwn"),
+      label: electrsLabel,
       stufe: electrsVerbunden
         ? "gut"
         : (kopfQuelleAufbau(electrs) ? "warn" : "krit"),
-      title: electrs?.error
-        || t("header.sourceElectrumOwnTitle"),
+      title: electrsTitle,
     });
   }
 
@@ -12736,7 +12907,11 @@ async function testeEigenenNode(knopf) {
   }
   try {
     const ergebnis = await apiSourceCheck();
-    return nimmPeerStand(ergebnis, false);
+    const stand = nimmPeerStand(ergebnis, false);
+    // Anfänger-Belohnung nur bei bewusstem Test (Speichern / „Node testen“),
+    // nicht beim stillen 30‑s-Poll (pruefeNodeStatus ohne Knopf).
+    if (knopf && stand && stand.gut) jubelDatenquelleErfolg();
+    return stand;
   } finally {
     Zustand.peerCheckLaeuft = false;
     if ($("#quellen-liste")?.childElementCount) {

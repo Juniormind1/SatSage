@@ -589,6 +589,226 @@ class TestOnionLatenzGate(unittest.TestCase):
         self.assertFalse(any("langsam" in z.lower() for z in self.logs))
 
 
+class TestJobAbbruchUeberall(unittest.TestCase):
+    """Web-Abbruch muss Scan/BIP-158/CLI-Schleifen und Job-Ende erreichen."""
+
+    def test_job_context_setzt_aktuellen_job(self):
+        registry = JobRegistry()
+        gesehen = {}
+
+        def lauf(job):
+            gesehen["job"] = jobs_mod.aktueller_job()
+            gesehen["abgebrochen"] = jobs_mod.job_abgebrochen()
+            return "ok"
+
+        job = registry.start("trace", "T", lauf)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.status, "done")
+        self.assertIs(gesehen["job"], job)
+        self.assertFalse(gesehen["abgebrochen"])
+        self.assertIsNone(jobs_mod.aktueller_job())
+
+    def test_cancel_endet_mit_abgebrochen_meldung(self):
+        registry = JobRegistry()
+        tor = threading.Event()
+
+        def hang(job):
+            while not job.cancelled:
+                if tor.wait(0.05):
+                    break
+            # Soft-return nach Cancel — Registry muss trotzdem cancelled setzen.
+            return {"partial": True}
+
+        job = registry.start("rescan", "Scan", hang)
+        time.sleep(0.05)
+        self.assertTrue(registry.cancel(job.id))
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        tor.set()
+        self.assertEqual(job.status, "cancelled")
+        self.assertEqual(job.message, "Abgebrochen.")
+
+    def test_is_list_abort_sieht_job_cancel(self):
+        from display import is_list_abort_requested
+
+        registry = JobRegistry()
+        tor = threading.Event()
+        gesehen = {}
+
+        def lauf(job):
+            job.cancel()  # simuliert DELETE /jobs
+            gesehen["abort"] = is_list_abort_requested()
+            gesehen["raise"] = False
+            try:
+                jobs_mod.raise_if_job_cancelled()
+            except jobs_mod.Cancelled:
+                gesehen["raise"] = True
+            tor.set()
+
+        job = registry.start("verlauf", "V", lauf)
+        tor.wait(timeout=2)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertTrue(gesehen.get("abort"))
+        self.assertTrue(gesehen.get("raise"))
+        self.assertEqual(job.status, "cancelled")
+
+    def test_scan_queue_entfernt_wartenden(self):
+        registry = JobRegistry()
+        queue = jobs_mod.ScanQueue(registry)
+        tor = threading.Event()
+
+        def hang(job):
+            while not job.cancelled and not tor.wait(0.05):
+                pass
+
+        # Erster startet sofort, zweiter wartet.
+        d1 = queue.einreihen(
+            kind="rescan",
+            wallet_id="w1",
+            wallet_name="A",
+            label="A",
+            factory=hang,
+        )
+        d2 = queue.einreihen(
+            kind="rescan",
+            wallet_id="w2",
+            wallet_name="B",
+            label="B",
+            factory=hang,
+        )
+        self.assertEqual(d1.get("queue_status"), "running")
+        self.assertEqual(d2.get("queue_status"), "queued")
+        qid = d2["id"]
+        self.assertTrue(queue.cancel(qid))
+        snap = queue.snapshot()
+        self.assertEqual(snap["queued"], [])
+        # Aktiven Job abbrechen
+        self.assertTrue(queue.cancel(d1["id"]))
+        tor.set()
+        for _ in range(80):
+            j = registry.get(d1["id"])
+            if j is None or j.status != "running":
+                break
+            time.sleep(0.02)
+
+
+class TestTraceAbbruchNichtSchlucken(unittest.TestCase):
+    """
+    „Lücken schließen“ / Herkunft: Cancelled muss durch bare excepts
+    und die erste Tiefen-Phase durchschlagen — sonst bleibt der Job running.
+    """
+
+    def test_ist_abbruch_erkennt_cancelled(self):
+        self.assertTrue(jobs_mod.ist_abbruch(jobs_mod.Cancelled()))
+        self.assertFalse(jobs_mod.ist_abbruch(RuntimeError("x")))
+
+    def test_trace_origin_reicht_cancelled_durch(self):
+        import analyze
+        from tests.fixtures import BIP84_RECEIVE_0, TXID_WALLET_IN, make_get_tx, simple_chain
+
+        class _Prog:
+            def __init__(self):
+                self.n = 0
+
+            def update(self, _m):
+                self.n += 1
+                if self.n >= 2:
+                    raise jobs_mod.Cancelled()
+
+        get_tx = make_get_tx(simple_chain())
+        with self.assertRaises(jobs_mod.Cancelled):
+            analyze.trace_utxo_origin(
+                get_tx,
+                TXID_WALLET_IN,
+                0,
+                {BIP84_RECEIVE_0},
+                progress=_Prog(),
+            )
+
+    def test_engine_funding_reicht_cancelled_durch(self):
+        from tests.fixtures import TXID_WALLET_IN, make_get_tx, simple_chain
+        from trace_engine import iter_funding_inputs
+
+        get_tx = make_get_tx(simple_chain())
+        n = {"c": 0}
+
+        def prog(_m):
+            n["c"] += 1
+            if n["c"] >= 1:
+                raise jobs_mod.Cancelled()
+
+        with self.assertRaises(jobs_mod.Cancelled):
+            list(iter_funding_inputs(get_tx, TXID_WALLET_IN, progress=prog))
+
+    def test_luecken_tief_bricht_mit_progress_ab(self):
+        import server
+        from tests.fixtures import BIP84_RECEIVE_0, TXID_WALLET_IN, make_get_tx, simple_chain
+
+        get_tx = make_get_tx(simple_chain())
+        n = {"c": 0}
+
+        def progress(_m):
+            n["c"] += 1
+            if n["c"] >= 3:
+                raise jobs_mod.Cancelled()
+
+        with self.assertRaises(jobs_mod.Cancelled):
+            server._trace_ein_utxo_tief(
+                get_tx=get_tx,
+                txid=TXID_WALLET_IN,
+                vout=0,
+                eigene={BIP84_RECEIVE_0},
+                wallet_ctx=None,
+                cache_dir=None,
+                immutable_cache_dir=None,
+                fetch_addr=None,
+                cache_source="test",
+                progress=progress,
+                cancel_cb=lambda: n["c"] >= 3,
+                folge_bundled=True,
+                folge_tx=False,
+            )
+        self.assertGreaterEqual(n["c"], 3)
+
+    def test_followup_cancel_zwischen_vorgaenger_txs(self):
+        import analyze
+        from tests.fixtures import BIP84_RECEIVE_0, make_get_tx, simple_chain, txid
+
+        get_tx = make_get_tx(simple_chain())
+        gesehen = []
+
+        def cancel():
+            return len(gesehen) >= 1
+
+        def progress(m):
+            gesehen.append(m)
+
+        with self.assertRaises(jobs_mod.Cancelled):
+            analyze._run_tx_oriented_followups(
+                get_tx,
+                {txid("a1"), txid("b2")},
+                "current",
+                {BIP84_RECEIVE_0},
+                set(),
+                0,
+                None,
+                None,
+                None,
+                None,
+                cancel_cb=cancel,
+                progress_cb=progress,
+            )
+        self.assertTrue(any("Eigene Vorgänger" in m for m in gesehen), gesehen)
+
+
 class TestJobRegistry(unittest.TestCase):
 
     def test_systemexit_beendet_den_job(self):
