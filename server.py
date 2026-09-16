@@ -2585,6 +2585,20 @@ def api_save_source(state: AppState, payload: dict) -> dict:
     if not updates:
         return {"saved": False, "grund": "Nichts zu ändern."}
 
+    # Ein Port/TLS in der UI — Tor-Sonderkeys (FULCRUM_TOR_PORT/_SSL) sonst
+    # überschreiben den neuen Wert still und der Verbindungsversuch bleibt
+    # am alten Endpoint (nur Server-Neustart half).
+    if "FULCRUM_PORT" in updates:
+        updates["FULCRUM_TOR_PORT"] = None
+    if "FULCRUM_SSL" in updates:
+        updates["FULCRUM_TOR_SSL"] = None
+
+    electrs_keys = {
+        "FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_PORT", "FULCRUM_SSL",
+        "FULCRUM_TOR_PORT", "FULCRUM_TOR_SSL", "FULCRUM_TOR_PROXY",
+    }
+    electrs_geaendert = bool(electrs_keys & set(updates))
+
     env.apply(updates)
     try:
         sicherung = env.save()
@@ -2592,12 +2606,52 @@ def api_save_source(state: AppState, payload: dict) -> dict:
         raise ApiError(500, "Interner Serverfehler.") from exc
 
     state.reload()
+    if electrs_geaendert:
+        _verwerfe_electrs_verbindungen(state)
     werte = state.env().values()
     return {
         "saved": True,
         "backup": str(sicherung) if sicherung else None,
         "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
     }
+
+
+def _verwerfe_electrs_verbindungen(state: AppState) -> None:
+    """
+    Alte Electrs-Sockets/Sessions nach Host-/Port-Wechsel schließen.
+
+    * Empfangs-QR-Client (AppState-Cache)
+    * Wallet-Watch-Subscribe (sonst hängt die Session am alten Endpoint)
+    """
+    # Empfang-Clients: reload() hat sie schon genullt; sicherheitshalber nochmal.
+    with getattr(state, "_empfang_fulcrum_lock", threading.Lock()):
+        alt = getattr(state, "_empfang_fulcrum", None)
+        alt_pub = getattr(state, "_empfang_public_fulcrum", None)
+        state._empfang_fulcrum = None
+        state._empfang_public_fulcrum = None
+    for client in (alt, alt_pub):
+        if client is None:
+            continue
+        try:
+            client.close()
+        except Exception:
+            pass
+    try:
+        from core import wallet_watch
+
+        if wallet_watch.get_watch_service().laeuft:
+            wallet_watch.restart_wallet_watch(
+                state,
+                on_log=lambda t: LOGGER.info("%s", t),
+            )
+        else:
+            # Watch war aus — falls Option an, frisch starten mit neuem Endpoint.
+            wallet_watch.starte_wallet_watch(
+                state,
+                on_log=lambda t: LOGGER.info("%s", t),
+            )
+    except Exception as exc:
+        LOGGER.warning("Electrs-Verbindungen nach Config-Wechsel: %s", exc)
 
 
 def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
@@ -4661,11 +4715,19 @@ def _persist_tls_auto(state: AppState, quellen: list, *, on_log=None) -> list:
 
 
 def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
+    from dataclasses import replace
+
+    from core.jobs import electrum_serial_busy
+
     werte = state.env().values()
     quellen = source_mod.describe_sources(werte)
     still = query.get("still", ["0"])[0] in ("1", "true", "ja")
     check_an = query.get("check", ["0"])[0] in ("1", "true", "ja")
-    if check_an:
+    # Während UTXO-Scan/Herkunft: stiller Peer-Takt soll own_fulcrum nicht
+    # neu connecten (Tor-SOCKS-Spam + Last auf dem Electrs-Socket).
+    electrum_busy = electrum_serial_busy()
+    skip_live_check = bool(check_an and still and electrum_busy)
+    if check_an and not skip_live_check:
         quellen = source_mod.check_sources(
             quellen, werte, on_log=None if still else on_log, still=still,
         )
@@ -4673,15 +4735,41 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
             state, quellen, on_log=None if still else on_log,
         )
         werte = state.env().values()
+    elif skip_live_check and state.sources_last:
+        alt = {
+            q.get("key"): q
+            for q in state.sources_last
+            if isinstance(q, dict) and q.get("key")
+        }
+        aufgefrischt: list = []
+        for q in quellen:
+            a = alt.get(q.key)
+            if a and q.key == "own_fulcrum":
+                q = replace(
+                    q,
+                    reachable=a.get("reachable"),
+                    peer_count=int(a.get("peer_count") or 0),
+                    peer_hosts=list(a.get("peer_hosts") or []),
+                    error=str(a.get("error") or ""),
+                    detail=str(a.get("detail") or q.detail or ""),
+                )
+                soft = a.get("software")
+                if soft:
+                    try:
+                        q.software = soft  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            aufgefrischt.append(q)
+        quellen = aufgefrischt
     quellen = source_mod.anreichere_live_p2p(quellen)
     stand = source_mod.peer_status(quellen, werte)
     # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
     # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
     # Header laufen über Start, /headers und eigenen Cooldown.
     sources_dicts = [q.as_dict() for q in quellen]
-    if check_an:
+    if check_an and not skip_live_check:
         state.sources_last = sources_dicts
-    return {
+    out = {
         "sources": sources_dicts,
         "peers": stand["count"],
         "peer_status": stand,
@@ -4689,6 +4777,9 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
     }
+    if electrum_busy:
+        out["electrum_busy"] = True
+    return out
 
 
 def _live_p2p_peers() -> list[str]:

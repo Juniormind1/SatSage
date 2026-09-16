@@ -966,6 +966,34 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_PORT"], "50001")
         self.assertEqual(werte["FULCRUM_SSL"], "false")
 
+    def test_port_speichern_loescht_stale_tor_port(self):
+        """UI-Port muss Tor-Endpoint steuern — altes FULCRUM_TOR_PORT weg."""
+        self.env_pfad.write_text(
+            self.env_pfad.read_text(encoding="utf-8")
+            + "\nFULCRUM_TOR=abc.onion\nFULCRUM_TOR_PORT=443\nFULCRUM_TOR_SSL=true\n",
+            encoding="utf-8",
+        )
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "FULCRUM_TOR": "abc.onion",
+                "FULCRUM_PORT": "50001",
+                "FULCRUM_SSL": "false",
+            }},
+        )
+        self.assertEqual(status, 200)
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_PORT"), "50001")
+        self.assertNotIn("FULCRUM_TOR_PORT", werte)
+        self.assertNotIn("FULCRUM_TOR_SSL", werte)
+        # Scan-Pfad nutzt denselben Port wie die UI.
+        ende = main._resolve_own_tor_endpoint(
+            self.state.args_namespace(), werte,
+        )
+        self.assertIsNotNone(ende)
+        self.assertEqual(ende[1], 50001)
+        self.assertFalse(ende[2])
+
     def test_p2p_starthoehe_wird_gespeichert(self):
         status, _ = self.anfrage(
             "/api/config/source", methode="PUT",

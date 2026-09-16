@@ -71,7 +71,34 @@ class TestBinarySuche(unittest.TestCase):
                 self.assertEqual(tor_mod.finde_tor_binary(), hier)
 
 
+class TestSocksCache(unittest.TestCase):
+
+    def setUp(self):
+        with tor_mod._socks_ok_lock:
+            tor_mod._socks_ok_cache.clear()
+
+    def test_cache_vermeidet_zweiten_log(self):
+        logs: list[str] = []
+
+        def log(t: str) -> None:
+            logs.append(t)
+
+        with patch.object(tor_mod, "erkenne_tor_socks", return_value=("127.0.0.1", 9050)):
+            with patch.object(tor_mod, "socks_erreichbar", return_value=True):
+                a = tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=log)
+                b = tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=log)
+        self.assertEqual(a, ("127.0.0.1", 9050))
+        self.assertEqual(b, a)
+        # Erster Aufruf loggt, zweiter (Cache) still.
+        self.assertEqual(sum(1 for t in logs if "Prüfe Tor-SOCKS" in t), 1)
+        self.assertEqual(sum(1 for t in logs if "erreichbar" in t), 1)
+
+
 class TestAutostart(unittest.TestCase):
+
+    def setUp(self):
+        with tor_mod._socks_ok_lock:
+            tor_mod._socks_ok_cache.clear()
 
     def test_standard_ist_an(self):
         self.assertTrue(tor_mod._autostart_erlaubt({}))

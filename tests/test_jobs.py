@@ -860,6 +860,14 @@ class TestTraceAbbruchNichtSchlucken(unittest.TestCase):
 
 class TestJobRegistry(unittest.TestCase):
 
+    def setUp(self):
+        # Gate vom vorigen Test freigeben.
+        gate = jobs_mod.ELECTRUM_GATE
+        with gate._cv:
+            gate._holder_id = None
+            gate._holder_label = ""
+            gate._cv.notify_all()
+
     def test_systemexit_beendet_den_job(self):
         """Sonst bleibt der UTXO-Scan auf running, letzte Zeile klebt."""
         registry = JobRegistry()
@@ -880,6 +888,47 @@ class TestJobRegistry(unittest.TestCase):
         self.assertIn("Keine Datenquelle erreichbar", job.error)
         self.assertIn("Keine Datenquelle erreichbar", job.message)
         self.assertIsNotNone(job.finished_at)
+
+    def test_electrum_jobs_laufen_serial(self):
+        """UTXO-Scan und Herkunft teilen Tor/Electrs — nicht parallel."""
+        registry = JobRegistry(max_parallel_heavy=3)
+        reihenfolge: list[str] = []
+        barrier = threading.Event()
+
+        def langsam(name: str):
+            def _fn(job):
+                reihenfolge.append(f"start:{name}")
+                # Halte Electrum-Gate, bis der zweite Job wartet.
+                if name == "a":
+                    barrier.wait(timeout=2.0)
+                    time.sleep(0.15)
+                else:
+                    time.sleep(0.05)
+                reihenfolge.append(f"end:{name}")
+                return name
+
+            return _fn
+
+        a = registry.start("rescan", "Scan A", langsam("a"))
+        time.sleep(0.05)
+        self.assertTrue(jobs_mod.electrum_serial_busy())
+        b = registry.start("trace-alle", "Herkunft B", langsam("b"))
+        # B wartet — A noch nicht fertig.
+        time.sleep(0.08)
+        self.assertIn("start:a", reihenfolge)
+        self.assertNotIn("start:b", reihenfolge)
+        barrier.set()
+        for _ in range(100):
+            if a.status != "running" and b.status != "running":
+                break
+            time.sleep(0.03)
+        self.assertEqual(a.status, "done")
+        self.assertEqual(b.status, "done")
+        self.assertEqual(
+            reihenfolge,
+            ["start:a", "end:a", "start:b", "end:b"],
+        )
+        self.assertFalse(jobs_mod.electrum_serial_busy())
 
     def test_finde_laufenden_nach_meta(self):
         registry = JobRegistry()

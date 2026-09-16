@@ -489,8 +489,13 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     if tor:
         tor = main._normalize_fulcrum_host(tor)
     port = _int(values, "FULCRUM_PORT", 50002)
+    # Anzeige: Onion nutzt FULCRUM_TOR_PORT falls gesetzt, sonst FULCRUM_PORT.
+    if not host and tor:
+        port = _int(values, "FULCRUM_TOR_PORT", port)
     # 50001 ist bei Start9/electrs der Klartext-Port; 50002 typisch TLS.
     ssl_an = _flag(values, "FULCRUM_SSL", port != 50001)
+    if not host and tor and (values.get("FULCRUM_TOR_SSL") or "").strip():
+        ssl_an = _flag(values, "FULCRUM_TOR_SSL", True)
     ziel = host or tor
     quellen.append(SourceInfo(
         rank=1,
@@ -510,7 +515,8 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
             Feld("FULCRUM_TOR", "Onion-Adresse", "text", tor,
                  "optional, statt oder zusätzlich zum LAN-Host"),
             Feld("FULCRUM_PORT", "Port", "port", str(port),
-                 "Fulcrum meist 50002 (TLS) oder 50001, electrs oft 50001"),
+                 "Gilt für LAN und Onion. Fulcrum meist 50002 (TLS) oder "
+                 "50001, electrs oft 50001"),
             Feld("FULCRUM_SSL", "TLS verwenden", "schalter",
                  "true" if ssl_an else "false",
                  "Beim Verbinden wird die andere Einstellung mitprobiert "
@@ -1205,28 +1211,33 @@ def check_reachable(
     if info.key != "own_fulcrum" or not info.configured:
         return ergebnis
 
-    lan = values.get("FULCRUM_HOST", "").strip()
-    onion = values.get("FULCRUM_TOR", "").strip()
-    roh = lan or onion
-    host = main._normalize_fulcrum_host(roh) if roh else ""
-    if lan:
-        port = _int(values, "FULCRUM_PORT", 50002)
-        use_ssl = _flag(values, "FULCRUM_SSL", port != 50001)
-    else:
-        port = _int(values, "FULCRUM_TOR_PORT", _int(values, "FULCRUM_PORT", 50002))
-        if values.get("FULCRUM_TOR_SSL", "").strip():
-            use_ssl = _flag(values, "FULCRUM_TOR_SSL", True)
-        else:
-            use_ssl = _flag(values, "FULCRUM_SSL", port != 50001)
-
     log(f"Prüfe {info.name}…")
 
-    tor_proxy = None
-    if host.endswith(".onion"):
+    # Dieselbe Endpoint-Reihenfolge wie main._try_own_fulcrum_client
+    # (LAN zuerst, dann Tor) — und dieselben Port/TLS-Keys.
+    from types import SimpleNamespace
+
+    args = SimpleNamespace(
+        fulcrum_host=None,
+        rpchost=None,
+        fulcrum_port=None,
+        fulcrum_no_ssl=False,
+    )
+    kandidaten: list[tuple[str, int, bool, tuple[str, int] | None]] = []
+    lan = main._resolve_own_lan_endpoint(args, values)
+    if lan:
+        kandidaten.append((*lan, None))
+    tor = main._resolve_own_tor_endpoint(args, values)
+    if tor:
+        host_t, port_t, ssl_t = tor
         from core.tor import TorFehler, stelle_tor_socks_bereit
         from fulcrum import FULCRUM_ONION_TIMEOUT
 
-        raw = values.get("FULCRUM_TOR_PROXY") or values.get("TOR_PROXY") or "127.0.0.1:9050"
+        raw = (
+            values.get("FULCRUM_TOR_PROXY")
+            or values.get("TOR_PROXY")
+            or "127.0.0.1:9050"
+        )
         if ":" in raw:
             ph, pp = raw.rsplit(":", 1)
             konfiguriert = (ph, int(pp)) if pp.isdigit() else (raw, 9050)
@@ -1237,50 +1248,78 @@ def check_reachable(
                 konfiguriert, env=values, log=log,
             )
         except (TorFehler, ValueError) as exc:
-            ergebnis.reachable = False
-            ergebnis.error = str(exc)
-            log(f"Verbinde mit {_verbindung_ziel(host, port, use_ssl)}")
-            log(f"Verbindung fehlgeschlagen: {exc}")
-            return ergebnis
-        if tor_proxy != konfiguriert:
-            log(
-                f"Fallback SOCKS {tor_proxy[0]}:{tor_proxy[1]} "
-                f"(statt {konfiguriert[0]}:{konfiguriert[1]})"
-            )
-        timeout = max(timeout, FULCRUM_ONION_TIMEOUT)
+            if not kandidaten:
+                ergebnis.reachable = False
+                ergebnis.error = str(exc)
+                log(f"Verbinde mit {_verbindung_ziel(host_t, port_t, ssl_t)}")
+                log(f"Verbindung fehlgeschlagen: {exc}")
+                return ergebnis
+            log(f"Tor für Onion-Endpoint nicht bereit: {exc}")
+            tor_proxy = None
+        else:
+            if tor_proxy != konfiguriert:
+                log(
+                    f"Fallback SOCKS {tor_proxy[0]}:{tor_proxy[1]} "
+                    f"(statt {konfiguriert[0]}:{konfiguriert[1]})"
+                )
+            kandidaten.append((host_t, port_t, ssl_t, tor_proxy))
+            timeout = max(timeout, FULCRUM_ONION_TIMEOUT)
 
-    ssl_gewuenscht = use_ssl
+    if not kandidaten:
+        ergebnis.reachable = False
+        ergebnis.error = "kein Endpoint"
+        return ergebnis
+
     # UI-Schalter ist FULCRUM_SSL; Onion-Sonderfall FULCRUM_TOR_SSL mitziehen.
     ssl_env_keys = ["FULCRUM_SSL"]
-    if not lan and (values.get("FULCRUM_TOR_SSL") or "").strip():
+    if (values.get("FULCRUM_TOR_SSL") or "").strip():
         ssl_env_keys.append("FULCRUM_TOR_SSL")
+
+    client = None
+    fehler: str | None = None
+    host = ""
+    port = 0
+    use_ssl = True
+    ssl_gewuenscht = True
+    tor_proxy = None
 
     try:
         from fulcrum import connect_fulcrum
 
-        log(f"Verbinde mit {_verbindung_ziel(host, port, use_ssl, tor_proxy)}")
-        client, fehler = connect_fulcrum(
-            host, port, use_ssl=use_ssl, timeout=timeout,
-            tor_proxy=tor_proxy, require_listunspent=True,
-        )
-        # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung
-        # (LAN + Onion, Design Node-Anbindung — Nutzer soll nicht raten).
-        if not client and fehler and main.tls_should_try_opposite(fehler):
-            alt = not use_ssl
+        for host, port, use_ssl, tor_proxy in kandidaten:
+            ssl_gewuenscht = use_ssl
             log(
-                f"{'TLS' if use_ssl else 'Ohne TLS'} fehlgeschlagen: {fehler}"
+                f"Verbinde mit "
+                f"{_verbindung_ziel(host, port, use_ssl, tor_proxy)}"
             )
-            log(
-                f"Fallback: derselbe Port "
-                f"{'ohne TLS' if use_ssl else 'mit TLS'}"
-            )
-            log(f"Verbinde mit {_verbindung_ziel(host, port, alt, tor_proxy)}")
             client, fehler = connect_fulcrum(
-                host, port, use_ssl=alt, timeout=timeout,
+                host, port, use_ssl=use_ssl, timeout=timeout,
                 tor_proxy=tor_proxy, require_listunspent=True,
             )
+            # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung.
+            if not client and fehler and main.tls_should_try_opposite(fehler):
+                alt = not use_ssl
+                log(
+                    f"{'TLS' if use_ssl else 'Ohne TLS'} fehlgeschlagen: "
+                    f"{fehler}"
+                )
+                log(
+                    f"Fallback: derselbe Port "
+                    f"{'ohne TLS' if use_ssl else 'mit TLS'}"
+                )
+                log(
+                    f"Verbinde mit "
+                    f"{_verbindung_ziel(host, port, alt, tor_proxy)}"
+                )
+                client, fehler = connect_fulcrum(
+                    host, port, use_ssl=alt, timeout=timeout,
+                    tor_proxy=tor_proxy, require_listunspent=True,
+                )
+                if client:
+                    use_ssl = alt
             if client:
-                use_ssl = alt
+                break
+            log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
     except Exception as exc:  # Import- oder Laufzeitfehler
         ergebnis.reachable = False
         ergebnis.error = str(exc)

@@ -114,6 +114,18 @@ class WalletWatchService:
             self._thread.start()
         return True
 
+    def restart(self, state, *, on_log=None) -> bool:
+        """
+        Stoppt und startet neu — nach Host/Port/TLS-Änderung am eigenen Electrs.
+
+        ``start`` allein lässt einen laufenden Thread auf dem alten Endpoint
+        sitzen; erst Neustart baut die Subscribe-Session neu auf.
+        """
+        if on_log is not None:
+            self._on_log = on_log
+        self.stop()
+        return self.start(state, on_log=self._on_log)
+
     def stop(self) -> None:
         self._stop.set()
         self._cancel_timers()
@@ -655,6 +667,11 @@ def starte_wallet_watch(state, *, on_log=None) -> bool:
 
 def stoppe_wallet_watch() -> None:
     get_watch_service().stop()
+
+
+def restart_wallet_watch(state, *, on_log=None) -> bool:
+    """Watch nach Electrs-Config-Wechsel neu aufbauen (Host/Port/TLS)."""
+    return get_watch_service().restart(state, on_log=on_log)
 
 
 def wallet_watch_status() -> dict[str, Any]:

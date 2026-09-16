@@ -38,6 +38,12 @@ _started: subprocess.Popen[str] | None = None
 _started_lock = threading.Lock()
 _log_tail: list[str] = []
 
+#: Erfolgreicher SOCKS-Fund — TTL spart Dauer-„Prüfe Tor-SOCKS“-Spam
+#: (Peer-Takt + parallele Jobs + Reconnects).
+_socks_ok_cache: dict[tuple[str, int], tuple[float, tuple[str, int]]] = {}
+_socks_ok_lock = threading.Lock()
+SOCKS_OK_CACHE_TTL_S = 90.0
+
 
 class TorFehler(RuntimeError):
     """Tor nicht erreichbar und nicht startbar."""
@@ -335,6 +341,40 @@ def _starte_tor(
     )
 
 
+def _socks_cache_key(konfiguriert: tuple[str, int] | None) -> tuple[str, int]:
+    return konfiguriert or (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+
+
+def _socks_cache_get(
+    konfiguriert: tuple[str, int] | None,
+) -> tuple[str, int] | None:
+    """Gecachter SOCKS, still mit kurzem TCP-Ping verifiziert."""
+    key = _socks_cache_key(konfiguriert)
+    jetzt = time.monotonic()
+    with _socks_ok_lock:
+        eintrag = _socks_ok_cache.get(key)
+    if not eintrag:
+        return None
+    ts, proxy = eintrag
+    if jetzt - ts > SOCKS_OK_CACHE_TTL_S:
+        return None
+    # Kurzer stiller Ping — kein Log.
+    if socks_erreichbar(proxy[0], proxy[1], timeout=0.4):
+        return proxy
+    with _socks_ok_lock:
+        _socks_ok_cache.pop(key, None)
+    return None
+
+
+def _socks_cache_set(
+    konfiguriert: tuple[str, int] | None,
+    proxy: tuple[str, int],
+) -> None:
+    key = _socks_cache_key(konfiguriert)
+    with _socks_ok_lock:
+        _socks_ok_cache[key] = (time.monotonic(), proxy)
+
+
 def stelle_tor_socks_bereit(
     konfiguriert: tuple[str, int] | None = None,
     *,
@@ -348,8 +388,16 @@ def stelle_tor_socks_bereit(
 
     Startet bei Bedarf ein lokales Tor. Wirft :class:`TorFehler`, wenn weder
     ein Proxy läuft noch eines startbar ist.
+
+    Erfolgreiche Funde werden kurz gecacht (``SOCKS_OK_CACHE_TTL_S``), damit
+    parallele Jobs und der Peer-Takt nicht dauernd „Prüfe Tor-SOCKS…“ spammen.
     """
     ziel = konfiguriert or (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+
+    gecacht = _socks_cache_get(konfiguriert)
+    if gecacht is not None:
+        return gecacht
+
     if log:
         log(f"Prüfe Tor-SOCKS {ziel[0]}:{ziel[1]}…")
     gefunden = erkenne_tor_socks(konfiguriert)
@@ -361,6 +409,7 @@ def stelle_tor_socks_bereit(
             )
         elif log:
             log(f"Tor-SOCKS {gefunden[0]}:{gefunden[1]} erreichbar")
+        _socks_cache_set(konfiguriert, gefunden)
         return gefunden
 
     darf = starten and _autostart_erlaubt(env)
@@ -385,7 +434,11 @@ def stelle_tor_socks_bereit(
         schon = _started
     if schon is not None and schon.poll() is None:
         if socks_erreichbar(TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT):
-            return TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT
+            proxy = (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+            _socks_cache_set(konfiguriert, proxy)
+            return proxy
 
     _starte_tor(binary, TOR_DAEMON_SOCKS_PORT, timeout, log)
-    return TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT
+    proxy = (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+    _socks_cache_set(konfiguriert, proxy)
+    return proxy

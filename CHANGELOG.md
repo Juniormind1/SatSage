@@ -9,7 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Electrs über Tor · JSON-RPC-Batch:** Beim eigenen Node über Tor bündelt SatSage `listunspent` (UTXO-Scan) und `get_history` (Wallet-Alter) in Batches à max. 32 Calls — weniger Roundtrips auf dem einen Socket. LAN/Parallel-Pool und öffentliche Server unverändert.
+- **Tor/Electrs · Performance:** SOCKS-Check wird 90 s gecacht (kein Dauer-„Prüfe Tor-SOCKS“). UTXO-Scan, Herkunft und verwandte Jobs laufen **nacheinander** (Electrum-Gate) — nicht parallel auf demselben Tor-Socket. Stiller Peer-Takt verbindet währenddessen nicht neu zu own_fulcrum.
+- **Eigener Electrs · Config-Wechsel:** Host/Port/TLS speichern startet die Verbindung neu (Wallet-Watch-Session + Empfangs-Client). Altes `FULCRUM_TOR_PORT`/`FULCRUM_TOR_SSL` wird beim Speichern des UI-Ports/TLS gelöscht — sonst blieb der Verbindungsversuch am alten Endpoint hängen (nur Server-Neustart half).
+- **Electrs über Tor · JSON-RPC-Batch:** Beim eigenen Node über Tor bündelt SatSage `listunspent`/`get_history` (UTXO-Scan, Wallet-Alter, **Gap-Scan**) in Batches — weniger Roundtrips auf dem einen Socket. Gap-Scan: Fenster-Batch, Auswertung weiter indexweise inkl. Gap-Limit; Log kann `· Batch N` zeigen. LAN/Parallel-Pool und öffentliche Server unverändert.
 - **Herkunft · unvollständig rot:** Lückige/abgebrochene Bäume zeigen **„unvollständig · Datum“** in Rot statt grün „verfolgt“.
 - **Herkunft · Resume:** „Scan neu“ / Lücken schließen verwerfen brauchbare Teilbäume nicht mehr — fertige Zweige bleiben, nur Lücken (error-Prevout, tax_horizon, unvollständige interne Äste) werden nachgezogen. Leere/kaputte Stände starten weiterhin von null.
 - **Herkunft · leerer Trace:** Wenn die Vorgänger-Tx nicht ladbar war, endet der Baum nicht mehr still mit „Keine Zuflüsse ermittelbar“ und leeren Kindern. Stattdessen sichtbare Lücke (error-Blatt) und Hinweis auf unvollständige Herkunft — „Scan neu“ / Lücken schließen. Ursache war u. a. still übersprungene Prevouts.

@@ -900,6 +900,52 @@ def first_seen_fulcrum(
     return {"height": hoehe, "time_ts": _block_time_for_height(client, hoehe)}
 
 
+def _adressen_fuer_index(
+    derive_address_at_index,
+    xpub: str,
+    change: int,
+    index: int,
+) -> list[str]:
+    """Eine Adresse oder alle Skript-Varianten (xpub+auto) für Index *index*."""
+    roh = derive_address_at_index(xpub, change, index)
+    if isinstance(roh, (list, tuple, set)):
+        return [a for a in roh if a]
+    if roh:
+        return [roh]
+    return []
+
+
+def _gap_progress(
+    on_progress,
+    *,
+    kette: str,
+    index: int,
+    bisher: int,
+    utxo_zahl: int,
+    batch_n: int = 0,
+) -> None:
+    if not on_progress:
+        return
+    name = f"{kette} " if kette else ""
+    wort = "UTXO" if bisher == 1 else "UTXOs"
+    if utxo_zahl > 0:
+        hier = "UTXO" if utxo_zahl == 1 else "UTXOs"
+        text = (
+            f"Gap-Scan {name}Index #{index} — darin {utxo_zahl} {hier} "
+            f"gefunden · bisher {bisher} {wort}"
+        )
+    else:
+        # Nicht „0 gefunden“: das würde den letzten Treffer in der
+        # Statuszeile überschreiben und widerspräche dem Log.
+        text = f"Gap-Scan {name}Index #{index} · bisher {bisher} {wort}"
+        if batch_n > 1:
+            text = f"{text} · Batch {batch_n}"
+    try:
+        on_progress(text, sofort=utxo_zahl > 0)
+    except TypeError:
+        on_progress(text)
+
+
 def collect_used_chain_indices_fulcrum(
     client: FulcrumClient,
     xpub: str,
@@ -920,8 +966,26 @@ def collect_used_chain_indices_fulcrum(
     *on_utxos_update* erhält nach jedem Fund die bisher gefundenen UTXOs
     dieser Chain (voller Zwischenstand), damit die GUI schon während des
     Gap-Scans zeichnen kann.
+
+    Über Tor: ``get_history`` in Fenstern (Batch), Auswertung weiter strikt
+    indexweise inkl. Gap-Abbruch — fertige Treffer holen ``listunspent``
+    gebündelt nach.
     """
     from display import is_list_abort_requested
+
+    if client.tor_batch_sinnvoll(2):
+        return _collect_used_chain_indices_tor_batch(
+            client,
+            xpub,
+            change,
+            max_index,
+            gap_limit,
+            derive_address_at_index,
+            start_index=start_index,
+            on_progress=on_progress,
+            on_utxos_update=on_utxos_update,
+            kette=kette,
+        )
 
     used: set[int] = set()
     gap = 0
@@ -932,14 +996,9 @@ def collect_used_chain_indices_fulcrum(
         if is_list_abort_requested():
             break
         next_index = i + 1
-        roh = derive_address_at_index(xpub, change, i)
-        # Eine Adresse (alt) oder alle Skript-Varianten (xpub+auto).
-        if isinstance(roh, (list, tuple, set)):
-            adressen = [a for a in roh if a]
-        elif roh:
-            adressen = [roh]
-        else:
-            adressen = []
+        adressen = _adressen_fuer_index(
+            derive_address_at_index, xpub, change, i,
+        )
         if not adressen:
             break
         utxo_zahl = 0
@@ -968,23 +1027,179 @@ def collect_used_chain_indices_fulcrum(
             gap += 1
             if gap >= gap_limit:
                 break
-        if on_progress:
-            name = f"{kette} " if kette else ""
-            wort = "UTXO" if bisher == 1 else "UTXOs"
-            if utxo_zahl > 0:
-                hier = "UTXO" if utxo_zahl == 1 else "UTXOs"
-                text = (
-                    f"Gap-Scan {name}Index #{i} — darin {utxo_zahl} {hier} "
-                    f"gefunden · bisher {bisher} {wort}"
-                )
+        _gap_progress(
+            on_progress,
+            kette=kette,
+            index=i,
+            bisher=bisher,
+            utxo_zahl=utxo_zahl,
+        )
+    return used, next_index
+
+
+def _collect_used_chain_indices_tor_batch(
+    client: FulcrumClient,
+    xpub: str,
+    change: int,
+    max_index: int,
+    gap_limit: int,
+    derive_address_at_index,
+    *,
+    start_index: int = 0,
+    on_progress=None,
+    on_utxos_update=None,
+    kette: str = "",
+) -> tuple[set[int], int]:
+    """
+    Gap-Scan über Tor: get_history-Fenster batchen, Gap in Index-Reihenfolge.
+
+    Fenstergröße min(TOR_RPC_BATCH_SIZE, max(gap_limit, 8)) — nach gap_limit
+    leeren Indizes abbrechen, auch mitten im Fenster.
+    """
+    from display import is_list_abort_requested
+
+    used: set[int] = set()
+    gap = 0
+    next_index = start_index
+    bisher = 0
+    gefunden: list[dict] = []
+    # Nicht größer als Gap-Limit unnötig vorabfragen (außer etwas Puffer).
+    fenster = max(8, min(int(TOR_RPC_BATCH_SIZE), max(int(gap_limit), 8)))
+    i = start_index
+
+    while i < max_index:
+        if is_list_abort_requested():
+            break
+        window_end = min(max_index, i + fenster)
+        # (index, address) für alle Varianten im Fenster
+        eintraege: list[tuple[int, str]] = []
+        for idx in range(i, window_end):
+            for addr in _adressen_fuer_index(
+                derive_address_at_index, xpub, change, idx,
+            ):
+                eintraege.append((idx, addr))
+        if not eintraege:
+            break
+
+        calls = [
+            (_GET_HISTORY_METHOD, [address_to_scripthash(addr)])
+            for _idx, addr in eintraege
+        ]
+        try:
+            answers = client.request_batch(calls)
+        except Exception:
+            # Batch fehlgeschlagen → Index für Index wie bisher
+            answers = []
+            for _idx, addr in eintraege:
+                try:
+                    answers.append(
+                        client.request(
+                            _GET_HISTORY_METHOD,
+                            [address_to_scripthash(addr)],
+                        ) or []
+                    )
+                except Exception:
+                    answers.append([])
+
+        # index → [(address, history), ...]
+        nach_index: dict[int, list[tuple[str, list]]] = {}
+        for (idx, addr), hist in zip(eintraege, answers):
+            nach_index.setdefault(idx, []).append((addr, hist or []))
+
+        stop = False
+        for idx in range(i, window_end):
+            if is_list_abort_requested():
+                stop = True
+                break
+            next_index = idx + 1
+            varianten = nach_index.get(idx) or []
+            if not varianten:
+                stop = True
+                break
+            hit_addrs = [a for a, h in varianten if h]
+            getroffen = bool(hit_addrs)
+            utxo_zahl = 0
+            if getroffen:
+                used.add(idx)
+                gap = 0
+                # listunspent für Treffer-Adressen bündeln
+                try:
+                    lu_calls = [
+                        (_LISTUNSPENT_METHOD, [address_to_scripthash(a)])
+                        for a in hit_addrs
+                    ]
+                    if len(lu_calls) == 1:
+                        lu_answers = [
+                            client.request(lu_calls[0][0], lu_calls[0][1]) or []
+                        ]
+                    else:
+                        lu_answers = client.request_batch(lu_calls)
+                except RuntimeError as exc:
+                    if _is_unknown_method_error(exc, _LISTUNSPENT_METHOD):
+                        lu_answers = None
+                    else:
+                        lu_answers = None
+                except Exception:
+                    lu_answers = None
+
+                if lu_answers is not None:
+                    for address, entries in zip(hit_addrs, lu_answers):
+                        try:
+                            for utxo in _utxos_from_listunspent_entries(
+                                client, entries or [],
+                            ):
+                                utxo["address"] = address
+                                gefunden.append(utxo)
+                                utxo_zahl += 1
+                        except Exception:
+                            try:
+                                for utxo in fetch_address_utxos_fulcrum(
+                                    client, address,
+                                ):
+                                    utxo["address"] = address
+                                    gefunden.append(utxo)
+                                    utxo_zahl += 1
+                            except Exception:
+                                pass
+                else:
+                    for address in hit_addrs:
+                        try:
+                            for utxo in fetch_address_utxos_fulcrum(
+                                client, address,
+                            ):
+                                utxo["address"] = address
+                                gefunden.append(utxo)
+                                utxo_zahl += 1
+                        except Exception:
+                            pass
+                bisher += utxo_zahl
+                if on_utxos_update and utxo_zahl > 0:
+                    on_utxos_update(list(gefunden))
             else:
-                # Nicht „0 gefunden“: das würde den letzten Treffer in der
-                # Statuszeile überschreiben und widerspräche dem Log.
-                text = f"Gap-Scan {name}Index #{i} · bisher {bisher} {wort}"
-            try:
-                on_progress(text, sofort=utxo_zahl > 0)
-            except TypeError:
-                on_progress(text)
+                gap += 1
+                if gap >= gap_limit:
+                    stop = True
+                    _gap_progress(
+                        on_progress,
+                        kette=kette,
+                        index=idx,
+                        bisher=bisher,
+                        utxo_zahl=0,
+                        batch_n=len(eintraege),
+                    )
+                    break
+
+            _gap_progress(
+                on_progress,
+                kette=kette,
+                index=idx,
+                bisher=bisher,
+                utxo_zahl=utxo_zahl,
+                batch_n=len(eintraege) if not getroffen else 0,
+            )
+        if stop:
+            break
+        i = window_end
     return used, next_index
 
 

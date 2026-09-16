@@ -199,6 +199,73 @@ HEAVY_JOB_KINDS = NUTZER_JOB_KINDS | frozenset({"headers"})
 #: Schwere Jobs bekommen greppbare Start-/Ende-Zeilen im Log (JOB-START / JOB-ENDE).
 JOB_ZEIT_LOG_KINDS = HEAVY_JOB_KINDS
 
+#: Jobs, die denselben Electrum/Tor-Flaschenhals teilen — höchstens einer
+#: gleichzeitig (sonst UTXO-Scan + Herkunft parallel → doppelte SOCKS/Connects).
+ELECTRUM_SERIAL_KINDS = frozenset({
+    "rescan",
+    "verlauf",
+    "trace",
+    "trace-alle",
+    "trace-tief",
+    "wallet_sync",
+})
+
+
+class _ElectrumGate:
+    """
+    Serialisiert Electrum-lastige Jobs.
+
+    Der zweite Job wartet (abbrechbar), statt Tor/Electrs parallel zu belasten.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cv = threading.Condition(self._lock)
+        self._holder_id: str | None = None
+        self._holder_label: str = ""
+
+    def holder_label(self) -> str:
+        with self._lock:
+            return self._holder_label or ""
+
+    def busy(self) -> bool:
+        with self._lock:
+            return self._holder_id is not None
+
+    def acquire(self, job: "Job") -> None:
+        if job.kind not in ELECTRUM_SERIAL_KINDS:
+            return
+        with self._cv:
+            while self._holder_id is not None and self._holder_id != job.id:
+                job.raise_if_cancelled()
+                label = self._holder_label or self._holder_id or "anderer Job"
+                # phase-ähnlich: sichtbar, aber nicht jede Sekunde neu.
+                msg = f"Warte auf freie Electrum-Verbindung ({label})…"
+                if job.message != msg:
+                    job.progress(msg, log=True)
+                self._cv.wait(timeout=1.5)
+            job.raise_if_cancelled()
+            self._holder_id = job.id
+            self._holder_label = (job.label or job.kind or job.id)[:80]
+
+    def release(self, job: "Job") -> None:
+        if job.kind not in ELECTRUM_SERIAL_KINDS:
+            return
+        with self._cv:
+            if self._holder_id == job.id:
+                self._holder_id = None
+                self._holder_label = ""
+                self._cv.notify_all()
+
+
+#: Prozess-weit — ein Electrs@Tor-Socket / eine Pipeline.
+ELECTRUM_GATE = _ElectrumGate()
+
+
+def electrum_serial_busy() -> bool:
+    """True wenn gerade ein Electrum-Job (Scan/Herkunft/…) läuft."""
+    return ELECTRUM_GATE.busy()
+
 
 def format_job_uhr(ts: float | None = None) -> str:
     """Lokale Wanduhr, ISO-ähnlich ohne TZ — greppbar und lesbar."""
@@ -483,12 +550,19 @@ class JobRegistry:
         def lauf():
             token = _aktueller_job.set(job)
             zeit_log = job.kind in JOB_ZEIT_LOG_KINDS
+            electrum_serial = job.kind in ELECTRUM_SERIAL_KINDS
             try:
                 if zeit_log:
                     # Vor der Arbeit — greppbar im Log-Bereich / Terminal-Spiegel.
                     job._haenge_log_an(job_start_zeile(job))
                 try:
-                    job.result = func(job)
+                    if electrum_serial:
+                        ELECTRUM_GATE.acquire(job)
+                    try:
+                        job.result = func(job)
+                    finally:
+                        if electrum_serial:
+                            ELECTRUM_GATE.release(job)
                     if job.cancelled:
                         job.status = "cancelled"
                         # Immer klare Endmeldung — nicht die letzte Scan-Zeile.
@@ -521,6 +595,12 @@ class JobRegistry:
                         job.message = "Fehlgeschlagen."
                         traceback.print_exc()
             finally:
+                # Gate freigeben falls acquire vor func scheiterte / Cancel.
+                if electrum_serial:
+                    try:
+                        ELECTRUM_GATE.release(job)
+                    except Exception:
+                        pass
                 _aktueller_job.reset(token)
                 job.finished_at = time.time()
                 if zeit_log:
