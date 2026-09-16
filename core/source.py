@@ -275,16 +275,21 @@ def verbindung_label(
     electrs_n: int = 0,
     onion_n: int = 0,
     clear_n: int = 0,
+    electrum_name: str = "",
 ) -> str:
     """
-    Kopf/Log: Peers (BIP-158) und eigenes electrs nebeneinander — nicht
+    Kopf/Log: Peers (BIP-158) und eigener Indexer nebeneinander — nicht
     „entweder Peers oder onion-electrs“.
+
+    *electrum_name*: aus ``server.version`` (libbitcoin/electrs/fulcrum);
+    leer → generisch „electrs“ (Historie/Tests).
     """
     teile: list[str] = []
     if peers_n > 0:
         teile.append("1 Peer" if peers_n == 1 else f"{peers_n} Peers")
     if electrs_n > 0:
-        teile.append("1 electrs" if electrs_n == 1 else f"{electrs_n} electrs")
+        name = (electrum_name or "electrs").strip() or "electrs"
+        teile.append(f"1 {name}" if electrs_n == 1 else f"{electrs_n} {name}")
     if onion_n > 0:
         teile.append(f"{onion_n} onion-electrs")
     if clear_n > 0:
@@ -292,6 +297,112 @@ def verbindung_label(
     if not teile:
         return "0 Peers verbunden"
     return f"{' · '.join(teile)} verbunden"
+
+
+def own_fulcrum_stand_dict(
+    *,
+    software: str = "",
+    software_raw: str = "",
+    host: str = "",
+    port: int | str = 0,
+    detail: str = "",
+) -> dict:
+    """Kompaktes own_fulcrum-Update für Job-Meta / sources_last."""
+    soft = str(software or "").strip()
+    soft_raw = str(software_raw or "").strip()
+    host_s = str(host or "").strip()
+    try:
+        port_n = int(port or 0)
+    except (TypeError, ValueError):
+        port_n = 0
+    peer = f"{host_s}:{port_n}" if host_s and port_n else (host_s or "")
+    basis = peer
+    if soft and peer:
+        basis = f"{soft} · {peer}"
+    elif soft:
+        basis = soft
+    if soft_raw and soft and soft_raw.lower().strip("/") != soft.lower():
+        basis = f"{basis} · {soft_raw}" if basis else soft_raw
+    return {
+        "reachable": True,
+        "peer_count": 1 if peer or soft else 1,
+        "peer_hosts": [peer] if peer else [],
+        "error": "",
+        "software": soft,
+        "software_raw": soft_raw,
+        "detail": str(detail or basis or ""),
+    }
+
+
+def own_fulcrum_stand_from_client(client: object) -> dict | None:
+    """Stand aus verbundenem FulcrumClient (nach Handshake)."""
+    if client is None:
+        return None
+    host = str(getattr(client, "host", "") or "").strip()
+    port = getattr(client, "port", 0) or 0
+    soft = str(getattr(client, "server_software", "") or "").strip()
+    soft_raw = str(getattr(client, "server_software_raw", "") or "").strip()
+    if not host and not soft:
+        return None
+    return own_fulcrum_stand_dict(
+        software=soft,
+        software_raw=soft_raw,
+        host=host,
+        port=port,
+    )
+
+
+def merke_own_fulcrum_in_sources(
+    alt: list[dict] | None,
+    frisch: list[SourceInfo],
+    stand: dict,
+) -> list[dict]:
+    """
+    Schreibt own_fulcrum-Erreichbarkeit + Software in die sources_last-Liste.
+
+    Damit Tip-Sync/Empfang die Kopf-Pille sofort grün setzen können — ohne
+    auf den periodischen Peer-Check zu warten.
+    """
+    nach_alt: dict[str, dict] = {}
+    for eintrag in alt or []:
+        if isinstance(eintrag, dict) and eintrag.get("key"):
+            nach_alt[str(eintrag["key"])] = dict(eintrag)
+    out: list[dict] = []
+    for q in frisch:
+        d = q.as_dict()
+        a = nach_alt.get(q.key)
+        if q.key == "own_fulcrum" and q.configured and isinstance(stand, dict):
+            d["reachable"] = True
+            d["error"] = ""
+            d["peer_count"] = int(stand.get("peer_count") or 1)
+            hosts = list(stand.get("peer_hosts") or [])
+            if not hosts and a:
+                hosts = list(a.get("peer_hosts") or [])
+            d["peer_hosts"] = hosts
+            soft = str(stand.get("software") or "").strip()
+            soft_raw = str(stand.get("software_raw") or "").strip()
+            if soft:
+                d["software"] = soft
+                d["software_raw"] = soft_raw or soft
+            elif a:
+                d["software"] = str(a.get("software") or "")
+                d["software_raw"] = str(a.get("software_raw") or "")
+            detail = str(stand.get("detail") or "").strip()
+            if detail:
+                d["detail"] = detail
+            out.append(d)
+            continue
+        if a and d.get("reachable") is None:
+            d["reachable"] = a.get("reachable")
+            d["error"] = str(a.get("error") or "")
+            d["peer_count"] = int(a.get("peer_count") or 0)
+            d["peer_hosts"] = list(a.get("peer_hosts") or [])
+            d["software"] = str(a.get("software") or "")
+            d["software_raw"] = str(a.get("software_raw") or "")
+            if a.get("detail") and not d.get("detail"):
+                d["detail"] = a.get("detail")
+        out.append(d)
+    return out
 
 
 def peer_status(
@@ -325,6 +436,7 @@ def peer_status(
     p2p = nach.get("bip158")
     peers_n = int(getattr(p2p, "peer_count", 0) or 0) if p2p else 0
     electrs_n = 1 if (own and own.reachable) else 0
+    electrum_name = str(getattr(own, "software", "") or "").strip() if own else ""
 
     if peers_n > 0 or electrs_n > 0:
         hosts: list[str] = []
@@ -341,10 +453,15 @@ def peer_status(
         stand = {
             "kind": kind,
             "count": peers_n + electrs_n,
-            "label": verbindung_label(peers_n=peers_n, electrs_n=electrs_n),
+            "label": verbindung_label(
+                peers_n=peers_n,
+                electrs_n=electrs_n,
+                electrum_name=electrum_name,
+            ),
             "peers": hosts,
             "peers_n": peers_n,
             "electrs_n": electrs_n,
+            "software": electrum_name,
         }
     elif core and core.reachable:
         stand = {

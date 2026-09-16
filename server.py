@@ -2598,6 +2598,16 @@ def api_save_source(state: AppState, payload: dict) -> dict:
         "FULCRUM_TOR_PORT", "FULCRUM_TOR_SSL", "FULCRUM_TOR_PROXY",
     }
     electrs_geaendert = bool(electrs_keys & set(updates))
+    core_keys = {
+        "NODE_IP", "RPCHOST", "BITCOIN_RPC_HOST", "RPCPORT", "RPCUSER",
+        "RPCPASSWORD", "RPC_SSL", "RPC_COOKIE_FILE", "BITCOIN_RPC_COOKIE",
+    }
+    core_geaendert = bool(core_keys & set(updates)) or quelle == "own_core"
+    utxo_keys = {
+        "UTXO_RPC_HOST", "UTXO_RPCPORT", "UTXO_RPCUSER", "UTXO_RPCPASSWORD",
+        "UTXO_RPC_SSL", "UTXO_RPC_COOKIE_FILE",
+    }
+    utxo_geaendert = bool(utxo_keys & set(updates)) or quelle == "own_utxo_core"
 
     env.apply(updates)
     try:
@@ -2608,12 +2618,49 @@ def api_save_source(state: AppState, payload: dict) -> dict:
     state.reload()
     if electrs_geaendert:
         _verwerfe_electrs_verbindungen(state)
+        _loesche_source_stand(state, "own_fulcrum")
+    if core_geaendert:
+        _loesche_source_stand(state, "own_core")
+    if utxo_geaendert:
+        _loesche_source_stand(state, "own_utxo_core")
+    # Pille sofort „unbekannt“, bis der nächste Check/Connect greift.
+    pending = []
+    if electrs_geaendert:
+        pending.append("own_fulcrum")
+    if core_geaendert:
+        pending.append("own_core")
+    if utxo_geaendert:
+        pending.append("own_utxo_core")
     werte = state.env().values()
     return {
         "saved": True,
         "backup": str(sicherung) if sicherung else None,
         "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
+        "pending_sources": pending,
     }
+
+
+def _loesche_source_stand(state: AppState, *keys: str) -> None:
+    """sources_last für geänderte Quellen leeren — sonst bleibt die Pille grün."""
+    if not keys or not getattr(state, "sources_last", None):
+        return
+    keyset = {str(k) for k in keys}
+    neu: list = []
+    for eintrag in state.sources_last:
+        if not isinstance(eintrag, dict):
+            continue
+        if str(eintrag.get("key") or "") in keyset:
+            d = dict(eintrag)
+            d["reachable"] = None
+            d["error"] = ""
+            d["peer_count"] = 0
+            d["peer_hosts"] = []
+            d["software"] = ""
+            d["software_raw"] = ""
+            neu.append(d)
+        else:
+            neu.append(eintrag)
+    state.sources_last = neu
 
 
 def _verwerfe_electrs_verbindungen(state: AppState) -> None:
@@ -2791,6 +2838,29 @@ def _verlaufs_anhang(state: AppState, entries, *, limit: int | None = None,
     }
 
 
+def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
+    """
+    Eigener Electrum-Connect → sources_last + Job-tauglicher Stand.
+
+    Tip-Sync und Empfang verbinden oft Minuten vor dem 30‑s-Peer-Takt;
+    die Kopf-Pille soll dann schon grün mit libbitcoin/electrs/fulcrum sein.
+    """
+    stand = source_mod.own_fulcrum_stand_from_client(client)
+    if not stand:
+        return None
+    try:
+        werte = state.env().values()
+        frisch = source_mod.describe_sources(werte)
+        state.sources_last = source_mod.merke_own_fulcrum_in_sources(
+            getattr(state, "sources_last", None),
+            frisch,
+            stand,
+        )
+    except Exception:
+        LOGGER.debug("own_fulcrum Stand merken fehlgeschlagen", exc_info=True)
+    return stand
+
+
 def _eigener_fulcrum_client(state: AppState):
     """
     Eigener Electrs/Fulcrum oder None (kein öffentlicher Pool).
@@ -2815,6 +2885,7 @@ def _eigener_fulcrum_client(state: AppState):
         if alt is not None:
             try:
                 alt.request("server.ping")
+                _merke_own_fulcrum_client(state, alt)
                 return alt
             except Exception:
                 try:
@@ -2829,6 +2900,8 @@ def _eigener_fulcrum_client(state: AppState):
         except Exception:
             return None
         state._empfang_fulcrum = client
+        if client is not None:
+            _merke_own_fulcrum_client(state, client)
         return client
 
 
@@ -4752,13 +4825,9 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
                     peer_hosts=list(a.get("peer_hosts") or []),
                     error=str(a.get("error") or ""),
                     detail=str(a.get("detail") or q.detail or ""),
+                    software=str(a.get("software") or ""),
+                    software_raw=str(a.get("software_raw") or ""),
                 )
-                soft = a.get("software")
-                if soft:
-                    try:
-                        q.software = soft  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
             aufgefrischt.append(q)
         quellen = aufgefrischt
     quellen = source_mod.anreichere_live_p2p(quellen)
@@ -7791,6 +7860,14 @@ def starte_wallet_aktualisierung(
                 and fulcrum is not None
                 and main.is_own_fulcrum_backend(fulcrum)
             )
+            # Kopf-Pille sofort: Indexer schon in Nutzung, nicht erst Peer-Takt.
+            if electrs_eigen:
+                own_stand = _merke_own_fulcrum_client(state, fulcrum)
+                if own_stand and isinstance(job.meta, dict):
+                    job.meta["own_fulcrum"] = own_stand
+                    soft = str(own_stand.get("software") or "").strip()
+                    if soft:
+                        stand.phase(f"Indexer: {soft}")
             schluessel = [e.analyse_schluessel for e in eintraege]
             hat_tip = any(
                 (main.load_xpub_cache_entry(x, state.cache_dir) or {})

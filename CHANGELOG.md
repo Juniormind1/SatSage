@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Kopf · Log-Schalter:** Statt Checkbox „Zeige Log“ nur noch kompakter Knopf **Log** (wie DE/EN daneben) — an = Akzent, aus = gedimmt.
+- **Datenquelle · Pille nach Übernehmen:** Speichern von Electrum/Core setzt die Kopf-Pille sofort **grau** (Indexer/Core) und verwirft den alten Connect-Stand. Grün + konkreter Name (`libbitcoin`/`electrs`/`fulcrum`) erst nach erfolgreichem Verbindungstest — kein Weitergrün mit dem vorigen Endpoint.
+- **Dock · Empfangs-QR ziehbar:** Zwischen Assistent (LLM) und Empfangs-QR wieder ein horizontaler Spalter — Breite speichert sich (`xpq-dock-empfang`). Die QR-Fläche folgt der Spaltenbreite (QR bleibt innen quadratisch), nicht mehr starr an die Dock-Höhe gekoppelt.
+- **Kopf-Pille · Indexer:** Vor dem Handshake grau **Indexer**; sobald Tip-Sync/Empfang den eigenen Electrum-Server nutzt, sofort grün mit `libbitcoin`/`electrs`/`fulcrum` (aus `server.version`) — nicht erst nach dem 30‑s-Peer-Takt. Log: `1 libbitcoin verbunden` statt generisch „electrs“, wenn die Software bekannt ist.
 - **Tor/Electrs · Performance:** SOCKS-Check wird 90 s gecacht (kein Dauer-„Prüfe Tor-SOCKS“). UTXO-Scan, Herkunft und verwandte Jobs laufen **nacheinander** (Electrum-Gate) — nicht parallel auf demselben Tor-Socket. Stiller Peer-Takt verbindet währenddessen nicht neu zu own_fulcrum.
 - **Eigener Electrs · Config-Wechsel:** Host/Port/TLS speichern startet die Verbindung neu (Wallet-Watch-Session + Empfangs-Client). Altes `FULCRUM_TOR_PORT`/`FULCRUM_TOR_SSL` wird beim Speichern des UI-Ports/TLS gelöscht — sonst blieb der Verbindungsversuch am alten Endpoint hängen (nur Server-Neustart half).
 - **Electrs über Tor · JSON-RPC-Batch:** Beim eigenen Node über Tor bündelt SatSage `listunspent`/`get_history` (UTXO-Scan, Wallet-Alter, **Gap-Scan**) in Batches — weniger Roundtrips auf dem einen Socket. Gap-Scan: Fenster-Batch, Auswertung weiter indexweise inkl. Gap-Limit; Log kann `· Batch N` zeigen. LAN/Parallel-Pool und öffentliche Server unverändert.

@@ -219,13 +219,6 @@ button, input, select { font: inherit; color: inherit; }
 }
 .quelle { margin-left: auto; display: flex; align-items: center; gap: 10px;
           font-family: var(--mono); font-size: 11px; color: var(--gedaempft); }
-.kopf-log {
-  display: flex; align-items: center; gap: 7px; flex-shrink: 0;
-  font-family: var(--mono); font-size: 11px; color: var(--gedaempft);
-  cursor: pointer; user-select: none;
-}
-.kopf-log input { margin: 0; }
-
 .kopf-lang {
   display: flex; align-items: center; gap: 2px; flex-shrink: 0;
   margin-left: 8px;
@@ -238,6 +231,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .lang-knopf:hover { opacity: 1; }
 .lang-knopf.aktiv { opacity: 1; border-color: var(--akzent); color: var(--akzent); }
+.log-knopf { margin-right: 4px; }
 
 .buehne {
   flex: 1; min-height: 0;
@@ -264,23 +258,30 @@ button, input, select { font: inherit; color: inherit; }
 .dock-spalten {
   flex: 1; min-height: 0;
   display: grid;
-  grid-template-columns: minmax(8rem, var(--dock-log-pct, 50%)) 5px minmax(8rem, 1fr) auto;
+  /* Log | Spalter | Assistent (LLM) | Spalter | Empfangs-QR — QR relativ zum LLM ziehbar. */
+  grid-template-columns:
+    minmax(8rem, var(--dock-log-pct, 40%))
+    5px
+    minmax(10rem, 1fr)
+    5px
+    minmax(7.5rem, var(--dock-empfang-pct, 22%));
   align-items: stretch;
 }
 .buehne:not(.log-an) .dock-spalten {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns:
+    minmax(0, 1fr)
+    5px
+    minmax(7.5rem, var(--dock-empfang-pct, 28%));
 }
 .buehne:not(.log-an) #log-pane,
 .buehne:not(.log-an) #dock-spalter { display: none; }
 .empfang-pane {
-  /* Quadrat: Seitenlänge = Dock-Höhe; schrumpft mit, bleibt 1:1. */
+  /* Breite steuert der Empfang-Spalter (--dock-empfang-pct); QR bleibt innen quadratisch. */
   position: relative;
   height: 100%;
   max-height: 100%;
-  aspect-ratio: 1 / 1;
-  width: auto;
-  max-width: min(100%, 22rem);
-  min-width: 7.5rem;
+  width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -582,9 +583,15 @@ button, input, select { font: inherit; color: inherit; }
 }
 .dock-spalter {
   cursor: ew-resize; background: transparent; padding: 0; margin: 0;
+  align-self: stretch;
+  min-height: 0;
 }
 .dock-spalter:hover, .dock-spalter:focus-visible {
   background: var(--akzent-zart);
+}
+.empfang-spalter {
+  /* Trennt Assistent und Empfangs-QR. */
+  border: 0;
 }
 .log-kopf, .chat-kopf {
   font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
@@ -2147,15 +2154,16 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   .nav-eintrag.aktiv { border-left: 0; border-bottom-color: var(--akzent); }
   .inhalt { padding: 14px; }
   .buehne.log-an .dock-spalten {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) minmax(6.5rem, var(--dock-empfang-pct, 36%));
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
   .buehne.log-an #log-pane { grid-column: 1 / -1; }
-  .buehne.log-an #dock-spalter { display: none; }
+  .buehne.log-an #dock-spalter,
+  .buehne.log-an #empfang-spalter { display: none; }
   .buehne.log-an .log-pane { border-right: 0; border-bottom: 1px solid var(--linie); }
   .empfang-pane {
-    max-width: min(42vw, 14rem);
-    min-width: 6.5rem;
+    max-width: none;
+    min-width: 0;
   }
 }
 

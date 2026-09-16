@@ -2,6 +2,44 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Steuerbericht · HTML/CSV-Knöpfe gelb/grün nach Trace-Tiefe (BMF)
+
+**Stand:** 2026-09-16 · **offen** · Produkt / UI / Steuer
+
+**Hintergrund (BMF 2022 / 2025):** Die Sat-Historie muss **durchgehend** sein — auch wenn die Haltefrist schon **innerhalb** der XPUB-Wallets erreicht wurde. Abbruch nur an Haltefrist/Stichtag reicht für den **amtlichen Herkunftsnachweis nicht**.
+
+**Ist / Abgrenzung:**
+- **Dotplot + UTXO-Klassifikation** (innerhalb / außerhalb Haltefrist): begrenzter Scan, der früher abbricht als „extern / Coinbase“, **reicht**.
+- **HTML- oder CSV-Bericht:** ohne Kette bis **extern / Coinbase** wäre der Bericht **unvollständig** (BMF-Lesart).
+
+**Soll:**
+1. HTML-Bericht-Knöpfe **gelb**, wenn der Verlauf **nicht** bis extern/Coinbase im Cache liegt → Klick löst tieferen Herkunftsscan aus (kann dauern).
+2. HTML-Bericht-Knöpfe **grün**, wenn die Herkunft **schon vollständig** im Cache liegt → Export schnell.
+3. **Tooltips:**  
+   - Gelb: „erfordert Herkunftsscan. Kann dauern…“  
+   - Grün: „Herkunft liegt schon im Cache“
+4. Analog ggf. CSV, falls derselbe Vollständigkeits-Anspruch gilt.
+
+**Nicht:** Dotplot/Klassifikation auf Voll-Trace umstellen — der begrenzte Scan bleibt dort korrekt und schneller.
+
+---
+
+## UTXO-Bestand · libbitcoin `scantxoutset` (RPC wie Core)
+
+**Stand:** 2026-09-16 · **offen** · später · Datenquelle / UTXO-Scan
+
+**Idee:** Libbitcoin (bzw. vergleichbarer Stack) per **RPC wie Bitcoin Core** anbinden und **`scantxoutset`** für den UTXO-Bestand nutzen — parallel/alternativ zum Electrum-Gap-Scan.
+
+**Nutzen:** Kann bei **exotischen Wallets** (Miniscript, unübliche Deskriptoren, Adressen jenseits typischer Gap-Annahmen) Treffer liefern, die ein Gap-Scan **übersieht**.
+
+**Nicht der Treiber:** Laut Einschätzung **nicht schneller** als Gap-Scan am eigenen Indexer — also kein Performance-Projekt, sondern **Vollständigkeit / Exoten**.
+
+**Voraussetzung:** Libbitcoin wie Core konfigurierbar (Host/Port/User/Pass oder Cookie), eigene Slot-Logik oder Erweiterung von `UTXO_RPC_*` / `own_utxo_core`, klare Priorität gegenüber Electrs-LAN-Gap und Core-`scantxoutset`.
+
+**Priorität:** niedrig — **irgendwann später**, wenn Exoten-Wallets oder fehlende UTXOs das rechtfertigen. Kein Blocker für den normalen Electrs/Fulcrum/libbitcoin-Electrum-Pfad.
+
+---
+
 ## Steuerbericht · zwei Berichtsarten (Geldwäsche vs. Haltefrist/Stichtag)
 
 **Stand:** 2026-09-15 · **offen** · Produkt / Export

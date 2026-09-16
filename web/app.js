@@ -1061,6 +1061,8 @@ function formatLocale() {
 const T_FALLBACK = {
   "header.p2pPeers": "P2P {n}",
   "header.sourceCore": "Core",
+  "header.sourceIndexer": "Indexer",
+  "header.sourceIndexerTitle": "Eigener Electrum-Indexer — Verbindung wird geprüft…",
   "header.sourceElectrumOwn": "Electrum privat",
   "header.sourceElectrumImpl": "{name}",
   "header.sourceElectrumImplTitle": "Eigener Electrum-Indexer: {name} ({raw}). {detail}",
@@ -1675,8 +1677,14 @@ function nimmLogZeilen(job, stand, wallet) {
 }
 
 function setzeLogSichtbar(an) {
+  const sichtbar = Boolean(an);
   const buehne = document.querySelector(".buehne");
-  if (buehne) buehne.classList.toggle("log-an", Boolean(an));
+  if (buehne) buehne.classList.toggle("log-an", sichtbar);
+  const knopf = $("#log-anzeige");
+  if (knopf) {
+    knopf.classList.toggle("aktiv", sichtbar);
+    knopf.setAttribute("aria-pressed", sichtbar ? "true" : "false");
+  }
 }
 
 const LOG_HOEHE_MERKER = "xpq-log-hoehe";
@@ -1735,6 +1743,7 @@ function macheLogZiehbar() {
 }
 
 const DOCK_SPALTE_MERKER = "xpq-dock-spalte";
+const EMPFANG_SPALTE_MERKER = "xpq-dock-empfang";
 
 const EMPFANG_POLL_MS = 12_000;
 
@@ -3789,11 +3798,11 @@ function macheDockSpalter() {
     const gemerkt = localStorage.getItem(DOCK_SPALTE_MERKER);
     if (gemerkt) spalten.style.setProperty("--dock-log-pct", gemerkt);
   } catch (_) {
-    /* ohne Speicher bleibt 50/50 */
+    /* ohne Speicher bleibt Vorgabe */
   }
 
   let startX = 0;
-  let startPct = 50;
+  let startPct = 40;
   let zieht = false;
 
   const merken = (wert) => {
@@ -3823,7 +3832,7 @@ function macheDockSpalter() {
     zieht = true;
     startX = ereignis.clientX;
     const roh = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
-    startPct = Number.parseFloat(roh) || 50;
+    startPct = Number.parseFloat(roh) || 40;
     spalter.setPointerCapture(ereignis.pointerId);
     ereignis.preventDefault();
   });
@@ -3832,8 +3841,72 @@ function macheDockSpalter() {
     const breite = spalten.getBoundingClientRect().width;
     if (breite < 40) return;
     const delta = ((ereignis.clientX - startX) / breite) * 100;
-    const pct = Math.min(80, Math.max(20, startPct + delta));
+    // Platz für Assistent + Empfangs-QR lassen.
+    const pct = Math.min(70, Math.max(15, startPct + delta));
     spalten.style.setProperty("--dock-log-pct", `${Math.round(pct)}%`);
+  });
+  spalter.addEventListener("pointerup", beenden);
+  spalter.addEventListener("pointercancel", beenden);
+}
+
+/** Empfangs-QR horizontal relativ zum Assistenten (LLM) ziehbar. */
+function macheEmpfangSpalter() {
+  const spalter = $("#empfang-spalter");
+  const spalten = document.querySelector(".dock-spalten");
+  if (!spalter || !spalten) return;
+
+  try {
+    const gemerkt = localStorage.getItem(EMPFANG_SPALTE_MERKER);
+    if (gemerkt) spalten.style.setProperty("--dock-empfang-pct", gemerkt);
+  } catch (_) {
+    /* ohne Speicher bleibt Vorgabe */
+  }
+
+  let startX = 0;
+  let startPct = 22;
+  let zieht = false;
+
+  const merken = (wert) => {
+    try {
+      localStorage.setItem(EMPFANG_SPALTE_MERKER, wert);
+    } catch (_) {
+      /* gleichgültig */
+    }
+  };
+
+  const beenden = (ereignis) => {
+    if (!zieht) return;
+    zieht = false;
+    try {
+      spalter.releasePointerCapture(ereignis.pointerId);
+    } catch (_) {
+      /* Capture war schon weg */
+    }
+    const wert = getComputedStyle(spalten)
+      .getPropertyValue("--dock-empfang-pct")
+      .trim();
+    if (wert) merken(wert);
+  };
+
+  spalter.addEventListener("pointerdown", (ereignis) => {
+    if (ereignis.button !== 0) return;
+    zieht = true;
+    startX = ereignis.clientX;
+    const roh = getComputedStyle(spalten)
+      .getPropertyValue("--dock-empfang-pct")
+      .trim();
+    startPct = Number.parseFloat(roh) || 22;
+    spalter.setPointerCapture(ereignis.pointerId);
+    ereignis.preventDefault();
+  });
+  spalter.addEventListener("pointermove", (ereignis) => {
+    if (!zieht) return;
+    const breite = spalten.getBoundingClientRect().width;
+    if (breite < 40) return;
+    // Nach rechts ziehen → QR schmaler; nach links → QR breiter (Anteil der Dock-Breite).
+    const delta = ((startX - ereignis.clientX) / breite) * 100;
+    const pct = Math.min(48, Math.max(12, startPct + delta));
+    spalten.style.setProperty("--dock-empfang-pct", `${Math.round(pct)}%`);
   });
   spalter.addEventListener("pointerup", beenden);
   spalter.addEventListener("pointercancel", beenden);
@@ -9902,8 +9975,14 @@ function zeichneLocalCoreHinweis() {
         } else {
           await ladeConfig();
         }
+        setzeQuellenPending(["own_core", "own_utxo_core"]);
         zeichneDatenquellenAnsicht();
         logZeile("Lokaler Bitcoin Core übernommen.");
+        try {
+          await testeEigenenNode($("#quelle-pruefen"));
+        } catch (_) {
+          /* Pille bleibt grau/rot bis zum nächsten Check */
+        }
       } catch (fehler) {
         logZeile(String(fehler?.message || fehler), "krit");
       } finally {
@@ -10578,9 +10657,13 @@ function quellenFormular(quelle, behaelter) {
         daten: { source: quelle.key, values: werte },
       });
       await ladeConfig();
-      // Während des Tests „im Aufbau“ zeigen.
-      Zustand.peerCheckLaeuft = true;
-      zeichneQuellen(ergebnis.sources || Zustand.config.sources);
+      // Alte grüne Pille verwerfen: grau bis der neue Connect steht.
+      const pending = Array.isArray(ergebnis.pending_sources)
+        && ergebnis.pending_sources.length
+        ? ergebnis.pending_sources
+        : quellenPendingKeysNachSave(quelle.key);
+      setzeQuellenPending(pending);
+      zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
       meldung(t("sources.appliedTesting"), "warn");
       try {
         const stand = await testeEigenenNode($("#quelle-pruefen"));
@@ -12501,6 +12584,7 @@ function peerStatusAusQuellen(quellen, apiStand) {
       label: apiStand.label,
       peers: apiStand.peers || [],
       gut: (apiStand.count || 0) > 0,
+      software: apiStand.software || "",
     };
   }
   const nach = {};
@@ -12510,6 +12594,7 @@ function peerStatusAusQuellen(quellen, apiStand) {
   const p2p = nach.bip158;
   const peersN = p2p?.peer_count || 0;
   const electrsN = own && own.reachable ? 1 : 0;
+  const electrumName = String(own?.software || "").trim();
 
   if (peersN > 0 || electrsN > 0) {
     const hosts = [];
@@ -12521,10 +12606,11 @@ function peerStatusAusQuellen(quellen, apiStand) {
     return {
       n: peersN + electrsN,
       kind,
-      label: verbindungLabel({ peersN, electrsN }),
+      label: verbindungLabel({ peersN, electrsN, electrumName }),
       peers: hosts,
       peers_n: peersN,
       electrs_n: electrsN,
+      software: electrumName,
       gut: true,
     };
   }
@@ -12565,11 +12651,16 @@ function peerStatusAusQuellen(quellen, apiStand) {
   };
 }
 
-/** Peers (BIP-158) + eigenes electrs nebeneinander. */
-function verbindungLabel({ peersN = 0, electrsN = 0, onionN = 0, clearN = 0 } = {}) {
+/** Peers (BIP-158) + eigener Indexer nebeneinander. */
+function verbindungLabel({
+  peersN = 0, electrsN = 0, onionN = 0, clearN = 0, electrumName = "",
+} = {}) {
   const teile = [];
   if (peersN > 0) teile.push(peersN === 1 ? "1 Peer" : `${peersN} Peers`);
-  if (electrsN > 0) teile.push(electrsN === 1 ? "1 electrs" : `${electrsN} electrs`);
+  if (electrsN > 0) {
+    const name = String(electrumName || "").trim() || "electrs";
+    teile.push(electrsN === 1 ? `1 ${name}` : `${electrsN} ${name}`);
+  }
   if (onionN > 0) teile.push(`${onionN} onion-electrs`);
   if (clearN > 0) teile.push(`${clearN} clearnet-electrs`);
   if (!teile.length) return "0 Peers verbunden";
@@ -12767,6 +12858,9 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
           (neu.peer_hosts && neu.peer_hosts.length)
             ? neu.peer_hosts
             : (alt.peer_hosts || []),
+        software: neu.software || alt.software || "",
+        software_raw: neu.software_raw || alt.software_raw || "",
+        detail: neu.detail || alt.detail || "",
       };
     }
     if (
@@ -12783,10 +12877,97 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
           (alt.peer_hosts && alt.peer_hosts.length)
             ? alt.peer_hosts
             : (neu.peer_hosts || []),
+        software: alt.software || neu.software || "",
+        software_raw: alt.software_raw || neu.software_raw || "",
+        detail: alt.detail || neu.detail || "",
+      };
+    }
+    // Software vom älteren Stand behalten, wenn der neue Check sie weglässt.
+    if (
+      neu.reachable === true
+      && !String(neu.software || "").trim()
+      && String(alt.software || "").trim()
+    ) {
+      return {
+        ...neu,
+        software: alt.software,
+        software_raw: alt.software_raw || neu.software_raw || "",
       };
     }
     return neu;
   });
+}
+
+/** Welche Kopf-Pillen nach Speichern einer Quelle neu verbunden werden müssen. */
+function quellenPendingKeysNachSave(quelleKey) {
+  if (quelleKey === "own_fulcrum") return ["own_fulcrum"];
+  if (quelleKey === "own_core") return ["own_core"];
+  if (quelleKey === "own_utxo_core") return ["own_utxo_core"];
+  return [];
+}
+
+/**
+ * Nach „Übernehmen“: betroffene Pillen sofort grau (pending), ohne alten
+ * reachable/software-Stand. Farbe + Name erst nach erfolgreichem Check.
+ */
+function setzeQuellenPending(keys) {
+  const keyset = new Set(
+    (Array.isArray(keys) ? keys : [keys]).map((k) => String(k || "")).filter(Boolean),
+  );
+  if (!keyset.size || !Zustand.config) return;
+  Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+    if (!q || !keyset.has(q.key) || !q.configured) return q;
+    return {
+      ...q,
+      reachable: null,
+      error: "",
+      peer_count: 0,
+      peer_hosts: [],
+      software: "",
+      software_raw: "",
+    };
+  });
+  // Noch kein frischer Check — Aufbau (grau), nicht Fehler (rot).
+  Zustand.peersGeprueft = false;
+  Zustand.peerCheckLaeuft = true;
+  const stand = peerStatusAusQuellen(Zustand.config.sources);
+  Zustand.peerStatus = stand;
+  Zustand.peers = stand.n;
+  Zustand.peerLabel = stand.label;
+  zeichneKopfStatus(Zustand.config.sources);
+}
+
+/**
+ * Eigener Indexer schon in Nutzung (Tip-Sync/Empfang) → Pille sofort grün.
+ * Kommt aus Job-Meta oder sources_last, nicht erst vom 30‑s-Peer-Takt.
+ */
+function nimmOwnFulcrumStand(info) {
+  if (!info || !Zustand.config) return;
+  const soft = String(info.software || "").trim();
+  const softRaw = String(info.software_raw || "").trim();
+  const hosts = Array.isArray(info.peer_hosts)
+    ? info.peer_hosts.map((h) => String(h || "").trim()).filter(Boolean)
+    : [];
+  Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+    if (q.key !== "own_fulcrum" || !q.configured) return q;
+    return {
+      ...q,
+      reachable: info.reachable === false ? false : true,
+      error: info.reachable === false ? String(info.error || q.error || "") : "",
+      peer_count: Number(info.peer_count || hosts.length || 1),
+      peer_hosts: hosts.length ? hosts : (q.peer_hosts || []),
+      software: soft || q.software || "",
+      software_raw: softRaw || q.software_raw || "",
+      detail: String(info.detail || q.detail || ""),
+    };
+  });
+  Zustand.peersGeprueft = true;
+  const stand = peerStatusAusQuellen(Zustand.config.sources);
+  Zustand.peerStatus = stand;
+  Zustand.peers = stand.n;
+  Zustand.peerLabel = stand.label;
+  zeichneKopfStatus(Zustand.config.sources);
+  setzePeerTakt(Zustand.config.sources);
 }
 
 function nimmPeerStand(ergebnis, still) {
@@ -13089,11 +13270,14 @@ function zeichneKopfStatus(quellen) {
   const eintraege = [];
 
   if (coreVerbunden || kopfQuelleAufbau(core) || kopfQuelleFehler(core)) {
+    // Wie Indexer: Aufbau grau, erst nach Connect grün — kein Gelb-Flash.
     eintraege.push({
       key: "own_core",
       lern: "core",
       label: t("header.sourceCore"),
-      stufe: coreVerbunden ? "gut" : (kopfQuelleAufbau(core) ? "warn" : "krit"),
+      stufe: coreVerbunden
+        ? "gut"
+        : (kopfQuelleAufbau(core) ? "neutral" : "krit"),
       title: core?.error
         || t("header.sourceCoreTitle"),
     });
@@ -13113,27 +13297,43 @@ function zeichneKopfStatus(quellen) {
   }
 
   if (electrsVerbunden || kopfQuelleAufbau(electrs) || kopfQuelleFehler(electrs)) {
-    // Konkrete Implementierung aus server.version (electrs/fulcrum/libbitcoin).
+    // Vor Handshake: grau „Indexer“. Erst mit server.version grün + Name.
     const soft = String(electrs?.software || "").trim();
     const softRaw = String(electrs?.software_raw || "").trim();
-    const electrsLabel = soft
-      ? t("header.sourceElectrumImpl", { name: soft })
-      : t("header.sourceElectrumOwn");
-    const electrsTitle = electrs?.error
-      || (soft
-        ? t("header.sourceElectrumImplTitle", {
-          name: soft,
-          raw: softRaw || soft,
-          detail: electrs?.detail || "",
-        })
-        : t("header.sourceElectrumOwnTitle"));
+    const aufbau = kopfQuelleAufbau(electrs);
+    const fehler = kopfQuelleFehler(electrs);
+    let electrsLabel;
+    let electrsTitle;
+    let stufe;
+    if (electrsVerbunden && soft) {
+      electrsLabel = t("header.sourceElectrumImpl", { name: soft });
+      electrsTitle = t("header.sourceElectrumImplTitle", {
+        name: soft,
+        raw: softRaw || soft,
+        detail: electrs?.detail || "",
+      });
+      stufe = "gut";
+    } else if (electrsVerbunden) {
+      electrsLabel = t("header.sourceIndexer");
+      electrsTitle = t("header.sourceElectrumOwnTitle");
+      stufe = "gut";
+    } else if (aufbau) {
+      electrsLabel = t("header.sourceIndexer");
+      electrsTitle = t("header.sourceIndexerTitle");
+      stufe = "neutral";
+    } else {
+      electrsLabel = soft
+        ? t("header.sourceElectrumImpl", { name: soft })
+        : t("header.sourceIndexer");
+      electrsTitle = electrs?.error || t("header.sourceElectrumOwnTitle");
+      stufe = "krit";
+    }
+    if (fehler && electrs?.error) electrsTitle = electrs.error;
     eintraege.push({
       key: "own_fulcrum",
       lern: "electrum",
       label: electrsLabel,
-      stufe: electrsVerbunden
-        ? "gut"
-        : (kopfQuelleAufbau(electrs) ? "warn" : "krit"),
+      stufe,
       title: electrsTitle,
     });
   }
@@ -14007,6 +14207,9 @@ async function pruefeWalletSyncJob() {
     if (Array.isArray(job.live_p2p_peers)) {
       nimmLiveP2pPeers(job.live_p2p_peers);
     }
+    if (job.meta?.own_fulcrum) {
+      nimmOwnFulcrumStand(job.meta.own_fulcrum);
+    }
     merkeWalletSyncZiele(job);
     if (jobIstStillerTip(job)) Zustand.walletSyncStill = true;
     if (job.meta?.phase === "empfang") {
@@ -14434,13 +14637,18 @@ async function start() {
   $("#app").hidden = false;
   // DE/EN sofort klickbar — nicht erst nach Jobs/Header-Sync am Ende von start().
   bindeSprachUmschalter();
-  const logSchalter = $("#log-anzeige");
-  setzeLogSichtbar(logSchalter.checked);
-  logSchalter.addEventListener("change", () => {
-    setzeLogSichtbar(logSchalter.checked);
-  });
+  const logKnopf = $("#log-anzeige");
+  // Standard an (wie bisher checked); Klick toggelt wie DE/EN.
+  setzeLogSichtbar(logKnopf ? logKnopf.classList.contains("aktiv") : true);
+  if (logKnopf) {
+    logKnopf.addEventListener("click", () => {
+      const an = !document.querySelector(".buehne")?.classList.contains("log-an");
+      setzeLogSichtbar(an);
+    });
+  }
   macheLogZiehbar();
   macheDockSpalter();
+  macheEmpfangSpalter();
   setzeEmpfangPoll();
   setzeLernhinweiseDelegates();
   setzeEmpfangAnimDebug();

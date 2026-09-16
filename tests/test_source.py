@@ -123,6 +123,44 @@ class TestElectrumSoftwareLabel(unittest.TestCase):
         self.assertIn("libbitcoin", out.detail)
         self.assertIn("libbitcoin", out.as_dict()["software"])
 
+    def test_merke_own_fulcrum_sofort_in_sources(self):
+        from core.source import (
+            merke_own_fulcrum_in_sources,
+            own_fulcrum_stand_from_client,
+            peer_status,
+            verbindung_label,
+        )
+
+        self.assertEqual(
+            verbindung_label(electrs_n=1, electrum_name="libbitcoin"),
+            "1 libbitcoin verbunden",
+        )
+        self.assertEqual(
+            verbindung_label(electrs_n=1),
+            "1 electrs verbunden",
+        )
+        client = mock.Mock()
+        client.host = "192.0.2.10"
+        client.port = 50001
+        client.server_software = "libbitcoin"
+        client.server_software_raw = "/libbitcoin:4.0.0/"
+        stand = own_fulcrum_stand_from_client(client)
+        self.assertEqual(stand["software"], "libbitcoin")
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        frisch = describe_sources(werte)
+        liste = merke_own_fulcrum_in_sources(None, frisch, stand)
+        own = next(q for q in liste if q["key"] == "own_fulcrum")
+        self.assertTrue(own["reachable"])
+        self.assertEqual(own["software"], "libbitcoin")
+        gemerged = mergere_erreichbarkeit(describe_sources(werte), liste)
+        ps = peer_status(gemerged)
+        self.assertEqual(ps["label"], "1 libbitcoin verbunden")
+        self.assertEqual(ps.get("software"), "libbitcoin")
+
 
 class TestCheckReachable(unittest.TestCase):
 

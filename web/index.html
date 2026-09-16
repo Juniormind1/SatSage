@@ -269,11 +269,14 @@
       <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
       <span id="llm-pille" class="pille pille-neutral">LLM</span>
     </div>
-    <label class="kopf-log" data-i18n-title="header.showLogTitle" title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an.">
-      <input type="checkbox" id="log-anzeige" checked>
-      <span data-i18n="header.showLog">Zeige Log</span>
-    </label>
     <div class="kopf-lang">
+      <button type="button" id="log-anzeige" class="lang-knopf log-knopf aktiv"
+              data-i18n="header.showLog"
+              data-i18n-title="header.showLogTitle"
+              data-i18n-aria-label="header.showLogAria"
+              title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an."
+              aria-label="Log ein- oder ausblenden"
+              aria-pressed="true">Log</button>
       <button type="button" id="lang-de" class="lang-knopf" data-lang="de" aria-label="Deutsch">DE</button>
       <button type="button" id="lang-en" class="lang-knopf" data-lang="en" aria-label="English">EN</button>
     </div>
@@ -1415,6 +1418,12 @@
           </button>
         </form>
       </section>
+      <div id="empfang-spalter" class="dock-spalter empfang-spalter" role="separator"
+           aria-orientation="vertical"
+           data-i18n-aria-label="dock.empfangSplitAria"
+           aria-label="Breite von Assistent und Empfangs-QR"
+           data-i18n-title="dock.empfangSplitTitle"
+           title="Ziehen, um Empfangs-QR und Assistent breiter oder schmaler zu machen"></div>
       <section id="empfang-pane" class="empfang-pane"
                data-i18n-aria-label="dock.empfangAria" aria-label="Empfangsadresse">
         <div class="empfang-kopf-zeile">
