@@ -2223,7 +2223,7 @@ const EmpfangPuls = (() => {
     });
   }
 
-  function zeichneOhNoMaske(seite, aScale, dark) {
+  function zeichneOhNoMaske(seite, aScale, dark, herzScale = 1) {
     const bg = dark ? 0 : 255;
     const out = ctx.createImageData(seite, seite);
     const od = out.data;
@@ -2232,20 +2232,23 @@ const EmpfangPuls = (() => {
       od[i + 3] = 255;
     }
     ctx.putImageData(out, 0, 0);
+    const s = Math.max(0.1, Math.min(1, Number(herzScale) || 1));
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, aScale));
+    ctx.translate(seite / 2, seite / 2);
+    ctx.scale(s, s);
     ctx.fillStyle = dark ? "#fff" : "#111";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     // Zwei Zeilen füllen zusammen ~80 % der Quadratfläche.
     const fs = Math.max(28, Math.floor(seite * 0.38));
     ctx.font = `bold ${fs}px system-ui, sans-serif`;
-    ctx.fillText("OH", seite / 2, seite * 0.34);
-    ctx.fillText("NO!", seite / 2, seite * 0.70);
+    ctx.fillText("OH", 0, seite * (0.34 - 0.5));
+    ctx.fillText("NO!", 0, seite * (0.70 - 0.5));
     ctx.restore();
   }
 
-  function zeichneHakenMaske(seite, aScale, dark) {
+  function zeichneHakenMaske(seite, aScale, dark, herzScale = 1) {
     const bg = dark ? 0 : 255;
     const out = ctx.createImageData(seite, seite);
     const od = out.data;
@@ -2254,15 +2257,18 @@ const EmpfangPuls = (() => {
       od[i + 3] = 255;
     }
     ctx.putImageData(out, 0, 0);
+    const s = Math.max(0.1, Math.min(1, Number(herzScale) || 1));
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, aScale));
+    ctx.translate(seite / 2, seite / 2);
+    ctx.scale(s, s);
     ctx.fillStyle = "#3ddc84"; // grüner Haken
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     // ~80 % der Quadratseite
     const fs = Math.max(40, Math.floor(seite * 0.8));
     ctx.font = `bold ${fs}px system-ui, "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
-    ctx.fillText("✓", seite / 2, seite / 2 + fs * 0.06);
+    ctx.fillText("✓", 0, fs * 0.06);
     ctx.restore();
   }
 
@@ -2277,6 +2283,8 @@ const EmpfangPuls = (() => {
     const bg = dark ? 0 : 255;
     const glow = dark ? 255 : 0;
     const aScale = Math.max(0, Math.min(1, sichtQr));
+    // Herzschlag: Maske 10 %↔100 % mitskalieren (parallel zum Fade).
+    const herzScale = 0.1 + 0.9 * aScale;
 
     if (nurSchwarz) {
       ctx.fillStyle = dark ? "#000" : "#fff";
@@ -2285,18 +2293,19 @@ const EmpfangPuls = (() => {
     }
 
     if (art === "ohNo") {
-      zeichneOhNoMaske(seite, aScale, dark);
+      zeichneOhNoMaske(seite, aScale, dark, herzScale);
       return;
     }
     if (art === "haken") {
-      zeichneHakenMaske(seite, aScale, dark);
+      zeichneHakenMaske(seite, aScale, dark, herzScale);
       return;
     }
 
-    // Oranges ₿: skaliert (5–80 % der QR-Seite), zentriert; sonst Maske full-size.
+    // Oranges ₿: feste Sats-Skala; normaler Atem: herzScale zentriert.
     let maskSeite = seite;
     let maskOx = 0;
     let maskOy = 0;
+    let lumaSeite = seite;
     if (orange && (art || "btc") === "btc") {
       const scale = Math.max(
         ORANGE_B_MIN,
@@ -2310,18 +2319,32 @@ const EmpfangPuls = (() => {
       maskSeite = Math.max(8, Math.floor(seite * scale));
       maskOx = Math.floor((seite - maskSeite) / 2);
       maskOy = maskOx;
+      lumaSeite = maskSeite;
+    } else {
+      // Luma immer full-size cachen; nur die Abtastung skaliert (kein Cache-Sturm).
+      maskSeite = Math.max(8, seite * herzScale);
+      maskOx = (seite - maskSeite) / 2;
+      maskOy = maskOx;
+      lumaSeite = seite;
     }
 
-    const luma = await bereiteMaskeLuma(art || "btc", maskSeite);
+    const luma = await bereiteMaskeLuma(art || "btc", lumaSeite);
     const qr = orange ? null : await baueQrBitmap(seite);
     const out = ctx.createImageData(seite, seite);
     const od = out.data;
     const qd = qr ? qr.data : null;
     const innen = new Uint8Array(seite * seite);
-    // Full-canvas innen-Karte nur für QR-Atem (nicht orange ₿).
+    // Innen-Karte in Canvas-Koordinaten (skalierte Maske → Glow-Rand).
     if (luma && !orange) {
-      for (let p = 0; p < luma.length; p++) {
-        innen[p] = luma[p] >= 120 ? 1 : 0;
+      const inv = maskSeite > 0 ? lumaSeite / maskSeite : 1;
+      for (let y = 0, p = 0; y < seite; y++) {
+        for (let x = 0; x < seite; x++, p++) {
+          const mx = (x - maskOx) * inv;
+          const my = (y - maskOy) * inv;
+          if (mx < 0 || my < 0 || mx >= lumaSeite || my >= lumaSeite) continue;
+          const mp = (my | 0) * lumaSeite + (mx | 0);
+          if (luma[mp] >= 120) innen[p] = 1;
+        }
       }
     }
 
@@ -2334,11 +2357,17 @@ const EmpfangPuls = (() => {
             const mx = x - maskOx;
             const my = y - maskOy;
             if (mx >= 0 && my >= 0 && mx < maskSeite && my < maskSeite) {
-              const mp = my * maskSeite + mx;
+              const mp = (my | 0) * lumaSeite + (mx | 0);
               maskA = Math.max(0, Math.min(1, (luma[mp] - 40) / 180));
             }
           } else {
-            maskA = Math.max(0, Math.min(1, (luma[p] - 40) / 180));
+            const inv = maskSeite > 0 ? lumaSeite / maskSeite : 1;
+            const mx = (x - maskOx) * inv;
+            const my = (y - maskOy) * inv;
+            if (mx >= 0 && my >= 0 && mx < lumaSeite && my < lumaSeite) {
+              const mp = (my | 0) * lumaSeite + (mx | 0);
+              maskA = Math.max(0, Math.min(1, (luma[mp] - 40) / 180));
+            }
           }
         }
         let r = bg;
