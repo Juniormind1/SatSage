@@ -569,7 +569,7 @@ def _menu_sanctions_wallet(session: MenuSession) -> None:
                         get_tx._satsage_imm_wrapped = True
                     except Exception:
                         pass
-            hits, checked, abort_hit = check_wallet_utxos_sanctions(
+            hits, checked, abort_hit, coinjoins = check_wallet_utxos_sanctions(
                 get_tx,
                 utxos,
                 session.all_addresses,
@@ -588,6 +588,7 @@ def _menu_sanctions_wallet(session: MenuSession) -> None:
                 utxo_count=checked,
                 sanctioned_count=len(session.sanctioned_addresses),
                 aborted=abort_hit is not None,
+                coinjoins=coinjoins,
             )
             if abort_hit:
                 from display import abbrev_display, format_utxo_ref

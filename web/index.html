@@ -1294,6 +1294,24 @@
 
         <div class="karte">
           <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="sources.exchangeReports">Börsen-Reports</span>
+            <span id="boerse-zusatz" class="karte-zusatz"></span>
+            <button type="button" id="boerse-csv-import" class="knopf knopf-klein"
+                    data-i18n="sources.exchangeImport" data-i18n-title="sources.exchangeImportTitle"
+                    title="CSV einer Börse wählen (Transaktionshistorie). Nur Bitcoin-Adressen und TxIDs werden übernommen — Kurse und andere Coins verworfen. Danach erscheinen die Adressen in der Herkunft als Börsen-Klarname.">
+              Börsen-CSV importieren
+            </button>
+            <input type="file" id="boerse-csv-datei" accept=".csv,text/csv,text/plain" hidden>
+          </div>
+          <p class="meta" data-i18n="sources.exchangeMeta">
+            Deine Börsen-Historie anreichert Herkunft mit Klarnamen (z. B. „Börse · Kraken“).
+            Pro Börse eine Cache-Datei; nur On-Chain-Referenzen, keine Handelskurse.
+          </p>
+          <div id="boerse-status"></div>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
             <span class="karte-titel" data-i18n="sources.labels">Adress-Labels</span>
             <span id="label-zusatz" class="karte-zusatz"></span>
             <label class="feld feld-klein">

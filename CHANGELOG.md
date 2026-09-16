@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · Börsen-CSV:** Transaktionsreports importieren (Knopf unter Datenquellen). Nur Bitcoin-Adressen und TxIDs — Kurse und andere Coins verworfen. Pro Börse eine Cache-Datei (`exchange_reports/`); Herkunft zeigt Klarname „Börse · …“ (optional Ein-/Auszahlung). Trace **endet** an Börsen-Adresse/Tx — keine Hops hinter die Ein-/Auszahlung.
+- **Sanktionscheck · CoinJoins im Hop-Fenster:** Beim Scan über n Hops werden Form-Heuristiken (Wasabi/WabiSabi/Whirlpool/JoinMarket/Mix) hervorgehoben — z. B. „Keine sanktionierte Adresse in den letzten n Hops. CoinJoins: Hop m · Zeit · vermutlich …“. Soft-Label, keine forensische Sicherheit; im Walk-Cache und in CLI/Web.
 - **Herkunft · Fan-In vs. Fan-Out:** Rein eigene Spends trennen nach Richtung — Fan-Out nur noch bei mehr Outputs als Inputs (≥3 Outs, Auszahlung/Split); Fan-In bei mehr Inputs als Outputs (Konsolidierung n→wenige). Soft-Label „eigene Konsolidierung (Fan-In)“.
 - **Einstellungen · Darstellung:** Hell/Dunkel als Radiobuttons statt Dropdown.
 - **Herkunft · flache Hierarchie im Wallet:** Einrückung nur bei Wallet-Wechsel (oder Extern/Coinbase), nicht mehr pro Hop innerhalb desselben Wallets — Web-Baum und HTML-Hop-Bericht.

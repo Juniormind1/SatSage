@@ -82,7 +82,7 @@ def main() -> int:
         expect_at = chain.get("expect_hit_at_hops")
         start = chain["start_address"]
         for depth in depths:
-            hits, checked, _abort = check_wallet_utxos_sanctions(
+            hits, checked, _abort, _coinjoins = check_wallet_utxos_sanctions(
                 get_tx,
                 [utxo],
                 set(),

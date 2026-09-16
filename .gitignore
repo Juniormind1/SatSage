@@ -30,6 +30,7 @@ immutable_cache/
 sanctioned_cache/
 tor_data/
 label_cache/
+exchange_reports/
 psbt_out/
 
 terminals/

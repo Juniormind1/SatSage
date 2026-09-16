@@ -323,6 +323,27 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
                 )
                 if unterbaum.get("time_ts"):
                     knoten["block_time"] = int(unterbaum["time_ts"])
+            elif unterbaum.get("exchange_stop"):
+                # Börsen-Grenze: kein Walk hinter Ein-/Auszahlung.
+                knoten["exchange_stop"] = True
+                knoten["label"] = (
+                    unterbaum.get("exchange_label")
+                    or labels.beschrifte(
+                        adresse or "",
+                        txid=str(unterbaum.get("txid") or ""),
+                    )
+                )
+                knoten["note"] = (
+                    "Börse — Herkunft endet an der Ein-/Auszahlung "
+                    "(keine Hops darüber hinaus)."
+                )
+                if quellen:
+                    knoten["children"] = _quellen_zu_knoten(
+                        unterbaum, wallet, pfad, tiefe + 1
+                    )
+                else:
+                    knoten["children"] = []
+                knoten["expandable"] = bool(knoten["children"])
             elif quellen:
                 knoten["children"] = _quellen_zu_knoten(
                     unterbaum, wallet, pfad, tiefe + 1
@@ -377,10 +398,20 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
         )
         _setze_externe_zeit(knoten, quelle)
     elif typ == "external":
-        knoten["note"] = "Externe Zweige werden nicht weiterverfolgt."
+        if quelle.get("exchange_stop"):
+            knoten["exchange_stop"] = True
+            knoten["note"] = (
+                "Börse — Herkunft endet an der Ein-/Auszahlung "
+                "(keine Hops darüber hinaus)."
+            )
+        else:
+            knoten["note"] = "Externe Zweige werden nicht weiterverfolgt."
         # Genau hier endet die Verfolgung — und genau hier ist die Frage
         # „von wem kam das eigentlich" am interessantesten.
-        knoten["label"] = labels.beschrifte(adresse)
+        # Börsen-CSV: Adresse oder TxID des Prevouts (Ein-/Auszahlung).
+        from_utxo = str(quelle.get("from_utxo") or "")
+        prev_txid = from_utxo.rsplit(":", 1)[0] if ":" in from_utxo else ""
+        knoten["label"] = labels.beschrifte(adresse, txid=prev_txid)
         # Blockzeit des Prevouts: wann diese Sats die fremde Adresse erreichten
         # (bzw. der Funding-Output bestätigt wurde). analyze legt time_ts ab;
         # ohne das blieb die UI-Zeile ohne Datum, obwohl die jüngsten sats
@@ -681,7 +712,12 @@ def trace_utxo(
         "amount_sats": int(roh.get("amount_sats", 0) or 0),
         "time_label": roh.get("time", ""),
         "type": roh.get("type", "utxo"),
+        "label": None,
     }
+    # Börsen-CSV: Empfangs-Tx als Auszahlung der Börse markieren (wenn gelistet).
+    root["label"] = labels.beschrifte(
+        wurzel_adresse or "", txid=str(roh.get("txid") or ""),
+    )
     if roh.get("tax_horizon"):
         root["tax_horizon"] = True
     if roh.get("tx_class"):
@@ -689,6 +725,14 @@ def trace_utxo(
         root["tx_class_label"] = roh.get("tx_class_label") or ""
         root["tx_class_label_en"] = roh.get("tx_class_label_en") or ""
         root["note"] = root["tx_class_label"]
+    if roh.get("exchange_stop"):
+        root["exchange_stop"] = True
+        if roh.get("exchange_label"):
+            root["label"] = roh.get("exchange_label")
+        root["note"] = (
+            "Börse — Herkunft endet an der Ein-/Auszahlung "
+            "(keine Hops darüber hinaus)."
+        )
 
     ergebnis = {
         "found": True,

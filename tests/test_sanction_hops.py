@@ -212,7 +212,7 @@ class TestSanctionWalkCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             imm = Path(tmp) / "immutable_cache"
             imm.mkdir()
-            hits1, n1, _ = analyze.check_wallet_utxos_sanctions(
+            hits1, n1, _, _cj1 = analyze.check_wallet_utxos_sanctions(
                 get_tx,
                 [utxo],
                 {OWN},
@@ -227,13 +227,14 @@ class TestSanctionWalkCache(unittest.TestCase):
             walk = trace_cache.sanction_walk_laden(win, vout, imm)
             self.assertIsNotNone(walk)
             self.assertTrue(walk["complete"])
+            self.assertIn("coinjoins", walk)
 
             counter.clear()
 
             def get_tx_verboten(_txid: str):
                 raise AssertionError("Cache-Hit darf get_tx nicht rufen")
 
-            hits2, n2, _ = analyze.check_wallet_utxos_sanctions(
+            hits2, n2, _, _cj2 = analyze.check_wallet_utxos_sanctions(
                 get_tx_verboten,
                 [utxo],
                 {OWN},
@@ -246,6 +247,61 @@ class TestSanctionWalkCache(unittest.TestCase):
             self.assertEqual(len(hits2), 1)
             self.assertEqual(hits2[0]["address"], SANC)
             self.assertEqual(counter, [])
+
+
+class TestSanctionCoinJoinHinweis(unittest.TestCase):
+    """CoinJoin-Form im Hop-Fenster wird hervorgehoben (kein Sanktionstreffer)."""
+
+    def test_whirlpool_im_walk(self):
+        import analyze
+        from tests.fixtures import core_vin, core_vout, core_tx, make_get_tx, txid
+
+        # Whirlpool-like 5×5 equal outs → Hop 0 der Wallet-UTXO-Tx
+        peers = [
+            "bc1qpeer0xxxxxxxxxxxxxxxxxxxxxxxxxxxxx0",
+            "bc1qpeer1xxxxxxxxxxxxxxxxxxxxxxxxxxxxx1",
+            "bc1qpeer2xxxxxxxxxxxxxxxxxxxxxxxxxxxxx2",
+            "bc1qpeer3xxxxxxxxxxxxxxxxxxxxxxxxxxxxx3",
+            "bc1qpeer4xxxxxxxxxxxxxxxxxxxxxxxxxxxxx4",
+        ]
+        cj_tid = txid("c1")
+        denom = 0.01
+        # Prevouts für die 5 Ins (einfache Funding-Txs)
+        chain: dict = {}
+        vins = []
+        for i, addr in enumerate(peers):
+            ft = txid(f"f{i+1:02x}")
+            chain[ft] = core_tx(
+                ft,
+                [{"coinbase": "00", "sequence": 0}],
+                [core_vout(0, addr, denom)],
+            )
+            vins.append(core_vin(ft, 0))
+        outs = [core_vout(i, peers[i], denom) for i in range(5)]
+        chain[cj_tid] = core_tx(cj_tid, vins, outs, blocktime=1_700_000_000)
+
+        utxo = {
+            "txid": cj_tid,
+            "vout": 0,
+            "address": peers[0],
+            "value": int(denom * 1e8),
+        }
+        # Dummy-Liste ohne Treffer (Adresse nicht gelistet)
+        hits, n, abort, coinjoins = analyze.check_wallet_utxos_sanctions(
+            make_get_tx(chain),
+            [utxo],
+            set(peers),
+            frozenset({SANC}),
+            max_hops=2,
+            abort_on_hit=False,
+        )
+        self.assertEqual(n, 1)
+        self.assertEqual(hits, [])
+        self.assertIsNone(abort)
+        self.assertTrue(coinjoins, "Whirlpool-Form sollte erkannt werden")
+        self.assertEqual(coinjoins[0]["kind"], "whirlpool")
+        self.assertEqual(coinjoins[0]["hop"], 0)
+        self.assertIn("Whirlpool", coinjoins[0].get("label") or "")
 
 
 if __name__ == "__main__":

@@ -356,6 +356,28 @@ def _form_coinjoin_kind(n_in: int, n_out: int, values: list[int]) -> str | None:
     return None
 
 
+def form_coinjoin_kind_from_tx(tx: dict | None) -> str | None:
+    """
+    Nur Form (xpub-blind) — für Sanktions-Hop-Walk ohne Eigentumswissen.
+
+    Soft-Label-Heuristik, keine forensische Sicherheit. Coinbase → None.
+    """
+    if not isinstance(tx, dict):
+        return None
+    vins = tx.get("vin") or []
+    n_in = len(vins)
+    if n_in == 0:
+        return None
+    if n_in == 1 and (vins[0] or {}).get("is_coinbase"):
+        return None
+    if n_in == 1 and (vins[0] or {}).get("coinbase") is not None:
+        return None
+    n_out = len(tx.get("vout") or [])
+    if n_out < 1:
+        return None
+    return _form_coinjoin_kind(n_in, n_out, _output_values_sats(tx))
+
+
 def _vout_is_op_return(vout: dict) -> bool:
     """True, wenn der Output ein OP_RETURN / nulldata ist."""
     spk = vout.get("scriptPubKey") or {}

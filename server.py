@@ -590,6 +590,12 @@ class AppState:
         self.immutable_cache_dir = immutable_cache_dir
         self.sanctions_dir = sanctions_dir
         self.label_dir = label_dir or labels.LABEL_CACHE_DIR
+        # Börsen-CSV-Reports (Klarname Ein-/Auszahlung) neben dem App-Verzeichnis.
+        from core import exchange_reports as boerse_mod
+        from core.paths import app_dir as _app_dir
+
+        self.exchange_reports_dir = Path(_app_dir()) / "exchange_reports"
+        boerse_mod.setze_verzeichnis(self.exchange_reports_dir)
         # None bedeutet eigenständige Desktop-GUI; der Plugin-Einstieg setzt
         # dieses Merkmal ausdrücklich, nicht über eine fremde .env.
         self.managed_by = _managed_by_from_env(managed_by, env_path)
@@ -3870,6 +3876,74 @@ def api_labels_import(state: AppState, payload: dict) -> dict:
     return stand
 
 
+def api_exchange_reports(state: AppState, query: dict) -> dict:
+    """Status der importierten Börsen-CSV-Reports."""
+    from core import exchange_reports as boerse
+
+    return boerse.status(state.exchange_reports_dir)
+
+
+def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
+    """
+    Börsen-Transaktionsreport (CSV) einlesen.
+
+    Body: ``name`` (Börse), ``csv`` (Text), optional ``filename``,
+    ``ersetzen`` (true = Datei der Börse neu statt mergen).
+    Nur BTC-Adressen/TxIDs — Kurse und Shitcoins werden verworfen.
+    """
+    from core import exchange_reports as boerse
+
+    if not isinstance(payload, dict):
+        raise ApiError(400, "JSON-Objekt erwartet.")
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise ApiError(400, "Feld „name“ (Börse) fehlt.")
+    csv_text = payload.get("csv")
+    if csv_text is None:
+        raise ApiError(400, "Feld „csv“ fehlt.")
+    if not isinstance(csv_text, str):
+        raise ApiError(400, "Feld „csv“ muss Text sein.")
+    if len(csv_text) > 40 * 1024 * 1024:
+        raise ApiError(400, "CSV zu groß (max. 40 MB).")
+    dateiname = str(payload.get("filename") or "").strip()[:200]
+    ersetzen = bool(payload.get("ersetzen"))
+    try:
+        ergebnis = boerse.importiere_csv(
+            csv_text,
+            name=name,
+            filename=dateiname,
+            cache_dir=state.exchange_reports_dir,
+            ersetzen=ersetzen,
+        )
+    except boerse.ExchangeReportError as exc:
+        raise ApiError(400, str(exc)) from exc
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    ergebnis["status"] = boerse.status(state.exchange_reports_dir)
+    return ergebnis
+
+
+def api_exchange_reports_loesche(state: AppState, query: dict) -> dict:
+    """Eine Börse oder alle Reports löschen. Query: ``slug`` oder ``all=1``."""
+    from core import exchange_reports as boerse
+
+    if str(query.get("all") or "").strip() in ("1", "true", "yes"):
+        n = 0
+        for e in boerse.liste(state.exchange_reports_dir):
+            if boerse.loesche(str(e.get("slug") or ""), state.exchange_reports_dir):
+                n += 1
+        return {"geloescht": n, "status": boerse.status(state.exchange_reports_dir)}
+    slug = str(query.get("slug") or "").strip()
+    if not slug:
+        raise ApiError(400, "Query „slug“ oder „all=1“ fehlt.")
+    ok = boerse.loesche(slug, state.exchange_reports_dir)
+    return {
+        "geloescht": 1 if ok else 0,
+        "slug": slug,
+        "status": boerse.status(state.exchange_reports_dir),
+    }
+
+
 def api_sanctions_import(state: AppState, payload: dict) -> dict:
     """Manueller Sanktionslisten-Import (JSON/TXT/XML/ZIP)."""
     import sanctioned as sanctioned_mod
@@ -4007,6 +4081,7 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
             if not utxos:
                 ergebnisse.append({
                     "wallet": name, "geprueft": 0, "treffer": [],
+                    "coinjoins": [],
                     "abgebrochen": False,
                 })
                 continue
@@ -4028,25 +4103,28 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 )
 
             gesehen: set[str] = set()
-            treffer, geprueft, abbruch = analyze.check_wallet_utxos_sanctions(
-                get_tx,
-                utxos,
-                eigene,
-                adressen,
-                max_hops=max_hops,
-                wallet=wallet_ctx,
-                abort_on_hit=False,
-                progress_cb=fortschritt,
-                cancel_cb=lambda: job.cancelled,
-                gesehene_adressen=gesehen,
-                get_tx_je_worker=get_tx_je_worker,
-                worker_count=verbindungen,
-                immutable_cache_dir=state.immutable_cache_dir,
+            treffer, geprueft, abbruch, coinjoins = (
+                analyze.check_wallet_utxos_sanctions(
+                    get_tx,
+                    utxos,
+                    eigene,
+                    adressen,
+                    max_hops=max_hops,
+                    wallet=wallet_ctx,
+                    abort_on_hit=False,
+                    progress_cb=fortschritt,
+                    cancel_cb=lambda: job.cancelled,
+                    gesehene_adressen=gesehen,
+                    get_tx_je_worker=get_tx_je_worker,
+                    worker_count=verbindungen,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
             )
             ergebnisse.append({
                 "wallet": name,
                 "geprueft": geprueft,
                 "treffer": treffer,
+                "coinjoins": coinjoins,
                 "abgebrochen": abbruch is not None or job.cancelled,
                 "adressen_geprueft": len(gesehen),
                 # Sortiert und gekappt: die Datei soll auch bei tiefen Läufen
@@ -6918,6 +6996,14 @@ class Handler(BaseHTTPRequestHandler):
             )
         if teile == ["labels"] and methode == "DELETE":
             return 200, api_labels_verwerfen(state, query)
+        if teile == ["exchange-reports"] and methode == "GET":
+            return 200, api_exchange_reports(state, query)
+        if teile == ["exchange-reports", "import"] and methode == "POST":
+            return 200, api_exchange_reports_import(
+                state, self._body(max_bytes=45 * 1024 * 1024)
+            )
+        if teile == ["exchange-reports"] and methode == "DELETE":
+            return 200, api_exchange_reports_loesche(state, query)
         if teile == ["source", "status"] and methode == "GET":
             return 200, api_source_status(state, query)
         if teile == ["source", "oeffentlich"] and methode == "POST":

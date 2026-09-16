@@ -119,6 +119,9 @@ button, input, select { font: inherit; color: inherit; }
   padding: 1px 6px; border-radius: 2px; white-space: nowrap;
   border: 1px solid var(--linie);
 }
+.label-nutzer {
+  border-color: var(--akzent, #c9a227);
+}
 .label-dienst {
   background: var(--akzent-zart); color: var(--akzent);
   border-color: transparent;
@@ -1883,6 +1886,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 
 /* Geprüfte Adressen: standardmäßig zu — die Liste wird lang, und sie ist
    Beleg, nicht Befund. */
+.sanktions-coinjoin {
+  padding-left: 28px;
+  color: var(--gedaempft);
+}
 .sanktions-adressen {
   padding: 8px 13px; border-bottom: 1px solid var(--linie-zart);
   font-size: 12px;

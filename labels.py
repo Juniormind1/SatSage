@@ -436,8 +436,27 @@ def lade(cache_dir: Path | None = None) -> Labelverzeichnis | None:
     return bestand
 
 
-def beschrifte(adresse: str, cache_dir: Path | None = None) -> dict | None:
-    """Bequemer Einzelaufruf — None, wenn nichts bekannt ist."""
+def beschrifte(
+    adresse: str,
+    cache_dir: Path | None = None,
+    *,
+    txid: str = "",
+) -> dict | None:
+    """
+    Bequemer Einzelaufruf — None, wenn nichts bekannt ist.
+
+    Reihenfolge: Nutzer-Börsen-CSV (Adresse, sonst TxID) vor dem öffentlichen
+    Label-Bestand (am-i.exposed). Eigene Import-Klarname schlagen historische
+    Massendaten.
+    """
+    try:
+        from core import exchange_reports as boerse
+
+        hit = boerse.beschrifte(adresse=adresse or "", txid=txid or "")
+        if hit is not None:
+            return hit
+    except Exception:
+        pass
     bestand = lade(cache_dir)
     return bestand.suche(adresse) if bestand else None
 

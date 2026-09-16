@@ -113,8 +113,10 @@ def utxo_as_dict(
             # Woher die Sats zuletzt von außen kamen. Ist die Adresse einem
             # Dienst zuzuordnen, gehört das an das UTXO — sonst müsste man
             # für dieselbe Auskunft erst den Herkunftsbaum aufklappen.
+            # Börsen-CSV: Adresse und ggf. externe TxID (Ingress speichert oft nur Adresse).
             eintrag["herkunft_label"] = labels.beschrifte(
-                ingress.get("external_address") or ""
+                ingress.get("external_address") or "",
+                txid=str(ingress.get("external_txid") or ""),
             )
 
         gespeichert = trace_cache.kopf(

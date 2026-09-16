@@ -9850,10 +9850,150 @@ function zeichneDatenquellenAnsicht() {
   zeichneQuellen(Zustand.config?.sources || []);
   zeichneMempoolStatus();
   ladeKursHistorie();
+  ladeBoersenReports();
   ladeLabelStatus();
   ladeListenStatus();
   setzeEnvPfad(Zustand.config?.env_path);
   aktualisiereDatenquellenNav();
+}
+
+async function ladeBoersenReports() {
+  const kasten = $("#boerse-status");
+  const zusatz = $("#boerse-zusatz");
+  if (!kasten) return;
+  try {
+    const stand = await api("/exchange-reports");
+    zeichneBoersenReports(stand);
+  } catch (fehler) {
+    kasten.replaceChildren();
+    kasten.append(hinweisZeile(t("common.loadFailed", { msg: fehler.message })));
+    if (zusatz) setzeText(zusatz, "");
+  }
+}
+
+function zeichneBoersenReports(stand) {
+  const kasten = $("#boerse-status");
+  const zusatz = $("#boerse-zusatz");
+  if (!kasten) return;
+  kasten.replaceChildren();
+  const liste = stand?.exchanges || [];
+  const nAdr = Number(stand?.addresses || 0);
+  const nTx = Number(stand?.txids || 0);
+  if (zusatz) {
+    setzeText(
+      zusatz,
+      liste.length
+        ? `${liste.length} · ${formatZahl(nAdr)} Adr. · ${formatZahl(nTx)} Tx`
+        : "",
+    );
+  }
+  if (!liste.length) {
+    kasten.append(hinweisZeile(t("sources.exchangeNone")));
+    return;
+  }
+  for (const e of liste) {
+    const zeile = document.createElement("div");
+    zeile.className = "sanktions-zeile";
+    zeile.append(pille("gut", e.name || e.slug || "?"));
+    const text = document.createElement("span");
+    text.textContent = t("sources.exchangeLine", {
+      name: "",
+      addresses: formatZahl(e.addresses || 0),
+      txids: formatZahl(e.txids || 0),
+    }).replace(/^:\s*/, "").replace(/^\s+/, "");
+    // exchangeLine starts with {name}: — name already in pill
+    text.textContent = `${formatZahl(e.addresses || 0)} Adr. · ${formatZahl(e.txids || 0)} Tx`;
+    zeile.append(text);
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "knopf knopf-klein";
+    knopf.textContent = t("sources.exchangeRemove");
+    knopf.title = t("sources.exchangeRemoveTitle");
+    knopf.addEventListener("click", () => verwerfeBoersenReport(e.slug));
+    zeile.append(knopf);
+    kasten.append(zeile);
+  }
+  if (liste.length > 1) {
+    const alle = document.createElement("button");
+    alle.type = "button";
+    alle.className = "knopf knopf-klein";
+    alle.textContent = t("sources.exchangeRemoveAll");
+    alle.addEventListener("click", () => verwerfeBoersenReport(null, true));
+    kasten.append(alle);
+  }
+}
+
+function starteBoersenCsvImport() {
+  const feld = $("#boerse-csv-datei");
+  if (feld) feld.click();
+}
+
+function liesBoersenCsvDatei(ereignis) {
+  const datei = ereignis.target.files && ereignis.target.files[0];
+  ereignis.target.value = "";
+  if (!datei) return;
+  const name = window.prompt(t("sources.exchangePromptName"), "");
+  if (name == null) return;
+  const boerse = String(name || "").trim();
+  if (!boerse) {
+    meldung(t("sources.exchangePromptName"), "krit");
+    return;
+  }
+  logZeile(`Importiere Börsen-CSV „${datei.name}“ (${boerse})…`);
+  const leser = new FileReader();
+  leser.onload = async () => {
+    try {
+      const ergebnis = await api("/exchange-reports/import", {
+        methode: "POST",
+        daten: {
+          name: boerse,
+          csv: String(leser.result || ""),
+          filename: datei.name,
+          ersetzen: false,
+        },
+        timeoutMs: 120_000,
+      });
+      logZeile(
+        t("sources.exchangeImported", {
+          name: ergebnis.name || boerse,
+          addresses: formatZahl(ergebnis.imported_addresses || 0),
+          txids: formatZahl(ergebnis.imported_txids || 0),
+          btc: formatZahl(ergebnis.rows_btc || 0),
+          total: formatZahl(ergebnis.rows_total || 0),
+        }),
+        true,
+      );
+      meldung(
+        t("sources.exchangeImported", {
+          name: ergebnis.name || boerse,
+          addresses: formatZahl(ergebnis.addresses || 0),
+          txids: formatZahl(ergebnis.txids || 0),
+          btc: formatZahl(ergebnis.rows_btc || 0),
+          total: formatZahl(ergebnis.rows_total || 0),
+        }),
+        "gut",
+      );
+      await ladeBoersenReports();
+    } catch (fehler) {
+      logZeile(`Börsen-CSV: ${fehler.message}`, true);
+      meldung(fehler.message, "krit");
+    }
+  };
+  leser.onerror = () => {
+    logZeile("Börsen-CSV ließ sich nicht lesen.", true);
+    meldung(t("common.fileUnreadable"), "krit");
+  };
+  leser.readAsText(datei);
+}
+
+async function verwerfeBoersenReport(slug, alle = false) {
+  try {
+    const q = alle ? "all=1" : `slug=${encodeURIComponent(slug || "")}`;
+    await api(`/exchange-reports?${q}`, { methode: "DELETE" });
+    await ladeBoersenReports();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  }
 }
 
 function zeichneKursHistorie(stand) {
@@ -10815,15 +10955,27 @@ function labelMarke(label) {
     const u = t(katKey);
     return u !== katKey ? u : (label.kategorie_label || label.art || "");
   })();
-  marke.textContent = `${kat} · ${label.name}`;
+  const rolle = (label.rolle || "").trim();
+  marke.textContent = rolle
+    ? `${kat} · ${label.name} (${rolle})`
+    : `${kat} · ${label.name}`;
+  if (label.nutzer_import) {
+    marke.classList.add("label-nutzer");
+  }
   const teile = [];
   if (label.land) teile.push(t("labels.seat", { land: label.land }));
   if (label.status === "closed") teile.push(t("labels.serviceClosed"));
-  teile.push(t("labels.sourceFile", {
-    quelle: label.quelle,
-    date: (label.stand || "").split("-").reverse().join("."),
-  }));
-  marke.title = `${teile.join(" · ")}. ${hinweis}`;
+  if (label.nutzer_import) {
+    teile.push(label.quelle || "Börsen-CSV");
+    teile.push(label.hinweis || "");
+  } else {
+    teile.push(t("labels.sourceFile", {
+      quelle: label.quelle,
+      date: (label.stand || "").split("-").reverse().join("."),
+    }));
+    teile.push(hinweis);
+  }
+  marke.title = teile.filter(Boolean).join(" · ");
   return marke;
 }
 
@@ -10893,7 +11045,11 @@ function zeichneSankErgebnis(daten) {
     if (treffer.length === 0) {
       zeile.append(pille("gut", t("sanctions.noHit")));
       const text = document.createElement("span");
-      text.textContent = umfang + (w.abgebrochen ? t("sanctions.abortedSuffix") : "");
+      text.textContent =
+        t("sanctions.cleanWindow", { hops: daten.max_hops || "?" }) +
+        " · " +
+        umfang +
+        (w.abgebrochen ? t("sanctions.abortedSuffix") : "");
       zeile.append(text);
     } else {
       zeile.append(pille("krit", t("sanctions.hits", { count: treffer.length })));
@@ -10903,18 +11059,63 @@ function zeichneSankErgebnis(daten) {
     }
     behaelter.append(zeile);
 
-    for (const t of treffer) {
+    for (const hit of treffer) {
       const detail = document.createElement("div");
       detail.className = "sanktions-zeile sanktions-treffer";
       const beschreibung = document.createElement("span");
       beschreibung.className = "mono klein";
       beschreibung.textContent =
-        `Hop ${t.hop} · ${t.address} · ${formatSats(t.amount_sats || 0)} ` +
-        `über UTXO ${t.from_utxo}`;
+        `Hop ${hit.hop} · ${hit.address} · ${formatSats(hit.amount_sats || 0)} ` +
+        `über UTXO ${hit.from_utxo}`;
       detail.append(beschreibung);
-      const link = mempoolVerweis("address", t.address);
+      const link = mempoolVerweis("address", hit.address);
       if (link) detail.append(link);
       behaelter.append(detail);
+    }
+
+    const coinjoins = w.coinjoins || [];
+    if (coinjoins.length) {
+      const cjKopf = document.createElement("div");
+      cjKopf.className = "sanktions-zeile";
+      cjKopf.append(pille("warn", t("sanctions.coinjoins", { count: coinjoins.length })));
+      const cjText = document.createElement("span");
+      cjText.textContent = t("sanctions.coinjoinsHint");
+      cjKopf.append(cjText);
+      behaelter.append(cjKopf);
+      for (const cj of coinjoins) {
+        const detail = document.createElement("div");
+        detail.className = "sanktions-zeile sanktions-coinjoin";
+        const beschreibung = document.createElement("span");
+        beschreibung.className = "mono klein";
+        const when = cj.time || t("sanctions.timeUnknown");
+        const en = uiSprache() === "en";
+        let label =
+          (en ? cj.label_en : cj.label) ||
+          cj.label ||
+          cj.label_en ||
+          t("sanctions.coinjoinGeneric");
+        if (/^wahrscheinlich\s+/i.test(label)) {
+          label =
+            t("sanctions.presumablyPrefix") +
+            label.replace(/^wahrscheinlich\s+/i, "");
+        } else if (/^likely\s+/i.test(label)) {
+          label =
+            t("sanctions.presumablyPrefix") + label.replace(/^likely\s+/i, "");
+        }
+        const tid = cj.txid ? kuerze(cj.txid, 10, 8) : "";
+        beschreibung.textContent = t("sanctions.coinjoinLine", {
+          hop: cj.hop ?? "?",
+          when,
+          label,
+          tx: tid ? ` · Tx ${tid}` : "",
+        });
+        detail.append(beschreibung);
+        if (cj.txid) {
+          const link = mempoolVerweis("tx", cj.txid);
+          if (link) detail.append(link);
+        }
+        behaelter.append(detail);
+      }
     }
 
     const adressen = w.adressen || [];
@@ -14540,6 +14741,10 @@ async function start() {
   if (kursSync) {
     kursSync.addEventListener("click", () => starteKursHistorieSync());
   }
+  const boerseImport = $("#boerse-csv-import");
+  if (boerseImport) boerseImport.addEventListener("click", starteBoersenCsvImport);
+  const boerseDatei = $("#boerse-csv-datei");
+  if (boerseDatei) boerseDatei.addEventListener("change", liesBoersenCsvDatei);
   $("#mempool-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") speichereMempool();
   });

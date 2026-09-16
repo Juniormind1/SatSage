@@ -259,6 +259,46 @@ def trace_utxo_origin(
         except (TypeError, ValueError):
             pass
 
+    # Börsen-CSV: an importierter Adresse/Tx endet der Walk — keine Hops
+    # hinter die Ein-/Auszahlung (auch wenn der Klarname dem Nutzer gehört).
+    try:
+        from core import exchange_reports as boerse_mod
+
+        boerse_grenze = boerse_mod.grenze(
+            adressen=out_addrs, txid=creator_txid,
+        )
+    except Exception:
+        boerse_grenze = None
+    if boerse_grenze is not None:
+        node["exchange_stop"] = True
+        node["exchange_label"] = boerse_grenze
+        # Blatt wie externes Ende: Anschaffung an der Börsen-Grenze.
+        # Adress-Treffer → echte Börsen-Adresse; nur Tx-Treffer → Klarname
+        # (Wallet-Adresse der Wurzel nicht als „extern“ ausgeben).
+        try:
+            from core import exchange_reports as _boerse_chk
+
+            addr_disp = next(
+                (a for a in out_addrs if _boerse_chk.ist_boerse_adresse(a)),
+                "",
+            )
+        except Exception:
+            addr_disp = out_addrs[0] if out_addrs else ""
+        if not addr_disp:
+            addr_disp = str(boerse_grenze.get("name") or "Börse")
+        node["sources"] = [{
+            "type": "external",
+            "address": addr_disp,
+            "amount_sats": node.get("amount_sats") or 0,
+            "from_utxo": utxo_key,
+            "time_ts": node.get("time_ts"),
+            "time": node.get("time") or "",
+            "exchange_stop": True,
+        }]
+        memo[utxo_key] = node
+        visited_utxos.discard(utxo_key)
+        return node
+
     progress_cb = progress.update if progress else None
 
     # CoinJoin-/Mix-Klassifikation: Eigentum (Verlauf-Index + Prevouts), dann Form.
@@ -333,6 +373,41 @@ def trace_utxo_origin(
         prev_vout = edge.prevout.vout
 
         try:
+            # Börsen-Prevout: immer externes Blatt, nie intern weiterverfolgen.
+            try:
+                from core import exchange_reports as boerse_mod
+
+                prev_boerse = boerse_mod.grenze(
+                    adressen=prev_addrs, txid=prev_txid,
+                )
+            except Exception:
+                prev_boerse = None
+            if prev_boerse is not None:
+                ext_ts = edge.prev_time_ts
+                ext_time = ""
+                if ext_ts:
+                    try:
+                        from datetime import UTC, datetime
+
+                        ext_time = datetime.fromtimestamp(
+                            int(ext_ts), UTC
+                        ).strftime("%d.%m.%Y %H:%M:%S")
+                    except (OSError, OverflowError, TypeError, ValueError):
+                        ext_time = ""
+                node["sources"].append({
+                    "type": "external",
+                    "address": (
+                        prev_addrs[0] if prev_addrs
+                        else str(prev_boerse.get("name") or "Börse")
+                    ),
+                    "amount_sats": amount_sats,
+                    "from_utxo": prev_ref,
+                    "time_ts": ext_ts,
+                    "time": ext_time,
+                    "exchange_stop": True,
+                })
+                continue
+
             own_addr = _match_own_address(prev_addrs, own_addresses, wallet)
             if not own_addr and own_only and prev_ref.lower() in {
                 p.lower() for p in own_prevouts
@@ -1659,6 +1734,117 @@ def _sanction_progress_status(hits: list[dict]) -> str:
     return "noch keine sanktionierte Adresse gefunden"
 
 
+def _sanction_coinjoin_eintrag(
+    tx: dict | None,
+    *,
+    hop: int,
+    txid: str,
+    wallet_utxo_ref: str = "",
+    kind: str | None = None,
+) -> dict | None:
+    """
+    Form-Heuristik (xpub-blind) → CoinJoin-Hinweis für den Sanktions-Report.
+
+    *hop*: Entfernung der Tx-Ausgabe zum geprüften Wallet-UTXO (0 = UTXO-Tx).
+    """
+    from core.tx_classify import COINJOIN_KINDS, form_coinjoin_kind_from_tx, soft_label
+
+    kind_eff = (kind or "").strip() or None
+    if kind_eff is None and isinstance(tx, dict):
+        kind_eff = form_coinjoin_kind_from_tx(tx)
+    if not kind_eff or kind_eff not in COINJOIN_KINDS:
+        return None
+    time_ts = None
+    time_label = ""
+    if isinstance(tx, dict):
+        try:
+            time_ts = _main()._tx_block_time(tx)
+        except Exception:
+            time_ts = None
+        try:
+            time_label = str(_main()._format_tx_time(tx) or "")
+        except Exception:
+            time_label = ""
+    if time_ts is not None:
+        try:
+            time_ts = int(time_ts)
+        except (TypeError, ValueError):
+            time_ts = None
+    return {
+        "hop": int(hop),
+        "txid": str(txid or "").strip(),
+        "kind": kind_eff,
+        "label": soft_label(kind_eff, lang="de"),
+        "label_en": soft_label(kind_eff, lang="en"),
+        "time_ts": time_ts,
+        "time": time_label,
+        "wallet_utxo": wallet_utxo_ref,
+    }
+
+
+def _coinjoins_zusammenfuehren(eintraege: list[dict]) -> list[dict]:
+    """Gleiche Tx einmal; kleinster Hop, Wallet-UTXOs vereinigt."""
+    by_txid: dict[str, dict] = {}
+    for raw in eintraege or []:
+        if not isinstance(raw, dict):
+            continue
+        tid = str(raw.get("txid") or "").strip().lower()
+        if not tid:
+            continue
+        hop = int(raw.get("hop") or 0)
+        kind = str(raw.get("kind") or "").strip()
+        entry = by_txid.get(tid)
+        if entry is None:
+            wrefs = set()
+            w = str(raw.get("wallet_utxo") or "").strip()
+            if w:
+                wrefs.add(w)
+            for extra in raw.get("wallet_utxos") or []:
+                e = str(extra or "").strip()
+                if e:
+                    wrefs.add(e)
+            by_txid[tid] = {
+                "hop": hop,
+                "txid": tid,
+                "kind": kind,
+                "label": str(raw.get("label") or ""),
+                "label_en": str(raw.get("label_en") or ""),
+                "time_ts": raw.get("time_ts"),
+                "time": str(raw.get("time") or ""),
+                "wallet_utxos": wrefs,
+            }
+            continue
+        if hop < int(entry["hop"]):
+            entry["hop"] = hop
+        if raw.get("time_ts") and not entry.get("time_ts"):
+            entry["time_ts"] = raw.get("time_ts")
+            entry["time"] = str(raw.get("time") or "")
+        if kind and not entry.get("kind"):
+            entry["kind"] = kind
+            entry["label"] = str(raw.get("label") or "")
+            entry["label_en"] = str(raw.get("label_en") or "")
+        w = str(raw.get("wallet_utxo") or "").strip()
+        if w:
+            entry["wallet_utxos"].add(w)
+        for extra in raw.get("wallet_utxos") or []:
+            e = str(extra or "").strip()
+            if e:
+                entry["wallet_utxos"].add(e)
+    out: list[dict] = []
+    for entry in by_txid.values():
+        refs = sorted(entry.pop("wallet_utxos"))
+        entry["wallet_utxos"] = refs
+        out.append(entry)
+    out.sort(
+        key=lambda e: (
+            int(e.get("hop") or 0),
+            int(e.get("time_ts") or 0),
+            str(e.get("txid") or ""),
+        )
+    )
+    return out
+
+
 def scan_external_sanction_hops(
     get_tx,
     creator_txid: str,
@@ -1840,19 +2026,25 @@ def _events_aus_origin_tree(
     depth: int = 0,
     events: list | None = None,
     frontiers: list | None = None,
-) -> tuple[list, list]:
+    coinjoins: list | None = None,
+) -> tuple[list, list, list]:
     """
     Liest Adress-Hops aus dem Herkunfts-Rohbaum (xpub-blind nutzbar).
 
     *frontiers*: (txid, vout, next_depth) wo der Baum endet, aber noch
     Hops bis *max_hops* fehlen (typisch externes Blatt).
+    *coinjoins*: Soft-Labels aus dem Herkunftsbaum (``tx_class``).
     """
+    from core.tx_classify import COINJOIN_KINDS
+
     if events is None:
         events = []
     if frontiers is None:
         frontiers = []
+    if coinjoins is None:
+        coinjoins = []
     if not isinstance(node, dict) or depth > max_hops:
-        return events, frontiers
+        return events, frontiers, coinjoins
 
     txid = str(node.get("txid") or "").strip()
     try:
@@ -1861,6 +2053,30 @@ def _events_aus_origin_tree(
         vout = 0
     utxo_k = f"{txid}:{vout}" if txid else ""
     amount = int(node.get("amount_sats") or 0)
+
+    kind = str(node.get("tx_class") or "").strip()
+    if kind in COINJOIN_KINDS and txid:
+        cj = _sanction_coinjoin_eintrag(
+            None,
+            hop=depth,
+            txid=txid,
+            wallet_utxo_ref=wallet_utxo_ref,
+            kind=kind,
+        )
+        if cj is not None:
+            # Zeit aus dem Herkunftsknoten, falls Form-Label ohne get_tx.
+            if node.get("time_ts") is not None and not cj.get("time_ts"):
+                try:
+                    cj["time_ts"] = int(node["time_ts"])
+                except (TypeError, ValueError):
+                    pass
+            if node.get("time") and not cj.get("time"):
+                cj["time"] = str(node.get("time") or "")
+            if node.get("tx_class_label"):
+                cj["label"] = str(node["tx_class_label"])
+            if node.get("tx_class_label_en"):
+                cj["label_en"] = str(node["tx_class_label_en"])
+            coinjoins.append(cj)
 
     for addr in node.get("addresses") or []:
         if not addr:
@@ -1877,14 +2093,14 @@ def _events_aus_origin_tree(
         # Teilbaum: tiefer nur per get_tx
         if depth < max_hops and txid:
             frontiers.append((txid, vout, depth + 1))
-        return events, frontiers
+        return events, frontiers, coinjoins
 
     quellen = node.get("sources") or []
     if not quellen:
         if depth < max_hops and txid and depth > 0:
             # Unvollständiger Knoten — Finanzierung unbekannt
             frontiers.append((txid, vout, depth + 1))
-        return events, frontiers
+        return events, frontiers, coinjoins
 
     for src in quellen:
         if not isinstance(src, dict):
@@ -1916,6 +2132,7 @@ def _events_aus_origin_tree(
                 depth=hop,
                 events=events,
                 frontiers=frontiers,
+                coinjoins=coinjoins,
             )
         elif typ == "external" and hop < max_hops and ":" in from_utxo:
             # Externes Blatt: tiefer nur per Chain-Walk
@@ -1931,7 +2148,7 @@ def _events_aus_origin_tree(
                 )
             except (TypeError, ValueError):
                 pass
-    return events, frontiers
+    return events, frontiers, coinjoins
 
 
 def _sammle_sanction_events_live(
@@ -1944,13 +2161,16 @@ def _sammle_sanction_events_live(
     wallet_utxo_ref: str,
     start_depth: int = 1,
     visited: set | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     """
-    xpub-blinder Hop-Walk → Event-Liste (get_tx füllt den Tx-Immutable-Cache).
+    xpub-blinder Hop-Walk → Event- und CoinJoin-Liste
+    (get_tx füllt den Tx-Immutable-Cache).
 
     *start_depth*: 1 = Inputs der UTXO-Tx; >1 = Fortsetzung an einem Frontier.
+    CoinJoin-Hop = Hop der Tx-Ausgabe Richtung Wallet-UTXO (0 = UTXO-Tx).
     """
     events: list[dict] = []
+    coinjoins: list[dict] = []
     if visited is None:
         visited = set()
 
@@ -1960,6 +2180,7 @@ def _sammle_sanction_events_live(
         if raw:
             hop0.append(raw)
         amount0 = int(utxo.get("value") or utxo.get("value_sats") or 0)
+        tx0 = None
         try:
             tx0 = get_tx(txid)
             outs = tx0.get("vout") or []
@@ -1972,7 +2193,7 @@ def _sammle_sanction_events_live(
                 except Exception:
                     pass
         except Exception:
-            pass
+            tx0 = None
         for a in hop0:
             events.append({
                 "hop": 0,
@@ -1981,6 +2202,12 @@ def _sammle_sanction_events_live(
                 "in_tx": txid,
                 "amount_sats": amount0,
             })
+        if tx0 is not None:
+            cj0 = _sanction_coinjoin_eintrag(
+                tx0, hop=0, txid=txid, wallet_utxo_ref=wallet_utxo_ref,
+            )
+            if cj0 is not None:
+                coinjoins.append(cj0)
 
     def _walk(creator_txid: str, depth: int) -> None:
         if depth > max_hops:
@@ -1991,6 +2218,27 @@ def _sammle_sanction_events_live(
             return
         visited.add(key)
         try:
+            # Tx laden (auch für CJ-Form); iter_funding_inputs lädt ggf. nochmal
+            # aus Cache.
+            try:
+                tx = get_tx(creator_txid)
+            except Exception:
+                tx = None
+            # Hop der Ausgabe dieser Tx Richtung Wallet = depth-1 (depth≥1).
+            # UTXO-Tx (start_depth≤1, depth=1, dieselbe txid) schon bei Hop 0.
+            schon_hop0 = (
+                start_depth <= 1 and depth == 1 and creator_txid == txid
+            )
+            if tx is not None and not schon_hop0:
+                cj = _sanction_coinjoin_eintrag(
+                    tx,
+                    hop=max(0, int(depth) - 1),
+                    txid=creator_txid,
+                    wallet_utxo_ref=wallet_utxo_ref,
+                )
+                if cj is not None:
+                    coinjoins.append(cj)
+
             for inp in iter_funding_inputs(get_tx, creator_txid):
                 if isinstance(inp, CoinbaseFunding):
                     continue
@@ -2012,7 +2260,7 @@ def _sammle_sanction_events_live(
             return
 
     _walk(txid, max(1, int(start_depth)))
-    return events
+    return events, coinjoins
 
 
 def _pruefe_ein_utxo(
@@ -2026,9 +2274,10 @@ def _pruefe_ein_utxo(
     abort_on_hit: bool,
     progress,
     immutable_cache_dir: Path | None = None,
-) -> tuple[str, list[dict], set[str]] | None:
+) -> tuple[str, list[dict], set[str], list[dict]] | None:
     """
-    Ein UTXO prüfen. Rückgabe: (ref, treffer, gesehene Adressen) oder None.
+    Ein UTXO prüfen. Rückgabe: (ref, treffer, gesehene Adressen, coinjoins)
+    oder None.
 
     Cache-Reihenfolge:
     1. ``sanction_walk`` (Graph) → aktuelle Liste matchen
@@ -2036,6 +2285,7 @@ def _pruefe_ein_utxo(
     3. Live-Walk ab Root; Ergebnis als sanction_walk speichern
 
     Hop 0 = UTXO-Adresse; danach xpub-blind bis *max_hops*.
+    CoinJoins: Form-Heuristik je Tx im Fenster (Soft-Label).
     """
     del own_addresses, wallet
     from core import trace_cache
@@ -2052,6 +2302,7 @@ def _pruefe_ein_utxo(
     ref = f"{txid}:{vout_index}"
     treffer: list[dict] = []
     gesehen: set[str] = set()
+    coinjoins: list[dict] = []
     counters = {"addrs_checked": 0}
 
     def _fortschritt(hop: int) -> None:
@@ -2100,7 +2351,11 @@ def _pruefe_ein_utxo(
         and int(walk.get("max_hops") or 0) >= max_hops
     ):
         _match_events(walk.get("events") or [])
-        return ref, treffer, gesehen
+        coinjoins = [
+            c for c in (walk.get("coinjoins") or [])
+            if int(c.get("hop") or 0) <= max_hops
+        ]
+        return ref, treffer, gesehen, coinjoins
 
     # 2+3) origin_tree und/oder Live-Walk → Event-Liste aufbauen
     events: list[dict] = []
@@ -2111,7 +2366,7 @@ def _pruefe_ein_utxo(
     )
     frontiers: list[tuple[str, int, int]] = []
     if origin:
-        events, frontiers = _events_aus_origin_tree(
+        events, frontiers, coinjoins = _events_aus_origin_tree(
             origin,
             max_hops=max_hops,
             wallet_utxo_ref=ref,
@@ -2120,7 +2375,7 @@ def _pruefe_ein_utxo(
     if not origin or frontiers:
         visited: set = set()
         if not origin:
-            events = _sammle_sanction_events_live(
+            events, coinjoins = _sammle_sanction_events_live(
                 get_tx,
                 txid,
                 vout_index,
@@ -2135,7 +2390,7 @@ def _pruefe_ein_utxo(
             for f_txid, f_vout, f_depth in frontiers:
                 if f_depth > max_hops:
                     continue
-                extra = _sammle_sanction_events_live(
+                extra, extra_cj = _sammle_sanction_events_live(
                     get_tx,
                     f_txid,
                     f_vout,
@@ -2147,8 +2402,10 @@ def _pruefe_ein_utxo(
                 )
                 # start_depth>1: keine Hop-0-Events; Inputs bei f_depth
                 events.extend(extra)
+                coinjoins.extend(extra_cj)
 
     _match_events(events)
+    coinjoins = _coinjoins_zusammenfuehren(coinjoins)
 
     if immutable_cache_dir and events:
         # Dedup Events (gleiche hop/address/from_utxo)
@@ -2171,10 +2428,11 @@ def _pruefe_ein_utxo(
             max_hops=max_hops,
             complete=True,
             events=unique,
+            coinjoins=coinjoins,
             immutable_cache_dir=immutable_cache_dir,
         )
 
-    return ref, treffer, gesehen
+    return ref, treffer, gesehen, coinjoins
 
 
 def _check_wallet_utxos_parallel(
@@ -2211,6 +2469,7 @@ def _check_wallet_utxos_parallel(
     sperre = threading.Lock()
     melde_sperre = threading.Lock()
     alle_treffer: list[dict] = []
+    alle_coinjoins: list[dict] = []
     geprueft = 0
     fortschritt = (
         _FortschrittsAdapter(progress_cb, melde_sperre)
@@ -2236,10 +2495,11 @@ def _check_wallet_utxos_parallel(
             )
             if ergebnis is None:
                 continue
-            _ref, treffer, gesehen = ergebnis
+            _ref, treffer, gesehen, cjs = ergebnis
             with sperre:
                 geprueft += 1
                 alle_treffer.extend(treffer)
+                alle_coinjoins.extend(cjs)
                 if gesehene_adressen is not None:
                     gesehene_adressen.update(gesehen)
 
@@ -2254,7 +2514,7 @@ def _check_wallet_utxos_parallel(
         key=lambda t: (t.get("wallet_utxo", ""), t.get("hop", 0),
                        t.get("address", ""))
     )
-    return alle_treffer, geprueft, None
+    return alle_treffer, geprueft, None, _coinjoins_zusammenfuehren(alle_coinjoins)
 
 
 def check_wallet_utxos_sanctions(
@@ -2272,13 +2532,16 @@ def check_wallet_utxos_sanctions(
     get_tx_je_worker=None,
     worker_count: int = 1,
     immutable_cache_dir: Path | None = None,
-) -> tuple[list[dict], int, dict | None]:
+) -> tuple[list[dict], int, dict | None, list[dict]]:
     """
     Prüft Wallet-UTXOs xpub-blind auf sanktionierte Adressen (Drittperspektive).
 
     Je UTXO: Output-Adresse (Hop 0) plus bis *max_hops* Prevout-Hops rückwärts
     — ohne XPUB-Filter. Grün = keine gelistete Adresse in diesem Fenster.
-    Rückgabe: (treffer, geprüfte_utxos, abbruch_treffer|None)
+    Rückgabe: (treffer, geprüfte_utxos, abbruch_treffer|None, coinjoins)
+
+    *coinjoins*: Form-Heuristik (Wasabi/Whirlpool/JoinMarket/…) je Tx im
+    Hop-Fenster — Soft-Label „vermutlich …“, keine forensische Sicherheit.
 
     Cache: ``sanction_walk`` und Herkunfts-``origin_tree`` unter
     *immutable_cache_dir*; Live-``get_tx`` füllt den Tx-Immutable-Cache
@@ -2303,7 +2566,7 @@ def check_wallet_utxos_sanctions(
     if sanctioned_addresses is None:
         sanctioned_addresses = frozenset()
     if not utxos or not sanctioned_addresses or max_hops < 1:
-        return [], 0, None
+        return [], 0, None, []
 
     if get_tx_je_worker is not None and worker_count > 1 and not abort_on_hit:
         return _check_wallet_utxos_parallel(
@@ -2319,6 +2582,7 @@ def check_wallet_utxos_sanctions(
     from display import SanctionCheckProgressLine
 
     all_hits: list[dict] = []
+    all_coinjoins: list[dict] = []
     checked = 0
     cli_progress = SanctionCheckProgressLine() if progress_cb is None else None
     # Ohne CLI-Zeile meldet der Adapter denselben Zustand an progress_cb —
@@ -2351,16 +2615,17 @@ def check_wallet_utxos_sanctions(
                 break
             if ergebnis is None:
                 continue
-            _ref, treffer, gesehen = ergebnis
+            _ref, treffer, gesehen, cjs = ergebnis
             checked += 1
             all_hits.extend(treffer)
+            all_coinjoins.extend(cjs)
             if gesehene_adressen is not None:
                 gesehene_adressen.update(gesehen)
     finally:
         if cli_progress is not None:
             cli_progress.finish()
 
-    return all_hits, checked, abort_hit
+    return all_hits, checked, abort_hit, _coinjoins_zusammenfuehren(all_coinjoins)
 
 
 def print_sanction_check_report(
@@ -2371,6 +2636,7 @@ def print_sanction_check_report(
     utxo_count: int,
     sanctioned_count: int,
     aborted: bool = False,
+    coinjoins: list[dict] | None = None,
 ) -> None:
     """Gibt das Ergebnis der Sanktionsprüfung aus."""
     print(f"\n{'═' * 72}")
@@ -2385,54 +2651,67 @@ def print_sanction_check_report(
 
     if not hits:
         print(
-            "\n  Keine Treffer — in der geprüften Vorgeschichte keine "
-            "sanktionierte Adresse gefunden."
+            f"\n  Keine sanktionierte Adresse in den letzten {max_hops} Hop(s)."
         )
+    else:
+        by_key: dict[tuple, dict] = {}
+        for hit in hits:
+            key = (hit["hop"], hit["address"], hit["from_utxo"], hit["in_tx"])
+            entry = by_key.get(key)
+            if entry is None:
+                entry = {
+                    "hop": hit["hop"],
+                    "address": hit["address"],
+                    "from_utxo": hit["from_utxo"],
+                    "in_tx": hit["in_tx"],
+                    "amount_sats": hit["amount_sats"],
+                    "wallet_utxos": set(),
+                }
+                by_key[key] = entry
+            entry["wallet_utxos"].add(hit.get("wallet_utxo", ""))
+
+        print(
+            f"\n  ⚠️  {len(by_key)} Treffer "
+            f"(sanktionierte Adresse in der Hop-Vorgeschichte):\n"
+        )
+        with cancellable_output(hint="Trefferliste — q zum Abbrechen"):
+            for index, entry in enumerate(
+                sorted(by_key.values(), key=lambda e: (e["hop"], e["address"])),
+                start=1,
+            ):
+                if is_list_abort_requested():
+                    break
+                addr = abbrev_display(entry["address"])
+                from_utxo = format_utxo_ref(entry["from_utxo"])
+                in_tx = abbrev_display(entry["in_tx"])
+                wallet_refs = ", ".join(
+                    format_utxo_ref(ref)
+                    for ref in sorted(entry["wallet_utxos"])
+                    if ref
+                )
+                print(
+                    f"  [{index}] Hop {entry['hop']}: {addr} "
+                    f"({entry['amount_sats']:,} sats)"
+                )
+                print(f"       UTXO: {from_utxo}  →  Tx {in_tx}")
+                if wallet_refs:
+                    print(f"       Betrifft Wallet-UTXO(s): {wallet_refs}")
+                print()
+
+    cjs = _coinjoins_zusammenfuehren(list(coinjoins or []))
+    if not cjs:
         return
-
-    by_key: dict[tuple, dict] = {}
-    for hit in hits:
-        key = (hit["hop"], hit["address"], hit["from_utxo"], hit["in_tx"])
-        entry = by_key.get(key)
-        if entry is None:
-            entry = {
-                "hop": hit["hop"],
-                "address": hit["address"],
-                "from_utxo": hit["from_utxo"],
-                "in_tx": hit["in_tx"],
-                "amount_sats": hit["amount_sats"],
-                "wallet_utxos": set(),
-            }
-            by_key[key] = entry
-        entry["wallet_utxos"].add(hit.get("wallet_utxo", ""))
-
-    print(
-        f"\n  ⚠️  {len(by_key)} Treffer "
-        f"(sanktionierte Adresse in der Hop-Vorgeschichte):\n"
-    )
-    with cancellable_output(hint="Trefferliste — q zum Abbrechen"):
-        for index, entry in enumerate(
-            sorted(by_key.values(), key=lambda e: (e["hop"], e["address"])),
-            start=1,
-        ):
-            if is_list_abort_requested():
-                break
-            addr = abbrev_display(entry["address"])
-            from_utxo = format_utxo_ref(entry["from_utxo"])
-            in_tx = abbrev_display(entry["in_tx"])
-            wallet_refs = ", ".join(
-                format_utxo_ref(ref)
-                for ref in sorted(entry["wallet_utxos"])
-                if ref
-            )
-            print(
-                f"  [{index}] Hop {entry['hop']}: {addr} "
-                f"({entry['amount_sats']:,} sats)"
-            )
-            print(f"       UTXO: {from_utxo}  →  Tx {in_tx}")
-            if wallet_refs:
-                print(f"       Betrifft Wallet-UTXO(s): {wallet_refs}")
-            print()
+    print("\n  CoinJoins in der geprüften Vorgeschichte:")
+    for cj in cjs:
+        hop = cj.get("hop", 0)
+        when = str(cj.get("time") or "").strip() or "Zeit unbekannt"
+        label = str(cj.get("label") or "").strip() or "vermutlich CoinJoin/Mix"
+        # „Wahrscheinlich X“ → „vermutlich X“ für den Report-Satz
+        if label.lower().startswith("wahrscheinlich "):
+            label = "vermutlich " + label[len("Wahrscheinlich "):]
+        tid = abbrev_display(str(cj.get("txid") or ""))
+        print(f"    Hop {hop} · {when} · {label}" + (f" · Tx {tid}" if tid else ""))
+    print()
 
 
 

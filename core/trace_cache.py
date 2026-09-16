@@ -78,7 +78,8 @@ def meta_pfad(
 
 
 #: Sanktions-Hop-Walk (xpub-blind) — Graph/Adressen; Liste wird neu gematcht.
-SANKTION_WALK_VERSION = 1
+#: v2: zusätzlich ``coinjoins`` (Form-Heuristik je Hop-Tx).
+SANKTION_WALK_VERSION = 2
 
 
 def sanction_walk_pfad(
@@ -99,8 +100,9 @@ def sanction_walk_laden(
     """
     Gespeicherter xpub-blinder Hop-Walk.
 
-    Liefert ``{max_hops, complete, events}`` oder None. Events = Adress-Hops
-    (Graph); die aktuelle Sanktionsliste wird beim Lesen neu gematcht.
+    Liefert ``{max_hops, complete, events, coinjoins}`` oder None. Events =
+    Adress-Hops (Graph); die aktuelle Sanktionsliste wird beim Lesen neu
+    gematcht. ``coinjoins`` = Form-Hinweise (Wasabi/Whirlpool/…) im Fenster.
     """
     ziel = sanction_walk_pfad(txid, vout, immutable_cache_dir)
     if ziel is None or not ziel.is_file():
@@ -118,6 +120,11 @@ def sanction_walk_laden(
     events = daten.get("events")
     if not isinstance(events, list):
         return None
+    coinjoins = daten.get("coinjoins")
+    if coinjoins is None:
+        coinjoins = []
+    if not isinstance(coinjoins, list):
+        return None
     try:
         max_hops = int(daten.get("max_hops") or 0)
     except (TypeError, ValueError):
@@ -126,6 +133,7 @@ def sanction_walk_laden(
         "max_hops": max_hops,
         "complete": bool(daten.get("complete")),
         "events": events,
+        "coinjoins": coinjoins,
     }
 
 
@@ -137,6 +145,7 @@ def sanction_walk_speichern(
     complete: bool,
     events: list,
     immutable_cache_dir: Path | str | None,
+    coinjoins: list | None = None,
 ) -> Path | None:
     """Schreibt den Hop-Walk neben dem Herkunftsbaum."""
     ziel = sanction_walk_pfad(txid, vout, immutable_cache_dir)
@@ -152,6 +161,7 @@ def sanction_walk_speichern(
         "max_hops": int(max_hops),
         "complete": bool(complete),
         "events": list(events or []),
+        "coinjoins": list(coinjoins or []),
     }
     try:
         ziel.parent.mkdir(parents=True, exist_ok=True)
@@ -406,6 +416,10 @@ def _blaetter_ohne_luecke(knoten: list, *, erlaube_tax_horizon: bool = False) ->
         if erlaube_tax_horizon and (
             typ == "tax_horizon" or aktuell.get("tax_horizon")
         ):
+            hat_ende = True
+            continue
+        # Börsen-CSV-Grenze: absichtliches Ende an Ein-/Auszahlung.
+        if aktuell.get("exchange_stop"):
             hat_ende = True
             continue
         # CoinJoin: absichtlich nur eigene Ins — Blatt mit Soft-Label und
