@@ -2988,10 +2988,17 @@ def _setup_blockchain_client(
     if result:
         return result[0], result[1]
 
-    grund = (
-        "Keine Datenquelle erreichbar (eigener Electrum-Server, BIP-158). "
-        "Öffentliche Electrum-Server nur nach Bestätigung."
-    )
+    if _oeffentliche_electrum_erlaubt(env, args):
+        grund = (
+            "Keine Datenquelle erreichbar: eigener Electrum-Server und "
+            "BIP-158 fehlen, öffentliche Electrum-Server (Onion/Clearnet) "
+            "waren trotz Freigabe nicht nutzbar (Tor/Netz/Liste prüfen)."
+        )
+    else:
+        grund = (
+            "Keine Datenquelle erreichbar (eigener Electrum-Server, BIP-158). "
+            "Öffentliche Electrum-Server nur nach Bestätigung."
+        )
     _log_quelle(grund)
     raise SystemExit(grund)
 

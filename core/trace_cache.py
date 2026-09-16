@@ -351,6 +351,32 @@ def vorhanden(
     return bool(ziel and ziel.is_file())
 
 
+def loeschen(
+    txid: str,
+    vout: int,
+    immutable_cache_dir: Path | str | None,
+) -> bool:
+    """
+    Entfernt Herkunftsbaum + Meta (z. B. vor erzwungenem „Scan neu“).
+
+    Lässt Sanktions-Walk unberührt. Rückgabe True wenn mindestens eine
+    Datei weg war.
+    """
+    geloescht = False
+    for ziel in (
+        pfad(txid, vout, immutable_cache_dir),
+        meta_pfad(txid, vout, immutable_cache_dir),
+    ):
+        if ziel is None or not ziel.is_file():
+            continue
+        try:
+            ziel.unlink()
+            geloescht = True
+        except OSError:
+            pass
+    return geloescht
+
+
 def baum_ist_vollstaendig(baum: dict | None) -> bool:
     """
     Alle Sats enden an einer fremden Adresse oder als Coinbase (rot/lila).

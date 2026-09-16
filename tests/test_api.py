@@ -551,6 +551,79 @@ class TestEmpfang(ApiTestBasis):
         self.assertEqual(körper["address"], BIP84_RECEIVE_0)
         self.assertEqual(körper["index"], 0)
 
+    def test_empfang_oeffentliches_electrum_nach_opt_in(self):
+        """Öffentliches Electrum mit Opt-in → History-Probe, source=fulcrum."""
+        kennung = self.wallet_id(BIP84_ZPUB)
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            self.assertIs(client, fake)
+            return (BIP84_RECEIVE_0, 0)
+
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None), \
+             mock.patch.object(
+                 server, "_oeffentlicher_fulcrum_fuer_empfang", return_value=fake,
+             ), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_0)
+
+    def test_schaerfe_nach_sync_oeffentlich_mit_opt_in(self):
+        """Tip-Sync mit öffentlichem Pool + Opt-in schärft Empfang."""
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000)], self.cache, 6,
+        )
+        kennung = self.wallet_id(BIP84_ZPUB)
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            self.assertIs(client, fake)
+            return (BIP84_RECEIVE_1, 1)
+
+        with mock.patch.object(main, "is_own_fulcrum_backend", return_value=False), \
+             mock.patch.object(
+                 server.source_mod, "oeffentliche_electrum_erlaubt", return_value=True,
+             ), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ), \
+             mock.patch.object(server, "_empfang_electrum_client", return_value=None):
+            n = server._schaerfe_empfang_nach_sync(
+                self.state, [entry], fulcrum=fake,
+            )
+        self.assertEqual(n, 1)
+        gemerkt = self.state.empfang_cache.get(kennung)
+        self.assertIsNotNone(gemerkt)
+        self.assertEqual(gemerkt["source"], "fulcrum")
+        self.assertEqual(gemerkt["index"], 1)
+
+    def test_schaerfe_nach_sync_oeffentlich_ohne_opt_in(self):
+        """Öffentlicher Pool ohne Opt-in: Empfang nicht schärfen."""
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        fake = object()
+        with mock.patch.object(main, "is_own_fulcrum_backend", return_value=False), \
+             mock.patch.object(
+                 server.source_mod, "oeffentliche_electrum_erlaubt", return_value=False,
+             ), \
+             mock.patch.object(server, "_empfang_electrum_client", return_value=None), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs",
+             ) as nicht:
+            n = server._schaerfe_empfang_nach_sync(
+                self.state, [entry], fulcrum=fake,
+            )
+        self.assertEqual(n, 0)
+        nicht.assert_not_called()
+
     def test_empfang_electrs_belegt_neu_holen(self):
         """Gemerkte Adresse hat History → neu unbenutzte holen."""
         kennung = self.wallet_id(BIP84_ZPUB)
@@ -1109,10 +1182,24 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertIn("peers", körper)
         self.assertTrue(any(q["key"] == "own_fulcrum" for q in körper["sources"]))
 
-    def test_oeffentliche_electrum_bestaetigung_schreibt_env(self):
+    def test_oeffentliche_electrum_bestaetigung_ist_sitzung(self):
+        """Opt-in gilt nur sitzungsweise — nicht dauerhaft in der .env."""
+        self.env_pfad.write_text(
+            self.env_pfad.read_text(encoding="utf-8")
+            + "\nOEFFENTLICHE_ELECTRUM=1\n",
+            encoding="utf-8",
+        )
+        # Frischer State streicht Dauer-Flag und startet ohne Sitzung.
+        self.state = server.AppState(
+            self.env_pfad, self.cache, self.immutable,
+            sanctions_dir=self.sanktionen,
+        )
+        server.Handler.state = self.state
         self.assertNotIn(
             "OEFFENTLICHE_ELECTRUM", main._load_dotenv(self.env_pfad)
         )
+        self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
+
         status, körper = self.anfrage(
             "/api/source/oeffentlich",
             methode="POST",
@@ -1121,9 +1208,21 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
         self.assertTrue(körper["erlaubt"])
-        self.assertEqual(
-            main._load_dotenv(self.env_pfad).get("OEFFENTLICHE_ELECTRUM"), "1"
+        self.assertTrue(körper.get("session"))
+        self.assertTrue(server.source_mod.oeffentliche_electrum_session_aktiv())
+        # Kein Zurückschreiben in die .env.
+        self.assertNotIn(
+            "OEFFENTLICHE_ELECTRUM", main._load_dotenv(self.env_pfad)
         )
+
+        status, körper = self.anfrage(
+            "/api/source/oeffentlich",
+            methode="POST",
+            daten={"erlauben": False},
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["erlaubt"])
+        self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
 
     def test_source_status_streamt_log_zeilen(self):
         """Die Oberfläche soll Zeilen sehen, bevor die Prüfung fertig ist."""

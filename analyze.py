@@ -23,6 +23,7 @@ from trace_engine import (
     FundingEdge,
     MAX_TRACE_DEPTH,
     UnresolvedExternalBatch,
+    UnresolvedPrevout,
     iter_funding_inputs,
     iter_trace_funding_inputs,
     is_own_output,
@@ -365,6 +366,18 @@ def trace_utxo_origin(
                 "amount_sats": 0,
             })
             continue
+        if isinstance(inp, UnresolvedPrevout):
+            # Prevout fehlte (get_tx/Netz) — Lücke, kein leeres „found“.
+            node["sources"].append({
+                "type": "error",
+                "from_utxo": inp.key,
+                "amount_sats": 0,
+                "error": (
+                    "Vorgänger-Tx nicht ladbar — Herkunft hier unterbrochen. "
+                    "„Scan neu“ erneut versuchen."
+                ),
+            })
+            continue
         edge: FundingEdge = inp
         prev_ref = edge.prevout.key
         prev_addrs = list(edge.addresses)
@@ -501,7 +514,24 @@ def trace_utxo_origin(
             if own_ins == 0:
                 node["type"] = "unknown"
         else:
-            node["type"] = "unknown"
+            # Erzeuger-Tx hat Inputs, aber kein Source → Lücke sichtbar machen
+            # (nicht „found + leer“ → UI „Keine Zuflüsse ermittelbar“).
+            n_vin = sum(
+                1 for v in (tx.get("vin") or [])
+                if not v.get("is_coinbase") and v.get("txid") is not None
+            )
+            if n_vin > 0:
+                node["sources"].append({
+                    "type": "error",
+                    "input_count": n_vin,
+                    "amount_sats": 0,
+                    "error": (
+                        "Eingänge nicht auflösbar (Vorgänger-Tx fehlte). "
+                        "„Scan neu“ erneut versuchen."
+                    ),
+                })
+            else:
+                node["type"] = "unknown"
 
     # Nur abgeschlossene Knoten cachen — cycle bleibt pfadgebunden.
     memo[utxo_key] = node
@@ -594,6 +624,334 @@ def _hat_tax_horizon(node: dict | None) -> bool:
         if src.get("type") == "internal" and _hat_tax_horizon(src.get("trace")):
             return True
     return False
+
+
+def _knoten_txid_vout(node: dict) -> tuple[str, int] | None:
+    """txid/vout aus Rohknoten oder error-from_utxo."""
+    txid = str(node.get("txid") or "").strip()
+    if txid:
+        try:
+            return txid, int(node.get("vout", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+    roh = str(node.get("utxo") or node.get("from_utxo") or "").strip()
+    if ":" not in roh:
+        return None
+    tid, _, v = roh.rpartition(":")
+    tid = tid.strip()
+    if not tid:
+        return None
+    try:
+        return tid, int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quelle_hat_luecke(src: dict | None) -> bool:
+    """True wenn diese Quelle noch nachgezogen werden muss."""
+    if not isinstance(src, dict):
+        return True
+    typ = src.get("type")
+    if typ in ("external", "coinbase"):
+        return False
+    if src.get("exchange_stop"):
+        return False
+    if typ == "external_unresolved":
+        return True
+    if typ == "error":
+        return True
+    if typ == "internal":
+        return _origin_hat_luecken(src.get("trace"))
+    return True
+
+
+def _origin_hat_luecken(node: dict | None) -> bool:
+    """
+    True wenn der Rohbaum noch kein volles extern/Coinbase-Ende hat.
+
+    Entspricht der UI-Semantik „unvollständig“: error/unknown/cycle,
+    leere Sources, tax_horizon, external_unresolved, lückige interne Kinder.
+    """
+    if not isinstance(node, dict):
+        return True
+    if node.get("tax_horizon"):
+        return True
+    typ = node.get("type")
+    if typ in ("error", "unknown", "cycle"):
+        return True
+    if node.get("coinjoin_noise_skipped") and node.get("tx_class"):
+        # Absichtliches CJ-Ende ohne Peer-Externals.
+        return False
+    quellen = node.get("sources")
+    if not isinstance(quellen, list) or not quellen:
+        # Root ohne Sources (und kein CJ-Skip) = Lücke.
+        return typ not in ("external", "coinbase")
+    return any(_quelle_hat_luecke(src) for src in quellen)
+
+
+def hat_brauchbaren_teilfortschritt(node: dict | None) -> bool:
+    """
+    Ob ein gespeicherter origin_tree bei Resume etwas Erhaltenswertes hat.
+
+    Leerer/kaputter Baum (nur error ohne Struktur) → Neustart sinnvoll.
+    Sonst: fertige Zweige behalten und nur Lücken nachziehen.
+    """
+    if not isinstance(node, dict):
+        return False
+    if node.get("tax_horizon"):
+        return True
+    quellen = node.get("sources")
+    if not isinstance(quellen, list) or not quellen:
+        return False
+    for src in quellen:
+        if not isinstance(src, dict):
+            continue
+        typ = src.get("type")
+        if typ in ("external", "coinbase"):
+            return True
+        if typ == "internal" and isinstance(src.get("trace"), dict):
+            return True
+        if typ == "external_unresolved":
+            return True
+    return False
+
+
+def _seed_memo_fertige_unterbaeume(node: dict | None, memo: dict) -> None:
+    """Vollständige Unterbäume ins Memo — Resume läuft sie nicht nochmal ab."""
+    if not isinstance(node, dict) or not isinstance(memo, dict):
+        return
+    ref = _knoten_txid_vout(node)
+    if ref and not _origin_hat_luecken(node) and node.get("type") not in (
+        "error", "unknown", "cycle",
+    ):
+        memo[f"{ref[0]}:{ref[1]}"] = node
+    for src in node.get("sources") or []:
+        if isinstance(src, dict) and src.get("type") == "internal":
+            _seed_memo_fertige_unterbaeume(src.get("trace"), memo)
+
+
+def vertiefe_herkunft_luecken(
+    node: dict | None,
+    get_tx,
+    own_addresses: set,
+    *,
+    wallet: WalletContext | None = None,
+    cache_dir: Path | None = None,
+    fetch_address_utxos=None,
+    cache_source: str | None = None,
+    progress: _EphemeralProgress | None = None,
+    alle_eigenen_inputs: bool = False,
+    memo: dict | None = None,
+) -> dict | None:
+    """
+    Setzt einen unvollständigen Herkunfts-Rohbaum fort.
+
+    * Fertige Zweige (extern/Coinbase, vollständige interne Teilbäume) bleiben.
+    * ``tax_horizon``, ``error``, leere Sources und lückige interne Kinder
+      werden gezielt nachgezogen — kein Komplett-Neulauf ab der Wurzel.
+    """
+    if not isinstance(node, dict):
+        return node
+    if memo is None:
+        memo = {}
+        _seed_memo_fertige_unterbaeume(node, memo)
+
+    if not _origin_hat_luecken(node):
+        return node
+
+    # Steuer-Horizont oder reiner Fehler-/Leer-Knoten: diesen Hop neu laufen.
+    if node.get("tax_horizon") or node.get("type") in ("error", "unknown", "cycle"):
+        ref = _knoten_txid_vout(node)
+        if not ref:
+            return node
+        txid, vout = ref
+        memo.pop(f"{txid}:{vout}", None)
+        if progress:
+            try:
+                progress.update(
+                    f"↻ Lücke nachziehen {txid[:16]}…:{vout}"
+                )
+            except Exception:
+                pass
+        return trace_utxo_origin(
+            get_tx,
+            txid,
+            vout,
+            own_addresses,
+            wallet=wallet,
+            cache_dir=cache_dir,
+            fetch_address_utxos=fetch_address_utxos,
+            cache_source=cache_source,
+            progress=progress,
+            alle_eigenen_inputs=alle_eigenen_inputs,
+            memo=memo,
+            stop_before_ts=None,
+        )
+
+    quellen = node.get("sources")
+    if not isinstance(quellen, list) or not quellen:
+        ref = _knoten_txid_vout(node)
+        if not ref:
+            return node
+        txid, vout = ref
+        memo.pop(f"{txid}:{vout}", None)
+        return trace_utxo_origin(
+            get_tx,
+            txid,
+            vout,
+            own_addresses,
+            wallet=wallet,
+            cache_dir=cache_dir,
+            fetch_address_utxos=fetch_address_utxos,
+            cache_source=cache_source,
+            progress=progress,
+            alle_eigenen_inputs=alle_eigenen_inputs,
+            memo=memo,
+            stop_before_ts=None,
+        )
+
+    # Ganze Node neu, wenn gebündelte unresolved-Eingänge mit Opt-in.
+    if alle_eigenen_inputs and any(
+        isinstance(s, dict) and s.get("type") == "external_unresolved"
+        for s in quellen
+    ):
+        ref = _knoten_txid_vout(node)
+        if ref:
+            txid, vout = ref
+            memo.pop(f"{txid}:{vout}", None)
+            return trace_utxo_origin(
+                get_tx,
+                txid,
+                vout,
+                own_addresses,
+                wallet=wallet,
+                cache_dir=cache_dir,
+                fetch_address_utxos=fetch_address_utxos,
+                cache_source=cache_source,
+                progress=progress,
+                alle_eigenen_inputs=True,
+                memo=memo,
+                stop_before_ts=None,
+            )
+
+    neu_quellen: list = []
+    geaendert = False
+    for src in quellen:
+        if not isinstance(src, dict):
+            neu_quellen.append(src)
+            continue
+        typ = src.get("type")
+        if typ == "internal":
+            kind = src.get("trace")
+            if isinstance(kind, dict) and _origin_hat_luecken(kind):
+                frisch = vertiefe_herkunft_luecken(
+                    kind,
+                    get_tx,
+                    own_addresses,
+                    wallet=wallet,
+                    cache_dir=cache_dir,
+                    fetch_address_utxos=fetch_address_utxos,
+                    cache_source=cache_source,
+                    progress=progress,
+                    alle_eigenen_inputs=alle_eigenen_inputs,
+                    memo=memo,
+                )
+                if frisch is not kind:
+                    src = dict(src)
+                    src["trace"] = frisch
+                    geaendert = True
+            neu_quellen.append(src)
+        elif typ == "error":
+            ref = _knoten_txid_vout(src)
+            if ref is None:
+                # from_utxo am error-Source
+                roh = str(src.get("from_utxo") or "").strip()
+                if ":" in roh:
+                    tid, _, v = roh.rpartition(":")
+                    try:
+                        ref = (tid.strip(), int(v))
+                    except (TypeError, ValueError):
+                        ref = None
+            if ref:
+                txid, vout = ref
+                memo.pop(f"{txid}:{vout}", None)
+                if progress:
+                    try:
+                        progress.update(
+                            f"↻ Fehlenden Prevout nachladen {txid[:16]}…:{vout}"
+                        )
+                    except Exception:
+                        pass
+                kind = trace_utxo_origin(
+                    get_tx,
+                    txid,
+                    vout,
+                    own_addresses,
+                    wallet=wallet,
+                    cache_dir=cache_dir,
+                    fetch_address_utxos=fetch_address_utxos,
+                    cache_source=cache_source,
+                    progress=progress,
+                    alle_eigenen_inputs=alle_eigenen_inputs,
+                    memo=memo,
+                    stop_before_ts=None,
+                )
+                # error-Source → internal oder external ersetzen
+                own_addr = None
+                if wallet and kind:
+                    for a in kind.get("addresses") or []:
+                        if wallet.resolve_address(a):
+                            own_addr = a
+                            break
+                if own_addr or (
+                    kind
+                    and any(
+                        a in own_addresses
+                        for a in (kind.get("addresses") or [])
+                    )
+                ):
+                    addr = own_addr or (kind.get("addresses") or [""])[0]
+                    neu_quellen.append({
+                        "type": "internal",
+                        "address": addr,
+                        "amount_sats": int(
+                            src.get("amount_sats")
+                            or kind.get("amount_sats")
+                            or 0
+                        ),
+                        "from_utxo": f"{txid}:{vout}",
+                        "trace": kind,
+                    })
+                elif kind and kind.get("type") not in ("error", "unknown"):
+                    # Als external-Blatt, wenn Prevout jetzt da und fremd
+                    addrs = kind.get("addresses") or []
+                    neu_quellen.append({
+                        "type": "external",
+                        "address": addrs[0] if addrs else "unbekannt",
+                        "amount_sats": int(
+                            src.get("amount_sats")
+                            or kind.get("amount_sats")
+                            or 0
+                        ),
+                        "from_utxo": f"{txid}:{vout}",
+                        "time_ts": kind.get("time_ts"),
+                        "time": kind.get("time") or "",
+                    })
+                else:
+                    neu_quellen.append(src)
+                geaendert = True
+            else:
+                neu_quellen.append(src)
+        else:
+            neu_quellen.append(src)
+
+    if not geaendert:
+        return node
+    out = dict(node)
+    out["sources"] = neu_quellen
+    if out.get("type") == "unknown" and neu_quellen:
+        out["type"] = "utxo"
+    return out
 
 
 def _sum_external_sats(node: dict | None) -> int:

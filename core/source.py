@@ -383,8 +383,37 @@ def peer_status(
     return stand
 
 
+#: Sitzungs-Opt-in für öffentliche Electrum-Server (Web-GUI).
+#: Gilt nur für den laufenden Prozess — nach Server-Neustart wieder aus,
+#: damit bei geringer Privatsphäre jedes Mal nachgefragt wird.
+_SESSION_OEFFENTLICHE_ELECTRUM = False
+
+
+def oeffentliche_electrum_session_aktiv() -> bool:
+    """True wenn diese Prozess-Sitzung öffentliche Electrum freigegeben hat."""
+    return bool(_SESSION_OEFFENTLICHE_ELECTRUM)
+
+
+def setze_oeffentliche_electrum_session(erlaubt: bool) -> None:
+    """
+    Sitzungs-Freigabe setzen (kein Schreiben in die .env).
+
+    Outbound-Allowlist liest denselben Prozess-Status über diese Flag-API.
+    """
+    global _SESSION_OEFFENTLICHE_ELECTRUM
+    _SESSION_OEFFENTLICHE_ELECTRUM = bool(erlaubt)
+
+
 def oeffentliche_electrum_erlaubt(values: dict[str, str] | None) -> bool:
-    """Öffentliche Electrum-Server (Onion/Clearnet) nur nach Bestätigung."""
+    """
+    Öffentliche Electrum-Server (Onion/Clearnet) nur nach Bestätigung.
+
+    * **Sitzung** (Web-Dialog): gilt bis Prozessende, nicht über Neustart.
+    * **``.env`` / CLI** (``OEFFENTLICHE_ELECTRUM=1``, ``--oeffentliche-electrum``):
+      für Headless/Tests; die Web-GUI speichert das Flag nicht mehr dauerhaft.
+    """
+    if _SESSION_OEFFENTLICHE_ELECTRUM:
+        return True
     return _flag(values or {}, "OEFFENTLICHE_ELECTRUM", False)
 
 

@@ -622,10 +622,40 @@ class AppState:
         self._entries: list[WalletEntry] = []
         # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
         self.empfang_cache: dict[str, dict] = {}
-        # Wiederverwendeter Electrs-Client nur für Empfangs-QR (kein Connect/Request).
+        # Wiederverwendeter Electrs-Client nur für Empfangs-QR (eigen oder öffentlich).
         self._empfang_fulcrum = None
+        self._empfang_public_fulcrum = None
         self._empfang_fulcrum_lock = threading.Lock()
+        # Öffentliches Electrum: pro Serverstart neu fragen (keine Dauer-.env).
+        source_mod.setze_oeffentliche_electrum_session(False)
+        self._streiche_dauerhafte_oeffentliche_electrum()
         self.reload()
+
+    def _streiche_dauerhafte_oeffentliche_electrum(self) -> None:
+        """
+        Altes ``OEFFENTLICHE_ELECTRUM=1`` aus der ``.env`` nehmen.
+
+        Die Web-GUI speichert die Freigabe nur sitzungsweise; sonst bliebe
+        „Privatsphäre gering“ nach Neustart still freigegeben.
+        """
+        try:
+            env = EnvFile.load(self.env_path)
+        except OSError:
+            return
+        if not (env.values().get("OEFFENTLICHE_ELECTRUM") or "").strip():
+            return
+        env.apply({"OEFFENTLICHE_ELECTRUM": None})
+        try:
+            env.save()
+            LOGGER.info(
+                "OEFFENTLICHE_ELECTRUM aus .env entfernt "
+                "(Opt-in gilt pro Serverstart)."
+            )
+        except OSError as exc:
+            LOGGER.warning(
+                "OEFFENTLICHE_ELECTRUM konnte nicht aus .env entfernt werden: %s",
+                exc,
+            )
 
     def set_managed_by(self, value: str | None) -> None:
         """Setzt die Herkunft der Konfiguration für diesen Serverlauf."""
@@ -717,10 +747,14 @@ class AppState:
             self.empfang_cache.clear()
             with getattr(self, "_empfang_fulcrum_lock", threading.Lock()):
                 alt = getattr(self, "_empfang_fulcrum", None)
+                alt_pub = getattr(self, "_empfang_public_fulcrum", None)
                 self._empfang_fulcrum = None
-            if alt is not None:
+                self._empfang_public_fulcrum = None
+            for client in (alt, alt_pub):
+                if client is None:
+                    continue
                 try:
-                    alt.close()
+                    client.close()
                 except Exception:
                     pass
 
@@ -807,7 +841,7 @@ class AppState:
                 str(self.env().values().get("FULCRUM_SSL", "true")).strip().lower()
                 in ("0", "false", "no", "off")
             ),
-            oeffentliche_electrum=False,
+            oeffentliche_electrum=source_mod.oeffentliche_electrum_session_aktiv(),
         )
 
 
@@ -1666,6 +1700,10 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
             main.resolve_wallets_nur_bekannte_utxos(werte)
         ),
         "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
+        # Explizit: Web-Opt-in ist sitzungsweise (nach Neustart wieder false).
+        "oeffentliche_electrum_session": (
+            source_mod.oeffentliche_electrum_session_aktiv()
+        ),
         "wallet_watch": _wallet_watch_status(),
 
         "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
@@ -2740,6 +2778,59 @@ def _eigener_fulcrum_client(state: AppState):
         return client
 
 
+def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
+    """
+    Öffentlicher Electrum-Pool für Empfangs-History — nur mit Opt-in.
+
+    Ohne ``OEFFENTLICHE_ELECTRUM`` bleibt es bei der Cache-Schätzung
+    (keine Adress-Probes an Fremdserver). Mit Opt-in: dieselbe History-Probe
+    wie beim eigenen Node; die Adressen sind dem Pool ohnehin schon bekannt,
+    sobald Scans darüber laufen.
+    """
+    werte = state.env().values()
+    if not source_mod.oeffentliche_electrum_erlaubt(werte):
+        return None
+
+    lock = getattr(state, "_empfang_fulcrum_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+
+    with lock:
+        alt = getattr(state, "_empfang_public_fulcrum", None)
+        if alt is not None:
+            try:
+                alt.request("server.ping")
+                return alt
+            except Exception:
+                try:
+                    alt.close()
+                except Exception:
+                    pass
+                state._empfang_public_fulcrum = None
+        try:
+            args = state.args_namespace()
+            pool = main._try_public_onion_fulcrum(
+                args, werte, interactive=False,
+            )
+            if pool is None:
+                pool = main._setup_public_clearnet_fulcrum(args, werte)
+        except Exception:
+            return None
+        state._empfang_public_fulcrum = pool
+        return pool
+
+
+def _empfang_electrum_client(state: AppState):
+    """
+    Electrum für Empfangs-QR: eigener Node, sonst öffentlicher nach Opt-in.
+    """
+    eigen = _eigener_fulcrum_client(state)
+    if eigen is not None:
+        return eigen
+    return _oeffentlicher_fulcrum_fuer_empfang(state)
+
+
 def _adresse_hat_history(client, address: str) -> bool:
     """True wenn Electrs für die Adresse mindestens eine Tx kennt."""
     if not address:
@@ -2805,7 +2896,8 @@ def _schaerfe_empfang_nach_sync(
 
     * Prozess-Cache leeren, dann pro Wallet **1–wenige** ``get_history`` ab
       Cache-Schätzung (kein Fullscan, siehe ``_naechste_freie_empfang_electrs``).
-    * Ohne eigenen Electrs: nur Cache leeren.
+    * Electrum: eigener Node, oder öffentlicher Pool nach Opt-in
+      (``OEFFENTLICHE_ELECTRUM``). Ohne beides: nur Cache leeren.
     """
     if not eintraege:
         return 0
@@ -2819,11 +2911,15 @@ def _schaerfe_empfang_nach_sync(
     if client is not None:
         try:
             if not main.is_own_fulcrum_backend(client):
-                client = None
+                # Öffentlicher Pool nur mit Opt-in — sonst keine Adress-Probes.
+                if not source_mod.oeffentliche_electrum_erlaubt(
+                    state.env().values()
+                ):
+                    client = None
         except Exception:
             client = None
     if client is None:
-        client = _eigener_fulcrum_client(state)
+        client = _empfang_electrum_client(state)
     if client is None:
         return 0
 
@@ -3524,9 +3620,10 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
     """
     Nächste Empfangsadresse für QR/Anzeige.
 
-    * **Eigener Electrs/Fulcrum erreichbar:** immer unbenutzte Adresse
-      (get_history / BIP44-Gap). Prozess-Cache nur, wenn die gemerkte
-      Adresse noch history-frei ist (ein RPC).
+    * **Electrs/Fulcrum erreichbar** (eigener Node, oder öffentlicher nach
+      Opt-in): unbenutzte Adresse per ``get_history`` / BIP44-Gap.
+      Prozess-Cache nur, wenn die gemerkte Adresse noch history-frei ist
+      (ein RPC).
     * **Sonst:** Schätzung aus UTXO-/Verlaufs-Cache + ``source=cache_estimate``
       (UI-Warnhinweis). Liefert nie XPUB/Deskriptor.
     """
@@ -3550,7 +3647,7 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
 
     max_index = _empfang_max_index(entry, state)
     bekannt, _ = _cache_bekannt_adressen(state, entry)
-    client = _eigener_fulcrum_client(state)
+    client = _empfang_electrum_client(state)
 
     gemerkt = state.empfang_cache.get(kennung)
     if (
@@ -3595,7 +3692,7 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
                 )
         except Exception:
             pass
-        # Electrs konfiguriert, aber Abfrage gescheitert → Schätzung + Warnung.
+        # Electrs erreichbar konfiguriert, Abfrage gescheitert → Schätzung + Warnung.
 
     return _empfang_aus_cache_schaetzung(
         state, entry, kennung=kennung, max_index=max_index,
@@ -4174,19 +4271,30 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
 
 
 def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
+    """
+    Sitzungs-Bestätigung für öffentliche Electrum-Server.
+
+    Gilt nur bis zum Prozessende — wird **nicht** in die ``.env`` geschrieben,
+    damit nach jedem Server-Neustart bei geringer Privatsphäre erneut gefragt
+    wird. Ein altes ``OEFFENTLICHE_ELECTRUM`` in der ``.env`` wird entfernt
+    (Migration von der früheren Dauer-Freigabe).
+    """
     _datenquellen_config_gesperrt(state)
-    """Speichert die Bestätigung, öffentliche Electrum-Server zu nutzen."""
     erlauben = bool(payload.get("erlauben"))
+    source_mod.setze_oeffentliche_electrum_session(erlauben)
+    # Dauerhafte Freigabe streichen — Opt-in ist sitzungsweise.
     env = state.env()
-    env.apply({"OEFFENTLICHE_ELECTRUM": "1" if erlauben else None})
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    state.reload()
+    if (env.values().get("OEFFENTLICHE_ELECTRUM") or "").strip():
+        env.apply({"OEFFENTLICHE_ELECTRUM": None})
+        try:
+            env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+        state.reload()
     return {
         "saved": True,
         "erlaubt": erlauben,
+        "session": True,
         "sources": [
             q.as_dict() for q in source_mod.describe_sources(state.env().values())
         ],
@@ -4598,7 +4706,7 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
     Streicht einen eigenen Node aus der .env, schaltet P2P aus
     (``BIP158_P2P=0``), oder löscht nur die geladene öffentliche
     Electrum-Liste (Onion-Rotation / electrum_servers.json).
-    Opt-in ``OEFFENTLICHE_ELECTRUM`` bleibt unberührt.
+    Sitzungs-Opt-in für öffentliche Electrum bleibt unberührt.
     """
     name = (quelle or "").strip()
     _datenquellen_config_gesperrt(state, quelle=name, aktion="verwerfen")
@@ -5432,6 +5540,21 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             else:
                                 stand.phase(t)
 
+                        resume_tief = None
+                        geladen_tief = trace_cache.laden(
+                            txid, vout, state.immutable_cache_dir, eigene,
+                        )
+                        if geladen_tief and isinstance(
+                            geladen_tief.get("baum"), dict
+                        ):
+                            origin_t = geladen_tief["baum"].get("origin_tree")
+                            if (
+                                isinstance(origin_t, dict)
+                                and analyze.hat_brauchbaren_teilfortschritt(
+                                    origin_t
+                                )
+                            ):
+                                resume_tief = origin_t
                         ergebnis = _trace_ein_utxo_tief(
                             get_tx=fetchers["get_tx"],
                             txid=txid,
@@ -5446,15 +5569,23 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             cancel_cb=lambda: job.cancelled,
                             folge_bundled=True,
                             folge_tx=True,
+                            resume_origin=resume_tief,
                         )
                     else:
                         resume = None
-                        if modus == "voll":
+                        if modus in ("voll", "steuer"):
                             geladen = trace_cache.laden(
                                 txid, vout, state.immutable_cache_dir, eigene,
                             )
                             if geladen and isinstance(geladen.get("baum"), dict):
-                                resume = geladen["baum"].get("origin_tree")
+                                origin = geladen["baum"].get("origin_tree")
+                                if (
+                                    isinstance(origin, dict)
+                                    and analyze.hat_brauchbaren_teilfortschritt(
+                                        origin
+                                    )
+                                ):
+                                    resume = origin
                         ergebnis = trace_mod.trace_utxo(
                             fetchers["get_tx"], txid, vout, eigene,
                             wallet=wallet_ctx,
@@ -5465,6 +5596,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             stop_before_ts=(
                                 stop_before_ts if modus == "steuer" else None
                             ),
+                            # voll: Lücken fortsetzen; steuer: Horizont neu
+                            # mit stop — Resume nur bei voll.
                             resume_origin=resume if modus == "voll" else None,
                         )
                     fertig += 1
@@ -5804,11 +5937,13 @@ def _trace_ein_utxo_tief(
     cancel_cb=None,
     folge_bundled: bool = True,
     folge_tx: bool = True,
+    resume_origin: dict | None = None,
 ) -> dict:
     """
     Ein UTXO wie „Herkunftslücken schließen“ (followup=full):
 
-    1. Roh-Trace mit allen eigenen Eingängen (große Sammel-Txs)
+    1. Roh-Trace mit allen eigenen Eingängen (große Sammel-Txs),
+       oder Resume aus ``resume_origin`` (nur Lücken)
     2. optional eigene Vorgänger-Txs nachverfolgen (Cache/Adressen warm)
     3. UI-Baum speichern mit resolve_bundled
 
@@ -5840,18 +5975,36 @@ def _trace_ein_utxo_tief(
             log("Folgeanalyse: erst Herkunft, dann Vorgänger…")
         # Fortschritt/Abbruch hier mitgeben — Phase 1 war sonst stumm und
         # unabbrechbar (CoinJoin/Remix: Minuten ohne job.progress).
-        roh = analyze.trace_utxo_origin(
-            get_tx,
-            txid,
-            vout,
-            eigene,
-            wallet=wallet_ctx,
-            cache_dir=cache_dir,
-            fetch_address_utxos=fetch_addr,
-            cache_source=cache_source,
-            progress=fortschritt,
-            alle_eigenen_inputs=folge_bundled,
-        )
+        if (
+            resume_origin
+            and isinstance(resume_origin, dict)
+            and analyze.hat_brauchbaren_teilfortschritt(resume_origin)
+        ):
+            log("Setze gespeicherten Teilbaum fort…")
+            roh = analyze.vertiefe_herkunft_luecken(
+                resume_origin,
+                get_tx,
+                eigene,
+                wallet=wallet_ctx,
+                cache_dir=cache_dir,
+                fetch_address_utxos=fetch_addr,
+                cache_source=cache_source,
+                progress=fortschritt,
+                alle_eigenen_inputs=folge_bundled,
+            )
+        else:
+            roh = analyze.trace_utxo_origin(
+                get_tx,
+                txid,
+                vout,
+                eigene,
+                wallet=wallet_ctx,
+                cache_dir=cache_dir,
+                fetch_address_utxos=fetch_addr,
+                cache_source=cache_source,
+                progress=fortschritt,
+                alle_eigenen_inputs=folge_bundled,
+            )
         _check_abbruch()
         if folge_tx:
             vorgaenger: set[str] = set()
@@ -5912,6 +6065,7 @@ def _trace_ein_utxo_tief(
         progress=progress if callable(progress) else None,
         resolve_bundled=folge_bundled,
         merke_tx_oriented_done=folge_tx,
+        resume_origin=resume_origin,
     )
     return ergebnis
 
@@ -6011,6 +6165,13 @@ def api_trace(state: AppState, payload: dict) -> dict:
     # full = beides; Legacy-Werte bleiben einzeln steuerbar.
     folge_bundled = followup in ("full", "resolve_unresolved")
     folge_tx = followup in ("full", "tx_oriented")
+    # „Scan neu“: nicht stumm aus Cache; brauchbaren Teilbaum fortsetzen
+    # statt alles zu löschen. Nur leere/kaputte Stände werden verworfen.
+    force = bool(
+        payload.get("force")
+        or payload.get("neu")
+        or payload.get("rescan")
+    )
 
     wallet_ctx = state.wallet_ctx
     if wallet_ctx is None:
@@ -6027,12 +6188,35 @@ def api_trace(state: AppState, payload: dict) -> dict:
             or ""
         ),
     )
+    resume_origin = None
+    if force or followup is not None:
+        try:
+            geladen = trace_cache.laden(
+                txid, vout, state.immutable_cache_dir, eigene,
+            )
+            if geladen and isinstance(geladen.get("baum"), dict):
+                origin = geladen["baum"].get("origin_tree")
+                if (
+                    isinstance(origin, dict)
+                    and analyze.hat_brauchbaren_teilfortschritt(origin)
+                ):
+                    resume_origin = origin
+                elif force:
+                    # Nichts Brauchbares — alten Stand weg, echter Neustart.
+                    trace_cache.loeschen(txid, vout, state.immutable_cache_dir)
+        except Exception:
+            if force:
+                try:
+                    trace_cache.loeschen(txid, vout, state.immutable_cache_dir)
+                except Exception:
+                    pass
 
     def lauf(job):
         from core.jobs import Fortschritt, herzschlag
 
         # Nochmals Cache (Race: GET und POST parallel) — bevor Electrs startet.
-        if followup is None:
+        # force: nie stiller Cache-Hit (Resume läuft unten mit Netz).
+        if followup is None and not force:
             treffer = trace_cache.laden(
                 txid, vout, state.immutable_cache_dir, eigene,
             )
@@ -6078,6 +6262,10 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 "tx_oriented": f"Speichere gründlichere Herkunft über {quelle}…",
                 "resolve_unresolved": f"Löse gebündelte Eingänge über {quelle}…",
             }[followup]
+            if force and resume_origin is not None:
+                label = f"Setze Herkunft fort über {quelle}…"
+            elif force:
+                label = f"Scan neu über {quelle}…"
             stand.phase(label)
 
             def _fortschritt(text: str) -> None:
@@ -6095,6 +6283,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     or t.startswith("Folgeanalyse")
                     or t.startswith("Schließe")
                     or t.startswith("Verfolge")
+                    or t.startswith("Setze")
                 ):
                     # tick speichert Stand; phase bei echten Phasen-Texten.
                     if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
@@ -6119,6 +6308,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     cancel_cb=lambda: job.cancelled,
                     folge_bundled=folge_bundled,
                     folge_tx=folge_tx,
+                    resume_origin=resume_origin,
                 )
             else:
                 ergebnis = trace_mod.trace_utxo(
@@ -6132,6 +6322,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     fetch_address_utxos=fetch_addr,
                     cache_source=quelle,
                     progress=_fortschritt,
+                    resume_origin=resume_origin,
                 )
             ergebnis["source"] = quelle
             ergebnis["followup"] = followup
@@ -6155,9 +6346,9 @@ def api_trace(state: AppState, payload: dict) -> dict:
     if bestehend is not None:
         return bestehend.as_dict()
 
-    # Cache-first (ohne followup): fertiger Baum → kein Job, kein Electrs.
-    # Plot-Klick / Ankunft am sollen den Immutable-Trace nutzen, wenn er liegt.
-    if followup is None:
+    # Cache-first (ohne followup, ohne force): vorhandener Baum → kein Job.
+    # Unvollständige Bäume bleiben sichtbar (rote Marke); „Scan neu“ setzt force.
+    if followup is None and not force:
         eigene_cache = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
         treffer = trace_cache.laden(
             txid, vout, state.immutable_cache_dir, eigene_cache,
@@ -6209,7 +6400,11 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 }
 
     titel = f"Herkunft {txid[:12]}…:{vout}"
-    if followup == "full":
+    if force and resume_origin is not None and followup is None:
+        titel = f"Herkunft fortsetzen {txid[:12]}…:{vout}"
+    elif force and followup is None:
+        titel = f"Scan neu {txid[:12]}…:{vout}"
+    elif followup == "full":
         titel = f"Lücken schließen {txid[:12]}…:{vout}"
     elif followup == "tx_oriented":
         titel = f"Folgeanalyse {txid[:12]}…:{vout}"
@@ -6227,6 +6422,8 @@ def api_trace(state: AppState, payload: dict) -> dict:
             "txid": txid,
             "vout": vout,
             "followup": followup_meta,
+            "force": force,
+            "resume": bool(resume_origin),
             "wallet_name": wallet_name,
         },
     )

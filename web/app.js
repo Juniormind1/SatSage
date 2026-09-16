@@ -1260,15 +1260,15 @@ function gruppeAusTraceListe(address, keyHinweis) {
  */
 function merkeTraceAmUtxo(utxo, ergebnis) {
   if (!utxo || !ergebnis || !ergebnis.found) return;
-  const z = ergebnis.summary || {};
-  const voll = ergebnis.verfolgt_vollstaendig ?? (
-    !(z.unresolved_inputs > 0) && Boolean(z.external_count || z.coinbase)
-  );
+  // Nur Server-Flag — kein Fallback über external_count (leere/lückige Bäume
+  // wirkten sonst fälschlich „vollständig“).
+  const voll = Boolean(ergebnis.verfolgt_vollstaendig);
   utxo.verfolgt = true;
   // Immer neu setzen — sonst bleibt bei „Scan neu" das alte Stand-Datum.
   utxo.verfolgt_ts = Math.floor(Date.now() / 1000);
   utxo.verfolgt_veraltet = false;
-  utxo.verfolgt_vollstaendig = Boolean(voll);
+  utxo.verfolgt_vollstaendig = voll;
+  utxo.unvollstaendig = Boolean(ergebnis.unvollstaendig) || !voll;
   if (ergebnis.juengste_sats_ts) {
     utxo.juengste_sats_ts = ergebnis.juengste_sats_ts;
   }
@@ -1312,6 +1312,7 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
         eintrag.verfolgt_ts = utxo.verfolgt_ts;
         eintrag.verfolgt_veraltet = false;
         eintrag.verfolgt_vollstaendig = utxo.verfolgt_vollstaendig;
+        eintrag.unvollstaendig = utxo.unvollstaendig;
         if (utxo.juengste_sats_ts) {
           eintrag.juengste_sats_ts = utxo.juengste_sats_ts;
         }
@@ -1402,7 +1403,15 @@ function aktualisiereTraceWurzelKopf(utxo, wurzelEl = null) {
   }
 }
 
-/** Marke „verfolgt · Datum" in der UTXO-Kopfzeile an den aktuellen Stand anpassen. */
+/** Unvollständiger Herkunftsbaum (Lücke, Abbruch, fehlender Prevout, …). */
+function utxoHerkunftUnvollstaendig(utxo) {
+  if (!utxo || !utxo.verfolgt) return false;
+  if (utxo.unvollstaendig) return true;
+  if (utxo.verfolgt_vollstaendig === false) return true;
+  return false;
+}
+
+/** Marke „verfolgt · Datum" / „unvollständig · Datum" (rot) anpassen. */
 function setzeVerfolgtMarke(oben, utxo) {
   if (!oben || !utxo || !utxo.verfolgt) return;
   const selektor =
@@ -1412,16 +1421,28 @@ function setzeVerfolgtMarke(oben, utxo) {
     marke = document.createElement("span");
     oben.append(marke);
   }
-  marke.className = utxo.verfolgt_veraltet
-    ? "verfolgt-marke veraltet"
-    : "verfolgt-marke";
+  const unvoll = utxoHerkunftUnvollstaendig(utxo);
+  if (unvoll) {
+    marke.className = "verfolgt-marke unvollstaendig";
+  } else if (utxo.verfolgt_veraltet) {
+    marke.className = "verfolgt-marke veraltet";
+  } else {
+    marke.className = "verfolgt-marke";
+  }
   const wann = utxo.verfolgt_ts
     ? formatKurzdatum(utxo.verfolgt_ts * 1000)
     : "";
-  marke.textContent = wann ? t("trace.followedWhen", { wann }) : t("trace.followed");
-  marke.title = utxo.verfolgt_veraltet
-    ? t("trace.followedStale")
-    : t("trace.followedCached");
+  if (unvoll) {
+    marke.textContent = wann
+      ? t("trace.incompleteWhen", { wann })
+      : t("trace.incomplete");
+    marke.title = t("trace.incompleteTitle");
+  } else {
+    marke.textContent = wann ? t("trace.followedWhen", { wann }) : t("trace.followed");
+    marke.title = utxo.verfolgt_veraltet
+      ? t("trace.followedStale")
+      : t("trace.followedCached");
+  }
 }
 
 function ersetzeJuengsteMarke(ort, marke) {
@@ -3627,16 +3648,14 @@ function zeichneEmpfang(daten, { zahlung = false } = {}) {
   );
   setzeEmpfangQuelle(daten.source);
 
+  // Cache-Warnung nur in #empfang-quelle (setzeEmpfangQuelle) — nicht noch
+  // einmal in #empfang-hinweis (war doppelte Zeile „Schätzung aus Cache …“).
   const hinweis = $("#empfang-hinweis");
   if (hinweis) {
     if (zahlung) {
       hinweis.hidden = false;
       hinweis.textContent = t("dock.empfangZahlung");
       hinweis.classList.remove("empfang-hinweis--warn");
-    } else if (daten.source === "cache_estimate") {
-      hinweis.hidden = false;
-      hinweis.textContent = t("dock.empfangSourceCache");
-      hinweis.classList.add("empfang-hinweis--warn");
     } else if (!hinweis.hidden && Zustand.empfang?.address === daten.address) {
       /* Zahlungshinweis bleibt kurz stehen, bis Adresse wechselt */
     } else {
@@ -4649,6 +4668,20 @@ function zeichneUtxoZeile(utxo) {
     marke.className = "verfolgt-marke receive-pending";
     marke.textContent = t("trace.receivePending");
     marke.title = t("trace.receivePendingTitle");
+    zeile.append(marke);
+  }
+
+  // Herkunft unvollständig (rot) — Abbruch, Lücken, fehlende Prevouts.
+  if (utxo.verfolgt && utxoHerkunftUnvollstaendig(utxo)) {
+    const marke = document.createElement("span");
+    marke.className = "verfolgt-marke unvollstaendig";
+    const wann = utxo.verfolgt_ts
+      ? formatKurzdatum(utxo.verfolgt_ts * 1000)
+      : "";
+    marke.textContent = wann
+      ? t("trace.incompleteWhen", { wann })
+      : t("trace.incomplete");
+    marke.title = t("trace.incompleteTitle");
     zeile.append(marke);
   }
 
@@ -5720,6 +5753,9 @@ const PUNKT_KLASSE = {
   external_unresolved: "knoten-offen",
   coinbase: "knoten-coinbase",
   tax_horizon: "knoten-offen",
+  error: "knoten-krit",
+  unknown: "knoten-krit",
+  cycle: "knoten-krit",
 };
 
 /**
@@ -5842,7 +5878,8 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
       undefined,
       walletNameZu(Zustand.walletId),
     );
-    await starteZweigTrace(utxo, zweig, klapp, null, jobId);
+    // force: alten Cache verwerfen — sonst kommt derselbe kaputte Stand zurück.
+    await starteZweigTrace(utxo, zweig, klapp, null, jobId, { force: true });
   } else {
     await oeffneZweig(utxo, zweig, klapp, jobId);
   }
@@ -6172,21 +6209,11 @@ function zeichneTraceWurzel(utxo) {
   if (utxo.address) macheKopierbar(adresse, utxo.address, "Adresse");
   oben.append(betrag, wer, adresse);
 
-  // Vor dem Aufklappen sichtbar machen, ob eine Analyse vorliegt: Dann geht
-  // es sofort, sonst startet ein Lauf über die Datenquelle.
+  // Vor dem Aufklappen sichtbar: Analyse da / unvollständig (rot) / frisch.
   if (utxo.verfolgt) {
     const marke = document.createElement("span");
-    marke.className = utxo.verfolgt_veraltet
-      ? "verfolgt-marke veraltet"
-      : "verfolgt-marke";
-    const wann = utxo.verfolgt_ts
-      ? formatKurzdatum(utxo.verfolgt_ts * 1000)
-      : "";
-    marke.textContent = wann ? t("trace.followedWhen", { wann }) : t("trace.followed");
-    marke.title = utxo.verfolgt_veraltet
-      ? t("trace.followedStale")
-      : t("trace.followedCached");
     oben.append(marke);
+    setzeVerfolgtMarke(oben, utxo);
 
     const juengste = juengsteSatsMarke(utxo);
     if (juengste) oben.append(juengste);
@@ -6442,8 +6469,13 @@ function gespeicherterKopf(gespeichert, utxo, zweig, klapp) {
  * Startet die Analyse für genau einen UTXO und rendert sie in *zweig*.
  * *followup*: optional ``full`` (Lücken schließen), Legacy ``tx_oriented`` /
  * ``resolve_unresolved``.
+ * *opts.force*: Cache verwerfen („Scan neu“) — sonst liefert der Server den
+ * alten unvollständigen Baum wieder aus dem Immutable-Cache.
  */
-async function starteZweigTrace(utxo, zweig, klapp, followup = null, jobIdVorgabe = null) {
+async function starteZweigTrace(
+  utxo, zweig, klapp, followup = null, jobIdVorgabe = null, opts = null,
+) {
+  const force = Boolean(opts && opts.force);
   zweig.dataset.geladen = "laeuft";
 
   const status = document.createElement("div");
@@ -6541,6 +6573,7 @@ async function starteZweigTrace(utxo, zweig, klapp, followup = null, jobIdVorgab
     if (!jobId) {
       const daten = { target: utxo.key };
       if (followup) daten.followup = followup;
+      if (force) daten.force = true;
       if (utxo.wallet) daten.wallet = utxo.wallet;
       if (utxo.address) daten.address = utxo.address;
       if (utxo.value_sats != null) daten.value_sats = utxo.value_sats;
@@ -6726,11 +6759,17 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   setzeWurzelTxClass(zweig, ergebnis);
 
   if (ergebnis.children.length === 0) {
-    zweig.append(hinweisZeile(
-      klasseHinweis
-        ? t("trace.coinjoinOwnOnlyEmpty")
-        : t("trace.noInflows"),
-    ));
+    // Leere Kinder sind kein Trace-Ergebnis: entweder CJ-Soft-Label ohne
+    // eigene Vorgänger, oder unvollständiger Lauf (Prevout fehlte). Nie
+    // „Keine Zuflüsse“ so tun, als wäre extern/Coinbase erreicht.
+    if (klasseHinweis) {
+      zweig.append(hinweisZeile(t("trace.coinjoinOwnOnlyEmpty")));
+    } else if (ergebnis.verfolgt_vollstaendig) {
+      zweig.append(hinweisZeile(t("trace.noInflows")));
+    } else {
+      zweig.append(hinweisZeile(t("trace.incompleteEmpty")));
+      zeichneFolgeBand(ergebnis, zweig, utxo, klapp);
+    }
     return;
   }
 
@@ -12836,22 +12875,39 @@ function frageOeffentlicheElectrum() {
   if (nein) nein.focus();
 }
 
-function lehneOeffentlicheElectrumAb() {
+async function lehneOeffentlicheElectrumAb() {
   const overlay = $("#oeffentliche-electrum-warnung");
   if (overlay) overlay.hidden = true;
   logZeile("Öffentliche Electrum-Server abgelehnt.");
+  try {
+    await api("/source/oeffentlich", {
+      methode: "POST",
+      daten: { erlauben: false },
+    });
+    if (Zustand.config) {
+      Zustand.config.oeffentliche_electrum = false;
+      Zustand.config.oeffentliche_electrum_session = false;
+    }
+  } catch (fehler) {
+    logZeile(`Öffentliche Server: ${fehler.message}`, true);
+  }
 }
 
 async function erlaubeOeffentlicheElectrum() {
   const overlay = $("#oeffentliche-electrum-warnung");
   if (overlay) overlay.hidden = true;
-  logZeile("Öffentliche Electrum-Server bestätigt — verbinde…");
+  logZeile(
+    "Öffentliche Electrum-Server bestätigt (nur diese Sitzung) — verbinde…",
+  );
   try {
     await api("/source/oeffentlich", {
       methode: "POST",
       daten: { erlauben: true },
     });
-    if (Zustand.config) Zustand.config.oeffentliche_electrum = true;
+    if (Zustand.config) {
+      Zustand.config.oeffentliche_electrum = true;
+      Zustand.config.oeffentliche_electrum_session = true;
+    }
     await testeEigenenNode();
   } catch (fehler) {
     Zustand.oeffentlicheGefragt = false;

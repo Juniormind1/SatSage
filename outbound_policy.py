@@ -73,8 +73,15 @@ def public_opt_in(values: dict[str, str] | None = None, service: str = "") -> bo
     if service_key == "LLM":
         keys.append("LLM_REMOTE_OPT_IN")
     # Öffentliche Electrum (Onion/Clearnet) nach UI-Bestätigung —
-    # sonst blockiert die Allowlist Clearnet-IPs trotz OEFFENTLICHE_ELECTRUM=1.
+    # Sitzung (Web) oder .env/CLI-Flag.
     if service_key in ("", "FULCRUM", "ELECTRUM"):
+        try:
+            from core.source import oeffentliche_electrum_session_aktiv
+
+            if oeffentliche_electrum_session_aktiv():
+                return True
+        except Exception:
+            pass
         keys.append("OEFFENTLICHE_ELECTRUM")
     return any(_truthy(_setting(values, key)) for key in keys)
 

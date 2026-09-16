@@ -84,6 +84,7 @@ def utxo_as_dict(
         "verfolgt_ts": None,
         "verfolgt_veraltet": False,
         "verfolgt_vollstaendig": False,
+        "unvollstaendig": False,
         "juengste_sats_ts": None,
         # Mix-Formen aus gespeichertem Herkunftsbaum (Icons an der Adressgruppe).
         "mix_arten": [],
@@ -132,6 +133,8 @@ def utxo_as_dict(
             if ingress and ingress.get("external_untergrenze"):
                 voll = False
             eintrag["verfolgt_vollstaendig"] = voll
+            # Abbruch / Lücken / fehlende Prevouts — Liste zeigt rot „unvollständig“.
+            eintrag["unvollstaendig"] = bool(eintrag["verfolgt"]) and not voll
             if voll and ingress:
                 eintrag["juengste_sats_ts"] = (
                     ingress.get("external_time_ts")

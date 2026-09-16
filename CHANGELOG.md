@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Electrs über Tor · JSON-RPC-Batch:** Beim eigenen Node über Tor bündelt SatSage `listunspent` (UTXO-Scan) und `get_history` (Wallet-Alter) in Batches à max. 32 Calls — weniger Roundtrips auf dem einen Socket. LAN/Parallel-Pool und öffentliche Server unverändert.
+- **Herkunft · unvollständig rot:** Lückige/abgebrochene Bäume zeigen **„unvollständig · Datum“** in Rot statt grün „verfolgt“.
+- **Herkunft · Resume:** „Scan neu“ / Lücken schließen verwerfen brauchbare Teilbäume nicht mehr — fertige Zweige bleiben, nur Lücken (error-Prevout, tax_horizon, unvollständige interne Äste) werden nachgezogen. Leere/kaputte Stände starten weiterhin von null.
+- **Herkunft · leerer Trace:** Wenn die Vorgänger-Tx nicht ladbar war, endet der Baum nicht mehr still mit „Keine Zuflüsse ermittelbar“ und leeren Kindern. Stattdessen sichtbare Lücke (error-Blatt) und Hinweis auf unvollständige Herkunft — „Scan neu“ / Lücken schließen. Ursache war u. a. still übersprungene Prevouts.
+- **Öffentliches Electrum · Sitzungs-Opt-in:** Die Freigabe („Privatsphäre gering“) gilt nur bis zum Server-Neustart — nicht mehr dauerhaft in der `.env`. Beim Start wird ein altes `OEFFENTLICHE_ELECTRUM=1` entfernt; der Dialog erscheint erneut, sobald öffentliche Server nötig wären. CLI: weiterhin `--oeffentliche-electrum` / `.env` für Headless.
+- **Empfang · öffentliches Electrum:** Nach Opt-in (`OEFFENTLICHE_ELECTRUM`) prüft die freie Empfangsadresse per `get_history` auch über den öffentlichen Pool — nicht nur über den eigenen Electrs. Ohne Opt-in bleibt die Cache-Schätzung mit Warnung.
+- **Empfang · Cache-Warnung:** „Schätzung aus Cache …“ erscheint nur noch einmal (Quelle-Zeile), nicht doppelt unter Index.
 - **Datenquellen · Börsen-CSV:** Transaktionsreports importieren (Knopf unter Datenquellen). Nur Bitcoin-Adressen und TxIDs — Kurse und andere Coins verworfen. Pro Börse eine Cache-Datei (`exchange_reports/`); Herkunft zeigt Klarname „Börse · …“ (optional Ein-/Auszahlung). Trace **endet** an Börsen-Adresse/Tx — keine Hops hinter die Ein-/Auszahlung.
 - **Sanktionscheck · CoinJoins im Hop-Fenster:** Beim Scan über n Hops werden Form-Heuristiken (Wasabi/WabiSabi/Whirlpool/JoinMarket/Mix) hervorgehoben — z. B. „Keine sanktionierte Adresse in den letzten n Hops. CoinJoins: Hop m · Zeit · vermutlich …“. Soft-Label, keine forensische Sicherheit; im Walk-Cache und in CLI/Web.
 - **Herkunft · Fan-In vs. Fan-Out:** Rein eigene Spends trennen nach Richtung — Fan-Out nur noch bei mehr Outputs als Inputs (≥3 Outs, Auszahlung/Split); Fan-In bei mehr Inputs als Outputs (Konsolidierung n→wenige). Soft-Label „eigene Konsolidierung (Fan-In)“.

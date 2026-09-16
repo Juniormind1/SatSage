@@ -428,6 +428,18 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
         )
     elif typ == "coinbase":
         knoten["note"] = "Frisch geschürfte Sats — hier endet jede Herkunft."
+    elif typ == "error":
+        knoten["note"] = (
+            quelle.get("error")
+            or "Herkunft dieses Zweigs konnte nicht ermittelt werden."
+        )
+        if quelle.get("input_count"):
+            knoten["input_count"] = int(quelle.get("input_count") or 0)
+    elif typ == "unknown":
+        knoten["note"] = (
+            quelle.get("error")
+            or "Herkunft unvollständig — kein externes oder Coinbase-Ende."
+        )
 
     return knoten
 
@@ -520,6 +532,8 @@ def folge_meta(baum: dict | None) -> dict:
         ),
         "followup_tx_oriented_done": done_flag,
         "verfolgt_vollstaendig": voll,
+        # Explizit für UI/Liste: Abbruch, fehlende Prevouts, Lücken, …
+        "unvollstaendig": bool(baum and baum.get("found") and not voll),
     }
 
 
@@ -560,8 +574,9 @@ def trace_utxo(
     *stop_before_ts*: Steuer-Horizont — Trace endet an Hops vor Stichtag/
     Haltefrist-Anfang (siehe ``analyze.trace_utxo_origin``).
 
-    *resume_origin*: gespeicherter Analyse-Rohbaum; bei vollem Lauf werden
-    nur ``tax_horizon``-Blätter nachgezogen (kein Komplett-Neulauf).
+    *resume_origin*: gespeicherter Analyse-Rohbaum. Bei vollem Lauf werden
+    Lücken nachgezogen (tax_horizon, error-Prevouts, unvollständige interne
+    Zweige) — fertige Äste bleiben erhalten (kein Komplett-Neulauf).
     """
     fortschritt = _FortschrittsAdapter(progress) if progress else None
     txid_n = main._normalize_txid(txid)
@@ -581,14 +596,21 @@ def trace_utxo(
         resume_origin
         and isinstance(resume_origin, dict)
         and stop_before_ts is None
-        and analyze._hat_tax_horizon(resume_origin)
+        and (
+            analyze._hat_tax_horizon(resume_origin)
+            or analyze._origin_hat_luecken(resume_origin)
+        )
+        and analyze.hat_brauchbaren_teilfortschritt(resume_origin)
     ):
         if progress:
             try:
-                progress("Setze Steuer-Horizont bis extern/Coinbase fort…")
+                if analyze._hat_tax_horizon(resume_origin):
+                    progress("Setze Steuer-Horizont bis extern/Coinbase fort…")
+                else:
+                    progress("Setze unvollständige Herkunft fort (Teilbaum)…")
             except Exception:
                 pass
-        roh = analyze.vertiefe_tax_horizon(
+        roh = analyze.vertiefe_herkunft_luecken(
             resume_origin,
             get_tx,
             own_addresses,
