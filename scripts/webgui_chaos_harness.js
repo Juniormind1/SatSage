@@ -203,7 +203,8 @@
       ".lang-knopf",
       ".nav-eintrag",
       ".stift",
-      "label.kopf-log",
+      "#log-anzeige",
+      ".log-knopf",
     ].join(",");
     return Array.from(document.querySelectorAll(sel)).filter(
       (el) => sichtbar(el) && !istBlockiert(el, destructive),

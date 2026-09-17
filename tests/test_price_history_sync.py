@@ -115,35 +115,8 @@ class TestHistorieNachzug(unittest.TestCase):
         # Letzter Smooth-Tag ≈ remote
         self.assertAlmostEqual(merged["2026-09-03"], 200.0, places=4)
 
-    def test_nachziehen_ohne_opt_in_nur_hinweis(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            price_mod.schreibe_kurs_csv(
-                root / "btc_price" / "EUR.csv",
-                {"2026-08-27": 67000.0},
-                currency="EUR",
-                quelle="test",
-            )
-            logs: list[str] = []
-            jetzt = int(datetime(2026, 9, 11, tzinfo=timezone.utc).timestamp())
-
-            def fetch(url, timeout):
-                raise AssertionError("kein Netz ohne Opt-in")
-
-            ergebnis = sync.historie_nachziehen(
-                root,
-                "EUR",
-                values={},
-                on_log=logs.append,
-                fetch=fetch,
-                jetzt=jetzt,
-                force=True,
-            )
-            self.assertFalse(ergebnis["ok"])
-            self.assertEqual(ergebnis["reason"], "opt_in")
-            self.assertTrue(any("SATSAGE_PRICE_HISTORY_OPT_IN" in z for z in logs))
-
-    def test_nachziehen_mit_opt_in_fuellt_luecke(self):
+    def test_nachziehen_fuellt_luecke_ohne_opt_in(self):
+        """Nachzug läuft immer — kein Einstellungs-Schalter nötig."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             price_mod.schreibe_kurs_csv(
@@ -169,7 +142,7 @@ class TestHistorieNachzug(unittest.TestCase):
             ergebnis = sync.historie_nachziehen(
                 root,
                 "EUR",
-                values={"SATSAGE_PRICE_HISTORY_OPT_IN": "1"},
+                values={},  # kein Opt-in
                 on_log=logs.append,
                 fetch=fetch,
                 jetzt=jetzt,
@@ -180,6 +153,11 @@ class TestHistorieNachzug(unittest.TestCase):
             stand = price_mod.historie_status(root, "EUR")
             self.assertEqual(stand["to"], "2026-09-10")
             self.assertEqual(stand["source"], "cache")
+
+    def test_opt_in_hilfsfunktion_immer_true(self):
+        self.assertTrue(sync.price_history_opt_in(None))
+        self.assertTrue(sync.price_history_opt_in({}))
+        self.assertTrue(sync.price_history_opt_in({"SATSAGE_PRICE_HISTORY_OPT_IN": "0"}))
 
 
 if __name__ == "__main__":

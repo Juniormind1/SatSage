@@ -23,6 +23,7 @@ from core import trace as trace_mod
 from tests.fixtures import (
     BIP84_AS_XPUB,
     BIP84_RECEIVE_0,
+    BIP84_RECEIVE_1,
     BIP84_ZPUB,
     ZWEITER_ALS_XPUB,
     txid,
@@ -414,6 +415,265 @@ class TestUtxoListe(ApiTestBasis):
         self.assertFalse(körper["hat_verlauf"])
         self.assertEqual(körper["verlauf"]["total_count"], 0)
 
+
+class TestEmpfang(ApiTestBasis):
+    """GET /api/wallets/{id}/empfang — nächste Empfangsadresse ohne XPUB."""
+
+    def test_cache_schaetzung_nach_benutztem_index(self):
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000)], self.cache, 6,
+        )
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["wallet_id"], kennung)
+        self.assertEqual(körper["wallet_name"], "Cold Storage")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_1)
+        self.assertEqual(körper["index"], 1)
+        self.assertEqual(körper["change"], 0)
+        self.assertEqual(körper["source"], "cache_estimate")
+        self.assertIn("subscribed", körper)
+        self.assertIn("watch_active", körper)
+        # Nie Schlüsselmaterial.
+        roh = json.dumps(körper)
+        self.assertNotIn(BIP84_ZPUB, roh)
+        self.assertNotIn("xpub", roh.lower())
+        self.assertNotIn("descriptor", roh.lower())
+
+    def test_leeres_wallet_index_null(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["address"], BIP84_RECEIVE_0)
+        self.assertEqual(körper["index"], 0)
+        self.assertEqual(körper["source"], "cache_estimate")
+
+    def test_unbekanntes_wallet(self):
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, _ = self.anfrage("/api/wallets/gibtsnicht/empfang")
+        self.assertEqual(status, 404)
+
+    def test_naechste_hinter_hoechstem_index(self):
+        """Auch ohne scan_end: max(UTXO-Empfangs-Index)+1, nicht wieder #0."""
+        from tests.fixtures import BIP84_RECEIVE_1
+
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB,
+            [utxo(1_000, BIP84_RECEIVE_1, marker="hi")],
+            self.cache,
+            6,
+        )
+        # scan_end_index absichtlich klein lassen (alte Falle).
+        pfad = main._xpub_cache_path(BIP84_ZPUB, self.cache)
+        data = __import__("json").loads(pfad.read_text(encoding="utf-8"))
+        data["scan_end_index"] = 0
+        pfad.write_text(__import__("json").dumps(data), encoding="utf-8")
+
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["index"], 2)
+        self.assertNotEqual(körper["address"], BIP84_RECEIVE_0)
+
+    def test_read_only_ohne_adresse(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        # Eintrag in state auf read_only setzen
+        for e in self.state.entries:
+            if e.analyse_schluessel == BIP84_ZPUB:
+                e.read_only = True
+        status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertTrue(körper["read_only"])
+        self.assertEqual(körper["address"], "")
+        self.assertEqual(körper["source"], "read_only")
+
+    def test_schaerfe_nach_sync_setzt_fulcrum_quelle(self):
+        """Nach Tip/Scan: einmal Electrs → source=fulcrum im Prozess-Cache."""
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000)], self.cache, 6,
+        )
+        kennung = self.wallet_id(BIP84_ZPUB)
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            self.assertIs(client, fake)
+            return (BIP84_RECEIVE_1, 1)
+
+        with mock.patch.object(main, "is_own_fulcrum_backend", return_value=True), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ), \
+             mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            n = server._schaerfe_empfang_nach_sync(
+                self.state, [entry], fulcrum=fake,
+            )
+        self.assertEqual(n, 1)
+        gemerkt = self.state.empfang_cache.get(kennung)
+        self.assertIsNotNone(gemerkt)
+        self.assertEqual(gemerkt["source"], "fulcrum")
+        self.assertEqual(gemerkt["address"], BIP84_RECEIVE_1)
+        self.assertEqual(gemerkt["index"], 1)
+
+        # GET mit Electrs: gemerkte fulcrum-Adresse per History-Probe bestätigt.
+        with mock.patch.object(
+            server, "_naechste_freie_empfang_electrs",
+        ) as nicht_nochmal, \
+             mock.patch.object(server, "_adresse_hat_history", return_value=False), \
+             mock.patch.object(server, "_eigener_fulcrum_client", return_value=fake), \
+             mock.patch.object(main, "is_own_fulcrum_backend", return_value=True):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_1)
+        nicht_nochmal.assert_not_called()
+
+    def test_empfang_mit_electrs_liefert_fulcrum(self):
+        """Lebendiger Electrs → immer source=fulcrum (unbenutzt)."""
+        kennung = self.wallet_id(BIP84_ZPUB)
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            return (BIP84_RECEIVE_0, 0)
+
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=fake), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_0)
+        self.assertEqual(körper["index"], 0)
+
+    def test_empfang_oeffentliches_electrum_nach_opt_in(self):
+        """Öffentliches Electrum mit Opt-in → History-Probe, source=fulcrum."""
+        kennung = self.wallet_id(BIP84_ZPUB)
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            self.assertIs(client, fake)
+            return (BIP84_RECEIVE_0, 0)
+
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None), \
+             mock.patch.object(
+                 server, "_oeffentlicher_fulcrum_fuer_empfang", return_value=fake,
+             ), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["address"], BIP84_RECEIVE_0)
+
+    def test_schaerfe_nach_sync_oeffentlich_mit_opt_in(self):
+        """Tip-Sync mit öffentlichem Pool + Opt-in schärft Empfang."""
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000)], self.cache, 6,
+        )
+        kennung = self.wallet_id(BIP84_ZPUB)
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        fake = object()
+
+        def _fake_next(state, entry, client, *, max_index):
+            self.assertIs(client, fake)
+            return (BIP84_RECEIVE_1, 1)
+
+        with mock.patch.object(main, "is_own_fulcrum_backend", return_value=False), \
+             mock.patch.object(
+                 server.source_mod, "oeffentliche_electrum_erlaubt", return_value=True,
+             ), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ), \
+             mock.patch.object(server, "_empfang_electrum_client", return_value=None):
+            n = server._schaerfe_empfang_nach_sync(
+                self.state, [entry], fulcrum=fake,
+            )
+        self.assertEqual(n, 1)
+        gemerkt = self.state.empfang_cache.get(kennung)
+        self.assertIsNotNone(gemerkt)
+        self.assertEqual(gemerkt["source"], "fulcrum")
+        self.assertEqual(gemerkt["index"], 1)
+
+    def test_schaerfe_nach_sync_oeffentlich_ohne_opt_in(self):
+        """Öffentlicher Pool ohne Opt-in: Empfang nicht schärfen."""
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        fake = object()
+        with mock.patch.object(main, "is_own_fulcrum_backend", return_value=False), \
+             mock.patch.object(
+                 server.source_mod, "oeffentliche_electrum_erlaubt", return_value=False,
+             ), \
+             mock.patch.object(server, "_empfang_electrum_client", return_value=None), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs",
+             ) as nicht:
+            n = server._schaerfe_empfang_nach_sync(
+                self.state, [entry], fulcrum=fake,
+            )
+        self.assertEqual(n, 0)
+        nicht.assert_not_called()
+
+    def test_empfang_electrs_belegt_neu_holen(self):
+        """Gemerkte Adresse hat History → neu unbenutzte holen."""
+        kennung = self.wallet_id(BIP84_ZPUB)
+        fake = object()
+        self.state.empfang_cache[kennung] = {
+            "wallet_id": kennung,
+            "wallet_name": "Cold Storage",
+            "address": BIP84_RECEIVE_0,
+            "index": 0,
+            "source": "fulcrum",
+            "subscribed": False,
+            "watch_active": False,
+            "read_only": False,
+            "change": 0,
+        }
+        calls = {"n": 0}
+
+        def _fake_next(state, entry, client, *, max_index):
+            calls["n"] += 1
+            return (BIP84_RECEIVE_1, 1)
+
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=fake), \
+             mock.patch.object(server, "_adresse_hat_history", return_value=True), \
+             mock.patch.object(
+                 server, "_naechste_freie_empfang_electrs", side_effect=_fake_next,
+             ):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/empfang")
+        self.assertEqual(status, 200, körper)
+        self.assertEqual(körper["source"], "fulcrum")
+        self.assertEqual(körper["index"], 1)
+        self.assertEqual(calls["n"], 1)
+
+    def test_schaerfe_ohne_eigenen_electrs_leert_nur_cache(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        entry = next(
+            e for e in self.state.entries if e.analyse_schluessel == BIP84_ZPUB
+        )
+        self.state.empfang_cache[kennung] = {
+            "wallet_id": kennung,
+            "address": BIP84_RECEIVE_0,
+            "index": 0,
+            "source": "cache_estimate",
+        }
+        with mock.patch.object(server, "_eigener_fulcrum_client", return_value=None):
+            n = server._schaerfe_empfang_nach_sync(self.state, [entry], fulcrum=None)
+        self.assertEqual(n, 0)
+        self.assertNotIn(kennung, self.state.empfang_cache)
+
+
+class TestUtxoVerlauf(ApiTestBasis):
     def test_verlauf_liefert_ausgegebene_dieses_wallets(self):
         """Steuerjahr und Herkunft lesen dieselbe Datei — die Wallet-Ansicht auch."""
         main.save_xpub_utxo_cache(
@@ -628,6 +888,13 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         """Die Liste kommt aus electrum_servers.json, nicht aus der .env."""
         self.assertFalse(self.quellen()["clearnet"]["editierbar"])
 
+    def test_public_onion_ohne_stift(self):
+        """Onion-Liste nur über „Verbinden“ / .env — kein Bearbeiten-Formular."""
+        onion = self.quellen()["public_onion"]
+        self.assertFalse(onion["editierbar"])
+        self.assertEqual(onion["felder"], [])
+        self.assertEqual(onion["laden_filter"], "onion")
+
     def test_config_liefert_header_job_id(self):
         _, körper = self.anfrage("/api/config")
         self.assertIn("header_job_id", körper)
@@ -685,10 +952,12 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertTrue(körper["header_job_id"])
 
     def test_p2p_bip158_hat_keine_rpc_felder(self):
-        felder = {f["key"]: f for f in self.quellen()["bip158"]["felder"]}
-        self.assertIn("BIP158_START_HEIGHT", felder)
-        self.assertNotIn("RPCPASSWORD", felder)
-        self.assertNotIn("NODE_IP", felder)
+        bip = self.quellen()["bip158"]
+        self.assertFalse(bip["editierbar"])
+        self.assertEqual(bip["felder"], [])
+        self.assertEqual(bip["start_height"], 481824)
+        self.assertNotIn("RPCPASSWORD", [f["key"] for f in bip["felder"]])
+        self.assertNotIn("NODE_IP", [f["key"] for f in bip["felder"]])
 
     def test_speichern_und_zuruecklesen(self):
         status, körper = self.anfrage(
@@ -705,6 +974,34 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_HOST"], "192.0.2.50")
         self.assertEqual(werte["FULCRUM_PORT"], "50001")
         self.assertEqual(werte["FULCRUM_SSL"], "false")
+
+    def test_port_speichern_loescht_stale_tor_port(self):
+        """UI-Port muss Tor-Endpoint steuern — altes FULCRUM_TOR_PORT weg."""
+        self.env_pfad.write_text(
+            self.env_pfad.read_text(encoding="utf-8")
+            + "\nFULCRUM_TOR=abc.onion\nFULCRUM_TOR_PORT=443\nFULCRUM_TOR_SSL=true\n",
+            encoding="utf-8",
+        )
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "FULCRUM_TOR": "abc.onion",
+                "FULCRUM_PORT": "50001",
+                "FULCRUM_SSL": "false",
+            }},
+        )
+        self.assertEqual(status, 200)
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_PORT"), "50001")
+        self.assertNotIn("FULCRUM_TOR_PORT", werte)
+        self.assertNotIn("FULCRUM_TOR_SSL", werte)
+        # Scan-Pfad nutzt denselben Port wie die UI.
+        ende = main._resolve_own_tor_endpoint(
+            self.state.args_namespace(), werte,
+        )
+        self.assertIsNotNone(ende)
+        self.assertEqual(ende[1], 50001)
+        self.assertFalse(ende[2])
 
     def test_p2p_starthoehe_wird_gespeichert(self):
         status, _ = self.anfrage(
@@ -827,6 +1124,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
         self.assertEqual(körper["cleared"], "bip158")
+        self.assertIn("cancelled_jobs", körper)
         # Wie manuelle Checkbox: false in .env, Feld und configured aus.
         self.assertEqual(
             main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "false",
@@ -834,19 +1132,51 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         nach_key = {q["key"]: q for q in körper["sources"]}
         self.assertFalse(nach_key["bip158"]["configured"])
         self.assertFalse(nach_key["bip158"]["verwerfbar"])
-        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
-        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
         # GET /config darf P2P nicht wieder als an zeigen.
         status2, cfg = self.anfrage("/api/config")
         self.assertEqual(status2, 200)
         bip = next(q for q in cfg["sources"] if q["key"] == "bip158")
         self.assertFalse(bip["configured"])
-        self.assertEqual(
-            next(f["value"] for f in bip["felder"] if f["key"] == "BIP158_P2P"),
-            "false",
+        self.assertNotIn(
+            "BIP158_P2P",
+            [f["key"] for f in bip["felder"]],
         )
 
-    def test_p2p_aufbauen_schalter_schreibt_env(self):
+    def test_p2p_trennen_bricht_laufende_scan_jobs_ab(self):
+        import threading
+        import time
+
+        from core.jobs import Cancelled
+
+        halt = threading.Event()
+
+        def langsam(job):
+            job.meta["source"] = "bip158"
+            while not job.cancelled:
+                time.sleep(0.02)
+            raise Cancelled()
+
+        job = self.state.jobs.start("rescan", "UTXO-Scan Test", langsam)
+        self.state.header_job_id = self.state.jobs.start(
+            "headers", "Header-Test", langsam,
+        ).id
+        try:
+            status, körper = self.anfrage(
+                "/api/config/source/bip158", methode="DELETE",
+            )
+            self.assertEqual(status, 200)
+            self.assertIn(job.id, körper.get("cancelled_jobs") or [])
+            # Kurz warten bis Worker den Cancel sieht.
+            for _ in range(50):
+                if job.status != "running":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(job.status, "cancelled")
+        finally:
+            halt.set()
+            self.state.jobs.cancel(job.id)
+
+    def test_p2p_verbinden_schalter_schreibt_env(self):
         status, körper = self.anfrage(
             "/api/config/source",
             methode="PUT",
@@ -864,10 +1194,22 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         )
         nach_key = {q["key"]: q for q in körper["sources"]}
         self.assertFalse(nach_key["bip158"]["configured"])
-        # Checkbox-Feld ist im Formular.
-        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
-        self.assertEqual(felder["BIP158_P2P"]["typ"], "checkbox")
-        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
+        self.assertFalse(nach_key["bip158"]["editierbar"])
+        self.assertEqual(nach_key["bip158"]["felder"], [])
+        self.assertEqual(nach_key["bip158"]["start_height"], 481824)
+
+        status2, an = self.anfrage(
+            "/api/config/source",
+            methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_P2P": "true"}},
+        )
+        self.assertEqual(status2, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "true",
+        )
+        self.assertTrue(
+            next(q for q in an["sources"] if q["key"] == "bip158")["configured"]
+        )
 
     def test_unbekannte_quelle_laesst_sich_nicht_loeschen(self):
         status, körper = self.anfrage(
@@ -922,10 +1264,24 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertIn("peers", körper)
         self.assertTrue(any(q["key"] == "own_fulcrum" for q in körper["sources"]))
 
-    def test_oeffentliche_electrum_bestaetigung_schreibt_env(self):
+    def test_oeffentliche_electrum_bestaetigung_ist_sitzung(self):
+        """Opt-in gilt nur sitzungsweise — nicht dauerhaft in der .env."""
+        self.env_pfad.write_text(
+            self.env_pfad.read_text(encoding="utf-8")
+            + "\nOEFFENTLICHE_ELECTRUM=1\n",
+            encoding="utf-8",
+        )
+        # Frischer State streicht Dauer-Flag und startet ohne Sitzung.
+        self.state = server.AppState(
+            self.env_pfad, self.cache, self.immutable,
+            sanctions_dir=self.sanktionen,
+        )
+        server.Handler.state = self.state
         self.assertNotIn(
             "OEFFENTLICHE_ELECTRUM", main._load_dotenv(self.env_pfad)
         )
+        self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
+
         status, körper = self.anfrage(
             "/api/source/oeffentlich",
             methode="POST",
@@ -934,9 +1290,21 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
         self.assertTrue(körper["erlaubt"])
-        self.assertEqual(
-            main._load_dotenv(self.env_pfad).get("OEFFENTLICHE_ELECTRUM"), "1"
+        self.assertTrue(körper.get("session"))
+        self.assertTrue(server.source_mod.oeffentliche_electrum_session_aktiv())
+        # Kein Zurückschreiben in die .env.
+        self.assertNotIn(
+            "OEFFENTLICHE_ELECTRUM", main._load_dotenv(self.env_pfad)
         )
+
+        status, körper = self.anfrage(
+            "/api/source/oeffentlich",
+            methode="POST",
+            daten={"erlauben": False},
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["erlaubt"])
+        self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
 
     def test_source_status_streamt_log_zeilen(self):
         """Die Oberfläche soll Zeilen sehen, bevor die Prüfung fertig ist."""
@@ -1300,7 +1668,9 @@ class TestSanktionsCheckCache(ApiTestBasis):
         )
         self.assertEqual(wallet["geprueft"], 1)
         self.assertIn(gelistet, wallet["adressen"])
-        self.assertEqual(wallet["adressen_geprueft"], 1)
+        # Hop 0 zählt UTXO-Adresse (+ ggf. weitere aus Origin) — mindestens die
+        # gelistete Treffer-Adresse.
+        self.assertGreaterEqual(wallet["adressen_geprueft"], 1)
         self.assertEqual(
             [t["address"] for t in wallet["treffer"]], [gelistet]
         )
@@ -1900,6 +2270,20 @@ class TestGespeicherterBaum(ApiTestBasis):
         )
         self.assertEqual(status, 403)
 
+    def test_post_trace_nutzt_cache_ohne_job(self):
+        """Plot-Klick / Ankunft: Cache-Hit → sofort done, kein Electrs-Job."""
+        self.ablegen()
+        status, körper = self.anfrage(
+            "/api/trace",
+            methode="POST",
+            daten={"target": f"{self.ZIEL}:0"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper.get("from_cache") or körper.get("status") == "done")
+        self.assertFalse(körper.get("running"))
+        self.assertTrue(körper.get("result", {}).get("found"))
+        self.assertEqual(körper["result"]["root"]["txid"], self.ZIEL)
+
 
 class TestCacheLeeren(ApiTestBasis):
 
@@ -2212,15 +2596,49 @@ class TestDeskriptorEndpunkt(ApiTestBasis):
         """
         Nur an ihr lässt sich vor dem Speichern sehen, ob wirklich die eigene
         Wallet gemeint ist — ein Deskriptor sieht auch mit vertauschtem
-        Schlüssel richtig aus.
+        Schlüssel richtig aus. Immer Empfang #0, nie Change.
         """
         _, körper = self.pruefe(self.deskriptor())
         adresse = körper["gefunden"][0]["erste_adresse"]
+        deskriptor = körper["gefunden"][0]["descriptor"]
         self.assertEqual(
             adresse,
-            sorted(main.derive_descriptor_addresses(
-                körper["gefunden"][0]["descriptor"], max_addresses=2
-            ))[0],
+            main.derive_address_at_index(deskriptor, 0, 0),
+        )
+
+    def test_bitkey_external_internal_export(self):
+        """Bitkey-Export → eine Multisig-Wallet, Empfangsadresse #0."""
+        cosigner = _abgeleitete_cosigner(3)
+        fps = ("34eae6a8", "3bef7db3", "aabbccdd")
+        ext = (
+            "wsh(sortedmulti(2,"
+            + ",".join(
+                f"[{fps[i]}/84'/0'/0']{cosigner[i]}/0/*" for i in range(3)
+            )
+            + "))"
+        )
+        intr = (
+            "wsh(sortedmulti(2,"
+            + ",".join(
+                f"[{fps[i]}/84'/0'/0']{cosigner[i]}/1/*" for i in range(3)
+            )
+            + "))"
+        )
+        text = f"External: {ext}\n\nInternal: {intr}"
+        status, körper = self.pruefe(text)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(körper["gefunden"]), 1)
+        treffer = körper["gefunden"][0]
+        self.assertTrue(treffer["is_multisig"])
+        self.assertEqual(treffer["threshold"], 2)
+        self.assertIn("/<0;1>/*", treffer["descriptor"])
+        self.assertEqual(
+            treffer["erste_adresse"],
+            main.derive_address_at_index(treffer["descriptor"], 0, 0),
+        )
+        self.assertNotEqual(
+            treffer["erste_adresse"],
+            main.derive_address_at_index(treffer["descriptor"], 1, 0),
         )
 
     def test_volle_schluessel_verlassen_den_server_nicht(self):

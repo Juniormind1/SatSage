@@ -30,6 +30,139 @@ def _ohne_live_p2p():
     )
 
 
+class TestTlsAutoProbe(unittest.TestCase):
+    """TLS ja/nein: Gegenprobe und Festschreiben."""
+
+    def test_should_try_opposite_bei_wrong_version(self):
+        import main
+
+        self.assertTrue(
+            main.tls_should_try_opposite("WRONG_VERSION_NUMBER")
+        )
+        self.assertTrue(
+            main.tls_should_try_opposite(
+                "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF"
+            )
+        )
+        self.assertFalse(main.tls_should_try_opposite("connection refused"))
+        self.assertFalse(main.tls_should_try_opposite("timed out"))
+        self.assertFalse(
+            main.tls_should_try_opposite("listunspent nicht unterstützt")
+        )
+
+    def test_check_reachable_probiert_ohne_tls_und_meldet_persist(self):
+        from fulcrum import FulcrumClient
+
+        client = mock.Mock(spec=FulcrumClient)
+        client.server_software = "libbitcoin"
+        client.server_software_raw = "/libbitcoin:4.0.0/"
+        client.close = mock.Mock()
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "true",  # falsch für Klartext-Port
+        }
+        quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
+        calls = {"n": 0}
+
+        def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                    require_listunspent=False):
+            calls["n"] += 1
+            if use_ssl:
+                return None, "WRONG_VERSION_NUMBER"
+            return client, None
+
+        with mock.patch("fulcrum.connect_fulcrum", side_effect=connect):
+            out = check_reachable(quelle, werte, timeout=1)
+        self.assertTrue(out.reachable)
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(out.ssl_effective, False)
+        self.assertEqual(out.ssl_persist.get("FULCRUM_SSL"), "false")
+        self.assertIn("festgeschrieben", out.note)
+
+
+class TestElectrumSoftwareLabel(unittest.TestCase):
+    """server.version → Pillen-Name (electrs / fulcrum / libbitcoin)."""
+
+    def test_libbitcoin_pfad_form(self):
+        from fulcrum import parse_electrum_server_software
+
+        label, roh = parse_electrum_server_software(["/libbitcoin:4.0.0/", "1.4"])
+        self.assertEqual(label, "libbitcoin")
+        self.assertIn("libbitcoin", roh)
+
+    def test_electrs_und_fulcrum(self):
+        from fulcrum import parse_electrum_server_software
+
+        self.assertEqual(
+            parse_electrum_server_software(["electrs/0.10.5", "1.4"])[0],
+            "electrs",
+        )
+        self.assertEqual(
+            parse_electrum_server_software(["Fulcrum 1.9.1", "1.4"])[0],
+            "fulcrum",
+        )
+
+    def test_check_reachable_uebernimmt_software(self):
+        from fulcrum import FulcrumClient
+
+        client = mock.Mock(spec=FulcrumClient)
+        client.server_software = "libbitcoin"
+        client.server_software_raw = "/libbitcoin:4.0.0/"
+        client.close = mock.Mock()
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
+        with mock.patch("fulcrum.connect_fulcrum", return_value=(client, None)):
+            out = check_reachable(quelle, werte, timeout=1)
+        self.assertTrue(out.reachable)
+        self.assertEqual(out.software, "libbitcoin")
+        self.assertIn("libbitcoin", out.detail)
+        self.assertIn("libbitcoin", out.as_dict()["software"])
+
+    def test_merke_own_fulcrum_sofort_in_sources(self):
+        from core.source import (
+            merke_own_fulcrum_in_sources,
+            own_fulcrum_stand_from_client,
+            peer_status,
+            verbindung_label,
+        )
+
+        self.assertEqual(
+            verbindung_label(electrs_n=1, electrum_name="libbitcoin"),
+            "1 libbitcoin verbunden",
+        )
+        self.assertEqual(
+            verbindung_label(electrs_n=1),
+            "1 electrs verbunden",
+        )
+        client = mock.Mock()
+        client.host = "192.0.2.10"
+        client.port = 50001
+        client.server_software = "libbitcoin"
+        client.server_software_raw = "/libbitcoin:4.0.0/"
+        stand = own_fulcrum_stand_from_client(client)
+        self.assertEqual(stand["software"], "libbitcoin")
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        frisch = describe_sources(werte)
+        liste = merke_own_fulcrum_in_sources(None, frisch, stand)
+        own = next(q for q in liste if q["key"] == "own_fulcrum")
+        self.assertTrue(own["reachable"])
+        self.assertEqual(own["software"], "libbitcoin")
+        gemerged = mergere_erreichbarkeit(describe_sources(werte), liste)
+        ps = peer_status(gemerged)
+        # Label kann Peers + Indexer nennen (z. B. „2 Peers · 1 libbitcoin…“).
+        self.assertIn("libbitcoin", ps["label"])
+        self.assertEqual(ps.get("software"), "libbitcoin")
+
+
 class TestCheckReachable(unittest.TestCase):
 
     def test_kopie_funktioniert_fuer_alle_quellen(self):
@@ -115,6 +248,8 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(quellen["clearnet"].laden_filter, "clearnet")
         self.assertIn("electrum", quellen["public_onion"].laden_url)
         self.assertNotIn("esplora", quellen)
+        self.assertFalse(quellen["public_onion"].editierbar)
+        self.assertEqual(quellen["public_onion"].felder, [])
 
     def test_esplora_ist_keine_quelle_mehr(self):
         """Esplora entfällt — P2P und Electrum reichen."""
@@ -227,7 +362,7 @@ class TestCheckReachable(unittest.TestCase):
         p2p.assert_not_called()
         nach_key = {q.key: q for q in ergebnis}
         self.assertTrue(nach_key["own_fulcrum"].reachable)
-        self.assertEqual(peer_status(ergebnis)["label"], "Eigener Peer verbunden")
+        self.assertIn("electrs", peer_status(ergebnis)["label"])
         self.assertEqual(
             nach_key["bip158"].note,
             "P2P als Datenquelle nicht erforderlich (Electrs erreichbar).",
@@ -291,9 +426,10 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(quelle.name, "Bitcoin-P2P · Compact Filter")
         self.assertNotIn("NODE_IP", [f.key for f in quelle.felder])
         self.assertIn("DNS-Seeds", quelle.detail)
-        felder = {f.key: f for f in quelle.felder}
-        self.assertEqual(felder["BIP158_P2P"].typ, "checkbox")
-        self.assertEqual(felder["BIP158_P2P"].value, "true")
+        # Kein Stift-Dialog — Start­höhe nur noch inline in der Zeile.
+        self.assertFalse(quelle.editierbar)
+        self.assertEqual(quelle.felder, [])
+        self.assertEqual(quelle.start_height, 481824)
 
     def test_p2p_aus_zeigt_hinweis_auf_oeffentliche_listen(self):
         quelle = next(
@@ -301,10 +437,7 @@ class TestCheckReachable(unittest.TestCase):
         )
         self.assertFalse(quelle.configured)
         self.assertIn("öffentliche Listen", quelle.detail)
-        self.assertEqual(
-            next(f for f in quelle.felder if f.key == "BIP158_P2P").value,
-            "false",
-        )
+        self.assertNotIn("BIP158_P2P", [f.key for f in quelle.felder])
 
     def test_p2p_nennt_node_im_lan_und_dns_fallback(self):
         quelle = next(
@@ -313,8 +446,9 @@ class TestCheckReachable(unittest.TestCase):
         )
         self.assertIn("Node im LAN 192.168.1.50", quelle.detail)
         self.assertIn("DNS-Seeds", quelle.detail)
-        hinweis = next(f for f in quelle.felder if f.key == "BIP158_PEERS").hinweis
-        self.assertIn("Host im LAN", hinweis)
+        # Extra-Peers nur noch per .env — kein Stift-Feld mehr.
+        self.assertNotIn("BIP158_PEERS", [f.key for f in quelle.felder])
+        self.assertEqual(quelle.start_height, 481824)
 
     def test_p2p_pruefung_nutzt_lan_und_dns_fallback(self):
         from unittest import mock
@@ -351,15 +485,31 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(stand["kind"], "p2p")
         self.assertEqual(stand["label"], "3 Peers verbunden")
 
-    def test_peer_status_eigener_electrum_sticht_p2p(self):
+    def test_peer_status_peers_und_electrs_gemeinsam(self):
         from types import SimpleNamespace
 
-        own = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
-        p2p = SimpleNamespace(key="bip158", reachable=True, peer_count=4)
+        own = SimpleNamespace(
+            key="own_fulcrum", reachable=True, peer_count=1, peer_hosts=["192.0.2.10"],
+        )
+        p2p = SimpleNamespace(
+            key="bip158", reachable=True, peer_count=4, peer_hosts=["a", "b", "c", "d"],
+        )
         pub = SimpleNamespace(key="public_onion", reachable=True, peer_count=7)
         with _ohne_live_p2p():
             stand = peer_status([own, p2p, pub])
-        self.assertEqual(stand["label"], "Eigener Peer verbunden")
+        self.assertEqual(stand["label"], "4 Peers · 1 electrs verbunden")
+        self.assertEqual(stand["kind"], "mixed")
+        self.assertEqual(stand["peers_n"], 4)
+        self.assertEqual(stand["electrs_n"], 1)
+
+    def test_peer_status_nur_electrs(self):
+        from types import SimpleNamespace
+
+        own = SimpleNamespace(key="own_fulcrum", reachable=True, peer_count=1)
+        p2p = SimpleNamespace(key="bip158", reachable=False, peer_count=0)
+        with _ohne_live_p2p():
+            stand = peer_status([own, p2p])
+        self.assertEqual(stand["label"], "1 electrs verbunden")
         self.assertEqual(stand["kind"], "own")
 
     def test_peer_status_oeffentliche_electrum(self):
@@ -473,7 +623,8 @@ class TestCheckReachable(unittest.TestCase):
             )
         pruefe.assert_called()
 
-    def test_peer_aenderungen_ausfall_und_zugang(self):
+    def test_peer_aenderungen_p2p_host_rotation_stumm(self):
+        """Probe-Hosts rotieren — bei gleichem Label kein Spam."""
         alt = {
             "kind": "p2p", "count": 2, "label": "2 Peers verbunden",
             "peers": ["192.0.2.1:8333", "192.0.2.2:8333"],
@@ -482,28 +633,33 @@ class TestCheckReachable(unittest.TestCase):
             "kind": "p2p", "count": 2, "label": "2 Peers verbunden",
             "peers": ["192.0.2.2:8333", "192.0.2.3:8333"],
         }
-        zeilen = peer_aenderungen(alt, neu)
-        self.assertEqual(
-            zeilen,
-            [
-                "Peer 192.0.2.1:8333 ausgefallen.",
-                "Neuer Peer 192.0.2.3:8333.",
-            ],
-        )
+        self.assertEqual(peer_aenderungen(alt, neu), [])
 
-    def test_peer_aenderungen_sorte_wechselt(self):
+    def test_peer_aenderungen_zahl_wechselt(self):
         alt = {
-            "kind": "own", "count": 1, "label": "Eigener Peer verbunden",
-            "peers": ["192.0.2.10:50001"],
+            "kind": "mixed", "count": 3, "label": "2 Peers · 1 electrs verbunden",
+            "peers": [],
         }
         neu = {
-            "kind": "p2p", "count": 2, "label": "2 Peers verbunden",
-            "peers": ["192.0.2.1:8333", "192.0.2.2:8333"],
+            "kind": "mixed", "count": 4, "label": "3 Peers · 1 electrs verbunden",
+            "peers": [],
         }
         self.assertEqual(
             peer_aenderungen(alt, neu),
-            ["Wechsel: Eigener Peer verbunden → 2 Peers verbunden"],
+            ["Wechsel: 2 Peers · 1 electrs verbunden → 3 Peers · 1 electrs verbunden"],
         )
+
+    def test_peer_aenderungen_kein_quatsch_peers_zu_onion(self):
+        """Peers+electrs bleiben; nicht fälschlich nur onion-electrs."""
+        alt = {
+            "kind": "mixed", "count": 3, "label": "2 Peers · 1 electrs verbunden",
+            "peers": [],
+        }
+        neu = {
+            "kind": "mixed", "count": 3, "label": "2 Peers · 1 electrs verbunden",
+            "peers": [],
+        }
+        self.assertEqual(peer_aenderungen(alt, neu), [])
 
     def test_peer_aenderungen_erster_stand_bleibt_stumm(self):
         neu = {
@@ -603,6 +759,96 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(nach["own_fulcrum"].configured)
         self.assertTrue(nach["own_fulcrum"].reachable)
         self.assertEqual(nach["own_fulcrum"].peer_count, 1)
+
+
+class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
+    """Nach Opt-in: Clearnet zuerst; Onions/Tor nur wenn Clearnet fehlt."""
+
+    def test_clearnet_treffer_probt_keine_onions(self):
+        from core import source as source_mod
+        from core.source import SourceInfo, PRIVACY_MEDIUM
+
+        gefunden = {
+            "public_onion": SourceInfo(
+                rank=5, key="public_onion", name="Onion", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True,
+            ),
+            "clearnet": SourceInfo(
+                rank=6, key="clearnet", name="Clear", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True,
+            ),
+        }
+        values = {"FULCRUM_TOR_0": "abc.onion", "OEFFENTLICHE_ELECTRUM": "1"}
+        logs: list[str] = []
+
+        with mock.patch.object(
+            source_mod, "_zaehle_electrum_endpunkte",
+            side_effect=lambda endpunkte, **kw: (
+                ["1.2.3.4:50002"] if endpunkte and not str(endpunkte[0][0]).endswith(".onion")
+                else (_ for _ in ()).throw(AssertionError("Onion darf nicht geprobt werden"))
+            ),
+        ), mock.patch.object(
+            source_mod, "splitte_electrum_server",
+            return_value=([], [("1.2.3.4", 50002, True)] * 3),
+        ), mock.patch(
+            "check_fulcrum_tor.load_electrum_servers", return_value={},
+        ), mock.patch.object(
+            source_mod, "_loese_oeffentliches_onion_tor",
+        ) as loese:
+            out = source_mod._pruefe_oeffentliche_electrum(
+                gefunden, values, timeout=1, on_log=logs.append,
+            )
+        self.assertEqual(out["clearnet"].peer_count, 1)
+        self.assertEqual(out["public_onion"].peer_count, 0)
+        self.assertIsNone(out["public_onion"].reachable)
+        loese.assert_called_once()
+        self.assertTrue(any("Clearnet" in z for z in logs))
+
+
+class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
+    """Clearnet-Probe darf nicht an den ersten 8 alphabetischen IPs hängen."""
+
+    def test_stichprobe_nicht_nur_prefix(self):
+        from core import source as source_mod
+
+        endpunkte = [(f"h{i}.example", 50002, True) for i in range(30)]
+        gesehen = set()
+        for _ in range(40):
+            stich = source_mod._waehle_electrum_stichprobe(endpunkte, 8)
+            self.assertEqual(len(stich), 8)
+            gesehen.update(h for h, _p, _s in stich)
+        # Bei echter Zufallsstichprobe tauchen auch hintere Hosts auf.
+        self.assertGreater(len(gesehen), 8)
+        self.assertTrue(any(h.startswith("h2") for h in gesehen), gesehen)
+
+    def test_zweite_runde_wenn_erste_tot(self):
+        from core import source as source_mod
+
+        tot = [(f"dead{i}.example", 50002, True) for i in range(8)]
+        gut = [("alive.example", 50002, True)]
+        endpunkte = tot + gut
+        logs: list[str] = []
+
+        def fake_connect(host, port, use_ssl=True, timeout=8, tor_proxy=None,
+                         require_listunspent=False):
+            if host == "alive.example":
+                class _C:
+                    def close(self):
+                        return None
+                return _C(), None
+            return None, "timed out"
+
+        with mock.patch("fulcrum.connect_fulcrum", side_effect=fake_connect):
+            with mock.patch.object(
+                source_mod.random, "sample",
+                side_effect=[list(tot), list(gut)],
+            ):
+                treffer = source_mod._zaehle_electrum_endpunkte(
+                    endpunkte, timeout=5, tor_proxy=None,
+                    on_log=logs.append, limit=8, max_runden=2,
+                )
+        self.assertEqual(treffer, ["alive.example:50002"])
+        self.assertTrue(any("weitere" in z for z in logs), logs)
 
 
 if __name__ == "__main__":

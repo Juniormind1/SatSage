@@ -1,8 +1,8 @@
 """
-Selbstanzeige-Report: markierte Börsen-Einzahlungen mit walletbezogenem FiFo.
+Bericht Sat-Geschichte: markierte Börsen-Einzahlungen mit walletbezogenem FiFo.
 
 Keine Steuerberatung. V1: Veräußerungszeit = Chain-Zeit der Einzahlung;
-Personendaten sind Platzhalter (Donald Duck), später über Einstellungen.
+Personendaten aus Einstellungen (Default: Donald Duck / Entenhausen).
 On-Chain ergänzt Börsenhistorien und Kaufbelege, ersetzt sie nicht.
 """
 from __future__ import annotations
@@ -11,22 +11,63 @@ import csv
 import io
 from datetime import datetime
 from pathlib import Path
+from typing import Mapping
 
 import main
 from core import tax as tax_mod
 
-#: Platzhalter bis Einstellungen existieren.
+#: Default-Platzhalter (Entenhausen), bis der Nutzer eigene Daten speichert.
+#: Felder in _PERSON_OPTIONAL bleiben bei leerer .env leer (kein Fake-Default).
 STEUER_PERSON = {
     "name": "Donald Duck",
     "steuernummer": "0/8/15",
     "anschrift": "Entenhausen",
+    "email": "",
+    "finanzamt": "",
+    "finanzamt_anschrift": "",
+    "sachbearbeiter": "",
 }
 
+_PERSON_ENV = {
+    "name": "STEUER_PERSON_NAME",
+    "steuernummer": "STEUER_PERSON_STEUERNUMMER",
+    "anschrift": "STEUER_PERSON_ANSCHRIFT",
+    "email": "STEUER_PERSON_EMAIL",
+    "finanzamt": "STEUER_PERSON_FINANZAMT",
+    "finanzamt_anschrift": "STEUER_PERSON_FINANZAMT_ANSCHRIFT",
+    "sachbearbeiter": "STEUER_PERSON_SACHBEARBEITER",
+}
+
+#: Kein Donald-Duck-Fallback — nur anzeigen, wenn gesetzt.
+_PERSON_OPTIONAL = frozenset({
+    "email", "finanzamt", "finanzamt_anschrift", "sachbearbeiter",
+})
+
+
+def lese_steuer_person(werte: Mapping[str, str] | None = None) -> dict[str, str]:
+    """
+    Persönliche Daten für Berichte aus der .env, sonst Donald-Duck-Defaults.
+
+    Leere Env-Werte fallen auf den jeweiligen Default zurück (nicht auf leer),
+    außer den optionalen Feldern (E-Mail, Finanzamt, …) — die bleiben leer.
+    """
+    w = werte or {}
+    out: dict[str, str] = {}
+    for feld, env_key in _PERSON_ENV.items():
+        roh = str(w.get(env_key) or "").strip()
+        if roh:
+            out[feld] = roh
+        elif feld in _PERSON_OPTIONAL:
+            out[feld] = ""
+        else:
+            out[feld] = str(STEUER_PERSON.get(feld) or "")
+    return out
+
 HINWEIS_SELBSTANZEIGE = (
-    "Diese Unterlage dient der Vorbereitung einer Selbstanzeige bzw. "
-    "Nachmeldung. Sie ist keine Steuerberatung. Eine wirksame Selbstanzeige "
-    "setzt Vollständigkeit für den betroffenen Zeitraum und die betroffenen "
-    "Einkünfte voraus — fehlende Veräußerungen gefährden sie."
+    "Diese Unterlage ist ein Bericht zur Sat-Geschichte (On-Chain) und dient "
+    "der Dokumentation von Zu- und Abflüssen. Sie ist keine Steuerberatung. "
+    "Vollständigkeit für den betroffenen Zeitraum und die betroffenen "
+    "Vorgänge liegt in der Verantwortung des Nutzers."
 )
 
 HINWEIS_FIFO = (
@@ -77,11 +118,29 @@ def _parse_utxo_schluessel(wert: str) -> tuple[str, int] | None:
         return None
 
 
-def _norm_txid(txid: str) -> str:
+def _norm_txid(txid: str, *, strict: bool = False) -> str:
+    """
+    Kanonische 64-Hex-TxID.
+
+    Akzeptiert auch ``txid:vout`` / ``utxo:txid:vout`` (Outpoint) — nur der
+    Tx-Teil zählt. *strict=False*: ungültig → ``""``; *strict=True*: ValueError.
+    """
     text = (txid or "").strip()
     if not text:
         return ""
-    return main._normalize_txid(text)
+    if text.lower().startswith("utxo:"):
+        text = text[5:].strip()
+    # Outpoint txid:vout → nur TxID (Report-Filter / Copy-Paste aus Liste)
+    if ":" in text:
+        links, _, rechts = text.partition(":")
+        if rechts.isdigit() or (rechts and rechts.lstrip("-").isdigit()):
+            text = links.strip()
+    try:
+        return main._normalize_txid(text)
+    except ValueError:
+        if strict:
+            raise
+        return ""
 
 
 def _wallet_name(utxo: dict, wallet) -> str:
@@ -341,7 +400,7 @@ def kandidaten(
     txid: str | None = None,
 ) -> dict:
     """
-    Auswahl für den Selbstanzeige-Report.
+    Auswahl für den Bericht Sat-Geschichte.
 
     *abfluesse*: Netto-Abgänge des Jahres (Verlauf).
     *utxos*: offene UTXOs als Hypothese „Was wäre wenn“.
@@ -350,7 +409,10 @@ def kandidaten(
     netto, zurueck, eingesetzt = _netto_und_eigen(utxos)
     jahresbeginn = datetime(jahr, 1, 1)
     jahresende = datetime(jahr, 12, 31, 23, 59, 59)
-    hinweis_txid = _norm_txid(txid) if txid else ""
+    hinweis_txid = ""
+    if txid and str(txid).strip():
+        # Nutzer-Filter: ungültige ID → ValueError (API → 400, kein 500).
+        hinweis_txid = _norm_txid(str(txid).strip(), strict=True)
 
     liste = []
     for spender, betrag in sorted(netto.items(), key=lambda kv: kv[0]):
@@ -399,7 +461,7 @@ def kandidaten(
             "gehen in den Report.",
             HINWEIS_HYPOTHESE,
         ],
-        "person": dict(STEUER_PERSON),
+        "person": lese_steuer_person(),
     }
 
 
@@ -641,7 +703,7 @@ def auswerten(
                 tax_mod.HINWEIS_ONCHAIN,
                 "Keine Transaktion und kein UTXO ausgewählt.",
             ],
-            "person": dict(STEUER_PERSON),
+            "person": lese_steuer_person(),
             "erstellt": datetime.now().strftime("%d.%m.%Y %H:%M"),
             "haltefrist_jahre": haltefrist_jahre,
             "methode": "FiFo (walletbezogen)",
@@ -722,7 +784,7 @@ def auswerten(
         "jahr": jahr,
         "vorgaenge": vorgaenge,
         "hinweise": hinweise,
-        "person": dict(STEUER_PERSON),
+        "person": lese_steuer_person(),
         "erstellt": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "haltefrist_jahre": haltefrist_jahre,
         "methode": methode,
@@ -743,10 +805,18 @@ def als_csv(report: dict) -> bytes:
     w = csv.writer(puffer, delimiter=";", quoting=csv.QUOTE_MINIMAL,
                    lineterminator="\r\n")
     person = report["person"]
-    w.writerow(["Selbstanzeige-Report (Vorbereitung)"])
-    w.writerow(["Name", person["name"]])
-    w.writerow(["Steuernummer", person["steuernummer"]])
-    w.writerow(["Anschrift", person["anschrift"]])
+    w.writerow(["Bericht Sat-Geschichte"])
+    w.writerow(["Name", person.get("name") or ""])
+    w.writerow(["Steuernummer", person.get("steuernummer") or ""])
+    w.writerow(["Anschrift", person.get("anschrift") or ""])
+    if person.get("email"):
+        w.writerow(["E-Mail", person["email"]])
+    if person.get("finanzamt"):
+        w.writerow(["Finanzamt", person["finanzamt"]])
+    if person.get("finanzamt_anschrift"):
+        w.writerow(["Finanzamt Anschrift", person["finanzamt_anschrift"]])
+    if person.get("sachbearbeiter"):
+        w.writerow(["Sachbearbeiter", person["sachbearbeiter"]])
     w.writerow(["Steuerjahr", report["jahr"]])
     w.writerow(["Methode", report["methode"]])
     w.writerow(["Haltefrist Jahre", report["haltefrist_jahre"]])
@@ -811,10 +881,53 @@ def als_csv(report: dict) -> bytes:
     return b"\xef\xbb\xbf" + puffer.getvalue().encode("utf-8")
 
 
-def als_html(report: dict) -> bytes:
+def _css_str(text: str) -> str:
+    """String für CSS ``content: "…"`` — keine HTML-Entities (brechen CSS)."""
+    return (
+        str(text or "")
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace("</", "<\\/")
+    )
+
+
+def als_html(
+    report: dict,
+    *,
+    immutable_cache_dir: Path | str | None = None,
+    theme: str | None = None,
+) -> bytes:
+    from core import herkunft_bericht as hb
+
     person = report["person"]
     esc = tax_mod._html_escape
+    theme_name = hb.normalize_bericht_theme(theme)
     vorgang_html = []
+    # Hop-Ketten für alle FiFo-Lose (und Hypothese-UTXOs als Los).
+    hop_eintraege: list[dict] = []
+    gesehen: set[str] = set()
+    for vg in report.get("vorgaenge") or []:
+        for los in vg.get("lose") or []:
+            key = f"{los.get('lot_txid')}:{los.get('lot_vout')}"
+            if key in gesehen:
+                continue
+            gesehen.add(key)
+            hop_eintraege.append({
+                "txid": los.get("lot_txid") or "",
+                "vout": los.get("lot_vout", 0),
+                "wallet": los.get("wallet") or "",
+                "address": los.get("address") or "",
+                "value_sats": los.get("sats"),
+            })
+    hop_abschnitt = hb.abschnitt_hop_ketten(
+        hop_eintraege,
+        immutable_cache_dir=immutable_cache_dir,
+        ueberschrift="Herkunftsnachweis (on-chain Hop-Kette der Lose)",
+    )
+    hop_css = hb.HOP_KETTE_CSS if hop_abschnitt else ""
+
     for vg in report["vorgaenge"]:
         los_zeilen = "".join(
             "<tr>"
@@ -884,54 +997,73 @@ def als_html(report: dict) -> bytes:
 """)
 
     hinweise = "".join(f"<li>{esc(h)}</li>" for h in report["hinweise"])
-    kopf_text = (
-        f"{person['name']} · Steuernummer {person['steuernummer']} · "
-        f"{person['anschrift']}"
-    )
+    kopf_teile = [
+        person.get("name") or "",
+        f"Steuernummer {person.get('steuernummer') or ''}",
+        person.get("anschrift") or "",
+    ]
+    if person.get("email"):
+        kopf_teile.append(person["email"])
+    kopf_text = " · ".join(t for t in kopf_teile if t)
     fuss_text = (
-        f"{person['name']} · {person['steuernummer']} · "
-        f"Selbstanzeige-Report {report['jahr']}"
+        f"{person.get('name') or ''} · {person.get('steuernummer') or ''} · "
+        f"Bericht Sat-Geschichte {report['jahr']}"
     )
+    # CSS content: eigene Escapes — HTML-&quot; zerstört @page-Strings.
+    kopf_css = _css_str(f"{kopf_text} · {report['erstellt']}")
+    fuss_css = _css_str(fuss_text)
 
+    theme_css = hb.BERICHT_THEME_CSS
     html = f"""<!DOCTYPE html>
-<html lang="de"><head><meta charset="utf-8">
-<title>Selbstanzeige-Report {report['jahr']} — {esc(person['name'])}</title>
+<html lang="de" data-theme="{theme_name}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="{theme_name}">
+<title>Bericht Sat-Geschichte {report['jahr']} — {esc(person.get('name') or '')}</title>
 <style>
-  body {{ font-family: Georgia, "Times New Roman", serif; color: #1a1a1a;
-         max-width: 22cm; margin: 1.5cm auto; line-height: 1.45; }}
-  h1 {{ font-size: 18pt; margin: 0 0 6pt; }}
-  h2 {{ font-size: 13pt; margin: 22pt 0 6pt; }}
-  h3 {{ font-size: 11pt; margin: 14pt 0 4pt; }}
-  .unter, .klein {{ color: #444; font-size: 9pt; }}
-  .summe {{ background: #f4f4f0; padding: 8pt 10pt; border-left: 3px solid #333; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 8.5pt; margin: 6pt 0 12pt; }}
-  th {{ text-align: left; border-bottom: 1.5px solid #333; padding: 3pt 5pt 3pt 0;
-        font-size: 7.5pt; text-transform: uppercase; letter-spacing: .04em; }}
-  td {{ border-bottom: 1px solid #ddd; padding: 3pt 5pt 3pt 0; vertical-align: top; }}
+  {theme_css}
+  body {{ font-family: Georgia, "Times New Roman", serif; color: var(--fg);
+         max-width: 22cm; margin: 1.5cm auto; line-height: 1.45;
+         padding: 0 12px; background: var(--bg); }}
+  h1 {{ font-size: 18pt; margin: 0 0 6pt; color: var(--fg); }}
+  h2 {{ font-size: 13pt; margin: 22pt 0 6pt; color: var(--fg); }}
+  h3 {{ font-size: 11pt; margin: 14pt 0 4pt; color: var(--fg); }}
+  .unter, .klein {{ color: var(--muted); font-size: 9pt; }}
+  .summe {{ background: var(--panel); padding: 8pt 10pt;
+            border-left: 3px solid var(--line); color: var(--fg); }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 8.5pt; margin: 6pt 0 12pt;
+           color: var(--fg); }}
+  th {{ text-align: left; border-bottom: 1.5px solid var(--line); padding: 3pt 5pt 3pt 0;
+        font-size: 7.5pt; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--fg); }}
+  td {{ border-bottom: 1px solid var(--line-soft); padding: 3pt 5pt 3pt 0;
+        vertical-align: top; }}
   .r {{ text-align: right; }}
   .mono {{ font-family: "Courier New", Courier, monospace; }}
   .voll {{ word-break: break-all; overflow-wrap: anywhere; }}
-  .stammdaten {{ margin: 0 0 16pt; font-size: 10pt; }}
+  .stammdaten {{ margin: 0 0 16pt; font-size: 10pt; color: var(--fg); }}
   .stammdaten dt {{ font-weight: bold; float: left; width: 9em; clear: left; }}
   .stammdaten dd {{ margin: 0 0 2pt 9em; }}
-  .hinweise {{ margin-top: 20pt; padding-top: 10pt; border-top: 1px solid #333;
-               font-size: 8.5pt; color: #333; }}
+  .hinweise {{ margin-top: 20pt; padding-top: 10pt; border-top: 1px solid var(--line);
+               font-size: 8.5pt; color: var(--muted); }}
   .bildschirm-kopf {{
-    font-size: 9pt; color: #333; border-bottom: 1px solid #ccc;
+    font-size: 9pt; color: var(--muted); border-bottom: 1px solid var(--line-mid);
     padding-bottom: 6pt; margin-bottom: 12pt;
   }}
+  .leer {{ padding: 16pt; background: var(--panel2); border: 1px solid var(--line-soft);
+           color: var(--fg); }}
+  {hop_css}
   @media print {{
-    body {{ margin: 0; max-width: none; }}
+    body {{ margin: 0; max-width: none; padding: 0; }}
     .vorgang {{ page-break-inside: avoid; }}
     .bildschirm-kopf {{ display: none; }}
     @page {{
       margin: 2cm 1.5cm 2.2cm 1.5cm;
       @top-center {{
-        content: "{esc(kopf_text)} · {esc(report['erstellt'])}";
+        content: "{kopf_css}";
         font-size: 8pt; color: #333;
       }}
       @bottom-center {{
-        content: "{esc(fuss_text)} · Seite " counter(page);
+        content: "{fuss_css} · Seite " counter(page);
         font-size: 8pt; color: #333;
       }}
     }}
@@ -940,22 +1072,28 @@ def als_html(report: dict) -> bytes:
 
 <div class="bildschirm-kopf">{esc(kopf_text)} · erstellt {esc(report['erstellt'])}</div>
 
-<h1>Selbstanzeige-Report (Vorbereitung)</h1>
+<h1>Bericht Sat-Geschichte</h1>
 <p class="unter">Steuerjahr {report['jahr']} · {esc(report['methode'])} ·
 Haltefrist {report['haltefrist_jahre']} Jahr(e) · erstellt {esc(report['erstellt'])}</p>
 
 <dl class="stammdaten">
-  <dt>Name</dt><dd>{esc(person['name'])}</dd>
-  <dt>Steuernummer</dt><dd>{esc(person['steuernummer'])}</dd>
-  <dt>Anschrift</dt><dd>{esc(person['anschrift'])}</dd>
+  <dt>Name</dt><dd>{esc(person.get('name') or '')}</dd>
+  <dt>Steuernummer</dt><dd>{esc(person.get('steuernummer') or '')}</dd>
+  <dt>Anschrift</dt><dd>{esc(person.get('anschrift') or '')}</dd>
+  {f"<dt>E-Mail</dt><dd>{esc(person['email'])}</dd>" if person.get('email') else ''}
+  {f"<dt>Finanzamt</dt><dd>{esc(person['finanzamt'])}</dd>" if person.get('finanzamt') else ''}
+  {f"<dt>FA-Anschrift</dt><dd>{esc(person['finanzamt_anschrift'])}</dd>" if person.get('finanzamt_anschrift') else ''}
+  {f"<dt>Sachbearbeiter</dt><dd>{esc(person['sachbearbeiter'])}</dd>" if person.get('sachbearbeiter') else ''}
 </dl>
 
-{''.join(vorgang_html) if vorgang_html else '<p>Keine Vorgänge ausgewählt.</p>'}
+{''.join(vorgang_html) if vorgang_html else '<p class="leer"><strong>Keine Vorgänge in diesem Report.</strong><br>TxID passt nicht zum gewählten Steuerjahr, oder FiFo fand keine Lose im Cache. Bitte Jahr prüfen, Abfluss ankreuzen oder „Aktualisieren“.</p>'}
+
+{hop_abschnitt}
 
 <div class="hinweise"><ul>{hinweise}</ul>
 <p>Erzeugt mit SatSage aus lokal vorliegenden Wallet-/Cache-Daten.
-TxIDs und Adressen sind vollständig angegeben. PDF: Im Browser
-„Drucken → Als PDF sichern“ (Kopf-/Fußzeile mit Seitenzahl erscheinen im Druck).</p></div>
+TxIDs und Adressen sind vollständig angegeben. Herkunft: on-chain Hop-Kette
+(keine Börsenbelege). PDF: Im Browser „Drucken → Als PDF sichern“.</p></div>
 
 </body></html>
 """

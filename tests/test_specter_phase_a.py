@@ -45,7 +45,9 @@ class TestSpecterPhaseA(unittest.TestCase):
                 SatSageContext(wallets=[wallet]), specter=None
             )
         self.assertEqual(entries[0].descriptor, descriptor)
-        self.assertTrue(entries[0].is_multisig)
+        # wpkh(…) ist Single-Sig-Policy (Wasabi/Sparrow), kein Multisig.
+        self.assertFalse(entries[0].is_multisig)
+        self.assertEqual(entries[0].script_type, "segwit")
 
 
     def test_managed_api_blocks_wallet_and_source_writes(self):

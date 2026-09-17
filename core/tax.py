@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -44,8 +45,8 @@ OESTERREICH_ALTBESTAND = date(2021, 2, 28)
 #: Vorgabe: keine Stichtagsregel.
 STANDARD_STICHTAG = None
 
-#: Auswahl in den Einstellungen: 1…n Jahre plus „keine“.
-HALTEFRIST_MAX_JAHRE = 20
+#: Auswahl in den Einstellungen: 1…n Jahre plus „keine“ (Dropdown).
+HALTEFRIST_MAX_JAHRE = 10
 
 #: Anschaffungsdatum aus Herkunft: defensiv (jüngster externer Zufluss) oder
 #: offensiv (ältester). Default bleibt defensiv.
@@ -201,6 +202,47 @@ def bezugsdatum(jahr: int, jetzt: datetime | None = None) -> tuple[datetime, boo
     if jetzt < ende:
         return jetzt, True
     return ende, False
+
+
+def stop_before_ts_fuer_steuer(
+    jahr: int,
+    haltefrist_jahre: int,
+    stichtag_tag: date | None = None,
+    *,
+    jetzt: datetime | None = None,
+) -> int | None:
+    """
+    Unix-Zeit, ab der der Steuer-Trace rückwärts abbrechen darf.
+
+    Sobald ein Hop **älter oder gleich** diesem Zeitpunkt ist, reichen die
+    bekannten Fakten für Haltefrist und (falls gesetzt) Stichtagsregel —
+    tiefer bis Coinbase/extern ist fürs Steuerjahr unnötig. Herkunft tracen
+    geht trotzdem weiter bis extern/Coinbase.
+
+    Schwelle = frühester (strengster) der aktiven Cutoffs:
+    * Haltefrist-Anfang = Bezug minus *haltefrist_jahre*
+    * Stichtag (Tagesende)
+
+    Ohne Haltefrist und ohne Stichtag: ``None`` (kein Frühabbruch).
+    """
+    bezug, _ = bezugsdatum(int(jahr), jetzt=jetzt)
+    kandidaten: list[int] = []
+    try:
+        frist = int(haltefrist_jahre or 0)
+    except (TypeError, ValueError):
+        frist = 0
+    if frist > 0:
+        kandidaten.append(int(plus_jahre(bezug, -frist).timestamp()))
+    if stichtag_tag is not None:
+        kandidaten.append(
+            int(datetime(
+                stichtag_tag.year, stichtag_tag.month, stichtag_tag.day,
+                23, 59, 59,
+            ).timestamp())
+        )
+    if not kandidaten:
+        return None
+    return min(kandidaten)
 
 
 #: Grundlage, auf der das Anschaffungsdatum eines UTXO beruht.
@@ -429,6 +471,20 @@ def _anschaffung(
     modus = parse_anschaffung(anschaffung)
     if ingress:
         untergrenze = bool(ingress.get("external_untergrenze"))
+        # Variante A: tax_horizon vor Haltefrist-Grenze → erfuellt (grün)
+        # Wenn wir nur einen Horizont-Hopf haben und dieser schon vor der
+        # Frist-Grenze liegt, gilt die Mindest-Haltedauer als erfüllt.
+        horizon_ts = ingress.get("tax_horizon_time_ts")
+        if horizon_ts is not None:
+            try:
+                horizon_dt = datetime.fromtimestamp(int(horizon_ts))
+                # Wird später in haltefrist_entscheidung geprüft; hier nur
+                # untergrenze auf False setzen, damit er nicht als "vorsichtig"
+                # behandelt wird. Die eigentliche erfuellt-Entscheidung
+                # passiert in haltefrist_entscheidung mit diesem Datum.
+                untergrenze = False
+            except (ValueError, OSError, OverflowError):
+                pass
         if modus == ANSCHAFFUNG_AELTESTE:
             stempel = ingress.get("external_oldest_time_ts")
             if stempel:
@@ -465,6 +521,18 @@ def _anschaffung(
                     )
                 except (ValueError, OSError, OverflowError):
                     pass
+        # Variante A: tax_horizon als ausreichendes Anschaffungsdatum nutzen
+        horizon_ts = ingress.get("tax_horizon_time_ts")
+        if horizon_ts:
+            try:
+                return (
+                    datetime.fromtimestamp(int(horizon_ts)),
+                    GRUNDLAGE_HERKUNFT,
+                    False,
+                    False,
+                )
+            except (ValueError, OSError, OverflowError):
+                pass
         stempel = ingress.get("youngest_time_ts")
         if stempel:
             try:
@@ -832,6 +900,49 @@ def _groessenklasse(sats: int, gesamt: int) -> str:
     return "klein"
 
 
+
+def _y_log_prozent(sats: int, hoechst: int) -> float:
+    """
+    Logarithmische Y-Position 0..100 für den Zeitstrahl.
+
+    ``log1p`` hält 0 Sat unten (kein ``log(0)``) und staucht große Beträge
+    weniger als eine lineare Achse — typisch bei UTXOs von Dust bis BTC.
+    """
+    oben = math.log1p(max(int(hoechst), 0))
+    if oben <= 0:
+        return 0.0
+    return round(math.log1p(max(int(sats), 0)) / oben * 100.0, 3)
+
+
+def _y_achsen_max(hoechst_utxo: int) -> int:
+    """
+    Y-Skalenende: nächste Zehnerpotenz strikt über dem größten UTXO.
+
+    So bleibt Kopfraum („eine 10er-Potenz höher“) und die Tick-Leiter
+    (1, 10, 100, …) endet auf einer runden Dekade.
+    """
+    h = max(int(hoechst_utxo or 0), 1)
+    exp = int(math.floor(math.log10(h))) + 1
+    return int(10 ** exp)
+
+
+def _minus_monate(zeitpunkt: datetime, monate: int) -> datetime:
+    """Kalendermonate zurück (Tag gekappt auf Monatsende)."""
+    y = zeitpunkt.year
+    m = zeitpunkt.month - int(monate)
+    while m <= 0:
+        m += 12
+        y -= 1
+    # Letzter Tag des Zielmonats.
+    if m == 12:
+        naechster = datetime(y + 1, 1, 1, zeitpunkt.hour, zeitpunkt.minute, zeitpunkt.second)
+    else:
+        naechster = datetime(y, m + 1, 1, zeitpunkt.hour, zeitpunkt.minute, zeitpunkt.second)
+    letzter = naechster - timedelta(days=1)
+    tag = min(zeitpunkt.day, letzter.day)
+    return zeitpunkt.replace(year=y, month=m, day=tag)
+
+
 def zeitstrahl(
     eintraege: list[Eingang],
     ende: datetime,
@@ -841,145 +952,101 @@ def zeitstrahl(
     """
     Rechnet die Eingänge auf Positionen einer Fläche um.
 
-    X: Zeit vom gebündelten linken Rand bis zum Bezugstag. UTXOs vor der
-    Haltefrist oder vor dem Stichtag sitzen gemeinsam am Quartalsbeginn
-    davor — sonst quetscht ein sehr alter Coin den aktuellen Rand.
-    Y: Betrag dieses UTXO, relativ zum größten. Prozentwerte, damit die
-    Darstellung ohne feste Pixelbreite auskommt.
+    X: Anschaffungszeit; Achsenbeginn **6 Monate vor** dem ältesten UTXO
+    bis zum Bezugstag (Zoom/Pan). Y: Einzelbetrag log1p, Skalenende eine
+    Zehnerpotenz über dem größten UTXO.
 
-    ``aeltere_sats`` ist die Summe aller zeitlich früheren UTXOs — der
-    Saldo, der schon da war, als dieser Eingang dazukam.
+    Jeder Eingang wird einzeln gezeichnet. ``aeltere_sats`` ist die Summe
+    der zeitlich früheren UTXOs (Tooltip). Einmalig liefert
+    ``geister_saldo`` die Summe aller UTXOs **außerhalb** der Haltefrist
+    (UI: grüner Ring auf y=0 an der Fristgrenze, Label „sats vor Haltefrist“).
 
     Die Fristgrenze (Bezug minus Haltefrist) trennt sichtbar, was die Frist
     erfüllt hat. Liegt sie außerhalb des dargestellten Zeitraums, wird sie
     nicht gezeichnet — eine Linie am Rand würde etwas Falsches suggerieren.
+
+    *stichtag* fließt nur in ``neuvermoegen`` der Eingänge ein, nicht mehr
+    in eine X-Bündelung.
     """
+    del stichtag  # API stabil; Bündelung entfällt
     if not eintraege:
         return {"vorhanden": False, "events": [], "ticks": [], "frist_pos": None}
 
     frist_grenze = (
         plus_jahre(ende, -haltefrist_jahre) if haltefrist_jahre > 0 else None
     )
-    # Bündelpunkt: Quartalsbeginn vor der jüngeren der beiden Grenzen,
-    # damit die Achse beim aktuellen Rand bleibt.
-    if frist_grenze is not None:
-        anker = frist_grenze.date()
-    elif stichtag is not None:
-        anker = stichtag
-    else:
-        anker = None
-    buendel = (
-        datetime.combine(quartalsbeginn_vor(anker), datetime.min.time())
-        if anker is not None else None
-    )
-
-    def _gruppe(eintrag: Eingang) -> str | None:
-        if anker is None:
-            return None
-        if stichtag is not None and eintrag.zeitpunkt.date() <= stichtag:
-            return "stichtag"
-        if frist_grenze is not None and eintrag.zeitpunkt <= frist_grenze:
-            return "haltefrist"
-        return None
 
     sortiert = sorted(eintraege, key=lambda e: (e.zeitpunkt, e.txid, e.vout))
-    gruppen_zahl = {"stichtag": 0, "haltefrist": 0}
-    for eintrag in sortiert:
-        name = _gruppe(eintrag)
-        if name:
-            gruppen_zahl[name] += 1
-
-    def _plotzeit(eintrag: Eingang) -> datetime:
-        return buendel if _gruppe(eintrag) and buendel is not None else eintrag.zeitpunkt
-
-    plotzeiten = [_plotzeit(e) for e in sortiert]
-    von = min(plotzeiten)
-    bis = max(max(plotzeiten), ende)
+    aeltester = min(e.zeitpunkt for e in sortiert)
+    # Immer 6 Monate vor dem ältesten UTXO — Kopfraum links, Zoom bleibt sinnvoll.
+    von = _minus_monate(aeltester, 6)
+    bis = max(max(e.zeitpunkt for e in sortiert), ende)
 
     spanne = (bis - von).total_seconds()
     if spanne <= 0:
-        # Ein einziger Eingang, oder alle am selben Tag: künstliche Spanne,
-        # damit die Punkte nicht alle auf 0 % liegen.
-        von = von - timedelta(days=180)
-        bis = bis + timedelta(days=180)
+        bis = von + timedelta(days=180)
         spanne = (bis - von).total_seconds()
 
     def prozent(zeitpunkt: datetime) -> float:
         return max(0.0, min(100.0, (zeitpunkt - von).total_seconds() / spanne * 100))
 
     gesamt = sum(e.value_sats for e in eintraege)
-    buendel_summe = {
-        name: sum(e.value_sats for e in sortiert if _gruppe(e) == name)
-        for name in ("stichtag", "haltefrist")
-    }
-    hoechst = max(
-        [e.value_sats for e in sortiert if _gruppe(e) is None]
-        + [s for s in buendel_summe.values() if s]
-        or [0]
-    ) or 1
+    # Y: Einzel-UTXOs; Skalenende eine Dekade über dem Maximum.
+    hoechst_utxo = max((e.value_sats for e in sortiert), default=0) or 1
+    hoechst = _y_achsen_max(hoechst_utxo)
 
-    def _event(eintrag: Eingang, *, sats: int, gruppe: str | None,
-               gruppe_n: int, aeltere_sats: int, datum: str,
-               wallet: str) -> dict:
-        return {
-            "pos": round(prozent(_plotzeit(eintrag)), 3),
-            "y": round(sats / hoechst * 100, 3),
+    events: list[dict] = []
+    aeltere = 0
+    erfuellt_sats = 0
+    erfuellt_n = 0
+    erfuellt_letzte_pos: float | None = None
+    for eintrag in sortiert:
+        sats = int(eintrag.value_sats)
+        pos = round(prozent(eintrag.zeitpunkt), 3)
+        events.append({
+            "pos": pos,
+            "y": _y_log_prozent(sats, hoechst),
             "erfuellt": eintrag.erfuellt,
             "geprueft": eintrag.geprueft,
             "neuvermoegen": eintrag.neuvermoegen,
             "value_sats": sats,
-            "aeltere_sats": aeltere_sats,
-            "datum": datum,
-            "wallet": wallet,
+            "aeltere_sats": aeltere,
+            "datum": eintrag.zeitpunkt.strftime("%d.%m.%Y"),
+            "wallet": eintrag.wallet,
+            "address": eintrag.address or "",
+            "txid": eintrag.txid,
+            "vout": int(eintrag.vout),
+            "key": f"{eintrag.txid}:{int(eintrag.vout)}",
             "groesse": _groessenklasse(sats, gesamt),
-            "gruppe": gruppe,
-            "gruppe_n": gruppe_n,
-        }
-
-    events: list[dict] = []
-    aeltere = 0
-    ausgegeben = set()
-    for eintrag in sortiert:
-        gruppe = _gruppe(eintrag)
-        if gruppe:
-            if gruppe in ausgegeben:
-                continue
-            ausgegeben.add(gruppe)
-            mitglieder = [e for e in sortiert if _gruppe(e) == gruppe]
-            namen = []
-            for m in mitglieder:
-                if m.wallet and m.wallet not in namen:
-                    namen.append(m.wallet)
-            daten = [m.zeitpunkt.strftime("%d.%m.%Y") for m in mitglieder]
-            ev = _event(
-                eintrag,
-                sats=buendel_summe[gruppe],
-                gruppe=gruppe,
-                gruppe_n=len(mitglieder),
-                aeltere_sats=aeltere,
-                datum=daten[0] if len(daten) == 1 else f"{daten[0]} – {daten[-1]}",
-                wallet=", ".join(namen) if namen else "unbekannt",
-            )
-            ev["gruppe_daten"] = daten
-            events.append(ev)
-            aeltere += buendel_summe[gruppe]
-            continue
-        events.append(_event(
-            eintrag,
-            sats=eintrag.value_sats,
-            gruppe=None,
-            gruppe_n=0,
-            aeltere_sats=aeltere,
-            datum=eintrag.zeitpunkt.strftime("%d.%m.%Y"),
-            wallet=eintrag.wallet,
-        ))
-        aeltere += eintrag.value_sats
+            "gruppe": None,
+            "gruppe_n": 0,
+        })
+        aeltere += sats
+        if eintrag.erfuellt:
+            erfuellt_sats += sats
+            erfuellt_n += 1
+            erfuellt_letzte_pos = pos
 
     frist_pos = None
     frist_datum = ""
     if frist_grenze is not None and von <= frist_grenze <= bis:
         frist_pos = round(prozent(frist_grenze), 3)
         frist_datum = frist_grenze.strftime("%d.%m.%Y")
+
+    # Ein Geister-Saldo: Summe aller UTXOs außerhalb der Haltefrist.
+    # X = Fristlinie (falls gezeichnet), sonst letzter erledigter Eingang.
+    geister_saldo = None
+    if erfuellt_sats > 0:
+        g_pos = frist_pos
+        if g_pos is None:
+            g_pos = erfuellt_letzte_pos if erfuellt_letzte_pos is not None else 0.0
+        geister_saldo = {
+            "pos": float(g_pos),
+            "y": 0.0,
+            "value_sats": int(erfuellt_sats),
+            "count": int(erfuellt_n),
+            "erfuellt": True,
+        }
 
     schritte = 4
     ticks = [
@@ -997,9 +1064,11 @@ def zeitstrahl(
         "frist_pos": frist_pos,
         "frist_datum": frist_datum,
         "events": events,
+        "geister_saldo": geister_saldo,
         "ticks": ticks,
         "max_sats": hoechst,
-        "verdeckt": gruppen_zahl["stichtag"] + gruppen_zahl["haltefrist"],
+        "y_scale": "log",
+        "verdeckt": 0,
     }
 
 
@@ -1139,14 +1208,24 @@ def _html_escape(text: str) -> str:
     )
 
 
-def als_bericht(auswertung: dict) -> bytes:
+def als_bericht(
+    auswertung: dict,
+    *,
+    immutable_cache_dir: Path | str | None = None,
+    theme: str | None = None,
+) -> bytes:
     """
     Druckbarer Bericht als eigenständige HTML-Datei.
 
     Bewusst ohne externe Ressourcen: Die Datei lässt sich weitergeben, im
     Browser öffnen und über „Drucken → Als PDF sichern" in ein PDF wandeln —
     auf allen drei Plattformen gleich, ohne Zusatzsoftware.
+
+    Mit *immutable_cache_dir* folgt ein Abschnitt mit vollständiger
+    on-chain Hop-Kette je UTXO (gespeicherter Herkunfts-Trace).
     """
+    from core import herkunft_bericht as hb
+
     kennzahlen = auswertung["kennzahlen"]
     zeilen = []
     for eintrag in auswertung["eintraege"]:
@@ -1166,6 +1245,11 @@ def als_bericht(auswertung: dict) -> bytes:
     hinweise = "".join(
         f"<li>{_html_escape(h)}</li>" for h in auswertung["hinweise"]
     )
+    hop_abschnitt = hb.abschnitt_hop_ketten(
+        list(auswertung.get("eintraege") or []),
+        immutable_cache_dir=immutable_cache_dir,
+    )
+    hop_css = hb.HOP_KETTE_CSS if hop_abschnitt else ""
 
     # Veräußerungen als eigener Abschnitt — der steuerlich maßgebliche Vorgang
     # gehört in den Bericht, nicht nur in die Bildschirmansicht.
@@ -1205,30 +1289,39 @@ def als_bericht(auswertung: dict) -> bytes:
 </table>
 """
 
+    theme_css = hb.BERICHT_THEME_CSS
+    theme_name = hb.normalize_bericht_theme(theme)
     return f"""<!DOCTYPE html>
-<html lang="de"><head><meta charset="utf-8">
+<html lang="de" data-theme="{theme_name}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="{theme_name}">
 <title>Aufstellung Steuerjahr {auswertung['jahr']}</title>
 <style>
-  body {{ font-family: Georgia, "Times New Roman", serif; color: #1a1a1a;
-         max-width: 20cm; margin: 2cm auto; line-height: 1.5; }}
-  h1 {{ font-size: 20pt; margin: 0 0 4pt; }}
-  .unter {{ color: #555; margin: 0 0 20pt; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 9pt; }}
-  th {{ text-align: left; border-bottom: 1.5px solid #333; padding: 4pt 6pt 4pt 0;
-        font-size: 8pt; text-transform: uppercase; letter-spacing: .06em; }}
-  td {{ border-bottom: 1px solid #ddd; padding: 4pt 6pt 4pt 0; }}
+  {theme_css}
+  body {{ font-family: Georgia, "Times New Roman", serif; color: var(--fg);
+         max-width: 20cm; margin: 2cm auto; line-height: 1.5;
+         background: var(--bg); padding: 0 12px; }}
+  h1 {{ font-size: 20pt; margin: 0 0 4pt; color: var(--fg); }}
+  h2 {{ color: var(--fg); }}
+  .unter {{ color: var(--muted2); margin: 0 0 20pt; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 9pt; color: var(--fg); }}
+  th {{ text-align: left; border-bottom: 1.5px solid var(--line); padding: 4pt 6pt 4pt 0;
+        font-size: 8pt; text-transform: uppercase; letter-spacing: .06em;
+        color: var(--fg); }}
+  td {{ border-bottom: 1px solid var(--line-soft); padding: 4pt 6pt 4pt 0; }}
   .r {{ text-align: right; }}
   .mono {{ font-family: "Courier New", monospace; }}
-  .klein {{ font-size: 7.5pt; }}
+  .klein {{ font-size: 7.5pt; color: var(--muted); }}
   .kennzahlen {{ display: flex; gap: 24pt; margin: 0 0 20pt; flex-wrap: wrap; }}
-  .kennzahl {{ border-left: 2px solid #333; padding-left: 8pt; }}
+  .kennzahl {{ border-left: 2px solid var(--line); padding-left: 8pt; color: var(--fg); }}
   .kennzahl b {{ display: block; font-size: 14pt; }}
   .kennzahl span {{ font-size: 8pt; text-transform: uppercase;
-                    letter-spacing: .06em; color: #555; }}
-  .hinweise {{ margin-top: 24pt; padding-top: 10pt; border-top: 1px solid #333;
-               font-size: 8.5pt; color: #444; }}
+                    letter-spacing: .06em; color: var(--muted2); }}
+  .hinweise {{ margin-top: 24pt; padding-top: 10pt; border-top: 1px solid var(--line);
+               font-size: 8.5pt; color: var(--muted); }}
   .hinweise li {{ margin-bottom: 5pt; }}
-  @media print {{ body {{ margin: 0; }} }}
+  {hop_css}
+  @media print {{ body {{ margin: 0; max-width: none; padding: 0; }} }}
 </style></head><body>
 
 <h1>Aufstellung Steuerjahr {auswertung['jahr']}</h1>
@@ -1260,8 +1353,10 @@ def als_bericht(auswertung: dict) -> bytes:
   <tbody>{''.join(zeilen)}</tbody>
 </table>
 {abgang_block}
+{hop_abschnitt}
 <div class="hinweise"><ul>{hinweise}</ul>
-<p>Erzeugt mit SatSage aus lokal abgefragten Blockchain-Daten.</p></div>
+<p>Erzeugt mit SatSage aus lokal abgefragten Blockchain-Daten.
+Herkunftsnachweis: on-chain Hop-Kette aus dem Trace-Cache (keine Börsenbelege).</p></div>
 
 </body></html>
 """.encode("utf-8")

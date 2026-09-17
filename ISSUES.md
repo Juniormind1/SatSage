@@ -2,7 +2,250 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Empfang · Ka-Ching mit libbitcoin
+
+**Stand:** 2026-09-17 · **kein SatSage-Bug** · Hinweis
+
+**Beobachtung:** Konfetti/Ka-Ching bei Mempool-Empfang funktioniert; **mit libbitcoin als Indexer nicht**, weil libbitcoin **keinen Tx-Pool/Mempool** hat — Pending-Receive steigt nicht.
+
+**Bewertung:** Erwartetes Limit der Datenquelle, kein SatSage-Fehler. Mit electrs/Fulcrum (Mempool) ok.
+
+---
+
+## Herkunft · Soft-Label „Wahrscheinlich Coinjoin/Mix“ ohne CJ-Icon
+
+**Stand:** 2026-09-17 · **offen** · näher untersuchen · UI / Trace
+
+**Beobachtung:** In **Herkunft tracen** erscheint häufiger der Soft-Text **„Wahrscheinlich Coinjoin/Mix“** (o. Ä.), aber das zugehörige **CJ-/Mix-Icon** taucht darunter **nicht** auf (weder an der Zeile noch in der Gruppen-Kopf-Leiste).
+
+**Zu klären:**
+
+- Welche `tx_class`-Werte den Text setzen vs. welche in `MIX_ICON_ORDER` / `TX_CLASS_ICON` ein Icon haben
+- Ob Icon nur bei konkreten Formen (Wasabi/Whirlpool/…) gerendert wird, Soft-Label aber bei generischem `coinjoin`/`mix`
+- Ob `mix_arten` am UTXO/Gruppe nach Trace nicht gesetzt wird, obwohl `tx_class_label` da ist
+- Soft-Label an Wurzel vs. Icon nur an Kindknoten / Gruppenkopf
+
+**Nächster Schritt:** Repro mit einer betroffenen Tx, `tx_class` / `mix_arten` / DOM prüfen. Kein 0.9.6-Blocker, aber UX-Inkonsistenz.
+
+---
+
+## Herkunft · „Scan neu“ auf Adresszeile (Bereits ausgegeben)
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI / Herkunft
+
+**Ist:** Unter **Bereits ausgegeben** Adressgruppen; jede Adresse klappt zu mehreren Tx-Zeilen auf. „Scan neu“ sitzt je Tx — bei vielen Tx mühsam.
+
+**Soll:** In der **Adresszeile** selbst ein Knopf **„Scan neu“**, der alle **untergeordneten** Tx/UTXOs dieser Adresse neu scannt/traced (Batch), nicht nur eine einzelne Tx.
+
+**Nutzen:** Weniger Klicks bei großen Ausgaben-Gruppen. Kein 0.9.6-Blocker.
+
+---
+
+## Steuerjahr · Zwei Tiefen (Horizont vs. voll) — Abnahme später
+
+**Stand:** 2026-09-17 · **offen für späteres Release** · Semantik / Test
+
+**Hintergrund:** Steuer-Horizont vs. voll bis Extern/Coinbase war als Optimierung gedacht, erzeugt aber hohe Komplexität (Scorecard gelb/grau, `steuer_ausreichend`, gelb-klären, Berichtstiefe).
+
+**Für 0.9.6:** Keine systematische Abnahme der Zwei-Tiefen-Sonderfälle. Pragmatisch: klären möglichst vollständig, aufs Beste hoffen. Testplan **C1** (und verwandte Horizont-Semantik) **verschoben**.
+
+**Später:** Gelb erst „fertig“, wenn **grün** oder voller Baum gelb bestätigt; Horizont-Stop ≠ gelb erledigt. UI/Backend und Testfälle dann bewusst nachziehen.
+
+---
+
+## Herkunft · Stichwort-Filter in Sammelzeilen
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI / Herkunft tracen
+
+**Soll:** In jeder **Sammelzeile** (Gruppe zum Ausklappen darunter) ein Eingabefeld **„Stichwort“** + **Filtern**. Danach bleiben nur noch die Teile der Gruppe sichtbar, die zum Stichwort passen.
+
+**Match egal worauf** (Teilstring, case-insensitive sinnvoll):
+
+- Adresse (auch Teil)
+- TxID (auch Teil)
+- Börsenlabel (z. B. Kraken)
+- Monat / Jahr (Datumsfelder)
+
+**Bezug:** Ergänzt die geplanten Filter in der Gruppen-Überschrift (Datumsbereich, Coinjoins, Börsen, Volumen) — Stichwort ist der schnelle Freitext. Kein 0.9.6-Blocker.
+
+---
+
+## Auswerten · Tools · Adresse nachschlagen
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI
+
+**Soll:** Unter **Auswerten** einen Punkt **Tools**. Darin:
+
+- Eingabefeld für eine **Adresse**
+- Knopf **„Auswerten“**
+
+**Verhalten:**
+
+1. Gehört die Adresse zu einem der konfigurierten Wallets? Wenn ja → welches (Name / XPUB-Kontext).
+2. Wurde sie schon verwendet? (Historie/UTXO-Cache)
+3. Wenn verwendet **und** Herkunfts-Trace vorliegt → **Link zum Trace** anbieten.
+4. Gehört sie zu **keinem** Wallet → **„nicht gefunden“** und, sofern konfiguriert, **Link zum Block-Explorer**.
+
+**Nutzen:** Schnelle Zuordnung ohne manuell Wallets/Listen durchzuklicken. Kein 0.9.6-Blocker — nur Idee notiert.
+
+---
+
+## Herkunft · Filter in der Gruppen-Überschriftenzeile
+
+**Stand:** 2026-09-17 · **offen** · später · UI / Herkunft tracen
+
+**Soll:** In jeder **Adressgruppen-Kopfzeile** (Bestand und „Bereits ausgegeben“) Filteroptionen:
+
+- **Datumsbereich**
+- **Coinjoins** (Mix-Formen vorhanden / Art)
+- **Börsen** (z. B. nur Kraken/Coinbase / mit Börsen-Label)
+- **Volumen** `<` / `>` / **zwischen**
+
+**Kontext:** Sortierung (Volumen/Alter) wirkt bereits auf Bestand und Ausgaben; Mix-Icons und Börsen-Pillen stehen schon in der Kopfzeile — Filter wären die nächste Stufe zum Eingrenzen großer Listen.
+
+**Nutzen:** Hoch bei vielen Adressen/UTXOs. Kein 0.9.6-Blocker — **später bauen**.
+
+---
+
+## BIP-158 · ein Filterpass für alle XPUBs (ohne eigenen Indexer)
+
+**Stand:** 2026-09-17 · **offen** · später · Datenquelle / P2P · Performance
+
+**Problem:** Ohne eigenen Electrs/Fulcrum läuft der UTXO-Bestand über Compact Filter **pro Wallet / XPUB** (Scan-Queue + `fetch_wallet_utxos_bip158`: `for xpub in xpubs`). Mehrere Wallets ⇒ mehrfacher Lauf über dieselben Höhen (Turbo/Historie) — großer Zeitfresser für P2P-only-Nutzer.
+
+**Soll (Idee):** Ein gemeinsamer Filterpass: Scripts **aller** konfigurierten XPUBs in einem `watched`-Set matchen, Treffer dem richtigen XPUB zuordnen, Caches weiter **pro Wallet** schreiben. Abbruch, Zwischenstand und unterschiedliche Start­höhen/Alter sauber lösen.
+
+**Nicht:** Herkunft-Trace umbauen — der liest den Bestand aus dem Cache und macht Tx-Graph-Walks; der Boost trifft die **Bestands-Population**.
+
+**Nutzen:** Sehr hoch für Nutzer ohne Indexer. Architektur-Hebel, kein Mikro-Polish — **später bauen**, kein 0.9.6-Blocker.
+
+---
+
+## Steuerbericht · HTML/CSV-Knöpfe gelb/grün nach Trace-Tiefe (BMF)
+
+**Stand:** 2026-09-16 · **offen** · Produkt / UI / Steuer
+
+**Hintergrund (BMF 2022 / 2025):** Die Sat-Historie muss **durchgehend** sein — auch wenn die Haltefrist schon **innerhalb** der XPUB-Wallets erreicht wurde. Abbruch nur an Haltefrist/Stichtag reicht für den **amtlichen Herkunftsnachweis nicht**.
+
+**Ist / Abgrenzung:**
+- **Dotplot + UTXO-Klassifikation** (innerhalb / außerhalb Haltefrist): begrenzter Scan, der früher abbricht als „extern / Coinbase“, **reicht**.
+- **HTML- oder CSV-Bericht:** ohne Kette bis **extern / Coinbase** wäre der Bericht **unvollständig** (BMF-Lesart).
+
+**Soll:**
+1. HTML-Bericht-Knöpfe **gelb**, wenn der Verlauf **nicht** bis extern/Coinbase im Cache liegt → Klick löst tieferen Herkunftsscan aus (kann dauern).
+2. HTML-Bericht-Knöpfe **grün**, wenn die Herkunft **schon vollständig** im Cache liegt → Export schnell.
+3. **Tooltips:**  
+   - Gelb: „erfordert Herkunftsscan. Kann dauern…“  
+   - Grün: „Herkunft liegt schon im Cache“
+4. Analog ggf. CSV, falls derselbe Vollständigkeits-Anspruch gilt.
+
+**Nicht:** Dotplot/Klassifikation auf Voll-Trace umstellen — der begrenzte Scan bleibt dort korrekt und schneller.
+
+---
+
+## UTXO-Bestand · libbitcoin `scantxoutset` (RPC wie Core)
+
+**Stand:** 2026-09-16 · **offen** · später · Datenquelle / UTXO-Scan
+
+**Idee:** Libbitcoin (bzw. vergleichbarer Stack) per **RPC wie Bitcoin Core** anbinden und **`scantxoutset`** für den UTXO-Bestand nutzen — parallel/alternativ zum Electrum-Gap-Scan.
+
+**Nutzen:** Kann bei **exotischen Wallets** (Miniscript, unübliche Deskriptoren, Adressen jenseits typischer Gap-Annahmen) Treffer liefern, die ein Gap-Scan **übersieht**.
+
+**Nicht der Treiber:** Laut Einschätzung **nicht schneller** als Gap-Scan am eigenen Indexer — also kein Performance-Projekt, sondern **Vollständigkeit / Exoten**.
+
+**Voraussetzung:** Libbitcoin wie Core konfigurierbar (Host/Port/User/Pass oder Cookie), eigene Slot-Logik oder Erweiterung von `UTXO_RPC_*` / `own_utxo_core`, klare Priorität gegenüber Electrs-LAN-Gap und Core-`scantxoutset`.
+
+**Priorität:** niedrig — **irgendwann später**, wenn Exoten-Wallets oder fehlende UTXOs das rechtfertigen. Kein Blocker für den normalen Electrs/Fulcrum/libbitcoin-Electrum-Pfad.
+
+---
+
+## Steuerbericht · zwei Berichtsarten (Geldwäsche vs. Haltefrist/Stichtag)
+
+**Stand:** 2026-09-15 · **offen** · Produkt / Export
+
+Der HTML-Herkunftsnachweis (Hop-Kette aus Trace-Cache) braucht **zwei getrennte Berichtsarten** — nicht eine Vollkette für alles:
+
+1. **Geldwäsche / vollständiger Herkunftsnachweis**  
+   Hop-Kette bis zum **externen Zugang** (Kauf-/Zuflussdatum außerhalb der eigenen Wallets). Länger, für Nachvollziehbarkeit „woher die Sats kamen“.
+
+2. **Haltefrist / Stichtag**  
+   Hop-Kette nur so weit, bis die Sats **älter als Haltefrist bzw. vor dem Stichtag** sind — dann Abbruch. Kürzer, reicht zur Untermauerung der Haltedauer-/Altbestand-Behauptung.
+
+**Abgrenzung:** On-chain Hops only. Börsen-/Konto-/Kaufbelege („externe Belege“ im Sinne von Drittunterlagen) baut SatSage **nicht**.
+
+**Ist:** Ein Hop-Abschnitt im Steuer-/Selbstanzeige-HTML, immer volle Trace-Tiefe (sofern Cache vorhanden).
+
+**Soll:** UI/API-Wahl der Berichtsart; Haltefrist-Modus schneidet den Baum am Frist-/Stichtags-Horizont; Dateiname/Titel kennzeichnen die Art; Tests für Abbruchkriterium.
+
+---
+
+## Config · EnvFile vs. plain `dict` — Aufrufstellen härten
+
+**Stand:** 2026-09-15 · **offen** · API-Klarheit / Härtung
+
+Wiederkehrende Stolperfalle (Assistenten und Skripte): Manche Einstiege erwarten ein **`EnvFile`** (`.values()` → `dict[str, str]`), andere ein **plain `dict`**. Wer ein `dict` an eine EnvFile-API übergibt, bekommt still `dict_values` statt Key-Zugriff (`AttributeError: 'dict_values' object has no attribute 'get'` — z. B. `read_wallets(env)` ruft `env.values()` auf).
+
+**Ist-Zustand (Stichprobe):**
+- `EnvFile` in `core/config.py` — `values()` liefert den Key/Value-Dict.
+- `read_wallets(env: EnvFile)`, ähnliche Block-APIs: brauchen **EnvFile**, nicht Dict.
+- Viele interne Helfer und Tests: erwarten bereits **`dict`** / `env.values()`.
+- `_load_dotenv()` in `main` liefert **Dict**, nicht EnvFile — Verwechslung vorprogrammiert.
+
+**Ziel:**
+1. Pro öffentlicher Funktion eindeutig: Param-Name + Typ (`env: EnvFile` vs. `values: Mapping[str, str]`), Docstring eine Zeile.
+2. An EnvFile-Grenzen **tolerant oder klar**: entweder `isinstance`-Normalisierung (`EnvFile` | `Mapping` → values-dict) **oder** harter TypeError mit lesbarer Meldung („EnvFile erwartet, got dict“).
+3. Keine stillen `env.values()`-Aufrufe auf Objekten, die schon ein Dict sind.
+4. Optional: schmaler Helfer `als_env_values(env_or_dict) -> dict[str, str]` an einer Stelle, alle Config-Leser darüber.
+
+**Nicht:** Drive-by-Refactor aller Call-Sites ohne Nutzen; zuerst die öffentlichen Config/Wallet-Leser und die Stellen, an denen Assistenten/Tests typisch anecken.
+
+---
+
+## Eastereggs · SatSage-würdige Ereignis-Atemzüge
+
+**Stand:** 2026-09-13 · **offen** · Ideen (Form: Ereignis → ein Atemzug → fertig; Flüchtigkeit beachten)
+
+Anschluss an bestehende Empfangs-Animationen (Konfetti/OH-NO/✓/oranges B) und Lernhinweise. Kein Streak-/Push-Gamification.
+
+1. **21-Millionen-Moment:** Session-Gesamtsaldo erstmals ≥ 21 000 000 sats → einmal ∞/21M-Maske atmen.
+2. **Haltefrist-Grenzübergang:** Ein UTXO wird „grün“ (außerhalb Frist) → einmal grüner Haken am Zeitstrahl (nicht nur Farbwechsel).
+3. **Privatsphäre-Pille:** Wechsel öffentlich → eigener Node/Electrs/P2P → kurzer „aufatmen“-Atem am QR (ruhiger Text).
+4. **Lern-Wo-ist-Walter:** Nach 5 gefundenen Lern-Tooltips in einer Session einmal Student-Maske (nur wenn Lernhinweise an).
+5. **Dust-Humor:** Versuch &lt;546 sats (Lab-Faucet) → OH NO! oder „Dust…“ — lehrreich.
+6. **Erste BIP-158-Treffer:** Compact Filter lädt zum ersten Mal einen Trefferblock → einmal Lupe-Atem.
+
+**Optional / nah an Technik:** Gap-Catch-Logzeile (*„Fremde Zahlung auf #n+k — Gap hat’s gefangen“*) + einmal Lupe, wenn Subscribe-Gap einen Empfang außerhalb der QR-Adresse meldet.
+
+**Nicht tun:** Daily Streaks, laut FOMO, Animationen die einen scannbaren Empfangs-QR während Zahlungsabsicht verdecken.
+
+---
+
+## Empfangen · Mempool-Lebenszeichen (Herzschlag + Wallet-Blink)
+
+**Stand:** 2026-09-12 · **offen** · Idee / Experiment
+
+Wenn eine für ein Wallet **relevante Tx im Mempool** auftaucht (Wallet-Watch / Pending):
+
+1. **Herzschlag** im Empfangs-QR (maskierter, nicht scanbarer Puls — wie beim Scan-Denken).
+2. Das betroffene Wallet in der Nav **kurz aufblinken**.
+3. Maske nach Betrag (eingehend, Satoshi):
+   - **≥ 1 000 000 sats** → Bitcoin-**B**
+   - **≥ 10 000 und &lt; 1 000 000** → **sat**
+   - **&lt; 10 000 sats** → **Pfeiffe**
+
+Wenn dieselbe Tx **bestätigt** (erster Block — binär, nicht „Pending sinkt“):
+
+4. Grüner **✓**-Atemzug (~80 % der QR-Fläche) — `EmpfangPuls.flashHaken()` ist vorbereitet.
+5. Wallet **nochmals** kurz aufblinken (Nav-Blink noch offen).
+
+**Hinweise:** Flüchtigkeit beachten. Trigger für Bestätigung: Txid war pending und hat jetzt `block_height` — nicht Zähler-Heuristik. Debug: `?animdebug=1` zeigt Test-Buttons neben Empfangen (nicht für Releases).
+
+**Abgrenzung:** Lernhinweise-QR und Scan-Herzschlag bleiben getrennte Modi; Mempool-Puls ist Ereignis, kein Dauerzustand.
+
+---
+
 ## Kurs-Historie · Bundle veraltet / Lücken bis „heute“ — teilweise gelöst
+
 
 **Stand:** 2026-09-11 · **umgesetzt (MVP)** · **zurückgestellt** (Feinschliff im Büro)
 
@@ -101,7 +344,7 @@ Wenn SatSage **standalone** auf derselben Maschine wie ein laufendes `bitcoind` 
 
 ## Immutable-Cache · SQLite statt Winz-JSONs (tx / utxo_ingress)
 
-**Stand:** 2026-09-09 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
+**Stand:** 2026-09-15 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
 
 ### Entscheidungsgrundlage (nicht vorab bauen)
 
@@ -111,15 +354,51 @@ Punktzugriff per TxID / `(txid, vout)` ist mit Flatfiles schon O(1). SQLite lohn
 |------------------------------------------|---------|
 | < ~1 000 | Flatfiles behalten |
 | ~2 000–5 000 | Grauzone — messen (Walk-Zeit, Windows); SQLite wenn Batch-Walks/Reports stocken |
-| ≥ ~10 000 | SQLite sinnvoll bis geboten |
+| ≥ ~10 000 | SQLite sinnvoll bis geboten (**Implementierungs-Schwelle** / Log-Hinweis) |
+
+**Feldbeobachtung (echte XPUBs):** `immutable_cache` inkl. `tx/` kann schon **über ~5 000 Dateien** laufen, bevor die 10k-Schwelle greift — Grauzone ist real, nicht nur theoretisch. Schwelle für den einmaligen Log-Hinweis und für „jetzt bauen“ bleibt bewusst **≥ ~10 000**.
 
 **Wachstumstreiber:** Herkunft in der Breite (viele UTXOs → `utxo_ingress/`) und/oder Tiefe/Breite des Graphen (viele `get_tx` → `tx/`), v. a. „Herkunft vollständig“, hohe `max_hops`, aufgelöste große Sammel-/CoinJoin-Txs. Reiner UTXO-/Specter-Seed füllt diese Ordner nicht.
 
-**Scope später:** nur `immutable_cache/tx` + `utxo_ingress` (zwei Tabellen, PK); XPUB-UTXO/Verlauf-JSON bleiben. Optional lazy Migration / Schwellwert-Opt-in. Windows/StartOS + Antivirus stärker betroffen als warmer Linux-Page-Cache.
+**Scope / Reihenfolge:** SQLite-Umbau **zunächst nur** die Immutable-Seite — konkret **`immutable_cache/tx`** (Tx-Cache) und mitgedacht **`utxo_ingress`** (zwei Tabellen, PK). **Nicht** in der ersten Welle: `utxo_cache/` (XPUB-UTXO, Verlauf, Alter, Adress-Auflösung), **`utxo_trace/`**, `cfilter/`, Header-Binaries, Sanktions-Cache, Labels. Optional lazy Migration / Schwellwert-Opt-in. Windows/StartOS + Antivirus stärker betroffen als warmer Linux-Page-Cache.
 
 **Laufzeit-Hinweis:** Ab ≥10 000 JSON-Dateien in `tx/` oder `utxo_ingress/` schreibt SatSage einmalig ins Log: *Cache wächst — sqlite ab jetzt sinnvoll* (+ Bitte um GitHub-Issue). Zählung nur alle 500 Writes, damit das Zählen selbst nicht teuer wird.
 
 **Abgrenzung:** Kein Drive-by vor CoinJoin-Hybrid-Walk — CJ-Auflösung treibt `tx/` voraussichtlich erst richtig in die Tausender.
+
+### Skalierung · Gedankenexperiment (Gesamt-UTXO-Set × bis Coinbase)
+
+**Kontext (Theorie, 2026-09-15):** Jemand lädt das **gesamte aktuelle UTXO-Set** in SatSage (grundlegende Modifikation, UTXOs ohne XPUB) und veranlasst den **Gesamtverlauf aller UTXOs bis Coinbase** (z. B. Sanktions-Check mit „1 Mio Hops“ ≈ kein künstlicher Tiefenstopp). Vergleichsgröße: Full-Node **mit Index ~1,3 TB**.
+
+**Größenordnung Cache danach (sehr grob):**
+
+| Teil | Charakter | vs. ~1,3 TB Node |
+|------|-----------|------------------|
+| `tx/` | unique TxIDs im Vorfahren-DAG ≈ großer Teil der Tx-Historie; JSON-Flatfile dicker als Wire | oft **~1×–wenige ×** Node (≈ 1–5 TB+, dickere JSONs mehr) |
+| `utxo_ingress/` | 1 schlanke Datei pro UTXO (~10⁸) | **~0,1–0,4 TB** — lästig, nicht dominant |
+| `utxo_trace/` | **1 Vollbaum pro UTXO**, geteilte Vorfahren **ohne Sharing erneut serialisiert** | leicht **~10–100 TB+** (CJ/breit: deutlich mehr) — **dominiert** |
+| Header / cfilter / UTXO-Liste | Nebenkosten | ≪ Trace/Tx |
+
+**Key takeaway:** Ja — **`utxo_trace`-Flatfiles sind massiv redundant**, weil **geteilte Vergangenheiten** (gemeinsame Vorfahren bis Coinbase) **pro UTXO erneut weggeschrieben** werden. `tx/` ist dagegen schon **pro TxID dedupliziert** (ein File je Transaktion); der Schmerz dort ist vor allem **JSON-Aufblähung + Millionen Dateien/Syscalls**, nicht Baum-Kopie. Ohne Voll-Traces: Cache eher „Node-Liga oder etwas drüber“. Mit Voll-Trace je Output: **Größenordnungen über** 1,3 TB; OS/AV sterben an **Dateianzahl** oft vor der TB-Zahl. Node bleibt effizienter: Historie **einmal** binär, kein materialisierter Baum je Coin.
+
+**Erkenntnis · geteiltes DAG-/Graph-Modell:** Die **Blockchain selbst** *ist* bereits das Funding-DAG in **höchstkomprimierter** Form (binäre Txs, Blöcke, optional txindex/UTXO-Set). Ein SatSage-internes „shared Graph gegen Trace-Redundanz“ für den **Vollgraphen** (alle Coins, multi-user, bis Coinbase) konvergiert gegen **Node-/Indexer-Arbeit** — Konsens-Historie plus Wallet-Färbung (own/external, Fingerprint, CJ, Steuer) in einem eigenen Store zu halten wäre **sehr komplex** und meist eine **schlechtere zweite Chain**. Schichten grob: (1) `tx`+`ingress`-Tabellen = mittel, Datei-Schmerz; (2) App-Kanten-Cache + lazy Walk = schon semantisch heikel (Invalidierung, Färbung); (3) chain-gleicher Vollgraph = falsch investiert. Redundanz der Traces stirbt primär durch **Nicht-Materialisieren**, nicht durch Ultra-Graph-Eigenbau.
+
+**SQLite — was hilft (ohne zweite Chain):**
+
+- **Erste Welle (`tx` + `ingress` als Tabellen/PK):** mildert **Inode-/Open-/AV-Kosten** und Backup-Chaos; speichert **nicht magisch weniger Nutzdaten**, wenn jede Tx weiter als fetter JSON-Blob in einer Zeile liegt. Kompression kann JSON-Bloat mindern, nicht die „fast volle Historie“-Menge.
+- **Traces nur als Blob-pro-UTXO in SQLite** (1:1-Port): **behebt die Redundanz nicht** — weniger Dateien, ähnliche TB-Lage.
+- **Nicht-Ziel:** SatSage als Exchange-Backend mit privatem Voll-Trace-Clone je Kunde. Multi-User-Fantasie → **Indexer/Node** als DAG, SatSage = Policy/Steuer/UI.
+
+### Designentscheidung · keine „bessere Blockchain“, Cache-Grenze, Trace on demand
+
+**Stand:** 2026-09-15 · **beschlossen (Richtung)**
+
+1. **SatSage soll keine „bessere Blockchain“ als DAG-/Graph-Modell neu erfinden.** Die Chain (bzw. ein fähiger Index darüber) bleibt Source of Truth für den Funding-Graphen. Kein Projektziel „shared Herkunfts-DAG parallel zur Node“.
+2. **Cache hat einen Grenzfall, den wir bei Bedarf scharf ziehen** — wenn Skalierung weh tut (viele Traces, ggf. multi-user / viele XPUB-Welten): geeigneten **Cache-Ceiling** identifizieren (was darf persistent sein: typisch schlankes `tx`/`ingress`/UTXO-Meta; was nicht: Vollbäume auf Vorrat).
+3. **Darüber hinaus:** Herkunfts-/Sanktions-Bäume **nur individuell je Anforderung** erzeugen (Job/Request), **nicht auf Vorrat in den Cache verklappen**. Optional ephemer in RAM/Session; Persistenz von Voll-`utxo_trace` ist Komfort unter der Grenze, kein Pflichtpfad für Masse.
+4. **Performance jenseits der Grenze:** nicht mehr Cache-Philosophie, sondern **bessere Datenquelle/Indexer**. Orientierung: **Libbitcoin** (bzw. vergleichbar starker Stack) schafft grob **~vierfache electrs-Performance** — das muss für schwere Walks **dann mal reichen**, statt Graph-DB in-process.
+
+**Konsequenz für diese Issue:** SQLite-Welle 1 bleibt **`tx` + `ingress`** (Zugriffskosten). **Kein** Folge-Epic „Graph-DB / shared trace DAG“. Trace-Redundanz und Exchange-Skalen → **Ceiling + on-demand + Indexer**, nicht Denormalisierungs-Kunst in SatSage.
 
 ---
 
@@ -408,16 +687,17 @@ Verwandt mit „Gründlichere Herkunft in der Web-GUI“.
 
 Vor Formheuristik: **alle** `vin`/`vout` gegen konfigurierte XPUBs matchen. Sonst kein Exchange-/PayJoin-Label. Soft: „Wahrscheinlich …“.
 
-| Label | Eigene Inputs | Eigene Outputs | Lesart |
-|--------|---------------|----------------|--------|
-| **Fan-Out (eigen)** | **alle** Ins eigen | 0 oder nur Change | du zahlst aus |
+| Label | Eigene Inputs | Form (In/Out) | Lesart |
+|--------|---------------|---------------|--------|
+| **Fan-Out (eigen)** | **alle** Ins eigen | mehr Outs als Ins, ≥3 Outs | Auszahlung/Split (wenige→n) |
+| **Fan-In (eigen)** | **alle** Ins eigen | mehr Ins als Outs, ≥2 Ins | Konsolidierung (n→wenige) |
 | **PayJoin** | gemischt; übersichtlich viele Ins, **wenige** Fremd (typisch 1, selten 2) | Sender oft Change; Empfänger oft 1 Netto-Out | kollaborative Zahlung, **kein** Mix |
-| **Exchange-Batch** | **0** eigen | genau 1 (selten mehr) | nur Empfang; **kein** CJ (Risiko gering, wenn Input-Eigentum vollständig) |
+| **Exchange-Batch** | **0** eigen | typisch viele Outs, ≥1 eigen | nur Empfang; **kein** CJ |
 | **CoinJoin** (Wasabi / Whirlpool / JM) | ≥1 eigen | ≥1 eigen | Mix; Fremde = Rauschen |
 
-**Detektor-Reihenfolge:** (1) Eigentum klären → (2) 0 eigene Ins + eigene Outs → Exchange-Batch → (3) alle Ins eigen → Fan-Out → (4) wenige Ins/wenige Fremd → PayJoin → (5) Whirlpool → Wasabi → JoinMarket → unklar.
+**Detektor-Reihenfolge:** (1) Eigentum klären → (2) 0 eigene Ins + eigene Outs → Exchange-Batch → (3) alle Ins eigen → Fan-In/Fan-Out nach Richtung → (4) wenige Ins/wenige Fremd → PayJoin → (5) Whirlpool → Wasabi → JoinMarket → unklar.
 
-**Abgrenzung:** Fan-Out = 0 Fremd-Ins; PayJoin = ≥1 Fremd-In bei kleinem Ins-Set (Richtwert ≤5–8 Ins, ≤2 Fremd); Exchange ohne eigenen Input kein CJ. PayJoin/Fan-Out/Exchange **nicht** in die CJ-Stop-/Auflös-Optionen.
+**Abgrenzung:** Fan-In/Out = 0 Fremd-Ins, Richtung `n_in` vs. `n_out` (nicht pauschal „alle eigenen Ins“); PayJoin = ≥1 Fremd-In bei kleinem Ins-Set (Richtwert ≤5–8 Ins, ≤2 Fremd); Exchange ohne eigenen Input kein CJ. PayJoin/Fan-In/Fan-Out/Exchange **nicht** in die CJ-Stop-/Auflös-Optionen.
 
 ### Umsetzungsstrategie (Reihenfolge)
 
@@ -470,12 +750,13 @@ Rückwärts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein*
 - Mit XPUB: eigene Inputs + typisch ein CJ-Out + ggf. eigenes Change; Fremde = Rauschen.  
 - In die CoinJoin-Einstellung aufnehmen; Cache-Typ `joinmarket`.
 
-**5. PayJoin / Fan-Out / Exchange-Batch — eigene Labels, kein CJ**
+**5. PayJoin / Fan-In / Fan-Out / Exchange-Batch — eigene Labels, kein CJ**
 
 - Siehe Tabelle „Klassifikation · Eigentum zuerst“.  
 - PayJoin (BIP78/BIP77): weicher Hinweis möglich; **nicht** in CJ-Stop-/Auflös-Optionen.  
 - Exchange-Batch erst nach vollständigem Input-Eigentum (0 eigene Ins).  
-- Fan-Out (eigen): alle Ins eigen.
+- Fan-Out (eigen): alle Ins eigen, mehr Outs als Ins (≥3 Outs).  
+- Fan-In (eigen): alle Ins eigen, mehr Ins als Outs (Konsolidierung).
 
 **Erledigt (MVP):** Detektor + Soft-Labels + Own-Input-Walk + Lab-Fixtures.  
 **Wenn wir wieder drankommen:** Einstellungs-Enum A/B/C → Whirlpool-Kette (Remix × n) → Handbuch-Abschnitt Trace-Verhalten.

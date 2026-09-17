@@ -70,6 +70,14 @@ class TestEinfacherBaum(unittest.TestCase):
         self.assertEqual(kinder[0]["address"], EXTERN_A)
         self.assertEqual(kinder[0]["from_utxo"], f"{TXID_EXTERN}:0")
 
+    def test_externer_zufluss_traegt_eingangsdatum(self):
+        """Jüngste sats nutzen time_ts — die UI muss es am Blatt sehen."""
+        kind = self.ergebnis["children"][0]
+        self.assertTrue(
+            kind.get("time_label") or kind.get("block_time"),
+            msg=f"externes Blatt ohne Zeit: {kind!r}",
+        )
+
     def test_vollstaendiger_baum_meldet_sich_an_der_wurzel(self):
         """Die Liste braucht das, sonst erscheint „jüngste sats" erst nach Refresh."""
         self.assertTrue(self.ergebnis["verfolgt_vollstaendig"])
@@ -85,6 +93,30 @@ class TestEinfacherBaum(unittest.TestCase):
         kennungen = [k["id"] for k in self.ergebnis["children"]]
         self.assertEqual(len(kennungen), len(set(kennungen)))
         self.assertTrue(all(k.startswith("0.") for k in kennungen))
+
+
+class TestFehlenderPrevout(unittest.TestCase):
+    """Vorgänger-Tx fehlt → Lücke, nicht leeres „found“ ohne Kinder."""
+
+    def test_prevout_fehlt_ergibt_error_kind_nicht_leer(self):
+        # Erzeuger-Tx mit einem Vin, Prevout-Tx nicht im get_tx-Pool.
+        creator = txid("a3")
+        missing_prev = txid("f9")
+        chain = {
+            creator: core_tx(
+                creator,
+                [core_vin(missing_prev, 0)],
+                [core_vout(0, BIP84_RECEIVE_0, 0.0005)],
+            ),
+        }
+        ergebnis = trace_utxo(make_get_tx(chain), creator, 0, EIGENE)
+        self.assertTrue(ergebnis["found"])
+        self.assertFalse(ergebnis["verfolgt_vollstaendig"])
+        kinder = ergebnis["children"]
+        self.assertGreaterEqual(len(kinder), 1, msg=ergebnis)
+        self.assertEqual(kinder[0]["type"], "error")
+        self.assertIn("Vorgänger", kinder[0].get("note") or "")
+        self.assertEqual(kinder[0].get("from_utxo"), f"{missing_prev}:0")
 
 
 class TestVerschachtelung(unittest.TestCase):

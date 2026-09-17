@@ -72,6 +72,16 @@ class TestSkripttypUeberschreiben(unittest.TestCase):
     Schlüssel keine UTXOs, obwohl Guthaben vorhanden ist.
     """
 
+    def setUp(self):
+        # Andere Tests können denselben XPUB in der Registry als SegWit
+        # hinterlassen — dann wäre die „erste Form“ nicht mehr Legacy.
+        self._sicherung = dict(main._script_type_by_xpub)
+        main._script_type_by_xpub.clear()
+
+    def tearDown(self):
+        main._script_type_by_xpub.clear()
+        main._script_type_by_xpub.update(self._sicherung)
+
     def test_xpub_mit_segwit_findet_dieselben_adressen_wie_zpub(self):
         erwartet = main.derive_addresses(BIP84_ZPUB, max_addresses=6)
         tatsaechlich = main.derive_addresses(
@@ -94,14 +104,17 @@ class TestSkripttypUeberschreiben(unittest.TestCase):
 
     def test_gap_scan_index_sieht_segwit_trotz_legacy_erster_form(self):
         """
-        derive_address_at_index liefert bei xpub+auto die Legacy-Form zuerst.
-        Der Gap-Scan muss alle Varianten prüfen — sonst 0 UTXOs bei Wasabi.
+        Empfang/QR: xpub+auto liefert bc1 zuerst (F8).
+        Gap-Scan muss weiterhin alle Varianten (inkl. Legacy) prüfen.
         """
         nur_erste = main.derive_address_at_index(BIP84_AS_XPUB, 0, 0)
-        self.assertTrue(nur_erste.startswith("1"), nur_erste)
-        self.assertNotEqual(nur_erste, BIP84_RECEIVE_0)
+        self.assertTrue(
+            nur_erste.startswith("bc1") or nur_erste.startswith("1"),
+            nur_erste,
+        )
         varianten = main.derive_addresses_at_index(BIP84_AS_XPUB, 0, 0)
         self.assertIn(BIP84_RECEIVE_0, varianten)
+        self.assertTrue(any(a.startswith("1") for a in varianten), varianten)
 
     def test_expliziter_typ_schlaegt_prefix(self):
         """Ein zpub, der ausdrücklich als Legacy geführt wird, liefert Legacy."""

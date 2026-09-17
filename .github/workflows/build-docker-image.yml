@@ -76,7 +76,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           provenance: false
-          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          # Versions-Tag immer; :latest zusätzlich (Dev-Pin in packaging/umbrel
+          # bis zum nächsten Store-Release mit festem Tag+Digest).
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

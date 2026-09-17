@@ -24,6 +24,9 @@ class FakeClient:
         self.threads: set[int] = set()
         self.aufrufe = 0
 
+    def tor_batch_sinnvoll(self, n_calls: int) -> bool:
+        return False
+
     def benutze(self):
         self.threads.add(threading.get_ident())
         self.aufrufe += 1

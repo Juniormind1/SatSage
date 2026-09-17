@@ -16,6 +16,9 @@ Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diese
 - **Konfiguration:** `.env` (Vorlage: `.env.example`) â€” niemals Secrets, XPUBs oder persÃ¶nliche Wallet-Namen committen
 - **Dokumentation:** `README.md`, Nutzerhandbuch: `doc/handbuch.html`, Ã„nderungshistorie: `CHANGELOG.md`, offene Punkte: `ISSUES.md`, Plugin: `specter_plugin/README.md`
 - **Design Â· Node-Anbindung:** `doc/design-node-anbindung.md` â€” schick, minimalistisch, fehlertolerant; Konfigurationsfehler mÃ¶glichst von der App abfangen (nicht vom Nutzer)
+- **Design Â· FlÃ¼chtigkeit:** `doc/design-fluchtigkeit.md` â€” Nutzer in Eile/unaufmerksam; Fehlerverhinderung statt Hinweistext (z.â€¯B. Empfangs-QR beim Wallet-Wechsel sofort ungÃ¼ltig)
+- **Design Â· Neugier:** `doc/design-neugier.md` / `doc/lernhinweise-kuratierung.md` â€” Pleb-Lern-URLs; **bei jeder Kuratierung Handbuch §14 (`doc/handbuch.html`) mitziehen**
+
 - **Grok-Bot (remote, z.â€¯B. nur iPhone + GitHub):** `GROK_BOT.md` â€” hart: keine Secrets/Heim-Node; **Mainnet nie**; Lab/CI: **Regtest â†’ Signet â†’ Testnet nur Ausnahme**; Lab-Env getrennt von Prod-`.env` (kein eingebauter Multi-Chain-Schalter)
 - **Web-GUI-StabilitÃ¤t (Rumgeklicke):** Protokoll `doc/testprotokoll-webgui-stabilitaet.md`; halbautomatisch `scripts/webgui_chaos_run.py` + `scripts/webgui_chaos_harness.js` (optional Playwright)
 - **Datenquellen-Wechsel waehrend Scan:** Protokoll `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — P2P vs Electrum, Job-Snapshot, Cache-Flags, Queue
@@ -63,8 +66,8 @@ py main.py --txid <txid> --xpubs zpub6...
 
 1. **Eigener Electrum-Server** (`FULCRUM_HOST` / `FULCRUM_TOR`, electrs/Fulcrum) â€” PrivatsphÃ¤re **hoch**
 2. **Bitcoin-P2P Compact Filter** â€” `--bip158` (kein Core-RPC)
-3. **Ã–ffentliche Fulcrum-Onions** â€” `FULCRUM_TOR_0`â€¦`9`, nur nach BestÃ¤tigung
-4. **Clearnet-Fulcrum** â€” Ã¶ffentliche Server ohne Tor (`electrum_servers.json`), nur nach BestÃ¤tigung
+3. **Clearnet-Fulcrum** â€” Ã¶ffentliche Server ohne Tor (`electrum_servers.json`), nur nach BestÃ¤tigung
+4. **Ã–ffentliche Fulcrum-Onions** â€” `FULCRUM_TOR_0`â€¦`9`, nur nach BestÃ¤tigung und nur wenn Clearnet nicht erreichbar (dann Tor; bei Clearnet-Treffer wird Ã¶ffentliches Onion/Tor-Autostart gelÃ¶st)
 
 **UTXO-Bestand** (zusätzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
 
@@ -211,12 +214,14 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 ### Commit-Identität (Maintainer / Assistent)
 
-**Maintainer-Clones und Assistenten-Worktrees** committen/pushen nur unter der Projekt-Identität:
+**Von Maintainer-Rechnern und Assistenten-Worktrees** (Juniormind1-Maschinen, Grok/Cursor-Worktrees, `scripts/commit.*` / `scripts/push.*`) gilt hart:
 
-- `user.name=Juniormind1`
-- `user.email=juniormind@proton.me`
+- **Nur** `user.name=Juniormind1` / `user.email=juniormind@proton.me`
+- **Kein** Push/Commit unter anderer Identität — auch nicht versehentlich (OS-Default, alte Config, Assistent)
+- Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Abweichung ab; `--fix-identity` setzt name/email/hooks). Commit-Default: getrackte + untracked **Text** auto; untracked **Binär** nach Nachfrage (`-A` alles, `-u` nur getrackt)
+- **Windows `.bat`:** echte `cmd.exe`-Dateien — **CRLF**-Zeilenenden (LF-only zerlegt CMD in Müll-Befehle), `REM`/`::` statt `#`, kein Bash-Syntax. Nach dem Schreiben Bytes prüfen (`\r\n`, kein UTF-16/NUL). `.sh` bleibt LF/Bash.
 
-Pflicht in diesen Clones:
+Pflicht in **diesen** Clones:
 
 ```bash
 git config user.name Juniormind1
@@ -224,9 +229,9 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **in diesen Worktrees**. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
 
-**Fremde Contributor-Commits und PRs:** eigene Autor-/Committer-IDs sind erlaubt (übliche OSS-Praxis). CI verlangt nicht „jeder Commit = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
+**Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
 Assistenten sollen:
 
@@ -234,6 +239,35 @@ Assistenten sollen:
 - Nicht nach jedem Task „Soll ich committen/pushen?“ fragen
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
+- Für Commit/Push ohne Token-Verbrauch die Maintainer-Skripte vorschlagen (`scripts/commit.*`, `scripts/push.*`)
+
+### Remote-Stand prüfen (Pflicht, multi-machine)
+
+Entwicklung läuft parallel (z. B. MacBook + Windows-Worktree). Pushes auf `dev-juniormind` können von einem anderen Rechner kommen. **Niemals** den Remote-Stand nur aus dem lokalen Tracking-Ref `origin/<branch>` ableiten und als Wahrheit melden.
+
+**Harte Falle in manchen Clones/Worktrees:** `remote.origin.fetch` ist auf nur `main` eingeengt, z. B.
+
+```text
+remote.origin.fetch=+refs/heads/main:refs/remotes/origin/main
+```
+
+Dann aktualisiert `git fetch` / `git fetch --prune` **`origin/dev-juniormind` nicht**. Der Ref kann tagelang auf einem alten Commit stehen, während GitHub schon weiter ist — und der Assistent meldet fälschlich „Remote = 11.09.“ obwohl gerade gepusht wurde.
+
+**Pflichtablauf bei jeder Frage nach Remote / Sync / „wo steht origin?“ / vor Pull-Empfehlung:**
+
+1. `git config --get remote.origin.fetch` lesen (Refspec-Falle erkennen).
+2. **Wahrheit vom Server:** `git ls-remote origin refs/heads/dev-juniormind refs/heads/main` (SHA live von GitHub).
+3. Tracking-Ref aktualisieren, explizit und mit Force-Refspec wenn nötig:
+   - `git fetch origin +refs/heads/dev-juniormind:refs/remotes/origin/dev-juniormind`
+   - analog für andere Branches; nicht darauf vertrauen, dass ein bare `git fetch` alle Heads holt.
+4. Erst danach `git log -1` auf `origin/dev-juniormind`, Divergenz `HEAD...origin/dev-juniormind` (`rev-list --left-right --count`), und bei Non-Fast-Forward / Rewrite klar sagen.
+5. `FETCH_HEAD` allein oder ein veraltetes `origin/*` ohne Schritt 2–3 **reicht nicht** als Remote-Antwort.
+
+Optional dauerhaft heilen (nur wenn der Nutzer das will, nicht stillschweigend global umbiegen):
+
+```bash
+git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+```
 
 ### Merge-Dealbreaker
 
@@ -242,6 +276,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 ## Sicherheit & Datenschutz
 
 - XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
+- Lern-URLs / Kaninchenbau: nur Bitcoin-only-Content für Plebs (Mechanismen, keine SatSage-Internals); Shitcoins/Eth im Zweifel warnen (Dealbreaker T13)
 - Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen
 - Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` öffentlich sichtbar
 - Fulcrum (öffentliche Onions/Clearnet): mäßig (Rotation mildert Risiko); öffentliche Server und Remote-LLM nur nach Opt-in
@@ -252,6 +287,9 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 ## UI-Konventionen
 
 - **Node verbinden:** Leitbild in `doc/design-node-anbindung.md` â€” dem Nutzer den Node so einfach wie mÃ¶glich machen; typische Heimnetz-/TLS-/Port-Fallen selbst abfangen; HÃ¤rte nur wo nÃ¶tig (Clearnet, Opt-in), nicht als Kollateralschaden auf Desktop-LAN oder Start9-Bridge.
+- **FlÃ¼chtigkeit / Eile:** Leitbild in `doc/design-fluchtigkeit.md` â€” von unaufmerksamem, eiligem Nutzer ausgehen; gefÃ¤hrliche ZwischenzustÃ¤nde unmÃ¶glich machen (nicht nur beschriften). Beispiel Empfangs-QR: bei Wallet-Wechsel sofort entwerten, erst wieder zeigen wenn die Adresse des neuen Wallets feststeht.
+- **Neugier / Lernen nebenbei:** Leitbild in `doc/design-neugier.md` â€” Tooltips (`title` / `data-i18n-title`); Kuratierung `doc/lernhinweise-kuratierung.md`. **Pflicht:** Jede vom Maintainer angegebene Pleb-Lern-URL sofort in `web/lernhinweise.json` **und** Handbuch-FAQ §14 (`doc/handbuch.html`, DE+EN) nachziehen. Kein Widerspruch zur FlÃ¼chtigkeit.
+
 - **Verbose:** Default `nein` (`VERBOSE` in `.env` oder Einstellungen [4]); gekÃ¼rzte TxIDs/Adressen
 - **BetrÃ¤ge:** `format_sats` â€” â‰¤100â€¯000 sats als sats, darÃ¼ber BTC mit 2 Dezimalstellen
 - **Lange Listen:** `cancellable_output` â€” `q` zum Abbrechen (nur interaktives TTY)

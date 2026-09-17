@@ -147,6 +147,15 @@ def set_chain_network(name: str | None) -> None:
     _hdkey_by_xpub.clear()
     _xpub_address_positive_cache.clear()
     _xpub_address_negative_cache.clear()
+    # Fulcrum-Header-Zeiten: Mainnet-Höhe ≠ Regtest-Höhe.
+    try:
+        import fulcrum as _fulcrum_mod
+
+        cache = getattr(_fulcrum_mod, "_HEADER_TIME_CACHE", None)
+        if isinstance(cache, dict):
+            cache.clear()
+    except Exception:
+        pass
 
 _hdkey_by_xpub: dict[str, HDKey] = {}
 #: Cache-Kennung pro Deskriptor-Text (erste Adresse → Hash), damit
@@ -167,8 +176,15 @@ def _dump_cache_json(payload: dict | list) -> str:
 
 
 
-def _load_dotenv(env_path: Path = ENV_FILE) -> dict[str, str]:
-    """Lädt KEY=VALUE-Paare aus einer .env-Datei (ohne externe Abhängigkeit)."""
+def _load_dotenv(env_path: Path | None = None) -> dict[str, str]:
+    """Lädt KEY=VALUE-Paare aus einer .env-Datei (ohne externe Abhängigkeit).
+
+    *env_path* default zur Laufzeit ``ENV_FILE`` — nicht als Default-Argument
+    einfrieren, sonst bleibt nach ``server --env lab/…`` die Root-``.env``
+    (und z. B. ``NETWORK=main``) aktiv und setzt Regtest-Adressen zurück.
+    """
+    if env_path is None:
+        env_path = ENV_FILE
     values: dict[str, str] = {}
     if not env_path.is_file():
         return values
@@ -642,8 +658,27 @@ def save_cached_tx(
 
 
 
+def _block_header_network_tag() -> str:
+    """Unterscheidet Mainnet/Regtest — Höhe 130 ist nicht dieselbe Chain."""
+    if _CHAIN_NETWORK is None:
+        return "main"
+    name = str(_CHAIN_NETWORK.get("name") or "main").strip().lower()
+    if "regtest" in name:
+        return "regtest"
+    if "signet" in name:
+        return "signet"
+    if "test" in name:
+        return "test"
+    return "main"
+
+
 def _block_header_cache_path(height: int, cache_root: Path) -> Path:
-    return cache_root / BLOCK_HEADER_CACHE_SUBDIR / f"{int(height)}.json"
+    # Netzwerk im Dateinamen: Mainnet-Cache darf Regtest-Höhen nicht vergiften.
+    return (
+        cache_root
+        / BLOCK_HEADER_CACHE_SUBDIR
+        / f"{_block_header_network_tag()}-{int(height)}.json"
+    )
 
 
 def load_cached_block_time(height: int, cache_root: Path | None = None) -> int | None:
@@ -653,7 +688,12 @@ def load_cached_block_time(height: int, cache_root: Path | None = None) -> int |
     root = cache_root or IMMUTABLE_CACHE_DIR
     path = _block_header_cache_path(height, root)
     if not path.is_file():
-        return None
+        # Legacy: höhen-only (Mainnet-Ära) — nur ohne aktives Alt-Netz lesen.
+        legacy = root / BLOCK_HEADER_CACHE_SUBDIR / f"{int(height)}.json"
+        if _block_header_network_tag() == "main" and legacy.is_file():
+            path = legacy
+        else:
+            return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -676,6 +716,7 @@ def save_cached_block_time(
     payload = {
         "height": int(height),
         "block_time": int(block_time),
+        "network": _block_header_network_tag(),
         "cached_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": source,
     }
@@ -1416,6 +1457,36 @@ def _probe_public_onion_endpoint(
     return index, client, error
 
 
+def tls_should_try_opposite(error: str | None) -> bool:
+    """
+    Ob nach Fehlversuch die andere TLS-Einstellung sinnvoll ist.
+
+    Reine Netzfehler (Timeout, refused) nicht — da hilft SSL-Umschalten nicht.
+    Protokoll-Mismatch (wrong version, EOF, SSL) und unklare Handshake-Fehler ja.
+    """
+    if not error:
+        return False
+    text = str(error).lower()
+    if "listunspent" in text:
+        return False
+    if any(
+        x in text
+        for x in (
+            "timed out",
+            "timeout",
+            "connection refused",
+            "network is unreachable",
+            "no route to host",
+            "name or service not known",
+            "nodename nor servname",
+            "getaddrinfo failed",
+            "temporary failure in name resolution",
+        )
+    ):
+        return False
+    return True
+
+
 def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     """
     Übersetzt typische Verbindungsfehler in einen umsetzbaren Hinweis.
@@ -1431,7 +1502,7 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     if use_ssl and "wrong version number" in text:
         return (
             "TLS-Handshake fehlgeschlagen — der Port spricht vermutlich kein SSL. "
-            "FULCRUM_SSL=false in .env setzen oder --fulcrum-no-ssl verwenden."
+            "SatSage probiert beim nächsten Check ohne TLS und schreibt es fest."
         )
     if use_ssl and "certificate verify failed" in text:
         return (
@@ -1442,7 +1513,7 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     if not use_ssl and ("unexpected eof" in text or "not enough data" in text):
         return (
             "Verbindung ohne TLS abgebrochen — der Port erwartet vermutlich SSL. "
-            "FULCRUM_SSL=true in .env setzen."
+            "SatSage probiert beim nächsten Check mit TLS und schreibt es fest."
         )
     if "connection refused" in text:
         return "Port geschlossen — läuft Fulcrum, und stimmt FULCRUM_PORT?"
@@ -1506,20 +1577,36 @@ def _try_fulcrum_endpoint(
             tor_proxy=None,
             require_listunspent=True,
         )
-    if (
-        not client
-        and use_ssl
-        and tor_proxy
-        and error
-        and "wrong version number" in error.lower()
-    ):
+    # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung (LAN + Onion).
+    if not client and error and tls_should_try_opposite(error):
+        alt = not use_ssl
         print(
-            "  → TLS-Handshake fehlgeschlagen, versuche denselben Port ohne TLS…",
+            f"  → {'TLS' if use_ssl else 'ohne TLS'} fehlgeschlagen "
+            f"({error}) — versuche {'ohne TLS' if use_ssl else 'mit TLS'}…",
             flush=True,
         )
-        return _try_fulcrum_endpoint(label, host, port, False, tor_proxy)
+        if tor_proxy:
+            _index, client, error = _probe_public_onion_endpoint(
+                0, host, port, alt, tor_proxy,
+            )
+        else:
+            from fulcrum import connect_fulcrum
+
+            client, error = connect_fulcrum(
+                host,
+                port,
+                use_ssl=alt,
+                timeout=FULCRUM_CONNECT_TIMEOUT,
+                tor_proxy=None,
+                require_listunspent=True,
+            )
+        use_ssl = alt
     if client:
-        print(f"  → {label} erreichbar", flush=True)
+        print(
+            f"  → {label} erreichbar"
+            + (f" ({'TLS' if use_ssl else 'ohne TLS'})"),
+            flush=True,
+        )
         return client
     if error and "listunspent" in error:
         print(f"  → ungeeignet: {error}", flush=True)
@@ -2253,7 +2340,7 @@ def _try_public_onion_fulcrum(
     *,
     interactive: bool = False,
 ):
-    """Priorität 3: öffentliche Fulcrum-Server über Tor."""
+    """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt."""
     if not _load_public_onion_endpoints(args, env):
         return None
     try:
@@ -2384,12 +2471,11 @@ def _nach_oeffentlichem_onion_latenz(
 
 
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
-    """Priorität 4: öffentliche Fulcrum-Server über Clearnet."""
+    """Öffentliche Fulcrum-Server über Clearnet (vor öffentlichem Onion)."""
     from fulcrum import RotatingFulcrumPool
 
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
-    # letzte Probe (z. B. „Onions nicht nutzbar“), während Clearnet
-    # nur nach stdout schreibt.
+    # letzte Probe, während Clearnet nur nach stdout schreibt.
     _log_quelle("Suche öffentliche Electrum-Server (Clearnet)…")
     pool, _from_cache = resolve_sanctions_clearnet_pool(env)
     if pool is None:
@@ -2400,6 +2486,13 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
         f"Datenquelle: öffentliche Electrum-Server "
         f"(Clearnet, {len(clients)} Server)"
     )
+    # Tor-Autostart für öffentliche Onions nicht als Flaschenhals stehen lassen.
+    try:
+        from core.source import _loese_oeffentliches_onion_tor
+
+        _loese_oeffentliches_onion_tor(on_log=_log_quelle)
+    except Exception:
+        pass
     return RotatingFulcrumPool(clients)
 
 
@@ -2413,7 +2506,7 @@ def _try_data_source_priority_chain(
     """
     Automatische Datenquelle in Prioritätsreihenfolge.
     1. eigener Electrum-Server (Fulcrum/electrs), 2. P2P-BIP-158.
-    Öffentliche Onions/Clearnet nur nach Bestätigung (OEFFENTLICHE_ELECTRUM).
+    Öffentliche Electrum nur nach Bestätigung: Clearnet vor Onion.
     """
     _log_quelle("Automatische Datenquellen-Priorität…")
 
@@ -2447,6 +2540,12 @@ def _try_data_source_priority_chain(
         )
         return None
 
+    # Clearnet vor öffentlichem Onion: nach Opt-in kein Tor-Flaschenhals,
+    # solange Clearnet-Electrs erreichbar sind.
+    pool = _setup_public_clearnet_fulcrum(args, env)
+    if pool:
+        return "fulcrum", pool, None
+
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
         gewählt = _nach_oeffentlichem_onion_latenz(
@@ -2459,10 +2558,6 @@ def _try_data_source_priority_chain(
         if gewählt:
             return gewählt[0], gewählt[1], None
         return None
-
-    pool = _setup_public_clearnet_fulcrum(args, env)
-    if pool:
-        return "fulcrum", pool, None
 
     return None
 
@@ -2497,6 +2592,14 @@ def _try_public_electrum_fuer_verlauf(
         )
         return None
 
+    pool = _setup_public_clearnet_fulcrum(args, env)
+    if pool:
+        _log_quelle(
+            "Verlauf: öffentliche Electrum-Server (Clearnet) — get_history "
+            "(Privatsphäre mäßig)."
+        )
+        return "fulcrum", pool
+
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
         gewählt = _nach_oeffentlichem_onion_latenz(
@@ -2517,17 +2620,9 @@ def _try_public_electrum_fuer_verlauf(
             return quelle, backend
         _log_quelle(
             "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
-            "(Privatsphäre mäßig)."
+            "(Privatsphäre mäßig; Clearnet nicht erreichbar)."
         )
         return "fulcrum", backend
-
-    pool = _setup_public_clearnet_fulcrum(args, env)
-    if pool:
-        _log_quelle(
-            "Verlauf: öffentliche Electrum-Server (Clearnet) — get_history "
-            "(Privatsphäre mäßig)."
-        )
-        return "fulcrum", pool
     return None
 
 
@@ -2547,7 +2642,7 @@ def _try_verlauf_priority_chain(
     1. Electrs/Fulcrum im LAN (``get_history``)
     2. Electrs/Fulcrum über Onion
     3. BIP-158 Compact Filter (Blockwalk/Cache, kein get_history)
-    4. öffentliche Electrum (Onion, dann Clearnet) nach Bestätigung
+    4. öffentliche Electrum (Clearnet, sonst Onion) nach Bestätigung
     """
     _log_quelle("Verlaufsscan — eigene Datenquellen-Priorität…")
 
@@ -2901,10 +2996,17 @@ def _setup_blockchain_client(
     if result:
         return result[0], result[1]
 
-    grund = (
-        "Keine Datenquelle erreichbar (eigener Electrum-Server, BIP-158). "
-        "Öffentliche Electrum-Server nur nach Bestätigung."
-    )
+    if _oeffentliche_electrum_erlaubt(env, args):
+        grund = (
+            "Keine Datenquelle erreichbar: eigener Electrum-Server und "
+            "BIP-158 fehlen, öffentliche Electrum-Server (Onion/Clearnet) "
+            "waren trotz Freigabe nicht nutzbar (Tor/Netz/Liste prüfen)."
+        )
+    else:
+        grund = (
+            "Keine Datenquelle erreichbar (eigener Electrum-Server, BIP-158). "
+            "Öffentliche Electrum-Server nur nach Bestätigung."
+        )
     _log_quelle(grund)
     raise SystemExit(grund)
 
@@ -3220,6 +3322,10 @@ def _encoders_for_xpub(xpub: str, script_type: str | None = None):
     'tpub' werden deshalb alle gängigen Typen probiert, statt natives SegWit
     auszulassen — sonst finden solche Wallets keine UTXOs. Wer das nicht
     braucht, setzt den Typ ausdrücklich und spart die überflüssigen Ableitungen.
+
+    Bei auto/xpub kommt **native SegWit (bc1q) zuerst** — Empfangsadresse/QR
+    und erste Ableitung sollen modern sein; Legacy/Nested/Taproot folgen für
+    den Gap-Scan. Explizit „legacy“ in den Einstellungen erzwingt weiter ``1…``.
     """
     pubkey = lambda pk: script.p2pkh(pk)
     nested = lambda pk: script.p2sh(script.p2wpkh(pk))
@@ -3243,7 +3349,8 @@ def _encoders_for_xpub(xpub: str, script_type: str | None = None):
         "upub": [nested],
         "vpub": [segwit],
     }
-    return mapping.get(prefix, [pubkey, nested, segwit, taproot])
+    # xpub/tpub/unbekannt: SegWit zuerst (Empfang/QR), dann Rest für den Scan.
+    return mapping.get(prefix, [segwit, nested, taproot, pubkey])
 
 
 def ist_deskriptor(text: str) -> bool:
@@ -3690,7 +3797,14 @@ class WalletContext:
         if _is_known_external_address(address, self.xpubs, max_search):
             return None
         for xpub in self.xpubs:
-            if _address_belongs_to_xpub(xpub, address, max_search):
+            # Pro Wallet nicht tiefer als nötig + max_search (Gap/Trace).
+            xpub_cap = max(
+                int(self.max_addresses_for(xpub, max_search) or 0),
+                int(max_search or 0),
+            )
+            if xpub_cap <= 0:
+                xpub_cap = max_search
+            if _address_belongs_to_xpub(xpub, address, xpub_cap):
                 _register_wallet_address(self, xpub, address)
                 _mark_wallet_address_positive(xpub, address)
                 _remove_external_address_if_present(address)
@@ -3839,6 +3953,84 @@ def seed_wallet_addresses_from_utxo_cache(
         cache_dir=cache_dir,
         xpubs=xpubs,
     )
+    # Ausgegebene Change-Adressen jenseits max_addresses: nicht in utxos[],
+    # oft auch nicht im Verlauf — scan_end_index kennt den Scan-Horizont.
+    seed_wallet_addresses_from_scan_end(wallet, xpubs, cache_dir)
+
+
+def seed_wallet_addresses_from_scan_end(
+    wallet: WalletContext | None,
+    xpubs: list[str],
+    cache_dir: Path,
+) -> int:
+    """
+    Leitet Adressen bis ``scan_end_index`` ab und registriert sie.
+
+    Der UTXO-Scan hat diese Indizes bereits geprüft. Ausgegebene Change-
+    Adressen stehen danach oft weder in ``utxos[]`` noch im Verlauf (wenn
+    der Verlauf nur bis ``max_addresses`` geplant war). ``match_own_address``
+    macht absichtlich keine HD-Suche — ohne diesen Seed stuft die Herkunft
+    interne Überträge (Change jenseits der Start-Ableitung) als Extern ein.
+    """
+    if wallet is None:
+        return 0
+    n = 0
+    for xpub in xpubs:
+        if xpub not in wallet.names_by_xpub:
+            continue
+        entry = load_xpub_cache_entry(xpub, cache_dir)
+        if not entry:
+            continue
+        try:
+            scan_end = int(entry.get("scan_end_index") or 0)
+        except (TypeError, ValueError):
+            scan_end = 0
+        if scan_end <= 0:
+            continue
+        # derive_addresses: max//2 Indizes je Chain → Indizes 0 .. scan_end-1
+        max_addr = max(scan_end * 2, int(wallet.max_addresses_for(xpub) or 0))
+        configured = int(wallet.max_addresses_for(xpub) or 0)
+        # Schon in build_wallet_context abgedeckt?
+        if scan_end <= max(1, configured // 2):
+            continue
+        script = wallet.script_type_for(xpub)
+        for addr in derive_addresses(xpub, max_addr, script_type=script):
+            if addr in wallet.address_to_wallet:
+                continue
+            _register_wallet_address(wallet, xpub, addr)
+            n += 1
+        if max_addr > configured:
+            wallet.max_addresses_by_xpub[xpub] = max_addr
+    return n
+
+
+def seed_wallet_addresses_from_verlauf_cache(
+    wallet: WalletContext | None,
+    xpubs: list[str],
+    cache_dir: Path,
+) -> int:
+    """
+    Adressen aus dem Verlaufs-Cache ins Mapping — **ohne** HD-Suche.
+
+    Nach Gap-Scan liegen oft hunderte Indizes über ``max_addresses`` im
+    Verlauf. ``resolve_address`` würde sonst je Adresse bis
+    ``MAX_TRACE_ADDRESS_SEARCH`` über alle XPUBs ableiten (Minuten).
+    Zugehörigkeit ist hier durch die Cache-Datei pro XPUB bekannt.
+    """
+    if wallet is None:
+        return 0
+    n = 0
+    for xpub in xpubs:
+        eintraege = load_xpub_verlauf_cache(xpub, cache_dir) or []
+        for e in eintraege:
+            addr = (e.get("address") or "").strip()
+            if not addr:
+                continue
+            if addr in wallet.address_to_wallet:
+                continue
+            _register_wallet_address(wallet, xpub, addr)
+            n += 1
+    return n
 
 
 def _merge_cached_utxos(
@@ -4004,14 +4196,26 @@ def derive_address_at_index(xpub: str, change: int, index: int) -> str | None:
 def derive_receive_address_at_index(
     xpub: str,
     index: int,
-) -> tuple[str, int, HDKey, object] | None:
-    """Leitet die Empfangsadresse (change=0) am Index ab."""
+    script_type: str | None = None,
+) -> tuple[str, int, HDKey | None, object | None] | None:
+    """
+    Leitet die Empfangsadresse (change=0) am Index ab.
+
+    ``script_type`` überschreibt die XPUB-Registry (Wallet-Einstellung).
+    Bei auto/xpub: natives SegWit zuerst (bc1q).
+    """
+    if ist_deskriptor(xpub):
+        addr = derive_address_at_index(xpub, 0, index)
+        if not addr:
+            return None
+        return addr, index, None, None
+
     try:
         hd = HDKey.from_string(xpub)
     except Exception:
         return None
 
-    for encoder in _encoders_for_xpub(xpub):
+    for encoder in _encoders_for_xpub(xpub, script_type):
         try:
             child = hd.derive([0, index])
             sc = encoder(child.key)
@@ -4292,6 +4496,72 @@ def load_xpub_utxo_cache(xpub: str, cache_dir: Path) -> list[dict] | None:
     return entry["utxos"] if entry else None
 
 
+def _scan_tip_anheben(
+    tip_i: int | None,
+    cache_dir: Path,
+    *,
+    fulcrum=None,
+    extra_heights: list[int] | tuple[int, ...] | None = None,
+) -> int | None:
+    """
+    Hebt ``scan_tip_height`` nur an (nie absenken).
+
+    Reihenfolge: bisheriger Tip → optionale Höhen (Spends/UTXOs) →
+    Electrs-Tip → Header-Datei. Sonst bleibt nach Wallet-Watch-Settle die
+    mtime frisch, der Tip aber Wochen hinter dem Chain-Tip („vor 12 Min · −53 Blöcke“).
+    """
+    tip = tip_i
+    for roh in extra_heights or ():
+        try:
+            h = int(roh or 0)
+        except (TypeError, ValueError):
+            continue
+        if h > 0 and (tip is None or h > tip):
+            tip = h
+    if fulcrum is not None:
+        try:
+            from fulcrum import get_chain_tip_height
+
+            et = int(get_chain_tip_height(fulcrum, force=True))
+            if tip is None or et > int(tip):
+                tip = et
+        except Exception:
+            pass
+    try:
+        from core.p2p import header_datei_tip, p2p_headers_path
+
+        header_tip = header_datei_tip(
+            p2p_headers_path(
+                resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
+            )
+        )
+        if header_tip is not None:
+            ht = int(header_tip)
+            if tip is None or ht > int(tip):
+                tip = ht
+    except Exception:
+        pass
+    return tip
+
+
+def _blockhoehe_aus_utxo(utxo: dict) -> int:
+    """Bestätigungshöhe aus UTXO-Dict (status oder height)."""
+    status = utxo.get("status") if isinstance(utxo.get("status"), dict) else {}
+    for roh in (
+        status.get("block_height"),
+        utxo.get("height"),
+        utxo.get("block_height"),
+        utxo.get("spent_height"),
+    ):
+        try:
+            h = int(roh or 0)
+        except (TypeError, ValueError):
+            continue
+        if h > 0:
+            return h
+    return 0
+
+
 def settle_gezielte_spends_im_cache(
     xpub: str,
     cache_dir: Path,
@@ -4299,6 +4569,7 @@ def settle_gezielte_spends_im_cache(
     confirmed_spent: list[dict],
     live_auf_adressen: list[dict],
     source: str = "fulcrum",
+    fulcrum=None,
 ) -> list[dict] | None:
     """
     Bestätigte Spends und frisches listunspent nur für betroffene Adressen.
@@ -4308,6 +4579,8 @@ def settle_gezielte_spends_im_cache(
       (Change/neue Empfänge), andere Adressen unangetastet
 
     Kein Gap, kein Fullscan. Rückgabe: neue UTXO-Liste oder None ohne Cache.
+    ``scan_tip_height`` wird mit Header-/Electrs-Tip und bekannten Höhen
+    angehoben — sonst wirkt der Cache frisch (mtime), bleibt aber „−N Blöcke“.
     """
     entry = load_xpub_cache_entry(xpub, cache_dir)
     if entry is None:
@@ -4356,14 +4629,24 @@ def settle_gezielte_spends_im_cache(
         tip_i = int(tip) if tip is not None else None
     except (TypeError, ValueError):
         tip_i = None
-    # Tip: höchste Bestätigungshöhe der Settles, falls höher
+    # Nur Spend-Höhe bzw. Live-UTXO-Höhe — nicht die Empfangshöhe des
+    # ausgegebenen Outputs (die kann weit hinter dem Tip liegen und würde
+    # fälschlich als „Scan-Tip“ wirken).
+    extra: list[int] = []
     for s in confirmed_spent:
         try:
             h = int(s.get("spent_height") or 0)
         except (TypeError, ValueError):
             h = 0
-        if h > 0 and (tip_i is None or h > tip_i):
-            tip_i = h
+        if h > 0:
+            extra.append(h)
+    for u in live_auf_adressen:
+        h = _blockhoehe_aus_utxo(u)
+        if h > 0:
+            extra.append(h)
+    tip_i = _scan_tip_anheben(
+        tip_i, cache_dir, fulcrum=fulcrum, extra_heights=extra,
+    )
 
     max_addr = int((entry.get("raw") or {}).get("max_addresses") or DEFAULT_MAX_ADDRESSES)
     save_xpub_utxo_cache(
@@ -5218,10 +5501,20 @@ def _prune_cached_utxos(
     fetch_address_utxos,
     *,
     verify_utxo_spent=None,
-) -> list[dict]:
-    """Entfernt aus dem Cache UTXOs, die nicht mehr unspent sind."""
+    fetch_addresses_utxos=None,
+    on_progress=None,
+    progress_label: str | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Entfernt aus dem Cache UTXOs, die nicht mehr unspent sind.
+
+    Rückgabe ``(noch_unspent, live_auf_adressen)``:
+    *live_auf_adressen* ist das frische ``listunspent`` der Cache-Adressen
+    (ein RPC-Durchgang) — der Tip-Light-Pfad nutzt es für Prune **und**
+    neue Empfänge auf denselben Adressen, ohne zweites listunspent.
+    """
     if not cached:
-        return []
+        return [], []
 
     if verify_utxo_spent is not None:
         pruned = []
@@ -5232,23 +5525,35 @@ def _prune_cached_utxos(
                 continue
             if live_value is not None and live_value == utxo["value"]:
                 pruned.append(utxo)
-        return pruned
+        # Kein Adress-Snapshot — Aufrufer holt listunspent nur bei Bedarf.
+        return pruned, []
 
-    live_sig: dict[str, int] = {}
     addresses = {u["address"] for u in cached if u.get("address")}
-    for address in sorted(addresses):
+    live_list = _fetch_address_batch_utxos(
+        addresses,
+        fetch_address_utxos,
+        fetch_addresses_utxos,
+        progress_label=progress_label or "Live",
+        on_progress=on_progress,
+    )
+    live_sig: dict[str, int] = {}
+    for utxo in live_list:
         try:
-            for utxo in fetch_address_utxos(address):
-                live_sig[f"{utxo['txid']}:{utxo['vout']}"] = utxo["value"]
-        except Exception:
+            key = f"{str(utxo.get('txid') or '').lower()}:{int(utxo.get('vout') or 0)}"
+            live_sig[key] = int(utxo.get("value") or 0)
+        except (TypeError, ValueError):
             continue
 
     pruned = []
     for utxo in cached:
-        key = f"{utxo['txid']}:{utxo['vout']}"
-        if key in live_sig and live_sig[key] == utxo["value"]:
+        key = f"{str(utxo.get('txid') or '').lower()}:{int(utxo.get('vout') or 0)}"
+        try:
+            wert = int(utxo.get("value") or 0)
+        except (TypeError, ValueError):
+            continue
+        if key in live_sig and live_sig[key] == wert:
             pruned.append(utxo)
-    return pruned
+    return pruned, live_list
 
 
 def _mempool_pending_nach_prune(
@@ -5488,10 +5793,11 @@ def _verify_cached_utxo_set(
             f"+ Indizes #{scan_end_index}–#{next_end} pro Chain...",
             flush=True,
         )
-        pruned = _prune_cached_utxos(
+        pruned, _live_snapshot = _prune_cached_utxos(
             cached,
             fetch_address_utxos,
             verify_utxo_spent=verify_utxo_spent,
+            fetch_addresses_utxos=None,
         )
         from display import summarize_utxo_cache_usage
 
@@ -5589,7 +5895,9 @@ def _light_rescan_xpub(
         flush=True,
     )
 
-    pruned = _prune_cached_utxos(cached, fetch_address_utxos)
+    pruned, _live_snapshot = _prune_cached_utxos(
+        cached, fetch_address_utxos,
+    )
     pruned = _mempool_pending_nach_prune(
         xpub,
         cached,
@@ -5874,6 +6182,10 @@ def _try_scantxoutset_xpub(
             on_progress=on_progress,
         )
     except Exception as exc:
+        from core.jobs import ist_abbruch
+
+        if ist_abbruch(exc):
+            raise
         print(f"  scantxoutset übersprungen: {exc}", flush=True)
         return None
     if ergebnis is None:
@@ -6206,6 +6518,10 @@ def sync_xpub_zum_tip(
                 allow_scantxoutset=False,
             )
         except Exception as exc:
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
             # Multisig/Deskriptor oder Peer-Fehler: nicht den ganzen Wallet
             # überspringen — Electrs light hält den Cache frisch.
             msg = (
@@ -6273,11 +6589,29 @@ def sync_xpub_zum_tip(
                 f"{label}: prüfe {len(alt)} bekannte UTXO(s), Gap ab #{scan_end}…"
             )
 
-    live = _prune_cached_utxos(
+    # Ein listunspent-Durchgang: Prune + neue Empfänge auf denselben Adressen.
+    # Früher: prune listunspent + extra_same listunspent = doppelt so langsam.
+    live, extra_same = _prune_cached_utxos(
         alt,
         fetch_address_utxos,
         verify_utxo_spent=verify_utxo_spent,
+        fetch_addresses_utxos=fetch_addresses_utxos,
+        on_progress=on_progress,
+        progress_label=f"Live {label}",
     )
+    # verify_utxo_spent-Pfad liefert kein Adress-Snapshot → einmal nachholen.
+    if (
+        not extra_same
+        and addrs_cache
+        and (fetch_address_utxos or fetch_addresses_utxos)
+    ):
+        extra_same = _fetch_address_batch_utxos(
+            addrs_cache,
+            fetch_address_utxos,
+            fetch_addresses_utxos,
+            progress_label=f"Live {label}",
+            on_progress=on_progress,
+        )
     live = _mempool_pending_nach_prune(
         xpub,
         alt,
@@ -6286,15 +6620,6 @@ def sync_xpub_zum_tip(
         wallet=wallet,
         cache_dir=cache_dir,
     )
-    extra_same: list[dict] = []
-    if addrs_cache and (fetch_address_utxos or fetch_addresses_utxos):
-        extra_same = _fetch_address_batch_utxos(
-            addrs_cache,
-            fetch_address_utxos,
-            fetch_addresses_utxos,
-            progress_label=f"Live {label}",
-            on_progress=on_progress,
-        )
     new_end = scan_end
     extra_utxos: list[dict] = []
     extra_window: list[dict] = []
@@ -6371,30 +6696,7 @@ def sync_xpub_zum_tip(
     # Electrs light: Tip auf Live-Electrs (bevorzugt) bzw. Header-Datei
     # anheben — sonst bleibt „−N Blöcke“ hängen, wenn p2p_headers hinter
     # dem Node liegt oder stundenlang nicht nachgezogen wurde.
-    tip_fuer_cache = tip_i
-    if fulcrum is not None:
-        try:
-            from fulcrum import get_chain_tip_height
-
-            et = int(get_chain_tip_height(fulcrum, force=True))
-            if tip_fuer_cache is None or et > int(tip_fuer_cache):
-                tip_fuer_cache = et
-        except Exception:
-            pass
-    try:
-        from core.p2p import header_datei_tip, p2p_headers_path
-
-        header_tip = header_datei_tip(
-            p2p_headers_path(
-                resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
-            )
-        )
-        if header_tip is not None:
-            ht = int(header_tip)
-            if tip_fuer_cache is None or ht > int(tip_fuer_cache):
-                tip_fuer_cache = ht
-    except Exception:
-        pass
+    tip_fuer_cache = _scan_tip_anheben(tip_i, cache_dir, fulcrum=fulcrum)
     cache_path = save_xpub_utxo_cache(
         xpub,
         merged,
@@ -6458,6 +6760,10 @@ def sync_wallets_zum_tip(
                 nur_bekannte=nur_bekannte,
             )
         except Exception as exc:
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
             label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."
             msg = f"{label}: Aktualisierung fehlgeschlagen ({exc})"
             print(f"  ⚠️  {msg}", flush=True)

@@ -68,6 +68,15 @@ class TestRundlauf(TraceCacheBasis):
         geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
         self.assertEqual(geladen["baum"]["summary"]["external_sats"], 7)
 
+    def test_loeschen_entfernt_baum_und_meta(self):
+        """„Scan neu“ muss den alten Stand verwerfen können."""
+        trace_cache.speichern(txid("a1"), 0, BAUM, self.dir, EIGENE)
+        self.assertTrue(trace_cache.vorhanden(txid("a1"), 0, self.dir))
+        self.assertTrue(trace_cache.loeschen(txid("a1"), 0, self.dir))
+        self.assertFalse(trace_cache.vorhanden(txid("a1"), 0, self.dir))
+        self.assertIsNone(trace_cache.laden(txid("a1"), 0, self.dir, EIGENE))
+        self.assertFalse(trace_cache.loeschen(txid("a1"), 0, self.dir))
+
     def test_kaputte_datei_fuehrt_nicht_zum_absturz(self):
         pfad = trace_cache.pfad(txid("a1"), 0, self.dir)
         pfad.parent.mkdir(parents=True, exist_ok=True)

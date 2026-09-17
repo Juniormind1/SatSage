@@ -42,16 +42,22 @@ class TestStart9PhaseS3(unittest.TestCase):
 
         if sys.platform == "win32":
             self.skipTest("chmod 0600 greift unter Windows nicht zuverlässig")
+        from core.config import env_backup_path
+
         with TemporaryDirectory() as tmp:
             env = Path(tmp) / ".env"
             backup = Path(tmp) / ".env.bak"
+            backup0 = env_backup_path(env, 0)
             env.write_text("NETWORK=regtest\\n", encoding="utf-8")
             backup.write_text("NETWORK=regtest\\n", encoding="utf-8")
+            backup0.write_text("NETWORK=regtest\\n", encoding="utf-8")
             os.chmod(env, 0o644)
             os.chmod(backup, 0o644)
+            os.chmod(backup0, 0o644)
             server._pruefe_env_modus(env)
             self.assertEqual(stat.S_IMODE(env.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(backup0.stat().st_mode), 0o600)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,27 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
 
    Tx im Explorer: `http://127.0.0.1:18080/tx/<txid>` (z. B. Whirlpool-Lab-Tx).
 
+### Kalender / Haltefrist (setmocktime)
+
+Die Basis-Szenarien streuen **unspent UTXO-Alter zufällig** über **gestern … vor 7 Jahren** (`setmocktime` in `generate_scenarios.py`). Blockzeiten steigen monoton (MTP); die Zufallszeiten werden sortiert gemined.
+
+| Phase | Inhalt (kurz) |
+|-------|----------------|
+| bootstrap | 110 Blocks am Fensterstart (Coinbase-Reife) |
+| random-age-funding | 40× unspent @0,049 BTC (nur Alter) + 40× Spend-Pool @0,05 BTC — je Index eigene Zufallszeit |
+| shapes | Hop/CJ/Fan-out nur aus Spend-Pool (Alters-Kohorte bleibt liegen) |
+| tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
+
+In der GUI: viele unterschiedliche `hold_days` (nicht nur 1 T / 377 T).
+
+**Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
+
+**Mocktime + Descriptor-Wallets:** `createwallet` setzt die Birthtime auf die Host-Uhr; Blöcke mit `setmocktime` (2022–2025) erscheinen erst nach `rescanblockchain 0` in `listunspent`. `generate_scenarios.py` rescanned Faucet und Lab-Wallets automatisch. `mine_at` ruft `mine` direkt (keine Rekursion über `mine_next`).
+
+**Electrs im Docker:** bitcoind muss P2P im Compose-Netz lauschen (`-bind=0.0.0.0 -port=18444 -whitelist=0.0.0.0/0`). Cookie für electrs: `regtest/.cookie` als `bitcoin:secret` (siehe `start.sh`). Nach Chain-Wipe electrs-DB mitlöschen (`.data/electrs/`).
+
+**GUI mit Lab-Env:** Immer `--env lab/regtest/.data/.regtest.env` (und eigene Cache-Dirs). `main._load_dotenv()` folgt zur Laufzeit `ENV_FILE` (nicht Import-Default) — sonst überschreibt die Root-`.env` (`NETWORK=main`) Regtest-Adressen (`bcrt1` → fälschlich `bc1`).
+
 Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolidierung, Fan-out und gealterte Coins. Für die **Tx-Klassifikation / Herkunft**:
 
 | Szenario | Erwartetes Label |
@@ -62,7 +83,7 @@ Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolid
 | `Whirlpool-like-5x5` | `whirlpool` — 1× Alpha + 4× Faucet |
 | `JoinMarket-like` | `joinmarket` — 1× Beta + 3× Faucet |
 | `PayJoin-like` | `payjoin` |
-| `Beta-aged-fanout` / Fan-out-own | `fan_out_own` |
+| `Beta-aged-fanout` / Fan-out-own | `fan_out_own` (1→viele; n→1 wäre `fan_in_own`) |
 | `Exchange-batch-like` | `exchange_batch` |
 
 **Fremd-Peers:** `lab-faucet` finanziert alle Lab-Sats und stellt Mix-Peer-Inputs. Die Faucet-XPUB steht **nicht** in SatSage `WALLET_*` — in der App sind das fremde Inputs. Alles Einzelsignatur (kein Multisig). Keine Coordinator-/echte WabiSabi-Implementierung, nur On-Chain-Form. Expectations: `.data/scenario-report-txclass.json`.
@@ -84,7 +105,7 @@ Nach den Basis-Szenarien legt `scripts/generate_sanctions_scenarios.py` (von `ru
 - Pseudo-Liste unter `.data/sanctioned_cache/` (nur `bcrt1…`)
 - Expectations: `.data/scenario-report-sanctions.json`
 
-GUI-Lab setzt `--sanctions-dir lab/regtest/.data/sanctioned_cache` und `SANKTION_MAX_HOPS_CAP=100` (Produkt-Default bleibt 20). Das testet die **externe Vorgeschichte** (`scan_external_sanction_hops`), nicht den Listen-UTXO-Bestandsscan.
+GUI-Lab setzt `--sanctions-dir lab/regtest/.data/sanctioned_cache` und `SANKTION_MAX_HOPS_CAP=100` (Produkt-Default bleibt 20). Das testet die **xpub-blinde Hop-Vorgeschichte** (`scan_external_sanction_hops`), nicht den Listen-UTXO-Bestandsscan.
 
 Verify (Lab muss laufen):
 

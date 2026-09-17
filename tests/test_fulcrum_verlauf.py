@@ -34,6 +34,9 @@ class FakeFulcrumClient:
         self._history = history_by_scripthash
         self._txs = tx_by_id
 
+    def tor_batch_sinnvoll(self, n_calls: int) -> bool:
+        return False
+
     def request(self, method: str, params: list | None = None):
         params = params or []
         if method == "blockchain.scripthash.get_history":

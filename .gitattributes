@@ -1,1 +1,4 @@
 data/p2p_headers_segwit.bin.gz binary
+
+# cmd.exe needs CRLF; LF-only .bat files break labels/REM on Windows
+*.bat text eol=crlf

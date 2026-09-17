@@ -1,6 +1,7 @@
 #!/bin/sh
 # SatSage: only Juniormind1 identity may commit.
-# Activate once per clone: git config core.hooksPath githooks
+# Activate once per Maintainer-Clone: git config core.hooksPath githooks
+# Contributor-Clones (tbusch u. a.) setzen hooksPath nicht — eigene IDs OK.
 
 set -e
 

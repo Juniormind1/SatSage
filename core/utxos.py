@@ -84,13 +84,17 @@ def utxo_as_dict(
         "verfolgt_ts": None,
         "verfolgt_veraltet": False,
         "verfolgt_vollstaendig": False,
+        "unvollstaendig": False,
         "juengste_sats_ts": None,
-        # Mix-Formen aus gespeichertem Herkunftsbaum (Icons an der Adressgruppe).
+        # Mix-Formen / Börsen aus gespeichertem Herkunftsbaum (Gruppen-Kopf).
         "mix_arten": [],
+        "boerse_namen": [],
         "tx_class": "",
         # Mempool: Ausgabe unterwegs (eigener Electrs).
         "spending_pending": bool(utxo.get("spending_pending")),
         "spent_txid": utxo.get("spent_txid") or "",
+        # Spend-Tx hat Output an eigenes Wallet (anderes oder Change) → nur Konfetti.
+        "spending_internal": bool(utxo.get("spending_internal")),
         # Mempool: eigener Empfang noch unbestätigt (Selbstüberweisung/Change).
         "receive_pending": bool(
             utxo.get("receive_pending")
@@ -111,8 +115,10 @@ def utxo_as_dict(
             # Woher die Sats zuletzt von außen kamen. Ist die Adresse einem
             # Dienst zuzuordnen, gehört das an das UTXO — sonst müsste man
             # für dieselbe Auskunft erst den Herkunftsbaum aufklappen.
+            # Börsen-CSV: Adresse und ggf. externe TxID (Ingress speichert oft nur Adresse).
             eintrag["herkunft_label"] = labels.beschrifte(
-                ingress.get("external_address") or ""
+                ingress.get("external_address") or "",
+                txid=str(ingress.get("external_txid") or ""),
             )
 
         gespeichert = trace_cache.kopf(
@@ -128,6 +134,8 @@ def utxo_as_dict(
             if ingress and ingress.get("external_untergrenze"):
                 voll = False
             eintrag["verfolgt_vollstaendig"] = voll
+            # Abbruch / Lücken / fehlende Prevouts — Liste zeigt rot „unvollständig“.
+            eintrag["unvollstaendig"] = bool(eintrag["verfolgt"]) and not voll
             if voll and ingress:
                 eintrag["juengste_sats_ts"] = (
                     ingress.get("external_time_ts")
@@ -136,6 +144,7 @@ def utxo_as_dict(
             # Schon aus demselben Cache-Lesen wie die Verfolgt-Marke —
             # kein Extra-Durchlauf über die Chain.
             eintrag["mix_arten"] = list(gespeichert.get("mix_arten") or [])
+            eintrag["boerse_namen"] = list(gespeichert.get("boerse_namen") or [])
             eintrag["tx_class"] = str(gespeichert.get("tx_class") or "")
 
     return eintrag

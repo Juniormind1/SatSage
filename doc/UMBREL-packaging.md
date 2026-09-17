@@ -42,14 +42,25 @@ Wirkung in der App: `own_fulcrum` und `own_core` sind in der Datenquellen-UI ges
 
 ---
 
+## Dev vs. Store-Release
+
+Auf `dev-juniormind` zeigt `docker-compose.yml` absichtlich auf
+`ghcr.io/juniormind1/satsage:latest` **ohne** Digest — floating Pin, kein
+Store-Release. Der Image-Workflow taggt bei jedem Lauf zusätzlich `:latest`.
+Für Gerätetests vor einem öffentlichen Image: `scripts/umbrel_dev_install`
+(baut lokal und schreibt den Compose-Tag um).
+
+Nächster Store-Stand: **0.9.6** beim Merge nach `main` (hier im Dev ist seit
+0.9.2 viel passiert; 0.9.3–0.9.5 auf main waren Umbrel-only Pins).
+
 ## Ablauf für ein Release
 
 1. `VERSION` und `CHANGELOG.md` hochziehen, Tag `vX.Y.Z` pushen.
 2. Workflow **Build container image (multi-arch)** läuft an und schiebt
-   `ghcr.io/juniormind1/satsage:X.Y.Z`. Die Job-Summary nennt die fertige
-   `image:`-Zeile inklusive Manifest-List-Digest.
-3. Diese Zeile und `version:` in `packaging/umbrel/` eintragen, `releaseNotes:`
-   für bestehende Installationen schreiben.
+   `ghcr.io/juniormind1/satsage:X.Y.Z` (und `:latest`). Die Job-Summary nennt
+   die fertige `image:`-Zeile inklusive Manifest-List-Digest.
+3. Diese Zeile und `version:` in `packaging/umbrel/` eintragen (Digest-Pin,
+   kein `:latest` mehr), `releaseNotes:` für bestehende Installationen schreiben.
 4. Kopie in den Store bringen — siehe unten.
 
 Wichtig: umbrelOS bietet ein Update nur an, wenn sich `version:` im Manifest ändert, und führt neuen Code nur aus, wenn zusätzlich Tag+Digest im Compose angepasst sind. Beides gehört in denselben Commit.

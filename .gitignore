@@ -1,8 +1,8 @@
 .env
-# Die Web-Oberfläche legt vor jedem Schreiben eine Sicherung der .env an und
-# schreibt über eine .tmp. Beide enthalten dieselben Geheimnisse wie die .env
-# selbst — XPUBs, RPC-Zugangsdaten.
+# Start-Rotation: .env.backup0 … .env.backup9 (nur beim Serverstart).
+# Zur Laufzeit nur .env (+ .tmp beim atomaren Schreiben). Legacy: .env.bak.
 .env.bak
+.env.backup[0-9]
 .env.tmp
 .env.*.bak
 
@@ -30,6 +30,7 @@ immutable_cache/
 sanctioned_cache/
 tor_data/
 label_cache/
+exchange_reports/
 psbt_out/
 
 terminals/
@@ -68,3 +69,8 @@ satsage-webgui.exe
 satsage-webgui.exe.sha256
 
 .grok-local-notes.txt
+
+# lokale Geheimnisse / Backups
+.env.haukesecrets
+.env.backup*
+exchange_reports/

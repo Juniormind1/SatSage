@@ -337,6 +337,38 @@ class TestWalletsBeimStart(unittest.TestCase):
             entry = main.load_xpub_cache_entry(BIP84_ZPUB, cache)
             self.assertEqual(entry["raw"].get("scan_tip_height"), 912_345)
 
+    def test_settle_hebt_tip_auf_header(self):
+        """
+        Wallet-Watch-Settle aktualisiert mtime — ohne Tip-Anhebung blieb
+        „vor 12 Min · −53 Blöcke“ stehen.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            alt = _utxo(100, "a")
+            main.save_xpub_utxo_cache(
+                BIP84_ZPUB, [alt], cache, "fulcrum",
+                scan_end_index=2, scan_tip_height=100,
+            )
+            with mock.patch(
+                "core.p2p.header_datei_tip", return_value=500,
+            ), mock.patch(
+                "core.p2p.p2p_headers_path", return_value=Path("/tmp/x"),
+            ), mock.patch(
+                "main.resolve_immutable_cache_dir", return_value=cache,
+            ):
+                main.settle_gezielte_spends_im_cache(
+                    BIP84_ZPUB,
+                    cache,
+                    confirmed_spent=[{
+                        **alt,
+                        "spent_height": 120,
+                    }],
+                    live_auf_adressen=[],
+                )
+            entry = main.load_xpub_cache_entry(BIP84_ZPUB, cache)
+            self.assertEqual(entry["raw"].get("scan_tip_height"), 500)
+            self.assertEqual(entry["utxos"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

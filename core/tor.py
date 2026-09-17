@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -37,6 +38,12 @@ TOR_BROWSER_DOWNLOAD = "https://www.torproject.org/download/"
 _started: subprocess.Popen[str] | None = None
 _started_lock = threading.Lock()
 _log_tail: list[str] = []
+
+#: Erfolgreicher SOCKS-Fund — TTL spart Dauer-„Prüfe Tor-SOCKS“-Spam
+#: (Peer-Takt + parallele Jobs + Reconnects).
+_socks_ok_cache: dict[tuple[str, int], tuple[float, tuple[str, int]]] = {}
+_socks_ok_lock = threading.Lock()
+SOCKS_OK_CACHE_TTL_S = 90.0
 
 
 class TorFehler(RuntimeError):
@@ -271,6 +278,23 @@ def _bootstrap_stand() -> str | None:
     return None
 
 
+_BOOTSTRAP_PROZENT_RE = re.compile(r"Bootstrapped\s+(\d+)%", re.IGNORECASE)
+
+
+def _bootstrap_prozent() -> int | None:
+    """Letzter bekannter Tor-Bootstrap in Prozent, sonst ``None``."""
+    stand = _bootstrap_stand()
+    if not stand:
+        return None
+    m = _BOOTSTRAP_PROZENT_RE.search(stand)
+    return int(m.group(1)) if m else None
+
+
+def _bootstrap_fertig() -> bool:
+    prozent = _bootstrap_prozent()
+    return prozent is not None and prozent >= 100
+
+
 def _atexit_stop() -> None:
     stoppe_eigenes_tor()
 
@@ -310,22 +334,43 @@ def _starte_tor(
 
     deadline = time.monotonic() + timeout
     letzte_meldung = ""
+    socks_offen = False
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             rest = "\n".join(_log_tail[-8:]) or f"Exit-Code {proc.returncode}"
             raise TorFehler(f"Tor ist sofort beendet:\n{rest}")
-        if socks_erreichbar(TOR_SOCKS_HOST, socks_port):
+        if not socks_offen and socks_erreichbar(TOR_SOCKS_HOST, socks_port):
+            socks_offen = True
             if log:
                 stand = _bootstrap_stand()
                 log(stand or f"Tor-SOCKS lauscht auf {TOR_SOCKS_HOST}:{socks_port}")
-            with _started_lock:
-                _started = proc
-            return proc
+                if not _bootstrap_fertig():
+                    log("Warte auf Tor-Bootstrap (100 %), bevor .onion genutzt wird…")
         stand = _bootstrap_stand()
         if log and stand and stand != letzte_meldung:
             log(stand)
             letzte_meldung = stand
+        # SOCKS allein reicht nicht: Tor öffnet den Port schon bei 0 %,
+        # Onion-Circuits kommen erst mit Bootstrapped 100 %.
+        if socks_offen and _bootstrap_fertig():
+            with _started_lock:
+                _started = proc
+            return proc
         time.sleep(0.4)
+
+    if socks_offen:
+        # Degraded: SOCKS da, Circuit noch nicht — Aufrufer dürfen trotzdem
+        # versuchen; Logs zeigen den Stand. Besser als hart abbrechen, wenn
+        # das Netz nur langsam bootstrapped.
+        if log:
+            stand = _bootstrap_stand() or "Bootstrap unvollständig"
+            log(
+                f"Tor-SOCKS offen, aber nach {int(timeout)}s noch nicht 100 % "
+                f"({stand}). Onion-Verbindungen können scheitern."
+            )
+        with _started_lock:
+            _started = proc
+        return proc
 
     proc.terminate()
     raise TorFehler(
@@ -333,6 +378,40 @@ def _starte_tor(
         "Netzwerk/Firewall prüfen oder Tor Browser einmalig starten, "
         "damit das Binary gefunden wird."
     )
+
+
+def _socks_cache_key(konfiguriert: tuple[str, int] | None) -> tuple[str, int]:
+    return konfiguriert or (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+
+
+def _socks_cache_get(
+    konfiguriert: tuple[str, int] | None,
+) -> tuple[str, int] | None:
+    """Gecachter SOCKS, still mit kurzem TCP-Ping verifiziert."""
+    key = _socks_cache_key(konfiguriert)
+    jetzt = time.monotonic()
+    with _socks_ok_lock:
+        eintrag = _socks_ok_cache.get(key)
+    if not eintrag:
+        return None
+    ts, proxy = eintrag
+    if jetzt - ts > SOCKS_OK_CACHE_TTL_S:
+        return None
+    # Kurzer stiller Ping — kein Log.
+    if socks_erreichbar(proxy[0], proxy[1], timeout=0.4):
+        return proxy
+    with _socks_ok_lock:
+        _socks_ok_cache.pop(key, None)
+    return None
+
+
+def _socks_cache_set(
+    konfiguriert: tuple[str, int] | None,
+    proxy: tuple[str, int],
+) -> None:
+    key = _socks_cache_key(konfiguriert)
+    with _socks_ok_lock:
+        _socks_ok_cache[key] = (time.monotonic(), proxy)
 
 
 def stelle_tor_socks_bereit(
@@ -348,8 +427,16 @@ def stelle_tor_socks_bereit(
 
     Startet bei Bedarf ein lokales Tor. Wirft :class:`TorFehler`, wenn weder
     ein Proxy läuft noch eines startbar ist.
+
+    Erfolgreiche Funde werden kurz gecacht (``SOCKS_OK_CACHE_TTL_S``), damit
+    parallele Jobs und der Peer-Takt nicht dauernd „Prüfe Tor-SOCKS…“ spammen.
     """
     ziel = konfiguriert or (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+
+    gecacht = _socks_cache_get(konfiguriert)
+    if gecacht is not None:
+        return gecacht
+
     if log:
         log(f"Prüfe Tor-SOCKS {ziel[0]}:{ziel[1]}…")
     gefunden = erkenne_tor_socks(konfiguriert)
@@ -361,6 +448,7 @@ def stelle_tor_socks_bereit(
             )
         elif log:
             log(f"Tor-SOCKS {gefunden[0]}:{gefunden[1]} erreichbar")
+        _socks_cache_set(konfiguriert, gefunden)
         return gefunden
 
     darf = starten and _autostart_erlaubt(env)
@@ -385,7 +473,11 @@ def stelle_tor_socks_bereit(
         schon = _started
     if schon is not None and schon.poll() is None:
         if socks_erreichbar(TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT):
-            return TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT
+            proxy = (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+            _socks_cache_set(konfiguriert, proxy)
+            return proxy
 
     _starte_tor(binary, TOR_DAEMON_SOCKS_PORT, timeout, log)
-    return TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT
+    proxy = (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+    _socks_cache_set(konfiguriert, proxy)
+    return proxy

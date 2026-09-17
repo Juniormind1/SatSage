@@ -5,6 +5,8 @@
 :root,
 html[data-theme="light"] {
   color-scheme: light;
+  /* Steuerjahr-Punkte ohne Herkunft: dunkelgrau (unterscheidet sich von gelb/grün). */
+  --achse-ungeprueft: #5A6570;
   --grund:      #E7EAE7;
   --flaeche:    #F7F9F6;
   --flaeche-2:  #EDF0EC;
@@ -43,6 +45,8 @@ html[data-theme="light"] {
 /* Dark: sehr dunkelgrau (nicht pechschwarz). Markierungsfarben hell genug. */
 html[data-theme="dark"] {
   color-scheme: dark;
+  /* Steuerjahr-Punkte ohne Herkunft: hellgrau. */
+  --achse-ungeprueft: #B0B8BE;
   --grund:      #1A1E22;
   --flaeche:    #22272C;
   --flaeche-2:  #2A3036;
@@ -115,6 +119,9 @@ button, input, select { font: inherit; color: inherit; }
   padding: 1px 6px; border-radius: 2px; white-space: nowrap;
   border: 1px solid var(--linie);
 }
+.label-nutzer {
+  border-color: var(--akzent, #c9a227);
+}
 .label-dienst {
   background: var(--akzent-zart); color: var(--akzent);
   border-color: transparent;
@@ -122,6 +129,20 @@ button, input, select { font: inherit; color: inherit; }
 .label-erwaehnung {
   background: transparent; color: var(--blass);
   border-style: dashed;
+}
+/* Börse: nur Name; grün = von Börse ins Wallet, rot = zur Börse. */
+.label-boerse {
+  font-weight: 600;
+}
+.label-boerse-in {
+  background: var(--gut-bg, rgba(46, 160, 67, 0.15));
+  color: var(--gut, #2ea043);
+  border-color: color-mix(in srgb, var(--gut, #2ea043) 40%, transparent);
+}
+.label-boerse-out {
+  background: var(--krit-bg, rgba(248, 81, 73, 0.15));
+  color: var(--krit, #f85149);
+  border-color: color-mix(in srgb, var(--krit, #f85149) 40%, transparent);
 }
 
 /* ---------- Einrichtung (erster Start) ---------- */
@@ -212,13 +233,6 @@ button, input, select { font: inherit; color: inherit; }
 }
 .quelle { margin-left: auto; display: flex; align-items: center; gap: 10px;
           font-family: var(--mono); font-size: 11px; color: var(--gedaempft); }
-.kopf-log {
-  display: flex; align-items: center; gap: 7px; flex-shrink: 0;
-  font-family: var(--mono); font-size: 11px; color: var(--gedaempft);
-  cursor: pointer; user-select: none;
-}
-.kopf-log input { margin: 0; }
-
 .kopf-lang {
   display: flex; align-items: center; gap: 2px; flex-shrink: 0;
   margin-left: 8px;
@@ -231,6 +245,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .lang-knopf:hover { opacity: 1; }
 .lang-knopf.aktiv { opacity: 1; border-color: var(--akzent); color: var(--akzent); }
+.log-knopf { margin-right: 4px; }
 
 .buehne {
   flex: 1; min-height: 0;
@@ -257,13 +272,327 @@ button, input, select { font: inherit; color: inherit; }
 .dock-spalten {
   flex: 1; min-height: 0;
   display: grid;
-  grid-template-columns: minmax(8rem, var(--dock-log-pct, 50%)) 5px minmax(8rem, 1fr);
+  /* Log | Spalter | Assistent (LLM) | Spalter | Empfangs-QR — QR relativ zum LLM ziehbar. */
+  grid-template-columns:
+    minmax(8rem, var(--dock-log-pct, 40%))
+    5px
+    minmax(10rem, 1fr)
+    5px
+    minmax(7.5rem, var(--dock-empfang-pct, 22%));
+  align-items: stretch;
 }
 .buehne:not(.log-an) .dock-spalten {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns:
+    minmax(0, 1fr)
+    5px
+    minmax(7.5rem, var(--dock-empfang-pct, 28%));
 }
 .buehne:not(.log-an) #log-pane,
 .buehne:not(.log-an) #dock-spalter { display: none; }
+.empfang-pane {
+  /* Breite steuert der Empfang-Spalter (--dock-empfang-pct); QR bleibt innen quadratisch. */
+  position: relative;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--linie);
+  background: var(--flaeche-2);
+  padding: 0 8px 8px;
+}
+.empfang-kopf {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--blass);
+  padding: 2px 4px 4px; flex-shrink: 0;
+}
+.empfang-leer {
+  flex: 1; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 8px;
+  font-size: 11px; color: var(--blass); line-height: 1.35;
+}
+.empfang-inhalt {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.empfang-qr-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.empfang-qr {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+.empfang-qr svg {
+  width: 100%; height: 100%;
+  max-width: 100%; max-height: 100%;
+  aspect-ratio: 1 / 1;
+}
+.empfang-qr-maske {
+  position: absolute;
+  inset: 12%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-size: clamp(2.2rem, 42%, 5rem);
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+  text-shadow: 0 0 14px rgba(0, 0, 0, 0.75);
+  animation: empfang-maske-herz 1.1s ease-in-out infinite;
+}
+.empfang-qr-maske[hidden] {
+  display: none !important;
+}
+.empfang-qr-maske--btc {
+  color: rgba(247, 147, 26, 0.7);
+}
+.empfang-qr-maske--sat {
+  color: rgba(190, 210, 230, 0.7);
+}
+.empfang-maske-svg {
+  width: 72%;
+  height: 72%;
+  display: block;
+}
+@keyframes empfang-maske-herz {
+  0%, 100% { opacity: 0.3; transform: scale(0.1); }
+  45%, 55% { opacity: 1; transform: scale(1); }
+}
+.empfang-meta {
+  flex-shrink: 0;
+  font-size: 10px; line-height: 1.35; color: var(--gedaempft);
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+}
+.empfang-wallet {
+  font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.empfang-adresse {
+  font-size: 10px;
+  overflow-wrap: anywhere; word-break: break-all;
+  color: var(--akzent);
+}
+.empfang-index, .empfang-quelle { color: var(--blass); }
+.empfang-quelle--warn,
+.empfang-hinweis--warn {
+  color: var(--warn, #b58100);
+  font-weight: 600;
+}
+.empfang-hinweis {
+  color: var(--warn, #b58100);
+  font-weight: 600;
+}
+.wallet-optionen .feld-check {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.wallet-optionen .feld-check input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+}
+
+/* Herzschlag: Canvas mit Maske; QR atmet, Hintergrund bleibt — nicht scanbar. */
+.empfang-pane--puls .empfang-qr--puls {
+  pointer-events: none;
+}
+.empfang-pane--puls .empfang-wallet {
+  color: var(--blass);
+  font-size: 0.85rem;
+}
+.empfang-puls-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 4px;
+}
+.empfang-kopf-zeile {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-height: 1.2em;
+}
+.empfang-kopf-zeile .empfang-kopf {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.empfang-lab-senden {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+.empfang-lab-senden[hidden] {
+  display: none !important;
+}
+.empfang-lab-senden input {
+  width: 7.5rem;
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.3rem;
+}
+.empfang-lab-senden button {
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+.empfang-anim-debug {
+  display: flex;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+}
+.empfang-anim-debug[hidden] {
+  display: none !important;
+}
+.empfang-anim-debug button {
+  font: inherit;
+  font-size: 0.65rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--blass, #666);
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.empfang-anim-debug button:hover {
+  opacity: 1;
+}
+.empfang-konfetti-proto {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 0.5rem;
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px dashed var(--blass, #666);
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+.empfang-konfetti-proto[hidden] {
+  display: none !important;
+}
+.empfang-konfetti-proto-titel {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  opacity: 0.85;
+}
+.empfang-konfetti-proto label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.empfang-konfetti-proto input[type="range"],
+.empfang-konfetti-proto input[type="number"],
+.empfang-konfetti-proto select {
+  width: 100%;
+  font: inherit;
+  font-size: 0.7rem;
+}
+.empfang-konfetti-proto-status {
+  grid-column: 1 / -1;
+  opacity: 0.8;
+  font-size: 0.65rem;
+}
+.empfang-konfetti-proto-btn {
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
+.empfang-kopf--mehrzeilig {
+  white-space: pre-line;
+  line-height: 1.12;
+  text-align: center;
+}
+.empfang-kopf--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.empfang-pane--puls .empfang-kopf {
+  transition: none; /* Opacity steuert die Atem-RAF */
+  min-height: 1.2em;
+}
+.empfang-konfetti {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+}
+/* Legacy: Full-Viewport-Staub (nicht mehr der Datenquellen-Jubel). */
+.satsage-staub-konfetti {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9000;
+}
+.empfang-pane--konfetti .empfang-qr-wrap {
+  position: relative;
+  z-index: 1;
+}
+/* Datenquellen-Erfolg: QR-Feld schwarz, Staub darüber (wie Ka-Ching). */
+.empfang-qr--schwarz,
+.empfang-pane--staub .empfang-qr {
+  background: #000 !important;
+}
+.empfang-pane--staub .empfang-qr img,
+.empfang-pane--staub .empfang-puls-canvas,
+.empfang-pane--staub .empfang-qr-maske {
+  opacity: 0 !important;
+}
+.empfang-pane--staub .empfang-kopf {
+  /* Kurz unauffällig — Fokus auf Staub im Quadrat */
+  opacity: 0.35;
+}
+
+.empfang-pane--lern .empfang-qr {
+  cursor: pointer;
+}
+.empfang-pane--lern .empfang-adresse {
+  cursor: pointer;
+  word-break: break-all;
+}
+.empfang-lern-zurueck {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--akzent, #3d7ea6);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.empfang-lern-zurueck[hidden] {
+  display: none;
+}
+
 .log-pane {
   display: none; min-height: 0; overflow: hidden;
   flex-direction: column;
@@ -282,9 +611,15 @@ button, input, select { font: inherit; color: inherit; }
 }
 .dock-spalter {
   cursor: ew-resize; background: transparent; padding: 0; margin: 0;
+  align-self: stretch;
+  min-height: 0;
 }
 .dock-spalter:hover, .dock-spalter:focus-visible {
   background: var(--akzent-zart);
+}
+.empfang-spalter {
+  /* Trennt Assistent und Empfangs-QR. */
+  border: 0;
 }
 .log-kopf, .chat-kopf {
   font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
@@ -357,7 +692,20 @@ button, input, select { font: inherit; color: inherit; }
   border: 1px solid var(--linie);
 }
 .chat-warte { font-style: italic; color: var(--blass); }
-.llm-einstellungen { align-items: flex-end; }
+/* Spezifischer als .karte-fuss { align-items: center } (steht weiter unten). */
+.karte-fuss.llm-einstellungen {
+  align-items: flex-end;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Opt-in/Checks und Hinweise immer eigene Zeile, volle Breite. */
+.llm-einstellungen > .check-zeile,
+.llm-einstellungen > .steuer-einstellungen-hinweis {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
 /* flex nur am Label — am Input würde flex:1 in der Spalte die Box aufblasen. */
 .llm-einstellungen > .feld.feld-breit { min-width: 16rem; flex: 1 1 16rem; }
 .llm-einstellungen input.feld-breit,
@@ -412,6 +760,22 @@ button, input, select { font: inherit; color: inherit; }
 .nav-eintrag.nav-warn.aktiv {
   color: var(--warn);
   border-left-color: var(--warn);
+}
+.nav-job-zeile {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+}
+.nav-job-zeile .nav-job {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.nav-job-abbruch {
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
 }
 .nav-jobs {
   display: flex;
@@ -490,7 +854,20 @@ button, input, select { font: inherit; color: inherit; }
   margin-bottom: 16px;
 }
 .bereich-kopf h1 { font-family: var(--mono); font-size: 18px; margin: 0; }
-.bereich-aktionen { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.bereich-aktionen { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.utxo-aktionen {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.utxo-aktionen-praefix {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blass);
+  letter-spacing: 0.02em;
+  user-select: none;
+}
 .meta { margin: 2px 0 0; color: var(--blass); font-size: 12px; }
 
 /* ---------- Bedienelemente ---------- */
@@ -551,7 +928,8 @@ select,
 input[type="text"],
 input[type="number"],
 input[type="password"],
-input[type="email"] {
+input[type="email"],
+input[type="date"] {
   background: var(--flaeche); border: 1px solid var(--linie);
   border-radius: var(--r); padding: 4px 8px; color: var(--text);
   font-size: 12px;
@@ -559,7 +937,9 @@ input[type="email"] {
   box-sizing: border-box;
 }
 input[type="number"] { width: 90px; font-family: var(--mono); }
-select { font-family: var(--mono); font-size: 11px; }
+/* date wie select: sonst erbt type=date 14px Body und wirkt neben Dropdowns zu groß */
+select,
+input[type="date"] { font-family: var(--mono); font-size: 11px; }
 /* In Zeilen: horizontal dehnen. In .feld-Spalte: Input nicht mit flex hochziehen. */
 .feld-breit { flex: 1; min-width: 200px; font-size: 12px; }
 .feld > input,
@@ -576,8 +956,68 @@ select { font-family: var(--mono); font-size: 11px; }
   box-sizing: border-box;
   resize: none;
 }
-.steuer-einstellungen { align-items: flex-end; }
+/* Spezifischer als .karte-fuss { align-items: center } (steht weiter unten):
+   Übernehmen und Inputs in einer Flucht (unter den Feldtiteln), nicht vertikal
+   über Titel+Input zentriert. */
+.karte-fuss.steuer-einstellungen {
+  align-items: flex-end;
+  width: 100%;
+  box-sizing: border-box;
+}
 .steuer-einstellungen .feld { min-width: 11rem; }
+.steuer-einstellungen > .steuer-einstellungen-hinweis {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: none;
+}
+
+/* Persönliche Daten: zwei Spalten (Person | Finanzamt). */
+.karte-fuss.person-einstellungen {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.person-spalten {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  width: 100%;
+  min-width: 0;
+}
+.person-spalte {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.person-spalte-titel {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--blass);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--linie-zart);
+}
+.person-spalte .feld {
+  width: 100%;
+  min-width: 0;
+}
+.person-spalte .feld-breit,
+.person-spalte input.feld-breit {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.person-einstellungen > .knopf {
+  align-self: flex-start;
+}
+@media (max-width: 720px) {
+  .person-spalten {
+    grid-template-columns: 1fr;
+  }
+}
 .sa-liste { padding: 4px 13px 12px; display: flex; flex-direction: column; gap: 8px; }
 .sa-abschnitt {
   border: 1px solid var(--linie);
@@ -623,12 +1063,43 @@ select { font-family: var(--mono); font-size: 11px; }
   display: flex; align-items: flex-start; gap: 10px;
   padding: 8px 4px; border-bottom: 1px solid var(--linie);
   font-size: 13px;
+  cursor: pointer;
 }
 .sa-zeile:last-child { border-bottom: 0; }
-.sa-zeile input { margin-top: 3px; flex-shrink: 0; }
+.sa-zeile:hover { background: var(--flaeche-2); }
+.sa-zeile input {
+  margin-top: 3px; flex-shrink: 0;
+  width: 1.1rem; height: 1.1rem;
+  cursor: pointer;
+  accent-color: var(--akzent);
+}
 .sa-zeile.eigen { opacity: .65; }
 .sa-zeile .sa-meta { color: var(--blass); font-size: 11px; margin-top: 2px; }
 .sa-zeile .mono { word-break: break-all; }
+/* Text wächst; Aktionen (HTML/CSV/↗) rechtsbündig. */
+.sa-zeile > span:not(.sa-zeile-aktionen) { flex: 1; min-width: 0; }
+.sa-zeile-aktionen {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+}
+.sa-zeile-aktionen .sa-zeile-report {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.sa-zeile-aktionen .extern-link {
+  margin-left: 0;
+}
+.sa-werkzeug {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 4px 4px 10px;
+}
+.sa-mehr { margin: 8px 4px 4px; }
+.sa-utxo-host { display: flex; flex-direction: column; }
 .sa-inputs {
   margin: 4px 0 0 1.6rem; font-size: 11px; color: var(--gedaempft);
   font-family: var(--mono);
@@ -639,13 +1110,27 @@ select { font-family: var(--mono); font-size: 11px; }
   color: var(--text); font-size: 14px;
 }
 .check-zeile input { margin: 0; width: 1rem; height: 1rem; flex-shrink: 0; }
-.start-sync-fuss {
+/* Hell/Dunkel nebeneinander — mutual exclusive via name=ui-theme. */
+.radio-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 1.25rem;
+}
+/* Spezifischer als .karte-fuss { align-items: center } (steht weiter unten). */
+.karte-fuss.start-sync-fuss {
   flex-direction: column;
   align-items: flex-start;
+  justify-content: flex-start;
   gap: 6px;
 }
+.karte-fuss.start-sync-fuss > .check-zeile {
+  align-self: flex-start;
+  justify-content: flex-start;
+  width: auto;
+  margin-right: auto;
+}
 .check-zeile-unter {
-  margin-left: 1.6rem;
   font-size: 13px;
   color: var(--gedaempft);
 }
@@ -654,8 +1139,15 @@ select { font-family: var(--mono); font-size: 11px; }
   opacity: 0.55;
   cursor: default;
 }
+/* Volle Kartenbreite — nicht in schmaler Spalte umbrechen (früher max-width: 78ch). */
 .steuer-einstellungen-hinweis {
-  margin: 0; padding: 8px 13px 12px; max-width: 78ch; line-height: 1.55;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 8px 13px 12px;
+  line-height: 1.55;
 }
 
 .pille {
@@ -771,6 +1263,22 @@ select { font-family: var(--mono); font-size: 11px; }
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
   padding: 11px 13px; background: var(--flaeche-2);
   border-top: 1px solid var(--linie);
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Erläuterung unter den Feldern: volle Kartenbreite, nie Flex-Spalte. */
+.karte > .steuer-einstellungen-hinweis,
+.karte-fuss > .steuer-einstellungen-hinweis {
+  display: block;
+  float: none;
+  clear: both;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  /* Im Flex-Fuß: eigene Zeile über die volle Breite. */
+  flex: 0 0 auto;
+  flex-basis: 100%;
+  align-self: stretch;
 }
 
 .wallet-zeile {
@@ -836,11 +1344,39 @@ select { font-family: var(--mono); font-size: 11px; }
 .quelle-name { font-size: 12px; }
 .quelle-detail { font-family: var(--mono); font-size: 11px; color: var(--blass); }
 .quelle-rechts { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+.quelle-start-hoehe {
+  /* Breit genug für Placeholder „erster Scan-Block“ (DE) / „first scan block“ (EN). */
+  width: 12.5rem;
+  min-width: 12.5rem;
+  max-width: 40vw;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--rahmen);
+  border-radius: 3px;
+  background: var(--flaeche);
+  color: var(--text);
+}
+.quelle-start-hoehe::placeholder {
+  color: var(--blass);
+  opacity: 1;
+}
+.quelle-start-hoehe:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .quelle-notiz { flex-basis: 100%; font-size: 11px; color: var(--warn); padding-left: 23px; }
 /* Hoch-Privatsphäre konfiguriert → grün; unkonfiguriert / von besserer Quelle verdrängt → grau */
 .quelle-notiz.notiz-hoch { color: var(--gut); }
 .quelle-notiz.notiz-inaktiv { color: var(--blass); }
-.nicht-konfiguriert { opacity: .55; }
+/* Zeile ohne Liste: Inhalt gedimmt — „Verbinden“ bleibt voll sichtbar/aktiv. */
+.quelle-zeile.nicht-konfiguriert .quelle-rang,
+.quelle-zeile.nicht-konfiguriert .quelle-name,
+.quelle-zeile.nicht-konfiguriert .quelle-detail,
+.quelle-zeile.nicht-konfiguriert .quelle-notiz,
+.quelle-zeile.nicht-konfiguriert .pille {
+  opacity: .55;
+}
 
 /* Bearbeiten einer Datenquelle */
 .stift {
@@ -913,6 +1449,18 @@ select { font-family: var(--mono); font-size: 11px; }
 /* ---------- Herkunftsbaum ---------- */
 
 .suchleiste { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
+.trace-fokus-leiste {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--flaeche, #1a1a1a) 88%, var(--akzent, #f7931a) 12%);
+}
+.trace-fokus-leiste .meta { flex: 1 1 12rem; }
+.trace-fokus { margin-top: 4px; }
 
 .wurzel-zeile { padding: 12px 13px; display: flex; flex-direction: column; gap: 3px; }
 .wurzel-oben { display: flex; align-items: baseline; gap: 11px; flex-wrap: wrap; }
@@ -928,8 +1476,21 @@ select { font-family: var(--mono); font-size: 11px; }
 
 .baum { padding: 12px 13px; }
 .baum-knoten { display: flex; align-items: center; gap: 9px; padding: 5px 0; }
+/* Standard: eine Einrückstufe. Interne Ketten nutzen .flach + .knoten-austritt. */
 .baum-kinder {
   margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie);
+}
+/* Gleiches Wallet: Hops ohne extra Hierarchie (keine Treppen). */
+.baum-kinder.flach {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+/* Wallet-Wechsel oder Extern/Coinbase unter internem Segment → eine Stufe. */
+.baum-kinder.flach > .baum-knoten-block.knoten-austritt {
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--linie);
 }
 .klapp {
   flex: none; width: 22px; height: 22px; padding: 0; background: none; border: 0;
@@ -950,6 +1511,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .knoten-eigen  { background: var(--eigen); }
 .knoten-extern { background: var(--fremd); border-radius: 50%; }
 .knoten-offen  { background: var(--warn); }
+.knoten-krit   { background: var(--krit); border-radius: 2px; }
 .knoten-coinbase { background: var(--akzent); }
 .knoten-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .knoten-oben { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
@@ -995,6 +1557,24 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   width: 16px;
   height: 16px;
   opacity: 0.95;
+}
+.adress-boerse-leiste {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.adress-boerse-pille {
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--gut-bg, rgba(46, 160, 67, 0.15));
+  color: var(--gut, #2ea043);
+  border: 1px solid color-mix(in srgb, var(--gut, #2ea043) 35%, transparent);
+  white-space: nowrap;
 }
 .knoten-notiz {
   font-size: 11px; color: var(--warn); background: var(--warn-bg);
@@ -1097,8 +1677,26 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .utxo-wurzel > .baum-knoten { align-items: center; }
 .utxo-zweig { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie); }
 .zweig-status {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 11px; color: var(--gedaempft); padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  color: var(--gedaempft);
+  padding: 6px 0;
+}
+/* Text wächst/schrumpft — Abbrechen bleibt rechts, springt nicht. */
+.zweig-status > .zweig-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zweig-status > .knopf {
+  margin-left: auto;
+  flex: none;
 }
 
 /* Kopfzeile über einem gespeicherten Baum: Stand, ggf. Vorbehalt, Neustart. */
@@ -1134,6 +1732,40 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .zweig-stand { white-space: nowrap; }
 .zweig-warnung { color: var(--warn); flex: 1 1 16rem; min-width: 0; }
+.zweig-klapp-leiste {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+}
+.zweig-klapp-leiste .knopf {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--linie, #444);
+  background: var(--flaeche-2, #222);
+}
+.zweig-klapp-leiste .knopf:hover {
+  border-color: var(--akzent, #f7931a);
+  color: var(--akzent, #f7931a);
+}
+.baum-knoten-block { position: relative; }
+
+/* Wallet wechselt zwischen Eltern- und Kindknoten (interne Hops). */
+.baum-knoten-block.wallet-uebergang > .kopf-mit-verweis {
+  border-left: 3px solid var(--akzent);
+  padding-left: 8px;
+  margin-left: -2px;
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--akzent-zart) 70%, transparent);
+}
+.wallet-uebergang-hinweis {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--akzent);
+  line-height: 1.35;
+  margin-top: 1px;
+}
 
 /* Marke in der UTXO-Liste: liegt eine Analyse vor? */
 .verfolgt-marke {
@@ -1144,6 +1776,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .verfolgt-marke.veraltet,
 .verfolgt-marke.ohne-herkunft-marke {
   background: var(--warn-bg); color: var(--warn);
+}
+/* Abbruch, Lücken, fehlende Prevouts, leerer Baum — nicht „fertig grün“. */
+.verfolgt-marke.unvollstaendig {
+  background: var(--krit-bg); color: var(--krit); font-weight: 600;
 }
 
 /* Adressgruppen in der Wallet-Ansicht */
@@ -1211,7 +1847,54 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .kennzahl-wert.gut { color: var(--gut); }
 .kennzahl-wert.warn { color: var(--warn); }
+/* Wie Zeitstrahl-Dots ohne Herkunft (grau, nicht gelb). */
+.kennzahl-wert.ungeprueft { color: var(--achse-ungeprueft); }
 .kennzahl-zusatz { font-size: 11px; color: var(--gedaempft); }
+.kennzahl-aktion {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* UTXO-Tabelle: Haltefrist-Gruppen (initial zugeklappt) */
+.steuer-gruppe-kopf td {
+  padding: 0;
+  border-bottom: 1px solid var(--linie);
+  background: var(--flaeche-2);
+}
+.steuer-gruppe-taste {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.steuer-gruppe-taste:hover { background: var(--flaeche-3); }
+.steuer-gruppe-taste .klapp { flex: 0 0 auto; }
+.steuer-gruppe-titel {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .02em;
+  text-transform: capitalize;
+  font-weight: 600;
+}
+.steuer-gruppe.erfuellt .steuer-gruppe-titel { color: var(--gut); }
+.steuer-gruppe.offen .steuer-gruppe-titel { color: var(--warn); }
+.steuer-gruppe-meta {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.tabelle tbody.steuer-gruppe:last-child tr:last-child:not([hidden]) td {
+  border-bottom: 0;
+}
 
 /* ---------- Cache-Dashboard (Belegung) ---------- */
 
@@ -1304,6 +1987,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 
 /* Geprüfte Adressen: standardmäßig zu — die Liste wird lang, und sie ist
    Beleg, nicht Befund. */
+.sanktions-coinjoin {
+  padding-left: 28px;
+  color: var(--gedaempft);
+}
 .sanktions-adressen {
   padding: 8px 13px; border-bottom: 1px solid var(--linie-zart);
   font-size: 12px;
@@ -1328,6 +2015,14 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .grundlage-ok    { color: var(--gut); }
 .grundlage-offen { color: var(--warn); }
+/* „klären“ neben Wallet-Eingang in der UTXO-Tabelle */
+.steuer-utxo-klaeren {
+  margin-left: 8px;
+  vertical-align: middle;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+}
 
 /* ---------- Zeitstrahl ---------- */
 
@@ -1337,24 +2032,108 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
    abweichen lassen. */
 .punkt-frist-erfuellt { background: var(--gut); border-radius: 50%; }
 .punkt-frist-offen    { background: var(--warn); border-radius: 50%; }
+.punkt-frist-ungeprueft { background: var(--achse-ungeprueft); border-radius: 50%; }
+.punkt-geister-saldo {
+  background: transparent;
+  border: 2px solid var(--gut);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
 
 .achse {
-  display: flex; align-items: stretch; gap: 8px;
-  /* Oben Platz für die senkrechten Punktbeschriftungen. */
-  padding: 13rem 22px 14px;
+  display: flex; align-items: stretch; gap: 0;
+  /* Wenig Rand: UTXO-Beträge nur noch im Tooltip, nicht als Labels. */
+  padding: 1.2rem 22px 14px;
 }
+/* Y-Achse: gleiche Typo/Farbe wie .achse-ticks, senkrechte Linie wie .achse-linie. */
 .achse-y {
-  display: flex; flex-direction: column; justify-content: space-between;
-  font-family: var(--mono); font-size: 9px; color: var(--blass);
-  text-align: right; min-width: 4.8rem;
-  padding-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--blass);
+  text-align: right;
+  min-width: 5.5rem;
+  padding-bottom: 18px; /* wie .achse-ticks-Zeile — Skala = Spurhöhe */
+  padding-right: 6px; /* Abstand Labels → Linie, analog X-Ticks padding-top */
+  box-sizing: border-box;
+}
+.achse-y-skala {
+  position: relative;
+  flex: 0 0 220px; /* = .achse-spur height */
+  width: 100%;
+}
+/* Senkrechte Achsenlinie: trifft X-Linie in der Ecke (gap: 0). */
+.achse-y-linie {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 220px;
+  background: var(--linie);
+  pointer-events: none;
+}
+.achse-y-tick {
+  position: absolute;
+  right: 6px;
+  transform: translateY(50%); /* Mitte auf dem Tick wie Punkt-bottom */
+  white-space: nowrap;
+  line-height: 1;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--blass);
 }
 .achse-haupt { flex: 1; min-width: 0; }
 
-.achse-spur { position: relative; height: 200px; }
+/* X-Pan/Zoom: Viewport clippt, Spur wird per left-% neu gemappt. */
+.achse-viewport {
+  /* visible: senkrechte Betrags-Labels und „sats vor Haltefrist“ nicht abschneiden.
+     Außerhalb des X-Fensters werden Punkte ohnehin nicht gezeichnet. */
+  overflow: visible;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.achse-viewport.ziehend { cursor: grabbing; }
+
+.achse-spur { position: relative; height: 220px; overflow: visible; }
 .achse-linie {
   position: absolute; left: 0; right: 0; bottom: 0;
   height: 1px; background: var(--linie);
+}
+/* Sats vor Haltefrist: Ring exakt auf der Frist-X (wie andere Punkte),
+   Label absolut links davon — verschiebt den Ring nicht. */
+.achse-geister {
+  position: absolute;
+  bottom: 0;
+  /* right edge on Fristgrenze, lower edge on X-axis */
+  transform: translate(-100%, 0);
+  z-index: 2;
+  pointer-events: none;
+  line-height: 0;
+}
+.achse-geister .achse-punkt {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  display: block;
+}
+.achse-geister-label {
+  position: absolute;
+  right: calc(100% + 6px); /* links vom Ring */
+  bottom: 50%;
+  transform: translateY(50%);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gut);
+  white-space: nowrap;
+  line-height: 1.2;
+  background: color-mix(in srgb, var(--flaeche) 88%, transparent);
+  padding: 1px 3px;
 }
 
 /* Fristgrenze: senkrechte Linie mit Beschriftung */
@@ -1372,10 +2151,25 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   border-radius: 50%;
   border: 2px solid var(--flaeche);
   transform: translate(-50%, 50%);
-  cursor: default;
+  cursor: inherit; /* Ziehen am Viewport; Bubble mit .klickbar → pointer */
+  z-index: 2;
+  box-sizing: border-box;
 }
+.achse-punkt.klickbar { cursor: pointer; }
 .achse-punkt.erfuellt { background: var(--gut); }
 .achse-punkt.offen    { background: var(--warn); }
+/* Innerhalb Haltefrist + ohne Herkunft: grau statt gelb.
+   Außerhalb der Frist bleibt .erfuellt (grün), auch ohne Trace. */
+.achse-punkt.ungeprueft { background: var(--achse-ungeprueft); }
+/* Geister-Saldo: Ring auf der X-Achse (y=0), Größe per Inline-width/height. */
+.achse-punkt.geister {
+  background: transparent;
+  z-index: 1;
+  border-width: 2px;
+}
+/* Geister-Saldo ist immer „außerhalb Haltefrist“ → grün. */
+.achse-punkt.geister,
+.achse-punkt.geister.erfuellt { border-color: var(--gut); }
 .achse-punkt.klein  { width: 8px;  height: 8px; }
 .achse-punkt.mittel { width: 11px; height: 11px; }
 .achse-punkt.gross  { width: 15px; height: 15px; }
@@ -1394,17 +2188,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .achse-punkt:hover .achse-punkt-tip { display: block; }
 .achse-punkt-tip.links { left: auto; right: 16px; }
-.achse-punkt-label {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 3px);
-  transform: rotate(-90deg);
-  transform-origin: left bottom;
-  white-space: nowrap;
-  font-family: var(--mono); font-size: 9px; font-weight: 600;
-  color: var(--text); background: var(--flaeche);
-  padding: 0 3px; pointer-events: none;
-}
+
 
 .achse-ticks {
   display: flex; justify-content: space-between;
@@ -1444,11 +2228,17 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   .nav-eintrag.aktiv { border-left: 0; border-bottom-color: var(--akzent); }
   .inhalt { padding: 14px; }
   .buehne.log-an .dock-spalten {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(6.5rem, var(--dock-empfang-pct, 36%));
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
-  .buehne.log-an #dock-spalter { display: none; }
+  .buehne.log-an #log-pane { grid-column: 1 / -1; }
+  .buehne.log-an #dock-spalter,
+  .buehne.log-an #empfang-spalter { display: none; }
   .buehne.log-an .log-pane { border-right: 0; border-bottom: 1px solid var(--linie); }
+  .empfang-pane {
+    max-width: none;
+    min-width: 0;
+  }
 }
 
 /* Veräußerungen im Steuerjahr */
@@ -1459,6 +2249,11 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .abgang-zeile:last-child { border-bottom: 0; }
 .abgang-zeile .mono { min-width: 9rem; }
+.abgang-zeile .extern-link {
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+}
 
 /* XPUB und Multisig: gleiche Feldbreite, rechts dieselbe Spalte. */
 .wallet-einfuegen {

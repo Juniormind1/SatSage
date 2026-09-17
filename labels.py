@@ -436,8 +436,27 @@ def lade(cache_dir: Path | None = None) -> Labelverzeichnis | None:
     return bestand
 
 
-def beschrifte(adresse: str, cache_dir: Path | None = None) -> dict | None:
-    """Bequemer Einzelaufruf — None, wenn nichts bekannt ist."""
+def beschrifte(
+    adresse: str,
+    cache_dir: Path | None = None,
+    *,
+    txid: str = "",
+) -> dict | None:
+    """
+    Bequemer Einzelaufruf — None, wenn nichts bekannt ist.
+
+    Reihenfolge: Nutzer-Börsen-CSV (Adresse, sonst TxID) vor dem öffentlichen
+    Label-Bestand (am-i.exposed). Eigene Import-Klarname schlagen historische
+    Massendaten.
+    """
+    try:
+        from core import exchange_reports as boerse
+
+        hit = boerse.beschrifte(adresse=adresse or "", txid=txid or "")
+        if hit is not None:
+            return hit
+    except Exception:
+        pass
     bestand = lade(cache_dir)
     return bestand.suche(adresse) if bestand else None
 
@@ -472,6 +491,12 @@ def _hole(url: str, ziel: Path, fortschritt=None) -> int:
         gesamt = int(antwort.headers.get("Content-Length") or 0)
         with tmp.open("wb") as datei:
             while True:
+                try:
+                    from core.jobs import raise_if_job_cancelled
+
+                    raise_if_job_cancelled()
+                except ImportError:
+                    pass
                 block = antwort.read(65536)
                 if not block:
                     break
@@ -498,6 +523,12 @@ def aktualisiere(cache_dir: Path | None = None, *, variante: str = "kern",
 
     groessen = {}
     for name, url in VARIANTEN[variante].items():
+        try:
+            from core.jobs import raise_if_job_cancelled
+
+            raise_if_job_cancelled()
+        except ImportError:
+            pass
         groessen[name] = _hole(url, verzeichnis / name, fortschritt)
 
     meta = {

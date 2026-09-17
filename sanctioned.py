@@ -1398,6 +1398,15 @@ def update_sanctioned_lists(
     all_groups: list[SanctionEntityGroup] = []
     source_stats: list[dict] = []
 
+    def _check_abbruch() -> None:
+        try:
+            from core.jobs import raise_if_job_cancelled
+
+            raise_if_job_cancelled()
+        except ImportError:
+            pass
+
+    _check_abbruch()
     print("  [1/6] OFAC SDN Flatliste (0xB10C)…", flush=True)
     try:
         ofac_addresses, ofac_url, ofac_http = _fetch_ofac_flat_addresses()
@@ -1432,6 +1441,7 @@ def update_sanctioned_lists(
         })
         print(f"      ⚠️  {exc}", flush=True)
 
+    _check_abbruch()
     print("  [2/6] OFAC SDN-XML (Metadaten)…", flush=True)
     ofac_groups: list[SanctionEntityGroup] = []
     try:
@@ -1483,6 +1493,7 @@ def update_sanctioned_lists(
 
     step = 3
     for spec in OPENSANCTIONS_SOURCES:
+        _check_abbruch()
         print(f"  [{step}/6] {spec['name']}…", flush=True)
         step += 1
         try:
@@ -1525,6 +1536,7 @@ def update_sanctioned_lists(
             })
             print(f"      ⚠️  {exc}", flush=True)
 
+    _check_abbruch()
     print("  [6/6] Badd-Boyz Bitcoin Scammers…", flush=True)
     try:
         payload, badd_http = _fetch_url_with_meta(BADD_BOYZ_URL, timeout=60)

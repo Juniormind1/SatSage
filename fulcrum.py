@@ -76,6 +76,8 @@ FULCRUM_CONNECT_TIMEOUT = 8
 FULCRUM_ONION_TIMEOUT = 30
 #: Bei Tor/großen Tx-Antworten: nach Timeout neu verbinden und erneut fragen.
 FULCRUM_REQUEST_RETRIES = 3
+#: Electrum-JSON-RPC-Batch über Tor: Calls pro Nachricht (Timeout/Antwortgröße).
+TOR_RPC_BATCH_SIZE = 32
 TOR_PROXY_CHECK_TIMEOUT = 2
 TOR_BROWSER_SOCKS_HOST = "127.0.0.1"
 TOR_BROWSER_SOCKS_PORT = 9150
@@ -84,6 +86,7 @@ TOR_BROWSER_DOWNLOAD = "https://www.torproject.org/download/"
 CLIENT_NAME = "SatSage"
 PROTOCOL_VERSION = "1.4"
 _LISTUNSPENT_METHOD = "blockchain.scripthash.listunspent"
+_GET_HISTORY_METHOD = "blockchain.scripthash.get_history"
 _PROBE_SCRIPT_HASH = "0" * 64
 
 
@@ -92,7 +95,41 @@ def _is_unknown_method_error(exc: BaseException, method: str) -> bool:
     return "unknown method" in msg and method.lower() in msg
 
 
-def supports_listunspent(client: FulcrumClient) -> bool:
+def parse_electrum_server_software(version_result: Any) -> tuple[str, str]:
+    """
+    Kurzer Implementierungsname + Rohstring aus ``server.version``.
+
+    Electrum-RPC liefert typisch ``[server_string, protocol]``, z. B.
+    ``["/libbitcoin:4.0.0/", "1.4"]``, ``["electrs/0.10.5", "1.4"]``,
+    ``["Fulcrum 1.9.1", "1.4"]``. Rückgabe: ``(label, roh)`` — label für
+    die UI-Pille (``electrs`` / ``fulcrum`` / ``libbitcoin`` / …).
+    """
+    roh = ""
+    if isinstance(version_result, (list, tuple)) and version_result:
+        roh = str(version_result[0] or "").strip()
+    elif isinstance(version_result, str):
+        roh = version_result.strip()
+    if not roh:
+        return "", ""
+    klein = roh.lower().strip().strip("/")
+    # "/libbitcoin:4.0.0/" · electrs/0.10 · Fulcrum 1.9
+    if "libbitcoin" in klein:
+        return "libbitcoin", roh
+    if "fulcrum" in klein:
+        return "fulcrum", roh
+    if "electrs" in klein:
+        return "electrs", roh
+    if "electrumx" in klein or "electrum-x" in klein:
+        return "electrumx", roh
+    if "rostrum" in klein:
+        return "rostrum", roh
+    # Unbekannt: erstes Token (ohne Versionszahlen-Pfad)
+    token = klein.split("/")[0].split(":")[0].split()[0]
+    token = "".join(c for c in token if c.isalnum() or c in "-_")[:24]
+    return (token or "electrum"), roh
+
+
+def supports_listunspent(client: "FulcrumClient") -> bool:
     """Prüft, ob der Server blockchain.scripthash.listunspent unterstützt."""
     try:
         client.request(_LISTUNSPENT_METHOD, [_PROBE_SCRIPT_HASH])
@@ -145,6 +182,11 @@ class FulcrumClient:
         self._sock: socket.socket | ssl.SSLSocket | None = None
         self._request_id = 0
         self._lock = threading.Lock()
+        # Genau ein server.version pro TCP-Session (libbitcoin: zweites → bad_request).
+        self._handshaked = False
+        self.server_version: Any = None
+        self.server_software: str = ""
+        self.server_software_raw: str = ""
 
     @staticmethod
     def _outbound_values() -> dict[str, str] | None:
@@ -174,6 +216,10 @@ class FulcrumClient:
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
         else:
             self._sock = raw
+        self._handshaked = False
+        self.server_version = None
+        self.server_software = ""
+        self.server_software_raw = ""
         # Connect-Timeout gilt sonst nicht zuverlässig für spätere recv —
         # ohne das hängt get_history über Tor minutenlang ohne Abbruch.
         try:
@@ -188,6 +234,56 @@ class FulcrumClient:
             except OSError:
                 pass
             self._sock = None
+        self._handshaked = False
+
+    def _apply_server_version(self, version_result: Any) -> None:
+        label, roh = parse_electrum_server_software(version_result)
+        self.server_version = version_result
+        self.server_software = label
+        self.server_software_raw = roh
+
+    def _handshake_locked(self) -> Any:
+        """
+        ``server.version`` genau einmal pro TCP-Session.
+
+        libbitcoin antwortet auf ein zweites Handshake mit bad_request /
+        „moin moin“-Geschwätz — deshalb kein erneutes ``server.version``.
+        Aufruf nur unter ``self._lock``.
+        """
+        if self._handshaked:
+            return self.server_version
+        ver = self._request_once("server.version", [CLIENT_NAME, PROTOCOL_VERSION])
+        self._apply_server_version(ver)
+        self._handshaked = True
+        return ver
+
+    def handshake(self) -> Any:
+        """Electrum-Handshake (einmalig). Siehe ``_handshake_locked``."""
+        with self._lock:
+            return self._handshake_locked()
+
+    def _recv_json_line(self) -> Any:
+        """Eine newline-terminierte JSON-Nachricht vom Socket lesen."""
+        if not self._sock:
+            raise RuntimeError("Fulcrum-Client nicht verbunden")
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = self._sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("Fulcrum-Verbindung geschlossen")
+            buf += chunk
+        return json.loads(buf.decode("utf-8"))
+
+    @staticmethod
+    def _result_from_response(response: Any) -> Any:
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Ungültige Electrum-Antwort: {type(response).__name__}")
+        if response.get("error"):
+            err = response["error"]
+            if isinstance(err, dict):
+                raise RuntimeError(err.get("message", err))
+            raise RuntimeError(str(err))
+        return response.get("result")
 
     def _request_once(self, method: str, params: list | None = None) -> Any:
         if not self._sock:
@@ -202,31 +298,79 @@ class FulcrumClient:
         }
         data = (json.dumps(payload) + "\n").encode("utf-8")
         self._sock.sendall(data)
+        return self._result_from_response(self._recv_json_line())
 
-        buf = b""
-        while not buf.endswith(b"\n"):
-            chunk = self._sock.recv(65536)
-            if not chunk:
-                raise ConnectionError("Fulcrum-Verbindung geschlossen")
-            buf += chunk
+    def _request_batch_once(
+        self, calls: list[tuple[str, list | None]],
+    ) -> list[Any]:
+        """
+        Electrum-JSON-RPC-Batch: eine Nachricht, Antworten per id.
 
-        response = json.loads(buf.decode("utf-8"))
-        if response.get("error"):
-            err = response["error"]
-            if isinstance(err, dict):
-                raise RuntimeError(err.get("message", err))
-            raise RuntimeError(str(err))
-        return response.get("result")
+        Spec: Request als JSON-Array; Server antwortet mit Array oder
+        einzeln newline-getrennt. Reihenfolge der Rückgabe = *calls*.
+        """
+        if not self._sock:
+            raise RuntimeError("Fulcrum-Client nicht verbunden")
+        if not calls:
+            return []
+
+        payloads: list[dict] = []
+        id_order: list[int] = []
+        for method, params in calls:
+            self._request_id += 1
+            rid = self._request_id
+            id_order.append(rid)
+            payloads.append({
+                "jsonrpc": "2.0",
+                "id": rid,
+                "method": method,
+                "params": params or [],
+            })
+        data = (json.dumps(payloads) + "\n").encode("utf-8")
+        self._sock.sendall(data)
+
+        by_id: dict[int, Any] = {}
+        first = self._recv_json_line()
+        if isinstance(first, list):
+            for item in first:
+                if isinstance(item, dict) and "id" in item:
+                    by_id[int(item["id"])] = item
+        elif isinstance(first, dict) and "id" in first:
+            by_id[int(first["id"])] = first
+            while len(by_id) < len(id_order):
+                nxt = self._recv_json_line()
+                if isinstance(nxt, list):
+                    for item in nxt:
+                        if isinstance(item, dict) and "id" in item:
+                            by_id[int(item["id"])] = item
+                elif isinstance(nxt, dict) and "id" in nxt:
+                    by_id[int(nxt["id"])] = nxt
+                else:
+                    raise RuntimeError("Batch-Antwort ohne id")
+        else:
+            raise RuntimeError("Unerwartete Batch-Antwort vom Electrum-Server")
+
+        results: list[Any] = []
+        for rid in id_order:
+            if rid not in by_id:
+                raise RuntimeError(f"Batch-Antwort fehlt für id={rid}")
+            results.append(self._result_from_response(by_id[rid]))
+        return results
 
     def request(self, method: str, params: list | None = None) -> Any:
         """
         JSON-RPC-Aufruf. Bei Timeout/Abbrecher (typisch Tor + große Tx)
         bis ``FULCRUM_REQUEST_RETRIES`` neu verbinden und wiederholen.
         """
+        if method == "server.version":
+            # Immer über handshake — kein zweites version auf derselben Session.
+            return self.handshake()
         letzter: BaseException | None = None
         with self._lock:
             for versuch in range(1, FULCRUM_REQUEST_RETRIES + 1):
                 try:
+                    if not self._handshaked and self._sock is not None:
+                        self._handshake_locked()
                     return self._request_once(method, params)
                 except (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError) as exc:
                     letzter = exc
@@ -235,6 +379,7 @@ class FulcrumClient:
                     self.close()
                     try:
                         self.connect()
+                        self._handshake_locked()
                     except Exception as reconnect_exc:
                         letzter = reconnect_exc
                         continue
@@ -243,6 +388,67 @@ class FulcrumClient:
                 f"Fulcrum {method} nach {FULCRUM_REQUEST_RETRIES} Versuchen "
                 f"fehlgeschlagen ({letzter})"
             ) from letzter
+
+    def request_batch(
+        self, calls: list[tuple[str, list | None]],
+    ) -> list[Any]:
+        """
+        Mehrere JSON-RPC-Calls in einer Runde (Electrum-Batch).
+
+        * Nur bei ``tor_proxy`` und ≥2 Calls wirklich batchen — sonst
+          sequenziell ``request`` (LAN/Parallel-Pool braucht das nicht).
+        * Chunking über ``TOR_RPC_BATCH_SIZE`` (Antwortgröße/Timeouts).
+        * Reihenfolge der Ergebnisse = Reihenfolge von *calls*.
+        """
+        if not calls:
+            return []
+        if not self.tor_proxy or len(calls) == 1:
+            return [self.request(m, p) for m, p in calls]
+
+        out: list[Any] = []
+        chunk_n = max(1, int(TOR_RPC_BATCH_SIZE))
+        for start in range(0, len(calls), chunk_n):
+            chunk = calls[start : start + chunk_n]
+            if len(chunk) == 1:
+                out.append(self.request(chunk[0][0], chunk[0][1]))
+                continue
+            letzter: BaseException | None = None
+            with self._lock:
+                for versuch in range(1, FULCRUM_REQUEST_RETRIES + 1):
+                    try:
+                        if not self._handshaked and self._sock is not None:
+                            self._handshake_locked()
+                        out.extend(self._request_batch_once(chunk))
+                        letzter = None
+                        break
+                    except (
+                        TimeoutError,
+                        socket.timeout,
+                        ConnectionError,
+                        BrokenPipeError,
+                        OSError,
+                    ) as exc:
+                        letzter = exc
+                        if versuch >= FULCRUM_REQUEST_RETRIES:
+                            break
+                        self.close()
+                        try:
+                            self.connect()
+                            self._handshake_locked()
+                        except Exception as reconnect_exc:
+                            letzter = reconnect_exc
+                            continue
+                if letzter is not None:
+                    raise TimeoutError(
+                        f"Fulcrum-Batch ({len(chunk)} Calls) nach "
+                        f"{FULCRUM_REQUEST_RETRIES} Versuchen fehlgeschlagen "
+                        f"({letzter})"
+                    ) from letzter
+        return out
+
+    def tor_batch_sinnvoll(self, n_calls: int) -> bool:
+        """True wenn Batch über Tor RTTs spart (eigener Electrs@Tor)."""
+        return bool(self.tor_proxy) and int(n_calls) >= 2
 
 
 class FulcrumNotifySession:
@@ -472,7 +678,8 @@ def connect_fulcrum(
     )
     try:
         client.connect()
-        client.request("server.version", [CLIENT_NAME, PROTOCOL_VERSION])
+        # Ein Handshake — Ergebnis liegt an client.server_software (Pille).
+        client.handshake()
         if require_listunspent and not supports_listunspent(client):
             client.close()
             return None, "listunspent nicht unterstützt"
@@ -495,6 +702,10 @@ class RotatingFulcrumPool:
     @property
     def host(self) -> str:
         return f"rotation({len(self._clients)} Server)"
+
+    def tor_batch_sinnvoll(self, n_calls: int) -> bool:
+        """Kein Tor-Batch über Rotation — ``request_batch`` fehlt am Pool."""
+        return False
 
     def request(self, method: str, params: list | None = None) -> Any:
         last_exc: BaseException | None = None
@@ -587,7 +798,7 @@ def address_to_scripthash(address: str) -> str:
 def address_has_received_fulcrum(client: FulcrumClient, address: str) -> bool:
     """True, wenn die Adresse je eine On-Chain-Transaktion hatte."""
     sh = address_to_scripthash(address)
-    history = client.request("blockchain.scripthash.get_history", [sh])
+    history = client.request(_GET_HISTORY_METHOD, [sh])
     return bool(history)
 
 
@@ -615,23 +826,56 @@ def first_seen_height_fulcrum(
     liste = list(addresses)
     gesamt = len(liste)
     aeltester: int | None = None
-    for nummer, address in enumerate(liste, start=1):
-        try:
-            sh = address_to_scripthash(address)
-            history = client.request(
-                "blockchain.scripthash.get_history", [sh]
-            ) or []
-        except Exception:
-            history = []
-        for eintrag in history:
+    def _history_min_height(history) -> int | None:
+        lokal: int | None = None
+        for eintrag in history or []:
             try:
                 hoehe = int(eintrag.get("height", 0))
             except (TypeError, ValueError):
                 continue
             if hoehe <= 0:
                 continue
-            if aeltester is None or hoehe < aeltester:
-                aeltester = hoehe
+            if lokal is None or hoehe < lokal:
+                lokal = hoehe
+        return lokal
+
+    # Tor + viele Adressen: get_history bündeln (ein RTT statt N).
+    if getattr(client, "tor_batch_sinnvoll", lambda _n: False)(gesamt):
+        for start in range(0, gesamt, TOR_RPC_BATCH_SIZE):
+            chunk = liste[start : start + TOR_RPC_BATCH_SIZE]
+            calls = [
+                (_GET_HISTORY_METHOD, [address_to_scripthash(a)])
+                for a in chunk
+            ]
+            try:
+                answers = client.request_batch(calls)
+            except Exception:
+                answers = [None] * len(chunk)
+            for offset, history in enumerate(answers):
+                try:
+                    lokal = _history_min_height(history or [])
+                except Exception:
+                    lokal = None
+                if lokal is not None and (
+                    aeltester is None or lokal < aeltester
+                ):
+                    aeltester = lokal
+                nummer = start + offset + 1
+                if on_progress and (
+                    nummer == 1 or nummer == gesamt or nummer % 10 == 0
+                ):
+                    on_progress(f"Wallet-Alter: Adresse {nummer} von {gesamt}…")
+        return aeltester
+
+    for nummer, address in enumerate(liste, start=1):
+        try:
+            sh = address_to_scripthash(address)
+            history = client.request(_GET_HISTORY_METHOD, [sh]) or []
+        except Exception:
+            history = []
+        lokal = _history_min_height(history)
+        if lokal is not None and (aeltester is None or lokal < aeltester):
+            aeltester = lokal
         if on_progress and (nummer == 1 or nummer == gesamt or nummer % 10 == 0):
             on_progress(f"Wallet-Alter: Adresse {nummer} von {gesamt}…")
     return aeltester
@@ -660,6 +904,52 @@ def first_seen_fulcrum(
     return {"height": hoehe, "time_ts": _block_time_for_height(client, hoehe)}
 
 
+def _adressen_fuer_index(
+    derive_address_at_index,
+    xpub: str,
+    change: int,
+    index: int,
+) -> list[str]:
+    """Eine Adresse oder alle Skript-Varianten (xpub+auto) für Index *index*."""
+    roh = derive_address_at_index(xpub, change, index)
+    if isinstance(roh, (list, tuple, set)):
+        return [a for a in roh if a]
+    if roh:
+        return [roh]
+    return []
+
+
+def _gap_progress(
+    on_progress,
+    *,
+    kette: str,
+    index: int,
+    bisher: int,
+    utxo_zahl: int,
+    batch_n: int = 0,
+) -> None:
+    if not on_progress:
+        return
+    name = f"{kette} " if kette else ""
+    wort = "UTXO" if bisher == 1 else "UTXOs"
+    if utxo_zahl > 0:
+        hier = "UTXO" if utxo_zahl == 1 else "UTXOs"
+        text = (
+            f"Gap-Scan {name}Index #{index} — darin {utxo_zahl} {hier} "
+            f"gefunden · bisher {bisher} {wort}"
+        )
+    else:
+        # Nicht „0 gefunden“: das würde den letzten Treffer in der
+        # Statuszeile überschreiben und widerspräche dem Log.
+        text = f"Gap-Scan {name}Index #{index} · bisher {bisher} {wort}"
+        if batch_n > 1:
+            text = f"{text} · Batch {batch_n}"
+    try:
+        on_progress(text, sofort=utxo_zahl > 0)
+    except TypeError:
+        on_progress(text)
+
+
 def collect_used_chain_indices_fulcrum(
     client: FulcrumClient,
     xpub: str,
@@ -680,8 +970,26 @@ def collect_used_chain_indices_fulcrum(
     *on_utxos_update* erhält nach jedem Fund die bisher gefundenen UTXOs
     dieser Chain (voller Zwischenstand), damit die GUI schon während des
     Gap-Scans zeichnen kann.
+
+    Über Tor: ``get_history`` in Fenstern (Batch), Auswertung weiter strikt
+    indexweise inkl. Gap-Abbruch — fertige Treffer holen ``listunspent``
+    gebündelt nach.
     """
     from display import is_list_abort_requested
+
+    if getattr(client, "tor_batch_sinnvoll", lambda _n: False)(2):
+        return _collect_used_chain_indices_tor_batch(
+            client,
+            xpub,
+            change,
+            max_index,
+            gap_limit,
+            derive_address_at_index,
+            start_index=start_index,
+            on_progress=on_progress,
+            on_utxos_update=on_utxos_update,
+            kette=kette,
+        )
 
     used: set[int] = set()
     gap = 0
@@ -692,14 +1000,9 @@ def collect_used_chain_indices_fulcrum(
         if is_list_abort_requested():
             break
         next_index = i + 1
-        roh = derive_address_at_index(xpub, change, i)
-        # Eine Adresse (alt) oder alle Skript-Varianten (xpub+auto).
-        if isinstance(roh, (list, tuple, set)):
-            adressen = [a for a in roh if a]
-        elif roh:
-            adressen = [roh]
-        else:
-            adressen = []
+        adressen = _adressen_fuer_index(
+            derive_address_at_index, xpub, change, i,
+        )
         if not adressen:
             break
         utxo_zahl = 0
@@ -728,23 +1031,179 @@ def collect_used_chain_indices_fulcrum(
             gap += 1
             if gap >= gap_limit:
                 break
-        if on_progress:
-            name = f"{kette} " if kette else ""
-            wort = "UTXO" if bisher == 1 else "UTXOs"
-            if utxo_zahl > 0:
-                hier = "UTXO" if utxo_zahl == 1 else "UTXOs"
-                text = (
-                    f"Gap-Scan {name}Index #{i} — darin {utxo_zahl} {hier} "
-                    f"gefunden · bisher {bisher} {wort}"
-                )
+        _gap_progress(
+            on_progress,
+            kette=kette,
+            index=i,
+            bisher=bisher,
+            utxo_zahl=utxo_zahl,
+        )
+    return used, next_index
+
+
+def _collect_used_chain_indices_tor_batch(
+    client: FulcrumClient,
+    xpub: str,
+    change: int,
+    max_index: int,
+    gap_limit: int,
+    derive_address_at_index,
+    *,
+    start_index: int = 0,
+    on_progress=None,
+    on_utxos_update=None,
+    kette: str = "",
+) -> tuple[set[int], int]:
+    """
+    Gap-Scan über Tor: get_history-Fenster batchen, Gap in Index-Reihenfolge.
+
+    Fenstergröße min(TOR_RPC_BATCH_SIZE, max(gap_limit, 8)) — nach gap_limit
+    leeren Indizes abbrechen, auch mitten im Fenster.
+    """
+    from display import is_list_abort_requested
+
+    used: set[int] = set()
+    gap = 0
+    next_index = start_index
+    bisher = 0
+    gefunden: list[dict] = []
+    # Nicht größer als Gap-Limit unnötig vorabfragen (außer etwas Puffer).
+    fenster = max(8, min(int(TOR_RPC_BATCH_SIZE), max(int(gap_limit), 8)))
+    i = start_index
+
+    while i < max_index:
+        if is_list_abort_requested():
+            break
+        window_end = min(max_index, i + fenster)
+        # (index, address) für alle Varianten im Fenster
+        eintraege: list[tuple[int, str]] = []
+        for idx in range(i, window_end):
+            for addr in _adressen_fuer_index(
+                derive_address_at_index, xpub, change, idx,
+            ):
+                eintraege.append((idx, addr))
+        if not eintraege:
+            break
+
+        calls = [
+            (_GET_HISTORY_METHOD, [address_to_scripthash(addr)])
+            for _idx, addr in eintraege
+        ]
+        try:
+            answers = client.request_batch(calls)
+        except Exception:
+            # Batch fehlgeschlagen → Index für Index wie bisher
+            answers = []
+            for _idx, addr in eintraege:
+                try:
+                    answers.append(
+                        client.request(
+                            _GET_HISTORY_METHOD,
+                            [address_to_scripthash(addr)],
+                        ) or []
+                    )
+                except Exception:
+                    answers.append([])
+
+        # index → [(address, history), ...]
+        nach_index: dict[int, list[tuple[str, list]]] = {}
+        for (idx, addr), hist in zip(eintraege, answers):
+            nach_index.setdefault(idx, []).append((addr, hist or []))
+
+        stop = False
+        for idx in range(i, window_end):
+            if is_list_abort_requested():
+                stop = True
+                break
+            next_index = idx + 1
+            varianten = nach_index.get(idx) or []
+            if not varianten:
+                stop = True
+                break
+            hit_addrs = [a for a, h in varianten if h]
+            getroffen = bool(hit_addrs)
+            utxo_zahl = 0
+            if getroffen:
+                used.add(idx)
+                gap = 0
+                # listunspent für Treffer-Adressen bündeln
+                try:
+                    lu_calls = [
+                        (_LISTUNSPENT_METHOD, [address_to_scripthash(a)])
+                        for a in hit_addrs
+                    ]
+                    if len(lu_calls) == 1:
+                        lu_answers = [
+                            client.request(lu_calls[0][0], lu_calls[0][1]) or []
+                        ]
+                    else:
+                        lu_answers = client.request_batch(lu_calls)
+                except RuntimeError as exc:
+                    if _is_unknown_method_error(exc, _LISTUNSPENT_METHOD):
+                        lu_answers = None
+                    else:
+                        lu_answers = None
+                except Exception:
+                    lu_answers = None
+
+                if lu_answers is not None:
+                    for address, entries in zip(hit_addrs, lu_answers):
+                        try:
+                            for utxo in _utxos_from_listunspent_entries(
+                                client, entries or [],
+                            ):
+                                utxo["address"] = address
+                                gefunden.append(utxo)
+                                utxo_zahl += 1
+                        except Exception:
+                            try:
+                                for utxo in fetch_address_utxos_fulcrum(
+                                    client, address,
+                                ):
+                                    utxo["address"] = address
+                                    gefunden.append(utxo)
+                                    utxo_zahl += 1
+                            except Exception:
+                                pass
+                else:
+                    for address in hit_addrs:
+                        try:
+                            for utxo in fetch_address_utxos_fulcrum(
+                                client, address,
+                            ):
+                                utxo["address"] = address
+                                gefunden.append(utxo)
+                                utxo_zahl += 1
+                        except Exception:
+                            pass
+                bisher += utxo_zahl
+                if on_utxos_update and utxo_zahl > 0:
+                    on_utxos_update(list(gefunden))
             else:
-                # Nicht „0 gefunden“: das würde den letzten Treffer in der
-                # Statuszeile überschreiben und widerspräche dem Log.
-                text = f"Gap-Scan {name}Index #{i} · bisher {bisher} {wort}"
-            try:
-                on_progress(text, sofort=utxo_zahl > 0)
-            except TypeError:
-                on_progress(text)
+                gap += 1
+                if gap >= gap_limit:
+                    stop = True
+                    _gap_progress(
+                        on_progress,
+                        kette=kette,
+                        index=idx,
+                        bisher=bisher,
+                        utxo_zahl=0,
+                        batch_n=len(eintraege),
+                    )
+                    break
+
+            _gap_progress(
+                on_progress,
+                kette=kette,
+                index=idx,
+                bisher=bisher,
+                utxo_zahl=utxo_zahl,
+                batch_n=len(eintraege) if not getroffen else 0,
+            )
+        if stop:
+            break
+        i = window_end
     return used, next_index
 
 
@@ -987,6 +1446,32 @@ def klassifiziere_utxo_spends(
     return pending, confirmed, live_all
 
 
+def mempool_tx_hat_eigenen_output(
+    client: FulcrumClient,
+    spent_txid: str,
+    is_own_address,
+) -> bool:
+    """
+    True, wenn die Mempool-Spend-Tx mindestens einen Output an eine eigene
+    Adresse hat (Change oder Transfer an anderes SatSage-Wallet).
+    """
+    tid = str(spent_txid or "").strip().lower()
+    if not tid or not callable(is_own_address):
+        return False
+    try:
+        tx = fetch_tx_fulcrum(client, tid, enrich_block_info=False)
+    except Exception:
+        return False
+    for vout in tx.get("vout") or []:
+        for addr in _vout_addresses(vout):
+            try:
+                if is_own_address(addr):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 def eigene_mempool_empfaenge(
     client: FulcrumClient,
     pending_spends: list[dict],
@@ -1162,6 +1647,15 @@ def fetch_wallet_utxos_fulcrum(
             on_utxos_update(utxos)
         return utxos
 
+    # Eigener Electrs über Tor: listunspent bündeln (kein Multi-Socket).
+    if getattr(client, "tor_batch_sinnvoll", lambda _n: False)(total):
+        return _fetch_wallet_utxos_tor_batch(
+            client,
+            addr_list,
+            melde=melde,
+            melde_stand=melde_stand,
+        )
+
     utxos: list[dict] = []
     for done, address in enumerate(addr_list, start=1):
         if is_list_abort_requested():
@@ -1174,6 +1668,88 @@ def fetch_wallet_utxos_fulcrum(
         if neu:
             melde_stand(neu)
         melde(done, total)
+    return utxos
+
+
+def _fetch_wallet_utxos_tor_batch(
+    client: FulcrumClient,
+    addr_list: list[str],
+    *,
+    melde,
+    melde_stand,
+) -> list[dict]:
+    """
+    UTXO-Scan über Tor: ``listunspent`` in JSON-RPC-Batches.
+
+    Fallback: Server ohne listunspent → sequenziell History (selten).
+    """
+    from display import is_list_abort_requested
+
+    total = len(addr_list)
+    utxos: list[dict] = []
+    listunspent_ok = True
+
+    for start in range(0, total, TOR_RPC_BATCH_SIZE):
+        if is_list_abort_requested():
+            return utxos
+        chunk = addr_list[start : start + TOR_RPC_BATCH_SIZE]
+        if not listunspent_ok:
+            for offset, address in enumerate(chunk):
+                if is_list_abort_requested():
+                    return utxos
+                neu = []
+                for utxo in fetch_address_utxos_fulcrum(client, address):
+                    utxo["address"] = address
+                    utxos.append(utxo)
+                    neu.append(utxo)
+                if neu:
+                    melde_stand(neu)
+                melde(start + offset + 1, total)
+            continue
+
+        calls = [
+            (_LISTUNSPENT_METHOD, [address_to_scripthash(a)])
+            for a in chunk
+        ]
+        try:
+            answers = client.request_batch(calls)
+        except RuntimeError as exc:
+            if _is_unknown_method_error(exc, _LISTUNSPENT_METHOD):
+                listunspent_ok = False
+                for offset, address in enumerate(chunk):
+                    if is_list_abort_requested():
+                        return utxos
+                    neu = []
+                    for utxo in fetch_address_utxos_fulcrum(client, address):
+                        utxo["address"] = address
+                        utxos.append(utxo)
+                        neu.append(utxo)
+                    if neu:
+                        melde_stand(neu)
+                    melde(start + offset + 1, total)
+                continue
+            raise
+
+        for offset, (address, entries) in enumerate(zip(chunk, answers)):
+            if is_list_abort_requested():
+                return utxos
+            neu = []
+            try:
+                for utxo in _utxos_from_listunspent_entries(
+                    client, entries or [],
+                ):
+                    utxo["address"] = address
+                    utxos.append(utxo)
+                    neu.append(utxo)
+            except Exception:
+                # Einzeladresse: History-Fallback
+                for utxo in fetch_address_utxos_fulcrum(client, address):
+                    utxo["address"] = address
+                    utxos.append(utxo)
+                    neu.append(utxo)
+            if neu:
+                melde_stand(neu)
+            melde(start + offset + 1, total)
     return utxos
 
 
@@ -1674,7 +2250,14 @@ def fetch_wallet_history_fulcrum(
         neu: list[dict] = []
         try:
             scripthash = address_to_scripthash(address)
-        except Exception:
+        except Exception as exc:
+            try:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
+            except ImportError:
+                pass
             if on_address_done:
                 on_address_done(address, [])
             continue

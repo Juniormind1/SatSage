@@ -236,8 +236,13 @@ def _max_parallel_jobs(state=None, env_values=None) -> int:
 
 
 def _pruefe_env_modus(env_path: Path) -> None:
-    """Sichert .env und die atomare Sicherung beim Start gegen Mitlesen."""
-    for pfad in (env_path, env_path.with_suffix(env_path.suffix + ".bak")):
+    """Sichert .env und Start-Backups (backup0–9, legacy .bak) gegen Mitlesen."""
+    from core.config import ENV_BACKUP_SLOTS, env_backup_path
+
+    kandidaten = [env_path, env_path.with_suffix(env_path.suffix + ".bak")]
+    for i in range(ENV_BACKUP_SLOTS):
+        kandidaten.append(env_backup_path(env_path, i))
+    for pfad in kandidaten:
         try:
             if not pfad.is_file() or not stat.S_ISREG(pfad.stat().st_mode):
                 continue
@@ -569,11 +574,28 @@ class AppState:
                  immutable_cache_dir: Path, sanctions_dir: Path | None = None,
                  label_dir: Path | None = None, managed_by: str | None = None):
         self.env_path = env_path
+        # Vor dem ersten Laufzeit-Schreiben: vorgefundene .env rotieren.
+        try:
+            from core.config import rotate_env_backups_at_start
+
+            sicherung = rotate_env_backups_at_start(self.env_path)
+            if sicherung is not None:
+                meldung = ".env in .env.backup[0-9] gesichert."
+                print(meldung, flush=True)
+                LOGGER.info("%s (%s)", meldung, sicherung.name)
+        except OSError as exc:
+            LOGGER.warning("env-backup Rotation fehlgeschlagen: %s", exc)
         _pruefe_env_modus(self.env_path)
         self.cache_dir = cache_dir
         self.immutable_cache_dir = immutable_cache_dir
         self.sanctions_dir = sanctions_dir
         self.label_dir = label_dir or labels.LABEL_CACHE_DIR
+        # Börsen-CSV-Reports (Klarname Ein-/Auszahlung) neben dem App-Verzeichnis.
+        from core import exchange_reports as boerse_mod
+        from core.paths import app_dir as _app_dir
+
+        self.exchange_reports_dir = Path(_app_dir()) / "exchange_reports"
+        boerse_mod.setze_verzeichnis(self.exchange_reports_dir)
         # None bedeutet eigenständige Desktop-GUI; der Plugin-Einstieg setzt
         # dieses Merkmal ausdrücklich, nicht über eine fremde .env.
         self.managed_by = _managed_by_from_env(managed_by, env_path)
@@ -598,7 +620,42 @@ class AppState:
         self._lock = threading.Lock()
         self._wallet_ctx = None
         self._entries: list[WalletEntry] = []
+        # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
+        self.empfang_cache: dict[str, dict] = {}
+        # Wiederverwendeter Electrs-Client nur für Empfangs-QR (eigen oder öffentlich).
+        self._empfang_fulcrum = None
+        self._empfang_public_fulcrum = None
+        self._empfang_fulcrum_lock = threading.Lock()
+        # Öffentliches Electrum: pro Serverstart neu fragen (keine Dauer-.env).
+        source_mod.setze_oeffentliche_electrum_session(False)
+        self._streiche_dauerhafte_oeffentliche_electrum()
         self.reload()
+
+    def _streiche_dauerhafte_oeffentliche_electrum(self) -> None:
+        """
+        Altes ``OEFFENTLICHE_ELECTRUM=1`` aus der ``.env`` nehmen.
+
+        Die Web-GUI speichert die Freigabe nur sitzungsweise; sonst bliebe
+        „Privatsphäre gering“ nach Neustart still freigegeben.
+        """
+        try:
+            env = EnvFile.load(self.env_path)
+        except OSError:
+            return
+        if not (env.values().get("OEFFENTLICHE_ELECTRUM") or "").strip():
+            return
+        env.apply({"OEFFENTLICHE_ELECTRUM": None})
+        try:
+            env.save()
+            LOGGER.info(
+                "OEFFENTLICHE_ELECTRUM aus .env entfernt "
+                "(Opt-in gilt pro Serverstart)."
+            )
+        except OSError as exc:
+            LOGGER.warning(
+                "OEFFENTLICHE_ELECTRUM konnte nicht aus .env entfernt werden: %s",
+                exc,
+            )
 
     def set_managed_by(self, value: str | None) -> None:
         """Setzt die Herkunft der Konfiguration für diesen Serverlauf."""
@@ -667,6 +724,39 @@ class AppState:
             main.set_chain_network(env.values().get("NETWORK"))
             self._entries = read_wallets(env)
             self._wallet_ctx = self._build_context(self._entries)
+            # UTXO-/Resolution-Cache → Mapping: sonst resolve_address je
+            # ungeseedeter Adresse MAX_TRACE_ADDRESS_SEARCH Ableitungen
+            # (Herkunftsliste mit 30+ UTXOs: Sekunden).
+            if self._wallet_ctx is not None:
+                schluessel = [
+                    e.analyse_schluessel for e in self._entries if e.is_valid()
+                ]
+                try:
+                    main.seed_wallet_addresses_from_utxo_cache(
+                        self._wallet_ctx, schluessel, self.cache_dir,
+                    )
+                except Exception:
+                    pass
+                try:
+                    main.seed_wallet_addresses_from_resolution_cache(
+                        self._wallet_ctx, schluessel,
+                    )
+                except Exception:
+                    pass
+            # Empfangs-QR neu ableiten (Indizes/Adressen können sich geändert haben).
+            self.empfang_cache.clear()
+            with getattr(self, "_empfang_fulcrum_lock", threading.Lock()):
+                alt = getattr(self, "_empfang_fulcrum", None)
+                alt_pub = getattr(self, "_empfang_public_fulcrum", None)
+                self._empfang_fulcrum = None
+                self._empfang_public_fulcrum = None
+            for client in (alt, alt_pub):
+                if client is None:
+                    continue
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _build_context(entries: list[WalletEntry]):
@@ -751,7 +841,7 @@ class AppState:
                 str(self.env().values().get("FULCRUM_SSL", "true")).strip().lower()
                 in ("0", "false", "no", "off")
             ),
-            oeffentliche_electrum=False,
+            oeffentliche_electrum=source_mod.oeffentliche_electrum_session_aktiv(),
         )
 
 
@@ -1574,6 +1664,7 @@ def _datenquellen_config_gesperrt(
 
 def api_config(state: AppState, query: dict, accept_language: str | None = None) -> dict:
     from core.version import version as app_version
+    from core import selbstanzeige as sa_mod
 
     entries = state.entries
     zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
@@ -1598,6 +1689,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         "rpc_password_set": bool((werte.get("RPCUSER") or "").strip() and (werte.get("RPCPASSWORD") or "").strip()),
         "mempool": mempool_info(werte.get("MEMPOOL_URL", "")),
         "steuer": tax_mod.lese_steuer_einstellungen(werte),
+        "person": sa_mod.lese_steuer_person(werte),
         "wallets_beim_start_aktualisieren": (
             main.resolve_wallets_beim_start_aktualisieren(werte)
         ),
@@ -1608,6 +1700,10 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
             main.resolve_wallets_nur_bekannte_utxos(werte)
         ),
         "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
+        # Explizit: Web-Opt-in ist sitzungsweise (nach Neustart wieder false).
+        "oeffentliche_electrum_session": (
+            source_mod.oeffentliche_electrum_session_aktiv()
+        ),
         "wallet_watch": _wallet_watch_status(),
 
         "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
@@ -1621,7 +1717,10 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         ),
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
-        "wallet_sync_job_id": state.wallet_sync_job_id,
+        # Nur melden, wenn der Job wirklich noch läuft (stale ID → null).
+        "wallet_sync_job_id": (
+            state.wallet_sync_job_id if tip_sync_laeuft(state) else None
+        ),
         "live_p2p_peers": _live_p2p_peers(),
         # Ohne Netzprobe — die Pille bleibt grau, bis /api/llm/status?check=1.
         "llm": llm_mod.status_dict(werte, check=False),
@@ -1631,6 +1730,8 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         # darf dann nicht "nur lokal erreichbar" behaupten.
         "local_only": _ist_local_only(state),
         "ui_theme": _ui_theme_aus_env(werte),
+        "lernhinweise_plebs": _lernhinweise_plebs_aus_env(werte),
+        "network": (werte.get("NETWORK") or "main").strip().lower() or "main",
         "managed_by": state.managed_by,
         "managed_hint": _managed_hint(state, werte),
         "electrum_indexer": (
@@ -1641,6 +1742,14 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         ),
         "local_core": _local_core_status_for_api(state),
     }
+
+
+def _ui_lang_aus_env(werte: dict) -> str:
+    """``de`` oder ``en`` aus UI_LANG; Default Deutsch (CLI/Terminal)."""
+    roh = str((werte or {}).get("UI_LANG") or "").strip().lower()
+    if roh.startswith("en"):
+        return "en"
+    return "de"
 
 
 def _ui_lang_fuer_web(werte: dict, accept_language: str | None = None) -> str:
@@ -1695,6 +1804,25 @@ def api_save_ui_theme(state: AppState, payload: dict) -> dict:
     return {"saved": True, "ui_theme": theme}
 
 
+def _lernhinweise_plebs_aus_env(werte: dict) -> bool:
+    """``LERNHINWEISE_PLEBS=1`` — Experiment Neugier-Tooltips/Lern-QR; Default aus."""
+    roh = str((werte or {}).get("LERNHINWEISE_PLEBS") or "").strip().lower()
+    return roh in ("1", "true", "yes", "ja", "on")
+
+
+def api_save_lernhinweise_plebs(state: AppState, payload: dict) -> dict:
+    """Speichert das Experiment „Lernhinweise für Plebs“ in der .env."""
+    roh = payload.get("lernhinweise_plebs", payload.get("enabled", False))
+    an = roh in (True, 1, "1", "true", "yes", "ja", "on")
+    env = state.env()
+    env.apply({"LERNHINWEISE_PLEBS": "1" if an else "0"})
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    return {"saved": True, "lernhinweise_plebs": an}
+
+
 def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
     _wallets_config_gesperrt(state)
     """
@@ -1741,10 +1869,10 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
         return {
             "gefunden": [],
             "fehler": (
-                "Kein verwendbarer Deskriptor gefunden. Aggregierte "
+                "Kein verwendbarer Deskriptor gefunden. Bitkey: beide Zeilen "
+                "„External:“ und „Internal:“ einfügen. Aggregierte "
                 "Taproot-Schlüssel (musig) werden nicht unterstützt; sonst "
-                "deutet es auf einen Tippfehler oder eine falsche Prüfsumme "
-                "hin."
+                "Tippfehler oder falsche Prüfsumme."
             ),
         }
 
@@ -1752,9 +1880,10 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
     vorhandene_ids = {wallets_mod.eintrag_id(e) for e in state.entries}
     for descriptor in gefunden:
         eintrag = WalletEntry(descriptor=descriptor)
-        adressen = sorted(
-            main.derive_descriptor_addresses(descriptor, max_addresses=2)
-        )
+        # Empfang #0 — nie Change, nie lexikografische Sortierung (Bitkey-Check).
+        erste = config_mod.erste_empfangsadresse(eintrag)
+        if not erste:
+            erste = main.derive_address_at_index(descriptor, 0, 0) or ""
         beschreibungen.append({
             "descriptor": descriptor,
             "is_multisig": eintrag.is_multisig,
@@ -1769,7 +1898,7 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
                 if eintrag.is_multisig
                 else ([eintrag.masked_xpub()] if eintrag.masked_xpub() else [])
             ),
-            "erste_adresse": adressen[0] if adressen else "",
+            "erste_adresse": erste,
             "bereits_vorhanden": eintrag.wallet_id() in vorhandene_ids,
         })
     return {"gefunden": beschreibungen, "fehler": ""}
@@ -1806,6 +1935,7 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     max_addresses=int(
                         eintrag.get("max_addresses", main.DEFAULT_MAX_ADDRESSES)
                     ),
+                    read_only=bool(eintrag.get("read_only", False)),
                 ))
             except (TypeError, ValueError) as exc:
                 raise ApiError(400, f"Wallet {index}: {exc}") from exc
@@ -1836,6 +1966,9 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     max_addresses=int(
                         eintrag.get("max_addresses", bekannt.max_addresses)
                     ),
+                    read_only=bool(
+                        eintrag.get("read_only", bekannt.read_only)
+                    ),
                 ))
                 continue
 
@@ -1850,6 +1983,9 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     max_addresses=int(
                         eintrag.get("max_addresses", bekannt.max_addresses)
                     ),
+                    read_only=bool(
+                        eintrag.get("read_only", bekannt.read_only)
+                    ),
                 ))
                 continue
 
@@ -1858,6 +1994,7 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                 name=str(eintrag.get("name", "")),
                 script_type=str(eintrag.get("script_type", "auto")),
                 max_addresses=int(eintrag.get("max_addresses", main.DEFAULT_MAX_ADDRESSES)),
+                read_only=bool(eintrag.get("read_only", False)),
             ))
         except (TypeError, ValueError) as exc:
             raise ApiError(400, f"Wallet {index}: {exc}") from exc
@@ -1950,19 +2087,41 @@ def api_save_mempool(state: AppState, payload: dict) -> dict:
 
     Geprüft wird nur die Form. Ein Verbindungstest wäre schon der erste
     Abruf — und genau den soll der Benutzer selbst auslösen.
+
+    Öffentliche Explorer (mempool.space u. ä.) brauchen ``public_opt_in``
+    nach Warndialog in der UI — sonst bleibt die Outbound-Policy hart.
     """
     try:
         url = normalize_mempool_url(str(payload.get("url", "")))
     except ValueError as exc:
         raise ApiError(400, str(exc)) from exc
+
+    info = mempool_info(url)
+    oeffentlich = bool(info.get("configured") and not info.get("local"))
+    public_opt_in = bool(
+        _payload_bool(payload, "public_opt_in", "confirm_public", default=False)
+    )
+
     if url:
         try:
-            outbound_policy.ensure_url_allowed(url, service="mempool", values=state.env().values())
+            outbound_policy.ensure_url_allowed(
+                url,
+                service="mempool",
+                values=state.env().values(),
+                # Nach expliziter Bestätigung in der UI freigeben.
+                opt_in=True if (oeffentlich and public_opt_in) else None,
+            )
         except outbound_policy.OutboundPolicyError as exc:
             raise ApiError(400, str(exc)) from exc
 
     env = state.env()
-    env.apply({"MEMPOOL_URL": url or None})
+    updates: dict[str, str | None] = {"MEMPOOL_URL": url or None}
+    if not url or not oeffentlich:
+        # Kein öffentlicher Explorer mehr → Opt-in zurücknehmen.
+        updates["SATSAGE_MEMPOOL_PUBLIC_OPT_IN"] = None
+    elif public_opt_in:
+        updates["SATSAGE_MEMPOOL_PUBLIC_OPT_IN"] = "1"
+    env.apply(updates)
     try:
         env.save()
     except OSError as exc:
@@ -2114,6 +2273,66 @@ def api_save_steuer(state: AppState, payload: dict) -> dict:
         "saved": True,
         "steuer": tax_mod.lese_steuer_einstellungen(env.values()),
     }
+
+
+def api_save_steuer_person(state: AppState, payload: dict) -> dict:
+    """
+    Speichert persönliche Daten und Finanzamt-Angaben für HTML/CSV-Berichte.
+
+    Leere Felder → Env-Key entfernen → Name/Steuernummer/Anschrift wieder
+    Donald-Duck-Defaults; optionale Felder (E-Mail, Finanzamt, …) bleiben leer.
+    """
+    from core import selbstanzeige as sa_mod
+
+    def _feld(*keys: str) -> str:
+        for key in keys:
+            if key in payload and payload.get(key) is not None:
+                return str(payload.get(key) or "").strip()
+        return ""
+
+    name = _feld("name", "person_name")
+    steuernummer = _feld("steuernummer", "tax_id")
+    anschrift = _feld("anschrift", "address", "adresse")
+    email = _feld("email", "e_mail", "mail")
+    finanzamt = _feld("finanzamt", "tax_office")
+    finanzamt_anschrift = _feld(
+        "finanzamt_anschrift", "finanzamt_address", "tax_office_address",
+    )
+    sachbearbeiter = _feld("sachbearbeiter", "case_worker", "clerk")
+
+    if len(name) > 200:
+        raise ApiError(400, "Name ist zu lang (max. 200 Zeichen).")
+    if len(steuernummer) > 80:
+        raise ApiError(400, "Steuernummer ist zu lang (max. 80 Zeichen).")
+    if len(anschrift) > 400:
+        raise ApiError(400, "Anschrift ist zu lang (max. 400 Zeichen).")
+    if len(email) > 200:
+        raise ApiError(400, "E-Mail ist zu lang (max. 200 Zeichen).")
+    if email and ("@" not in email or " " in email):
+        raise ApiError(400, "E-Mail sieht ungültig aus.")
+    if len(finanzamt) > 200:
+        raise ApiError(400, "Finanzamt ist zu lang (max. 200 Zeichen).")
+    if len(finanzamt_anschrift) > 400:
+        raise ApiError(400, "Finanzamt-Anschrift ist zu lang (max. 400 Zeichen).")
+    if len(sachbearbeiter) > 200:
+        raise ApiError(400, "Sachbearbeiter ist zu lang (max. 200 Zeichen).")
+
+    env = state.env()
+    env.apply({
+        "STEUER_PERSON_NAME": name or None,
+        "STEUER_PERSON_STEUERNUMMER": steuernummer or None,
+        "STEUER_PERSON_ANSCHRIFT": anschrift or None,
+        "STEUER_PERSON_EMAIL": email or None,
+        "STEUER_PERSON_FINANZAMT": finanzamt or None,
+        "STEUER_PERSON_FINANZAMT_ANSCHRIFT": finanzamt_anschrift or None,
+        "STEUER_PERSON_SACHBEARBEITER": sachbearbeiter or None,
+    })
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+
+    return {"saved": True, "person": sa_mod.lese_steuer_person(env.values())}
 
 
 def api_save_hinweis_onchain(state: AppState, payload: dict) -> dict:
@@ -2366,6 +2585,30 @@ def api_save_source(state: AppState, payload: dict) -> dict:
     if not updates:
         return {"saved": False, "grund": "Nichts zu ändern."}
 
+    # Ein Port/TLS in der UI — Tor-Sonderkeys (FULCRUM_TOR_PORT/_SSL) sonst
+    # überschreiben den neuen Wert still und der Verbindungsversuch bleibt
+    # am alten Endpoint (nur Server-Neustart half).
+    if "FULCRUM_PORT" in updates:
+        updates["FULCRUM_TOR_PORT"] = None
+    if "FULCRUM_SSL" in updates:
+        updates["FULCRUM_TOR_SSL"] = None
+
+    electrs_keys = {
+        "FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_PORT", "FULCRUM_SSL",
+        "FULCRUM_TOR_PORT", "FULCRUM_TOR_SSL", "FULCRUM_TOR_PROXY",
+    }
+    electrs_geaendert = bool(electrs_keys & set(updates))
+    core_keys = {
+        "NODE_IP", "RPCHOST", "BITCOIN_RPC_HOST", "RPCPORT", "RPCUSER",
+        "RPCPASSWORD", "RPC_SSL", "RPC_COOKIE_FILE", "BITCOIN_RPC_COOKIE",
+    }
+    core_geaendert = bool(core_keys & set(updates)) or quelle == "own_core"
+    utxo_keys = {
+        "UTXO_RPC_HOST", "UTXO_RPCPORT", "UTXO_RPCUSER", "UTXO_RPCPASSWORD",
+        "UTXO_RPC_SSL", "UTXO_RPC_COOKIE_FILE",
+    }
+    utxo_geaendert = bool(utxo_keys & set(updates)) or quelle == "own_utxo_core"
+
     env.apply(updates)
     try:
         sicherung = env.save()
@@ -2373,12 +2616,89 @@ def api_save_source(state: AppState, payload: dict) -> dict:
         raise ApiError(500, "Interner Serverfehler.") from exc
 
     state.reload()
+    if electrs_geaendert:
+        _verwerfe_electrs_verbindungen(state)
+        _loesche_source_stand(state, "own_fulcrum")
+    if core_geaendert:
+        _loesche_source_stand(state, "own_core")
+    if utxo_geaendert:
+        _loesche_source_stand(state, "own_utxo_core")
+    # Pille sofort „unbekannt“, bis der nächste Check/Connect greift.
+    pending = []
+    if electrs_geaendert:
+        pending.append("own_fulcrum")
+    if core_geaendert:
+        pending.append("own_core")
+    if utxo_geaendert:
+        pending.append("own_utxo_core")
     werte = state.env().values()
     return {
         "saved": True,
         "backup": str(sicherung) if sicherung else None,
         "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
+        "pending_sources": pending,
     }
+
+
+def _loesche_source_stand(state: AppState, *keys: str) -> None:
+    """sources_last für geänderte Quellen leeren — sonst bleibt die Pille grün."""
+    if not keys or not getattr(state, "sources_last", None):
+        return
+    keyset = {str(k) for k in keys}
+    neu: list = []
+    for eintrag in state.sources_last:
+        if not isinstance(eintrag, dict):
+            continue
+        if str(eintrag.get("key") or "") in keyset:
+            d = dict(eintrag)
+            d["reachable"] = None
+            d["error"] = ""
+            d["peer_count"] = 0
+            d["peer_hosts"] = []
+            d["software"] = ""
+            d["software_raw"] = ""
+            neu.append(d)
+        else:
+            neu.append(eintrag)
+    state.sources_last = neu
+
+
+def _verwerfe_electrs_verbindungen(state: AppState) -> None:
+    """
+    Alte Electrs-Sockets/Sessions nach Host-/Port-Wechsel schließen.
+
+    * Empfangs-QR-Client (AppState-Cache)
+    * Wallet-Watch-Subscribe (sonst hängt die Session am alten Endpoint)
+    """
+    # Empfang-Clients: reload() hat sie schon genullt; sicherheitshalber nochmal.
+    with getattr(state, "_empfang_fulcrum_lock", threading.Lock()):
+        alt = getattr(state, "_empfang_fulcrum", None)
+        alt_pub = getattr(state, "_empfang_public_fulcrum", None)
+        state._empfang_fulcrum = None
+        state._empfang_public_fulcrum = None
+    for client in (alt, alt_pub):
+        if client is None:
+            continue
+        try:
+            client.close()
+        except Exception:
+            pass
+    try:
+        from core import wallet_watch
+
+        if wallet_watch.get_watch_service().laeuft:
+            wallet_watch.restart_wallet_watch(
+                state,
+                on_log=lambda t: LOGGER.info("%s", t),
+            )
+        else:
+            # Watch war aus — falls Option an, frisch starten mit neuem Endpoint.
+            wallet_watch.starte_wallet_watch(
+                state,
+                on_log=lambda t: LOGGER.info("%s", t),
+            )
+    except Exception as exc:
+        LOGGER.warning("Electrs-Verbindungen nach Config-Wechsel: %s", exc)
 
 
 def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
@@ -2518,18 +2838,322 @@ def _verlaufs_anhang(state: AppState, entries, *, limit: int | None = None,
     }
 
 
+def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
+    """
+    Eigener Electrum-Connect → sources_last + Job-tauglicher Stand.
+
+    Tip-Sync und Empfang verbinden oft Minuten vor dem 30‑s-Peer-Takt;
+    die Kopf-Pille soll dann schon grün mit libbitcoin/electrs/fulcrum sein.
+    """
+    stand = source_mod.own_fulcrum_stand_from_client(client)
+    if not stand:
+        return None
+    try:
+        werte = state.env().values()
+        frisch = source_mod.describe_sources(werte)
+        state.sources_last = source_mod.merke_own_fulcrum_in_sources(
+            getattr(state, "sources_last", None),
+            frisch,
+            stand,
+        )
+    except Exception:
+        LOGGER.debug("own_fulcrum Stand merken fehlgeschlagen", exc_info=True)
+    return stand
+
+
 def _eigener_fulcrum_client(state: AppState):
-    """Eigener Electrs/Fulcrum oder None (kein öffentlicher Pool)."""
+    """
+    Eigener Electrs/Fulcrum oder None (kein öffentlicher Pool).
+
+    Wiederverwendet eine Verbindung am AppState — sonst kostet jeder
+    Empfangs-QR-Klick einen frischen TCP/TLS-Handshake (wirkt wie „Scan“).
+    """
     werte = state.env().values()
     if not (
         (werte.get("FULCRUM_HOST") or "").strip()
         or (werte.get("FULCRUM_TOR") or "").strip()
     ):
         return None
-    try:
-        return main._try_own_fulcrum_client(state.args_namespace(), werte)
-    except Exception:
+
+    lock = getattr(state, "_empfang_fulcrum_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+
+    with lock:
+        alt = getattr(state, "_empfang_fulcrum", None)
+        if alt is not None:
+            try:
+                alt.request("server.ping")
+                _merke_own_fulcrum_client(state, alt)
+                return alt
+            except Exception:
+                try:
+                    alt.close()
+                except Exception:
+                    pass
+                state._empfang_fulcrum = None
+        try:
+            client = main._try_own_fulcrum_client(
+                state.args_namespace(), werte,
+            )
+        except Exception:
+            return None
+        state._empfang_fulcrum = client
+        if client is not None:
+            _merke_own_fulcrum_client(state, client)
+        return client
+
+
+def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
+    """
+    Öffentlicher Electrum-Pool für Empfangs-History — nur mit Opt-in.
+
+    Ohne ``OEFFENTLICHE_ELECTRUM`` bleibt es bei der Cache-Schätzung
+    (keine Adress-Probes an Fremdserver). Mit Opt-in: dieselbe History-Probe
+    wie beim eigenen Node; die Adressen sind dem Pool ohnehin schon bekannt,
+    sobald Scans darüber laufen.
+    """
+    werte = state.env().values()
+    if not source_mod.oeffentliche_electrum_erlaubt(werte):
         return None
+
+    lock = getattr(state, "_empfang_fulcrum_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+
+    with lock:
+        alt = getattr(state, "_empfang_public_fulcrum", None)
+        if alt is not None:
+            try:
+                alt.request("server.ping")
+                return alt
+            except Exception:
+                try:
+                    alt.close()
+                except Exception:
+                    pass
+                state._empfang_public_fulcrum = None
+        try:
+            args = state.args_namespace()
+            pool = main._try_public_onion_fulcrum(
+                args, werte, interactive=False,
+            )
+            if pool is None:
+                pool = main._setup_public_clearnet_fulcrum(args, werte)
+        except Exception:
+            return None
+        state._empfang_public_fulcrum = pool
+        return pool
+
+
+def _empfang_electrum_client(state: AppState):
+    """
+    Electrum für Empfangs-QR: eigener Node, sonst öffentlicher nach Opt-in.
+    """
+    eigen = _eigener_fulcrum_client(state)
+    if eigen is not None:
+        return eigen
+    return _oeffentlicher_fulcrum_fuer_empfang(state)
+
+
+def _adresse_hat_history(client, address: str) -> bool:
+    """True wenn Electrs für die Adresse mindestens eine Tx kennt."""
+    if not address:
+        return False
+    from fulcrum import address_to_scripthash
+
+    sh = address_to_scripthash(address)
+    hist = client.request("blockchain.scripthash.get_history", [sh]) or []
+    return bool(hist)
+
+
+def _naechste_freie_empfang_electrs(
+    state: AppState,
+    entry,
+    client,
+    *,
+    max_index: int,
+) -> tuple[str, int] | None:
+    """
+    Nächste freie Empfangsadresse per Electrs — **kein** Fullscan.
+
+    Educated guess aus UTXO-/Verlaufs-Cache (``max bekannter Empfangs-Index + 1``,
+    nach Tip-Sync typisch schon korrekt). Dann nur **vorwärts** per
+    ``get_history`` prüfen, bis die erste leere Adresse kommt.
+
+    Üblich: **1 RPC**. Wenn der Cache hinter der Chain liegt (Zahlung auf
+    höherem Index), wenige weitere Probes — Obergrenze ``BIP44_GAP_LIMIT``,
+    kein Walk ab #0 und kein electrs-seitiger Gap-Rescan.
+    """
+    gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+    skript = (
+        None if entry.is_multisig or entry.descriptor else entry.script_type
+    )
+    xpub = entry.analyse_schluessel
+    start = int(
+        _next_receive_index_from_cache(state, entry, max_index=max_index)
+    )
+    if start < 0:
+        start = 0
+    # Nur vorwärts ab Schätzung — höchstens gap+1 History-Probes.
+    limit = min(max_index, start + gap + 1)
+    for i in range(start, limit):
+        dest = main.derive_receive_address_at_index(
+            xpub, i, script_type=skript,
+        )
+        if not dest or not dest[0]:
+            break
+        if _adresse_hat_history(client, dest[0]):
+            continue
+        return str(dest[0]), int(i)
+    return None
+
+
+def _schaerfe_empfang_nach_sync(
+    state: AppState,
+    eintraege: list,
+    *,
+    fulcrum=None,
+    on_progress=None,
+) -> int:
+    """
+    Einmal nach Tip-Nachzug / UTXO-Scan: Empfangs-QR schärfen.
+
+    * Prozess-Cache leeren, dann pro Wallet **1–wenige** ``get_history`` ab
+      Cache-Schätzung (kein Fullscan, siehe ``_naechste_freie_empfang_electrs``).
+    * Electrum: eigener Node, oder öffentlicher Pool nach Opt-in
+      (``OEFFENTLICHE_ELECTRUM``). Ohne beides: nur Cache leeren.
+    """
+    if not eintraege:
+        return 0
+    for entry in eintraege:
+        try:
+            state.empfang_cache.pop(wallets_mod.eintrag_id(entry), None)
+        except Exception:
+            pass
+
+    client = fulcrum
+    if client is not None:
+        try:
+            if not main.is_own_fulcrum_backend(client):
+                # Öffentlicher Pool nur mit Opt-in — sonst keine Adress-Probes.
+                if not source_mod.oeffentliche_electrum_erlaubt(
+                    state.env().values()
+                ):
+                    client = None
+        except Exception:
+            client = None
+    if client is None:
+        client = _empfang_electrum_client(state)
+    if client is None:
+        return 0
+
+    from core import wallet_watch
+
+    watch = wallet_watch.wallet_watch_status()
+    watch_active = bool(watch.get("running"))
+    gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+    ok = 0
+
+    def _cache_estimate_merker(entry) -> None:
+        """Fallback-QR aus UTXO-Stand, falls Electrs scheitert / Belong-Check nein."""
+        kennung = wallets_mod.eintrag_id(entry)
+        try:
+            max_index = _empfang_max_index(entry, state)
+            next_index = _next_receive_index_from_cache(
+                state, entry, max_index=max_index,
+            )
+            skript = (
+                None
+                if entry.is_multisig or entry.descriptor
+                else entry.script_type
+            )
+            abgeleitet = main.derive_receive_address_at_index(
+                entry.analyse_schluessel, next_index, script_type=skript,
+            )
+            if not abgeleitet or not abgeleitet[0]:
+                return
+            address, index = str(abgeleitet[0]), int(abgeleitet[1])
+            # Belong-Check hier weich: sonst bleibt das Dock leer (500).
+            state.empfang_cache[kennung] = _empfang_antwort(
+                kennung=kennung,
+                entry=entry,
+                address=address,
+                index=index,
+                source="cache_estimate",
+                subscribed=False,
+                watch_active=watch_active,
+                read_only=False,
+            )
+        except Exception:
+            pass
+
+    for entry in eintraege:
+        if getattr(entry, "read_only", False) or not entry.is_valid():
+            continue
+        kennung = wallets_mod.eintrag_id(entry)
+        try:
+            if on_progress:
+                on_progress(
+                    f"Empfangsadresse „{entry.display_name}“ per Electrs…",
+                    sofort=True,
+                )
+            max_index = _empfang_max_index(entry, state)
+            treffer = _naechste_freie_empfang_electrs(
+                state, entry, client, max_index=max_index,
+            )
+            if not treffer:
+                _cache_estimate_merker(entry)
+                continue
+            address, index = treffer
+            if not _empfang_gehoert_zu_wallet(state, entry, address):
+                _cache_estimate_merker(entry)
+                continue
+            skript = (
+                None
+                if entry.is_multisig or entry.descriptor
+                else entry.script_type
+            )
+            lookahead: list[str] = []
+            for i in range(index, min(index + gap + 1, max_index)):
+                dest = main.derive_receive_address_at_index(
+                    entry.analyse_schluessel, i, script_type=skript,
+                )
+                if dest and dest[0] and dest[0] not in lookahead:
+                    lookahead.append(dest[0])
+            subscribed = False
+            if watch_active and lookahead:
+                subscribed = bool(
+                    wallet_watch.subscribe_addresses(
+                        lookahead, entry.analyse_schluessel,
+                    )
+                )
+            state.empfang_cache[kennung] = _empfang_antwort(
+                kennung=kennung,
+                entry=entry,
+                address=address,
+                index=index,
+                source="fulcrum",
+                subscribed=subscribed,
+                watch_active=watch_active,
+                read_only=False,
+            )
+            ok += 1
+        except Exception as exc:
+            # Tip/Scan bleibt gültig — Empfang fällt auf Cache-Schätzung zurück.
+            if on_progress:
+                try:
+                    on_progress(
+                        f"Empfang „{entry.display_name}“: {exc}",
+                        sofort=True,
+                    )
+                except Exception:
+                    pass
+            _cache_estimate_merker(entry)
+            continue
+    return ok
 
 
 def _verlauf_anhang_fuer_xpub(
@@ -2638,12 +3262,18 @@ def _mit_mempool_pending(
                 gesehen_k.add(key)
                 kandidaten.append({"txid": e.get("txid"), "vout": e.get("vout"), "value": int(e.get("value") or 0), "address": e.get("address"), "status": e.get("status") or {}})
     try:
-        from fulcrum import eigene_mempool_empfaenge, klassifiziere_utxo_spends
+        from fulcrum import (
+            eigene_mempool_empfaenge,
+            klassifiziere_utxo_spends,
+            mempool_tx_hat_eigenen_output,
+        )
 
         alle_pending, alle_confirmed, alle_live = klassifiziere_utxo_spends(client, kandidaten)
         pending = [p for p in alle_pending if not xpub or f"{str(p.get('txid') or '').lower()}:{int(p.get('vout') or 0)}" in ziel_keys]
         confirmed = [c for c in alle_confirmed if not xpub or f"{str(c.get('txid') or '').lower()}:{int(c.get('vout') or 0)}" in ziel_keys]
         live = [u for u in alle_live if not xpub or u.get("address") in ziel_adressen]
+        # Intern = Output an irgendein SatSage-Wallet (nicht nur Change desselben).
+        intern_tx: set[str] = set()
         if alle_pending and state.wallet_ctx is not None:
             try:
                 if xpub:
@@ -2657,36 +3287,61 @@ def _mit_mempool_pending(
                 )
             except Exception:
                 empfaenge = []
+            try:
+                is_own = state.wallet_ctx.is_own_address
+                gesehen_tx: set[str] = set()
+                for p in alle_pending:
+                    tid = str(p.get("spent_txid") or "").strip().lower()
+                    if not tid or tid in gesehen_tx:
+                        continue
+                    gesehen_tx.add(tid)
+                    if mempool_tx_hat_eigenen_output(client, tid, is_own):
+                        intern_tx.add(tid)
+            except Exception:
+                intern_tx = set()
     except Exception:
         return gecacht, anhang
-    finally:
-        try:
-            client.close()
-        except Exception:
-            pass
-
-    # Auch ohne aktuelle Pending/Confirmed: Cache-Flags bereinigen
-    # (Electrs erreichbar, klassifiziere lief durch).
-
-    # --- Bestätigte Spends settlen -----------------------------------------
-    if confirmed and xpub:
-        try:
-            neu = main.settle_gezielte_spends_im_cache(
-                xpub,
-                state.cache_dir,
-                confirmed_spent=confirmed,
-                live_auf_adressen=live,
-                source="fulcrum",
-            )
-            if neu is not None:
-                gecacht = neu
-            anhang = _verlauf_anhang_fuer_xpub(
-                state, xpub, limit=limit, sort=sort,
-            )
-        except Exception:
+    else:
+        # Settle bevor close — Electrs-Tip für scan_tip_height noch erreichbar.
+        if confirmed and xpub:
+            try:
+                neu = main.settle_gezielte_spends_im_cache(
+                    xpub,
+                    state.cache_dir,
+                    confirmed_spent=confirmed,
+                    live_auf_adressen=live,
+                    source="fulcrum",
+                    fulcrum=client,
+                )
+                if neu is not None:
+                    gecacht = neu
+                anhang = _verlauf_anhang_fuer_xpub(
+                    state, xpub, limit=limit, sort=sort,
+                )
+            except Exception:
+                conf_keys = {
+                    f"{str(c.get('txid') or '').lower()}:"
+                    f"{int(c.get('vout') or 0)}"
+                    for c in confirmed
+                }
+                gecacht = [
+                    u for u in gecacht
+                    if f"{str(u.get('txid') or '').lower()}:"
+                    f"{int(u.get('vout') or 0)}" not in conf_keys
+                ]
+                anhang = utxos_mod.merge_pending_spends_in_verlauf(
+                    anhang,
+                    [{**c, "spent_pending": False} for c in confirmed],
+                    wallet=state.wallet_ctx,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    own_addresses=_eigene_adressen(state),
+                    limit=limit,
+                    sort=sort,
+                )
+        elif confirmed:
+            # Kein XPUB: nur aus der Anzeige streichen, kein Cache-Settle.
             conf_keys = {
-                f"{str(c.get('txid') or '').lower()}:"
-                f"{int(c.get('vout') or 0)}"
+                f"{str(c.get('txid') or '').lower()}:{int(c.get('vout') or 0)}"
                 for c in confirmed
             }
             gecacht = [
@@ -2703,25 +3358,15 @@ def _mit_mempool_pending(
                 limit=limit,
                 sort=sort,
             )
-    elif confirmed:
-        conf_keys = {
-            f"{str(c.get('txid') or '').lower()}:{int(c.get('vout') or 0)}"
-            for c in confirmed
-        }
-        gecacht = [
-            u for u in gecacht
-            if f"{str(u.get('txid') or '').lower()}:"
-            f"{int(u.get('vout') or 0)}" not in conf_keys
-        ]
-        anhang = utxos_mod.merge_pending_spends_in_verlauf(
-            anhang,
-            [{**c, "spent_pending": False} for c in confirmed],
-            wallet=state.wallet_ctx,
-            immutable_cache_dir=state.immutable_cache_dir,
-            own_addresses=_eigene_adressen(state),
-            limit=limit,
-            sort=sort,
-        )
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    # Auch ohne aktuelle Pending/Confirmed: Cache-Flags bereinigen
+    # (Electrs erreichbar, klassifiziere lief durch). Bestätigte Spends
+    # sind oben im try/else bereits gesettled.
 
     # --- Pending: markieren + ausgegeben + eigene Empfänge (Change/Self) ---
     by_key = {
@@ -2758,6 +3403,9 @@ def _mit_mempool_pending(
         neu = dict(u)
         neu["spending_pending"] = True
         neu["spent_txid"] = p.get("spent_txid") or ""
+        stid = str(neu.get("spent_txid") or "").strip().lower()
+        if stid and stid in intern_tx:
+            neu["spending_internal"] = True
         markiert.append(neu)
 
     # Pending-Spends, die Light-Tip schon aus dem Cache genommen hat, wieder zeigen.
@@ -2770,6 +3418,9 @@ def _mit_mempool_pending(
         neu["spending_pending"] = True
         neu.pop("spent", None)
         neu.pop("spent_pending", None)
+        stid = str(neu.get("spent_txid") or "").strip().lower()
+        if stid and stid in intern_tx:
+            neu["spending_internal"] = True
         markiert.append(neu)
 
     # Selbstüberweisung/Change: unbestätigte eigenen Outputs in den Bestand.
@@ -2814,6 +3465,7 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     # mempool=0: nur Cache (schneller Erst-Paint). Default: Pending über Electrs.
     mempool = _query_flag(query, "mempool", default=True)
 
+    _seed_wallet_ctx_aus_caches(state)
     anhang = _verlaufs_anhang(state, [entry], limit=limit, sort=sort)
     gecacht = utxos_mod.load_cached_utxos(
         entry.analyse_schluessel,
@@ -2865,13 +3517,415 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     return ergebnis
 
 
+def _empfang_max_index(entry: WalletEntry, state: AppState | None = None) -> int:
+    """
+    Obergrenze Empfangs-Indizes.
+
+    Basis: Scan-Tiefe/2 (Receive-Kette). Liegt ``scan_end_index`` höher
+    (Tip/Fullscan hat weiter gelaufen), die Grenze mitziehen — sonst bleibt
+    die „nächste“ Adresse künstlich bei max−1 und Electrs-Schärfung scheitert.
+    """
+    try:
+        tief = int(entry.max_addresses or 0)
+    except (TypeError, ValueError):
+        tief = 0
+    if tief >= 2:
+        basis = max(1, tief // 2)
+    else:
+        basis = main.MAX_TRACE_ADDRESS_SEARCH
+    if state is not None:
+        try:
+            _, scan_end = _cache_bekannt_adressen(state, entry)
+            gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+            if scan_end > 0:
+                basis = max(basis, int(scan_end) + gap + 1)
+        except Exception:
+            pass
+    return max(1, basis)
+
+
+def _cache_bekannt_adressen(
+    state: AppState,
+    entry: WalletEntry,
+) -> tuple[set[str], int]:
+    """Adressen aus UTXO-/Verlaufs-Cache plus ``scan_end_index``."""
+    xpub = entry.analyse_schluessel
+    bekannt: set[str] = set()
+    scan_end = 0
+    eintrag = main.load_xpub_cache_entry(xpub, state.cache_dir)
+    if eintrag:
+        for u in eintrag.get("utxos") or []:
+            addr = u.get("address")
+            if addr:
+                bekannt.add(str(addr))
+        roh = eintrag.get("raw") or {}
+        for addr in roh.get("scanned_addresses") or []:
+            if addr:
+                bekannt.add(str(addr))
+        try:
+            scan_end = int(eintrag.get("scan_end_index") or 0)
+        except (TypeError, ValueError):
+            scan_end = 0
+    for e in main.load_xpub_verlauf_cache(xpub, state.cache_dir) or []:
+        addr = e.get("address")
+        if addr:
+            bekannt.add(str(addr))
+    return bekannt, scan_end
+
+
+def _next_receive_index_from_cache(
+    state: AppState,
+    entry: WalletEntry,
+    *,
+    max_index: int,
+) -> int:
+    """
+    Nächste Empfangs-Index-Schätzung: ``max(bekannter Empfangs-Index) + 1``.
+
+    Kein BIP44-Gap ab 0 (der oft fälschlich #0 lieferte, wenn ``scan_end``
+    klein war und hohe Indizes gar nicht gematcht wurden). Mit Electrs
+    kann die API später nachschärfen — die Cache-Schätzung soll sofort
+    und hinter dem höchsten bekannten Empfang liegen.
+    """
+    bekannt, scan_end = _cache_bekannt_adressen(state, entry)
+    if not bekannt and scan_end <= 0:
+        return 0
+
+    xpub = entry.analyse_schluessel
+    skript = None if entry.is_multisig or entry.descriptor else entry.script_type
+    # Volle Scan-Tiefe matchen — nicht nur scan_end+Gap (sonst #0-Falle).
+    limit = max(1, min(max_index, max(scan_end + main.BIP44_GAP_LIMIT, max_index)))
+    index_fuer: dict[str, int] = {}
+    for i in range(limit):
+        dest = main.derive_receive_address_at_index(xpub, i, script_type=skript)
+        if dest and dest[0]:
+            index_fuer[str(dest[0])] = i
+        # auto/xpub: zusätzlich alle Skriptformen, falls Cache-Adressen anders typisiert
+        if skript in (None, "", "auto") and not entry.descriptor:
+            for addr in main.derive_addresses_at_index(xpub, 0, i) or []:
+                index_fuer.setdefault(str(addr), i)
+
+    max_used = -1
+    for addr in bekannt:
+        idx = index_fuer.get(addr)
+        if idx is not None:
+            max_used = max(max_used, idx)
+
+    if max_used < 0 and bekannt and scan_end > 0:
+        # Adressen da, Index-Match fehlgeschlagen — Scan-Ende als Untergrenze.
+        return min(scan_end, max_index - 1) if max_index > 0 else 0
+
+    next_index = max_used + 1
+    if next_index >= max_index:
+        return max(0, max_index - 1)
+    return next_index
+
+
+def _empfang_gehoert_zu_wallet(
+    state: AppState,
+    entry: WalletEntry,
+    address: str,
+) -> bool:
+    """Belong-Check: Adresse gehört zu diesem Wallet (kein XPUB in der Antwort)."""
+    if not address:
+        return False
+    ctx = state.wallet_ctx
+    if ctx is None:
+        return True
+    xpub = entry.analyse_schluessel
+    bekannt = ctx.xpub_for_address(address)
+    if bekannt is not None:
+        return bekannt == xpub
+    label = ctx.resolve_address(address)
+    if label is None:
+        return False
+    return label == entry.display_name or ctx.xpub_for_address(address) == xpub
+
+
+def _empfang_antwort(
+    *,
+    kennung: str,
+    entry: WalletEntry,
+    address: str,
+    index: int,
+    source: str,
+    subscribed: bool,
+    watch_active: bool,
+    read_only: bool = False,
+) -> dict:
+    return {
+        "wallet_id": kennung,
+        "wallet_name": entry.display_name,
+        "address": address,
+        "index": index,
+        "change": 0,
+        "source": source,
+        "subscribed": subscribed,
+        "watch_active": watch_active,
+        "read_only": bool(read_only),
+    }
+
+
+def _empfang_finalize(
+    state: AppState,
+    entry: WalletEntry,
+    *,
+    kennung: str,
+    address: str,
+    index: int,
+    source: str,
+    max_index: int,
+) -> dict:
+    """Subscribe Gap + Prozess-Cache + Antwort (ohne XPUB)."""
+    xpub = entry.analyse_schluessel
+    skript = None if entry.is_multisig or entry.descriptor else entry.script_type
+    gap = int(getattr(main, "BIP44_GAP_LIMIT", 20) or 20)
+    lookahead: list[str] = []
+    for i in range(index, min(index + gap + 1, max_index)):
+        dest = main.derive_receive_address_at_index(
+            xpub, i, script_type=skript,
+        )
+        if dest and dest[0] and dest[0] not in lookahead:
+            lookahead.append(dest[0])
+
+    from core import wallet_watch
+
+    watch = wallet_watch.wallet_watch_status()
+    watch_active = bool(watch.get("running"))
+    subscribed = False
+    if watch_active and lookahead:
+        subscribed = bool(
+            wallet_watch.subscribe_addresses(lookahead, xpub)
+        )
+
+    antwort = _empfang_antwort(
+        kennung=kennung,
+        entry=entry,
+        address=address,
+        index=index,
+        source=source,
+        subscribed=subscribed,
+        watch_active=watch_active,
+        read_only=False,
+    )
+    state.empfang_cache[kennung] = dict(antwort)
+    return antwort
+
+
+def _empfang_aus_cache_schaetzung(
+    state: AppState,
+    entry: WalletEntry,
+    *,
+    kennung: str,
+    max_index: int,
+) -> dict:
+    """Fallback ohne Electrs: max(bekannter Index)+1 — UI warnt."""
+    xpub = entry.analyse_schluessel
+    next_index = _next_receive_index_from_cache(
+        state, entry, max_index=max_index,
+    )
+    skript = None if entry.is_multisig or entry.descriptor else entry.script_type
+    abgeleitet = main.derive_receive_address_at_index(
+        xpub, next_index, script_type=skript,
+    )
+    if not abgeleitet or not abgeleitet[0]:
+        raise ApiError(500, "Empfangsadresse konnte nicht abgeleitet werden.")
+    address, index = str(abgeleitet[0]), int(abgeleitet[1])
+    # Belong weich: Ableitung kommt vom Wallet-Schlüssel; harter 500 leert das Dock.
+    return _empfang_finalize(
+        state,
+        entry,
+        kennung=kennung,
+        address=address,
+        index=index,
+        source="cache_estimate",
+        max_index=max_index,
+    )
+
+
+def api_wallet_empfang(state: AppState, kennung: str) -> dict:
+    """
+    Nächste Empfangsadresse für QR/Anzeige.
+
+    * **Electrs/Fulcrum erreichbar** (eigener Node, oder öffentlicher nach
+      Opt-in): unbenutzte Adresse per ``get_history`` / BIP44-Gap.
+      Prozess-Cache nur, wenn die gemerkte Adresse noch history-frei ist
+      (ein RPC).
+    * **Sonst:** Schätzung aus UTXO-/Verlaufs-Cache + ``source=cache_estimate``
+      (UI-Warnhinweis). Liefert nie XPUB/Deskriptor.
+    """
+    entry = wallets_mod.find_entry(state.entries, kennung)
+    if entry is None:
+        raise ApiError(404, "Wallet nicht gefunden.")
+    if not entry.is_valid():
+        raise ApiError(400, "Wallet lässt sich nicht ableiten.")
+
+    if getattr(entry, "read_only", False):
+        return _empfang_antwort(
+            kennung=kennung,
+            entry=entry,
+            address="",
+            index=0,
+            source="read_only",
+            subscribed=False,
+            watch_active=False,
+            read_only=True,
+        )
+
+    max_index = _empfang_max_index(entry, state)
+    bekannt, _ = _cache_bekannt_adressen(state, entry)
+    client = _empfang_electrum_client(state)
+
+    gemerkt = state.empfang_cache.get(kennung)
+    if (
+        gemerkt
+        and gemerkt.get("address")
+        and not gemerkt.get("read_only")
+        and gemerkt["address"] not in bekannt
+    ):
+        if client is not None:
+            if gemerkt.get("source") == "fulcrum":
+                # Schnellpfad: eine History-Probe — Adresse noch unbenutzt?
+                try:
+                    if not _adresse_hat_history(client, gemerkt["address"]):
+                        return dict(gemerkt)
+                except Exception:
+                    pass
+                # Benutzt oder Electrs-Fehler → neu ermitteln.
+            # cache_estimate bei lebendem Electrs verwerfen.
+            state.empfang_cache.pop(kennung, None)
+        else:
+            # Ohne Electrs: gemerkte Adresse behalten, aber nicht als „unbenutzt“ behaupten.
+            out = dict(gemerkt)
+            if out.get("source") == "fulcrum":
+                out["source"] = "cache_estimate"
+            return out
+
+    if client is not None:
+        try:
+            treffer = _naechste_freie_empfang_electrs(
+                state, entry, client, max_index=max_index,
+            )
+            if treffer:
+                address, index = treffer
+                return _empfang_finalize(
+                    state,
+                    entry,
+                    kennung=kennung,
+                    address=address,
+                    index=index,
+                    source="fulcrum",
+                    max_index=max_index,
+                )
+        except Exception:
+            pass
+        # Electrs erreichbar konfiguriert, Abfrage gescheitert → Schätzung + Warnung.
+
+    return _empfang_aus_cache_schaetzung(
+        state, entry, kennung=kennung, max_index=max_index,
+    )
+
+
+#: Lab-Regtest: Fountain/Faucet — nicht in SatSage-WALLET_*, nur als Fremdquelle.
+_LAB_FAUCET_WALLET = "lab-faucet"
+
+
+def api_lab_faucet_senden(state: AppState, payload: dict) -> dict:
+    """
+    Regtest: sendet Sats von ``lab-faucet`` an eine Empfangsadresse.
+
+    Nur bei ``NETWORK=regtest``. Lässt die Tx im Mempool (kein Auto-Mine),
+    damit Incoming-Animationen testbar bleiben.
+    """
+    werte = state.env().values()
+    netz = (werte.get("NETWORK") or "").strip().lower()
+    if netz not in ("regtest", "reg"):
+        raise ApiError(403, "Lab-Faucet nur unter NETWORK=regtest.")
+
+    adresse = str(payload.get("address") or payload.get("adresse") or "").strip()
+    if not adresse:
+        raise ApiError(400, "Empfangsadresse fehlt.")
+    try:
+        sats = int(payload.get("sats") or payload.get("amount_sats") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "Ungültige Satoshi-Menge.") from exc
+    if sats < 546:
+        raise ApiError(400, "Mindestens 546 sats (Dust-Grenze).")
+    if sats > 50_000_000_000:
+        raise ApiError(400, "Menge zu groß.")
+
+    from core import bitcoind_rpc
+
+    from dataclasses import replace
+
+    cfg = bitcoind_rpc.config_from_env(werte) or bitcoind_rpc.config_utxo_from_env(werte)
+    if cfg is None or not cfg.configured:
+        raise ApiError(503, "Kein Core-RPC konfiguriert (NODE_IP / RPC*).")
+    btc = sats / 100_000_000.0
+    try:
+        # loadwallet am Node-Root; Senden am Wallet-Pfad.
+        root = bitcoind_rpc.BitcoinRpcClient(cfg, timeout=60.0)
+        try:
+            root.call("loadwallet", [_LAB_FAUCET_WALLET])
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "already loaded" not in msg and "duplicate" not in msg:
+                pass
+        client = bitcoind_rpc.BitcoinRpcClient(
+            replace(cfg, wallet=_LAB_FAUCET_WALLET), timeout=60.0,
+        )
+        txid = client.call("sendtoaddress", [adresse, btc])
+    except Exception as exc:
+        raise ApiError(502, f"Faucet-Send fehlgeschlagen: {exc}") from exc
+
+    return {
+        "ok": True,
+        "txid": txid,
+        "address": adresse,
+        "sats": sats,
+        "from_wallet": _LAB_FAUCET_WALLET,
+        "network": netz,
+    }
+
+
+def _seed_wallet_ctx_aus_caches(state: AppState) -> None:
+    """UTXO-/Verlauf-/Resolution-Adressen ins Mapping — ohne teure HD-Suche."""
+    ctx = state.wallet_ctx
+    if ctx is None:
+        return
+    schluessel = [e.analyse_schluessel for e in state.analyse_entries]
+    if not schluessel:
+        return
+    try:
+        main.seed_wallet_addresses_from_utxo_cache(
+            ctx, schluessel, state.cache_dir,
+        )
+    except Exception:
+        pass
+    try:
+        # Verlauf kann weit über max_addresses reichen (Gap-Scan) —
+        # ohne Seed hängt /api/utxos an resolve_address × MAX_TRACE.
+        main.seed_wallet_addresses_from_verlauf_cache(
+            ctx, schluessel, state.cache_dir,
+        )
+    except Exception:
+        pass
+    try:
+        main.seed_wallet_addresses_from_resolution_cache(ctx, schluessel)
+    except Exception:
+        pass
+
+
 def api_alle_utxos(state: AppState, query: dict) -> dict:
     """
     UTXOs über alle Wallets — Einstieg für die Herkunftsansicht.
 
     Bestand und Verlauf aus dem Cache. Optional Mempool-Pending-Spends
     nur über den eigenen Electrs (sonst kein Netz).
+
+    ``mempool=0``: kein Electrs-Rundlauf (Herkunftsliste / Sprung aus Wallet).
     """
+    _seed_wallet_ctx_aus_caches(state)
     gesammelt: list[dict] = []
     ohne_cache: list[str] = []
     for entry in state.entries:
@@ -2890,13 +3944,17 @@ def api_alle_utxos(state: AppState, query: dict) -> dict:
     except (ValueError, TypeError):
         limit = None
     sort = _sortierung(query)
+    mempool_an = str((query.get("mempool") or ["1"])[0]).strip().lower() not in (
+        "0", "false", "no", "nein", "off",
+    )
 
     anhang = _verlaufs_anhang(
         state, state.analyse_entries, limit=limit, sort=sort,
     )
-    gesammelt, anhang = _mit_mempool_pending(
-        state, gesammelt, anhang, limit=limit, sort=sort,
-    )
+    if mempool_an:
+        gesammelt, anhang = _mit_mempool_pending(
+            state, gesammelt, anhang, limit=limit, sort=sort,
+        )
 
     ergebnis = utxos_mod.rank_wallet_utxos(
         gesammelt,
@@ -2924,12 +3982,13 @@ def api_sanctions_update(state: AppState, payload: dict) -> dict:
     """Lädt die Listen neu. Läuft als Job, der Download dauert."""
 
     def lauf(job):
-        job.progress("Lade Sanktions- und Blacklists…")
+        job.progress("Lade Sanktions- und Blacklists…", log=True)
         import sanctioned
 
         adressen, meta = sanctioned.update_sanctioned_lists(
             cache_dir=state.sanctions_dir
         )
+        job.raise_if_cancelled()
         job.message = f"{len(adressen):,} Adressen geladen.".replace(",", ".")
         return {"adressen": len(adressen)}
 
@@ -2960,10 +4019,11 @@ def api_labels_update(state: AppState, payload: dict) -> dict:
                 f"{dateiname}: {geladen // 1024:,} KB{anteil}".replace(",", ".")
             )
 
-        job.progress("Lade Adress-Labels…")
+        job.progress("Lade Adress-Labels…", log=True)
         stand = labels.aktualisiere(
             state.label_dir, variante=variante, fortschritt=fortschritt
         )
+        job.raise_if_cancelled()
         job.message = (
             f"{stand['adressen']:,} Adressen, davon {stand['benannt']:,} benannt."
             .replace(",", ".")
@@ -3040,6 +4100,74 @@ def api_labels_import(state: AppState, payload: dict) -> dict:
     return stand
 
 
+def api_exchange_reports(state: AppState, query: dict) -> dict:
+    """Status der importierten Börsen-CSV-Reports."""
+    from core import exchange_reports as boerse
+
+    return boerse.status(state.exchange_reports_dir)
+
+
+def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
+    """
+    Börsen-Transaktionsreport (CSV) einlesen.
+
+    Body: ``name`` (Börse), ``csv`` (Text), optional ``filename``,
+    ``ersetzen`` (true = Datei der Börse neu statt mergen).
+    Nur BTC-Adressen/TxIDs — Kurse und Shitcoins werden verworfen.
+    """
+    from core import exchange_reports as boerse
+
+    if not isinstance(payload, dict):
+        raise ApiError(400, "JSON-Objekt erwartet.")
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise ApiError(400, "Feld „name“ (Börse) fehlt.")
+    csv_text = payload.get("csv")
+    if csv_text is None:
+        raise ApiError(400, "Feld „csv“ fehlt.")
+    if not isinstance(csv_text, str):
+        raise ApiError(400, "Feld „csv“ muss Text sein.")
+    if len(csv_text) > 40 * 1024 * 1024:
+        raise ApiError(400, "CSV zu groß (max. 40 MB).")
+    dateiname = str(payload.get("filename") or "").strip()[:200]
+    ersetzen = bool(payload.get("ersetzen"))
+    try:
+        ergebnis = boerse.importiere_csv(
+            csv_text,
+            name=name,
+            filename=dateiname,
+            cache_dir=state.exchange_reports_dir,
+            ersetzen=ersetzen,
+        )
+    except boerse.ExchangeReportError as exc:
+        raise ApiError(400, str(exc)) from exc
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    ergebnis["status"] = boerse.status(state.exchange_reports_dir)
+    return ergebnis
+
+
+def api_exchange_reports_loesche(state: AppState, query: dict) -> dict:
+    """Eine Börse oder alle Reports löschen. Query: ``slug`` oder ``all=1``."""
+    from core import exchange_reports as boerse
+
+    if str(query.get("all") or "").strip() in ("1", "true", "yes"):
+        n = 0
+        for e in boerse.liste(state.exchange_reports_dir):
+            if boerse.loesche(str(e.get("slug") or ""), state.exchange_reports_dir):
+                n += 1
+        return {"geloescht": n, "status": boerse.status(state.exchange_reports_dir)}
+    slug = str(query.get("slug") or "").strip()
+    if not slug:
+        raise ApiError(400, "Query „slug“ oder „all=1“ fehlt.")
+    ok = boerse.loesche(slug, state.exchange_reports_dir)
+    return {
+        "geloescht": 1 if ok else 0,
+        "slug": slug,
+        "status": boerse.status(state.exchange_reports_dir),
+    }
+
+
 def api_sanctions_import(state: AppState, payload: dict) -> dict:
     """Manueller Sanktionslisten-Import (JSON/TXT/XML/ZIP)."""
     import sanctioned as sanctioned_mod
@@ -3107,8 +4235,8 @@ def api_sanctions_check_verwerfen(state: AppState) -> dict:
 
 def api_sanctions_check(state: AppState, payload: dict) -> dict:
     """
-    Prüft Wallet-UTXOs auf sanktionierte Adressen in der externen
-    Vorgeschichte (CLI-Menü 6.1) — als Hintergrund-Vorgang.
+    Prüft Wallet-UTXOs xpub-blind auf sanktionierte Adressen (CLI-Menü 6.1)
+    — Drittperspektive ohne XPUB, bis *max_hops* Prevouts — als Job.
 
     Payload: {"wallet_id": "<kennung|leer=alle>", "max_hops": 3}
     """
@@ -3151,6 +4279,7 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
             )
 
         job.progress("Verbinde mit dem Sanktions-Server…")
+        print("Sanktionsprüfung: verbinde Datenquelle…", flush=True)
         get_tx_je_worker, verbindungen = _sanctions_get_tx_pool(state)
         job.raise_if_cancelled()
         if get_tx_je_worker is None:
@@ -3160,6 +4289,12 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 "eigene Server noch ein Clearnet-Server.",
             )
         get_tx = get_tx_je_worker(0)
+        print(
+            f"Sanktionsprüfung: {verbindungen} Verbindung(en), "
+            f"{max_hops} Hop(s), {len(adressen):,} Listen-Adressen."
+            .replace(",", "."),
+            flush=True,
+        )
 
         ergebnisse = []
         for ziel_entry in ziele:
@@ -3177,17 +4312,20 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
             if not utxos:
                 ergebnisse.append({
                     "wallet": name, "geprueft": 0, "treffer": [],
+                    "coinjoins": [],
                     "abgebrochen": False,
                 })
                 continue
 
-            # Im Parallel-Lauf melden mehrere Worker abwechselnd; die Zeile
-            # zeigt deshalb den zuletzt gesehenen Zustand, nicht den eines
-            # bestimmten UTXO. Der Zähler unten summiert dagegen über alle.
-            fertige = {"n": 0}
+            print(
+                f"Sanktionsprüfung „{name}“: {len(utxos)} UTXO(s)…",
+                flush=True,
+            )
 
+            # Parallel: Statuszeile = zuletzt meldender Worker (nicht „fertig“).
             def fortschritt(felder):
-                fertige["n"] += 1
+                if job.cancelled:
+                    return
                 job.progress(
                     f"{name}: {felder.get('status', '')} "
                     f"(UTXO {felder.get('wallet_utxo', '')}, "
@@ -3198,24 +4336,37 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 )
 
             gesehen: set[str] = set()
-            treffer, geprueft, abbruch = analyze.check_wallet_utxos_sanctions(
-                get_tx,
-                utxos,
-                eigene,
-                adressen,
-                max_hops=max_hops,
-                wallet=wallet_ctx,
-                abort_on_hit=False,
-                progress_cb=fortschritt,
-                cancel_cb=lambda: job.cancelled,
-                gesehene_adressen=gesehen,
-                get_tx_je_worker=get_tx_je_worker,
-                worker_count=verbindungen,
-            )
+            try:
+                treffer, geprueft, abbruch, coinjoins = (
+                    analyze.check_wallet_utxos_sanctions(
+                        get_tx,
+                        utxos,
+                        eigene,
+                        adressen,
+                        max_hops=max_hops,
+                        wallet=wallet_ctx,
+                        abort_on_hit=False,
+                        progress_cb=fortschritt,
+                        cancel_cb=lambda: job.cancelled,
+                        gesehene_adressen=gesehen,
+                        get_tx_je_worker=get_tx_je_worker,
+                        worker_count=verbindungen,
+                        immutable_cache_dir=state.immutable_cache_dir,
+                    )
+                )
+            except Exception as exc:
+                from core.jobs import Cancelled, ist_abbruch
+
+                if job.cancelled or ist_abbruch(exc) or isinstance(exc, Cancelled):
+                    treffer, geprueft, abbruch, coinjoins = [], 0, None, []
+                else:
+                    raise
+            job.raise_if_cancelled()
             ergebnisse.append({
                 "wallet": name,
                 "geprueft": geprueft,
                 "treffer": treffer,
+                "coinjoins": coinjoins,
                 "abgebrochen": abbruch is not None or job.cancelled,
                 "adressen_geprueft": len(gesehen),
                 # Sortiert und gekappt: die Datei soll auch bei tiefen Läufen
@@ -3265,19 +4416,30 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
 
 
 def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
+    """
+    Sitzungs-Bestätigung für öffentliche Electrum-Server.
+
+    Gilt nur bis zum Prozessende — wird **nicht** in die ``.env`` geschrieben,
+    damit nach jedem Server-Neustart bei geringer Privatsphäre erneut gefragt
+    wird. Ein altes ``OEFFENTLICHE_ELECTRUM`` in der ``.env`` wird entfernt
+    (Migration von der früheren Dauer-Freigabe).
+    """
     _datenquellen_config_gesperrt(state)
-    """Speichert die Bestätigung, öffentliche Electrum-Server zu nutzen."""
     erlauben = bool(payload.get("erlauben"))
+    source_mod.setze_oeffentliche_electrum_session(erlauben)
+    # Dauerhafte Freigabe streichen — Opt-in ist sitzungsweise.
     env = state.env()
-    env.apply({"OEFFENTLICHE_ELECTRUM": "1" if erlauben else None})
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    state.reload()
+    if (env.values().get("OEFFENTLICHE_ELECTRUM") or "").strip():
+        env.apply({"OEFFENTLICHE_ELECTRUM": None})
+        try:
+            env.save()
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+        state.reload()
     return {
         "saved": True,
         "erlaubt": erlauben,
+        "session": True,
         "sources": [
             q.as_dict() for q in source_mod.describe_sources(state.env().values())
         ],
@@ -3389,7 +4551,7 @@ def api_price_history(state: AppState, query: dict) -> dict:
                     state.immutable_cache_dir, roh, mit_serie=mit_serie,
                 ),
             ],
-            "price_history_opt_in": hist_sync.price_history_opt_in(werte),
+            "price_history_opt_in": True,
         }
     return {
         "histories": [
@@ -3398,28 +4560,17 @@ def api_price_history(state: AppState, query: dict) -> dict:
             )
             for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
         ],
-        "price_history_opt_in": hist_sync.price_history_opt_in(werte),
+        "price_history_opt_in": True,
     }
 
 
 def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict:
-    """Manueller oder erzwungener Historie-Nachzug (Bitstamp/CDD)."""
+    """Manueller Historie-Nachzug (Lücken füllen — Bitstamp/CDD, sonst Mempool)."""
     from core import price_history_sync as hist_sync
 
-    payload = payload or {}
-    an = payload.get("opt_in")
-    env = state.env()
-    if an is not None:
-        env.apply({
-            hist_sync.ENV_OPT_IN: "1" if bool(an) else "0",
-        })
-        try:
-            env.save()
-        except OSError as exc:
-            raise ApiError(500, "Interner Serverfehler.") from exc
-        state.reload()
+    _ = payload  # früher opt_in — Nachzug braucht keine Erlaubnis mehr
     logs: list[str] = []
-    # Manueller API-Lauf: Stamp ignorieren, Opt-in weiter beachten.
+    # Manueller API-Lauf: Tages-Stamp ignorieren, immer versuchen.
     ergebnisse = hist_sync.historie_nachziehen_alle(
         state.immutable_cache_dir,
         values=state.env().values(),
@@ -3432,9 +4583,7 @@ def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict
         "ok": all(e.get("ok") for e in ergebnisse),
         "results": ergebnisse,
         "log": logs,
-        "price_history_opt_in": hist_sync.price_history_opt_in(
-            state.env().values()
-        ),
+        "price_history_opt_in": True,
         "histories": [
             price_mod.historie_status(state.immutable_cache_dir, w)
             for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
@@ -3601,23 +4750,113 @@ def api_llm_chat(state: AppState, payload: dict) -> dict:
         raise ApiError(exc.status, exc.message) from exc
 
 
+def _persist_tls_auto(state: AppState, quellen: list, *, on_log=None) -> list:
+    """
+    Schreibt TLS-Auto-Ergebnis (FULCRUM_SSL / FULCRUM_TOR_SSL) in die .env.
+
+    Nur Desktop/.env — nicht Start9/Umbrel-Bridge. Liefert Quellenliste mit
+    aktualisierten Schalter-Feldern und geleertem ssl_persist.
+    """
+    from dataclasses import replace
+
+    if state.managed_by in _NODE_MANAGED:
+        return quellen
+    erlaubt = source_mod.EDITIERBARE_FELDER.get("own_fulcrum", ())
+    persist: dict[str, str | None] = {}
+    for q in quellen:
+        if q.key != "own_fulcrum" or not q.ssl_persist:
+            continue
+        for k, v in q.ssl_persist.items():
+            if k in erlaubt:
+                persist[k] = v
+    if not persist:
+        return quellen
+    try:
+        env = state.env()
+        env.apply(persist)
+        env.save()
+        state.reload()
+    except OSError:
+        return quellen
+    if on_log:
+        bits = ", ".join(f"{k}={v}" for k, v in persist.items())
+        on_log(f"TLS-Einstellung gespeichert: {bits}")
+    werte = state.env().values()
+    frisch = {q.key: q for q in source_mod.describe_sources(werte)}
+    out: list = []
+    for q in quellen:
+        basis = frisch.get(q.key, q)
+        out.append(
+            replace(
+                basis,
+                reachable=q.reachable,
+                error=q.error,
+                peer_count=q.peer_count,
+                peer_hosts=list(q.peer_hosts),
+                software=q.software,
+                software_raw=q.software_raw,
+                ssl_effective=q.ssl_effective,
+                ssl_persist={},
+                note=q.note or basis.note,
+                detail=q.detail or basis.detail,
+                log=list(q.log),
+            )
+        )
+    return out
+
+
 def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
+    from dataclasses import replace
+
+    from core.jobs import electrum_serial_busy
+
     werte = state.env().values()
     quellen = source_mod.describe_sources(werte)
     still = query.get("still", ["0"])[0] in ("1", "true", "ja")
-    if query.get("check", ["0"])[0] in ("1", "true", "ja"):
+    check_an = query.get("check", ["0"])[0] in ("1", "true", "ja")
+    # Während UTXO-Scan/Herkunft: stiller Peer-Takt soll own_fulcrum nicht
+    # neu connecten (Tor-SOCKS-Spam + Last auf dem Electrs-Socket).
+    electrum_busy = electrum_serial_busy()
+    skip_live_check = bool(check_an and still and electrum_busy)
+    if check_an and not skip_live_check:
         quellen = source_mod.check_sources(
             quellen, werte, on_log=None if still else on_log, still=still,
         )
+        quellen = _persist_tls_auto(
+            state, quellen, on_log=None if still else on_log,
+        )
+        werte = state.env().values()
+    elif skip_live_check and state.sources_last:
+        alt = {
+            q.get("key"): q
+            for q in state.sources_last
+            if isinstance(q, dict) and q.get("key")
+        }
+        aufgefrischt: list = []
+        for q in quellen:
+            a = alt.get(q.key)
+            if a and q.key == "own_fulcrum":
+                q = replace(
+                    q,
+                    reachable=a.get("reachable"),
+                    peer_count=int(a.get("peer_count") or 0),
+                    peer_hosts=list(a.get("peer_hosts") or []),
+                    error=str(a.get("error") or ""),
+                    detail=str(a.get("detail") or q.detail or ""),
+                    software=str(a.get("software") or ""),
+                    software_raw=str(a.get("software_raw") or ""),
+                )
+            aufgefrischt.append(q)
+        quellen = aufgefrischt
     quellen = source_mod.anreichere_live_p2p(quellen)
     stand = source_mod.peer_status(quellen, werte)
     # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
     # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
     # Header laufen über Start, /headers und eigenen Cooldown.
     sources_dicts = [q.as_dict() for q in quellen]
-    if query.get("check", ["0"])[0] in ("1", "true", "ja"):
+    if check_an and not skip_live_check:
         state.sources_last = sources_dicts
-    return {
+    out = {
         "sources": sources_dicts,
         "peers": stand["count"],
         "peer_status": stand,
@@ -3625,6 +4864,9 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
     }
+    if electrum_busy:
+        out["electrum_busy"] = True
+    return out
 
 
 def _live_p2p_peers() -> list[str]:
@@ -3637,17 +4879,72 @@ def _live_p2p_peers() -> list[str]:
         return []
 
 
+def _breche_p2p_jobs_ab(state: AppState) -> list[str]:
+    """
+    Bricht laufende/geplante Jobs ab, die über BIP-158/P2P hängen.
+
+    Aufruf beim Papierkorb „P2P trennen“ — Nutzer startet Electrum/Scan selbst.
+    """
+    abgebrochen: list[str] = []
+    gesehen: set[str] = set()
+
+    def _merk(jid: str | None) -> None:
+        j = str(jid or "").strip()
+        if j and j not in gesehen:
+            gesehen.add(j)
+            abgebrochen.append(j)
+
+    # Header-Vorab ist immer P2P.
+    hid = getattr(state, "header_job_id", None)
+    if hid and (state.scan_queue.cancel(hid) or state.jobs.cancel(hid)):
+        _merk(hid)
+    state.header_job_id = None
+
+    # Scan-Pipeline: aktiver Job + Warteschlange (sonst startet der nächste
+    # Eintrag noch mit der alten P2P-Priorität).
+    try:
+        snap = state.scan_queue.snapshot()
+    except Exception:
+        snap = {"current": None, "queued": []}
+    cur = snap.get("current") or {}
+    jid = cur.get("job_id")
+    if jid and state.scan_queue.cancel(jid):
+        _merk(jid)
+    for eintrag in snap.get("queued") or []:
+        qid = eintrag.get("queue_id")
+        if qid and state.scan_queue.cancel(qid):
+            _merk(qid)
+
+    # Laufende Registry-Jobs: Header/Rescan/Verlauf; wallet_sync nur mit
+    # bekannter BIP-158-Quelle (sonst Electrs-Tip-Sync nicht killen).
+    for job in state.jobs.list():
+        if job.status != "running":
+            continue
+        if job.id in gesehen:
+            continue
+        src = (job.meta or {}).get("source")
+        if job.kind == "headers" or job.kind in ("rescan", "verlauf"):
+            if state.jobs.cancel(job.id) or state.scan_queue.cancel(job.id):
+                _merk(job.id)
+        elif job.kind == "wallet_sync" and src == "bip158":
+            if state.jobs.cancel(job.id):
+                _merk(job.id)
+
+    return abgebrochen
+
+
 def api_clear_source(state: AppState, quelle: str) -> dict:
     """
     Streicht einen eigenen Node aus der .env, schaltet P2P aus
     (``BIP158_P2P=0``), oder löscht nur die geladene öffentliche
     Electrum-Liste (Onion-Rotation / electrum_servers.json).
-    Opt-in ``OEFFENTLICHE_ELECTRUM`` bleibt unberührt.
+    Sitzungs-Opt-in für öffentliche Electrum bleibt unberührt.
     """
     name = (quelle or "").strip()
     _datenquellen_config_gesperrt(state, quelle=name, aktion="verwerfen")
     env = state.env()
     sicherung = None
+    cancelled_jobs: list[str] = []
 
     if name in ("own_fulcrum", "own_core", "own_utxo_core"):
         erlaubt = source_mod.EDITIERBARE_FELDER[name]
@@ -3662,15 +4959,15 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
     elif name == "bip158":
-        # Wie Checkbox „P2P aufbauen“ aus (fehlender Key = Default an).
+        # Wie Zeilen-Knopf „Verbinden“ rückgängig (fehlender Key = Default an).
         env.apply({"BIP158_P2P": "false"})
         env.runtime_values.pop("BIP158_P2P", None)
         try:
             sicherung = env.save()
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
-        # Laufende Header/Filter-Peers nicht weiter als „P2P an“ anzeigen.
-        state.header_job_id = None
+        # Zuerst Jobs stoppen, dann Peers leeren — sonst weiter Filter holen.
+        cancelled_jobs = _breche_p2p_jobs_ab(state)
         try:
             import bip158_scanner as _bip
 
@@ -3678,6 +4975,12 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
                 _bip._LIVE_FILTER_PEERS.clear()
         except Exception:
             pass
+        if cancelled_jobs:
+            print(
+                "P2P getrennt — laufende P2P-/Scan-Jobs abgebrochen "
+                f"({len(cancelled_jobs)}).",
+                flush=True,
+            )
     elif name == "public_onion":
         updates: dict[str, str | None] = {}
         for i in range(main.MAX_PUBLIC_ONION_SERVERS):
@@ -3718,6 +5021,7 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
         "cleared": name,
         "backup": str(sicherung) if sicherung else None,
         "sources": quellen,
+        "cancelled_jobs": cancelled_jobs,
     }
 
 
@@ -3772,6 +5076,8 @@ def api_rescan(state: AppState, payload: dict) -> dict:
 
             quelle, backend = main._setup_blockchain_client(args, state.env().values())
             job.raise_if_cancelled()
+            if isinstance(job.meta, dict):
+                job.meta["source"] = quelle
 
             fetchers = main._build_blockchain_fetchers(
                 quelle, backend, args, state.wallet_ctx,
@@ -3808,9 +5114,24 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 on_utxos_update=on_utxos_update,
             )
             job.raise_if_cancelled()
+            n_empfang = _schaerfe_empfang_nach_sync(
+                state,
+                [entry],
+                fulcrum=fetchers.get("fulcrum"),
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+            )
             wort = "UTXO" if len(gefunden) == 1 else "UTXOs"
-            stand.phase(f"{len(gefunden)} {wort} gefunden.")
-            return {"utxo_count": len(gefunden), "partial": False}
+            stand.phase(
+                f"{len(gefunden)} {wort} gefunden."
+                + (" Empfangsadresse per Electrs geschärft." if n_empfang else "")
+            )
+            return {
+                "utxo_count": len(gefunden),
+                "partial": False,
+                "empfang_scharf": n_empfang,
+            }
         finally:
             halt.set()
             stand.close()
@@ -3931,6 +5252,9 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     Liefert *(eintraege, wallets_ohne_verlauf)*; die zweite Liste gehört in die
     Anzeige, damit eine gemischte Grundlage auffällt.
     """
+    # Verlaufsadressen vor resolve_address (sonst HD-Suche × MAX_TRACE).
+    _seed_wallet_ctx_aus_caches(state)
+
     eintraege: list[dict] = []
     ohne_verlauf: list[str] = []
     phantome_gesamt = 0
@@ -4044,13 +5368,17 @@ def api_selbstanzeige_kandidaten(state: AppState, query: dict) -> dict:
         jahre = tax_mod.verfuegbare_jahre(utxos)
         jahr = jahre[0] if jahre else __import__("datetime").date.today().year
     txid = (query.get("txid", [""])[0] or "").strip() or None
-    return sa.kandidaten(
-        utxos,
-        jahr,
-        wallet=state.wallet_ctx,
-        immutable_cache_dir=state.immutable_cache_dir,
-        txid=txid,
-    )
+    try:
+        return sa.kandidaten(
+            utxos,
+            jahr,
+            wallet=state.wallet_ctx,
+            immutable_cache_dir=state.immutable_cache_dir,
+            txid=txid,
+        )
+    except ValueError as exc:
+        # z. B. ungültige TxID im Filterfeld
+        raise ApiError(400, str(exc)) from exc
 
 
 def _selbstanzeige_report(state: AppState, payload: dict) -> dict:
@@ -4075,18 +5403,33 @@ def _selbstanzeige_report(state: AppState, payload: dict) -> dict:
     utxo_keys = payload.get("utxos") or []
     if not isinstance(utxo_keys, list):
         raise ApiError(400, "utxos muss eine Liste sein.")
-    return sa.auswerten(
-        utxos,
-        jahr,
-        [str(t) for t in txids],
-        haltefrist_jahre=max(0, frist),
-        anschaffung=einstellungen.get(
-            "anschaffung", tax_mod.STANDARD_ANSCHAFFUNG
-        ),
-        wallet=state.wallet_ctx,
-        immutable_cache_dir=state.immutable_cache_dir,
-        utxo_keys=[str(u) for u in utxo_keys],
-    )
+    # TxIDs sanft normalisieren — ungültige → 400 statt Traceback 500
+    saubere_txids: list[str] = []
+    for roh in txids:
+        text = str(roh or "").strip()
+        if not text:
+            continue
+        try:
+            saubere_txids.append(sa._norm_txid(text, strict=True))
+        except ValueError as exc:
+            raise ApiError(400, str(exc)) from exc
+    try:
+        report = sa.auswerten(
+            utxos,
+            jahr,
+            saubere_txids,
+            haltefrist_jahre=max(0, frist),
+            anschaffung=einstellungen.get(
+                "anschaffung", tax_mod.STANDARD_ANSCHAFFUNG
+            ),
+            wallet=state.wallet_ctx,
+            immutable_cache_dir=state.immutable_cache_dir,
+            utxo_keys=[str(u) for u in utxo_keys],
+        )
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
+    report["person"] = sa.lese_steuer_person(state.env().values())
+    return report
 
 
 def _ingress_veraltet(eintrag: dict | None) -> bool:
@@ -4127,37 +5470,63 @@ def _utxos_fuer_trace(
     return list(gecacht or [])
 
 
-def _trace_offen_basis(
-    state: AppState,
-    utxos: list[dict],
-    eigene_jetzt,
-) -> list[tuple[str, int]]:
-    """UTXOs ohne brauchbaren Ingress oder mit veraltetem Baum."""
-    offen: list[tuple[str, int]] = []
-    for utxo in utxos:
-        txid = utxo.get("txid", "")
-        vout = int(utxo.get("vout", 0))
-        nachholen = _ingress_veraltet(
-            main.load_utxo_ingress_cache(txid, vout, state.immutable_cache_dir)
-        )
-        if not nachholen:
-            kopf = trace_cache.kopf(
-                txid, vout, state.immutable_cache_dir, eigene_jetzt
-            )
-            nachholen = bool(kopf and kopf["veraltet"])
-        if nachholen:
-            offen.append((txid, vout))
-    return offen
-
-
-def _trace_offen_tief(
+def _trace_offen_steuer(
     state: AppState,
     utxos: list[dict],
     eigene_jetzt,
 ) -> list[tuple[str, int]]:
     """
-    UTXOs ohne vollständigen Baum (rot/lila-Blätter) — auch wenn schon
-    einmal getraced. Veraltete Bäume und fehlender Ingress ebenso.
+    UTXOs ohne steuerlich ausreichenden Herkunftsbaum.
+
+    Reicht: Blätter extern/Coinbase **oder** Steuer-Horizont (vor Stichtag/
+    Haltefrist-Anfang). Volle Graphen bis Coinbase sind nicht nötig.
+    """
+    offen: list[tuple[str, int]] = []
+    gesehen: set[tuple[str, int]] = set()
+    for utxo in utxos:
+        txid = str(utxo.get("txid") or "").strip()
+        if not txid:
+            continue
+        try:
+            vout = int(utxo.get("vout", 0))
+        except (TypeError, ValueError):
+            continue
+        key = (txid, vout)
+        if key in gesehen:
+            continue
+        gesehen.add(key)
+        kopf = trace_cache.kopf(
+            txid, vout, state.immutable_cache_dir, eigene_jetzt
+        )
+        if kopf is None:
+            # Kein Baum: alter Ingress mit Extern reicht für Steuerjahr.
+            if not _ingress_veraltet(
+                main.load_utxo_ingress_cache(
+                    txid, vout, state.immutable_cache_dir
+                )
+            ):
+                continue
+            offen.append(key)
+            continue
+        if kopf.get("veraltet"):
+            offen.append(key)
+            continue
+        if kopf.get("vollstaendig") or kopf.get("steuer_ausreichend"):
+            continue
+        offen.append(key)
+    return offen
+
+
+def _trace_offen_basis(
+    state: AppState,
+    utxos: list[dict],
+    eigene_jetzt,
+) -> list[tuple[str, int]]:
+    """
+    Herkunft tracen: UTXOs ohne **vollen** Baum bis extern/Coinbase.
+
+    Steuer-Horizont allein reicht nicht — diese Lücken werden nachgezogen,
+    idealerweise auf dem gespeicherten origin_tree (kein Komplett-Neulauf).
     """
     offen: list[tuple[str, int]] = []
     gesehen: set[tuple[str, int]] = set()
@@ -4182,32 +5551,81 @@ def _trace_offen_tief(
         if kopf.get("veraltet"):
             offen.append(key)
             continue
-        if not kopf.get("vollstaendig"):
-            offen.append(key)
+        if kopf.get("vollstaendig"):
             continue
-        # Baum ist vollständig und aktuell — fertig. Fehlenden Ingress holt
-        # „Herkunft aller UTXOs“ bzw. der nächste Einzel-Trace; der Tiefenlauf
-        # soll nicht alles nochmal kneten.
+        offen.append(key)
     return offen
+
+
+def _trace_offen_tief(
+    state: AppState,
+    utxos: list[dict],
+    eigene_jetzt,
+) -> list[tuple[str, int]]:
+    """
+    UTXOs ohne vollständigen Baum (rot/lila-Blätter) — auch wenn schon
+    einmal getraced. Veraltete Bäume und fehlender Ingress ebenso.
+    """
+    # Gleicher Maßstab wie Herkunft-tracen-Massenlauf (voll bis extern).
+    return _trace_offen_basis(state, utxos, eigene_jetzt)
+
+
+def _stop_before_ts_aus_payload(roh: dict) -> int | None:
+    """Steuer-Horizont aus Job-Payload (Jahr, Haltefrist, Stichtag)."""
+    try:
+        jahr = int(roh.get("jahr") or 0)
+    except (TypeError, ValueError):
+        jahr = 0
+    if jahr < 2009:
+        from datetime import datetime as _dt
+        jahr = _dt.now().year
+    try:
+        frist = int(
+            roh.get("haltefrist_jahre")
+            if roh.get("haltefrist_jahre") is not None
+            else roh.get("frist") or tax_mod.STANDARD_HALTEFRIST_JAHRE
+        )
+    except (TypeError, ValueError):
+        frist = tax_mod.STANDARD_HALTEFRIST_JAHRE
+    stichtag_roh = roh.get("stichtag") or roh.get("stichtag_iso") or ""
+    stichtag_tag = tax_mod.parse_stichtag(
+        str(stichtag_roh) if stichtag_roh else None
+    )
+    return tax_mod.stop_before_ts_fuer_steuer(jahr, frist, stichtag_tag)
 
 
 def api_trace_alle(state: AppState, payload: dict) -> dict:
     """
     Verfolgt die Herkunft von UTXOs.
 
-    Standard: alle Wallets, nur fehlender/veralteter Ingress (Steuerjahr).
+    *modus*:
+    - ``steuer`` (Steuerjahr): Stop an Stichtag/Haltefrist-Anfang oder
+      extern/Coinbase — schneller, für Anschaffungsdatum ausreichend.
+    - ``voll`` / Default (Herkunft tracen): immer bis extern/Coinbase;
+      setzt Steuer-Teilbäume fort (origin_tree), rechnet nicht alles neu.
+    - ``vollstaendig=true`` (Wallet „Herkunft“): Tiefenlauf inkl. Lücken.
 
-    Mit ``vollstaendig=true`` (Wallet-Knopf „Herkunft vollständig“): optional
-    ``wallet_id``, alle UTXOs ohne vollständigen Baum — derselbe Pfad wie
-    „Herkunftslücken schließen“ (gebündelte Eingänge **und** Vorgänger-Txs).
-    Kann sehr lange dauern; danach sitzt alles im Cache.
+    Mit ``vollstaendig=true``: optional ``wallet_id``, alle UTXOs ohne
+    vollständigen Baum — derselbe Pfad wie „Herkunftslücken schließen“.
     """
     wallet_ctx = state.wallet_ctx
     if wallet_ctx is None:
         raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
 
+    # scan_end_index → Change jenseits max_addresses (sonst Intern→Extern)
+    _seed_wallet_ctx_aus_caches(state)
+
     roh = payload if isinstance(payload, dict) else {}
     vollstaendig = bool(roh.get("vollstaendig") or roh.get("tief") or roh.get("deep"))
+    modus_roh = str(roh.get("modus") or "").strip().lower()
+    if vollstaendig:
+        modus = "tief"
+    elif modus_roh in ("steuer", "tax", "haltefrist"):
+        modus = "steuer"
+    else:
+        # Herkunft tracen / Default: voll bis extern
+        modus = "voll"
+
     wallet_id = str(roh.get("wallet_id") or "").strip()
     if vollstaendig and not wallet_id:
         raise ApiError(
@@ -4216,10 +5634,29 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "(Knopf in der Wallet-Ansicht).",
         )
 
+    stop_before_ts = None
+    if modus == "steuer":
+        stop_before_ts = _stop_before_ts_aus_payload(roh)
+
     eigene_jetzt = _eigene_adressen(state)
     utxos = _utxos_fuer_trace(state, wallet_id=wallet_id)
+
+    # Optional: nur bestimmte UTXOs tracen (z. B. nur gelbe aus Steuerjahr)
+    nur_keys = roh.get("utxo_keys")
+    if nur_keys:
+        gewuenscht = set()
+        for k in nur_keys:
+            if isinstance(k, str) and ":" in k:
+                try:
+                    tx, vo = k.split(":", 1)
+                    gewuenscht.add((tx.strip(), int(vo)))
+                except (ValueError, TypeError):
+                    pass
+        if gewuenscht:
+            utxos = [u for u in utxos if (u.get("txid"), int(u.get("vout", -1))) in gewuenscht]
+
     if not utxos:
-        # Leerer Bestand ≠ „alles schon getracet“ — sonst wirkt „Herkunft aller
+        # Leerer Bestand ≠ „alles schon getracet“ — sonst wirkt „Herkünfte
         # UTXOs“ nach frischem Lab/Cache fälschlich fertig (grüner Hinweis).
         return {
             "nichts_zu_tun": True,
@@ -4227,10 +5664,13 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "offen": 0,
             "utxos": 0,
             "vollstaendig": vollstaendig,
+            "modus": modus,
             "wallet_id": wallet_id,
         }
-    if vollstaendig:
+    if modus == "tief":
         offen = _trace_offen_tief(state, utxos, eigene_jetzt)
+    elif modus == "steuer":
+        offen = _trace_offen_steuer(state, utxos, eigene_jetzt)
     else:
         offen = _trace_offen_basis(state, utxos, eigene_jetzt)
 
@@ -4241,6 +5681,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "offen": 0,
             "utxos": len(utxos),
             "vollstaendig": vollstaendig,
+            "modus": modus,
             "wallet_id": wallet_id,
         }
 
@@ -4260,11 +5701,22 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         ).start()
         gesamt = len(offen)
         try:
-            if vollstaendig and wallet_name:
+            if modus == "tief" and wallet_name:
                 stand.phase(
                     f"Herkunft vollständig für „{wallet_name}“ "
                     f"({gesamt} UTXOs)…"
                 )
+            elif modus == "steuer":
+                stand.phase(
+                    f"Steuerrelevantes Alter für {gesamt} UTXOs"
+                    + (
+                        f" (Horizont bis {stop_before_ts})…"
+                        if stop_before_ts
+                        else "…"
+                    )
+                )
+            else:
+                stand.phase(f"Herkunft bis extern für {gesamt} UTXOs…")
             stand.phase(f"Verbinde für {gesamt} UTXOs…")
             args = state.args_namespace()
             quelle, backend = main._setup_blockchain_client(args, state.env().values())
@@ -4279,6 +5731,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             fehler = 0
             juengste = 0
             voll_ok = 0
+            steuer_ok_n = 0
 
             def _zwischenstand() -> None:
                 job.result = {
@@ -4287,16 +5740,23 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     "offen": gesamt,
                     "juengste_sats": juengste,
                     "vollstaendig_ok": voll_ok,
+                    "steuer_ok": steuer_ok_n,
                     "vollstaendig": vollstaendig,
+                    "modus": modus,
                     "partial": True,
                 }
 
             for index, (txid, vout) in enumerate(offen):
                 job.raise_if_cancelled()
                 rest = gesamt - index
-                if vollstaendig:
+                if modus == "tief":
                     text = (
                         f"Herkunft vollständig — noch {rest} von {gesamt} UTXOs"
+                        f" · {txid[:12]}…:{vout}"
+                    )
+                elif modus == "steuer":
+                    text = (
+                        f"Steuerrelevantes Alter — noch {rest} von {gesamt} UTXOs"
                         f" · {txid[:12]}…:{vout}"
                     )
                 else:
@@ -4310,8 +5770,33 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     stand.tick(text)
                 try:
                     fetch_addr = fetchers.get("fetch_address_utxos")
-                    if vollstaendig:
+                    if modus == "tief":
                         # Gleicher Pfad wie Einzel-Knopf „Herkunftslücken schließen“.
+                        def _tief_fortschritt(text: str) -> None:
+                            t = str(text or "").strip()
+                            job.raise_if_cancelled()
+                            if not t:
+                                return
+                            if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
+                                stand.tick(t)
+                            else:
+                                stand.phase(t)
+
+                        resume_tief = None
+                        geladen_tief = trace_cache.laden(
+                            txid, vout, state.immutable_cache_dir, eigene,
+                        )
+                        if geladen_tief and isinstance(
+                            geladen_tief.get("baum"), dict
+                        ):
+                            origin_t = geladen_tief["baum"].get("origin_tree")
+                            if (
+                                isinstance(origin_t, dict)
+                                and analyze.hat_brauchbaren_teilfortschritt(
+                                    origin_t
+                                )
+                            ):
+                                resume_tief = origin_t
                         ergebnis = _trace_ein_utxo_tief(
                             get_tx=fetchers["get_tx"],
                             txid=txid,
@@ -4322,11 +5807,27 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             immutable_cache_dir=state.immutable_cache_dir,
                             fetch_addr=fetch_addr,
                             cache_source=quelle,
-                            progress=job.progress,
+                            progress=_tief_fortschritt,
+                            cancel_cb=lambda: job.cancelled,
                             folge_bundled=True,
                             folge_tx=True,
+                            resume_origin=resume_tief,
                         )
                     else:
+                        resume = None
+                        if modus in ("voll", "steuer"):
+                            geladen = trace_cache.laden(
+                                txid, vout, state.immutable_cache_dir, eigene,
+                            )
+                            if geladen and isinstance(geladen.get("baum"), dict):
+                                origin = geladen["baum"].get("origin_tree")
+                                if (
+                                    isinstance(origin, dict)
+                                    and analyze.hat_brauchbaren_teilfortschritt(
+                                        origin
+                                    )
+                                ):
+                                    resume = origin
                         ergebnis = trace_mod.trace_utxo(
                             fetchers["get_tx"], txid, vout, eigene,
                             wallet=wallet_ctx,
@@ -4334,14 +5835,21 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             immutable_cache_dir=state.immutable_cache_dir,
                             fetch_address_utxos=fetch_addr,
                             cache_source=quelle,
+                            stop_before_ts=(
+                                stop_before_ts if modus == "steuer" else None
+                            ),
+                            # voll: Lücken fortsetzen; steuer: Horizont neu
+                            # mit stop — Resume nur bei voll.
+                            resume_origin=resume if modus == "voll" else None,
                         )
                     fertig += 1
-                    if (
-                        isinstance(ergebnis, dict)
-                        and ergebnis.get("found")
-                        and ergebnis.get("verfolgt_vollstaendig")
-                    ):
-                        voll_ok += 1
+                    if isinstance(ergebnis, dict) and ergebnis.get("found"):
+                        if ergebnis.get("verfolgt_vollstaendig"):
+                            voll_ok += 1
+                        if ergebnis.get("steuer_ausreichend") or ergebnis.get(
+                            "verfolgt_vollstaendig"
+                        ):
+                            steuer_ok_n += 1
                         if ergebnis.get("juengste_sats_ts"):
                             juengste += 1
                     _zwischenstand()
@@ -4352,15 +5860,22 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     _zwischenstand()
                     continue
 
-            if vollstaendig:
+            if modus == "tief":
                 fertig_text = (
                     f"{fertig} von {gesamt} durchgezogen"
                     f" · {voll_ok} vollständig"
                     + (f", {fehler} fehlgeschlagen" if fehler else "")
                 )
+            elif modus == "steuer":
+                fertig_text = (
+                    f"{fertig} von {gesamt} verfolgt"
+                    f" · {steuer_ok_n} steuerlich ok"
+                    + (f", {fehler} fehlgeschlagen" if fehler else "")
+                )
             else:
                 fertig_text = (
                     f"{fertig} von {gesamt} verfolgt"
+                    f" · {voll_ok} bis extern"
                     + (f", {fehler} fehlgeschlagen" if fehler else "")
                 )
             stand.phase(fertig_text)
@@ -4370,19 +5885,24 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 "offen": gesamt,
                 "juengste_sats": juengste,
                 "vollstaendig_ok": voll_ok,
+                "steuer_ok": steuer_ok_n,
                 "vollstaendig": vollstaendig,
+                "modus": modus,
                 "partial": False,
             }
         finally:
             halt.set()
             stand.close()
 
-    if vollstaendig:
+    if modus == "tief":
         titel = (
             f"Herkunft vollständig {wallet_name or wallet_id} "
             f"({len(offen)} UTXOs)"
         )
         art = "trace-tief"
+    elif modus == "steuer":
+        titel = f"Steuerrelevantes Alter für {len(offen)} UTXOs"
+        art = "trace-alle"
     else:
         titel = f"Herkunft für {len(offen)} UTXOs"
         art = "trace-alle"
@@ -4396,6 +5916,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "wallet_id": wallet_id,
             "wallet_name": wallet_name,
             "vollstaendig": vollstaendig,
+            "modus": modus,
+            "stop_before_ts": stop_before_ts,
         },
     )
     return job.as_dict()
@@ -4447,6 +5969,8 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
         ).start()
         try:
             stand.phase(f"Starte Verlaufsscan für {namen}…")
+            # Adressen bis scan_end_index (Change jenseits max_addresses)
+            _seed_wallet_ctx_aus_caches(state)
             stand.phase("Verbinde mit der Verlaufs-Datenquelle…")
             args = state.args_namespace()
             # Eigene Priorität: Electrs LAN → Onion → BIP-158 → öffentlich.
@@ -4603,6 +6127,9 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
     txid, vout = ziel
 
     wallet_ctx = state.wallet_ctx
+    # Vor Fingerprint/veraltet: Mapping bis scan_end (Change jenseits max_addresses)
+    if wallet_ctx is not None:
+        _seed_wallet_ctx_aus_caches(state)
     eigene = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
 
     gespeichert = trace_cache.laden(txid, vout, state.immutable_cache_dir, eigene)
@@ -4612,6 +6139,17 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
     baum = gespeichert["baum"] or {}
     if isinstance(baum, dict):
         baum = dict(baum)
+        # Alte Bäume: externe Blätter ohne time_label nachziehen (Tx-Cache).
+        # Kein lokales ``import trace as trace_mod`` — sonst UnboundLocalError
+        # auf dem Modul-Import weiter unten (Python-Scoping).
+        try:
+            kinder0 = baum.get("children") or []
+            if kinder0:
+                trace_mod._anreichere_externe_zeiten(
+                    kinder0, state.immutable_cache_dir,
+                )
+        except Exception:
+            pass
         # Vollständigkeit und Done-Flag frisch aus den Blättern — nicht dem
         # ggf. veralteten Cache-Flag vertrauen (ältere Läufe markierten
         # Bäume mit leeren grünen Blättern fälschlich als fertig).
@@ -4638,40 +6176,78 @@ def _trace_ein_utxo_tief(
     fetch_addr,
     cache_source: str,
     progress=None,
+    cancel_cb=None,
     folge_bundled: bool = True,
     folge_tx: bool = True,
+    resume_origin: dict | None = None,
 ) -> dict:
     """
     Ein UTXO wie „Herkunftslücken schließen“ (followup=full):
 
-    1. Roh-Trace mit allen eigenen Eingängen (große Sammel-Txs)
+    1. Roh-Trace mit allen eigenen Eingängen (große Sammel-Txs),
+       oder Resume aus ``resume_origin`` (nur Lücken)
     2. optional eigene Vorgänger-Txs nachverfolgen (Cache/Adressen warm)
     3. UI-Baum speichern mit resolve_bundled
 
     Wird vom Einzel-Trace und von „Herkunft vollständig“ genutzt — sonst
     bliebe der Superscan hinter dem Lücken-Knopf zurück.
+
+    *progress* und *cancel_cb* müssen greifen — sonst hängt Phase 1/2 ohne
+    Log und Abbruch (bare except in der Engine schluckte Cancelled früher).
     """
     import contextlib
     import io
 
     log = progress if callable(progress) else (lambda _m: None)
+    abbruch = cancel_cb if callable(cancel_cb) else None
+    # analyze.trace_utxo_origin erwartet .update(text); Jobs liefern Callables.
+    fortschritt = (
+        trace_mod._FortschrittsAdapter(progress) if callable(progress) else None
+    )
+
+    def _check_abbruch() -> None:
+        if abbruch and abbruch():
+            raise Cancelled()
 
     if folge_tx or folge_bundled:
+        _check_abbruch()
         if folge_bundled:
             log("Lücken: eigene Eingänge großer Sammel-Txs nachziehen…")
         else:
             log("Folgeanalyse: erst Herkunft, dann Vorgänger…")
-        roh = analyze.trace_utxo_origin(
-            get_tx,
-            txid,
-            vout,
-            eigene,
-            wallet=wallet_ctx,
-            cache_dir=cache_dir,
-            fetch_address_utxos=fetch_addr,
-            cache_source=cache_source,
-            alle_eigenen_inputs=folge_bundled,
-        )
+        # Fortschritt/Abbruch hier mitgeben — Phase 1 war sonst stumm und
+        # unabbrechbar (CoinJoin/Remix: Minuten ohne job.progress).
+        if (
+            resume_origin
+            and isinstance(resume_origin, dict)
+            and analyze.hat_brauchbaren_teilfortschritt(resume_origin)
+        ):
+            log("Setze gespeicherten Teilbaum fort…")
+            roh = analyze.vertiefe_herkunft_luecken(
+                resume_origin,
+                get_tx,
+                eigene,
+                wallet=wallet_ctx,
+                cache_dir=cache_dir,
+                fetch_address_utxos=fetch_addr,
+                cache_source=cache_source,
+                progress=fortschritt,
+                alle_eigenen_inputs=folge_bundled,
+            )
+        else:
+            roh = analyze.trace_utxo_origin(
+                get_tx,
+                txid,
+                vout,
+                eigene,
+                wallet=wallet_ctx,
+                cache_dir=cache_dir,
+                fetch_address_utxos=fetch_addr,
+                cache_source=cache_source,
+                progress=fortschritt,
+                alle_eigenen_inputs=folge_bundled,
+            )
+        _check_abbruch()
         if folge_tx:
             vorgaenger: set[str] = set()
             if roh:
@@ -4683,7 +6259,7 @@ def _trace_ein_utxo_tief(
             if vorgaenger:
                 buf = io.StringIO()
 
-                def _log_zeilen():
+                def _log_zeilen() -> None:
                     text = buf.getvalue()
                     if not text:
                         return
@@ -4693,6 +6269,11 @@ def _trace_ein_utxo_tief(
                         zeile = zeile.strip()
                         if zeile:
                             log(zeile)
+
+                def _folge_fortschritt(text: str) -> None:
+                    _check_abbruch()
+                    _log_zeilen()
+                    log(str(text or ""))
 
                 with contextlib.redirect_stdout(buf):
                     analyze._run_tx_oriented_followups(
@@ -4706,8 +6287,11 @@ def _trace_ein_utxo_tief(
                         cache_dir,
                         fetch_addr,
                         cache_source,
+                        cancel_cb=abbruch,
+                        progress_cb=_folge_fortschritt,
                     )
                 _log_zeilen()
+        _check_abbruch()
         log("Aktualisiere Herkunftsbaum…")
 
     ergebnis = trace_mod.trace_utxo(
@@ -4723,8 +6307,69 @@ def _trace_ein_utxo_tief(
         progress=progress if callable(progress) else None,
         resolve_bundled=folge_bundled,
         merke_tx_oriented_done=folge_tx,
+        resume_origin=resume_origin,
     )
     return ergebnis
+
+
+def _wallet_name_fuer_utxo(
+    state: AppState,
+    txid: str,
+    vout: int,
+    *,
+    hinweis: str = "",
+) -> str:
+    """
+    Anzeigename des Wallets zu txid:vout — für Job-Meta und UI nach Reload.
+
+    Reihenfolge: Client-Hinweis → gespeicherter Trace-Root → UTXO-Cache-Adresse
+    → Adressauflösung im Wallet-Kontext.
+    """
+    name = str(hinweis or "").strip()
+    if name:
+        return name
+    try:
+        treffer = trace_cache.laden(
+            txid, vout, state.immutable_cache_dir, None,
+        )
+        if treffer:
+            root = (treffer.get("baum") or {}).get("root") or {}
+            w = str(root.get("wallet") or "").strip()
+            if w:
+                return w
+            addr = str(root.get("address") or "").strip()
+            ctx = state.wallet_ctx
+            if addr and ctx is not None:
+                w = str(ctx.resolve_address(addr) or "").strip()
+                if w:
+                    return w
+    except Exception:
+        pass
+    try:
+        ctx = state.wallet_ctx
+        if ctx is None:
+            return ""
+        for entry in state.entries or []:
+            schluessel = getattr(entry, "analyse_schluessel", None) or getattr(
+                entry, "xpub", None,
+            )
+            if not schluessel:
+                continue
+            cached = main.load_xpub_utxo_cache(schluessel, state.cache_dir) or []
+            for u in cached:
+                if (
+                    str(u.get("txid") or "").lower() == str(txid).lower()
+                    and int(u.get("vout") or -1) == int(vout)
+                ):
+                    addr = str(u.get("address") or "").strip()
+                    if addr:
+                        w = str(ctx.resolve_address(addr) or "").strip()
+                        if w:
+                            return w
+                    return str(entry.display_name or "").strip()
+    except Exception:
+        pass
+    return ""
 
 
 def api_trace(state: AppState, payload: dict) -> dict:
@@ -4762,86 +6407,266 @@ def api_trace(state: AppState, payload: dict) -> dict:
     # full = beides; Legacy-Werte bleiben einzeln steuerbar.
     folge_bundled = followup in ("full", "resolve_unresolved")
     folge_tx = followup in ("full", "tx_oriented")
+    # „Scan neu“: nicht stumm aus Cache; brauchbaren Teilbaum fortsetzen
+    # statt alles zu löschen. Nur leere/kaputte Stände werden verworfen.
+    force = bool(
+        payload.get("force")
+        or payload.get("neu")
+        or payload.get("rescan")
+    )
 
     wallet_ctx = state.wallet_ctx
     if wallet_ctx is None:
         raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
+    _seed_wallet_ctx_aus_caches(state)
     eigene = set(wallet_ctx.address_to_wallet)
+    wallet_name = _wallet_name_fuer_utxo(
+        state,
+        txid,
+        vout,
+        hinweis=str(
+            payload.get("wallet")
+            or payload.get("wallet_name")
+            or ""
+        ),
+    )
+    resume_origin = None
+    if force or followup is not None:
+        try:
+            geladen = trace_cache.laden(
+                txid, vout, state.immutable_cache_dir, eigene,
+            )
+            if geladen and isinstance(geladen.get("baum"), dict):
+                origin = geladen["baum"].get("origin_tree")
+                if (
+                    isinstance(origin, dict)
+                    and analyze.hat_brauchbaren_teilfortschritt(origin)
+                ):
+                    resume_origin = origin
+                elif force:
+                    # Nichts Brauchbares — alten Stand weg, echter Neustart.
+                    trace_cache.loeschen(txid, vout, state.immutable_cache_dir)
+        except Exception:
+            if force:
+                try:
+                    trace_cache.loeschen(txid, vout, state.immutable_cache_dir)
+                except Exception:
+                    pass
 
     def lauf(job):
-        job.progress("Verbinde mit der Datenquelle…")
-        args = state.args_namespace()
-        quelle, backend = main._setup_blockchain_client(args, state.env().values())
-        job.raise_if_cancelled()
+        from core.jobs import Fortschritt, herzschlag
 
-        fetchers = main._build_blockchain_fetchers(
-            quelle, backend, args, wallet_ctx,
-            immutable_cache_dir=state.immutable_cache_dir,
-        )
-        get_tx = fetchers["get_tx"]
-        fetch_addr = fetchers.get("fetch_address_utxos")
-
-        label = {
-            None: f"Verfolge Herkunft über {quelle}…",
-            "full": f"Schließe Herkunftslücken über {quelle}…",
-            "tx_oriented": f"Speichere gründlichere Herkunft über {quelle}…",
-            "resolve_unresolved": f"Löse gebündelte Eingänge über {quelle}…",
-        }[followup]
-        job.progress(label)
-
-        if folge_tx or folge_bundled:
-            ergebnis = _trace_ein_utxo_tief(
-                get_tx=get_tx,
-                txid=txid,
-                vout=vout,
-                eigene=eigene,
-                wallet_ctx=wallet_ctx,
-                cache_dir=state.cache_dir,
-                immutable_cache_dir=state.immutable_cache_dir,
-                fetch_addr=fetch_addr,
-                cache_source=quelle,
-                progress=job.progress,
-                folge_bundled=folge_bundled,
-                folge_tx=folge_tx,
+        # Nochmals Cache (Race: GET und POST parallel) — bevor Electrs startet.
+        # force: nie stiller Cache-Hit (Resume läuft unten mit Netz).
+        if followup is None and not force:
+            treffer = trace_cache.laden(
+                txid, vout, state.immutable_cache_dir, eigene,
             )
-        else:
-            ergebnis = trace_mod.trace_utxo(
-                get_tx,
-                txid,
-                vout,
-                eigene,
-                wallet=wallet_ctx,
-                cache_dir=state.cache_dir,
+            if treffer is not None:
+                baum = treffer.get("baum") or {}
+                if isinstance(baum, dict) and baum.get("found"):
+                    baum = dict(baum)
+                    try:
+                        kinder = baum.get("children") or []
+                        if kinder:
+                            trace_mod._anreichere_externe_zeiten(
+                                kinder, state.immutable_cache_dir,
+                            )
+                        baum.update(trace_mod.folge_meta(baum))
+                    except Exception:
+                        pass
+                    baum["source"] = "cache"
+                    job.message = "Aus Herkunfts-Cache."
+                    return baum
+
+        stand = Fortschritt(job)
+        halt = threading.Event()
+        threading.Thread(
+            target=herzschlag, args=(stand, halt), daemon=True,
+        ).start()
+        try:
+            # log=True: Nav und Fokus-UI sehen mehr als nur die letzte message.
+            stand.phase("Verbinde mit der Datenquelle…")
+            args = state.args_namespace()
+            quelle, backend = main._setup_blockchain_client(args, state.env().values())
+            job.raise_if_cancelled()
+
+            fetchers = main._build_blockchain_fetchers(
+                quelle, backend, args, wallet_ctx,
                 immutable_cache_dir=state.immutable_cache_dir,
-                fetch_address_utxos=fetch_addr,
-                cache_source=quelle,
-                progress=job.progress,
             )
-        ergebnis["source"] = quelle
-        ergebnis["followup"] = followup
-        job.message = (
-            f"{ergebnis['summary'].get('node_count', 0)} Zuflüsse ermittelt."
-            if ergebnis.get("found") else "Keine Herkunft ermittelbar."
+            get_tx = fetchers["get_tx"]
+            fetch_addr = fetchers.get("fetch_address_utxos")
+
+            label = {
+                None: f"Verfolge Herkunft über {quelle}…",
+                "full": f"Schließe Herkunftslücken über {quelle}…",
+                "tx_oriented": f"Speichere gründlichere Herkunft über {quelle}…",
+                "resolve_unresolved": f"Löse gebündelte Eingänge über {quelle}…",
+            }[followup]
+            if force and resume_origin is not None:
+                label = f"Setze Herkunft fort über {quelle}…"
+            elif force:
+                label = f"Scan neu über {quelle}…"
+            stand.phase(label)
+
+            def _fortschritt(text: str) -> None:
+                """Engine-Fortschritt → Job-message + Log (Meilensteine)."""
+                t = str(text or "").strip()
+                job.raise_if_cancelled()
+                if not t:
+                    return
+                # Längere Meilensteine / Hop-Wechsel: sofort ins Log.
+                if (
+                    t.startswith("↻")
+                    or t.startswith("Lücken")
+                    or t.startswith("Eigene Vorgänger")
+                    or t.startswith("Aktualisiere")
+                    or t.startswith("Folgeanalyse")
+                    or t.startswith("Schließe")
+                    or t.startswith("Verfolge")
+                    or t.startswith("Setze")
+                ):
+                    # tick speichert Stand; phase bei echten Phasen-Texten.
+                    if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
+                        stand.tick(t)
+                    else:
+                        stand.phase(t)
+                else:
+                    stand.tick(t)
+
+            if folge_tx or folge_bundled:
+                ergebnis = _trace_ein_utxo_tief(
+                    get_tx=get_tx,
+                    txid=txid,
+                    vout=vout,
+                    eigene=eigene,
+                    wallet_ctx=wallet_ctx,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    fetch_addr=fetch_addr,
+                    cache_source=quelle,
+                    progress=_fortschritt,
+                    cancel_cb=lambda: job.cancelled,
+                    folge_bundled=folge_bundled,
+                    folge_tx=folge_tx,
+                    resume_origin=resume_origin,
+                )
+            else:
+                ergebnis = trace_mod.trace_utxo(
+                    get_tx,
+                    txid,
+                    vout,
+                    eigene,
+                    wallet=wallet_ctx,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    fetch_address_utxos=fetch_addr,
+                    cache_source=quelle,
+                    progress=_fortschritt,
+                    resume_origin=resume_origin,
+                )
+            ergebnis["source"] = quelle
+            ergebnis["followup"] = followup
+            job.message = (
+                f"{ergebnis['summary'].get('node_count', 0)} Zuflüsse ermittelt."
+                if ergebnis.get("found") else "Keine Herkunft ermittelbar."
+            )
+            return ergebnis
+        finally:
+            halt.set()
+            stand.close()
+
+    target = f"{txid}:{vout}"
+    followup_meta = followup or ""
+    # Derselbe UTXO + derselbe followup: laufenden Job wiederverwenden —
+    # sonst stapeln sich „Herkunft …:1“ in der Nav und blockieren sich.
+    bestehend = state.jobs.finde_laufenden(
+        "trace",
+        meta={"target": target, "followup": followup_meta},
+    )
+    if bestehend is not None:
+        return bestehend.as_dict()
+
+    # Cache-first (ohne followup, ohne force): vorhandener Baum → kein Job.
+    # Unvollständige Bäume bleiben sichtbar (rote Marke); „Scan neu“ setzt force.
+    if followup is None and not force:
+        eigene_cache = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
+        treffer = trace_cache.laden(
+            txid, vout, state.immutable_cache_dir, eigene_cache,
         )
-        return ergebnis
+        if treffer is not None:
+            baum = treffer.get("baum") or {}
+            if isinstance(baum, dict) and baum.get("found"):
+                baum = dict(baum)
+                try:
+                    kinder = baum.get("children") or []
+                    if kinder:
+                        trace_mod._anreichere_externe_zeiten(
+                            kinder, state.immutable_cache_dir,
+                        )
+                    baum.update(trace_mod.folge_meta(baum))
+                except Exception:
+                    pass
+                baum.setdefault("source", "cache")
+                if wallet_name and not (baum.get("root") or {}).get("wallet"):
+                    root = dict(baum.get("root") or {})
+                    root["wallet"] = wallet_name
+                    baum["root"] = root
+                return {
+                    "id": f"cache-{txid[:12]}-{vout}",
+                    "kind": "trace",
+                    "label": f"Herkunft {txid[:12]}…:{vout} (Cache)",
+                    "status": "done",
+                    "message": "Aus Herkunfts-Cache.",
+                    "log": [],
+                    "running": False,
+                    "elapsed_s": 0,
+                    "error": "",
+                    "meta": {
+                        "art": "trace",
+                        "target": target,
+                        "txid": txid,
+                        "vout": vout,
+                        "followup": "",
+                        "from_cache": True,
+                        "wallet_name": wallet_name,
+                    },
+                    "started_at": treffer.get("erstellt_ts") or 0,
+                    "finished_at": treffer.get("erstellt_ts") or 0,
+                    "result": baum,
+                    "from_cache": True,
+                    "erstellt_ts": treffer.get("erstellt_ts"),
+                    "veraltet": treffer.get("veraltet"),
+                    "adressen_seither": treffer.get("adressen_seither"),
+                }
 
     titel = f"Herkunft {txid[:12]}…:{vout}"
-    if followup == "full":
+    if force and resume_origin is not None and followup is None:
+        titel = f"Herkunft fortsetzen {txid[:12]}…:{vout}"
+    elif force and followup is None:
+        titel = f"Scan neu {txid[:12]}…:{vout}"
+    elif followup == "full":
         titel = f"Lücken schließen {txid[:12]}…:{vout}"
     elif followup == "tx_oriented":
         titel = f"Folgeanalyse {txid[:12]}…:{vout}"
     elif followup == "resolve_unresolved":
         titel = f"Nachziehen {txid[:12]}…:{vout}"
+    if wallet_name:
+        titel = f"{titel} · {wallet_name}"
     job = state.jobs.start(
         "trace",
         titel,
         lauf,
         meta={
             "art": "trace",
-            "target": f"{txid}:{vout}",
+            "target": target,
             "txid": txid,
             "vout": vout,
-            "followup": followup or "",
+            "followup": followup_meta,
+            "force": force,
+            "resume": bool(resume_origin),
+            "wallet_name": wallet_name,
         },
     )
     return job.as_dict()
@@ -4853,19 +6678,49 @@ def api_jobs(state: AppState, query: dict) -> dict:
     plus Scan-Pipeline (aktuell + Warteschlange).
     """
     try:
-        recent = float((query.get("recent_s") or ["10"])[0])
+        recent = float((query.get("recent_s") or ["3"])[0])
     except (TypeError, ValueError, IndexError):
-        recent = 10.0
+        recent = 3.0
     recent = max(0.0, min(recent, 120.0))
     jobs = [j.as_dict() for j in state.jobs.nutzer_jobs(recent_s=recent)]
+    # Laufende Traces ohne wallet_name (vor dem Fix gestartet / Browser-Reload):
+    # Name aus Cache nachziehen, damit der Job-Klick kein „unbekanntes Wallet“ zeigt.
+    for eintrag in jobs:
+        if eintrag.get("kind") != "trace":
+            continue
+        meta = eintrag.get("meta") or {}
+        if meta.get("wallet_name") or meta.get("wallet"):
+            continue
+        txid = meta.get("txid") or ""
+        try:
+            vout = int(meta.get("vout"))
+        except (TypeError, ValueError):
+            continue
+        if not txid:
+            continue
+        name = _wallet_name_fuer_utxo(state, str(txid), vout)
+        if name:
+            meta = dict(meta)
+            meta["wallet_name"] = name
+            eintrag["meta"] = meta
     # Teil-Ergebnis an hanging result für rescan
     for daten in jobs:
         job = state.jobs.get(daten["id"])
         if job is not None and job.result is not None:
             daten["result"] = job.result
+    watch = _wallet_watch_status()
+    block_event = None
+    try:
+        seq = int(watch.get("last_block_seq") or 0)
+        hoehe = watch.get("last_block_height")
+        if seq > 0 and hoehe is not None:
+            block_event = {"seq": seq, "height": int(hoehe)}
+    except (TypeError, ValueError):
+        block_event = None
     return {
         "jobs": jobs,
         "scan_pipeline": state.scan_queue.snapshot(),
+        "block_event": block_event,
     }
 
 
@@ -4889,9 +6744,20 @@ def api_job(state: AppState, job_id: str) -> dict:
 
 
 def api_cancel_job(state: AppState, job_id: str) -> dict:
-    if not state.jobs.cancel(job_id):
-        raise ApiError(409, "Vorgang läuft nicht mehr.")
-    return {"cancelled": True}
+    """
+    Bricht einen laufenden Job ab — oder einen wartenden Scan in der Pipeline.
+
+    Scan-Queue: ``queue_id`` der Warteschlange wird entfernt, ohne zu starten.
+    """
+    jid = str(job_id or "").strip()
+    if not jid:
+        raise ApiError(400, "Keine Job-ID.")
+    # Zuerst Scan-Pipeline (wartend + aktiv), sonst allgemeine Registry.
+    if state.scan_queue.cancel(jid):
+        return {"cancelled": True}
+    if state.jobs.cancel(jid):
+        return {"cancelled": True}
+    raise ApiError(409, "Vorgang läuft nicht mehr.")
 
 
 # ---------------------------------------------------------------------------
@@ -5521,8 +7387,12 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_save_ui_lang(state, self._body())
         if teile == ["config", "ui-theme"] and methode == "PUT":
             return 200, api_save_ui_theme(state, self._body())
+        if teile == ["config", "lernhinweise-plebs"] and methode == "PUT":
+            return 200, api_save_lernhinweise_plebs(state, self._body())
         if teile == ["config", "steuer"] and methode == "PUT":
             return 200, api_save_steuer(state, self._body())
+        if teile == ["config", "person"] and methode == "PUT":
+            return 200, api_save_steuer_person(state, self._body())
         if teile == ["config", "hinweis-onchain"] and methode == "PUT":
             return 200, api_save_hinweis_onchain(state, self._body())
         if teile == ["config", "llm"] and methode == "PUT":
@@ -5533,6 +7403,10 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_probe(state, self._body())
         if len(teile) == 3 and teile[0] == "wallets" and teile[2] == "utxos" and methode == "GET":
             return 200, api_wallet_utxos(state, teile[1], query)
+        if len(teile) == 3 and teile[0] == "wallets" and teile[2] == "empfang" and methode == "GET":
+            return 200, api_wallet_empfang(state, teile[1])
+        if teile == ["lab", "faucet-senden"] and methode == "POST":
+            return 200, api_lab_faucet_senden(state, self._body())
         if teile == ["utxos"] and methode == "GET":
             return 200, api_alle_utxos(state, query)
         if teile == ["sanctions"] and methode == "GET":
@@ -5561,6 +7435,14 @@ class Handler(BaseHTTPRequestHandler):
             )
         if teile == ["labels"] and methode == "DELETE":
             return 200, api_labels_verwerfen(state, query)
+        if teile == ["exchange-reports"] and methode == "GET":
+            return 200, api_exchange_reports(state, query)
+        if teile == ["exchange-reports", "import"] and methode == "POST":
+            return 200, api_exchange_reports_import(
+                state, self._body(max_bytes=45 * 1024 * 1024)
+            )
+        if teile == ["exchange-reports"] and methode == "DELETE":
+            return 200, api_exchange_reports_loesche(state, query)
         if teile == ["source", "status"] and methode == "GET":
             return 200, api_source_status(state, query)
         if teile == ["source", "oeffentlich"] and methode == "POST":
@@ -5590,7 +7472,9 @@ class Handler(BaseHTTPRequestHandler):
         if teile == ["trace", "alle"] and methode == "POST":
             return 202, api_trace_alle(state, self._body())
         if teile == ["trace"] and methode == "POST":
-            return 202, api_trace(state, self._body())
+            body = api_trace(state, self._body())
+            # Cache-Hit: 200 sofort. Live-Job: 202 Accepted.
+            return (200 if body.get("from_cache") else 202), body
         if teile == ["trace"] and methode == "GET":
             return 200, api_trace_gespeichert(state, query)
         if teile == ["config", "deskriptor"] and methode == "POST":
@@ -5631,13 +7515,25 @@ class Handler(BaseHTTPRequestHandler):
         """
         auswertung = _steuer_auswertung(self.state, query)
         jahr = auswertung["jahr"]
+        from core import herkunft_bericht as hb_mod
+        try:
+            theme_roh = (query.get("theme") or [""])[0]
+        except (TypeError, IndexError):
+            theme_roh = ""
+        if not theme_roh:
+            theme_roh = _ui_theme_aus_env(self.state.env().values())
+        theme = hb_mod.normalize_bericht_theme(theme_roh)
 
         if pfad.endswith(".csv"):
             inhalt = tax_mod.als_csv(auswertung)
             typ = "text/csv; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.csv"
         else:
-            inhalt = tax_mod.als_bericht(auswertung)
+            inhalt = tax_mod.als_bericht(
+                auswertung,
+                immutable_cache_dir=self.state.immutable_cache_dir,
+                theme=theme,
+            )
             typ = "text/html; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.html"
 
@@ -5651,7 +7547,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(inhalt)
 
     def _download_selbstanzeige(self, pfad: str, query: dict) -> None:
-        """Selbstanzeige-Report als HTML oder CSV (Query: jahr, frist, txids)."""
+        """Bericht Sat-Geschichte als HTML oder CSV (Query: jahr, frist, txids)."""
         from core import selbstanzeige as sa
 
         try:
@@ -5668,34 +7564,89 @@ class Handler(BaseHTTPRequestHandler):
         utxo_keys = [
             t.strip() for t in roh_u.replace(";", ",").split(",") if t.strip()
         ]
-        report = _selbstanzeige_report(
-            self.state,
-            {
-                "jahr": jahr,
-                "haltefrist_jahre": frist,
-                "txids": txids,
-                "utxos": utxo_keys,
-            },
-        )
+        try:
+            report = _selbstanzeige_report(
+                self.state,
+                {
+                    "jahr": jahr,
+                    "haltefrist_jahre": frist,
+                    "txids": txids,
+                    "utxos": utxo_keys,
+                },
+            )
+        except ApiError as exc:
+            # Browser-Tab erwartet HTML — JSON wirkt wie „leere/kaputte Seite“.
+            if pfad.endswith(".html"):
+                body = (
+                    "<!DOCTYPE html><html lang=de><meta charset=utf-8>"
+                    f"<title>Report-Fehler</title><body style='font-family:system-ui;"
+                    f"max-width:36rem;margin:2rem auto;padding:0 1rem'>"
+                    f"<h1>Report nicht erzeugbar</h1><p>{tax_mod._html_escape(exc.message)}</p>"
+                    f"<p style='color:#666'>Fenster schließen und in SatSage "
+                    f"TxID/Jahr prüfen.</p></body></html>"
+                ).encode("utf-8")
+                self._send(exc.status, body, "text/html; charset=utf-8")
+            else:
+                self._send(
+                    exc.status,
+                    json.dumps({"error": exc.message}).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+            return
+        except Exception as exc:
+            msg = f"Interner Serverfehler: {exc}"
+            if pfad.endswith(".html"):
+                body = (
+                    "<!DOCTYPE html><html lang=de><meta charset=utf-8>"
+                    f"<title>Report-Fehler</title><body style='font-family:system-ui;"
+                    f"max-width:36rem;margin:2rem auto;padding:0 1rem'>"
+                    f"<h1>Report fehlgeschlagen</h1>"
+                    f"<p>{tax_mod._html_escape(msg)}</p></body></html>"
+                ).encode("utf-8")
+                self._send(500, body, "text/html; charset=utf-8")
+            else:
+                self._send(
+                    500,
+                    json.dumps({"error": msg}).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+            return
         jahr = report["jahr"]
+        from core import herkunft_bericht as hb_mod
+        try:
+            theme_roh = (query.get("theme") or [""])[0]
+        except (TypeError, IndexError):
+            theme_roh = ""
+        if not theme_roh:
+            theme_roh = _ui_theme_aus_env(self.state.env().values())
+        theme = hb_mod.normalize_bericht_theme(theme_roh)
+
         if pfad.endswith(".csv"):
             inhalt = sa.als_csv(report)
             typ = "text/csv; charset=utf-8"
-            name = f"satsage-selbstanzeige-{jahr}.csv"
+            name = f"satsage-sat-geschichte-{jahr}.csv"
             # CSV immer als Download — im Tab wäre es nur Rohtext.
             disposition = f'attachment; filename="{name}"'
         else:
-            inhalt = sa.als_html(report)
+            inhalt = sa.als_html(
+                report,
+                immutable_cache_dir=self.state.immutable_cache_dir,
+                theme=theme,
+            )
             typ = "text/html; charset=utf-8"
-            name = f"satsage-selbstanzeige-{jahr}.html"
+            name = f"satsage-sat-geschichte-{jahr}.html"
             # inline: Tab zeigt den Report (Druck → PDF). Die Oberfläche
             # löst parallel noch einen Datei-Download aus.
             disposition = f'inline; filename="{name}"'
+        if isinstance(inhalt, str):
+            inhalt = inhalt.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", typ)
         self.send_header("Content-Length", str(len(inhalt)))
         self.send_header("Content-Disposition", disposition)
         self.send_header("X-Content-Type-Options", "nosniff")
+        # Report ist standalone HTML — kein CSP der App-Shell (bricht sonst
+        # eingebettetes CSS / Druck-@page).
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(inhalt)
@@ -5740,6 +7691,12 @@ def build_state(args) -> AppState:
     # Damit main._load_dotenv() dieselbe Datei sieht wie --env / AppState.
     if args.env:
         main.ENV_FILE = Path(args.env)
+    if args.cache_dir:
+        main.UTXO_CACHE_DIR = Path(args.cache_dir)
+    if args.immutable_cache_dir:
+        # fulcrum._block_time_for_height liest global IMMUTABLE_CACHE_DIR —
+        # sonst Mainnet-Header-Zeiten auf Regtest-Höhen (Alter nur 1T/377T).
+        main.IMMUTABLE_CACHE_DIR = Path(args.immutable_cache_dir)
     state = AppState(
         env_path=Path(args.env or main.ENV_FILE),
         cache_dir=Path(args.cache_dir or main.UTXO_CACHE_DIR),
@@ -5873,6 +7830,9 @@ def tip_sync_laeuft(state: AppState) -> bool:
         return False
     job = state.jobs.get(jid)
     if job is None or job.status != "running":
+        # Fertig/weg: stale ID freigeben — sonst meldet /api/config ewig den alten Job.
+        if job is None or job.status in ("done", "failed", "cancelled"):
+            state.wallet_sync_job_id = None
         return False
     # Abbruch angefordert: neuer Start darf den Slot übernehmen.
     if getattr(job, "cancelled", False):
@@ -5905,6 +7865,7 @@ def starte_wallet_aktualisierung(
     *,
     erzwingen: bool = False,
     wallet_ids: list[str] | None = None,
+    still: bool = False,
 ) -> dict | None:
     """
     Hintergrund: Wallets mit Cache bis Chain-Tip nachziehen.
@@ -5912,6 +7873,7 @@ def starte_wallet_aktualisierung(
     Kein Fullscan — BIP-158 ab ``scan_tip_height`` oder Electrs light.
     *erzwingen*: auch ohne ``WALLETS_BEIM_START_AKTUALISIEREN`` (UI-Knopf).
     *wallet_ids*: nur diese Wallets; sonst alle mit Cache.
+    *still*: Hintergrund (Wallet-Watch-Fallback) — GUI ohne Nav-„aktualisiere…“.
     Rückgabe: Job-Dict bei Start, None wenn nichts zu tun / schon läuft.
     """
     werte = state.env().values()
@@ -5948,9 +7910,14 @@ def starte_wallet_aktualisierung(
             nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
                 state.env().values()
             )
+            extras = []
+            if still:
+                extras.append("still")
+            if nur_bekannte:
+                extras.append("nur bekannte UTXOs, kein Gap")
+            suffix = f" ({', '.join(extras)})…" if extras else "…"
             stand.phase(
-                f"Aktualisiere {len(eintraege)} Wallet(s) bis Chain-Tip"
-                + (" (nur bekannte UTXOs, kein Gap)…" if nur_bekannte else "…")
+                f"Aktualisiere {len(eintraege)} Wallet(s) bis Chain-Tip{suffix}"
             )
             args = state.args_namespace()
             args.xpubs = [e.analyse_schluessel for e in eintraege]
@@ -5975,6 +7942,14 @@ def starte_wallet_aktualisierung(
                 and fulcrum is not None
                 and main.is_own_fulcrum_backend(fulcrum)
             )
+            # Kopf-Pille sofort: Indexer schon in Nutzung, nicht erst Peer-Takt.
+            if electrs_eigen:
+                own_stand = _merke_own_fulcrum_client(state, fulcrum)
+                if own_stand and isinstance(job.meta, dict):
+                    job.meta["own_fulcrum"] = own_stand
+                    soft = str(own_stand.get("software") or "").strip()
+                    if soft:
+                        stand.phase(f"Indexer: {soft}")
             schluessel = [e.analyse_schluessel for e in eintraege]
             hat_tip = any(
                 (main.load_xpub_cache_entry(x, state.cache_dir) or {})
@@ -6029,11 +8004,41 @@ def starte_wallet_aktualisierung(
                     stand.tick(text)
 
             zaehler = {"ok": 0, "utxos": 0}
+            # xpub → Nav-ID, damit die GUI je fertigem Wallet „gerade eben“ zeigt
+            # (nicht erst wenn alle Wallets durch sind).
+            id_nach_schluessel = {
+                e.analyse_schluessel: wallets_mod.eintrag_id(e)
+                for e in eintraege
+            }
+            if isinstance(job.meta, dict):
+                job.meta["done_wallet_ids"] = []
+                job.meta["total_wallets"] = len(eintraege)
 
             def on_done(xpub, utxos):
                 if utxos is not None:
                     zaehler["ok"] += 1
                     zaehler["utxos"] += len(utxos)
+                wid = id_nach_schluessel.get(xpub)
+                if not wid or not isinstance(job.meta, dict):
+                    return
+                fertig = list(job.meta.get("done_wallet_ids") or [])
+                if wid in fertig:
+                    return
+                fertig.append(wid)
+                job.meta["done_wallet_ids"] = fertig
+                job.meta["done_wallets"] = len(fertig)
+                # Leichte Message für Poller — ohne Log-Flut.
+                name = next(
+                    (
+                        e.display_name for e in eintraege
+                        if wallets_mod.eintrag_id(e) == wid
+                    ),
+                    wid,
+                )
+                job.message = (
+                    f"Wallet-Tip {len(fertig)}/{len(eintraege)}: "
+                    f"„{name}“ aktuell"
+                )
 
             main.sync_wallets_zum_tip(
                 [e.analyse_schluessel for e in eintraege],
@@ -6052,17 +8057,44 @@ def starte_wallet_aktualisierung(
                 nur_bekannte=nur_bekannte,
             )
             job.raise_if_cancelled()
+            # UTXO-Tip ist fertig → Nav darf „gerade eben“ zeigen. Empfangs-QR
+            # wird danach noch geschärft; der Nutzer sieht das am QR, nicht am
+            # Wallet-Marker.
+            if isinstance(job.meta, dict):
+                job.meta["phase"] = "empfang"
+            job.result = {
+                "wallets": zaehler["ok"],
+                "utxo_count": zaehler["utxos"],
+                "empfang_phase": True,
+            }
+            if state.wallet_sync_job_id == job.id:
+                state.wallet_sync_job_id = None
             stand.phase(
                 f"{zaehler['ok']} Wallet(s) aktualisiert, "
-                f"{zaehler['utxos']} UTXO(s)."
+                f"{zaehler['utxos']} UTXO(s) — Empfangsadressen folgen…"
             )
+            n_empfang = _schaerfe_empfang_nach_sync(
+                state,
+                eintraege,
+                fulcrum=fetchers.get("fulcrum"),
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+            )
+            job.raise_if_cancelled()
+            if n_empfang:
+                stand.phase(f"Empfang per Electrs: {n_empfang} Wallet(s).")
             return {
                 "wallets": zaehler["ok"],
                 "utxo_count": zaehler["utxos"],
+                "empfang_scharf": n_empfang,
             }
         finally:
             halt.set()
             stand.close()
+            # Slot freigeben sobald der Job-Thread endet (done/fail/cancel).
+            if state.wallet_sync_job_id == job.id:
+                state.wallet_sync_job_id = None
             try:
                 from core import wallet_watch
 
@@ -6073,11 +8105,12 @@ def starte_wallet_aktualisierung(
     namen = ", ".join(e.display_name for e in eintraege[:3])
     if len(eintraege) > 3:
         namen += f" +{len(eintraege) - 3}"
-    label = (
-        f"Tip-Nachzug ({namen})"
-        if erzwingen
-        else f"Start-Aktualisierung ({namen})"
-    )
+    if still:
+        label = f"Tip-Nachzug still ({namen})"
+    elif erzwingen:
+        label = f"Tip-Nachzug ({namen})"
+    else:
+        label = f"Start-Aktualisierung ({namen})"
     job = state.jobs.start(
         "wallet_sync",
         label,
@@ -6085,6 +8118,7 @@ def starte_wallet_aktualisierung(
         meta={
             "art": "wallet_sync",
             "wallet_ids": [wallets_mod.eintrag_id(e) for e in eintraege],
+            "still": bool(still),
         },
     )
     state.wallet_sync_job_id = job.id

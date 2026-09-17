@@ -3,11 +3,12 @@ Hintergrund: Wallets „immer aktuell“ halten über eigenen Electrs.
 
 Strategie (gut, wenn eigener Electrs da ist):
 
-1. Einmal Tip-Nachzug beim Start (wie bisher).
-2. ``blockchain.scripthash.subscribe`` auf bekannte Cache-Adressen —
+1. Einmal Tip-Nachzug beim Start (wie bisher) — Nav darf „aktualisiere…“ zeigen.
+2. ``blockchain.scripthash.subscribe`` auf bekannte Cache- + Empfangs-Gap-Adressen —
    Push bei Mempool/Bestätigung, dann nur ``listunspent`` dieser Adresse.
-3. ``blockchain.headers.subscribe`` — bei neuem Block kurz debounced
-   leichten Tip-Nachzug (Gap), damit frische Empfangsadressen nicht fehlen.
+3. ``blockchain.headers.subscribe``: **kein** Tip-Nachzug, solange Subscribe greift
+   (Adress-Push reicht). Greift Subscribe nicht (0 Adressen / Session weg):
+   debounced **stiller** Tip-Nachzug (Hintergrund, ohne Nav-„aktualisiere…“).
 
 Bitcoin Core hat kein leichtes Adress-Subscribe (nur ZMQ/Wallet) — deshalb
 Electrs zuerst. Ohne eigenen Electrs: nur Start-Tip-Nachzug, kein Watcher.
@@ -30,6 +31,24 @@ _SCRIPT_DEBOUNCE_S = 1.0
 _MAX_ADDR_PRO_WALLET = 400
 
 
+def _header_hoehe(header) -> int | None:
+    """Höhe aus Electrs ``headers.subscribe``-Notify/Result."""
+    if header is None:
+        return None
+    if isinstance(header, dict):
+        roh = header.get("height")
+        if roh is None and isinstance(header.get("header"), dict):
+            roh = header["header"].get("height")
+        try:
+            return int(roh) if roh is not None else None
+        except (TypeError, ValueError):
+            return None
+    try:
+        return int(header)
+    except (TypeError, ValueError):
+        return None
+
+
 class WalletWatchService:
     """Ein Prozess, ein Watcher — start/stop von server.py."""
 
@@ -48,6 +67,9 @@ class WalletWatchService:
         self._on_log: Callable[[str], None] | None = None
         #: Header kam während laufendem Tip-Nachzug — danach nochmal.
         self._tip_nachzug_offen = False
+        #: Letzter gesehener Chain-Tip (Electrs headers.subscribe) für UI-Atem.
+        self._last_block_height: int | None = None
+        self._last_block_seq: int = 0
 
     @property
     def laeuft(self) -> bool:
@@ -60,6 +82,8 @@ class WalletWatchService:
                 "running": self.laeuft,
                 "subscribed": len(self._sh_to_addr),
                 "host": (self._status.get("host") if self._session else None),
+                "last_block_height": self._last_block_height,
+                "last_block_seq": self._last_block_seq,
                 **{k: v for k, v in self._status.items() if k != "host"},
             }
 
@@ -89,6 +113,18 @@ class WalletWatchService:
             )
             self._thread.start()
         return True
+
+    def restart(self, state, *, on_log=None) -> bool:
+        """
+        Stoppt und startet neu — nach Host/Port/TLS-Änderung am eigenen Electrs.
+
+        ``start`` allein lässt einen laufenden Thread auf dem alten Endpoint
+        sitzen; erst Neustart baut die Subscribe-Session neu auf.
+        """
+        if on_log is not None:
+            self._on_log = on_log
+        self.stop()
+        return self.start(state, on_log=self._on_log)
 
     def stop(self) -> None:
         self._stop.set()
@@ -299,6 +335,23 @@ class WalletWatchService:
                 self._addr_to_xpubs.setdefault(a, set()).add(xpub)
             self._log(f"Wallet-Watch: neue Adresse abonniert ({a[:12]}…)")
 
+    def subscribe_addresses(self, addrs: list[str], xpub: str) -> bool:
+        """
+        Öffentlich: Lookahead-Adressen nachabonnieren, wenn der Watcher läuft.
+
+        Rückgabe True, wenn Session aktiv und Aufruf durchging (auch wenn
+        einzelne Adressen schon abonniert waren).
+        """
+        if not self.laeuft or self._session is None:
+            return False
+        if not addrs or not (xpub or "").strip():
+            return False
+        try:
+            self._subscribe_extra(addrs, xpub)
+            return True
+        except Exception:
+            return False
+
     def _on_scripthash(self, scripthash: str, _status) -> None:
         with self._lock:
             self._pending_scripts.add(str(scripthash))
@@ -313,7 +366,13 @@ class WalletWatchService:
             self._script_timer.daemon = True
             self._script_timer.start()
 
-    def _on_header(self, _header) -> None:
+    def _on_header(self, header) -> None:
+        hoehe = _header_hoehe(header)
+        if hoehe is not None:
+            with self._lock:
+                if hoehe != self._last_block_height:
+                    self._last_block_height = int(hoehe)
+                    self._last_block_seq += 1
         with self._lock:
             if self._header_timer is not None:
                 try:
@@ -352,22 +411,36 @@ class WalletWatchService:
         except Exception as exc:
             self._log(f"Wallet-Watch Adress-Update: {exc}")
 
+    def _subscribe_greift(self) -> bool:
+        """True wenn Scripthash-Subscribe aktiv und mindestens eine Adresse hält."""
+        if self._stop.is_set() or self._session is None:
+            return False
+        with self._lock:
+            return bool(self._sh_to_addr)
+
     def _flush_header(self) -> None:
         state = self._state
         if state is None or self._stop.is_set():
             return
-        self._log("Wallet-Watch: neuer Block — leichter Tip-Nachzug…")
+        # 1) Subscribe greift → kein Tip (Adress-Push + Empfangs-Gap reichen).
+        if self._subscribe_greift():
+            return
+        # 3) Fallback: stiller Tip ohne Nav-„aktualisiere…“.
+        self._log(
+            "Wallet-Watch: neuer Block, Subscribe unwirksam — "
+            "stiller Tip-Nachzug…"
+        )
         try:
-            # erzwingen=True: Option ist schon an (sonst liefe der Watcher nicht).
             from server import starte_wallet_aktualisierung, tip_sync_laeuft
 
-            job = starte_wallet_aktualisierung(state, erzwingen=True)
+            job = starte_wallet_aktualisierung(
+                state, erzwingen=True, still=True,
+            )
             if job is None and tip_sync_laeuft(state):
-                # Header während laufendem Job — nicht verwerfen.
                 self._tip_nachzug_offen = True
                 self._log(
                     "Wallet-Watch: Tip-Nachzug läuft schon — "
-                    "erneuter Lauf vorgemerkt."
+                    "erneuter stiller Lauf vorgemerkt."
                 )
             elif job is not None:
                 self._tip_nachzug_offen = False
@@ -376,8 +449,12 @@ class WalletWatchService:
             self._log(f"Wallet-Watch Tip-Nachzug: {exc}")
 
     def _versuch_offenen_tip_nachzug(self) -> None:
-        """Startet vorgemerkten Tip-Nachzug, sobald kein Job mehr läuft."""
+        """Startet vorgemerkten stillen Tip-Nachzug, sobald kein Job mehr läuft."""
         if not self._tip_nachzug_offen or self._stop.is_set():
+            return
+        # Subscribe inzwischen ok → vorgemerkten Tip verwerfen.
+        if self._subscribe_greift():
+            self._tip_nachzug_offen = False
             return
         state = self._state
         if state is None:
@@ -387,12 +464,13 @@ class WalletWatchService:
 
             if tip_sync_laeuft(state):
                 return
-            job = starte_wallet_aktualisierung(state, erzwingen=True)
+            job = starte_wallet_aktualisierung(
+                state, erzwingen=True, still=True,
+            )
             if job is not None:
                 self._tip_nachzug_offen = False
-                self._log("Wallet-Watch: nachgezogener Tip-Nachzug gestartet…")
+                self._log("Wallet-Watch: nachgezogener stiller Tip-Nachzug…")
             else:
-                # Nichts zu tun (kein Cache) — Flag nicht ewig drehen.
                 self._tip_nachzug_offen = False
         except Exception as exc:
             self._log(f"Wallet-Watch nachgezogener Tip-Nachzug: {exc}")
@@ -527,6 +605,7 @@ class WalletWatchService:
                         confirmed_spent=confirmed,
                         live_auf_adressen=live_merge,
                         source="fulcrum",
+                        fulcrum=client,
                     )
                 if neue_addrs and self._session is not None:
                     self._subscribe_extra(neue_addrs, xpub)
@@ -590,5 +669,15 @@ def stoppe_wallet_watch() -> None:
     get_watch_service().stop()
 
 
+def restart_wallet_watch(state, *, on_log=None) -> bool:
+    """Watch nach Electrs-Config-Wechsel neu aufbauen (Host/Port/TLS)."""
+    return get_watch_service().restart(state, on_log=on_log)
+
+
 def wallet_watch_status() -> dict[str, Any]:
     return get_watch_service().status()
+
+
+def subscribe_addresses(addrs: list[str], xpub: str) -> bool:
+    """Lookahead-Adressen beim laufenden Wallet-Watch nachabonnieren."""
+    return get_watch_service().subscribe_addresses(addrs, xpub)

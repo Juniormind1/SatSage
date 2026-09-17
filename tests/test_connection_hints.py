@@ -5,6 +5,7 @@ Ein Protokoll-Mismatch sieht in der Ausgabe sonst aus wie ein reines
 Erreichbarkeitsproblem — und das Programm fällt still auf die nächste,
 schlechtere Datenquelle zurück.
 """
+import re
 import unittest
 
 import main
@@ -16,7 +17,8 @@ class TestSslHinweise(unittest.TestCase):
         fehler = "[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1000)"
         hinweis = main.connection_error_hint(fehler, use_ssl=True)
         self.assertIsNotNone(hinweis)
-        self.assertIn("FULCRUM_SSL=false", hinweis)
+        # Auto-Flip: Hinweis ohne .env-Key-Tipp; Semantik „ohne TLS“.
+        self.assertRegex(hinweis, r"kein SSL|ohne TLS", re.I)
 
     def test_derselbe_fehler_ohne_ssl_ergibt_keinen_ssl_hinweis(self):
         """Ohne aktiviertes TLS wäre der Rat, TLS abzuschalten, unsinnig."""
@@ -26,7 +28,7 @@ class TestSslHinweise(unittest.TestCase):
     def test_abbruch_ohne_tls_weist_auf_aktivierung(self):
         hinweis = main.connection_error_hint("unexpected EOF", use_ssl=False)
         self.assertIsNotNone(hinweis)
-        self.assertIn("FULCRUM_SSL=true", hinweis)
+        self.assertRegex(hinweis, r"SSL|TLS", re.I)
 
     def test_selbstsigniertes_zertifikat(self):
         fehler = "certificate verify failed: self signed certificate"

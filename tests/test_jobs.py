@@ -1,4 +1,5 @@
 """Fortschritt langer Jobs: Phasen sofort, Zwischenstand spätestens alle 10s."""
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -558,6 +559,8 @@ class TestOnionLatenzGate(unittest.TestCase):
         with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
             main, "_try_bip158_backend", side_effect=[None, bip]
         ), patch.object(
+            main, "_setup_public_clearnet_fulcrum", return_value=None,
+        ), patch.object(
             main, "_try_public_onion_fulcrum", return_value=pool
         ), patch.object(
             main, "_measure_onion_get_history_latency", return_value=11.0
@@ -568,6 +571,23 @@ class TestOnionLatenzGate(unittest.TestCase):
         self.assertEqual(quelle, "bip158")
         self.assertIs(backend, bip)
         pool.close.assert_called_once()
+
+    def test_kette_clearnet_vor_oeffentlichem_onion(self):
+        clear = MagicMock()
+        onion = MagicMock()
+        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
+            main, "_try_bip158_backend", return_value=None,
+        ), patch.object(
+            main, "_setup_public_clearnet_fulcrum", return_value=clear,
+        ), patch.object(
+            main, "_try_public_onion_fulcrum", return_value=onion,
+        ) as onion_try:
+            quelle, backend, _ = main._try_data_source_priority_chain(
+                self.args, {"OEFFENTLICHE_ELECTRUM": "1"}, include_bip158=True,
+            )
+        self.assertEqual(quelle, "fulcrum")
+        self.assertIs(backend, clear)
+        onion_try.assert_not_called()
 
     def test_schnell_genug_behaelt_onion(self):
         pool = MagicMock()
@@ -588,7 +608,284 @@ class TestOnionLatenzGate(unittest.TestCase):
         self.assertFalse(any("langsam" in z.lower() for z in self.logs))
 
 
+class TestJobAbbruchUeberall(unittest.TestCase):
+    """Web-Abbruch muss Scan/BIP-158/CLI-Schleifen und Job-Ende erreichen."""
+
+    def setUp(self):
+        jobs_mod._reset_herzschlag_stand_fuer_tests()
+        jobs_mod._reset_electrum_gate_fuer_tests()
+
+    def test_job_context_setzt_aktuellen_job(self):
+        registry = JobRegistry()
+        gesehen = {}
+
+        def lauf(job):
+            gesehen["job"] = jobs_mod.aktueller_job()
+            gesehen["abgebrochen"] = jobs_mod.job_abgebrochen()
+            return "ok"
+
+        job = registry.start("trace", "T", lauf)
+        for _ in range(200):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.status, "done")
+        self.assertIs(gesehen["job"], job)
+        self.assertFalse(gesehen["abgebrochen"])
+        self.assertIsNone(jobs_mod.aktueller_job())
+
+    def test_schwere_jobs_loggen_start_und_ende(self):
+        """JOB-START/JOB-ENDE greppbar — Herkunft/Verlauf/UTXO-Scan im Log."""
+        registry = JobRegistry()
+        gesehen = {}
+
+        def lauf(job):
+            gesehen["log_mitte"] = list(job.as_dict()["log"])
+            time.sleep(0.05)
+            return "ok"
+
+        for kind, label in (
+            ("trace-alle", "Herkunft für 3 UTXOs"),
+            ("verlauf", "Verlauf aller Wallets"),
+            ("rescan", "UTXO-Scan Demo"),
+        ):
+            job = registry.start(kind, label, lauf)
+            for _ in range(250):
+                if job.status != "running":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(job.status, "done", kind)
+            log = job.as_dict()["log"]
+            self.assertGreaterEqual(len(log), 2, kind)
+            start = log[0]
+            ende = log[-1]
+            self.assertTrue(start.startswith("JOB-START "), start)
+            self.assertIn(f"kind={kind}", start)
+            self.assertIn(f"id={job.id}", start)
+            self.assertIn("at=", start)
+            self.assertIn(label, start)
+            self.assertTrue(ende.startswith("JOB-ENDE "), ende)
+            self.assertIn(f"kind={kind}", ende)
+            self.assertIn(f"id={job.id}", ende)
+            self.assertIn("status=done", ende)
+            self.assertIn("elapsed_s=", ende)
+            self.assertIn("dauer=", ende)
+            self.assertIn("at=", ende)
+            # Während der Arbeit schon die Start-Zeile sichtbar.
+            self.assertTrue(
+                any(z.startswith("JOB-START ") for z in gesehen["log_mitte"]),
+                gesehen["log_mitte"],
+            )
+
+    def test_format_job_dauer(self):
+        self.assertEqual(jobs_mod.format_job_dauer(0), "0s")
+        self.assertEqual(jobs_mod.format_job_dauer(9.4), "9s")
+        self.assertEqual(jobs_mod.format_job_dauer(65), "1m 05s")
+        self.assertEqual(jobs_mod.format_job_dauer(3661), "1h 01m 01s")
+
+    def test_cancel_endet_mit_abgebrochen_meldung(self):
+        registry = JobRegistry()
+        tor = threading.Event()
+
+        def hang(job):
+            while not job.cancelled:
+                if tor.wait(0.05):
+                    break
+            # Soft-return nach Cancel — Registry muss trotzdem cancelled setzen.
+            return {"partial": True}
+
+        job = registry.start("rescan", "Scan", hang)
+        time.sleep(0.05)
+        self.assertTrue(registry.cancel(job.id))
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        tor.set()
+        self.assertEqual(job.status, "cancelled")
+        self.assertEqual(job.message, "Abgebrochen.")
+
+    def test_is_list_abort_sieht_job_cancel(self):
+        from display import is_list_abort_requested
+
+        registry = JobRegistry()
+        tor = threading.Event()
+        gesehen = {}
+
+        def lauf(job):
+            job.cancel()  # simuliert DELETE /jobs
+            gesehen["abort"] = is_list_abort_requested()
+            gesehen["raise"] = False
+            try:
+                jobs_mod.raise_if_job_cancelled()
+            except jobs_mod.Cancelled:
+                gesehen["raise"] = True
+            tor.set()
+
+        job = registry.start("verlauf", "V", lauf)
+        tor.wait(timeout=2)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertTrue(gesehen.get("abort"))
+        self.assertTrue(gesehen.get("raise"))
+        self.assertEqual(job.status, "cancelled")
+
+    def test_scan_queue_entfernt_wartenden(self):
+        registry = JobRegistry()
+        queue = jobs_mod.ScanQueue(registry)
+        tor = threading.Event()
+
+        def hang(job):
+            while not job.cancelled and not tor.wait(0.05):
+                pass
+
+        # Erster startet sofort, zweiter wartet.
+        d1 = queue.einreihen(
+            kind="rescan",
+            wallet_id="w1",
+            wallet_name="A",
+            label="A",
+            factory=hang,
+        )
+        d2 = queue.einreihen(
+            kind="rescan",
+            wallet_id="w2",
+            wallet_name="B",
+            label="B",
+            factory=hang,
+        )
+        self.assertEqual(d1.get("queue_status"), "running")
+        self.assertEqual(d2.get("queue_status"), "queued")
+        qid = d2["id"]
+        self.assertTrue(queue.cancel(qid))
+        snap = queue.snapshot()
+        self.assertEqual(snap["queued"], [])
+        # Aktiven Job abbrechen
+        self.assertTrue(queue.cancel(d1["id"]))
+        tor.set()
+        for _ in range(80):
+            j = registry.get(d1["id"])
+            if j is None or j.status != "running":
+                break
+            time.sleep(0.02)
+
+
+class TestTraceAbbruchNichtSchlucken(unittest.TestCase):
+    """
+    „Lücken schließen“ / Herkunft: Cancelled muss durch bare excepts
+    und die erste Tiefen-Phase durchschlagen — sonst bleibt der Job running.
+    """
+
+    def test_ist_abbruch_erkennt_cancelled(self):
+        self.assertTrue(jobs_mod.ist_abbruch(jobs_mod.Cancelled()))
+        self.assertFalse(jobs_mod.ist_abbruch(RuntimeError("x")))
+
+    def test_trace_origin_reicht_cancelled_durch(self):
+        import analyze
+        from tests.fixtures import BIP84_RECEIVE_0, TXID_WALLET_IN, make_get_tx, simple_chain
+
+        class _Prog:
+            def __init__(self):
+                self.n = 0
+
+            def update(self, _m):
+                self.n += 1
+                if self.n >= 2:
+                    raise jobs_mod.Cancelled()
+
+        get_tx = make_get_tx(simple_chain())
+        with self.assertRaises(jobs_mod.Cancelled):
+            analyze.trace_utxo_origin(
+                get_tx,
+                TXID_WALLET_IN,
+                0,
+                {BIP84_RECEIVE_0},
+                progress=_Prog(),
+            )
+
+    def test_engine_funding_reicht_cancelled_durch(self):
+        from tests.fixtures import TXID_WALLET_IN, make_get_tx, simple_chain
+        from trace_engine import iter_funding_inputs
+
+        get_tx = make_get_tx(simple_chain())
+        n = {"c": 0}
+
+        def prog(_m):
+            n["c"] += 1
+            if n["c"] >= 1:
+                raise jobs_mod.Cancelled()
+
+        with self.assertRaises(jobs_mod.Cancelled):
+            list(iter_funding_inputs(get_tx, TXID_WALLET_IN, progress=prog))
+
+    def test_luecken_tief_bricht_mit_progress_ab(self):
+        import server
+        from tests.fixtures import BIP84_RECEIVE_0, TXID_WALLET_IN, make_get_tx, simple_chain
+
+        get_tx = make_get_tx(simple_chain())
+        n = {"c": 0}
+
+        def progress(_m):
+            n["c"] += 1
+            if n["c"] >= 3:
+                raise jobs_mod.Cancelled()
+
+        with self.assertRaises(jobs_mod.Cancelled):
+            server._trace_ein_utxo_tief(
+                get_tx=get_tx,
+                txid=TXID_WALLET_IN,
+                vout=0,
+                eigene={BIP84_RECEIVE_0},
+                wallet_ctx=None,
+                cache_dir=None,
+                immutable_cache_dir=None,
+                fetch_addr=None,
+                cache_source="test",
+                progress=progress,
+                cancel_cb=lambda: n["c"] >= 3,
+                folge_bundled=True,
+                folge_tx=False,
+            )
+        self.assertGreaterEqual(n["c"], 3)
+
+    def test_followup_cancel_zwischen_vorgaenger_txs(self):
+        import analyze
+        from tests.fixtures import BIP84_RECEIVE_0, make_get_tx, simple_chain, txid
+
+        get_tx = make_get_tx(simple_chain())
+        gesehen = []
+
+        def cancel():
+            return len(gesehen) >= 1
+
+        def progress(m):
+            gesehen.append(m)
+
+        with self.assertRaises(jobs_mod.Cancelled):
+            analyze._run_tx_oriented_followups(
+                get_tx,
+                {txid("a1"), txid("b2")},
+                "current",
+                {BIP84_RECEIVE_0},
+                set(),
+                0,
+                None,
+                None,
+                None,
+                None,
+                cancel_cb=cancel,
+                progress_cb=progress,
+            )
+        self.assertTrue(any("Eigene Vorgänger" in m for m in gesehen), gesehen)
+
+
 class TestJobRegistry(unittest.TestCase):
+
+    def setUp(self):
+        jobs_mod._reset_herzschlag_stand_fuer_tests()
+        jobs_mod._reset_electrum_gate_fuer_tests()
 
     def test_systemexit_beendet_den_job(self):
         """Sonst bleibt der UTXO-Scan auf running, letzte Zeile klebt."""
@@ -610,6 +907,88 @@ class TestJobRegistry(unittest.TestCase):
         self.assertIn("Keine Datenquelle erreichbar", job.error)
         self.assertIn("Keine Datenquelle erreichbar", job.message)
         self.assertIsNotNone(job.finished_at)
+
+    def test_electrum_jobs_laufen_serial(self):
+        """UTXO-Scan und Herkunft teilen Tor/Electrs — nicht parallel."""
+        registry = JobRegistry(max_parallel_heavy=3)
+        reihenfolge: list[str] = []
+        barrier = threading.Event()
+
+        def langsam(name: str):
+            def _fn(job):
+                reihenfolge.append(f"start:{name}")
+                # Halte Electrum-Gate, bis der zweite Job wartet.
+                if name == "a":
+                    barrier.wait(timeout=2.0)
+                    time.sleep(0.15)
+                else:
+                    time.sleep(0.05)
+                reihenfolge.append(f"end:{name}")
+                return name
+
+            return _fn
+
+        a = registry.start("rescan", "Scan A", langsam("a"))
+        time.sleep(0.05)
+        self.assertTrue(jobs_mod.electrum_serial_busy())
+        b = registry.start("trace-alle", "Herkunft B", langsam("b"))
+        # B wartet — A noch nicht fertig.
+        time.sleep(0.08)
+        self.assertIn("start:a", reihenfolge)
+        self.assertNotIn("start:b", reihenfolge)
+        barrier.set()
+        for _ in range(250):
+            if a.status != "running" and b.status != "running":
+                break
+            time.sleep(0.03)
+        self.assertEqual(a.status, "done")
+        self.assertEqual(b.status, "done")
+        self.assertEqual(
+            reihenfolge,
+            ["start:a", "end:a", "start:b", "end:b"],
+        )
+        self.assertFalse(jobs_mod.electrum_serial_busy())
+
+    def test_finde_laufenden_nach_meta(self):
+        registry = JobRegistry()
+        tor = threading.Event()
+
+        def hang(job):
+            while not job.cancelled and not tor.wait(0.05):
+                pass
+
+        a = registry.start(
+            "trace", "A", hang,
+            meta={"target": "aa" * 32 + ":0", "followup": ""},
+        )
+        b = registry.start(
+            "trace", "B", hang,
+            meta={"target": "bb" * 32 + ":1", "followup": ""},
+        )
+        self.assertIs(
+            registry.finde_laufenden(
+                "trace", meta={"target": "aa" * 32 + ":0", "followup": ""},
+            ),
+            a,
+        )
+        self.assertIs(
+            registry.finde_laufenden(
+                "trace", meta={"target": "bb" * 32 + ":1", "followup": ""},
+            ),
+            b,
+        )
+        self.assertIsNone(
+            registry.finde_laufenden(
+                "trace", meta={"target": "cc" * 32 + ":0", "followup": ""},
+            )
+        )
+        a.cancel()
+        b.cancel()
+        tor.set()
+        for _ in range(80):
+            if a.status != "running" and b.status != "running":
+                break
+            time.sleep(0.02)
 
 
 if __name__ == "__main__":

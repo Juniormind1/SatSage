@@ -20,6 +20,10 @@ from dataclasses import dataclass, field
 _zwischenstand: contextvars.ContextVar["Fortschritt | None"] = contextvars.ContextVar(
     "job_zwischenstand", default=None
 )
+#: Job, der *diesen* Thread gerade ausführt (für Abbruch in main/fulcrum/bip158).
+_aktueller_job: contextvars.ContextVar["Job | None"] = contextvars.ContextVar(
+    "aktueller_job", default=None
+)
 _fortschritt_lock = threading.Lock()
 _fortschritte: list["Fortschritt"] = []
 
@@ -136,6 +140,42 @@ class Cancelled(Exception):
     """Wird geworfen, wenn ein Vorgang abgebrochen wurde."""
 
 
+def ist_abbruch(exc: BaseException) -> bool:
+    """
+    True bei Job-Abbruch (Cancelled) — auch über Modulgrenzen hinweg.
+
+    Bare ``except Exception`` in Trace/Engine darf Abbruch nicht schlucken,
+    sonst bleibt „Lücken schließen“ trotz Knopf ewig auf running.
+    """
+    if isinstance(exc, Cancelled):
+        return True
+    # Duck-Typing: anderer Import-Pfad / Reload darf denselben Namen tragen.
+    return type(exc).__name__ == "Cancelled"
+
+
+def aktueller_job() -> "Job | None":
+    """Der Job dieses Worker-Threads, sonst None (CLI ohne Web-Job)."""
+    return _aktueller_job.get()
+
+
+def job_abgebrochen() -> bool:
+    """True, wenn der aktuelle Job abgebrochen wurde (Web-Abbruch-Knopf)."""
+    job = _aktueller_job.get()
+    return job is not None and job.cancelled
+
+
+def raise_if_job_cancelled() -> None:
+    """
+    Wirft Cancelled, sobald der Web-Job abgebrochen wurde.
+
+    Aufruf in engen Schleifen (BIP-158-Filter, Gap-Scan, Downloads) — sonst
+    greift der Abbruch-Knopf erst beim nächsten job.progress.
+    """
+    job = _aktueller_job.get()
+    if job is not None:
+        job.raise_if_cancelled()
+
+
 class JobQuotaExceeded(Exception):
     """Zu viele schwere Hintergrundvorgänge laufen bereits."""
 
@@ -155,6 +195,131 @@ NUTZER_JOB_KINDS = frozenset({
 
 
 HEAVY_JOB_KINDS = NUTZER_JOB_KINDS | frozenset({"headers"})
+
+#: Schwere Jobs bekommen greppbare Start-/Ende-Zeilen im Log (JOB-START / JOB-ENDE).
+JOB_ZEIT_LOG_KINDS = HEAVY_JOB_KINDS
+
+#: Jobs, die denselben Electrum/Tor-Flaschenhals teilen — höchstens einer
+#: gleichzeitig (sonst UTXO-Scan + Herkunft parallel → doppelte SOCKS/Connects).
+ELECTRUM_SERIAL_KINDS = frozenset({
+    "rescan",
+    "verlauf",
+    "trace",
+    "trace-alle",
+    "trace-tief",
+    "wallet_sync",
+})
+
+
+class _ElectrumGate:
+    """
+    Serialisiert Electrum-lastige Jobs.
+
+    Der zweite Job wartet (abbrechbar), statt Tor/Electrs parallel zu belasten.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cv = threading.Condition(self._lock)
+        self._holder_id: str | None = None
+        self._holder_label: str = ""
+
+    def holder_label(self) -> str:
+        with self._lock:
+            return self._holder_label or ""
+
+    def busy(self) -> bool:
+        with self._lock:
+            return self._holder_id is not None
+
+    def acquire(self, job: "Job") -> None:
+        if job.kind not in ELECTRUM_SERIAL_KINDS:
+            return
+        with self._cv:
+            while self._holder_id is not None and self._holder_id != job.id:
+                job.raise_if_cancelled()
+                label = self._holder_label or self._holder_id or "anderer Job"
+                # phase-ähnlich: sichtbar, aber nicht jede Sekunde neu.
+                msg = f"Warte auf freie Electrum-Verbindung ({label})…"
+                if job.message != msg:
+                    job.progress(msg, log=True)
+                self._cv.wait(timeout=1.5)
+            job.raise_if_cancelled()
+            self._holder_id = job.id
+            self._holder_label = (job.label or job.kind or job.id)[:80]
+
+    def release(self, job: "Job") -> None:
+        if job.kind not in ELECTRUM_SERIAL_KINDS:
+            return
+        with self._cv:
+            if self._holder_id == job.id:
+                self._holder_id = None
+                self._holder_label = ""
+                self._cv.notify_all()
+
+
+#: Prozess-weit — ein Electrs@Tor-Socket / eine Pipeline.
+ELECTRUM_GATE = _ElectrumGate()
+
+
+def electrum_serial_busy() -> bool:
+    """True wenn gerade ein Electrum-Job (Scan/Herkunft/…) läuft."""
+    return ELECTRUM_GATE.busy()
+
+
+def _reset_electrum_gate_fuer_tests() -> None:
+    """Test-Hilfe: Gate freigeben (Daemon-Jobs aus anderen Tests)."""
+    with ELECTRUM_GATE._cv:
+        ELECTRUM_GATE._holder_id = None
+        ELECTRUM_GATE._holder_label = ""
+        ELECTRUM_GATE._cv.notify_all()
+
+
+def format_job_uhr(ts: float | None = None) -> str:
+    """Lokale Wanduhr, ISO-ähnlich ohne TZ — greppbar und lesbar."""
+    return time.strftime(
+        "%Y-%m-%dT%H:%M:%S",
+        time.localtime(time.time() if ts is None else float(ts)),
+    )
+
+
+def format_job_dauer(sekunden: float) -> str:
+    """Kompakte Dauer für JOB-ENDE (z. B. ``2m 03s``, ``1h 05m 00s``)."""
+    s = max(0, int(round(float(sekunden))))
+    if s < 60:
+        return f"{s}s"
+    m, rest = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {rest:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m {rest:02d}s"
+
+
+def job_start_zeile(job: "Job") -> str:
+    """
+    Erste Log-Zeile langer Jobs — greppbar mit ``JOB-START``.
+
+    Felder kind/id/at stabil für Suche; Label am Ende (Wallet-Name, Anzahl).
+    """
+    return (
+        f"JOB-START kind={job.kind} id={job.id} "
+        f"at={format_job_uhr(job.started_at)} · {job.label}"
+    )
+
+
+def job_ende_zeile(job: "Job") -> str:
+    """
+    Letzte Log-Zeile langer Jobs — greppbar mit ``JOB-ENDE``.
+
+    status, elapsed_s und dauer erlauben Dauer-Auswertung ohne Job-API.
+    """
+    ende = job.finished_at if job.finished_at is not None else time.time()
+    elapsed = max(0.0, float(ende) - float(job.started_at))
+    return (
+        f"JOB-ENDE kind={job.kind} id={job.id} status={job.status} "
+        f"elapsed_s={elapsed:.1f} dauer={format_job_dauer(elapsed)} "
+        f"at={format_job_uhr(ende)} · {job.label}"
+    )
 
 
 @dataclass
@@ -391,31 +556,67 @@ class JobRegistry:
             self._aufraeumen()
 
         def lauf():
+            token = _aktueller_job.set(job)
+            zeit_log = job.kind in JOB_ZEIT_LOG_KINDS
+            electrum_serial = job.kind in ELECTRUM_SERIAL_KINDS
             try:
-                job.result = func(job)
-                job.status = "cancelled" if job.cancelled else "done"
-            except Cancelled:
-                job.status = "cancelled"
-                job.message = "Abgebrochen."
-            except SystemExit as exc:
-                # main._setup_blockchain_client bricht so ab — sonst bleibt
-                # der Job ewig auf running (letzte Log-Zeile klebt).
-                job.status = "failed"
-                if isinstance(exc.code, str) and exc.code.strip():
-                    text = exc.code.strip()
-                elif exc.code not in (None, 0):
-                    text = str(exc.code)
-                else:
-                    text = str(exc) or "Vorgang beendet."
-                job.error = text
-                job.message = text
-            except Exception as exc:
-                job.status = "failed"
-                job.error = f"{type(exc).__name__}: {exc}"
-                job.message = "Fehlgeschlagen."
-                traceback.print_exc()
+                if zeit_log:
+                    # Vor der Arbeit — greppbar im Log-Bereich / Terminal-Spiegel.
+                    job._haenge_log_an(job_start_zeile(job))
+                try:
+                    if electrum_serial:
+                        ELECTRUM_GATE.acquire(job)
+                    try:
+                        job.result = func(job)
+                    finally:
+                        if electrum_serial:
+                            ELECTRUM_GATE.release(job)
+                    if job.cancelled:
+                        job.status = "cancelled"
+                        # Immer klare Endmeldung — nicht die letzte Scan-Zeile.
+                        job.message = "Abgebrochen."
+                    else:
+                        job.status = "done"
+                except Cancelled:
+                    job.status = "cancelled"
+                    job.message = "Abgebrochen."
+                except SystemExit as exc:
+                    # main._setup_blockchain_client bricht so ab — sonst bleibt
+                    # der Job ewig auf running (letzte Log-Zeile klebt).
+                    job.status = "failed"
+                    if isinstance(exc.code, str) and exc.code.strip():
+                        text = exc.code.strip()
+                    elif exc.code not in (None, 0):
+                        text = str(exc.code)
+                    else:
+                        text = str(exc) or "Vorgang beendet."
+                    job.error = text
+                    job.message = text
+                except Exception as exc:
+                    # Abbruch, der irgendwo als Exception ankam (Duck-Typing).
+                    if ist_abbruch(exc):
+                        job.status = "cancelled"
+                        job.message = "Abgebrochen."
+                    else:
+                        job.status = "failed"
+                        job.error = f"{type(exc).__name__}: {exc}"
+                        job.message = "Fehlgeschlagen."
+                        traceback.print_exc()
             finally:
+                # Gate freigeben falls acquire vor func scheiterte / Cancel.
+                if electrum_serial:
+                    try:
+                        ELECTRUM_GATE.release(job)
+                    except Exception:
+                        pass
+                _aktueller_job.reset(token)
                 job.finished_at = time.time()
+                if zeit_log:
+                    # Nach Status/finished_at — auch bei Abbruch/Fehler.
+                    try:
+                        job._haenge_log_an(job_ende_zeile(job))
+                    except Exception:
+                        pass
                 if job._on_done is not None:
                     try:
                         job._on_done(job)
@@ -430,6 +631,31 @@ class JobRegistry:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def finde_laufenden(
+        self,
+        kind: str,
+        *,
+        meta: dict | None = None,
+    ) -> Job | None:
+        """
+        Laufender Job derselben Art; optional Meta-Felder müssen übereinstimmen.
+
+        Verhindert Doppelstarts (z. B. Herkunft desselben UTXO zweimal).
+        """
+        soll = {str(k): v for k, v in (meta or {}).items()}
+        with self._lock:
+            kandidaten = [
+                j for j in self._jobs.values()
+                if j.status == "running" and j.kind == kind
+            ]
+        for job in kandidaten:
+            if not soll:
+                return job
+            hat = job.meta or {}
+            if all(hat.get(k) == v for k, v in soll.items()):
+                return job
+        return None
+
     def cancel(self, job_id: str) -> bool:
         job = self.get(job_id)
         if job is None or job.status != "running":
@@ -442,7 +668,7 @@ class JobRegistry:
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.started_at, reverse=True)
 
-    def nutzer_jobs(self, *, recent_s: float = 10.0) -> list[Job]:
+    def nutzer_jobs(self, *, recent_s: float = 3.0) -> list[Job]:
         """
         Nutzer-Jobs: alle running plus finished der letzten *recent_s* Sekunden.
         """
@@ -657,4 +883,25 @@ class ScanQueue:
         key = (kind, str(wallet_id or "").strip())
         with self._lock:
             return key in self._belegte_keys()
+
+    def cancel(self, job_or_queue_id: str) -> bool:
+        """
+        Bricht laufenden Scan-Job ab oder entfernt einen Warteschlangen-Eintrag.
+
+        *job_or_queue_id*: echte Job-ID oder ``queue_id`` eines wartenden Scans.
+        """
+        jid = str(job_or_queue_id or "").strip()
+        if not jid:
+            return False
+        with self._lock:
+            # Wartend: rausnehmen, bevor der Job startet.
+            for i, eintrag in enumerate(self._wartend):
+                if eintrag.get("queue_id") == jid:
+                    self._wartend.pop(i)
+                    return True
+            aktiv = self._aktiv_job_id
+        if aktiv and aktiv == jid:
+            return self._jobs.cancel(jid)
+        # Auch wenn die ID nur im Job-Registry steckt (nicht Scan-Queue-aktiv).
+        return self._jobs.cancel(jid)
 

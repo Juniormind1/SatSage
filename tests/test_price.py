@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 from core import price
 
@@ -363,6 +364,47 @@ class TestCsvHistorie(unittest.TestCase):
             "2019-06-15", "EUR", immutable_cache_dir=None, fetch=fetch,
         )
         self.assertEqual(preis.amount, lokal.amount)
+
+
+class TestOutboundFetch(unittest.TestCase):
+    """TLS/Allowlist für Kursabruf: LAN-Self-Signed + .env-Opt-in."""
+
+    def test_ssl_context_lan_ohne_ca_zwang(self):
+        """Private Hosts nutzen unsicheren Kontext (Self-Signed Mempool)."""
+        ctx = price._ssl_context("192.168.2.168")
+        self.assertEqual(ctx.verify_mode, __import__("ssl").CERT_NONE)
+
+    def test_ssl_context_public_streng(self):
+        ctx = price._ssl_context("mempool.space")
+        self.assertNotEqual(ctx.verify_mode, __import__("ssl").CERT_NONE)
+
+    def test_fetch_json_reicht_env_values_an_allowlist(self):
+        """Ohne values scheitert Public trotz Opt-in nur in der .env."""
+        seen = {}
+
+        def fake_ensure(url, service="", values=None, opt_in=None):
+            seen["service"] = service
+            seen["values"] = values
+            return url
+
+        def fake_values():
+            return {"SATSAGE_PRICE_HISTORY_OPT_IN": "1"}
+
+        with mock.patch("core.price.ensure_url_allowed", fake_ensure), \
+             mock.patch("core.price._outbound_values", fake_values), \
+             mock.patch("core.price.urllib.request.urlopen") as open_m:
+            class _Ant:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *a):
+                    return False
+                def read(self):
+                    return b'{"time":1,"EUR":1,"USD":1}'
+            open_m.return_value = _Ant()
+            data = price._fetch_json("https://mempool.space/api/v1/prices", 5.0)
+            self.assertEqual(data["EUR"], 1)
+            self.assertEqual(seen["service"], "price")
+            self.assertEqual(seen["values"].get("SATSAGE_PRICE_HISTORY_OPT_IN"), "1")
 
 
 class TestLiveOptional(unittest.TestCase):

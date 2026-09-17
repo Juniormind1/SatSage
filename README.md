@@ -137,7 +137,7 @@ Ausführlich: [`doc/handbuch.html`](doc/handbuch.html). Offene Lücke (gründlic
 
 **Automatische Priorität** beim Start (wenn weder CLI-Flag noch manuelle Wahl in den Einstellungen gesetzt):
 
-1. eigener Electrum-Server → 2. P2P-BIP-158 → 3./4. öffentliche Onions bzw. Clearnet **nur nach Bestätigung** (`OEFFENTLICHE_ELECTRUM=1`, `--oeffentliche-electrum` oder Dialog in der Web-Oberfläche)
+1. eigener Electrum-Server → 2. P2P-BIP-158 → 3./4. öffentliche Onions bzw. Clearnet **nur nach Bestätigung** (Web-Dialog: nur bis Server-Neustart; CLI: `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1`)
 
 Ohne Bestätigung bleiben nur eigener Node und BIP-158. Extra-Scan-Verbindungen gelten nur für den eigenen LAN-Fulcrum. `BIP158_P2P=0` lässt Compact Filter in der Auto-Kette aus.
 

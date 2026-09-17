@@ -49,7 +49,10 @@ class TestVertragMitDerApi(unittest.TestCase):
     def test_log_flaeche_ist_standard_an(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="log-anzeige"', html)
-        self.assertRegex(html, r'id="log-anzeige"[^>]*checked')
+        # Kompakter Toggle wie DE/EN — Standard an via .aktiv, kein Checkbox.
+        self.assertRegex(html, r'id="log-anzeige"[^>]*class="[^"]*\baktiv\b')
+        self.assertIn("log-knopf", html)
+        self.assertNotIn("Zeige Log", html)
         self.assertIn('id="log-text"', html)
         self.assertIn("logZeile", self.js)
         self.assertIn("logZeitstempel", self.js)
@@ -91,7 +94,7 @@ class TestVertragMitDerApi(unittest.TestCase):
             "Verbunden. Compact Filter 192.0.2.2:8333",
             "Verbunden. 2 Compact-Filter-Peers.",
             "Verbunden. 5 öffentliche Electrum-Peers.",
-            "Wechsel: Eigener Peer verbunden → 2 Peers verbunden",
+            "Wechsel: 1 electrs verbunden → 2 Peers · 1 electrs verbunden",
             "Neuer Peer 192.0.2.3:8333.",
             "Peer 192.0.2.1:8333 ausgefallen.",
             "Verbindung fehlgeschlagen: timeout",
@@ -174,6 +177,8 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("Nur ${neu.n}", self.js)
         self.assertIn("pruefePeersLeise", self.js)
         self.assertIn("Eigener Peer verbunden", self.js)
+        self.assertIn("verbindungLabel", self.js)
+        self.assertIn('|| "electrs"', self.js)
         self.assertIn("oeffentlicheElectrumLabel", self.js)
         self.assertIn("onion-electrs", self.js)
         self.assertIn("clearnet-electrs", self.js)
@@ -194,7 +199,10 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("eigeneNodesBeideErreichbar", self.js)
         self.assertIn("setzePeerTakt", self.js)
         self.assertIn('t("header.sourceCore")', self.js)
-        self.assertIn('t("header.sourceElectrumOwn")', self.js)
+        self.assertIn('t("header.sourceIndexer")', self.js)
+        self.assertIn("nimmOwnFulcrumStand", self.js)
+        self.assertIn("setzeQuellenPending", self.js)
+        self.assertIn("pending_sources", self.js)
         self.assertIn('t("header.sourceElectrumPublic")', self.js)
         self.assertIn('t("header.p2pPeers"', self.js)
         self.assertIn('t("privacy.pillHigh")', self.js)
@@ -212,7 +220,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn('"header.sourceCore": "Core"', de)
         self.assertIn('"header.p2pPeers": "P2P {n}"', de)
-        self.assertIn('"header.sourceElectrumOwn": "Electrum privat"', de)
+        self.assertIn('"header.sourceIndexer": "Indexer"', de)
         self.assertIn('"header.sourceElectrumPublic": "Electrum öffentlich"', de)
         self.assertIn('"privacy.pillNone": "keine Privatsphäre"', de)
         self.assertIn('"privacy.pillUnclear": "Privatsphäre unklar"', de)
@@ -228,11 +236,14 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("loescheElectrumListe", self.js)
         self.assertIn("sources.disableP2pTitle", self.js)
         self.assertIn("feld.typ === \"checkbox\"", self.js)
+        self.assertIn("verbindeP2p", self.js)
         self.assertIn('"sources.reachable": "verbunden"', de)
         self.assertIn('"sources.clearListTitle"', de)
-        self.assertIn('"sources.field.BIP158_P2P.label": "P2P aufbauen"', de)
+        self.assertIn('"sources.connect": "Verbinden"', de)
+        self.assertIn('"sources.connectP2pTitle"', de)
         en = (WEB / "locales" / "en.json").read_text(encoding="utf-8")
         self.assertIn('"sources.reachable": "Connected"', en)
+        self.assertIn('"sources.connect": "Connect"', en)
 
     def test_assistent_dock_und_pille_phase1(self):
         """Phase 1: Log|Chat-Leiste, Kopf-Pille, Einstellungen — kein Chat-Call."""
@@ -242,6 +253,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('id="chat-pane"', html)
         self.assertIn('id="chat-anbindung"', html)
         self.assertIn('id="dock-spalter"', html)
+        self.assertIn('id="empfang-spalter"', html)
         self.assertIn('id="llm-url"', html)
         self.assertIn('id="llm-modell"', html)
         self.assertIn('id="llm-anbieter"', html)
@@ -253,6 +265,8 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("ladeLlmStatus", self.js)
         self.assertIn('"/config/llm"', self.js)
         self.assertIn("macheDockSpalter", self.js)
+        self.assertIn("macheEmpfangSpalter", self.js)
+        self.assertIn("--dock-empfang-pct", css)
         self.assertIn(".dock-spalten", css)
         self.assertIn(".chat-pane", css)
         self.assertIn(".buehne:not(.log-an)", css)
@@ -471,9 +485,19 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_verlaufsscan_steht_neben_dem_utxo_scan(self):
         self.assertIn('id="verlauf-knopf"', self.html)
-        self.assertIn("Verlaufsscan", self.html)
+        self.assertIn("Historie", self.html)
+        self.assertIn('class="utxo-aktionen-praefix"', self.html)
+        self.assertIn(">Bestand<", self.html)
+        self.assertIn(">Herkunft<", self.html)
         self.assertIn("starteVerlaufsscan", self.js)
-        self.assertIn("Verlauf aller Wallets", self.html)
+        self.assertIn('id="verlauf-erheben"', self.html)
+        self.assertIn("tax.historyAll", self.html)
+        # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in app.js
+        self.assertIn("tax.originAll", self.js)
+        self.assertIn("herkunft-alle", self.js)
+        import json
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertEqual(de.get("tax.originAll"), "klären")
 
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""
@@ -655,7 +679,7 @@ class TestOberflaeche(unittest.TestCase):
         )
         self.assertIsNotNone(
             re.search(
-                r"function zeichneKnoten\(knoten\) \{.*?kinder\.hidden = true",
+                r"function zeichneKnoten\(knoten(?:,\s*elternWallet(?:,\s*elternKnoten)?)?\) \{.*?kinder\.hidden = true",
                 self.js,
                 re.S,
             ),
@@ -711,9 +735,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("function fuegeWalletHinzu", self.js)
         self.assertIn("speichereWallets(false)", self.js)
         # Sofort speichern, nicht nur in den Entwurf schieben.
+        # Fenster größer als früher: Deskriptor-Umleitung im XPUB-Feld liegt dazwischen.
         self.assertRegex(
             self.js,
-            r"function fuegeWalletHinzu\(\)[\s\S]{0,800}?speichereWallets\(false\)",
+            r"function fuegeWalletHinzu\(\)[\s\S]{0,1600}?speichereWallets\(false\)",
         )
         self.assertIn(
             'haken.addEventListener("click", () => speichereWallets(false))',

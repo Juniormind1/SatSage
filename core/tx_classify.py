@@ -1,5 +1,6 @@
 """
-Klassifikation von Transaktionen für Herkunft (CoinJoin vs. Fan-Out / PayJoin / Exchange).
+Klassifikation von Transaktionen für Herkunft
+(CoinJoin vs. Fan-Out / Fan-In / PayJoin / Exchange).
 
 Eigentum zuerst, dann Formheuristik. Soft-Labels („Wahrscheinlich …“) —
 keine forensische Sicherheit.
@@ -133,7 +134,12 @@ _LABELS: dict[str, tuple[str, str]] = {
         "Wahrscheinlich eigene Auszahlung (Fan-Out)",
         "Likely own fan-out spend",
     ),
+    "fan_in_own": (
+        "Wahrscheinlich eigene Konsolidierung (Fan-In)",
+        "Likely own consolidation (fan-in)",
+    ),
     "exchange_batch": (
+        # Nur wenn keine Börsenadresse aus dem Report bekannt ist.
         "Wahrscheinlich Batch-Auszahlung von Exchange",
         "Likely exchange batch payout",
     ),
@@ -152,6 +158,145 @@ _LABELS: dict[str, tuple[str, str]] = {
 def soft_label(kind: str, *, lang: str = "de") -> str:
     de, en = _LABELS.get(kind, ("", ""))
     return de if lang == "de" else en
+
+
+def soft_label_exchange_batch(namen: list[str] | tuple[str, ...], *, lang: str = "de") -> str:
+    """
+    Bekannte Börse(n) aus Report → definitive Formulierung.
+    Sonst generisches „Wahrscheinlich …“.
+    """
+    klar = [str(n).strip() for n in (namen or []) if str(n).strip()]
+    # Reihenfolge erhalten, Duplikate streichen
+    gesehen: list[str] = []
+    for n in klar:
+        if n not in gesehen:
+            gesehen.append(n)
+    if not gesehen:
+        return soft_label("exchange_batch", lang=lang)
+    joined = ", ".join(gesehen)
+    # „u. a.“: nicht alle Inputs müssen von der Börse sein — nur manche.
+    if lang == "en":
+        return f"incl. payout from {joined}"
+    return f"u. a. Auszahlung von {joined}"
+
+
+def _boerse_name_aus_adresse(adresse: str) -> str:
+    """Börsenname aus Report oder Label-Katalog (WalletExplorer), sonst \"\"."""
+    a = (adresse or "").strip()
+    if not a:
+        return ""
+    try:
+        from core import exchange_reports as boerse
+
+        hit = boerse.beschrifte_adresse(a)
+        if hit and hit.get("kategorie") == "exchange":
+            name = str(hit.get("name") or "").strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    try:
+        import labels
+
+        lab = labels.beschrifte(a)
+        if lab and (
+            lab.get("kategorie") == "exchange"
+            or lab.get("kategorie_label") == "Börse"
+        ):
+            name = str(lab.get("name") or "").strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    return ""
+
+
+def _boerse_namen_aus_tx(
+    tx: dict,
+    *,
+    get_tx: Callable[[str], dict] | None = None,
+    progress: ProgressCallback | None = None,
+) -> list[str]:
+    """
+    Börsennamen zu einer Exchange-Batch-Tx.
+
+    Typisch sind die **Hot-Wallet-Inputs** unbekannt; bekannte Börsenadressen
+    stehen oft unter den **anderen Outputs** derselben Batch (wie im Trace-Baum).
+    Deshalb Inputs *und* Outputs prüfen (Report + Label-Katalog).
+    """
+    chain = _chain()
+    namen: list[str] = []
+    gesehen: set[str] = set()
+
+    def _merk(addr: str) -> None:
+        name = _boerse_name_aus_adresse(addr)
+        if name and name not in gesehen:
+            gesehen.add(name)
+            namen.append(name)
+
+    for vin in tx.get("vin") or []:
+        if vin.get("is_coinbase") or "txid" not in vin:
+            continue
+        addrs: tuple[str, ...] = ()
+        prev = vin.get("prevout")
+        if prev:
+            addrs = tuple(chain._extract_addresses(prev))
+        elif get_tx is not None:
+            try:
+                resolved = resolve_vin_prevout(get_tx, vin, progress=progress)
+            except Exception as exc:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
+                resolved = None
+            if resolved:
+                addrs = tuple(chain._extract_addresses(resolved))
+        for a in addrs:
+            _merk(str(a or ""))
+
+    for vout in tx.get("vout") or []:
+        for a in chain._extract_addresses(vout):
+            _merk(str(a or ""))
+
+    return namen
+
+
+def _classification_exchange_batch(
+    ownership: TxOwnership | None,
+    tx: dict,
+    *,
+    get_tx: Callable[[str], dict] | None = None,
+    progress: ProgressCallback | None = None,
+) -> TxClassification:
+    namen = _boerse_namen_aus_tx(tx, get_tx=get_tx, progress=progress)
+    return TxClassification(
+        kind="exchange_batch",
+        soft_label_de=soft_label_exchange_batch(namen, lang="de"),
+        soft_label_en=soft_label_exchange_batch(namen, lang="en"),
+        walk_own_inputs_only=False,
+        treat_foreign_as_noise=False,
+        ownership=ownership,
+    )
+
+
+def _own_spend_shape(n_in: int, n_out: int) -> str | None:
+    """
+    Richtung einer rein eigenen Tx (alle Ins eigen, kein Fremd).
+
+    · Fan-In: mehr Inputs als Outputs — UTXOs laufen zusammen (Konsolidierung).
+    · Fan-Out: mehr Outputs als Inputs und mindestens 3 Outs — Geld spreizt sich.
+    · Sonst None (z. B. 1→2 Payment+Change, oder n:n ohne klare Richtung).
+    """
+    if n_in < 1 or n_out < 1:
+        return None
+    # Konsolidierung: n→1 / n→2 (Change) / allgemein n_in > n_out
+    if n_in >= 2 and n_in > n_out:
+        return "fan_in_own"
+    # Auszahlung / Split: 1→viele oder wenige→deutlich mehr Outs
+    if n_out >= 3 and n_out > n_in:
+        return "fan_out_own"
+    return None
 
 
 def _classification(kind: str, ownership: TxOwnership | None) -> TxClassification:
@@ -227,7 +372,11 @@ def analyze_ownership(
         elif get_tx is not None:
             try:
                 resolved = resolve_vin_prevout(get_tx, vin, progress=progress)
-            except Exception:
+            except Exception as exc:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
                 resolved = None
             if resolved:
                 addrs = tuple(chain._extract_addresses(resolved))
@@ -245,7 +394,16 @@ def analyze_ownership(
 
     own_outs: list[int] = []
     foreign_outs: list[int] = []
+    n_out = len(vouts)
     for i, vout in enumerate(vouts):
+        # Abbruch/Fortschritt bei großen Fan-Outs (sonst hängt der Job minutenlang
+        # ohne message-Update und Cancel greift nicht).
+        if progress is not None and n_out >= 50 and (i == 0 or (i + 1) % 50 == 0 or i + 1 == n_out):
+            try:
+                progress(f"↻ Herkunft: Eigentum Out {i + 1}/{n_out}…")
+            except TypeError:
+                # Manche Callbacks erwarten kwargs — still weitermachen.
+                pass
         addrs = tuple(chain._extract_addresses(vout))
         if match_own_address(addrs, own_addresses, wallet):
             own_outs.append(i)
@@ -317,6 +475,28 @@ def _form_coinjoin_kind(n_in: int, n_out: int, values: list[int]) -> str | None:
     if n_in >= _LARGE_NM_MIN_INS and n_out >= _LARGE_NM_MIN_OUTS:
         return "coinjoin"
     return None
+
+
+def form_coinjoin_kind_from_tx(tx: dict | None) -> str | None:
+    """
+    Nur Form (xpub-blind) — für Sanktions-Hop-Walk ohne Eigentumswissen.
+
+    Soft-Label-Heuristik, keine forensische Sicherheit. Coinbase → None.
+    """
+    if not isinstance(tx, dict):
+        return None
+    vins = tx.get("vin") or []
+    n_in = len(vins)
+    if n_in == 0:
+        return None
+    if n_in == 1 and (vins[0] or {}).get("is_coinbase"):
+        return None
+    if n_in == 1 and (vins[0] or {}).get("coinbase") is not None:
+        return None
+    n_out = len(tx.get("vout") or [])
+    if n_out < 1:
+        return None
+    return _form_coinjoin_kind(n_in, n_out, _output_values_sats(tx))
 
 
 def _vout_is_op_return(vout: dict) -> bool:
@@ -396,7 +576,11 @@ def _prev_tx_via_single_vin(
         return None
     try:
         return get_tx(str(vin["txid"]))
-    except Exception:
+    except Exception as exc:
+        from core.jobs import ist_abbruch
+
+        if ist_abbruch(exc):
+            raise
         return None
 
 
@@ -471,9 +655,11 @@ def classify_tx(
     1. Eigentum klären
     2. Bisq-Deposit / Bisq-Payout (Form + optional OP_RETURN am Prevout)
     3. 0 eigene Ins + eigene Outs → Exchange-Batch (bei Fan-out-Form)
-    4. alle Ins eigen → Fan-Out (eigen), **außer** die Form ist klar Mix
+    4. alle Ins eigen → Fan-In / Fan-Out (eigen), **außer** die Form ist klar Mix
        (Wasabi/WabiSabi/Whirlpool/…) — Soft-Label der Form bleibt nützlich,
        auch wenn alle Teilnehmer eigene XPUBs sind (Lab / Multi-Wallet)
+       · Fan-In: mehr Inputs als Outputs (Konsolidierung, n→wenige)
+       · Fan-Out: mehr Outputs als Inputs und ≥3 Outs (Auszahlung/Split, wenige→n)
     5. wenige Ins, wenige Fremd → PayJoin
     6. Whirlpool → Wasabi Classic → WabiSabi → JoinMarket → coinjoin
     """
@@ -502,21 +688,23 @@ def classify_tx(
         return _classification("bisq_payout", own)
 
     # 3. Exchange-Batch: kein eigener Input, aber eigener Empfang; typisch Fan-out.
+    # Mit Börsen-Report-Treffer → „Auszahlung von Kraken“ statt „Wahrscheinlich …“.
     if (
         own.ownership_complete
         and own.own_input_count == 0
         and own.own_output_count >= 1
         and n_out >= 3
     ):
-        return _classification("exchange_batch", own)
+        return _classification_exchange_batch(
+            own, tx, get_tx=get_tx, progress=progress,
+        )
 
     # Mix-Form früh: auch bei rein eigenen Inputs (Multi-Wallet / Lab).
     form_kind = None
     if own.own_input_count >= 1 and own.own_output_count >= 1:
         form_kind = _form_coinjoin_kind(n_in, n_out, values)
 
-    # 3. Fan-Out (eigen): alle Inputs eigen — Soft-Label nur bei erkennbarer
-    # Auszahlungs-/Konsolidierungsform, nicht bei klarer Mix-Struktur.
+    # 3. Eigene reine Spends: Fan-In vs. Fan-Out (Richtung), kein Mix.
     if (
         own.ownership_complete
         and own.own_input_count == n_in
@@ -525,8 +713,9 @@ def classify_tx(
     ):
         if form_kind:
             return _classification(form_kind, own)
-        if n_out >= 3 or n_in >= 2:
-            return _classification("fan_out_own", own)
+        own_shape = _own_spend_shape(n_in, n_out)
+        if own_shape:
+            return _classification(own_shape, own)
         return _classification("unknown", own)
 
     # 4. PayJoin: gemischt, übersichtlich, wenige Fremd-Ins.

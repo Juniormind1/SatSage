@@ -268,8 +268,8 @@ class TestParallelerVorgeschichteScan(unittest.TestCase):
         )
 
     def test_parallel_findet_dieselben_treffer_wie_seriell(self):
-        treffer_p, geprueft_p, _ = self._lauf(8, worker=4)
-        treffer_s, geprueft_s, _ = self._lauf(8, worker=1)
+        treffer_p, geprueft_p, _, _ = self._lauf(8, worker=4)
+        treffer_s, geprueft_s, _, _ = self._lauf(8, worker=1)
         self.assertEqual(geprueft_p, 8)
         self.assertEqual(geprueft_p, geprueft_s)
         self.assertEqual(len(treffer_p), len(treffer_s))
@@ -292,8 +292,8 @@ class TestParallelerVorgeschichteScan(unittest.TestCase):
         Ohne Sortierung hinge die Reihenfolge am Thread-Timing — zwei Läufe
         über dieselben Daten lieferten verschiedene Cache-Dateien.
         """
-        erst, _, _ = self._lauf(8, worker=4)
-        zweit, _, _ = self._lauf(8, worker=4)
+        erst, _, _, _ = self._lauf(8, worker=4)
+        zweit, _, _, _ = self._lauf(8, worker=4)
         schluessel = lambda ts: [(t["wallet_utxo"], t["hop"], t["address"]) for t in ts]
         self.assertEqual(schluessel(erst), schluessel(zweit))
         self.assertEqual(schluessel(erst), sorted(schluessel(erst)))
@@ -305,7 +305,7 @@ class TestParallelerVorgeschichteScan(unittest.TestCase):
         """
         utxos, txs = self._kette(4)
         benutzt = []
-        treffer, geprueft, abbruch = self.analyze.check_wallet_utxos_sanctions(
+        treffer, geprueft, abbruch, _cj = self.analyze.check_wallet_utxos_sanctions(
             lambda t: txs[t],
             utxos,
             self.eigene,

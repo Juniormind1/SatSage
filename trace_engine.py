@@ -93,6 +93,25 @@ class UnresolvedExternalBatch:
     input_count: int
 
 
+@dataclass(frozen=True)
+class UnresolvedPrevout:
+    """
+    Ein Input, dessen Vorgänger-Tx nicht geladen werden konnte.
+
+    Darf nicht still verworfen werden — sonst endet der Trace mit leeren
+    ``sources`` und der UI-Text „Keine Zuflüsse ermittelbar“, obwohl die
+    Erzeuger-Tx klar Inputs hat (extern / intern / noch zu laden).
+    """
+
+    spending_txid: str
+    prev_txid: str
+    prev_vout: int
+
+    @property
+    def key(self) -> str:
+        return utxo_ref(self.prev_txid, self.prev_vout)
+
+
 FundingInput = FundingEdge | CoinbaseFunding
 
 
@@ -111,6 +130,14 @@ def _funding_edge_from_vin(
     )
 
 
+def _abbruch_durchreichen(exc: BaseException) -> None:
+    """Job-Abbruch nicht in bare except schlucken."""
+    from core.jobs import ist_abbruch
+
+    if ist_abbruch(exc):
+        raise
+
+
 def iter_funding_inputs(
     get_tx: Callable[[str], dict],
     creator_txid: str,
@@ -124,7 +151,8 @@ def iter_funding_inputs(
     """
     try:
         tx = get_tx(creator_txid)
-    except Exception:
+    except Exception as exc:
+        _abbruch_durchreichen(exc)
         return
 
     for vin in tx.get("vin", []):
@@ -136,7 +164,8 @@ def iter_funding_inputs(
             if not prev_out:
                 continue
             yield _funding_edge_from_vin(vin, prev_out, creator_txid)
-        except Exception:
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
             continue
 
 
@@ -164,14 +193,27 @@ def match_own_address(
     own_addresses: set[str],
     wallet: WalletContext | None = None,
 ) -> str | None:
-    """Erste passende eigene Adresse oder None."""
+    """
+    Erste passende eigene Adresse oder None.
+
+    Nur O(1)-Lookups (Set / address_to_wallet). Kein ``resolve_address``:
+    das leitet unbekannte Adressen über alle XPUBs ab und blockiert bei
+    Fan-Outs mit Hunderten Outputs (Minuten, Abbruch greift nicht).
+    Eigene Adressen müssen im Set bzw. Wallet-Kontext stehen (Cache-Seed).
+    """
     for addr in addrs:
         if not addr:
             continue
-        if wallet and wallet.resolve_address(addr):
-            return addr
         if addr in own_addresses:
             return addr
+        if wallet is not None:
+            # own_label = dict-get, keine HD-Suche
+            label = getattr(wallet, "own_label", None)
+            if callable(label) and label(addr):
+                return addr
+            mapping = getattr(wallet, "address_to_wallet", None)
+            if isinstance(mapping, dict) and addr in mapping:
+                return addr
     return None
 
 
@@ -215,7 +257,8 @@ def _mit_vorgaengerzeit(
         progress(f"↻ Herkunft: Blockzeit zu {edge.prevout.txid[:16]}…")
     try:
         prev_tx = get_tx(edge.prevout.txid)
-    except Exception:
+    except Exception as exc:
+        _abbruch_durchreichen(exc)
         return edge
     zeit = _chain()._tx_block_time(prev_tx)
     if zeit is None:
@@ -233,7 +276,9 @@ def iter_trace_funding_inputs(
     alle_eigenen_inputs: bool = False,
     own_inputs_only: bool = False,
     own_prevouts: set[str] | None = None,
-) -> Iterator[FundingEdge | CoinbaseFunding | UnresolvedExternalBatch]:
+) -> Iterator[
+    FundingEdge | CoinbaseFunding | UnresolvedExternalBatch | UnresolvedPrevout
+]:
     """
     Trace-Variante: Deferred-Inputs ohne inline-prevout werden bei kleinen
     Transaktionen (≤ FULL_RESOLUTION_INPUT_LIMIT Eingänge) vollständig
@@ -255,7 +300,8 @@ def iter_trace_funding_inputs(
     """
     try:
         tx = get_tx(creator_txid)
-    except Exception:
+    except Exception as exc:
+        _abbruch_durchreichen(exc)
         return
 
     known_own = {
@@ -304,7 +350,8 @@ def iter_trace_funding_inputs(
             if klar is True and vin.get("prevout"):
                 try:
                     edge = _funding_edge_from_vin(vin, vin["prevout"], creator_txid)
-                except Exception:
+                except Exception as exc:
+                    _abbruch_durchreichen(exc)
                     deferred.append(vin)
                     continue
                 yield edge
@@ -319,7 +366,8 @@ def iter_trace_funding_inputs(
         if prev_out:
             try:
                 inline.append(_funding_edge_from_vin(vin, prev_out, creator_txid))
-            except Exception:
+            except Exception as exc:
+                _abbruch_durchreichen(exc)
                 continue
         else:
             deferred.append(vin)
@@ -341,8 +389,15 @@ def iter_trace_funding_inputs(
     if vorladen is not None:
         try:
             vorladen([vin["txid"] for vin in deferred if vin.get("txid")])
-        except Exception:
-            pass
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+
+    def _unresolved_prev(vin: dict) -> UnresolvedPrevout:
+        return UnresolvedPrevout(
+            spending_txid=creator_txid,
+            prev_txid=str(vin.get("txid") or ""),
+            prev_vout=int(vin.get("vout") or 0),
+        )
 
     if voll:
         # Alle Eingänge auflösen — bei Opt-in / CJ auch jenseits des 20er-Limits.
@@ -353,11 +408,16 @@ def iter_trace_funding_inputs(
                     if key in known_own:
                         prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
                         if not prev_out:
+                            yield _unresolved_prev(vin)
                             continue
                         yield _funding_edge_from_vin(vin, prev_out, creator_txid)
                         continue
                 prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
                 if not prev_out:
+                    # CJ-Fremd ohne Prevout: Rauschen. Sonst Lücke melden.
+                    if own_inputs_only:
+                        continue
+                    yield _unresolved_prev(vin)
                     continue
                 edge = _funding_edge_from_vin(vin, prev_out, creator_txid)
                 if own_inputs_only:
@@ -367,7 +427,11 @@ def iter_trace_funding_inputs(
                 if not match_own_address(edge.addresses, own_addresses, wallet):
                     edge = _mit_vorgaengerzeit(get_tx, edge, progress=progress)
                 yield edge
-            except Exception:
+            except Exception as exc:
+                _abbruch_durchreichen(exc)
+                if own_inputs_only:
+                    continue
+                yield _unresolved_prev(vin)
                 continue
         return
 
@@ -376,9 +440,12 @@ def iter_trace_funding_inputs(
         try:
             prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
             if not prev_out:
+                yield _unresolved_prev(vin)
                 continue
             edge = _funding_edge_from_vin(vin, prev_out, creator_txid)
-        except Exception:
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            yield _unresolved_prev(vin)
             continue
 
         if match_own_address(edge.addresses, own_addresses, wallet):

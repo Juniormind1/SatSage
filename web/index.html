@@ -139,7 +139,8 @@
     <p data-i18n="dialog.publicElectrum.body">
       Compact Filter (BIP-158) haben keine Peers geliefert. Öffentliche
       Electrum-Server (Onion oder Clearnet) sehen die abgeleiteten
-      Wallet-Adressen. Trotzdem verbinden?
+      Wallet-Adressen. Die Freigabe gilt nur bis zum nächsten Server-Neustart.
+      Trotzdem verbinden?
     </p>
     <div class="einrichtung-knoepfe">
       <button type="button" id="oeffentliche-electrum-nein" class="knopf knopf-primaer"
@@ -152,7 +153,7 @@
       <button type="button" id="oeffentliche-electrum-ja" class="knopf"
               data-i18n="dialog.publicElectrum.yes"
               data-i18n-title="dialog.publicElectrum.yesTitle"
-              title="Erlaubt öffentliche Electrum-Server. Die Adressen gehen an Dritte.">
+              title="Erlaubt öffentliche Electrum-Server nur für diese Sitzung (bis Server-Neustart). Die Adressen gehen an Dritte.">
         Trotzdem verbinden
       </button>
     </div>
@@ -222,22 +223,22 @@
        aria-labelledby="wallet-scan-wahl-titel">
     <h1 id="wallet-scan-wahl-titel" data-i18n="dialog.walletScan.title">Wallet angelegt — was jetzt?</h1>
     <p id="wallet-scan-wahl-text" data-i18n="dialog.walletScan.body">
-      UTXO-Scan holt den aktuellen Bestand. Der Verlaufsscan erfasst auch
-      ausgegebene Beträge (u. a. fürs Steuerjahr) und dauert länger.
+      Bestand holt den aktuellen Stand. Historie erfasst auch ausgegebene
+      Beträge (u. a. fürs Steuerjahr) und dauert länger.
     </p>
     <div class="einrichtung-knoepfe">
       <button type="button" id="wallet-scan-utxo" class="knopf knopf-primaer"
               autofocus
               data-i18n="dialog.walletScan.utxo"
               data-i18n-title="dialog.walletScan.utxoTitle"
-              title="Fragt die Adressen beim Node ab und legt den UTXO-Bestand an.">
-        UTXO-Scan
+              title="Fragt die Adressen beim Node ab und legt den Bestand an.">
+        Bestand
       </button>
       <button type="button" id="wallet-scan-verlauf" class="knopf"
               data-i18n="dialog.walletScan.history"
               data-i18n-title="dialog.walletScan.historyTitle"
               title="Holt die volle Historie inkl. ausgegebener Outputs.">
-        Verlaufsscan
+        Historie
       </button>
       <button type="button" id="wallet-scan-manuell" class="knopf"
               data-i18n="dialog.walletScan.later"
@@ -265,14 +266,17 @@
       </div>
     </div>
     <div id="quelle-status" class="quelle" aria-live="polite">
-      <span id="kurs-pille" class="pille pille-neutral" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs">BTC —</span>
+      <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
       <span id="llm-pille" class="pille pille-neutral">LLM</span>
     </div>
-    <label class="kopf-log" data-i18n-title="header.showLogTitle" title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an.">
-      <input type="checkbox" id="log-anzeige" checked>
-      <span data-i18n="header.showLog">Zeige Log</span>
-    </label>
     <div class="kopf-lang">
+      <button type="button" id="log-anzeige" class="lang-knopf log-knopf aktiv"
+              data-i18n="header.showLog"
+              data-i18n-title="header.showLogTitle"
+              data-i18n-aria-label="header.showLogAria"
+              title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an."
+              aria-label="Log ein- oder ausblenden"
+              aria-pressed="true">Log</button>
       <button type="button" id="lang-de" class="lang-knopf" data-lang="de" aria-label="Deutsch">DE</button>
       <button type="button" id="lang-en" class="lang-knopf" data-lang="en" aria-label="English">EN</button>
     </div>
@@ -286,22 +290,27 @@
       <div id="wallet-nav" class="nav-liste"></div>
       <div class="nav-titel" data-i18n="nav.sectionAnalyze">Auswerten</div>
       <div class="nav-liste">
-        <button type="button" class="nav-eintrag" data-ansicht="trace"
-                data-i18n="nav.trace" data-i18n-title="nav.traceTitle">
-          Herkunft tracen
-        </button>
         <button type="button" class="nav-eintrag" data-ansicht="steuerjahr"
-                data-i18n="nav.tax" data-i18n-title="nav.taxTitle">
+                data-lern="haltefrist"
+                data-i18n="nav.tax" data-i18n-title="nav.taxTitle"
+                title="Verfolgt bis vor Stichtag oder Haltefrist">
           Steuerjahr
         </button>
+        <button type="button" class="nav-eintrag" data-ansicht="trace"
+                data-i18n="nav.trace" data-i18n-title="nav.traceTitle"
+                title="Verfolgt bis zum ersten externen Zufluss oder Mining">
+          Herkunft tracen
+        </button>
         <button type="button" class="nav-eintrag" data-ansicht="sanktionen"
-                data-i18n="nav.sanctions" data-i18n-title="nav.sanctionsTitle">
+                data-i18n="nav.sanctions" data-i18n-title="nav.sanctionsTitle"
+                title="Verfolgt xpub-blind so viele Hops wie gewünscht">
           Sanktionscheck
         </button>
       </div>
       <div class="nav-titel" data-i18n="nav.sectionAdmin">Verwaltung</div>
       <div class="nav-liste">
         <button type="button" class="nav-eintrag" data-ansicht="wallets"
+                data-lern="xpub"
                 data-i18n="nav.wallets" data-i18n-title="nav.walletsTitle">
           Wallets
         </button>
@@ -311,6 +320,7 @@
         </button>
         <button type="button" class="nav-eintrag" data-ansicht="datenquellen"
                 id="nav-datenquellen"
+                data-lern="privatsphaere"
                 data-i18n="nav.sources" data-i18n-title="nav.sourcesTitle">
           Datenquellen
         </button>
@@ -344,16 +354,19 @@
                 <option value="datum" data-i18n="wallet.sortDate">neueste zuerst</option>
               </select>
             </label>
-            <button type="button" id="tip-sync-knopf" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür UTXO-Scan." class="knopf">Bis Tip</button>
-            <button type="button" id="rescan-knopf" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den UTXO-Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt der Verlaufsscan daneben." class="knopf">UTXO-Scan</button>
-            <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Verlaufsscan</button>
-            <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht UTXO-Bestand." class="knopf">Herkunft vollständig</button>
+            <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür Bestand." class="knopf">Bis Tip</button>
+            <div class="utxo-aktionen" role="group" aria-label="UTXO">
+              <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO</span>
+              <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Bestand</button>
+              <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Historie</button>
+              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Bestand." class="knopf">Herkunft</button>
+            </div>
           </div>
         </div>
 
         <div id="rescan-lauf" class="hinweis hinweis-lauf" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span id="rescan-text" data-i18n="wallet.scanRunning">UTXO-Scan läuft…</span>
+          <span id="rescan-text" data-i18n="wallet.scanRunning">Bestand läuft…</span>
           <button type="button" id="rescan-abbruch" data-i18n="common.cancel" data-i18n-title="wallet.scanCancelTitle" title="Bricht nur den laufenden Scan ab. Angestellte Scans laufen danach weiter." class="knopf knopf-klein">
             Abbrechen
           </button>
@@ -361,7 +374,7 @@
 
         <div id="herkunft-tief-lauf" class="hinweis hinweis-lauf" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span id="herkunft-tief-text" data-i18n="wallet.originDeepRunning">Herkunft vollständig läuft…</span>
+          <span id="herkunft-tief-text" data-i18n="wallet.originDeepRunning">Herkunft läuft…</span>
           <button type="button" id="herkunft-tief-abbruch" data-i18n="common.cancel" data-i18n-title="wallet.originDeepCancelTitle" title="Bricht ab. Bereits fertige Herkunftsbäume bleiben im Cache." class="knopf knopf-klein">
             Abbrechen
           </button>
@@ -394,7 +407,9 @@
             <h1 data-i18n="trace.heading">Herkunft tracen</h1>
             <p class="meta" data-i18n="trace.meta">
               Verfolgt rückwärts, woher die Sats eines Outputs kamen — bis zu
-              einer fremden Adresse oder einer Coinbase.
+              einer fremden Adresse oder einer Coinbase. Das kann bei der
+              Erstellung von mit dem Geldwäschegesetz begründeten Forderungen
+              nach Herkunftsnachweisen helfen.
             </p>
           </div>
         </div>
@@ -408,7 +423,7 @@
             Gezielt tracen
           </button>
           <button type="button" id="trace-herkunft-alle" data-i18n="trace.allOrigins" data-i18n-title="trace.allOriginsTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen — dieselbe Analyse wie im Steuerjahr. Einmal ermittelt, bleibt sie gespeichert." class="knopf knopf-primaer">
-            Herkunft aller UTXOs
+            Herkünfte UTXOs
           </button>
         </div>
 
@@ -426,6 +441,13 @@
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="trace.currentUtxos">Aktuelle UTXOs</span>
             <span id="trace-liste-zusatz" class="karte-zusatz"></span>
+            <span id="trace-sort-wrap" class="karte-zusatz">
+              <select id="trace-sort" class="knopf knopf-klein" data-i18n-title="trace.sortTitle" title="Sortierung Bestand und Bereits ausgegeben">
+                <option value="volume-desc" data-i18n="trace.sortVolumeDesc">Volumen ↓</option>
+                <option value="age-desc" data-i18n="trace.sortAgeDesc">Alter ↓ (neueste zuerst)</option>
+                <option value="age-asc" data-i18n="trace.sortAgeAsc">Alter ↑ (älteste zuerst)</option>
+              </select>
+            </span>
             <span class="karte-zusatz legende">
               <span class="punkt punkt-eigen"></span> <span data-i18n="trace.legendOwn">eigenes Wallet</span>
               <span class="punkt punkt-extern"></span> <span data-i18n="trace.legendExternal">extern</span>
@@ -442,8 +464,10 @@
           <div>
             <h1 data-i18n="sanctions.heading">Sanktionscheck</h1>
             <p class="meta" data-i18n="sanctions.meta">
-              Prüft die externe Vorgeschichte deiner UTXOs gegen die
-              Sanktions- und Blacklists — bis zur gewählten Hop-Tiefe.
+              Prüft die Vorgeschichte deiner UTXOs xpub-blind (Drittperspektive,
+              ohne XPUB-Wissen) gegen die Sanktions- und Blacklists — bis zur
+              gewählten Hop-Tiefe. Nutzt Herkunfts- und Tx-Cache mit; Folge-Läufe
+              oft ohne erneuten Chain-Walk. Grün = keine gelistete Adresse in diesem Fenster.
             </p>
           </div>
         </div>
@@ -459,7 +483,7 @@
               <select id="sank-wallet"></select>
             </label>
             <label class="feld-inline">
-              <span data-i18n="sanctions.hops">Externe Hops</span>
+              <span data-i18n="sanctions.hops">Hops</span>
               <input type="number" id="sank-hops" min="1" max="20" value="3"
                      data-default-max="20" style="width:5em">
             </label>
@@ -516,13 +540,11 @@
             </p>
             <p class="meta" id="steuer-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
             <p class="meta" data-i18n-html="tax.metaHtml">
-              <strong>Verlaufsscan</strong> (Wallet) oder
-              <strong>Verlauf aller Wallets</strong> holt <em>welche</em>
+              <strong>Historien</strong> holt <em>welche</em>
               Beträge es je gab, auch längst ausgegebene — erst damit werden
               Veräußerungen sichtbar.
-              <strong>Herkunft aller UTXOs</strong> klärt, <em>woher</em> die
-              Sats kamen, und liefert das Anschaffungsdatum. Für eine
-              vollständige Aufstellung braucht es beides.
+              Fehlt die Herkunft (Scorecard grau), klärt <strong>klären</strong>
+              dort die Anschaffung bis Stichtag/Haltefrist.
             </p>
           </div>
           <div class="bereich-aktionen">
@@ -532,13 +554,10 @@
             </label>
             <label class="feld-inline">
               <span data-i18n="tax.holding">Haltefrist</span>
-              <select id="frist-wahl" data-i18n-title="tax.holdingTitle" title="Jahre bis zur Steuerfreiheit. Vorgabe 1 Jahr (Deutschland). Mehrjährige Fristen im Dropdown."></select>
+              <select id="frist-wahl" data-lern="haltefrist" data-i18n-title="tax.holdingTitle" title="Jahre bis zur Steuerfreiheit. Vorgabe 1 Jahr (Deutschland). Mehrjährige Fristen im Dropdown."></select>
             </label>
-            <button type="button" id="verlauf-erheben" data-i18n="tax.historyAll" data-i18n-title="tax.historyAllTitle" title="Holt die Historie aller Wallets — auch ausgegebene Beträge. Einzelnes Wallet: Verlaufsscan in der Wallet-Ansicht. Derselbe Cache. Braucht einen Electrum-Server." class="knopf">
-              Verlauf aller Wallets
-            </button>
-            <button type="button" id="herkunft-alle" data-i18n="tax.originAll" data-i18n-title="tax.originAllTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen. Liefert das On-Chain-Anschaffungsdatum dieser Wallet — ohne diese Analyse gilt nur das Entstehungsdatum des Outputs, das bei Wechselgeld und Eigenüberträgen zu jung ist. Börsenkauf und Haltedauer außerhalb der Chain stehen hier nicht." class="knopf">
-              Herkunft aller UTXOs
+            <button type="button" id="verlauf-erheben" data-i18n="tax.historyAll" data-i18n-title="tax.historyAllTitle" title="Holt die Historien aller Wallets — auch ausgegebene Beträge. Einzelnes Wallet: Historie in der Wallet-Ansicht. Derselbe Cache. Braucht einen Electrum-Server." class="knopf">
+              Historien
             </button>
             <button type="button" id="export-csv" data-i18n="tax.csv" data-i18n-title="tax.csvTitle" title="Aufstellung als CSV für Tabellenkalkulation und Steuerberatung — mit Semikolon und Dezimalkomma, damit Excel sie ohne Nacharbeit liest." class="knopf">CSV</button>
             <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf knopf-primaer">
@@ -547,19 +566,44 @@
           </div>
         </div>
 
+        <div id="steuer-kennzahlen" class="kennzahlen"></div>
+
+        <div id="zeitstrahl-karte" class="karte" hidden>
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tax.timeline">UTXOs über alle Wallets</span>
+            <span id="zeitstrahl-zusatz" class="karte-zusatz"></span>
+            <span class="karte-zusatz legende">
+              <span class="punkt punkt-frist-erfuellt"></span> <span data-i18n="tax.legendOut">außerhalb Haltefrist</span>
+              <span class="punkt punkt-frist-offen"></span> <span data-i18n="tax.legendIn">innerhalb Haltefrist</span>
+              <span class="punkt punkt-frist-ungeprueft"></span> <span data-i18n="tax.legendUnchecked">innerhalb Frist, ohne Herkunft</span>
+              <span class="punkt punkt-geister-saldo"></span> <span data-i18n="tax.legendGhost">sats vor Haltefrist</span>
+            </span>
+          </div>
+          <div class="achse">
+            <div id="achse-y" class="achse-y" aria-label="Betrag"></div>
+            <div class="achse-haupt">
+              <div id="achse-viewport" class="achse-viewport" title="">
+                <div id="achse-spur" class="achse-spur">
+                  <div class="achse-linie"></div>
+                </div>
+              </div>
+              <div id="achse-ticks" class="achse-ticks"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="karte" id="selbstanzeige-karte">
           <div class="karte-kopf">
-            <span class="karte-titel" data-i18n="tax.selfReport">Selbstanzeige-Report</span>
+            <span class="karte-titel" data-i18n="tax.selfReport">Bericht Sat-Geschichte</span>
             <span class="karte-zusatz" data-i18n="tax.selfReportZusatz">
               FiFo · Abflüsse + Was-wäre-wenn · Vorbereitung
             </span>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="tax.selfReportHint">
-            Für Nachmeldung / Selbstanzeige: Abflüsse und Was-wäre-wenn-UTXOs
-            werden beim Öffnen aus dem Cache geladen — markieren
-            (z. B. Börsen-Einzahlung) und Report erzeugen. Personendaten sind
-            vorerst Platzhalter (Donald Duck / 0/8/15 / Entenhausen). Keine
-            Steuerberatung.
+            Abflüsse und Was-wäre-wenn-UTXOs werden beim Öffnen aus dem Cache
+            geladen — markieren (z. B. Börsen-Einzahlung) und Report erzeugen.
+            Personendaten sind vorerst Platzhalter (Donald Duck / 0/8/15 /
+            Entenhausen). Keine Steuerberatung.
           </p>
           <div class="karte-fuss steuer-einstellungen">
             <label class="feld" style="flex: 1 1 22rem;">
@@ -600,34 +644,12 @@
           </button>
         </div>
 
-        <div id="steuer-kennzahlen" class="kennzahlen"></div>
-
         <div id="abgaenge-karte" class="karte" hidden>
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="tax.disposals">Veräußerungen im Steuerjahr</span>
             <span id="abgaenge-zusatz" class="karte-zusatz"></span>
           </div>
           <div id="abgaenge-liste"></div>
-        </div>
-
-        <div id="zeitstrahl-karte" class="karte" hidden>
-          <div class="karte-kopf">
-            <span class="karte-titel" data-i18n="tax.timeline">UTXOs über alle Wallets</span>
-            <span id="zeitstrahl-zusatz" class="karte-zusatz"></span>
-            <span class="karte-zusatz legende">
-              <span class="punkt punkt-frist-erfuellt"></span> <span data-i18n="tax.legendOut">außerhalb Haltefrist</span>
-              <span class="punkt punkt-frist-offen"></span> <span data-i18n="tax.legendIn">innerhalb Haltefrist</span>
-            </span>
-          </div>
-          <div class="achse">
-            <div id="achse-y" class="achse-y" aria-hidden="true"></div>
-            <div class="achse-haupt">
-              <div id="achse-spur" class="achse-spur">
-                <div class="achse-linie"></div>
-              </div>
-              <div id="achse-ticks" class="achse-ticks"></div>
-            </div>
-          </div>
         </div>
 
         <div class="karte">
@@ -838,19 +860,49 @@
             </span>
           </div>
           <div class="karte-fuss steuer-einstellungen">
-            <label class="feld">
-              <span class="feld-titel" data-i18n="settings.theme.label">Farbmodus</span>
-              <select id="ui-theme"
-                      data-i18n-title="settings.theme.titleAttr"
-                      title="Sofort wirksam. Wird in der .env (UI_THEME) und im Browser gespeichert.">
-                <option value="light" data-i18n="settings.theme.light">Hell</option>
-                <option value="dark" data-i18n="settings.theme.dark">Dunkel</option>
-              </select>
-            </label>
+            <div class="feld"
+                 role="radiogroup"
+                 aria-labelledby="ui-theme-titel"
+                 data-i18n-title="settings.theme.titleAttr"
+                 title="Sofort wirksam. Wird in der .env (UI_THEME) und im Browser gespeichert.">
+              <span class="feld-titel" id="ui-theme-titel" data-i18n="settings.theme.label">Farbmodus</span>
+              <div class="radio-zeile">
+                <label class="check-zeile" for="ui-theme-light">
+                  <input type="radio" name="ui-theme" id="ui-theme-light" value="light">
+                  <span data-i18n="settings.theme.light">Hell</span>
+                </label>
+                <label class="check-zeile" for="ui-theme-dark">
+                  <input type="radio" name="ui-theme" id="ui-theme-dark" value="dark">
+                  <span data-i18n="settings.theme.dark">Dunkel</span>
+                </label>
+              </div>
+            </div>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.theme.hint">
             Hell: bisheriges Erscheinungsbild. Dunkel: sehr dunkler grauer Grund —
             Markierungsfarben (rot/grün/gelb) bleiben erkennbar.
+          </p>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.lernhinweise.title">Lernhinweise für Plebs</span>
+            <span class="karte-zusatz" data-i18n="settings.lernhinweise.zusatz">
+              Experiment · Neugier
+            </span>
+          </div>
+          <div class="karte-fuss">
+            <label class="check-zeile"
+                   data-i18n-title="settings.lernhinweise.titleAttr"
+                   title="Aus = unveränderte UI, Empfangs-QR nur Adressen. An = Tooltips mit Kaninchenbau-Link; Lern-QR im Empfangs-Bereich möglich (Bitcoin-only).">
+              <input type="checkbox" id="lernhinweise-plebs">
+              <span data-i18n="settings.lernhinweise.enable">Lernhinweise für Plebs</span>
+            </label>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.lernhinweise.hint">
+            Für Neugierige: Tooltips nennen eine geeignete Quelle für den Einstieg
+            in diesen Kaninchenbau (DE u. a. Aprycot, Blocktrainer, Einundzwanzig).
+            Lern-QR: Klick kopiert und öffnet die URL. Eilige: Einstellung aus lassen.
           </p>
         </div>
 
@@ -866,7 +918,7 @@
                    data-i18n-title="settings.start.syncTitle"
                    title="Wenn an: Tip-Nachzug beim Start und Dauer-Watch über eigenen Electrs (Adress-Subscribe). Kein Fullscan. Ohne eigenen Electrs nur Start-Nachzug.">
               <input type="checkbox" id="start-sync">
-              <span data-i18n="settings.start.sync">Wallets immer aktuell halten?</span>
+              <span data-i18n="settings.start.sync">Wallets immer aktuell halten</span>
             </label>
             <label class="check-zeile check-zeile-unter"
                    id="start-sync-known-only-zeile"
@@ -946,6 +998,89 @@
             Andere europäische Länder haben keinen vergleichbaren Cutoff.
           </p>
           <p class="meta steuer-einstellungen-hinweis" id="frist-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.person.title">Persönliche Daten</span>
+            <span class="karte-zusatz" data-i18n="settings.person.zusatz">
+              Für HTML-/CSV-Berichte (Sat-Geschichte)
+            </span>
+          </div>
+          <div class="karte-fuss person-einstellungen">
+            <div class="person-spalten">
+              <div class="person-spalte person-spalte-user">
+                <div class="person-spalte-titel" data-i18n="settings.person.userCol">
+                  Person
+                </div>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.name">Name</span>
+                  <input type="text" id="person-name" class="feld-breit"
+                         autocomplete="name" spellcheck="false"
+                         data-i18n-placeholder="settings.person.namePlaceholder"
+                         placeholder="Donald Duck">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.taxId">Steuernummer</span>
+                  <input type="text" id="person-steuernummer" class="feld-breit mono"
+                         autocomplete="off" spellcheck="false"
+                         data-i18n-placeholder="settings.person.taxIdPlaceholder"
+                         placeholder="0/8/15">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.address">Anschrift</span>
+                  <input type="text" id="person-anschrift" class="feld-breit"
+                         autocomplete="street-address" spellcheck="false"
+                         data-i18n-placeholder="settings.person.addressPlaceholder"
+                         placeholder="Entenhausen">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.email">E-Mail</span>
+                  <input type="email" id="person-email" class="feld-breit"
+                         autocomplete="email" spellcheck="false"
+                         data-i18n-placeholder="settings.person.emailPlaceholder"
+                         placeholder="optional">
+                </label>
+              </div>
+              <div class="person-spalte person-spalte-fa">
+                <div class="person-spalte-titel" data-i18n="settings.person.taxOfficeCol">
+                  Finanzamt
+                </div>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.taxOffice">Zuständiges Finanzamt</span>
+                  <input type="text" id="person-finanzamt" class="feld-breit"
+                         autocomplete="organization" spellcheck="false"
+                         data-i18n-placeholder="settings.person.taxOfficePlaceholder"
+                         placeholder="optional">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.taxOfficeAddress">Adresse Finanzamt</span>
+                  <input type="text" id="person-finanzamt-anschrift" class="feld-breit"
+                         autocomplete="off" spellcheck="false"
+                         data-i18n-placeholder="settings.person.taxOfficeAddressPlaceholder"
+                         placeholder="optional">
+                </label>
+                <label class="feld">
+                  <span class="feld-titel" data-i18n="settings.person.caseWorker">Sachbearbeiter</span>
+                  <input type="text" id="person-sachbearbeiter" class="feld-breit"
+                         autocomplete="off" spellcheck="false"
+                         data-i18n-placeholder="settings.person.caseWorkerPlaceholder"
+                         placeholder="optional">
+                </label>
+              </div>
+            </div>
+            <button type="button" id="person-uebernehmen" class="knopf"
+                    data-i18n="common.save" data-i18n-title="settings.person.applyTitle"
+                    title="Schreibt die persönlichen und Finanzamt-Angaben in die .env. Berichte nutzen diese Felder.">
+              Übernehmen
+            </button>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.person.hint">
+            Vorbelegt mit Donald Duck / 0/8/15 / Entenhausen — nur Platzhalter,
+            keine echten Daten. Finanzamt und Sachbearbeiter optional.
+            Erscheint im Kopf der HTML-/CSV-Berichte. Bleibt lokal in der .env;
+            wird nicht hochgeladen.
+          </p>
         </div>
 
         <div class="karte">
@@ -1142,23 +1277,16 @@
             </span>
           </div>
           <p class="klein" style="padding: 0 13px 8px; margin: 0;" data-i18n-html="sources.ratesHintHtml">
-            Mitgeliefert: Bitstamp-Schlusskurse (CryptoDataDownload). Eigene
-            CSV (Bloomberg o. Ä.) mit Datum- und Preisspalte überschreibt
-            gleiche Tage im Cache. Format z. B. <span class="mono">date,price</span>
-            oder Semikolon; Kopfzeile wird erkannt. Täglicher Lücken-Nachzug
-            (Bitstamp) nur mit Opt-in.
+            Mitgeliefert: Bitstamp-Schlusskurse (CryptoDataDownload). Fehlende
+            Tage werden automatisch nachgezogen (Bitstamp, sonst Mempool).
+            Eigene CSV (Bloomberg o. Ä.) überschreibt gleiche Tage im Cache —
+            Format z. B. <span class="mono">date,price</span> oder Semikolon.
           </p>
           <div id="kurs-historie-status" class="sanktions-zeile"></div>
           <div class="karte-fuss" style="gap: 8px; flex-wrap: wrap; align-items: center;">
-            <label class="feld feld-klein" style="flex: 0 1 auto;">
-              <input type="checkbox" id="kurs-historie-opt-in"
-                     data-i18n-title="sources.ratesOptInTitle"
-                     title="Erlaubt einmal täglich den Abruf der Bitstamp-Tageskurse von CryptoDataDownload, wenn die lokale Serie hinter gestern zurückliegt. 4 Wochen Überlappung, bei großer Diskrepanz Hinweis im Log.">
-              <span data-i18n="sources.ratesOptIn">Historie täglich nachziehen (Bitstamp)</span>
-            </label>
             <button type="button" id="kurs-historie-sync" class="knopf knopf-klein"
                     data-i18n="sources.ratesSync" data-i18n-title="sources.ratesSyncTitle"
-                    title="Jetzt Lücken prüfen und bei Opt-in Bitstamp-CSV nachladen.">
+                    title="Lücken jetzt prüfen und Kurse nachladen (Bitstamp/Mempool).">
               Jetzt nachziehen
             </button>
             <button type="button" id="kurs-import-eur" class="knopf knopf-klein"
@@ -1173,6 +1301,24 @@
             </button>
             <input type="file" id="kurs-csv-datei" accept=".csv,text/csv,text/plain" hidden>
           </div>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="sources.exchangeReports">Börsen-Reports</span>
+            <span id="boerse-zusatz" class="karte-zusatz"></span>
+            <button type="button" id="boerse-csv-import" class="knopf knopf-klein"
+                    data-i18n="sources.exchangeImport" data-i18n-title="sources.exchangeImportTitle"
+                    title="CSV einer Börse wählen (Transaktionshistorie). Nur Bitcoin-Adressen und TxIDs werden übernommen — Kurse und andere Coins verworfen. Danach erscheinen die Adressen in der Herkunft als Börsen-Klarname.">
+              Börsen-CSV importieren
+            </button>
+            <input type="file" id="boerse-csv-datei" accept=".csv,text/csv,text/plain" hidden>
+          </div>
+          <p class="meta" data-i18n="sources.exchangeMeta">
+            Deine Börsen-Historie anreichert Herkunft mit Klarnamen (z. B. „Börse · Kraken“).
+            Pro Börse eine Cache-Datei; nur On-Chain-Referenzen, keine Handelskurse.
+          </p>
+          <div id="boerse-status"></div>
         </div>
 
         <div class="karte">
@@ -1207,6 +1353,9 @@
           <div id="label-lauf" class="sanktions-zeile" hidden>
             <span class="spinner" aria-hidden="true"></span>
             <span id="label-text" data-i18n="sources.labelsLoading">Lade…</span>
+            <button type="button" id="label-abbruch" class="knopf knopf-klein" data-i18n="common.cancel" hidden>
+              Abbrechen
+            </button>
           </div>
           <div id="label-status"></div>
         </div>
@@ -1229,6 +1378,9 @@
           <div id="listen-lauf" class="sanktions-zeile" hidden>
             <span class="spinner" aria-hidden="true"></span>
             <span id="listen-text" data-i18n="sources.listsLoading">Lade…</span>
+            <button type="button" id="listen-abbruch" class="knopf knopf-klein" data-i18n="common.cancel" hidden>
+              Abbrechen
+            </button>
           </div>
           <div id="listen-status"></div>
         </div>
@@ -1272,6 +1424,106 @@
             Senden
           </button>
         </form>
+      </section>
+      <div id="empfang-spalter" class="dock-spalter empfang-spalter" role="separator"
+           aria-orientation="vertical"
+           data-i18n-aria-label="dock.empfangSplitAria"
+           aria-label="Breite von Assistent und Empfangs-QR"
+           data-i18n-title="dock.empfangSplitTitle"
+           title="Ziehen, um Empfangs-QR und Assistent breiter oder schmaler zu machen"></div>
+      <section id="empfang-pane" class="empfang-pane"
+               data-i18n-aria-label="dock.empfangAria" aria-label="Empfangsadresse">
+        <div class="empfang-kopf-zeile">
+          <div id="empfang-kopf" class="empfang-kopf" data-lern="empfang" data-i18n="dock.empfangHead"
+               data-i18n-title="dock.empfangHeadTitle"
+               title="Nächste Empfangsadresse dieses Wallets">Empfangen</div>
+          <!-- Lab-Regtest: Sats von lab-faucet an aktuelle Empfangsadresse. -->
+          <div id="empfang-lab-senden" class="empfang-lab-senden" hidden>
+            <input type="number" id="empfang-lab-sats" min="546" step="1" value="100000"
+                   title="Sats von lab-faucet (Fremd-Wallet) an die Empfangsadresse">
+            <button type="button" id="empfang-lab-ok" title="Von lab-faucet senden (Mempool)">OK</button>
+          </div>
+          <!-- Nur mit ?animdebug=1 sichtbar — nie für Releases aktiv lassen. -->
+          <div id="empfang-anim-debug" class="empfang-anim-debug" hidden>
+            <button type="button" data-anim="puls" title="Atem-Zyklus">Atem</button>
+            <button type="button" data-anim="orangeB" title="UTXO gefunden">₿</button>
+            <button type="button" data-anim="ohNo" title="Outgoing Mempool">OH</button>
+            <button type="button" data-anim="incoming" title="Incoming Mempool">🎉</button>
+            <button type="button" data-anim="haken" title="Tx bestätigt">✓</button>
+            <button type="button" data-anim="neuerBlock" title="Neuer Block">▣</button>
+            <button type="button" data-anim="stop" title="Stop">■</button>
+            <button type="button" data-anim="konfetti-tune" title="Konfetti mit aktuellen Reglern">🎉 tune</button>
+          </div>
+        </div>
+        <div id="empfang-konfetti-proto" class="empfang-konfetti-proto" hidden>
+          <div class="empfang-konfetti-proto-titel">Konfetti-Prototyp (Sats → Stärke / Gold)</div>
+          <label class="empfang-konfetti-modus">Modus
+            <select id="konfetti-modus">
+              <option value="auto">auto (Sats)</option>
+              <option value="bunt">bunt</option>
+              <option value="gold">gold</option>
+            </select>
+          </label>
+          <label>Sats in Tx
+            <input type="number" id="konfetti-sats" min="1" step="1" value="100000">
+          </label>
+          <label>Gold ab (sats)
+            <input type="number" id="konfetti-gold-ab" min="1" step="1" value="1000000">
+          </label>
+          <label>Impuls (Mündungsgeschwindigkeit) <span id="konfetti-impuls-wert">500</span>
+            <input type="range" id="konfetti-impuls" min="5" max="500" value="500"
+                   title="Wie stark die Kanone schießt — DAS steuert die Flugweite">
+          </label>
+          <label>Impuls-Streuung % <span id="konfetti-impuls-streu-wert">80</span>
+            <input type="range" id="konfetti-impuls-streu" min="0" max="90" value="80"
+                   title="Zufällige Abweichung ± um den Impuls je Schnipsel">
+          </label>
+          <label>Gravitation <span id="konfetti-grav-wert">5</span>
+            <input type="range" id="konfetti-grav" min="0" max="100" value="5"
+                   title="Erdanziehung auf vy im Flug (0 = schwerelos)">
+          </label>
+          <label>Sats→Impuls vorschlagen <span id="konfetti-staerke-wert">—</span>
+            <button type="button" id="konfetti-impuls-aus-sats" class="empfang-konfetti-proto-btn"
+                    title="Setzt den Impuls-Regler aus dem Sats-Betrag (log)">aus Sats setzen</button>
+          </label>
+          <label>Schnipsel (aus Sats) <span id="konfetti-count-wert">auto</span>
+            <input type="range" id="konfetti-count" min="1" max="200" value="64" disabled
+                   title="Anzahl kommt aus der Schein-Aufteilung des Sat-Betrags">
+          </label>
+          <label>Max-Dauer ms <span id="konfetti-dauer-wert">3000</span>
+            <input type="range" id="konfetti-dauer" min="1000" max="60000" step="500" value="3000"
+                   title="Nur Sicherheits-Obergrenze — Ende wenn alle Schnipsel liegen">
+          </label>
+          <label>Winkel min° <span id="konfetti-winkel-min-wert">30</span>
+            <input type="range" id="konfetti-winkel-min" min="10" max="70" value="30">
+          </label>
+          <label>Winkel max° <span id="konfetti-winkel-max-wert">80</span>
+            <input type="range" id="konfetti-winkel-max" min="40" max="90" value="80">
+          </label>
+          <label>Luftwiderstand <span id="konfetti-luft-wert">2</span>
+            <input type="range" id="konfetti-luft" min="0" max="100" value="2"
+                   title="Bremst den Kanonenschuss ab; danach Blattfall statt Mondgestein">
+          </label>
+          <div id="konfetti-proto-status" class="empfang-konfetti-proto-status mono"></div>
+        </div>
+        <div id="empfang-leer" class="empfang-leer" data-i18n="dock.empfangEmpty">
+          Wallet wählen, um eine Empfangsadresse zu zeigen.
+        </div>
+        <div id="empfang-inhalt" class="empfang-inhalt" hidden>
+          <div class="empfang-qr-wrap">
+            <div id="empfang-qr" class="empfang-qr" aria-hidden="true"></div>
+            <div id="empfang-qr-maske" class="empfang-qr-maske" hidden aria-hidden="true"></div>
+          </div>
+          <div class="empfang-meta">
+            <div id="empfang-wallet" class="empfang-wallet"></div>
+            <div id="empfang-adresse" class="empfang-adresse mono"></div>
+            <button type="button" id="empfang-lern-zurueck" class="empfang-lern-zurueck" hidden
+                    data-i18n="dock.empfangLernZurueck">Zurück zur Empfangsadresse</button>
+            <div id="empfang-index" class="empfang-index"></div>
+            <div id="empfang-quelle" class="empfang-quelle"></div>
+            <div id="empfang-hinweis" class="empfang-hinweis" hidden></div>
+          </div>
+        </div>
       </section>
     </div>
   </aside>
@@ -1317,12 +1569,19 @@
         <span class="feld-titel" data-i18n="wallets.addressDepth">Adressen (beide Ketten)</span>
         <input type="number" class="tiefe-wahl" min="2" max="2000" step="2">
       </label>
+      <label class="feld feld-check">
+        <span class="feld-titel" data-i18n="wallets.readOnly">Nur lesen</span>
+        <input type="checkbox" class="read-only-wahl"
+               data-i18n-title="wallets.readOnlyTitle"
+               title="Kein Empfangs-QR — Wallet nur beobachten.">
+      </label>
       <button type="button" data-i18n="wallets.probe" data-i18n-title="wallets.probeTitle" title="Leitet für jeden Skripttyp Adressen ab und fragt den Node, welche davon je benutzt wurden. Klärt, welcher Typ wirklich zu diesem XPUB gehört — bei „xpub“-Prefix ist das nicht ablesbar." class="knopf knopf-klein pruefen">Skripttyp prüfen</button>
     </div>
     <div class="probe-ergebnis" hidden></div>
   </div>
 </template>
 
+<script src="/vendor/qr-min.js"></script>
 <script src="/i18n.js"></script>
 <script src="/log_i18n.js"></script>
 <script src="/app.js"></script>

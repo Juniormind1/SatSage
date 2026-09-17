@@ -15,8 +15,8 @@ from core import wallets as wallets_mod
 from display import format_sats
 
 KNOPF_SCAN = "UTXO-Scan in der Wallet-Ansicht"
-KNOPF_VERLAUF = "Verlaufsscan (Wallet) bzw. Verlauf aller Wallets"
-KNOPF_HERKUNFT = "Herkunft aller UTXOs (Steuerjahr oder Herkunft tracen)"
+KNOPF_VERLAUF = "Historie (Wallet) bzw. Historien (Steuerjahr, alle Wallets)"
+KNOPF_HERKUNFT = "klären (Steuerjahr, Scorecard ohne Herkunft) bzw. Herkünfte UTXOs (Herkunft tracen)"
 KNOPF_HERKUNFT_TIEF = (
     "Herkunft vollständig (Wallet): jedes UTXO bis extern/Coinbase, "
     "kann sehr lange dauern"
