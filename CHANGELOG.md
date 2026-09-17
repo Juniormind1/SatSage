@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.6] — 2026-09-17
+
 - **Tests / Stabilität:** Unittest-Suite wieder grün — u. a. Tor erst nach LAN-Fail, SSL-Hinweistexte an Auto-Flip, Trace-Sort-IDs im HTML, Job-Gate-Reset in Tests, Empfangs-Ka-Ching nach Tip-Sync.
 - **Empfang · Mempool-Sprung:** Reihenfolge jetzt: Adresse benutzt bemerkt → **Konfetti auf alter QR** → Wallet-Update (Pending) → **neuer QR erst nach Animation**.
 - **Empfang · Ka-Ching:** Mempool-Eingang während Tip-Sync / Empfangs-Schärfung wurde verschluckt (QR sprang, kein Konfetti). Incoming wird gemerkt; Index-Sprung kurz nach Tip-Sync holt Ka-Ching nach.
