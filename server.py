@@ -4861,6 +4861,60 @@ def _live_p2p_peers() -> list[str]:
         return []
 
 
+def _breche_p2p_jobs_ab(state: AppState) -> list[str]:
+    """
+    Bricht laufende/geplante Jobs ab, die über BIP-158/P2P hängen.
+
+    Aufruf beim Papierkorb „P2P trennen“ — Nutzer startet Electrum/Scan selbst.
+    """
+    abgebrochen: list[str] = []
+    gesehen: set[str] = set()
+
+    def _merk(jid: str | None) -> None:
+        j = str(jid or "").strip()
+        if j and j not in gesehen:
+            gesehen.add(j)
+            abgebrochen.append(j)
+
+    # Header-Vorab ist immer P2P.
+    hid = getattr(state, "header_job_id", None)
+    if hid and (state.scan_queue.cancel(hid) or state.jobs.cancel(hid)):
+        _merk(hid)
+    state.header_job_id = None
+
+    # Scan-Pipeline: aktiver Job + Warteschlange (sonst startet der nächste
+    # Eintrag noch mit der alten P2P-Priorität).
+    try:
+        snap = state.scan_queue.snapshot()
+    except Exception:
+        snap = {"current": None, "queued": []}
+    cur = snap.get("current") or {}
+    jid = cur.get("job_id")
+    if jid and state.scan_queue.cancel(jid):
+        _merk(jid)
+    for eintrag in snap.get("queued") or []:
+        qid = eintrag.get("queue_id")
+        if qid and state.scan_queue.cancel(qid):
+            _merk(qid)
+
+    # Laufende Registry-Jobs: Header/Rescan/Verlauf; wallet_sync nur mit
+    # bekannter BIP-158-Quelle (sonst Electrs-Tip-Sync nicht killen).
+    for job in state.jobs.list():
+        if job.status != "running":
+            continue
+        if job.id in gesehen:
+            continue
+        src = (job.meta or {}).get("source")
+        if job.kind == "headers" or job.kind in ("rescan", "verlauf"):
+            if state.jobs.cancel(job.id) or state.scan_queue.cancel(job.id):
+                _merk(job.id)
+        elif job.kind == "wallet_sync" and src == "bip158":
+            if state.jobs.cancel(job.id):
+                _merk(job.id)
+
+    return abgebrochen
+
+
 def api_clear_source(state: AppState, quelle: str) -> dict:
     """
     Streicht einen eigenen Node aus der .env, schaltet P2P aus
@@ -4872,6 +4926,7 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
     _datenquellen_config_gesperrt(state, quelle=name, aktion="verwerfen")
     env = state.env()
     sicherung = None
+    cancelled_jobs: list[str] = []
 
     if name in ("own_fulcrum", "own_core", "own_utxo_core"):
         erlaubt = source_mod.EDITIERBARE_FELDER[name]
@@ -4886,15 +4941,15 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
     elif name == "bip158":
-        # Wie Checkbox „P2P aufbauen“ aus (fehlender Key = Default an).
+        # Wie Zeilen-Knopf „Verbinden“ rückgängig (fehlender Key = Default an).
         env.apply({"BIP158_P2P": "false"})
         env.runtime_values.pop("BIP158_P2P", None)
         try:
             sicherung = env.save()
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
-        # Laufende Header/Filter-Peers nicht weiter als „P2P an“ anzeigen.
-        state.header_job_id = None
+        # Zuerst Jobs stoppen, dann Peers leeren — sonst weiter Filter holen.
+        cancelled_jobs = _breche_p2p_jobs_ab(state)
         try:
             import bip158_scanner as _bip
 
@@ -4902,6 +4957,12 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
                 _bip._LIVE_FILTER_PEERS.clear()
         except Exception:
             pass
+        if cancelled_jobs:
+            print(
+                "P2P getrennt — laufende P2P-/Scan-Jobs abgebrochen "
+                f"({len(cancelled_jobs)}).",
+                flush=True,
+            )
     elif name == "public_onion":
         updates: dict[str, str | None] = {}
         for i in range(main.MAX_PUBLIC_ONION_SERVERS):
@@ -4942,6 +5003,7 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
         "cleared": name,
         "backup": str(sicherung) if sicherung else None,
         "sources": quellen,
+        "cancelled_jobs": cancelled_jobs,
     }
 
 
@@ -4996,6 +5058,8 @@ def api_rescan(state: AppState, payload: dict) -> dict:
 
             quelle, backend = main._setup_blockchain_client(args, state.env().values())
             job.raise_if_cancelled()
+            if isinstance(job.meta, dict):
+                job.meta["source"] = quelle
 
             fetchers = main._build_blockchain_fetchers(
                 quelle, backend, args, state.wallet_ctx,

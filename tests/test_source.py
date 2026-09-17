@@ -247,6 +247,8 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(quellen["clearnet"].laden_filter, "clearnet")
         self.assertIn("electrum", quellen["public_onion"].laden_url)
         self.assertNotIn("esplora", quellen)
+        self.assertFalse(quellen["public_onion"].editierbar)
+        self.assertEqual(quellen["public_onion"].felder, [])
 
     def test_esplora_ist_keine_quelle_mehr(self):
         """Esplora entfällt — P2P und Electrum reichen."""
@@ -423,9 +425,10 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(quelle.name, "Bitcoin-P2P · Compact Filter")
         self.assertNotIn("NODE_IP", [f.key for f in quelle.felder])
         self.assertIn("DNS-Seeds", quelle.detail)
-        felder = {f.key: f for f in quelle.felder}
-        self.assertEqual(felder["BIP158_P2P"].typ, "checkbox")
-        self.assertEqual(felder["BIP158_P2P"].value, "true")
+        # Kein Stift-Dialog — Start­höhe nur noch inline in der Zeile.
+        self.assertFalse(quelle.editierbar)
+        self.assertEqual(quelle.felder, [])
+        self.assertEqual(quelle.start_height, 481824)
 
     def test_p2p_aus_zeigt_hinweis_auf_oeffentliche_listen(self):
         quelle = next(
@@ -433,10 +436,7 @@ class TestCheckReachable(unittest.TestCase):
         )
         self.assertFalse(quelle.configured)
         self.assertIn("öffentliche Listen", quelle.detail)
-        self.assertEqual(
-            next(f for f in quelle.felder if f.key == "BIP158_P2P").value,
-            "false",
-        )
+        self.assertNotIn("BIP158_P2P", [f.key for f in quelle.felder])
 
     def test_p2p_nennt_node_im_lan_und_dns_fallback(self):
         quelle = next(
@@ -757,6 +757,96 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(nach["own_fulcrum"].configured)
         self.assertTrue(nach["own_fulcrum"].reachable)
         self.assertEqual(nach["own_fulcrum"].peer_count, 1)
+
+
+class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
+    """Nach Opt-in: Clearnet zuerst; Onions/Tor nur wenn Clearnet fehlt."""
+
+    def test_clearnet_treffer_probt_keine_onions(self):
+        from core import source as source_mod
+        from core.source import SourceInfo, PRIVACY_MEDIUM
+
+        gefunden = {
+            "public_onion": SourceInfo(
+                rank=5, key="public_onion", name="Onion", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True,
+            ),
+            "clearnet": SourceInfo(
+                rank=6, key="clearnet", name="Clear", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True,
+            ),
+        }
+        values = {"FULCRUM_TOR_0": "abc.onion", "OEFFENTLICHE_ELECTRUM": "1"}
+        logs: list[str] = []
+
+        with mock.patch.object(
+            source_mod, "_zaehle_electrum_endpunkte",
+            side_effect=lambda endpunkte, **kw: (
+                ["1.2.3.4:50002"] if endpunkte and not str(endpunkte[0][0]).endswith(".onion")
+                else (_ for _ in ()).throw(AssertionError("Onion darf nicht geprobt werden"))
+            ),
+        ), mock.patch.object(
+            source_mod, "splitte_electrum_server",
+            return_value=([], [("1.2.3.4", 50002, True)] * 3),
+        ), mock.patch(
+            "check_fulcrum_tor.load_electrum_servers", return_value={},
+        ), mock.patch.object(
+            source_mod, "_loese_oeffentliches_onion_tor",
+        ) as loese:
+            out = source_mod._pruefe_oeffentliche_electrum(
+                gefunden, values, timeout=1, on_log=logs.append,
+            )
+        self.assertEqual(out["clearnet"].peer_count, 1)
+        self.assertEqual(out["public_onion"].peer_count, 0)
+        self.assertIsNone(out["public_onion"].reachable)
+        loese.assert_called_once()
+        self.assertTrue(any("Clearnet" in z for z in logs))
+
+
+class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
+    """Clearnet-Probe darf nicht an den ersten 8 alphabetischen IPs hängen."""
+
+    def test_stichprobe_nicht_nur_prefix(self):
+        from core import source as source_mod
+
+        endpunkte = [(f"h{i}.example", 50002, True) for i in range(30)]
+        gesehen = set()
+        for _ in range(40):
+            stich = source_mod._waehle_electrum_stichprobe(endpunkte, 8)
+            self.assertEqual(len(stich), 8)
+            gesehen.update(h for h, _p, _s in stich)
+        # Bei echter Zufallsstichprobe tauchen auch hintere Hosts auf.
+        self.assertGreater(len(gesehen), 8)
+        self.assertTrue(any(h.startswith("h2") for h in gesehen), gesehen)
+
+    def test_zweite_runde_wenn_erste_tot(self):
+        from core import source as source_mod
+
+        tot = [(f"dead{i}.example", 50002, True) for i in range(8)]
+        gut = [("alive.example", 50002, True)]
+        endpunkte = tot + gut
+        logs: list[str] = []
+
+        def fake_connect(host, port, use_ssl=True, timeout=8, tor_proxy=None,
+                         require_listunspent=False):
+            if host == "alive.example":
+                class _C:
+                    def close(self):
+                        return None
+                return _C(), None
+            return None, "timed out"
+
+        with mock.patch("fulcrum.connect_fulcrum", side_effect=fake_connect):
+            with mock.patch.object(
+                source_mod.random, "sample",
+                side_effect=[list(tot), list(gut)],
+            ):
+                treffer = source_mod._zaehle_electrum_endpunkte(
+                    endpunkte, timeout=5, tor_proxy=None,
+                    on_log=logs.append, limit=8, max_runden=2,
+                )
+        self.assertEqual(treffer, ["alive.example:50002"])
+        self.assertTrue(any("weitere" in z for z in logs), logs)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ kann, worüber gerade gefragt wird und was das für die Privatsphäre bedeutet.
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
@@ -33,6 +34,7 @@ EDITIERBARE_FELDER: dict[str, tuple[str, ...]] = {
         "UTXO_RPC_HOST", "UTXO_RPCPORT", "UTXO_RPCUSER", "UTXO_RPCPASSWORD",
         "UTXO_RPC_SSL", "UTXO_RPC_COOKIE_FILE",
     ),
+    # UI: nur Start-Höhe inline; Peers/Tor-Proxy nur noch per .env.
     "bip158": ("BIP158_P2P", "BIP158_START_HEIGHT", "BIP158_PEERS",
                "FULCRUM_TOR_PROXY"),
     "public_onion": ("FULCRUM_TOR_LISTE", "FULCRUM_TOR_PROXY"),
@@ -97,7 +99,7 @@ class SourceInfo:
     peer_count: int = 0
     peer_hosts: list[str] = field(default_factory=list)
     felder: list[Feld] = field(default_factory=list)
-    #: Wenn gesetzt, zeigt die Oberfläche „Von Electrum laden“.
+    #: Wenn gesetzt, zeigt die Oberfläche den Knopf „Verbinden“ (Electrum-Liste).
     laden_url: str = ""
     laden_filter: str = ""  # onion | clearnet | ""
     #: Zeilen für den Log-Bereich. Ankündigung vor dem Schritt, nicht danach.
@@ -109,6 +111,8 @@ class SourceInfo:
     ssl_effective: bool | None = None
     #: Wenn Auto-Probe von der .env abwich: Schlüssel → "true"/"false" zum Speichern.
     ssl_persist: dict[str, str] = field(default_factory=dict)
+    #: BIP-158: Start­höhe für Inline-Feld (kein Stift-Dialog).
+    start_height: int | None = None
 
     @property
     def editierbar(self) -> bool:
@@ -144,6 +148,7 @@ class SourceInfo:
             "software_raw": self.software_raw,
             "ssl_effective": self.ssl_effective,
             "ssl_persist": dict(self.ssl_persist) if self.ssl_persist else {},
+            "start_height": self.start_height,
         }
 
 
@@ -661,7 +666,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     quellen.append(SourceInfo(
         rank=2,
         key="own_utxo_core",
-        name="UTXO-Set-Quelle",
+        name="pruned UTXO-Set-Quelle",
         detail=utxo_detail,
         privacy=PRIVACY_HIGH,
         configured=utxo_ok,
@@ -724,7 +729,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
             "BIP-158). UTXO-Bestand hat einen eigenen Slot darüber."
             if core_ok else
             "Core für Tx/Block-Lookups (Start9 o. Ä.). Pruned Desktop-Node "
-            "gehört in die UTXO-Set-Quelle, nicht hier."
+            "gehört in die pruned UTXO-Set-Quelle, nicht hier."
         ),
         felder=[
             Feld("NODE_IP", "Host", "text", node,
@@ -783,25 +788,9 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
                 "und öffentliche Electrum erlaubt ist, greifen die."
             )
         ),
-        felder=[
-            Feld(
-                "BIP158_P2P",
-                "P2P aufbauen",
-                "checkbox",
-                "true" if p2p_an else "false",
-                "Nur wenn aktiv: Compact Filter über Bitcoin-P2P. "
-                "Sonst können geladene öffentliche Listen greifen.",
-            ),
-            Feld("BIP158_START_HEIGHT", "Erster Scan-Block", "port", str(start),
-                 "Vorgabe SegWit (481824). Blöcke davor werden nicht durchsucht."),
-            Feld("BIP158_PEERS", "P2P-Peers", "text", peers,
-                 "Optional extra host:port. Der Host im LAN wird zuerst "
-                 "gefragt; ohne Filter folgen DNS-Seeds."),
-            Feld("FULCRUM_TOR_PROXY", "Tor-SOCKS-Proxy", "text",
-                 values.get("FULCRUM_TOR_PROXY", "").strip(),
-                 "Nach fehlgeschlagenem Clearnet-P2P: laufender Tor Browser "
-                 "(9150) oder Autostart des tor-Binary. LAN-IPs bleiben direkt."),
-        ],
+        # Kein Stift-Dialog: Start­höhe als Inline-Feld in der Zeile.
+        felder=[],
+        start_height=int(start),
     ))
 
     onions = [v for k, v in values.items() if k.startswith("FULCRUM_TOR_") and v.strip()
@@ -814,17 +803,14 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         detail=f"{len(onions)} Server · SOCKS {proxy}" if onions else "keine eingetragen",
         privacy=PRIVACY_MEDIUM,
         configured=bool(onions),
-        note="Rotation mildert das Risiko einzelner Server. Erst nach Bestätigung.",
+        note=(
+            "Nur wenn öffentliches Clearnet fehlt. Rotation mildert das Risiko "
+            "einzelner Server. Erst nach Bestätigung."
+        ),
         laden_url=ELECTRUM_SERVERS_URL,
         laden_filter="onion",
-        felder=[
-            Feld("FULCRUM_TOR_LISTE", "Onion-Adressen", "liste",
-                 "\n".join(onions),
-                 "Eine Adresse je Zeile, höchstens zehn. "
-                 "„Von Electrum laden“ übernimmt Onion-Hosts aus der Liste."),
-            Feld("FULCRUM_TOR_PROXY", "Tor-SOCKS-Proxy", "text", proxy,
-                 "Tor Browser: 127.0.0.1:9150, Tor-Dienst: 127.0.0.1:9050"),
-        ],
+        # Kein Stift/Formular: Liste nur über „Verbinden“ (oder .env FULCRUM_TOR_0…).
+        felder=[],
     ))
 
     clearnet_datei = main.ELECTRUM_SERVERS_FILE.is_file()
@@ -851,7 +837,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         note=(
             "Erst nach Bestätigung — Adressen gehen an Dritte."
             if clearnet_datei
-            else "Noch keine Liste — „Von Electrum laden“ holt sie."
+            else "Noch keine Liste — „Verbinden“ holt sie."
         ),
         laden_url=ELECTRUM_SERVERS_URL,
         laden_filter="clearnet",
@@ -1058,6 +1044,18 @@ def _oeffentliche_onion_endpunkte(values: dict[str, str]) -> list[tuple[str, int
     return endpunkte
 
 
+def _waehle_electrum_stichprobe(
+    endpunkte: list[tuple[str, int, bool]],
+    limit: int,
+) -> list[tuple[str, int, bool]]:
+    """Zufällige Stichprobe — die JSON-Liste ist alphabetisch und oft vorn tot."""
+    if limit <= 0 or not endpunkte:
+        return []
+    if len(endpunkte) <= limit:
+        return list(endpunkte)
+    return random.sample(list(endpunkte), limit)
+
+
 def _zaehle_electrum_endpunkte(
     endpunkte: list[tuple[str, int, bool]],
     *,
@@ -1065,17 +1063,14 @@ def _zaehle_electrum_endpunkte(
     tor_proxy: tuple[str, int] | None,
     on_log=None,
     limit: int = 8,
+    max_runden: int = 2,
 ) -> list[str]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from fulcrum import connect_fulcrum
 
-    auswahl = endpunkte[:limit]
-    if not auswahl:
+    if not endpunkte:
         return []
-    for host, port, ssl in auswahl:
-        if on_log:
-            on_log(f"Verbinde mit {host}:{port}")
 
     def eines(ende: tuple[str, int, bool]):
         host, port, ssl = ende
@@ -1091,19 +1086,58 @@ def _zaehle_electrum_endpunkte(
             return host, port, None
         return host, port, fehler or "fehlgeschlagen"
 
+    rest = list(endpunkte)
     treffer: list[str] = []
-    with ThreadPoolExecutor(max_workers=min(8, len(auswahl))) as pool:
-        futures = [pool.submit(eines, e) for e in auswahl]
-        for fut in as_completed(futures):
-            host, port, fehler = fut.result()
-            if fehler is None:
-                treffer.append(f"{host}:{port}")
-                if on_log:
-                    on_log(f"Verbunden. {host}:{port}")
-            elif on_log:
-                on_log(f"Verbindung fehlgeschlagen {host}:{port}: {fehler}")
+    runden = max(1, int(max_runden))
+    for runde in range(runden):
+        if not rest:
+            break
+        auswahl = _waehle_electrum_stichprobe(rest, limit)
+        # Entfernen über Identität der Tupel — Stichprobe nicht nochmal.
+        genommen = set(auswahl)
+        rest = [e for e in rest if e not in genommen]
+        for host, port, _ssl in auswahl:
+            if on_log:
+                on_log(f"Verbinde mit {host}:{port}")
+        with ThreadPoolExecutor(max_workers=min(8, len(auswahl))) as pool:
+            futures = [pool.submit(eines, e) for e in auswahl]
+            for fut in as_completed(futures):
+                host, port, fehler = fut.result()
+                if fehler is None:
+                    treffer.append(f"{host}:{port}")
+                    if on_log:
+                        on_log(f"Verbunden. {host}:{port}")
+                elif on_log:
+                    on_log(f"Verbindung fehlgeschlagen {host}:{port}: {fehler}")
+        if treffer:
+            break
+        if rest and on_log and runde + 1 < runden:
+            on_log(
+                f"Keine Treffer in Stichprobe {runde + 1} — "
+                f"versuche weitere {min(limit, len(rest))} Server…"
+            )
     treffer.sort()
     return treffer
+
+
+def _loese_oeffentliches_onion_tor(*, on_log=None) -> None:
+    """
+    Beendet von SatSage gestartetes Tor, das nur für öffentliche Onions lief.
+
+    Clearnet ist dann die aktive öffentliche Quelle — Scans sollen den
+    Tor-Flaschenhals nicht mehr anfassen können. Eigenes Tor-Browser-SOCKS
+    (9150) bleibt unberührt; ``stoppe_eigenes_tor`` killt nur unseren Autostart.
+    """
+    try:
+        from core.tor import stoppe_eigenes_tor
+    except ImportError:
+        return
+    stoppe_eigenes_tor()
+    if on_log:
+        on_log(
+            "Öffentliche Onion-Electrs nicht genutzt — "
+            "Clearnet erreichbar; Tor-Autostart für Onions beendet."
+        )
 
 
 def _pruefe_oeffentliche_electrum(
@@ -1113,16 +1147,40 @@ def _pruefe_oeffentliche_electrum(
     timeout: int,
     on_log=None,
 ) -> dict[str, SourceInfo]:
-    """Öffentliche Onions und Clearnet zählen, wenn eigener Node und P2P fehlen."""
+    """Öffentliche Clearnet zählen; Onions nur wenn Clearnet fehlt."""
 
     def log(text: str) -> None:
         if on_log:
             on_log(text)
 
     log("Prüfe öffentliche Electrum-Server…")
+    clear_hosts: list[str] = []
+    try:
+        from check_fulcrum_tor import load_electrum_servers
+
+        servers = load_electrum_servers(main.ELECTRUM_SERVERS_FILE)
+        _onion_liste, clear = splitte_electrum_server(servers)
+    except (OSError, ValueError):
+        clear = []
+    if clear:
+        log(
+            f"{len(clear)} Clearnet-Server in der Liste, "
+            f"zufällige Stichprobe (bis 8, ggf. zweite Runde)…"
+        )
+        # Früher: endpunkte[:8] — alphabetisch oft tote IP-Literale vorn;
+        # bekannte Hosts (blockstream/qtornado/…) lagen unerreicht weiter hinten.
+        clear_hosts = _zaehle_electrum_endpunkte(
+            clear, timeout=8.0,
+            tor_proxy=None, on_log=log,
+        )
+
     onions = _oeffentliche_onion_endpunkte(values)
     onion_hosts: list[str] = []
-    if onions:
+    if clear_hosts:
+        # Clearnet reicht — Onions weder proben noch als „verbunden“ führen,
+        # Tor-Autostart für öffentliche Onions lösen.
+        _loese_oeffentliches_onion_tor(on_log=log)
+    elif onions:
         from core.tor import TorFehler, stelle_tor_socks_bereit
 
         raw = values.get("FULCRUM_TOR_PROXY") or values.get("TOR_PROXY") or "127.0.0.1:9050"
@@ -1137,35 +1195,37 @@ def _pruefe_oeffentliche_electrum(
             log(f"Tor für öffentliche Onions nicht bereit: {exc}")
             tor_proxy = None
         else:
-            log(f"{len(onions)} öffentliche Onions…")
+            log(f"{len(onions)} öffentliche Onions (Clearnet fehlt)…")
+            # Nach Bootstrap: etwas Luft für den ersten Circuit; nicht 30s je
+            # Probe, sonst wirkt die Pille minutenlang grau.
             onion_hosts = _zaehle_electrum_endpunkte(
-                onions, timeout=min(float(timeout), 8.0),
+                onions, timeout=min(max(float(timeout), 8.0), 15.0),
                 tor_proxy=tor_proxy, on_log=log,
             )
 
-    clear_hosts: list[str] = []
-    try:
-        from check_fulcrum_tor import load_electrum_servers
-
-        servers = load_electrum_servers(main.ELECTRUM_SERVERS_FILE)
-        _onion_liste, clear = splitte_electrum_server(servers)
-    except (OSError, ValueError):
-        clear = []
-    if clear:
-        log(f"{len(clear)} Clearnet-Server in der Liste, prüfe bis zu 8…")
-        clear_hosts = _zaehle_electrum_endpunkte(
-            clear, timeout=min(float(timeout), 5.0),
-            tor_proxy=None, on_log=log,
-        )
-
     onion_info = gefunden.get("public_onion")
     if onion_info is not None:
-        gefunden["public_onion"] = replace(
-            onion_info,
-            reachable=bool(onion_hosts) if onions else onion_info.reachable,
-            peer_count=len(onion_hosts),
-            peer_hosts=onion_hosts,
-        )
+        if clear_hosts:
+            # Stale „onion verbunden“ vermeiden, wenn Clearnet die Quelle ist.
+            gefunden["public_onion"] = replace(
+                onion_info,
+                reachable=None if onion_info.configured else onion_info.reachable,
+                peer_count=0,
+                peer_hosts=[],
+                error="",
+                note=(
+                    "Nicht genutzt — öffentliches Clearnet-Electrs ist erreichbar."
+                    if onion_info.configured
+                    else onion_info.note
+                ),
+            )
+        else:
+            gefunden["public_onion"] = replace(
+                onion_info,
+                reachable=bool(onion_hosts) if onions else onion_info.reachable,
+                peer_count=len(onion_hosts),
+                peer_hosts=onion_hosts,
+            )
     clear_info = gefunden.get("clearnet")
     if clear_info is not None:
         gefunden["clearnet"] = replace(

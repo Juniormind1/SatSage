@@ -236,11 +236,14 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("loescheElectrumListe", self.js)
         self.assertIn("sources.disableP2pTitle", self.js)
         self.assertIn("feld.typ === \"checkbox\"", self.js)
+        self.assertIn("verbindeP2p", self.js)
         self.assertIn('"sources.reachable": "verbunden"', de)
         self.assertIn('"sources.clearListTitle"', de)
-        self.assertIn('"sources.field.BIP158_P2P.label": "P2P aufbauen"', de)
+        self.assertIn('"sources.connect": "Verbinden"', de)
+        self.assertIn('"sources.connectP2pTitle"', de)
         en = (WEB / "locales" / "en.json").read_text(encoding="utf-8")
         self.assertIn('"sources.reachable": "Connected"', en)
+        self.assertIn('"sources.connect": "Connect"', en)
 
     def test_assistent_dock_und_pille_phase1(self):
         """Phase 1: Log|Chat-Leiste, Kopf-Pille, Einstellungen — kein Chat-Call."""

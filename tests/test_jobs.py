@@ -559,6 +559,8 @@ class TestOnionLatenzGate(unittest.TestCase):
         with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
             main, "_try_bip158_backend", side_effect=[None, bip]
         ), patch.object(
+            main, "_setup_public_clearnet_fulcrum", return_value=None,
+        ), patch.object(
             main, "_try_public_onion_fulcrum", return_value=pool
         ), patch.object(
             main, "_measure_onion_get_history_latency", return_value=11.0
@@ -569,6 +571,23 @@ class TestOnionLatenzGate(unittest.TestCase):
         self.assertEqual(quelle, "bip158")
         self.assertIs(backend, bip)
         pool.close.assert_called_once()
+
+    def test_kette_clearnet_vor_oeffentlichem_onion(self):
+        clear = MagicMock()
+        onion = MagicMock()
+        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
+            main, "_try_bip158_backend", return_value=None,
+        ), patch.object(
+            main, "_setup_public_clearnet_fulcrum", return_value=clear,
+        ), patch.object(
+            main, "_try_public_onion_fulcrum", return_value=onion,
+        ) as onion_try:
+            quelle, backend, _ = main._try_data_source_priority_chain(
+                self.args, {"OEFFENTLICHE_ELECTRUM": "1"}, include_bip158=True,
+            )
+        self.assertEqual(quelle, "fulcrum")
+        self.assertIs(backend, clear)
+        onion_try.assert_not_called()
 
     def test_schnell_genug_behaelt_onion(self):
         pool = MagicMock()

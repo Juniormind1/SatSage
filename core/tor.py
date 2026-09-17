@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -277,6 +278,23 @@ def _bootstrap_stand() -> str | None:
     return None
 
 
+_BOOTSTRAP_PROZENT_RE = re.compile(r"Bootstrapped\s+(\d+)%", re.IGNORECASE)
+
+
+def _bootstrap_prozent() -> int | None:
+    """Letzter bekannter Tor-Bootstrap in Prozent, sonst ``None``."""
+    stand = _bootstrap_stand()
+    if not stand:
+        return None
+    m = _BOOTSTRAP_PROZENT_RE.search(stand)
+    return int(m.group(1)) if m else None
+
+
+def _bootstrap_fertig() -> bool:
+    prozent = _bootstrap_prozent()
+    return prozent is not None and prozent >= 100
+
+
 def _atexit_stop() -> None:
     stoppe_eigenes_tor()
 
@@ -316,22 +334,43 @@ def _starte_tor(
 
     deadline = time.monotonic() + timeout
     letzte_meldung = ""
+    socks_offen = False
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             rest = "\n".join(_log_tail[-8:]) or f"Exit-Code {proc.returncode}"
             raise TorFehler(f"Tor ist sofort beendet:\n{rest}")
-        if socks_erreichbar(TOR_SOCKS_HOST, socks_port):
+        if not socks_offen and socks_erreichbar(TOR_SOCKS_HOST, socks_port):
+            socks_offen = True
             if log:
                 stand = _bootstrap_stand()
                 log(stand or f"Tor-SOCKS lauscht auf {TOR_SOCKS_HOST}:{socks_port}")
-            with _started_lock:
-                _started = proc
-            return proc
+                if not _bootstrap_fertig():
+                    log("Warte auf Tor-Bootstrap (100 %), bevor .onion genutzt wird…")
         stand = _bootstrap_stand()
         if log and stand and stand != letzte_meldung:
             log(stand)
             letzte_meldung = stand
+        # SOCKS allein reicht nicht: Tor öffnet den Port schon bei 0 %,
+        # Onion-Circuits kommen erst mit Bootstrapped 100 %.
+        if socks_offen and _bootstrap_fertig():
+            with _started_lock:
+                _started = proc
+            return proc
         time.sleep(0.4)
+
+    if socks_offen:
+        # Degraded: SOCKS da, Circuit noch nicht — Aufrufer dürfen trotzdem
+        # versuchen; Logs zeigen den Stand. Besser als hart abbrechen, wenn
+        # das Netz nur langsam bootstrapped.
+        if log:
+            stand = _bootstrap_stand() or "Bootstrap unvollständig"
+            log(
+                f"Tor-SOCKS offen, aber nach {int(timeout)}s noch nicht 100 % "
+                f"({stand}). Onion-Verbindungen können scheitern."
+            )
+        with _started_lock:
+            _started = proc
+        return proc
 
     proc.terminate()
     raise TorFehler(

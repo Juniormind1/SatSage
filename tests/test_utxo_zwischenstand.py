@@ -83,6 +83,9 @@ class TestGapScanMeldetUtxos(unittest.TestCase):
 class TestListunspentMeldetUtxos(unittest.TestCase):
     def test_sequentiell_meldet_zwischenstand(self):
         class Client:
+            def tor_batch_sinnvoll(self, n_calls: int) -> bool:
+                return False
+
             def request(self, method, params=None):
                 if method == "blockchain.scripthash.listunspent":
                     # eine Adresse → ein UTXO

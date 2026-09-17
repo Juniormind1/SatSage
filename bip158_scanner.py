@@ -810,10 +810,15 @@ def _block_aus_warteschlange(
     ergebnisse: dict,
     wach: threading.Condition,
     timeout: float = 180.0,
+    soll_enden=None,
 ) -> bytes | None:
     deadline = time.monotonic() + timeout
     with wach:
         while hoehe not in ergebnisse:
+            if soll_enden and soll_enden():
+                from core.jobs import Cancelled
+
+                raise Cancelled()
             rest = deadline - time.monotonic()
             if rest <= 0:
                 raise TimeoutError(
@@ -828,12 +833,14 @@ def _zeilen_bloecke_aufloesen(
     *,
     ergebnisse: dict,
     wach: threading.Condition,
+    soll_enden=None,
 ) -> list:
     aufgeloest = []
     for h, block_hash, blob, roh in zeilen:
         if roh is _BLOCK_PENDING:
             roh = _block_aus_warteschlange(
                 h, block_hash, ergebnisse=ergebnisse, wach=wach,
+                soll_enden=soll_enden,
             )
         aufgeloest.append((h, block_hash, blob, roh))
     return aufgeloest
@@ -868,6 +875,17 @@ def verteile_cfilter_chunks(
     stand = gezaehlt if gezaehlt is not None else [0]
     stats = stats if stats is not None else {}
 
+    # Cancel-Event hier (Job-Thread) einfangen — Worker haben kein ContextVar.
+    cancel_ev = None
+    try:
+        from core.jobs import aktueller_job as _aktueller_job_fn
+
+        _j = _aktueller_job_fn()
+        if _j is not None:
+            cancel_ev = _j._cancel
+    except Exception:
+        cancel_ev = None
+
     # Async-Blöcke sobald hole_bloecke: Filter enqueued nur, Block-Worker
     # holen mit Peer-Lock (Socket nicht parallel getcfilters+getdata).
     async_blocks = bool(hole_bloecke)
@@ -881,6 +899,10 @@ def verteile_cfilter_chunks(
     block_threads: list[threading.Thread] = []
 
     def _soll_enden() -> bool:
+        if cancel_ev is not None and cancel_ev.is_set():
+            return True
+        if block_stop.is_set():
+            return True
         try:
             from core.jobs import job_abgebrochen
             from display import is_list_abort_requested
@@ -888,6 +910,22 @@ def verteile_cfilter_chunks(
             return bool(job_abgebrochen() or is_list_abort_requested())
         except ImportError:
             return False
+
+    def _abbruch_oder_raus() -> None:
+        """Wirft Cancelled bzw. beendet den Generator sauber."""
+        if not _soll_enden():
+            return
+        block_stop.set()
+        try:
+            from core.jobs import raise_if_job_cancelled
+
+            raise_if_job_cancelled()
+        except ImportError:
+            pass
+        # ContextVar fehlt (sollte hier nicht), aber Event ist gesetzt.
+        from core.jobs import Cancelled
+
+        raise Cancelled()
 
     def block_arbeit(peer) -> None:
         lock = peer_locks[id(peer)]
@@ -938,11 +976,13 @@ def verteile_cfilter_chunks(
             return zeilen
         return _zeilen_bloecke_aufloesen(
             zeilen, ergebnisse=block_ergebnisse, wach=block_wach,
+            soll_enden=_soll_enden,
         )
 
     try:
         if len(filter_peers) == 1:
             for von, bis, stop in chunks:
+                _abbruch_oder_raus()
                 zeilen = _chunk_laden(filter_peers[0], von, bis, stop)
                 _tick_filter_stand(von, bis, stand, gesamt)
                 yield _chunk_fertig(zeilen)
@@ -1063,14 +1103,7 @@ def verteile_cfilter_chunks(
 
         try:
             for index in range(len(chunks)):
-                if _soll_enden():
-                    try:
-                        from core.jobs import raise_if_job_cancelled
-
-                        raise_if_job_cancelled()
-                    except ImportError:
-                        pass
-                    return
+                _abbruch_oder_raus()
                 with wach:
                     while index not in fertig:
                         if _soll_enden():
@@ -1079,17 +1112,22 @@ def verteile_cfilter_chunks(
                             break
                         wach.wait(timeout=1.0)
                     if index not in fertig:
+                        # Abbruch: keine neuen Peers anheuern — sonst läuft
+                        # der Scan trotz Knopf weiter.
+                        _abbruch_oder_raus()
                         if not _neuer_worker():
                             raise RuntimeError(
                                 "alle Compact-Filter-Peers ausgefallen"
                             )
                         while index not in fertig:
+                            _abbruch_oder_raus()
                             if lebendig <= 0 and index not in fertig:
                                 raise RuntimeError(
                                     "alle Compact-Filter-Peers ausgefallen"
                                 )
                             wach.wait(timeout=1.0)
                         if index not in fertig:
+                            _abbruch_oder_raus()
                             raise RuntimeError(
                                 "alle Compact-Filter-Peers ausgefallen"
                             )

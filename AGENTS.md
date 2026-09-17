@@ -66,8 +66,8 @@ py main.py --txid <txid> --xpubs zpub6...
 
 1. **Eigener Electrum-Server** (`FULCRUM_HOST` / `FULCRUM_TOR`, electrs/Fulcrum) â€” PrivatsphÃ¤re **hoch**
 2. **Bitcoin-P2P Compact Filter** â€” `--bip158` (kein Core-RPC)
-3. **Ã–ffentliche Fulcrum-Onions** â€” `FULCRUM_TOR_0`â€¦`9`, nur nach BestÃ¤tigung
-4. **Clearnet-Fulcrum** â€” Ã¶ffentliche Server ohne Tor (`electrum_servers.json`), nur nach BestÃ¤tigung
+3. **Clearnet-Fulcrum** â€” Ã¶ffentliche Server ohne Tor (`electrum_servers.json`), nur nach BestÃ¤tigung
+4. **Ã–ffentliche Fulcrum-Onions** â€” `FULCRUM_TOR_0`â€¦`9`, nur nach BestÃ¤tigung und nur wenn Clearnet nicht erreichbar (dann Tor; bei Clearnet-Treffer wird Ã¶ffentliches Onion/Tor-Autostart gelÃ¶st)
 
 **UTXO-Bestand** (zusätzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
 

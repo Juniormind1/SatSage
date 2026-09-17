@@ -1,6 +1,6 @@
 # Testplan · Features seit letztem `main`-Stand (Release-Kandidat 0.9.6)
 
-**Stand:** 2026-09-17  
+**Stand:** 2026-09-17 (Juniormind-Fortschritt: A1, A2 abgehakt)  
 **Scope:** `origin/main`…`HEAD` auf `dev-juniormind` (Merge-Base `ac62b7f`, 24 Commits, Changelog `[Unveröffentlicht]`).  
 **Ziel:** Vor Merge/Bump 0.9.6 wissen, wer was absichert.
 
@@ -23,9 +23,9 @@
 
 | # | P | Feature | testet Grok | testet Juniormind | Warum Grok leer / Automation |
 |---|---|---|---|---|---|
-| A1 | P0 | **Electrs über Tor · JSON-RPC-Batch** (UTXO, Gap, Alter) | `tests/test_fulcrum_tor_batch.py`; Fake-Clients in Parallel-/Zwischenstand-Tests um `tor_batch_sinnvoll` ergänzen bis Suite/CI grün | **Erledigt (Juniormind, Commit „Batched Tor getestet“)** — Live am eigenen Onion-Node | Live-Abnahme durch dich erledigt. Offen nur noch **CI-Fakes** (`AttributeError: tor_batch_sinnvoll` in `test_parallel` / `test_utxo_zwischenstand`) — Automation-Fix Pflicht vor Merge, kein erneuter Live-Test nötig |
-| A2 | P0 | **Tor/Electrs · SOCKS-Cache 90 s + Electrum-Gate** (Jobs nacheinander) | `tests/test_tor.py`, Job-Serialisierung in `tests/test_jobs.py` soweit vorhanden | Zwei Jobs parallel anstoßen (UTXO+Herkunft) über Tor — zweiter wartet; kein Dauer-„Prüfe Tor-SOCKS“ | Live-Latenzgefühl nur manuell |
-| A3 | P0 | **Öffentliches Electrum · nur Sitzungs-Opt-in** (kein Dauer-`.env`) | API-/Config-Test: Start entfernt `OEFFENTLICHE_ELECTRUM=1`; Dialog-Flag nur Runtime — ggf. Test nachziehen | Neustart → Dialog wieder; Headless-CLI/`--oeffentliche-electrum` weiter ok | **Automation möglich** (Env-Schreiben + Server-Start); UI-Dialog zusätzlich manuell |
+| A1 | P0 | **Electrs über Tor · JSON-RPC-Batch** (UTXO, Gap, Alter) | `tests/test_fulcrum_tor_batch.py`; Fake-Clients in Parallel-/Zwischenstand-Tests um `tor_batch_sinnvoll` ergänzen bis Suite/CI grün | **✓ Juniormind** (Commit „Batched Tor getestet“ + erneute Bestätigung) — Live am eigenen Onion-Node | Live erledigt. Offen nur noch **CI-Fakes** (`tor_batch_sinnvoll` in `test_parallel` / `test_utxo_zwischenstand`) — Grok-Fix vor Merge |
+| A2 | P0 | **Tor/Electrs · SOCKS-Cache 90 s + Electrum-Gate** (Jobs nacheinander) | `tests/test_tor.py`, Job-Serialisierung in `tests/test_jobs.py` soweit vorhanden | **✓ Juniormind** — durch Firewall; Herkunft: erst UTXO-Scan, danach Herkunft (Gate serialisiert) | Live erledigt. Unit-Abdeckung Gate/SOCKS-Cache bleibt Grok-Sache |
+| A3 | P0 | **Öffentliches Electrum · nur Sitzungs-Opt-in** (kein Dauer-`.env`) | API-/Config-Test: Start entfernt `OEFFENTLICHE_ELECTRUM=1`; Dialog-Flag nur Runtime; Stichprobe-Tests (`TestOeffentlicheElectrumStichprobe`) | **Teil ✓ Juniormind:** Dialog/Sitzung ok. Probe scheiterte an toter `[:8]`-Liste — Fix (Zufallsstichprobe + 2. Runde, Tor wartet auf Bootstrap 100 %). **Bitte Retest** nach Pull/Neustart | Opt-in-Semantik ok. Verbindungsfehler war Auswahl/Tor-Bootstrap, nicht „alle Server tot“ |
 | A4 | P1 | **Empfang über öffentlichen Pool** nach Opt-in | — | Nach Opt-in freie Adresse mit History über Public-Pool; ohne Opt-in Cache-Warnung | Braucht Opt-in-Dialog + Netz; Unittest mit Mock-Fetcher **möglich**, lohnt nach A3 |
 | A5 | P1 | **Electrs-Config-Wechsel** startet Watch/Empfang neu; alte Tor-Port/SSL-Keys weg | Config-Write-Test (Key-Löschung) | Host/Port/TLS speichern → neue Verbindung ohne Server-Neustart | Key-Löschung **automatisierbar**; Live-Reconnect manuell |
 | A6 | P1 | **TLS auto-flip** + Schreiben `FULCRUM_SSL` | `tests/test_connection_hints.py` an neue Texte anpassen (CI-Fail) | Falsches TLS absichtlich → Auto-Korrektur, `.env` stimmt | Texte/Automation **möglich**; echtes Mismatch-Gerät manuell |
@@ -135,7 +135,7 @@
 | Rolle | Fokus |
 |-------|--------|
 | **Grok** | CI/Unittests grün (A1/A6/F8 Fix), Userflow, Browser-Smokes P0/P1 lokal, Lab-Verifies Sanktion/Tx-Classify, Umbrel-Unit, Trace/Sanktion/Exchange-Unit |
-| **Juniormind** | A1 Live-Tor erledigt; noch A2-Gefühl, echte Börsen-CSV (B1), GUI-Optik/Animation (A8/E5/F4/F5), Nav-Timing, Umbrel/StartOS-Gerät, Copy/AML-Texte, Specter Weg A optional |
+| **Juniormind** | A1+A2 erledigt; als Nächstes sinnvoll: A3/A10, B1/B2, echte Börsen-CSV, GUI-Optik (A8/E5/F4/F5), Nav-Timing, Umbrel/StartOS, Copy/AML, Specter optional |
 
 ---
 

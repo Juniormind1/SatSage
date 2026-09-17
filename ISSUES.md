@@ -2,6 +2,20 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## BIP-158 · ein Filterpass für alle XPUBs (ohne eigenen Indexer)
+
+**Stand:** 2026-09-17 · **offen** · später · Datenquelle / P2P · Performance
+
+**Problem:** Ohne eigenen Electrs/Fulcrum läuft der UTXO-Bestand über Compact Filter **pro Wallet / XPUB** (Scan-Queue + `fetch_wallet_utxos_bip158`: `for xpub in xpubs`). Mehrere Wallets ⇒ mehrfacher Lauf über dieselben Höhen (Turbo/Historie) — großer Zeitfresser für P2P-only-Nutzer.
+
+**Soll (Idee):** Ein gemeinsamer Filterpass: Scripts **aller** konfigurierten XPUBs in einem `watched`-Set matchen, Treffer dem richtigen XPUB zuordnen, Caches weiter **pro Wallet** schreiben. Abbruch, Zwischenstand und unterschiedliche Start­höhen/Alter sauber lösen.
+
+**Nicht:** Herkunft-Trace umbauen — der liest den Bestand aus dem Cache und macht Tx-Graph-Walks; der Boost trifft die **Bestands-Population**.
+
+**Nutzen:** Sehr hoch für Nutzer ohne Indexer. Architektur-Hebel, kein Mikro-Polish — **später bauen**, kein 0.9.6-Blocker.
+
+---
+
 ## Steuerbericht · HTML/CSV-Knöpfe gelb/grün nach Trace-Tiefe (BMF)
 
 **Stand:** 2026-09-16 · **offen** · Produkt / UI / Steuer

@@ -72,6 +72,9 @@ class TestRequestBatch(unittest.TestCase):
         self.assertFalse(c.tor_batch_sinnvoll(1))
         lan = fulcrum.FulcrumClient("10.0.0.1", 50001, use_ssl=False)
         self.assertFalse(lan.tor_batch_sinnvoll(100))
+        # Öffentliche Rotation: nie Tor-Batch (kein request_batch am Pool).
+        pool = fulcrum.RotatingFulcrumPool([lan])
+        self.assertFalse(pool.tor_batch_sinnvoll(100))
 
 
 class TestFetchUtxosTorBatch(unittest.TestCase):

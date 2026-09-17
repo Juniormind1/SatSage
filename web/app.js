@@ -2587,25 +2587,45 @@ const EmpfangPuls = (() => {
   }
 
   /**
-   * Belohnung nach kniffliger Config (z. B. Datenquelle/TLS): viel Staub,
-   * keine großen Scheine. Full-Viewport, einmalig — Anfänger-Erfolg feiern.
+   * Belohnung nach kniffliger Config (z. B. Datenquelle/TLS): viel Staub
+   * im QR-Feld (schwarz), keine großen Scheine — wie Ka-Ching-Fläche.
    */
   function starteStaubKonfetti(onDone) {
-    const nStaub = 140;
+    const pane = document.getElementById("empfang-pane");
+    const leer = document.getElementById("empfang-leer");
+    const inhalt = document.getElementById("empfang-inhalt");
+    const qr = document.getElementById("empfang-qr");
+    if (pane) {
+      pane.classList.add(
+        "empfang-pane--puls",
+        "empfang-pane--konfetti",
+        "empfang-pane--staub",
+      );
+    }
+    if (leer) leer.hidden = true;
+    if (inhalt) inhalt.hidden = false;
+    if (qr) qr.classList.add("empfang-qr--schwarz");
+
+    const nStaub = 480; // 3× vorher
+    const fertig = () => {
+      if (qr) qr.classList.remove("empfang-qr--schwarz");
+      if (pane) pane.classList.remove("empfang-pane--staub");
+      if (typeof onDone === "function") onDone();
+    };
     return starteKonfetti({
       scheine: Array.from({ length: nStaub }, () => 10),
       staubExtra: 0,
       sats: 10,
       modus: "bunt",
-      impuls: 380,
-      impulsStreu: 90,
-      grav: 4,
-      luft: 8,
-      winkelMin: 20,
-      winkelMax: 95,
-      dauer: 2800,
-      fullViewport: true,
-    }, onDone);
+      impuls: 280, // langsamer Start
+      impulsStreu: 70,
+      grav: 2.2, // 50 %+ langsamer Fall
+      luft: 14,
+      winkelMin: 15,
+      winkelMax: 100,
+      dauer: 7200, // 50 % länger
+      fullViewport: false,
+    }, fertig);
   }
 
   function starteKonfetti(opts, onDone) {
@@ -2613,7 +2633,7 @@ const EmpfangPuls = (() => {
     const pane = document.getElementById("empfang-pane");
     const fullVp = Boolean(opts && opts.fullViewport);
     let host = fullVp
-      ? (document.getElementById("app") || document.body)
+      ? (document.body || document.getElementById("app"))
       : (wrap || pane);
     if (!host) {
       if (typeof onDone === "function") onDone();
@@ -3027,6 +3047,22 @@ function jubelDatenquelleErfolg() {
   } catch (_) {
     /* Animation optional */
   }
+}
+
+/**
+ * Privatsphäre hoch: eigener Indexer und/oder P2P.
+ * Öffentliches Electrum (kind public) — nie.
+ */
+function standHatHochPrivateVerbindung(stand, quellen) {
+  if (stand && stand.kind === "public") return false;
+  if (stand && stand.gut && (stand.kind === "own" || stand.kind === "mixed" || stand.kind === "p2p")) {
+    return true;
+  }
+  const liste = quellen || [];
+  const own = liste.find((q) => q && q.key === "own_fulcrum");
+  if (own && own.reachable === true) return true;
+  const p2p = liste.find((q) => q && q.key === "bip158");
+  return Boolean(p2p && p2p.configured && p2p.reachable === true);
 }
 
 function liesKonfettiProtoOpts() {
@@ -4151,10 +4187,15 @@ function zeichneNav() {
 
   const wallets = Zustand.config?.wallets || [];
   if (wallets.length === 0) {
-    const leer = document.createElement("div");
+    // Neunutzer: Klick → Verwaltung · Wallets (nicht nur toter Hinweis).
+    const leer = document.createElement("button");
+    leer.type = "button";
     leer.className = "nav-eintrag";
-    leer.style.cursor = "default";
     leer.textContent = t("wallet.noHistoryYet");
+    leer.title = t("wallet.noWalletsNavTitle");
+    leer.addEventListener("click", () => oeffneVerwaltung(
+      brauchtDatenquellenZuerst() ? "datenquellen" : "wallets",
+    ));
     behaelter.append(leer);
   }
 
@@ -5776,12 +5817,25 @@ function zeichneJobsNav() {
         abbruch.disabled = true;
         try {
           await api(`/jobs/${jobId}`, { methode: "DELETE" });
-        } catch (_) {
-          /* schon beendet */
+        } catch (fehler) {
+          // 409 = schon weg — ok; sonst kurz melden (sonst wirkt der Knopf tot).
+          if (!(fehler && fehler.status === 409)) {
+            meldung(
+              (fehler && fehler.message) || t("common.failed"),
+              "krit",
+            );
+          }
         }
         // Rescan-Statuszeile mitziehen, falls es der aktive Scan war.
         if (Zustand.rescanJob === jobId) {
           setzeText($("#rescan-text"), t("common.abortRequested"));
+          const rk = $("#rescan-abbruch");
+          if (rk) rk.disabled = true;
+          try {
+            await pruefeWalletScan();
+          } catch (_) {
+            /* nächster Takt */
+          }
         }
         await ladeJobsNav();
       });
@@ -5800,20 +5854,23 @@ function setzeJobsTakt() {
 
 async function brichRescanAb() {
   if (!Zustand.rescanJob) return;
-  const scanId = Zustand.scanWalletId;
-  const art = scanArtName();
-  setzeText($("#rescan-text"), "Abbruch angefordert…");
+  setzeText($("#rescan-text"), t("common.abortRequested"));
+  const knopf = $("#rescan-abbruch");
+  if (knopf) knopf.disabled = true;
   try {
     await api(`/jobs/${Zustand.rescanJob}`, { methode: "DELETE" });
   } catch (_) {
     /* Vorgang war bereits beendet */
   }
-  // Knopf sofort freigeben — nicht auf den nächsten Poll warten
-  // (sonst bleibt UTXO-Scan nach Abbruch/Quellenwechsel tot).
-  beendeRescan(`${art} abgebrochen.`, false);
-  await erfrischeWalletNachScan(scanId);
+  // Nicht sofort beendeRescan: Backend braucht den Cancel-Event in den
+  // Filter/Block-Workern. pruefeWalletScan beendet bei status=cancelled.
   await ladeJobsNav();
-  setzeWalletScanGesperrt();
+  // Einmal sofort pollen — sonst klebt die Zeile bis zum 2s-Takt.
+  try {
+    await pruefeWalletScan();
+  } catch (_) {
+    /* Poll-Fehler: nächster Takt */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -10283,6 +10340,32 @@ function oeffneVerwaltung(ansicht) {
   else if (ansicht === "datenquellen") zeichneDatenquellenAnsicht();
 }
 
+/**
+ * Neustart ohne Wallets: erst Indexer, P2P „eh da“ und mitgelieferte
+ * electrum_servers.json zählen nicht als konfigurierte Datenquelle.
+ */
+function brauchtDatenquellenZuerst() {
+  const wallets = Zustand.config?.wallets || [];
+  if (wallets.length > 0) return false;
+  if (walletsManaged() || sourcesFullyManaged()) return false;
+  const quellen = Zustand.config?.sources || [];
+  // Nur vom Nutzer gesetzte eigene Nodes — nicht Bundle-Clearnet, nicht P2P.
+  const eigenerIndexer = quellen.some(
+    (q) => q
+      && q.configured
+      && (
+        q.key === "own_fulcrum"
+        || q.key === "own_core"
+        || q.key === "own_utxo_core"
+      ),
+  );
+  // Öffentliche Onions nur, wenn der Nutzer welche eingetragen/geladen hat.
+  const onion = quellen.some(
+    (q) => q && q.key === "public_onion" && q.configured,
+  );
+  return !eigenerIndexer && !onion;
+}
+
 function aktualisiereSpeicherleiste() {
   // Früher: sticky „Speichern/Verwerfen“. Jetzt speichert jede Aktion
   // sofort; pro Zeile steuert „Aktualisieren“, ob Name/Optionen offen sind.
@@ -10413,16 +10496,16 @@ function zeichneQuellen(quellen) {
       rechts.append(stift);
     }
 
-    if (quelle.verwerfbar) {
+    // Papierkorb für eigene Nodes hier; P2P erst hinter „Verbinden“
+    // (gleiche Reihenfolge wie Electrum: Aktion, dann 🗑).
+    if (quelle.verwerfbar && quelle.key !== "bip158") {
       const korb = document.createElement("button");
       korb.type = "button";
       korb.className = "stift papierkorb";
       korb.textContent = "🗑";
       korb.title = bridgeManaged
         ? t("sources.start9BridgeHint")
-        : (quelle.key === "bip158"
-          ? t("sources.disableP2pTitle")
-          : t("sources.discardTitle", { name: anzeigename }));
+        : t("sources.discardTitle", { name: anzeigename });
       korb.disabled = bridgeManaged;
       korb.addEventListener("click", () => verwerfeQuelle(quelle));
       rechts.append(korb);
@@ -10432,11 +10515,11 @@ function zeichneQuellen(quellen) {
       const laden = document.createElement("button");
       laden.type = "button";
       laden.className = "knopf knopf-klein";
-      laden.textContent = t("wallets.loadFromElectrum");
+      laden.textContent = t("sources.connect");
       laden.title = t("sources.loadElectrumTitle", { url: quelle.laden_url });
       laden.addEventListener("click", () => ladeElectrumServer(quelle, laden));
       rechts.append(laden);
-      // Papierkorb hinter dem Laden-Knopf: nur die Serverliste, nicht Opt-in.
+      // Papierkorb hinter dem Verbinden-Knopf: nur die Serverliste, nicht Opt-in.
       if (quelle.configured) {
         const listeKorb = document.createElement("button");
         listeKorb.type = "button";
@@ -10445,6 +10528,52 @@ function zeichneQuellen(quellen) {
         listeKorb.title = t("sources.clearListTitle", { name: anzeigename });
         listeKorb.addEventListener("click", () => loescheElectrumListe(quelle));
         rechts.append(listeKorb);
+      }
+    }
+
+    if (quelle.key === "bip158") {
+      const hoehe = document.createElement("input");
+      hoehe.type = "number";
+      hoehe.className = "quelle-start-hoehe";
+      hoehe.min = "0";
+      hoehe.step = "1";
+      hoehe.inputMode = "numeric";
+      hoehe.placeholder = t("sources.bip158StartPlaceholder");
+      hoehe.title = t("sources.bip158StartTitle");
+      hoehe.disabled = bridgeManaged;
+      const startWert = quelle.start_height != null
+        ? String(quelle.start_height)
+        : "";
+      hoehe.value = startWert;
+      hoehe.dataset.savedValue = startWert;
+      hoehe.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          hoehe.blur();
+        }
+      });
+      hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe));
+      rechts.append(hoehe);
+
+      const verbinden = document.createElement("button");
+      verbinden.type = "button";
+      verbinden.className = "knopf knopf-klein";
+      verbinden.textContent = t("sources.connect");
+      verbinden.title = t("sources.connectP2pTitle");
+      verbinden.disabled = bridgeManaged;
+      verbinden.addEventListener("click", () => verbindeP2p(quelle, verbinden));
+      rechts.append(verbinden);
+      if (quelle.verwerfbar) {
+        const korb = document.createElement("button");
+        korb.type = "button";
+        korb.className = "stift papierkorb";
+        korb.textContent = "🗑";
+        korb.title = bridgeManaged
+          ? t("sources.start9BridgeHint")
+          : t("sources.disableP2pTitle");
+        korb.disabled = bridgeManaged;
+        korb.addEventListener("click", () => verwerfeQuelle(quelle));
+        rechts.append(korb);
       }
     }
 
@@ -10480,6 +10609,22 @@ async function verwerfeQuelle(quelle) {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
     });
+    // P2P-Papierkorb bricht Header/Scan-Jobs serverseitig ab — UI mitziehen.
+    if (quelle.key === "bip158") {
+      const cancelled = Array.isArray(ergebnis.cancelled_jobs)
+        ? ergebnis.cancelled_jobs
+        : [];
+      if (
+        Zustand.rescanJob
+        && (cancelled.includes(Zustand.rescanJob) || cancelled.length)
+      ) {
+        beendeRescan(t("sources.p2pJobsCancelled"), false);
+      }
+      if (cancelled.length) {
+        meldung(t("sources.p2pJobsCancelled"), "warn");
+      }
+      await ladeJobsNav();
+    }
     // Zuerst Server-Antwort (P2P-Schalter aus), dann Config — sonst hält
     // uebernehmeQuellenErreichbarkeit kurz den alten „an“-Stand.
     if (Zustand.config && Array.isArray(ergebnis.sources)) {
@@ -10535,6 +10680,78 @@ async function ladeElectrumServer(quelle, knopf) {
     zeichneQuellen(Zustand.config.sources);
     meldung(übersetzeLogText(ergebnis.message || t("sources.listAdopted")), "gut");
     pruefeNodeStatus();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+    knopf.disabled = false;
+    knopf.textContent = vorher;
+  }
+}
+
+/** P2P-Zeile: Start­höhe speichern (kein Stift-Dialog mehr). */
+async function speichereBip158StartHoehe(eingabe) {
+  if (!eingabe || eingabe.disabled) return;
+  const roh = String(eingabe.value || "").trim();
+  if (!roh) return;
+  const n = Number(roh);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    meldung(t("sources.bip158StartInvalid"), "krit");
+    return;
+  }
+  const vorher = eingabe.dataset.savedValue;
+  if (vorher != null && vorher === String(n)) return;
+  eingabe.disabled = true;
+  try {
+    const ergebnis = await api("/config/source", {
+      methode: "PUT",
+      daten: {
+        source: "bip158",
+        values: { BIP158_START_HEIGHT: String(n) },
+      },
+    });
+    await ladeConfig();
+    if (Array.isArray(ergebnis.sources) && Zustand.config) {
+      Zustand.config.sources = ergebnis.sources;
+    }
+    eingabe.dataset.savedValue = String(n);
+    zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
+    meldung(t("sources.bip158StartSaved", { n }), "gut");
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+    eingabe.disabled = false;
+  }
+}
+
+/** P2P-Zeile: „Verbinden“ schaltet Compact Filter ein (früher Checkbox). */
+async function verbindeP2p(quelle, knopf) {
+  const vorher = knopf.textContent;
+  knopf.disabled = true;
+  knopf.textContent = t("common.loadingEllipsis");
+  const hatteOeffentlich = oeffentlicheElectrumNochAktiv();
+  try {
+    const ergebnis = await api("/config/source", {
+      methode: "PUT",
+      daten: { source: "bip158", values: { BIP158_P2P: "true" } },
+    });
+    await ladeConfig();
+    const pending = Array.isArray(ergebnis.pending_sources)
+      && ergebnis.pending_sources.length
+      ? ergebnis.pending_sources
+      : quellenPendingKeysNachSave("bip158");
+    setzeQuellenPending(pending);
+    zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
+    meldung(t("sources.appliedTesting"), "warn");
+    try {
+      const stand = await testeEigenenNode($("#quelle-pruefen"));
+      meldung(
+        t("sources.appliedResult", { stand: stand.label }),
+        stand.gut ? "gut" : "krit",
+      );
+      if (hatteOeffentlich && p2pQuelleVerbunden()) {
+        await frageP2pPrivatsphaereKappen();
+      }
+    } catch (testFehler) {
+      meldung(t("sources.appliedTestFailed", { msg: testFehler.message }), "krit");
+    }
   } catch (fehler) {
     meldung(fehler.message, "krit");
     knopf.disabled = false;
@@ -10648,9 +10865,6 @@ function quellenFormular(quelle, behaelter) {
         ? (eingabe.checked ? "true" : "false")
         : eingabe.value;
     }
-    const p2pWirdAn = quelle.key === "bip158"
-      && String(werte.BIP158_P2P || "").toLowerCase() === "true";
-    const hatteOeffentlich = oeffentlicheElectrumNochAktiv();
     try {
       const ergebnis = await api("/config/source", {
         methode: "PUT",
@@ -10666,15 +10880,15 @@ function quellenFormular(quelle, behaelter) {
       zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
       meldung(t("sources.appliedTesting"), "warn");
       try {
-        const stand = await testeEigenenNode($("#quelle-pruefen"));
+        // jubel:true — Staub nach jedem erfolgreichen Indexer-Übernehmen.
+        const stand = await testeEigenenNode($("#quelle-pruefen"), { jubel: true });
         meldung(
           t("sources.appliedResult", { stand: stand.label }),
-          stand.gut ? "gut" : "krit",
+          stand.gut
+            || standHatHochPrivateVerbindung(stand, Zustand.config?.sources)
+            ? "gut"
+            : "krit",
         );
-        // Jubel steckt in testeEigenenNode (Knopf gesetzt).
-        if (p2pWirdAn && hatteOeffentlich && p2pQuelleVerbunden()) {
-          await frageP2pPrivatsphaereKappen();
-        }
       } catch (testFehler) {
         meldung(t("sources.appliedTestFailed", { msg: testFehler.message }), "krit");
       }
@@ -14040,7 +14254,7 @@ async function sendeChatZeile() {
   }
 }
 
-async function testeEigenenNode(knopf) {
+async function testeEigenenNode(knopf, opts = {}) {
   const vorher = knopf ? knopf.textContent : "";
   if (knopf) {
     knopf.disabled = true;
@@ -14057,9 +14271,19 @@ async function testeEigenenNode(knopf) {
   try {
     const ergebnis = await apiSourceCheck();
     const stand = nimmPeerStand(ergebnis, false);
-    // Anfänger-Belohnung nur bei bewusstem Test (Speichern / „Node testen“),
-    // nicht beim stillen 30‑s-Poll (pruefeNodeStatus ohne Knopf).
-    if (knopf && stand && stand.gut) jubelDatenquelleErfolg();
+    // Staub bei jedem erfolgreichen Speichern/Test einer hoch-privaten
+    // Verbindung (Indexer/P2P) — auch nach IP-/Software-Wechsel.
+    // Öffentliches Electrum: nie. Stiller Poll: nie.
+    const bewusst = Boolean(knopf) || Boolean(opts.jubel);
+    if (
+      bewusst
+      && standHatHochPrivateVerbindung(
+        stand,
+        Zustand.config?.sources || ergebnis.sources,
+      )
+    ) {
+      jubelDatenquelleErfolg();
+    }
     return stand;
   } finally {
     Zustand.peerCheckLaeuft = false;
@@ -14782,6 +15006,10 @@ async function start() {
 
   $("#einrichtung-weiter").addEventListener("click", () => {
     schliesseEinrichtung();
+    if (brauchtDatenquellenZuerst()) {
+      oeffneVerwaltung("datenquellen");
+      return;
+    }
     const schritte = einrichtungsSchritte(Zustand.config);
     const walletsOk = schritte.find((s) => s.titel.startsWith("Wallets"))?.erledigt;
     oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets");
@@ -15057,11 +15285,14 @@ async function start() {
     if (entwurfGeaendert()) e.preventDefault();
   });
 
-  // Einstieg: Wallets vorhanden → erstes Wallet, sonst Wallet-Verwaltung.
+  // Einstieg: mit Wallets → erstes Wallet. Ohne Wallets und ohne echte
+  // Datenquelle (P2P „eh da“ zählt nicht) → Datenquellen; sonst Wallets.
   if ((Zustand.config.wallets || []).length > 0) {
     zeigeWallet(Zustand.config.wallets[0].id);
   } else if (walletsManaged()) {
     oeffneVerwaltung("einstellungen");
+  } else if (brauchtDatenquellenZuerst()) {
+    oeffneVerwaltung("datenquellen");
   } else {
     oeffneVerwaltung("wallets");
   }

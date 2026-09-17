@@ -888,6 +888,13 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         """Die Liste kommt aus electrum_servers.json, nicht aus der .env."""
         self.assertFalse(self.quellen()["clearnet"]["editierbar"])
 
+    def test_public_onion_ohne_stift(self):
+        """Onion-Liste nur über „Verbinden“ / .env — kein Bearbeiten-Formular."""
+        onion = self.quellen()["public_onion"]
+        self.assertFalse(onion["editierbar"])
+        self.assertEqual(onion["felder"], [])
+        self.assertEqual(onion["laden_filter"], "onion")
+
     def test_config_liefert_header_job_id(self):
         _, körper = self.anfrage("/api/config")
         self.assertIn("header_job_id", körper)
@@ -945,10 +952,12 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertTrue(körper["header_job_id"])
 
     def test_p2p_bip158_hat_keine_rpc_felder(self):
-        felder = {f["key"]: f for f in self.quellen()["bip158"]["felder"]}
-        self.assertIn("BIP158_START_HEIGHT", felder)
-        self.assertNotIn("RPCPASSWORD", felder)
-        self.assertNotIn("NODE_IP", felder)
+        bip = self.quellen()["bip158"]
+        self.assertFalse(bip["editierbar"])
+        self.assertEqual(bip["felder"], [])
+        self.assertEqual(bip["start_height"], 481824)
+        self.assertNotIn("RPCPASSWORD", [f["key"] for f in bip["felder"]])
+        self.assertNotIn("NODE_IP", [f["key"] for f in bip["felder"]])
 
     def test_speichern_und_zuruecklesen(self):
         status, körper = self.anfrage(
@@ -1115,6 +1124,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
         self.assertEqual(körper["cleared"], "bip158")
+        self.assertIn("cancelled_jobs", körper)
         # Wie manuelle Checkbox: false in .env, Feld und configured aus.
         self.assertEqual(
             main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "false",
@@ -1122,19 +1132,51 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         nach_key = {q["key"]: q for q in körper["sources"]}
         self.assertFalse(nach_key["bip158"]["configured"])
         self.assertFalse(nach_key["bip158"]["verwerfbar"])
-        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
-        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
         # GET /config darf P2P nicht wieder als an zeigen.
         status2, cfg = self.anfrage("/api/config")
         self.assertEqual(status2, 200)
         bip = next(q for q in cfg["sources"] if q["key"] == "bip158")
         self.assertFalse(bip["configured"])
-        self.assertEqual(
-            next(f["value"] for f in bip["felder"] if f["key"] == "BIP158_P2P"),
-            "false",
+        self.assertNotIn(
+            "BIP158_P2P",
+            [f["key"] for f in bip["felder"]],
         )
 
-    def test_p2p_aufbauen_schalter_schreibt_env(self):
+    def test_p2p_trennen_bricht_laufende_scan_jobs_ab(self):
+        import threading
+        import time
+
+        from core.jobs import Cancelled
+
+        halt = threading.Event()
+
+        def langsam(job):
+            job.meta["source"] = "bip158"
+            while not job.cancelled:
+                time.sleep(0.02)
+            raise Cancelled()
+
+        job = self.state.jobs.start("rescan", "UTXO-Scan Test", langsam)
+        self.state.header_job_id = self.state.jobs.start(
+            "headers", "Header-Test", langsam,
+        ).id
+        try:
+            status, körper = self.anfrage(
+                "/api/config/source/bip158", methode="DELETE",
+            )
+            self.assertEqual(status, 200)
+            self.assertIn(job.id, körper.get("cancelled_jobs") or [])
+            # Kurz warten bis Worker den Cancel sieht.
+            for _ in range(50):
+                if job.status != "running":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(job.status, "cancelled")
+        finally:
+            halt.set()
+            self.state.jobs.cancel(job.id)
+
+    def test_p2p_verbinden_schalter_schreibt_env(self):
         status, körper = self.anfrage(
             "/api/config/source",
             methode="PUT",
@@ -1152,10 +1194,22 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         )
         nach_key = {q["key"]: q for q in körper["sources"]}
         self.assertFalse(nach_key["bip158"]["configured"])
-        # Checkbox-Feld ist im Formular.
-        felder = {f["key"]: f for f in nach_key["bip158"]["felder"]}
-        self.assertEqual(felder["BIP158_P2P"]["typ"], "checkbox")
-        self.assertEqual(felder["BIP158_P2P"]["value"], "false")
+        self.assertFalse(nach_key["bip158"]["editierbar"])
+        self.assertEqual(nach_key["bip158"]["felder"], [])
+        self.assertEqual(nach_key["bip158"]["start_height"], 481824)
+
+        status2, an = self.anfrage(
+            "/api/config/source",
+            methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_P2P": "true"}},
+        )
+        self.assertEqual(status2, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad).get("BIP158_P2P"), "true",
+        )
+        self.assertTrue(
+            next(q for q in an["sources"] if q["key"] == "bip158")["configured"]
+        )
 
     def test_unbekannte_quelle_laesst_sich_nicht_loeschen(self):
         status, körper = self.anfrage(

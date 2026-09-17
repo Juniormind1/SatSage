@@ -2340,7 +2340,7 @@ def _try_public_onion_fulcrum(
     *,
     interactive: bool = False,
 ):
-    """Priorität 3: öffentliche Fulcrum-Server über Tor."""
+    """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt."""
     if not _load_public_onion_endpoints(args, env):
         return None
     try:
@@ -2471,12 +2471,11 @@ def _nach_oeffentlichem_onion_latenz(
 
 
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
-    """Priorität 4: öffentliche Fulcrum-Server über Clearnet."""
+    """Öffentliche Fulcrum-Server über Clearnet (vor öffentlichem Onion)."""
     from fulcrum import RotatingFulcrumPool
 
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
-    # letzte Probe (z. B. „Onions nicht nutzbar“), während Clearnet
-    # nur nach stdout schreibt.
+    # letzte Probe, während Clearnet nur nach stdout schreibt.
     _log_quelle("Suche öffentliche Electrum-Server (Clearnet)…")
     pool, _from_cache = resolve_sanctions_clearnet_pool(env)
     if pool is None:
@@ -2487,6 +2486,13 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
         f"Datenquelle: öffentliche Electrum-Server "
         f"(Clearnet, {len(clients)} Server)"
     )
+    # Tor-Autostart für öffentliche Onions nicht als Flaschenhals stehen lassen.
+    try:
+        from core.source import _loese_oeffentliches_onion_tor
+
+        _loese_oeffentliches_onion_tor(on_log=_log_quelle)
+    except Exception:
+        pass
     return RotatingFulcrumPool(clients)
 
 
@@ -2500,7 +2506,7 @@ def _try_data_source_priority_chain(
     """
     Automatische Datenquelle in Prioritätsreihenfolge.
     1. eigener Electrum-Server (Fulcrum/electrs), 2. P2P-BIP-158.
-    Öffentliche Onions/Clearnet nur nach Bestätigung (OEFFENTLICHE_ELECTRUM).
+    Öffentliche Electrum nur nach Bestätigung: Clearnet vor Onion.
     """
     _log_quelle("Automatische Datenquellen-Priorität…")
 
@@ -2534,6 +2540,12 @@ def _try_data_source_priority_chain(
         )
         return None
 
+    # Clearnet vor öffentlichem Onion: nach Opt-in kein Tor-Flaschenhals,
+    # solange Clearnet-Electrs erreichbar sind.
+    pool = _setup_public_clearnet_fulcrum(args, env)
+    if pool:
+        return "fulcrum", pool, None
+
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
         gewählt = _nach_oeffentlichem_onion_latenz(
@@ -2546,10 +2558,6 @@ def _try_data_source_priority_chain(
         if gewählt:
             return gewählt[0], gewählt[1], None
         return None
-
-    pool = _setup_public_clearnet_fulcrum(args, env)
-    if pool:
-        return "fulcrum", pool, None
 
     return None
 
@@ -2584,6 +2592,14 @@ def _try_public_electrum_fuer_verlauf(
         )
         return None
 
+    pool = _setup_public_clearnet_fulcrum(args, env)
+    if pool:
+        _log_quelle(
+            "Verlauf: öffentliche Electrum-Server (Clearnet) — get_history "
+            "(Privatsphäre mäßig)."
+        )
+        return "fulcrum", pool
+
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
         gewählt = _nach_oeffentlichem_onion_latenz(
@@ -2604,17 +2620,9 @@ def _try_public_electrum_fuer_verlauf(
             return quelle, backend
         _log_quelle(
             "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
-            "(Privatsphäre mäßig)."
+            "(Privatsphäre mäßig; Clearnet nicht erreichbar)."
         )
         return "fulcrum", backend
-
-    pool = _setup_public_clearnet_fulcrum(args, env)
-    if pool:
-        _log_quelle(
-            "Verlauf: öffentliche Electrum-Server (Clearnet) — get_history "
-            "(Privatsphäre mäßig)."
-        )
-        return "fulcrum", pool
     return None
 
 
@@ -2634,7 +2642,7 @@ def _try_verlauf_priority_chain(
     1. Electrs/Fulcrum im LAN (``get_history``)
     2. Electrs/Fulcrum über Onion
     3. BIP-158 Compact Filter (Blockwalk/Cache, kein get_history)
-    4. öffentliche Electrum (Onion, dann Clearnet) nach Bestätigung
+    4. öffentliche Electrum (Clearnet, sonst Onion) nach Bestätigung
     """
     _log_quelle("Verlaufsscan — eigene Datenquellen-Priorität…")
 

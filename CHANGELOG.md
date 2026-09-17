@@ -9,6 +9,18 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · Bezeichnung:** „UTXO-Set-Quelle“ → **pruned UTXO-Set-Quelle** (Rolle scantxoutset / oft pruned Node).
+- **P2P · Zeile:** Stift-Dialog entfernt. Inline-Feld mit Placeholder „erster Scan-Block“; Extra-Peers und Tor-Proxy nur noch über `.env`.
+- **Datenquelle · Staub-Jubel:** Staub im QR-Feld bei **jedem** erfolgreichen Speichern/Test einer Verbindung mit Privatsphäre **hoch** (eigener Indexer oder P2P, auch nach IP-Wechsel). Öffentliches Electrum: kein Jubel.
+- **Einstieg · leer:** Ohne Wallets und ohne eigenen Indexer/Onion öffnet die GUI **Datenquellen** — mitgeliefertes `electrum_servers.json` und P2P zählen dafür nicht.
+- **P2P trennen:** Papierkorb an Compact Filter bricht laufende Header- sowie UTXO-/Verlaufs-Scans (inkl. Queue) ab; Electrum und erneuten Scan startet der Nutzer selbst.
+- **BIP-158 · Abbruch:** Cancel-Event gilt auch in Filter-/Block-Worker-Threads (kein ContextVar); Warte-Schleifen starten bei Abbruch keine neuen Peers mehr. Scan-UI bleibt auf „Abbruch angefordert…“ bis der Job wirklich `cancelled` ist (nicht mehr sofort „fertig“ vortäuschen).
+- **Datenquellen · öffentlich:** Stift an öffentlichen Onions entfernt (Liste nur „Verbinden“ / `.env`). „Verbinden“ bleibt voll sichtbar, auch wenn die Zeile sonst noch unkonfiguriert/gedimmt ist.
+- **Öffentliches Electrum:** Nach Opt-in zuerst **Clearnet**; öffentliche Onions nur wenn Clearnet fehlt. Steht Clearnet, werden Onion-Peers nicht mehr als verbunden geführt und ein Tor-Autostart für öffentliche Onions beendet — Scans nutzen den Tor-Flaschenhals dann nicht.
+- **Nav · keine Wallets:** „noch keine“ unter Wallets öffnet Verwaltung · Wallets (Neunutzer-Kürzel).
+- **UTXO-Scan · öffentliche Electrum:** `RotatingFulcrumPool` kennt `tor_batch_sinnvoll` (immer aus) — Scan über Clearnet-Rotation stürzt nicht mehr mit `AttributeError` ab.
+- **Datenquellen · Verbinden:** Knopfbeschriftung „Von Electrum laden“ → **Verbinden**. P2P: Checkbox „P2P aufbauen“ aus den Details entfernt; gleicher Schalter als **Verbinden** in der P2P-Zeile (wie bei Electrum), Papierkorb schaltet weiter aus.
+- **Öffentliches Electrum · Probe:** Clearnet-Stichprobe nicht mehr die ersten 8 Einträge der alphabetischen Liste (oft tote IP-Literale), sondern zufällig bis 8 und bei 0 Treffern eine zweite Runde. Tor-Autostart wartet auf Bootstrap 100 %, bevor `.onion`-Probes laufen (SOCKS allein war zu früh).
 - **Kopf · Log-Schalter:** Statt Checkbox „Zeige Log“ nur noch kompakter Knopf **Log** (wie DE/EN daneben) — an = Akzent, aus = gedimmt.
 - **Datenquelle · Pille nach Übernehmen:** Speichern von Electrum/Core setzt die Kopf-Pille sofort **grau** (Indexer/Core) und verwirft den alten Connect-Stand. Grün + konkreter Name (`libbitcoin`/`electrs`/`fulcrum`) erst nach erfolgreichem Verbindungstest — kein Weitergrün mit dem vorigen Endpoint.
 - **Dock · Empfangs-QR ziehbar:** Zwischen Assistent (LLM) und Empfangs-QR wieder ein horizontaler Spalter — Breite speichert sich (`xpq-dock-empfang`). Die QR-Fläche folgt der Spaltenbreite (QR bleibt innen quadratisch), nicht mehr starr an die Dock-Höhe gekoppelt.

@@ -703,6 +703,10 @@ class RotatingFulcrumPool:
     def host(self) -> str:
         return f"rotation({len(self._clients)} Server)"
 
+    def tor_batch_sinnvoll(self, n_calls: int) -> bool:
+        """Kein Tor-Batch über Rotation — ``request_batch`` fehlt am Pool."""
+        return False
+
     def request(self, method: str, params: list | None = None) -> Any:
         last_exc: BaseException | None = None
         n = len(self._clients)
@@ -973,7 +977,7 @@ def collect_used_chain_indices_fulcrum(
     """
     from display import is_list_abort_requested
 
-    if client.tor_batch_sinnvoll(2):
+    if getattr(client, "tor_batch_sinnvoll", lambda _n: False)(2):
         return _collect_used_chain_indices_tor_batch(
             client,
             xpub,
@@ -1644,7 +1648,7 @@ def fetch_wallet_utxos_fulcrum(
         return utxos
 
     # Eigener Electrs über Tor: listunspent bündeln (kein Multi-Socket).
-    if client.tor_batch_sinnvoll(total):
+    if getattr(client, "tor_batch_sinnvoll", lambda _n: False)(total):
         return _fetch_wallet_utxos_tor_batch(
             client,
             addr_list,

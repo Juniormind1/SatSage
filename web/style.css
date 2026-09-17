@@ -527,7 +527,7 @@ button, input, select { font: inherit; color: inherit; }
   pointer-events: none;
   z-index: 20;
 }
-/* Datenquellen-Erfolg: Staub über der ganzen App (keine großen Scheine). */
+/* Legacy: Full-Viewport-Staub (nicht mehr der Datenquellen-Jubel). */
 .satsage-staub-konfetti {
   position: fixed;
   inset: 0;
@@ -539,6 +539,20 @@ button, input, select { font: inherit; color: inherit; }
 .empfang-pane--konfetti .empfang-qr-wrap {
   position: relative;
   z-index: 1;
+}
+/* Datenquellen-Erfolg: QR-Feld schwarz, Staub darüber (wie Ka-Ching). */
+.empfang-qr--schwarz,
+.empfang-pane--staub .empfang-qr {
+  background: #000 !important;
+}
+.empfang-pane--staub .empfang-qr img,
+.empfang-pane--staub .empfang-puls-canvas,
+.empfang-pane--staub .empfang-qr-maske {
+  opacity: 0 !important;
+}
+.empfang-pane--staub .empfang-kopf {
+  /* Kurz unauffällig — Fokus auf Staub im Quadrat */
+  opacity: 0.35;
 }
 
 .empfang-pane--lern .empfang-qr {
@@ -1316,11 +1330,39 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 .quelle-name { font-size: 12px; }
 .quelle-detail { font-family: var(--mono); font-size: 11px; color: var(--blass); }
 .quelle-rechts { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+.quelle-start-hoehe {
+  /* Breit genug für Placeholder „erster Scan-Block“ (DE) / „first scan block“ (EN). */
+  width: 12.5rem;
+  min-width: 12.5rem;
+  max-width: 40vw;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--rahmen);
+  border-radius: 3px;
+  background: var(--flaeche);
+  color: var(--text);
+}
+.quelle-start-hoehe::placeholder {
+  color: var(--blass);
+  opacity: 1;
+}
+.quelle-start-hoehe:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .quelle-notiz { flex-basis: 100%; font-size: 11px; color: var(--warn); padding-left: 23px; }
 /* Hoch-Privatsphäre konfiguriert → grün; unkonfiguriert / von besserer Quelle verdrängt → grau */
 .quelle-notiz.notiz-hoch { color: var(--gut); }
 .quelle-notiz.notiz-inaktiv { color: var(--blass); }
-.nicht-konfiguriert { opacity: .55; }
+/* Zeile ohne Liste: Inhalt gedimmt — „Verbinden“ bleibt voll sichtbar/aktiv. */
+.quelle-zeile.nicht-konfiguriert .quelle-rang,
+.quelle-zeile.nicht-konfiguriert .quelle-name,
+.quelle-zeile.nicht-konfiguriert .quelle-detail,
+.quelle-zeile.nicht-konfiguriert .quelle-notiz,
+.quelle-zeile.nicht-konfiguriert .pille {
+  opacity: .55;
+}
 
 /* Bearbeiten einer Datenquelle */
 .stift {

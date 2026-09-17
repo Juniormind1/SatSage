@@ -111,7 +111,7 @@ class TestVerlaufPrioritaet(unittest.TestCase):
         ), patch.object(
             main, "_try_public_onion_fulcrum", return_value=pool,
         ) as onion, patch.object(
-            main, "_setup_public_clearnet_fulcrum",
+            main, "_setup_public_clearnet_fulcrum", return_value=None,
         ) as clear:
             self.assertIsNone(
                 main._try_verlauf_priority_chain(
@@ -126,7 +126,30 @@ class TestVerlaufPrioritaet(unittest.TestCase):
             )
         self.assertEqual(quelle, "fulcrum")
         self.assertIs(backend, pool)
+        clear.assert_called()
+        onion.assert_called()
         self.assertTrue(any("öffentlich" in z.lower() for z in self.logs))
+
+    def test_oeffentlich_clearnet_vor_onion(self):
+        clear_pool = object()
+        onion_pool = object()
+        with patch.object(
+            main, "_resolve_own_lan_endpoint", return_value=None,
+        ), patch.object(
+            main, "_resolve_own_tor_endpoint", return_value=None,
+        ), patch.object(
+            main, "_try_bip158_backend", return_value=None,
+        ), patch.object(
+            main, "_try_public_onion_fulcrum", return_value=onion_pool,
+        ) as onion, patch.object(
+            main, "_setup_public_clearnet_fulcrum", return_value=clear_pool,
+        ):
+            quelle, backend = main._try_verlauf_priority_chain(
+                _args(), {"OEFFENTLICHE_ELECTRUM": "1"}, include_bip158=True,
+            )
+        self.assertEqual(quelle, "fulcrum")
+        self.assertIs(backend, clear_pool)
+        onion.assert_not_called()
 
     def test_rpc_only_ueberspringt_bip158(self):
         with patch.object(
