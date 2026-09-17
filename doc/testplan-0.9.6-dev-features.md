@@ -1,8 +1,13 @@
 # Testplan · Features seit letztem `main`-Stand (Release-Kandidat 0.9.6)
 
-**Stand:** 2026-09-17 (Juniormind-Fortschritt: A1, A2 abgehakt)  
+**Stand:** 2026-09-17 (Juniormind: **A1–A10** abgehakt; weiter mit **B**)  
 **Scope:** `origin/main`…`HEAD` auf `dev-juniormind` (Merge-Base `ac62b7f`, 24 Commits, Changelog `[Unveröffentlicht]`).  
 **Ziel:** Vor Merge/Bump 0.9.6 wissen, wer was absichert.
+
+### Juniormind-Notizen (A)
+
+- **A6:** TLS-Auto-Flip ok. **Idee (offen):** analog Port **50001↔50002** mitprobieren und bei Erfolg in `.env` schreiben (wie `FULCRUM_SSL`).
+- **A10:** mempool.space → rote Explorer-Pille ok; kurz verschwindet die grüne libbitcoin-Pille und kommt wieder — **halb so wild**, kein Blocker.
 
 ## Legende
 
@@ -25,14 +30,14 @@
 |---|---|---|---|---|---|
 | A1 | P0 | **Electrs über Tor · JSON-RPC-Batch** (UTXO, Gap, Alter) | `tests/test_fulcrum_tor_batch.py`; Fake-Clients in Parallel-/Zwischenstand-Tests um `tor_batch_sinnvoll` ergänzen bis Suite/CI grün | **✓ Juniormind** (Commit „Batched Tor getestet“ + erneute Bestätigung) — Live am eigenen Onion-Node | Live erledigt. Offen nur noch **CI-Fakes** (`tor_batch_sinnvoll` in `test_parallel` / `test_utxo_zwischenstand`) — Grok-Fix vor Merge |
 | A2 | P0 | **Tor/Electrs · SOCKS-Cache 90 s + Electrum-Gate** (Jobs nacheinander) | `tests/test_tor.py`, Job-Serialisierung in `tests/test_jobs.py` soweit vorhanden | **✓ Juniormind** — durch Firewall; Herkunft: erst UTXO-Scan, danach Herkunft (Gate serialisiert) | Live erledigt. Unit-Abdeckung Gate/SOCKS-Cache bleibt Grok-Sache |
-| A3 | P0 | **Öffentliches Electrum · nur Sitzungs-Opt-in** (kein Dauer-`.env`) | API-/Config-Test: Start entfernt `OEFFENTLICHE_ELECTRUM=1`; Dialog-Flag nur Runtime; Stichprobe-Tests (`TestOeffentlicheElectrumStichprobe`) | **Teil ✓ Juniormind:** Dialog/Sitzung ok. Probe scheiterte an toter `[:8]`-Liste — Fix (Zufallsstichprobe + 2. Runde, Tor wartet auf Bootstrap 100 %). **Bitte Retest** nach Pull/Neustart | Opt-in-Semantik ok. Verbindungsfehler war Auswahl/Tor-Bootstrap, nicht „alle Server tot“ |
-| A4 | P1 | **Empfang über öffentlichen Pool** nach Opt-in | — | Nach Opt-in freie Adresse mit History über Public-Pool; ohne Opt-in Cache-Warnung | Braucht Opt-in-Dialog + Netz; Unittest mit Mock-Fetcher **möglich**, lohnt nach A3 |
-| A5 | P1 | **Electrs-Config-Wechsel** startet Watch/Empfang neu; alte Tor-Port/SSL-Keys weg | Config-Write-Test (Key-Löschung) | Host/Port/TLS speichern → neue Verbindung ohne Server-Neustart | Key-Löschung **automatisierbar**; Live-Reconnect manuell |
-| A6 | P1 | **TLS auto-flip** + Schreiben `FULCRUM_SSL` | `tests/test_connection_hints.py` an neue Texte anpassen (CI-Fail) | Falsches TLS absichtlich → Auto-Korrektur, `.env` stimmt | Texte/Automation **möglich**; echtes Mismatch-Gerät manuell |
-| A7 | P1 | **Kopf-Pille:** grau nach Speichern; Indexer-Name nach Handshake (`electrs`/`fulcrum`/`libbitcoin`) | Browser: Speichern → grau; nach Connect Name | Gegen echten libbitcoin/electrs/Fulcrum | DOM-Assert in Userflow **möglich**; Produktgefühl manuell |
-| A8 | P2 | **Staub-Konfetti** nach grünem Node-Test | — | Einmal Konfetti nach Erfolg, nicht bei Fehler | Rein visueller Reward; Automation unsinnig (Flakes) |
-| A9 | P2 | **Log: Peers + electrs gemeinsam**; Log-Knopf statt Checkbox | Browser-Smoke Log-Toggle | Lesbarkeit im Alltag | Toggle **automatisierbar**; Wortlaut manuell |
-| A10 | P0 | **Block-Explorer öffentlich mit Warnung** + Pille privat/öffentlich | API/UI: Speichern mempool.space → Dialog; Abbruch leert Feld | Warndialog + Pillenfarbe | Dialog-Flow **automatisierbar** (Userflow) |
+| A3 | P0 | **Öffentliches Electrum · nur Sitzungs-Opt-in** (kein Dauer-`.env`) | API-/Config-Test: Start entfernt `OEFFENTLICHE_ELECTRUM=1`; Dialog-Flag nur Runtime; Stichprobe-Tests (`TestOeffentlicheElectrumStichprobe`) | **✓ Juniormind** — Dialog/Sitzung + Connect nach Stichproben-Fix | Grok: Suite/CI weiter |
+| A4 | P1 | **Empfang über öffentlichen Pool** nach Opt-in | — | **✓ Juniormind** | Optional später Mock-Fetcher |
+| A5 | P1 | **Electrs-Config-Wechsel** startet Watch/Empfang neu; alte Tor-Port/SSL-Keys weg | Config-Write-Test (Key-Löschung) | **✓ Juniormind** | Key-Löschung weiter automatisierbar |
+| A6 | P1 | **TLS auto-flip** + Schreiben `FULCRUM_SSL` | `tests/test_connection_hints.py` an neue Texte anpassen (CI-Fail) | **✓ Juniormind** — flippt und verbindet. **Wunsch:** gleiches für Port 50001/50002 | Port-Auto-Flip = mögliche Folgeaufgabe (nicht Blocker) |
+| A7 | P1 | **Kopf-Pille:** grau nach Speichern; Indexer-Name nach Handshake (`electrs`/`fulcrum`/`libbitcoin`) | Browser: Speichern → grau; nach Connect Name | **✓ Juniormind** — läuft | — |
+| A8 | P2 | **Staub-Konfetti** nach grünem Node-Test | — | **✓ Juniormind** — staubt (hoch-privat, auch nach Wechsel) | Visuell; kein Auto-Test |
+| A9 | P2 | **Log: Peers + electrs gemeinsam**; Log-Knopf statt Checkbox | Browser-Smoke Log-Toggle | **✓ Juniormind** — klappt | — |
+| A10 | P0 | **Block-Explorer öffentlich mit Warnung** + Pille privat/öffentlich | API/UI: Speichern mempool.space → Dialog; Abbruch leert Feld | **✓ Juniormind** — Warnung/Pille ok. **Winzig:** kurze Ausblendung der grünen libbitcoin-Pille, kommt wieder | Halb so wild; optional später Pillen-Flicker glätten |
 
 ---
 
@@ -135,7 +140,7 @@
 | Rolle | Fokus |
 |-------|--------|
 | **Grok** | CI/Unittests grün (A1/A6/F8 Fix), Userflow, Browser-Smokes P0/P1 lokal, Lab-Verifies Sanktion/Tx-Classify, Umbrel-Unit, Trace/Sanktion/Exchange-Unit |
-| **Juniormind** | A1+A2 erledigt; als Nächstes sinnvoll: A3/A10, B1/B2, echte Börsen-CSV, GUI-Optik (A8/E5/F4/F5), Nav-Timing, Umbrel/StartOS, Copy/AML, Specter optional |
+| **Juniormind** | **A erledigt** → weiter **B1/B2** (Börsen-CSV); danach C/E/F nach Plan. Offen notiert: Port-Auto-Flip 50001/50002 (A6), Pillen-Flicker Explorer (A10) |
 
 ---
 
