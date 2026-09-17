@@ -4279,6 +4279,7 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
             )
 
         job.progress("Verbinde mit dem Sanktions-Server…")
+        print("Sanktionsprüfung: verbinde Datenquelle…", flush=True)
         get_tx_je_worker, verbindungen = _sanctions_get_tx_pool(state)
         job.raise_if_cancelled()
         if get_tx_je_worker is None:
@@ -4288,6 +4289,12 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 "eigene Server noch ein Clearnet-Server.",
             )
         get_tx = get_tx_je_worker(0)
+        print(
+            f"Sanktionsprüfung: {verbindungen} Verbindung(en), "
+            f"{max_hops} Hop(s), {len(adressen):,} Listen-Adressen."
+            .replace(",", "."),
+            flush=True,
+        )
 
         ergebnisse = []
         for ziel_entry in ziele:
@@ -4310,13 +4317,15 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 })
                 continue
 
-            # Im Parallel-Lauf melden mehrere Worker abwechselnd; die Zeile
-            # zeigt deshalb den zuletzt gesehenen Zustand, nicht den eines
-            # bestimmten UTXO. Der Zähler unten summiert dagegen über alle.
-            fertige = {"n": 0}
+            print(
+                f"Sanktionsprüfung „{name}“: {len(utxos)} UTXO(s)…",
+                flush=True,
+            )
 
+            # Parallel: Statuszeile = zuletzt meldender Worker (nicht „fertig“).
             def fortschritt(felder):
-                fertige["n"] += 1
+                if job.cancelled:
+                    return
                 job.progress(
                     f"{name}: {felder.get('status', '')} "
                     f"(UTXO {felder.get('wallet_utxo', '')}, "
@@ -4327,23 +4336,32 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
                 )
 
             gesehen: set[str] = set()
-            treffer, geprueft, abbruch, coinjoins = (
-                analyze.check_wallet_utxos_sanctions(
-                    get_tx,
-                    utxos,
-                    eigene,
-                    adressen,
-                    max_hops=max_hops,
-                    wallet=wallet_ctx,
-                    abort_on_hit=False,
-                    progress_cb=fortschritt,
-                    cancel_cb=lambda: job.cancelled,
-                    gesehene_adressen=gesehen,
-                    get_tx_je_worker=get_tx_je_worker,
-                    worker_count=verbindungen,
-                    immutable_cache_dir=state.immutable_cache_dir,
+            try:
+                treffer, geprueft, abbruch, coinjoins = (
+                    analyze.check_wallet_utxos_sanctions(
+                        get_tx,
+                        utxos,
+                        eigene,
+                        adressen,
+                        max_hops=max_hops,
+                        wallet=wallet_ctx,
+                        abort_on_hit=False,
+                        progress_cb=fortschritt,
+                        cancel_cb=lambda: job.cancelled,
+                        gesehene_adressen=gesehen,
+                        get_tx_je_worker=get_tx_je_worker,
+                        worker_count=verbindungen,
+                        immutable_cache_dir=state.immutable_cache_dir,
+                    )
                 )
-            )
+            except Exception as exc:
+                from core.jobs import Cancelled, ist_abbruch
+
+                if job.cancelled or ist_abbruch(exc) or isinstance(exc, Cancelled):
+                    treffer, geprueft, abbruch, coinjoins = [], 0, None, []
+                else:
+                    raise
+            job.raise_if_cancelled()
             ergebnisse.append({
                 "wallet": name,
                 "geprueft": geprueft,

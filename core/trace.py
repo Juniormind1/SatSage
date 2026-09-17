@@ -747,6 +747,24 @@ def trace_utxo(
         root["tx_class_label"] = roh.get("tx_class_label") or ""
         root["tx_class_label_en"] = roh.get("tx_class_label_en") or ""
         root["note"] = root["tx_class_label"]
+        # Exchange-Batch: Soft-Label anhand bekannter Börsen in den Kindern
+        # konkretisieren (Prevouts oft erst im Baum gelabelt).
+        if str(root.get("tx_class") or "") == "exchange_batch":
+            try:
+                from core.trace_cache import boerse_namen_im_baum
+                from core.tx_classify import soft_label_exchange_batch
+
+                probe = {"root": root, "children": kinder}
+                namen = boerse_namen_im_baum(probe)
+                if not namen:
+                    namen = boerse_namen_im_baum({"root": roh, "children": roh.get("sources") or []})
+                if namen:
+                    root["tx_class_label"] = soft_label_exchange_batch(namen, lang="de")
+                    root["tx_class_label_en"] = soft_label_exchange_batch(namen, lang="en")
+                    root["note"] = root["tx_class_label"]
+                    root["boerse_namen"] = namen
+            except Exception:
+                pass
     if roh.get("exchange_stop"):
         root["exchange_stop"] = True
         if roh.get("exchange_label"):

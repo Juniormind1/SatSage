@@ -1391,7 +1391,7 @@ def check_reachable(
     log(f"Prüfe {info.name}…")
 
     # Dieselbe Endpoint-Reihenfolge wie main._try_own_fulcrum_client
-    # (LAN zuerst, dann Tor) — und dieselben Port/TLS-Keys.
+    # (LAN zuerst, dann Tor) — Tor erst starten, wenn LAN fehlt/scheitert.
     from types import SimpleNamespace
 
     args = SimpleNamespace(
@@ -1404,9 +1404,10 @@ def check_reachable(
     lan = main._resolve_own_lan_endpoint(args, values)
     if lan:
         kandidaten.append((*lan, None))
-    tor = main._resolve_own_tor_endpoint(args, values)
-    if tor:
-        host_t, port_t, ssl_t = tor
+    tor_ep = main._resolve_own_tor_endpoint(args, values)
+    # Onion-Endpoint erst einreihen, wenn kein LAN — sonst unnötiger Tor-Start.
+    if tor_ep and not lan:
+        host_t, port_t, ssl_t = tor_ep
         from core.tor import TorFehler, stelle_tor_socks_bereit
         from fulcrum import FULCRUM_ONION_TIMEOUT
 
@@ -1425,22 +1426,18 @@ def check_reachable(
                 konfiguriert, env=values, log=log,
             )
         except (TorFehler, ValueError) as exc:
-            if not kandidaten:
-                ergebnis.reachable = False
-                ergebnis.error = str(exc)
-                log(f"Verbinde mit {_verbindung_ziel(host_t, port_t, ssl_t)}")
-                log(f"Verbindung fehlgeschlagen: {exc}")
-                return ergebnis
-            log(f"Tor für Onion-Endpoint nicht bereit: {exc}")
-            tor_proxy = None
-        else:
-            if tor_proxy != konfiguriert:
-                log(
-                    f"Fallback SOCKS {tor_proxy[0]}:{tor_proxy[1]} "
-                    f"(statt {konfiguriert[0]}:{konfiguriert[1]})"
-                )
-            kandidaten.append((host_t, port_t, ssl_t, tor_proxy))
-            timeout = max(timeout, FULCRUM_ONION_TIMEOUT)
+            ergebnis.reachable = False
+            ergebnis.error = str(exc)
+            log(f"Verbinde mit {_verbindung_ziel(host_t, port_t, ssl_t)}")
+            log(f"Verbindung fehlgeschlagen: {exc}")
+            return ergebnis
+        if tor_proxy != konfiguriert:
+            log(
+                f"Fallback SOCKS {tor_proxy[0]}:{tor_proxy[1]} "
+                f"(statt {konfiguriert[0]}:{konfiguriert[1]})"
+            )
+        kandidaten.append((host_t, port_t, ssl_t, tor_proxy))
+        timeout = max(timeout, FULCRUM_ONION_TIMEOUT)
 
     if not kandidaten:
         ergebnis.reachable = False
@@ -1497,6 +1494,41 @@ def check_reachable(
             if client:
                 break
             log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
+
+        # LAN war da, ist aber gescheitert → jetzt erst Tor für Onion.
+        if not client and lan and tor_ep and all(k[3] is None for k in kandidaten):
+            host_t, port_t, ssl_t = tor_ep
+            from core.tor import TorFehler, stelle_tor_socks_bereit
+            from fulcrum import FULCRUM_ONION_TIMEOUT
+
+            raw = (
+                values.get("FULCRUM_TOR_PROXY")
+                or values.get("TOR_PROXY")
+                or "127.0.0.1:9050"
+            )
+            if ":" in raw:
+                ph, pp = raw.rsplit(":", 1)
+                konfiguriert = (ph, int(pp)) if pp.isdigit() else (raw, 9050)
+            else:
+                konfiguriert = (raw, 9050)
+            try:
+                tor_proxy = stelle_tor_socks_bereit(
+                    konfiguriert, env=values, log=log,
+                )
+            except (TorFehler, ValueError) as exc:
+                log(f"Tor für Onion-Endpoint nicht bereit: {exc}")
+            else:
+                timeout = max(timeout, FULCRUM_ONION_TIMEOUT)
+                host, port, use_ssl = host_t, port_t, ssl_t
+                ssl_gewuenscht = use_ssl
+                log(
+                    f"Verbinde mit "
+                    f"{_verbindung_ziel(host, port, use_ssl, tor_proxy)}"
+                )
+                client, fehler = connect_fulcrum(
+                    host, port, use_ssl=use_ssl, timeout=timeout,
+                    tor_proxy=tor_proxy, require_listunspent=True,
+                )
     except Exception as exc:  # Import- oder Laufzeitfehler
         ergebnis.reachable = False
         ergebnis.error = str(exc)

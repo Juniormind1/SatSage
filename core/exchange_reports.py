@@ -195,9 +195,28 @@ def _finde_txids_in_zeile(row: list[str], spalten: list[int] | None) -> list[str
     return treffer
 
 
+def _zeile_hat_btc_ref(row: list[str]) -> bool:
+    """True wenn in der Zeile eine BTC-Adresse (bc1/1/3…) oder TxID steckt."""
+    return bool(_finde_adressen_in_zeile(row, None) or _finde_txids_in_zeile(row, None))
+
+
+def _erste_zeile_ist_kopf(headers: list[str]) -> bool:
+    """
+    Bekannte Spaltennamen → Kopfzeile.
+    Sieht die erste Zeile selbst wie Adresse/TxID aus → Datenzeile (Liste).
+    """
+    if _zeile_hat_btc_ref(headers):
+        return False
+    zu = _spalten_zuordnen(headers)
+    return bool(zu["address"] or zu["txid"] or zu["asset"] or zu["type"])
+
+
 def parse_csv_btc_refs(csv_text: str) -> dict:
     """
-    Liest CSV und liefert nur BTC-relevante Adressen/TxIDs.
+    Liest CSV **oder** einfache Adress-/TxID-Listen (eine je Zeile, ohne Kopf).
+
+    Unterstützt bc1…, Legacy ``1…`` und P2SH ``3…``. Shitcoin-/Kurszeilen
+    werden verworfen, sobald Asset-Spalten erkennbar sind.
 
     Rückgabe::
         {
@@ -225,27 +244,34 @@ def parse_csv_btc_refs(csv_text: str) -> dict:
 
     reader = csv.reader(io.StringIO(text), dialect)
     try:
-        headers = next(reader)
+        erste = next(reader)
     except StopIteration:
-        raise ExchangeReportError("CSV ohne Kopfzeile.") from None
+        raise ExchangeReportError("Datei ist leer.") from None
 
-    headers = [str(h or "") for h in headers]
-    zu = _spalten_zuordnen(headers)
-    hat_adress_spalte = bool(zu["address"])
-    hat_txid_spalte = bool(zu["txid"])
-    hat_asset_spalte = bool(zu["asset"])
-    hat_typ_spalte = bool(zu["type"])
-
-    if not hat_adress_spalte and not hat_txid_spalte:
-        # Inhalt heuristisch scannen — manche Reports ohne klare Header.
-        pass
+    erste = [str(h or "") for h in erste]
+    mit_kopf = _erste_zeile_ist_kopf(erste)
+    if mit_kopf:
+        zu = _spalten_zuordnen(erste)
+        hat_adress_spalte = bool(zu["address"])
+        hat_txid_spalte = bool(zu["txid"])
+        hat_asset_spalte = bool(zu["asset"])
+        hat_typ_spalte = bool(zu["type"])
+        daten_zeilen: list[list[str]] = list(reader)
+    else:
+        # Reine Liste / Report ohne erkannte Header — erste Zeile mitnehmen.
+        zu = {"address": [], "txid": [], "asset": [], "type": []}
+        hat_adress_spalte = False
+        hat_txid_spalte = False
+        hat_asset_spalte = False
+        hat_typ_spalte = False
+        daten_zeilen = [erste, *reader]
 
     addresses: dict[str, dict] = {}
     txids: dict[str, dict] = {}
     rows_total = 0
     rows_btc = 0
 
-    for row in reader:
+    for row in daten_zeilen:
         if not row or all(not str(c or "").strip() for c in row):
             continue
         rows_total += 1
@@ -263,14 +289,19 @@ def parse_csv_btc_refs(csv_text: str) -> dict:
                 if rolle:
                     break
 
-        addrs = _finde_adressen_in_zeile(
-            row, zu["address"] if hat_adress_spalte else None,
-        )
-        tids = _finde_txids_in_zeile(
-            row, zu["txid"] if hat_txid_spalte else None,
-        )
-        # Ohne erkannte Spalten: ganze Zeile scannen (nur klare Formen).
-        if not hat_adress_spalte and not hat_txid_spalte:
+        if hat_adress_spalte or hat_txid_spalte:
+            addrs = _finde_adressen_in_zeile(
+                row, zu["address"] if hat_adress_spalte else None,
+            )
+            tids = _finde_txids_in_zeile(
+                row, zu["txid"] if hat_txid_spalte else None,
+            )
+            # Spalten erkannt, aber Zelle leer → Rest der Zeile nicht
+            # mit Shitcoin-Müll vollscannen; nur wenn gar nichts kam.
+            if not addrs and not tids:
+                addrs = _finde_adressen_in_zeile(row, None)
+                tids = _finde_txids_in_zeile(row, None)
+        else:
             addrs = _finde_adressen_in_zeile(row, None)
             tids = _finde_txids_in_zeile(row, None)
 
@@ -293,7 +324,7 @@ def parse_csv_btc_refs(csv_text: str) -> dict:
     if not addresses and not txids:
         raise ExchangeReportError(
             "Keine Bitcoin-Adressen oder TxIDs gefunden "
-            "(Shitcoin-/Kurszeilen werden verworfen)."
+            "(bc1…/1…/3… bzw. 64-Hex; Shitcoin-/Kurszeilen werden verworfen)."
         )
 
     return {

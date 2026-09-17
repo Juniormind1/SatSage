@@ -441,6 +441,13 @@
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="trace.currentUtxos">Aktuelle UTXOs</span>
             <span id="trace-liste-zusatz" class="karte-zusatz"></span>
+            <span id="trace-sort-wrap" class="karte-zusatz">
+              <select id="trace-sort" class="knopf knopf-klein" data-i18n-title="trace.sortTitle" title="Sortierung Bestand und Bereits ausgegeben">
+                <option value="volume-desc" data-i18n="trace.sortVolumeDesc">Volumen ↓</option>
+                <option value="age-desc" data-i18n="trace.sortAgeDesc">Alter ↓ (neueste zuerst)</option>
+                <option value="age-asc" data-i18n="trace.sortAgeAsc">Alter ↑ (älteste zuerst)</option>
+              </select>
+            </span>
             <span class="karte-zusatz legende">
               <span class="punkt punkt-eigen"></span> <span data-i18n="trace.legendOwn">eigenes Wallet</span>
               <span class="punkt punkt-extern"></span> <span data-i18n="trace.legendExternal">extern</span>

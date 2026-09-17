@@ -136,11 +136,19 @@ class TestStrukturErhalt(EnvTestBasis):
         self.assertNotIn("RPCPASSWORD", self.neu_laden().values())
 
     def test_sicherung_wird_angelegt(self):
+        # Schreibvorgänge legen keine Backup-Kopie mehr an — Rotation nur
+        # beim Serverstart (rotate_env_backups_at_start).
         env = self.neu_laden()
         env.set("FULCRUM_PORT", "50001")
         sicherung = env.save()
-        self.assertIsNotNone(sicherung)
-        self.assertIn("FULCRUM_PORT=50002", sicherung.read_text())
+        self.assertIsNone(sicherung)
+        self.assertEqual(self.neu_laden().get("FULCRUM_PORT"), "50001")
+        from core.config import rotate_env_backups_at_start
+
+        backup0 = rotate_env_backups_at_start(self.pfad)
+        self.assertIsNotNone(backup0)
+        self.assertTrue(backup0.exists())
+        self.assertIn("FULCRUM_PORT=50001", backup0.read_text())
 
     def test_keine_temporaere_datei_bleibt_liegen(self):
         env = self.neu_laden()

@@ -130,6 +130,20 @@ button, input, select { font: inherit; color: inherit; }
   background: transparent; color: var(--blass);
   border-style: dashed;
 }
+/* Börse: nur Name; grün = von Börse ins Wallet, rot = zur Börse. */
+.label-boerse {
+  font-weight: 600;
+}
+.label-boerse-in {
+  background: var(--gut-bg, rgba(46, 160, 67, 0.15));
+  color: var(--gut, #2ea043);
+  border-color: color-mix(in srgb, var(--gut, #2ea043) 40%, transparent);
+}
+.label-boerse-out {
+  background: var(--krit-bg, rgba(248, 81, 73, 0.15));
+  color: var(--krit, #f85149);
+  border-color: color-mix(in srgb, var(--krit, #f85149) 40%, transparent);
+}
 
 /* ---------- Einrichtung (erster Start) ---------- */
 
@@ -1543,6 +1557,24 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   width: 16px;
   height: 16px;
   opacity: 0.95;
+}
+.adress-boerse-leiste {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.adress-boerse-pille {
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--gut-bg, rgba(46, 160, 67, 0.15));
+  color: var(--gut, #2ea043);
+  border: 1px solid color-mix(in srgb, var(--gut, #2ea043) 35%, transparent);
+  white-space: nowrap;
 }
 .knoten-notiz {
   font-size: 11px; color: var(--warn); background: var(--warn-bg);

@@ -158,7 +158,8 @@ class TestElectrumSoftwareLabel(unittest.TestCase):
         self.assertEqual(own["software"], "libbitcoin")
         gemerged = mergere_erreichbarkeit(describe_sources(werte), liste)
         ps = peer_status(gemerged)
-        self.assertEqual(ps["label"], "1 libbitcoin verbunden")
+        # Label kann Peers + Indexer nennen (z. B. „2 Peers · 1 libbitcoin…“).
+        self.assertIn("libbitcoin", ps["label"])
         self.assertEqual(ps.get("software"), "libbitcoin")
 
 
@@ -361,7 +362,7 @@ class TestCheckReachable(unittest.TestCase):
         p2p.assert_not_called()
         nach_key = {q.key: q for q in ergebnis}
         self.assertTrue(nach_key["own_fulcrum"].reachable)
-        self.assertEqual(peer_status(ergebnis)["label"], "1 electrs verbunden")
+        self.assertIn("electrs", peer_status(ergebnis)["label"])
         self.assertEqual(
             nach_key["bip158"].note,
             "P2P als Datenquelle nicht erforderlich (Electrs erreichbar).",
@@ -445,8 +446,9 @@ class TestCheckReachable(unittest.TestCase):
         )
         self.assertIn("Node im LAN 192.168.1.50", quelle.detail)
         self.assertIn("DNS-Seeds", quelle.detail)
-        hinweis = next(f for f in quelle.felder if f.key == "BIP158_PEERS").hinweis
-        self.assertIn("Host im LAN", hinweis)
+        # Extra-Peers nur noch per .env — kein Stift-Feld mehr.
+        self.assertNotIn("BIP158_PEERS", [f.key for f in quelle.felder])
+        self.assertEqual(quelle.start_height, 481824)
 
     def test_p2p_pruefung_nutzt_lan_und_dns_fallback(self):
         from unittest import mock

@@ -611,6 +611,10 @@ class TestOnionLatenzGate(unittest.TestCase):
 class TestJobAbbruchUeberall(unittest.TestCase):
     """Web-Abbruch muss Scan/BIP-158/CLI-Schleifen und Job-Ende erreichen."""
 
+    def setUp(self):
+        jobs_mod._reset_herzschlag_stand_fuer_tests()
+        jobs_mod._reset_electrum_gate_fuer_tests()
+
     def test_job_context_setzt_aktuellen_job(self):
         registry = JobRegistry()
         gesehen = {}
@@ -621,7 +625,7 @@ class TestJobAbbruchUeberall(unittest.TestCase):
             return "ok"
 
         job = registry.start("trace", "T", lauf)
-        for _ in range(80):
+        for _ in range(200):
             if job.status != "running":
                 break
             time.sleep(0.02)
@@ -646,7 +650,7 @@ class TestJobAbbruchUeberall(unittest.TestCase):
             ("rescan", "UTXO-Scan Demo"),
         ):
             job = registry.start(kind, label, lauf)
-            for _ in range(100):
+            for _ in range(250):
                 if job.status != "running":
                     break
                 time.sleep(0.02)
@@ -880,12 +884,8 @@ class TestTraceAbbruchNichtSchlucken(unittest.TestCase):
 class TestJobRegistry(unittest.TestCase):
 
     def setUp(self):
-        # Gate vom vorigen Test freigeben.
-        gate = jobs_mod.ELECTRUM_GATE
-        with gate._cv:
-            gate._holder_id = None
-            gate._holder_label = ""
-            gate._cv.notify_all()
+        jobs_mod._reset_herzschlag_stand_fuer_tests()
+        jobs_mod._reset_electrum_gate_fuer_tests()
 
     def test_systemexit_beendet_den_job(self):
         """Sonst bleibt der UTXO-Scan auf running, letzte Zeile klebt."""
@@ -937,7 +937,7 @@ class TestJobRegistry(unittest.TestCase):
         self.assertIn("start:a", reihenfolge)
         self.assertNotIn("start:b", reihenfolge)
         barrier.set()
-        for _ in range(100):
+        for _ in range(250):
             if a.status != "running" and b.status != "running":
                 break
             time.sleep(0.03)

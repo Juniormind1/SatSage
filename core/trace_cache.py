@@ -221,6 +221,7 @@ def _schreibe_meta(
         "vollstaendig": bool(baum_ist_vollstaendig(baum)),
         "steuer_ausreichend": bool(baum_ist_steuer_ausreichend(baum)),
         "mix_arten": mix_arten_im_baum(baum),
+        "boerse_namen": boerse_namen_im_baum(baum),
         "tx_class": _tx_class_aus_baum(baum),
     }
     tmp = ziel_meta.with_suffix(".json.tmp")
@@ -506,6 +507,50 @@ def mix_arten_im_baum(baum: dict | None) -> list[str]:
     return [k for k in MIX_ICON_KINDS if k in gefunden]
 
 
+def _boerse_name_aus_label(lab: object) -> str:
+    if not isinstance(lab, dict):
+        return ""
+    name = str(lab.get("name") or "").strip()
+    if not name:
+        return ""
+    if lab.get("kategorie") == "exchange" or lab.get("nutzer_import"):
+        return name
+    if lab.get("kategorie_label") == "Börse" or lab.get("quelle") == "Börsen-CSV":
+        return name
+    return ""
+
+
+def boerse_namen_im_baum(baum: dict | None) -> list[str]:
+    """Eindeutige Börsen-Namen (Kraken/Coinbase/…) aus Labels im Herkunftsbaum."""
+    if not isinstance(baum, dict):
+        return []
+    gefunden: set[str] = set()
+    stapel: list = []
+    root = baum.get("root")
+    if isinstance(root, dict):
+        stapel.append(root)
+    stapel.extend(baum.get("children") or [])
+    while stapel:
+        knoten = stapel.pop()
+        if not isinstance(knoten, dict):
+            continue
+        for lab in (knoten.get("label"), knoten.get("exchange_label")):
+            n = _boerse_name_aus_label(lab)
+            if n:
+                gefunden.add(n)
+        for src in knoten.get("sources") or []:
+            if not isinstance(src, dict):
+                continue
+            for lab in (src.get("label"), src.get("exchange_label")):
+                n = _boerse_name_aus_label(lab)
+                if n:
+                    gefunden.add(n)
+        kinder = knoten.get("children") or []
+        if kinder:
+            stapel.extend(kinder)
+    return sorted(gefunden)
+
+
 def kopf(
     txid: str,
     vout: int,
@@ -555,6 +600,7 @@ def kopf(
                 "vollstaendig": voll,
                 "steuer_ausreichend": steuer_ok,
                 "mix_arten": list(daten.get("mix_arten") or []),
+                "boerse_namen": list(daten.get("boerse_namen") or []),
                 "tx_class": str(daten.get("tx_class") or ""),
             }
 
@@ -566,6 +612,7 @@ def kopf(
     vollstaendig = baum_ist_vollstaendig(baum)
     steuer_ok = baum_ist_steuer_ausreichend(baum)
     mix_arten = mix_arten_im_baum(baum)
+    boerse_namen = boerse_namen_im_baum(baum)
     tx_class = _tx_class_aus_baum(baum)
     # Alte Caches: Meta nachziehen, damit der nächste Listen-Lauf billig bleibt.
     if meta_ziel is not None:
@@ -599,5 +646,6 @@ def kopf(
         "vollstaendig": vollstaendig,
         "steuer_ausreichend": steuer_ok,
         "mix_arten": mix_arten,
+        "boerse_namen": boerse_namen,
         "tx_class": tx_class,
     }

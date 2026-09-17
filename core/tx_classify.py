@@ -139,6 +139,7 @@ _LABELS: dict[str, tuple[str, str]] = {
         "Likely own consolidation (fan-in)",
     ),
     "exchange_batch": (
+        # Nur wenn keine Börsenadresse aus dem Report bekannt ist.
         "Wahrscheinlich Batch-Auszahlung von Exchange",
         "Likely exchange batch payout",
     ),
@@ -157,6 +158,126 @@ _LABELS: dict[str, tuple[str, str]] = {
 def soft_label(kind: str, *, lang: str = "de") -> str:
     de, en = _LABELS.get(kind, ("", ""))
     return de if lang == "de" else en
+
+
+def soft_label_exchange_batch(namen: list[str] | tuple[str, ...], *, lang: str = "de") -> str:
+    """
+    Bekannte Börse(n) aus Report → definitive Formulierung.
+    Sonst generisches „Wahrscheinlich …“.
+    """
+    klar = [str(n).strip() for n in (namen or []) if str(n).strip()]
+    # Reihenfolge erhalten, Duplikate streichen
+    gesehen: list[str] = []
+    for n in klar:
+        if n not in gesehen:
+            gesehen.append(n)
+    if not gesehen:
+        return soft_label("exchange_batch", lang=lang)
+    joined = ", ".join(gesehen)
+    # „u. a.“: nicht alle Inputs müssen von der Börse sein — nur manche.
+    if lang == "en":
+        return f"incl. payout from {joined}"
+    return f"u. a. Auszahlung von {joined}"
+
+
+def _boerse_name_aus_adresse(adresse: str) -> str:
+    """Börsenname aus Report oder Label-Katalog (WalletExplorer), sonst \"\"."""
+    a = (adresse or "").strip()
+    if not a:
+        return ""
+    try:
+        from core import exchange_reports as boerse
+
+        hit = boerse.beschrifte_adresse(a)
+        if hit and hit.get("kategorie") == "exchange":
+            name = str(hit.get("name") or "").strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    try:
+        import labels
+
+        lab = labels.beschrifte(a)
+        if lab and (
+            lab.get("kategorie") == "exchange"
+            or lab.get("kategorie_label") == "Börse"
+        ):
+            name = str(lab.get("name") or "").strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    return ""
+
+
+def _boerse_namen_aus_tx(
+    tx: dict,
+    *,
+    get_tx: Callable[[str], dict] | None = None,
+    progress: ProgressCallback | None = None,
+) -> list[str]:
+    """
+    Börsennamen zu einer Exchange-Batch-Tx.
+
+    Typisch sind die **Hot-Wallet-Inputs** unbekannt; bekannte Börsenadressen
+    stehen oft unter den **anderen Outputs** derselben Batch (wie im Trace-Baum).
+    Deshalb Inputs *und* Outputs prüfen (Report + Label-Katalog).
+    """
+    chain = _chain()
+    namen: list[str] = []
+    gesehen: set[str] = set()
+
+    def _merk(addr: str) -> None:
+        name = _boerse_name_aus_adresse(addr)
+        if name and name not in gesehen:
+            gesehen.add(name)
+            namen.append(name)
+
+    for vin in tx.get("vin") or []:
+        if vin.get("is_coinbase") or "txid" not in vin:
+            continue
+        addrs: tuple[str, ...] = ()
+        prev = vin.get("prevout")
+        if prev:
+            addrs = tuple(chain._extract_addresses(prev))
+        elif get_tx is not None:
+            try:
+                resolved = resolve_vin_prevout(get_tx, vin, progress=progress)
+            except Exception as exc:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
+                resolved = None
+            if resolved:
+                addrs = tuple(chain._extract_addresses(resolved))
+        for a in addrs:
+            _merk(str(a or ""))
+
+    for vout in tx.get("vout") or []:
+        for a in chain._extract_addresses(vout):
+            _merk(str(a or ""))
+
+    return namen
+
+
+def _classification_exchange_batch(
+    ownership: TxOwnership | None,
+    tx: dict,
+    *,
+    get_tx: Callable[[str], dict] | None = None,
+    progress: ProgressCallback | None = None,
+) -> TxClassification:
+    namen = _boerse_namen_aus_tx(tx, get_tx=get_tx, progress=progress)
+    return TxClassification(
+        kind="exchange_batch",
+        soft_label_de=soft_label_exchange_batch(namen, lang="de"),
+        soft_label_en=soft_label_exchange_batch(namen, lang="en"),
+        walk_own_inputs_only=False,
+        treat_foreign_as_noise=False,
+        ownership=ownership,
+    )
 
 
 def _own_spend_shape(n_in: int, n_out: int) -> str | None:
@@ -567,13 +688,16 @@ def classify_tx(
         return _classification("bisq_payout", own)
 
     # 3. Exchange-Batch: kein eigener Input, aber eigener Empfang; typisch Fan-out.
+    # Mit Börsen-Report-Treffer → „Auszahlung von Kraken“ statt „Wahrscheinlich …“.
     if (
         own.ownership_complete
         and own.own_input_count == 0
         and own.own_output_count >= 1
         and n_out >= 3
     ):
-        return _classification("exchange_batch", own)
+        return _classification_exchange_batch(
+            own, tx, get_tx=get_tx, progress=progress,
+        )
 
     # Mix-Form früh: auch bei rein eigenen Inputs (Multi-Wallet / Lab).
     form_kind = None

@@ -86,8 +86,9 @@ def utxo_as_dict(
         "verfolgt_vollstaendig": False,
         "unvollstaendig": False,
         "juengste_sats_ts": None,
-        # Mix-Formen aus gespeichertem Herkunftsbaum (Icons an der Adressgruppe).
+        # Mix-Formen / Börsen aus gespeichertem Herkunftsbaum (Gruppen-Kopf).
         "mix_arten": [],
+        "boerse_namen": [],
         "tx_class": "",
         # Mempool: Ausgabe unterwegs (eigener Electrs).
         "spending_pending": bool(utxo.get("spending_pending")),
@@ -143,6 +144,7 @@ def utxo_as_dict(
             # Schon aus demselben Cache-Lesen wie die Verfolgt-Marke —
             # kein Extra-Durchlauf über die Chain.
             eintrag["mix_arten"] = list(gespeichert.get("mix_arten") or [])
+            eintrag["boerse_namen"] = list(gespeichert.get("boerse_namen") or [])
             eintrag["tx_class"] = str(gespeichert.get("tx_class") or "")
 
     return eintrag

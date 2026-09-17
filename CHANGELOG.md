@@ -9,6 +9,18 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Tests / Stabilität:** Unittest-Suite wieder grün — u. a. Tor erst nach LAN-Fail, SSL-Hinweistexte an Auto-Flip, Trace-Sort-IDs im HTML, Job-Gate-Reset in Tests, Empfangs-Ka-Ching nach Tip-Sync.
+- **Empfang · Mempool-Sprung:** Reihenfolge jetzt: Adresse benutzt bemerkt → **Konfetti auf alter QR** → Wallet-Update (Pending) → **neuer QR erst nach Animation**.
+- **Empfang · Ka-Ching:** Mempool-Eingang während Tip-Sync / Empfangs-Schärfung wurde verschluckt (QR sprang, kein Konfetti). Incoming wird gemerkt; Index-Sprung kurz nach Tip-Sync holt Ka-Ching nach.
+- **Sanktionsprüfung · UI:** Nach Seitenwechsel / Klick auf den Vorgang erscheint die **Fortschrittszeile** wieder (Job wird neu angebunden, Poller fortgesetzt).
+- **Sanktionsprüfung · Fortschritt:** Hop-0-Adresse und Origin-Events werden sofort gematcht/gezählt — die UI klebt nicht mehr bei „Hop 0, 0 Adressen“, während Frontier-`get_tx` nachzieht. Lücken einzeln mit Status „Lücke i/n“; fehlgeschlagene Frontier-Tx überspringen statt Endlos-Warten.
+- **Sanktionsprüfung · Abbruch:** Cancel greift jetzt auch mitten im Hop-Walk / vor `get_tx` (nicht nur zwischen UTXOs) — „Abbruch angefordert“ bleibt nicht wirkungslos.
+- **Steuerjahr · klären (gelb):** Nutzt `eintraege` (Bugfix); Mehrfachklick gesperrt. Gelb startet pragmatisch voll bis extern/Coinbase. **Zwei-Tiefen-Abnahme** (Horizont vs. voll) bewusst **nicht** für 0.9.6 — späteres Release (siehe ISSUES / Testplan C1).
+- **Herkunft · Exchange-Batch:** Soft-Label „**u. a. Auszahlung von Kraken**“ (ggf. mehrere Namen), sobald Börsenadressen am Batch bekannt sind — „u. a.“, weil nicht alle Inputs von der Börse sein müssen. Sonst weiterhin „Wahrscheinlich Batch…“.
+- **Herkunft · Börsen-Label:** Anzeige nur noch der **Börsenname** (nicht „Börse · …“). **Grün** = Zufluss Börse→Wallet, **rot** = Abfluss zur Börse (Einzahlung dort).
+- **Herkunft tracen · Sortierung:** Dropdown (Volumen/Alter) gilt auch für **„Bereits ausgegeben“**, nicht nur für den UTXO-Bestand darüber.
+- **Herkunft · Adressgruppe:** Börsen-Namen (z. B. Kraken, Coinbase) aus dem Trace erscheinen wie Mix-Icons in der **Gruppen-Kopfzeile**, sobald entsprechende Adressen/TxIDs im Verlauf vorkommen.
+- **Börsen-Reports:** Papierkorb-Icon statt „Entfernen“. Import akzeptiert CSV **ohne** Kopfzeile bzw. reine Adress-/TxID-Listen (bc1…, Legacy ``1…``, P2SH ``3…``).
 - **Datenquellen · Bezeichnung:** „UTXO-Set-Quelle“ → **pruned UTXO-Set-Quelle** (Rolle scantxoutset / oft pruned Node).
 - **P2P · Zeile:** Stift-Dialog entfernt. Inline-Feld mit Placeholder „erster Scan-Block“; Extra-Peers und Tor-Proxy nur noch über `.env`.
 - **Datenquelle · Staub-Jubel:** Staub im QR-Feld bei **jedem** erfolgreichen Speichern/Test einer Verbindung mit Privatsphäre **hoch** (eigener Indexer oder P2P, auch nach IP-Wechsel). Öffentliches Electrum: kein Jubel.

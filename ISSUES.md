@@ -2,6 +2,111 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Empfang · Ka-Ching mit libbitcoin
+
+**Stand:** 2026-09-17 · **kein SatSage-Bug** · Hinweis
+
+**Beobachtung:** Konfetti/Ka-Ching bei Mempool-Empfang funktioniert; **mit libbitcoin als Indexer nicht**, weil libbitcoin **keinen Tx-Pool/Mempool** hat — Pending-Receive steigt nicht.
+
+**Bewertung:** Erwartetes Limit der Datenquelle, kein SatSage-Fehler. Mit electrs/Fulcrum (Mempool) ok.
+
+---
+
+## Herkunft · Soft-Label „Wahrscheinlich Coinjoin/Mix“ ohne CJ-Icon
+
+**Stand:** 2026-09-17 · **offen** · näher untersuchen · UI / Trace
+
+**Beobachtung:** In **Herkunft tracen** erscheint häufiger der Soft-Text **„Wahrscheinlich Coinjoin/Mix“** (o. Ä.), aber das zugehörige **CJ-/Mix-Icon** taucht darunter **nicht** auf (weder an der Zeile noch in der Gruppen-Kopf-Leiste).
+
+**Zu klären:**
+
+- Welche `tx_class`-Werte den Text setzen vs. welche in `MIX_ICON_ORDER` / `TX_CLASS_ICON` ein Icon haben
+- Ob Icon nur bei konkreten Formen (Wasabi/Whirlpool/…) gerendert wird, Soft-Label aber bei generischem `coinjoin`/`mix`
+- Ob `mix_arten` am UTXO/Gruppe nach Trace nicht gesetzt wird, obwohl `tx_class_label` da ist
+- Soft-Label an Wurzel vs. Icon nur an Kindknoten / Gruppenkopf
+
+**Nächster Schritt:** Repro mit einer betroffenen Tx, `tx_class` / `mix_arten` / DOM prüfen. Kein 0.9.6-Blocker, aber UX-Inkonsistenz.
+
+---
+
+## Herkunft · „Scan neu“ auf Adresszeile (Bereits ausgegeben)
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI / Herkunft
+
+**Ist:** Unter **Bereits ausgegeben** Adressgruppen; jede Adresse klappt zu mehreren Tx-Zeilen auf. „Scan neu“ sitzt je Tx — bei vielen Tx mühsam.
+
+**Soll:** In der **Adresszeile** selbst ein Knopf **„Scan neu“**, der alle **untergeordneten** Tx/UTXOs dieser Adresse neu scannt/traced (Batch), nicht nur eine einzelne Tx.
+
+**Nutzen:** Weniger Klicks bei großen Ausgaben-Gruppen. Kein 0.9.6-Blocker.
+
+---
+
+## Steuerjahr · Zwei Tiefen (Horizont vs. voll) — Abnahme später
+
+**Stand:** 2026-09-17 · **offen für späteres Release** · Semantik / Test
+
+**Hintergrund:** Steuer-Horizont vs. voll bis Extern/Coinbase war als Optimierung gedacht, erzeugt aber hohe Komplexität (Scorecard gelb/grau, `steuer_ausreichend`, gelb-klären, Berichtstiefe).
+
+**Für 0.9.6:** Keine systematische Abnahme der Zwei-Tiefen-Sonderfälle. Pragmatisch: klären möglichst vollständig, aufs Beste hoffen. Testplan **C1** (und verwandte Horizont-Semantik) **verschoben**.
+
+**Später:** Gelb erst „fertig“, wenn **grün** oder voller Baum gelb bestätigt; Horizont-Stop ≠ gelb erledigt. UI/Backend und Testfälle dann bewusst nachziehen.
+
+---
+
+## Herkunft · Stichwort-Filter in Sammelzeilen
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI / Herkunft tracen
+
+**Soll:** In jeder **Sammelzeile** (Gruppe zum Ausklappen darunter) ein Eingabefeld **„Stichwort“** + **Filtern**. Danach bleiben nur noch die Teile der Gruppe sichtbar, die zum Stichwort passen.
+
+**Match egal worauf** (Teilstring, case-insensitive sinnvoll):
+
+- Adresse (auch Teil)
+- TxID (auch Teil)
+- Börsenlabel (z. B. Kraken)
+- Monat / Jahr (Datumsfelder)
+
+**Bezug:** Ergänzt die geplanten Filter in der Gruppen-Überschrift (Datumsbereich, Coinjoins, Börsen, Volumen) — Stichwort ist der schnelle Freitext. Kein 0.9.6-Blocker.
+
+---
+
+## Auswerten · Tools · Adresse nachschlagen
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI
+
+**Soll:** Unter **Auswerten** einen Punkt **Tools**. Darin:
+
+- Eingabefeld für eine **Adresse**
+- Knopf **„Auswerten“**
+
+**Verhalten:**
+
+1. Gehört die Adresse zu einem der konfigurierten Wallets? Wenn ja → welches (Name / XPUB-Kontext).
+2. Wurde sie schon verwendet? (Historie/UTXO-Cache)
+3. Wenn verwendet **und** Herkunfts-Trace vorliegt → **Link zum Trace** anbieten.
+4. Gehört sie zu **keinem** Wallet → **„nicht gefunden“** und, sofern konfiguriert, **Link zum Block-Explorer**.
+
+**Nutzen:** Schnelle Zuordnung ohne manuell Wallets/Listen durchzuklicken. Kein 0.9.6-Blocker — nur Idee notiert.
+
+---
+
+## Herkunft · Filter in der Gruppen-Überschriftenzeile
+
+**Stand:** 2026-09-17 · **offen** · später · UI / Herkunft tracen
+
+**Soll:** In jeder **Adressgruppen-Kopfzeile** (Bestand und „Bereits ausgegeben“) Filteroptionen:
+
+- **Datumsbereich**
+- **Coinjoins** (Mix-Formen vorhanden / Art)
+- **Börsen** (z. B. nur Kraken/Coinbase / mit Börsen-Label)
+- **Volumen** `<` / `>` / **zwischen**
+
+**Kontext:** Sortierung (Volumen/Alter) wirkt bereits auf Bestand und Ausgaben; Mix-Icons und Börsen-Pillen stehen schon in der Kopfzeile — Filter wären die nächste Stufe zum Eingrenzen großer Listen.
+
+**Nutzen:** Hoch bei vielen Adressen/UTXOs. Kein 0.9.6-Blocker — **später bauen**.
+
+---
+
 ## BIP-158 · ein Filterpass für alle XPUBs (ohne eigenen Indexer)
 
 **Stand:** 2026-09-17 · **offen** · später · Datenquelle / P2P · Performance

@@ -337,6 +337,22 @@ def trace_utxo_origin(
             own_prevouts=own_prevouts,
             progress=progress_cb,
         )
+    # Exchange-Batch ohne Namen: Prevouts nachladen und Label ggf. konkretisieren
+    # („Auszahlung von Kraken“ statt „Wahrscheinlich Batch-…“).
+    if (
+        tx_class.kind == "exchange_batch"
+        and str(tx_class.soft_label_de or "").startswith("Wahrscheinlich")
+        and get_tx is not None
+        and not braucht_prevouts
+    ):
+        tx_class = classify_tx(
+            tx,
+            own_addresses,
+            wallet=wallet,
+            get_tx=get_tx,
+            own_prevouts=own_prevouts,
+            progress=progress_cb,
+        )
     if tx_class.kind != "unknown":
         node["tx_class"] = tx_class.kind
         node["tx_class_label"] = tx_class.soft_label_de
@@ -2519,6 +2535,7 @@ def _sammle_sanction_events_live(
     wallet_utxo_ref: str,
     start_depth: int = 1,
     visited: set | None = None,
+    cancel_cb=None,
 ) -> tuple[list[dict], list[dict]]:
     """
     xpub-blinder Hop-Walk → Event- und CoinJoin-Liste
@@ -2526,13 +2543,21 @@ def _sammle_sanction_events_live(
 
     *start_depth*: 1 = Inputs der UTXO-Tx; >1 = Fortsetzung an einem Frontier.
     CoinJoin-Hop = Hop der Tx-Ausgabe Richtung Wallet-UTXO (0 = UTXO-Tx).
+    *cancel_cb*: bei True Abbruch (Cancelled) — auch mitten im Hop-Walk.
     """
+    from core.jobs import Cancelled
+
     events: list[dict] = []
     coinjoins: list[dict] = []
     if visited is None:
         visited = set()
 
+    def _abbruch() -> None:
+        if cancel_cb and cancel_cb():
+            raise Cancelled()
+
     if start_depth <= 1:
+        _abbruch()
         hop0: list[str] = []
         raw = str(utxo.get("address") or "").strip()
         if raw:
@@ -2550,6 +2575,8 @@ def _sammle_sanction_events_live(
                     amount0 = int(_main()._extract_value_sats(outs[vout_index]))
                 except Exception:
                     pass
+        except Cancelled:
+            raise
         except Exception:
             tx0 = None
         for a in hop0:
@@ -2568,6 +2595,7 @@ def _sammle_sanction_events_live(
                 coinjoins.append(cj0)
 
     def _walk(creator_txid: str, depth: int) -> None:
+        _abbruch()
         if depth > max_hops:
             return
         key = f"{creator_txid}:walk"
@@ -2579,7 +2607,10 @@ def _sammle_sanction_events_live(
             # Tx laden (auch für CJ-Form); iter_funding_inputs lädt ggf. nochmal
             # aus Cache.
             try:
+                _abbruch()
                 tx = get_tx(creator_txid)
+            except Cancelled:
+                raise
             except Exception:
                 tx = None
             # Hop der Ausgabe dieser Tx Richtung Wallet = depth-1 (depth≥1).
@@ -2598,6 +2629,7 @@ def _sammle_sanction_events_live(
                     coinjoins.append(cj)
 
             for inp in iter_funding_inputs(get_tx, creator_txid):
+                _abbruch()
                 if isinstance(inp, CoinbaseFunding):
                     continue
                 edge: FundingEdge = inp
@@ -2614,6 +2646,8 @@ def _sammle_sanction_events_live(
                     })
                 if depth < max_hops:
                     _walk(edge.prevout.txid, depth + 1)
+        except Cancelled:
+            raise
         except Exception:
             return
 
@@ -2632,6 +2666,7 @@ def _pruefe_ein_utxo(
     abort_on_hit: bool,
     progress,
     immutable_cache_dir: Path | None = None,
+    cancel_cb=None,
 ) -> tuple[str, list[dict], set[str], list[dict]] | None:
     """
     Ein UTXO prüfen. Rückgabe: (ref, treffer, gesehene Adressen, coinjoins)
@@ -2647,6 +2682,7 @@ def _pruefe_ein_utxo(
     """
     del own_addresses, wallet
     from core import trace_cache
+    from core.jobs import Cancelled
 
     txid = str(utxo.get("txid", "")).strip()
     vout = utxo.get("vout")
@@ -2663,25 +2699,55 @@ def _pruefe_ein_utxo(
     coinjoins: list[dict] = []
     counters = {"addrs_checked": 0}
 
-    def _fortschritt(hop: int) -> None:
+    def _abbruch() -> None:
+        if cancel_cb and cancel_cb():
+            raise Cancelled()
+
+    # UI nicht bei jedem Address-Match fluten (große Origin-Bäume).
+    _last_prog = {"hop": -1, "n": 0, "t": 0.0}
+
+    def _fortschritt(hop: int, *, force: bool = False) -> None:
         if progress is None:
             return
+        import time as _time
+
+        n = counters["addrs_checked"]
+        jetzt = _time.monotonic()
+        hop_i = min(int(hop), max_hops)
+        if not force and hop_i == _last_prog["hop"] and n - _last_prog["n"] < 25:
+            if jetzt - _last_prog["t"] < 0.4:
+                return
+        _last_prog["hop"] = hop_i
+        _last_prog["n"] = n
+        _last_prog["t"] = jetzt
         progress.update(
             wallet_utxo=ref,
-            hop=min(hop, max_hops),
+            hop=hop_i,
             max_hops=max_hops,
-            addrs_checked=counters["addrs_checked"],
+            addrs_checked=n,
             status=_sanction_progress_status(treffer),
         )
 
+    gematcht: set[tuple] = set()
+
     def _match_events(events: list) -> None:
         for ev in events:
+            _abbruch()
             hop = int(ev.get("hop") or 0)
             if hop > max_hops:
                 continue
             addr = str(ev.get("address") or "").strip()
             if not addr:
                 continue
+            schluessel = (
+                hop,
+                addr,
+                str(ev.get("from_utxo") or ""),
+                str(ev.get("in_tx") or ""),
+            )
+            if schluessel in gematcht:
+                continue
+            gematcht.add(schluessel)
             counters["addrs_checked"] += 1
             gesehen.add(addr)
             _fortschritt(hop)
@@ -2690,11 +2756,23 @@ def _pruefe_ein_utxo(
             )
             if hit:
                 treffer.append(hit)
-                _fortschritt(hop)
+                _fortschritt(hop, force=True)
                 if abort_on_hit:
                     raise SanctionHitFound(hit)
 
-    if progress is not None:
+    _abbruch()
+    # Sofort Hop 0 aus dem UTXO melden — sonst bleibt die UI bei
+    # „0 Adressen“ stehen, während Frontiers noch get_tx machen.
+    hop0_addr = str(utxo.get("address") or "").strip()
+    if hop0_addr:
+        _match_events([{
+            "hop": 0,
+            "address": hop0_addr,
+            "from_utxo": ref,
+            "in_tx": txid,
+            "amount_sats": int(utxo.get("value") or utxo.get("value_sats") or 0),
+        }])
+    elif progress is not None:
         _fortschritt(0)
 
     # 1) Fertiger Sanktions-Walk
@@ -2729,7 +2807,10 @@ def _pruefe_ein_utxo(
             max_hops=max_hops,
             wallet_utxo_ref=ref,
         )
+        # Bekannte Origin-Events sofort matchen — nicht erst nach Live-Lücken.
+        _match_events(events)
 
+    live_complete = True
     if not origin or frontiers:
         visited: set = set()
         if not origin:
@@ -2742,27 +2823,52 @@ def _pruefe_ein_utxo(
                 wallet_utxo_ref=ref,
                 start_depth=1,
                 visited=visited,
+                cancel_cb=cancel_cb,
             )
+            _match_events(events)
         else:
-            # Lücken hinter externen Blättern nachziehen
-            for f_txid, f_vout, f_depth in frontiers:
+            # Lücken hinter externen Blättern nachziehen — je Frontier
+            # matchen, damit Fortschritt/Abbruch nicht bis zum Schluss warten.
+            for i, (f_txid, f_vout, f_depth) in enumerate(frontiers):
+                _abbruch()
                 if f_depth > max_hops:
                     continue
-                extra, extra_cj = _sammle_sanction_events_live(
-                    get_tx,
-                    f_txid,
-                    f_vout,
-                    {"address": "", "value": 0},
-                    max_hops=max_hops,
-                    wallet_utxo_ref=ref,
-                    start_depth=f_depth,
-                    visited=visited,
-                )
-                # start_depth>1: keine Hop-0-Events; Inputs bei f_depth
+                if progress is not None:
+                    progress.update(
+                        wallet_utxo=ref,
+                        hop=min(f_depth, max_hops),
+                        max_hops=max_hops,
+                        addrs_checked=counters["addrs_checked"],
+                        status=(
+                            f"{_sanction_progress_status(treffer)}"
+                            f" · Lücke {i + 1}/{len(frontiers)}"
+                        ),
+                    )
+                try:
+                    extra, extra_cj = _sammle_sanction_events_live(
+                        get_tx,
+                        f_txid,
+                        f_vout,
+                        {"address": "", "value": 0},
+                        max_hops=max_hops,
+                        wallet_utxo_ref=ref,
+                        start_depth=f_depth,
+                        visited=visited,
+                        cancel_cb=cancel_cb,
+                    )
+                except Exception as exc:
+                    from core.jobs import ist_abbruch
+
+                    if ist_abbruch(exc):
+                        live_complete = False
+                        raise
+                    # Einzelne Frontier-Tx nicht erreichbar: weiter, Walk unvollständig.
+                    live_complete = False
+                    continue
                 events.extend(extra)
                 coinjoins.extend(extra_cj)
+                _match_events(extra)
 
-    _match_events(events)
     coinjoins = _coinjoins_zusammenfuehren(coinjoins)
 
     if immutable_cache_dir and events:
@@ -2780,11 +2886,12 @@ def _pruefe_ein_utxo(
                 continue
             gesehen_k.add(k)
             unique.append(ev)
+        # Nur als complete speichern, wenn alle Frontiers gezogen wurden.
         trace_cache.sanction_walk_speichern(
             txid,
             vout_index,
             max_hops=max_hops,
-            complete=True,
+            complete=live_complete and (not frontiers or origin is not None),
             events=unique,
             coinjoins=coinjoins,
             immutable_cache_dir=immutable_cache_dir,
@@ -2839,18 +2946,36 @@ def _check_wallet_utxos_parallel(
 
     def worker(worker_id: int) -> None:
         nonlocal geprueft
-        get_tx = get_tx_je_worker(worker_id)
+        from core.jobs import Cancelled
+
+        roh_get_tx = get_tx_je_worker(worker_id)
+
+        def get_tx(txid: str):
+            if abbruch_gewuenscht():
+                raise Cancelled()
+            return roh_get_tx(txid)
+
         while not abbruch_gewuenscht():
             try:
                 utxo = arbeit.get_nowait()
             except queue.Empty:
                 return
-            ergebnis = _pruefe_ein_utxo(
-                get_tx, utxo, own_addresses, sanctioned_addresses,
-                max_hops=max_hops, wallet=wallet, abort_on_hit=False,
-                progress=fortschritt,
-                immutable_cache_dir=immutable_cache_dir,
-            )
+            try:
+                ergebnis = _pruefe_ein_utxo(
+                    get_tx, utxo, own_addresses, sanctioned_addresses,
+                    max_hops=max_hops, wallet=wallet, abort_on_hit=False,
+                    progress=fortschritt,
+                    immutable_cache_dir=immutable_cache_dir,
+                    cancel_cb=abbruch_gewuenscht,
+                )
+            except Cancelled:
+                # Restliche Queue leeren — andere Worker sollen auch enden.
+                while True:
+                    try:
+                        arbeit.get_nowait()
+                    except queue.Empty:
+                        break
+                return
             if ergebnis is None:
                 continue
             _ref, treffer, gesehen, cjs = ergebnis
@@ -2863,7 +2988,8 @@ def _check_wallet_utxos_parallel(
 
     arbeiter = min(worker_count, len(utxos))
     with ThreadPoolExecutor(max_workers=arbeiter) as executor:
-        for future in [executor.submit(worker, i) for i in range(arbeiter)]:
+        futures = [executor.submit(worker, i) for i in range(arbeiter)]
+        for future in futures:
             future.result()
 
     # Stabile Reihenfolge: Ohne Sortierung hinge sie am Thread-Timing, und
@@ -2966,11 +3092,18 @@ def check_wallet_utxos_sanctions(
                     max_hops=max_hops, wallet=wallet,
                     abort_on_hit=abort_on_hit, progress=progress,
                     immutable_cache_dir=immutable_cache_dir,
+                    cancel_cb=abbruch_gewuenscht,
                 )
             except SanctionHitFound as exc:
                 checked += 1
                 abort_hit = exc.hit
                 break
+            except Exception as exc:
+                from core.jobs import Cancelled, ist_abbruch
+
+                if ist_abbruch(exc) or isinstance(exc, Cancelled):
+                    break
+                raise
             if ergebnis is None:
                 continue
             _ref, treffer, gesehen, cjs = ergebnis

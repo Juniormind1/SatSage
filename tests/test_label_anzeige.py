@@ -112,17 +112,23 @@ class TestOberflaeche(unittest.TestCase):
         self.html = (web / "index.html").read_text(encoding="utf-8")
 
     def test_erwaehnung_wird_anders_formuliert_als_ein_dienst(self):
-        marke = self.js[self.js.index("function labelMarke"):]
-        marke = marke[:marke.index("\nfunction ")]
+        # labelMarke + Hilfsfunktionen davor (istBoersenLabel/boerseRichtung).
+        start = self.js.index("function istBoersenLabel")
+        ende = self.js.index("\nfunction meldungListen", start)
+        marke = self.js[start:ende]
         self.assertIn('label.art === "erwaehnung"', marke)
         self.assertIn('t("labels.mentionedOn"', marke)
         self.assertIn("kategorie_label", marke)
+        self.assertIn("istBoersenLabel", marke)
+        self.assertIn("label-boerse-in", marke)
+        self.assertIn("label-boerse-out", marke)
         de = (Path(__file__).resolve().parent.parent / "web" / "locales" / "de.json")
         self.assertIn("erwähnt", de.read_text(encoding="utf-8"))
 
     def test_datenstand_steht_im_hilfetext(self):
-        marke = self.js[self.js.index("function labelMarke"):]
-        marke = marke[:marke.index("\nfunction ")]
+        start = self.js.index("function labelMarke")
+        ende = self.js.index("\nfunction meldungListen", start)
+        marke = self.js[start:ende]
         self.assertIn('t("labels.dataHint")', marke)
 
     def test_einstellungen_haben_die_karte(self):

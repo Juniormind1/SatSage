@@ -267,6 +267,14 @@ def electrum_serial_busy() -> bool:
     return ELECTRUM_GATE.busy()
 
 
+def _reset_electrum_gate_fuer_tests() -> None:
+    """Test-Hilfe: Gate freigeben (Daemon-Jobs aus anderen Tests)."""
+    with ELECTRUM_GATE._cv:
+        ELECTRUM_GATE._holder_id = None
+        ELECTRUM_GATE._holder_label = ""
+        ELECTRUM_GATE._cv.notify_all()
+
+
 def format_job_uhr(ts: float | None = None) -> str:
     """Lokale Wanduhr, ISO-ähnlich ohne TZ — greppbar und lesbar."""
     return time.strftime(

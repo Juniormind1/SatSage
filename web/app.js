@@ -185,6 +185,22 @@ function softTxClassLabel(knotenOderErgebnis) {
   if (!knotenOderErgebnis) return "";
   const kind = knotenOderErgebnis.tx_class || "";
   if (!kind || kind === "unknown") return "";
+  // exchange_batch: bekannte Börsen → „Auszahlung von Kraken“ (auch aus
+  // boerse_namen am UTXO/Ergebnis, wenn Soft-Label noch „Wahrscheinlich…“ ist).
+  if (kind === "exchange_batch") {
+    const namen = Array.isArray(knotenOderErgebnis.boerse_namen)
+      ? knotenOderErgebnis.boerse_namen.filter(Boolean)
+      : [];
+    if (namen.length) {
+      return uiSprache() === "en"
+        ? `incl. payout from ${namen.join(", ")}`
+        : `u. a. Auszahlung von ${namen.join(", ")}`;
+    }
+    const backend = uiSprache() === "en"
+      ? (knotenOderErgebnis.tx_class_label_en || knotenOderErgebnis.tx_class_label || "")
+      : (knotenOderErgebnis.tx_class_label || "");
+    if (backend) return backend;
+  }
   const key = `trace.txClass.${kind}`;
   const uebersetzt = t(key);
   if (uebersetzt !== key) return uebersetzt;
@@ -321,7 +337,135 @@ function zeichneMixIconLeiste(arten) {
   return leiste.children.length ? leiste : null;
 }
 
-/** Nach neuem Trace: Mix-Icons an der Adressgruppe nachziehen. */
+/** Börsenname aus Label / exchange_label (CSV-Import oder Dienst-Katalog). */
+function boerseNameAusLabel(lab) {
+  if (!lab || typeof lab !== "object") return "";
+  const name = String(lab.name || "").trim();
+  if (!name) return "";
+  if (lab.kategorie === "exchange" || lab.nutzer_import) return name;
+  if (lab.kategorie_label === "Börse" || lab.quelle === "Börsen-CSV") return name;
+  return "";
+}
+
+function boerseNameAusKnoten(knoten) {
+  if (!knoten || typeof knoten !== "object") return "";
+  return (
+    boerseNameAusLabel(knoten.label)
+    || boerseNameAusLabel(knoten.exchange_label)
+  );
+}
+
+function _boerseRichtungMerken(richtungen, name, lab, kontext) {
+  if (!name) return;
+  const r = boerseRichtung(lab || { name }, kontext || { herkunft: true });
+  if (!r) return;
+  // out sticht in — wenn jemals zur Börse gesendet, rot behalten.
+  if (richtungen[name] === "out") return;
+  richtungen[name] = r;
+}
+
+/** Börsen-Namen + Richtungen aus einem Trace-Ergebnis (Root + Kinder). */
+function boerseNamenAusErgebnis(ergebnis) {
+  const gesehen = new Set();
+  const richtungen = {};
+  if (!ergebnis || !ergebnis.found) {
+    return { namen: [], richtungen };
+  }
+  const stapel = [];
+  if (ergebnis.root) stapel.push(ergebnis.root);
+  for (const k of ergebnis.children || []) stapel.push(k);
+  while (stapel.length) {
+    const knoten = stapel.pop();
+    if (!knoten || typeof knoten !== "object") continue;
+    const lab = knoten.label || knoten.exchange_label;
+    const name = boerseNameAusKnoten(knoten);
+    if (name) {
+      gesehen.add(name);
+      _boerseRichtungMerken(richtungen, name, lab, {
+        herkunft: true,
+        zufluss: !knoten.abfluss,
+        abfluss: Boolean(knoten.abfluss),
+      });
+    }
+    for (const kind of knoten.children || []) stapel.push(kind);
+    for (const src of knoten.sources || []) {
+      const slab = src.label || src.exchange_label;
+      const n = boerseNameAusLabel(slab);
+      if (n) {
+        gesehen.add(n);
+        _boerseRichtungMerken(richtungen, n, slab, { herkunft: true, zufluss: true });
+      }
+    }
+  }
+  return {
+    namen: [...gesehen].sort((a, b) => a.localeCompare(b, "de")),
+    richtungen,
+  };
+}
+
+function boerseNamenDerGruppe(gruppe) {
+  const gesehen = new Set();
+  const richtungen = {};
+  for (const u of gruppe.utxos || []) {
+    for (const n of u.boerse_namen || []) {
+      if (!n) continue;
+      gesehen.add(String(n));
+      const r = (u.boerse_richtungen && u.boerse_richtungen[n]) || "in";
+      if (richtungen[n] !== "out") richtungen[n] = r;
+    }
+  }
+  return {
+    namen: [...gesehen].sort((a, b) => a.localeCompare(b, "de")),
+    richtungen,
+  };
+}
+
+/**
+ * Kompakte Börsen-Pillen in der Adressgruppen-Kopfzeile.
+ * *richtungen*: optional Map name → "in"|"out" (sonst neutral/grün Zufluss).
+ */
+function zeichneBoersenLeiste(namen, richtungen) {
+  if (!namen || !namen.length) return null;
+  const leiste = document.createElement("span");
+  leiste.className = "adress-boerse-leiste";
+  const tipps = [];
+  const map = richtungen || {};
+  for (const name of namen) {
+    const richtung = map[name] || "in";
+    const tipp = richtung === "out"
+      ? t("labels.exchangeOutflowNamed", { name })
+      : t("trace.exchangeInHistory", { name });
+    tipps.push(tipp);
+    const p = document.createElement("span");
+    p.className = "adress-boerse-pille"
+      + (richtung === "out" ? " label-boerse-out" : " label-boerse-in");
+    p.textContent = name;
+    p.title = tipp;
+    leiste.append(p);
+  }
+  if (tipps.length) leiste.setAttribute("aria-label", tipps.join("; "));
+  return leiste;
+}
+
+function _haengeGruppenLeistenAn(kopf, gruppe) {
+  if (!kopf || !gruppe) return;
+  for (const sel of [".adress-mix-icons", ".adress-boerse-leiste"]) {
+    const alt = kopf.querySelector(sel);
+    if (alt) alt.remove();
+  }
+  const betrag = kopf.querySelector(".adress-betrag");
+  const boerse = boerseNamenDerGruppe(gruppe);
+  for (const leiste of [
+    zeichneMixIconLeiste(mixArtenDerGruppe(gruppe)),
+    zeichneBoersenLeiste(boerse.namen, boerse.richtungen),
+  ]) {
+    if (!leiste) continue;
+    if (betrag) kopf.insertBefore(leiste, betrag);
+    else kopf.append(leiste);
+  }
+}
+
+/** Nach neuem Trace: Mix-Icons + Börsen-Pillen an der Adressgruppe nachziehen. */
 function aktualisiereGruppenMixIcons(address) {
   if (!address) return;
   const gruppeEl = document.querySelector(
@@ -332,14 +476,7 @@ function aktualisiereGruppenMixIcons(address) {
   if (!gruppe) return;
   const kopf = gruppeEl.querySelector(".adress-kopf");
   if (!kopf) return;
-  const alt = kopf.querySelector(".adress-mix-icons");
-  if (alt) alt.remove();
-  const leiste = zeichneMixIconLeiste(mixArtenDerGruppe(gruppe));
-  if (!leiste) return;
-  // Vor dem Betrag rechts einfügen, falls vorhanden.
-  const betrag = kopf.querySelector(".adress-betrag");
-  if (betrag) kopf.insertBefore(leiste, betrag);
-  else kopf.append(leiste);
+  _haengeGruppenLeistenAn(kopf, gruppe);
 }
 
 function quelleFeldLabel(feld, quelleKey) {
@@ -1301,6 +1438,12 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
     const arten = new Set([...(utxo.mix_arten || []), ...tief]);
     utxo.mix_arten = MIX_ICON_ORDER.filter((k) => arten.has(k));
   }
+  // Börsen (Kraken/Coinbase/…) aus Trace-Blättern — für Gruppen-Kopfzeile.
+  const boersen = boerseNamenAusErgebnis(ergebnis);
+  if (boersen.namen && boersen.namen.length) {
+    utxo.boerse_namen = boersen.namen;
+    utxo.boerse_richtungen = boersen.richtungen || {};
+  }
   // Dieselbe Instanz in der Trace-Liste nachziehen (findeTraceUtxo kann
   // ein anderes Objekt geliefert haben als die Gruppenzeile).
   for (const liste of [
@@ -1324,6 +1467,10 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
         if (utxo.time_label) eintrag.time_label = utxo.time_label;
         if (utxo.mix_arten) eintrag.mix_arten = utxo.mix_arten;
         if (utxo.tx_class) eintrag.tx_class = utxo.tx_class;
+        if (utxo.boerse_namen) eintrag.boerse_namen = utxo.boerse_namen;
+        if (utxo.boerse_richtungen) {
+          eintrag.boerse_richtungen = utxo.boerse_richtungen;
+        }
         if (!utxo.address && gruppe.address) utxo.address = gruppe.address;
       }
     }
@@ -3808,8 +3955,26 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
       zeichneEmpfangBeschaeftigt(walletId);
       return null;
     }
-    // Empfangsadresse kann nach UTXO-Scan/Gap springen — das ist keine TxIN.
-    // Konfetti nur über meldePendingAenderung (Mempool-Eingang steigt).
+    // Index-Sprung = gezeigte Adresse wurde benutzt (oft Mempool).
+    // Reihenfolge: Konfetti auf *alter* Adresse → Wallet-Update → neuer QR
+    // erst nach Ende der Animation (nicht vorher umspringen).
+    const prevEmp = Zustand.empfangByWallet[walletId]
+      || (Zustand.empfang?.wallet_id === walletId ? Zustand.empfang : null);
+    const prevIdx = prevEmp && Number.isFinite(Number(prevEmp.index))
+      ? Number(prevEmp.index)
+      : null;
+    const neuIdx = Number(daten.index);
+    const indexSprung = prevIdx != null && Number.isFinite(neuIdx) && neuIdx > prevIdx;
+
+    if (indexSprung) {
+      return starteEmpfangSprungMitKonfetti(walletId, daten, prevEmp);
+    }
+
+    Zustand.empfangByWallet[walletId] = daten;
+    Zustand.empfang = daten;
+    if (spieleQueuedIncomingFlash(walletId)) {
+      return daten;
+    }
     zeichneEmpfang(daten, { zahlung: false });
     return daten;
   } catch (fehler) {
@@ -4052,6 +4217,9 @@ const Zustand = {
   peerTakt: null,
   peerTaktMs: null,
   peerCheckLaeuft: false,
+  /** Laufender Sanktions-Hop-Check (UI nach Seitenwechsel wieder anbinden). */
+  sanktionsCheckJobId: null,
+  sanktionsCheckTimer: null,
   oeffentlicheGefragt: false,
   headerJob: null,
   headerTimer: null,
@@ -4350,8 +4518,12 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
   const ladeGen = Zustand.walletLadeGen;
   zeigeAnsicht("wallet");
-  // Während TxIN/Orange-₿ Empfang nicht neu laden (würde Animation stoppen).
-  if (!ohneEmpfang && !empfangSonderAtemLaeuft()) {
+  // Während TxIN/Orange-₿ / Empfang-Sprung-Konfetti nicht neu laden.
+  if (
+    !ohneEmpfang
+    && !empfangSonderAtemLaeuft()
+    && Zustand._empfangSprungInArbeit !== String(walletId)
+  ) {
     ladeEmpfang(walletId).catch(() => {});
   }
 
@@ -4804,7 +4976,8 @@ function zeichneUtxoZeile(utxo) {
 
   // Woher der letzte externe Zufluss kam, sofern die Herkunft schon
   // ermittelt und die Adresse zuzuordnen ist.
-  const herkunft = labelMarke(utxo.herkunft_label);
+  // Ingress = Zufluss von außen (Börse→Wallet → grün).
+  const herkunft = labelMarke(utxo.herkunft_label, { herkunft: true, zufluss: true });
   if (herkunft) zeile.append(herkunft);
 
   const neu = document.createElement("button");
@@ -5360,13 +5533,145 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
  * Mempool-Pending → QR-Animation — nur für das *aktuell gewählte* Wallet.
  *
  * Konfetti **nur** wenn ``pending_receive`` steigt (neue TxIN im Mempool).
- * Nicht bei UTXO-Scan, Cache-Aufbau oder Empfangsadress-Sprung.
+ * Nicht bei UTXO-Scan, Cache-Aufbau oder Empfangsadress-Sprung allein.
+ *
+ * Während Tip-Sync/Scan ist ``empfangScanLaeuftFuer`` true — dann merken wir
+ * den Incoming und spielen Ka-Ching nach Sync-Ende nach (sonst: QR springt,
+ * Konfetti fehlt).
  *
  * * In → Konfetti
  * * In+Out gleichzeitig (Self) → nur Konfetti
  * * internOut: Spend an eigenes Wallet → Konfetti
  * * sonst Out → OH NO!
  */
+function merkeQueuedIncomingFlash(walletId) {
+  if (!walletId) return;
+  Zustand._queuedIncomingFlash = { walletId: String(walletId), um: Date.now() };
+}
+
+function holeQueuedIncomingFlash(walletId) {
+  const q = Zustand._queuedIncomingFlash;
+  if (!q || String(q.walletId) !== String(walletId)) return null;
+  if (Date.now() - (q.um || 0) > 120000) {
+    Zustand._queuedIncomingFlash = null;
+    return null;
+  }
+  Zustand._queuedIncomingFlash = null;
+  return q;
+}
+
+/**
+ * Empfangs-Index ist weitergesprungen (Adresse benutzt) → Wallet-UTXOs inkl.
+ * Mempool-Pending neu laden. Gedrosselt, damit Polls nicht fluten.
+ */
+function frischeWalletNachEmpfangSprung(walletId) {
+  if (!walletId || Zustand.walletId !== walletId) return;
+  if (Zustand.ansicht !== "wallet") return;
+  if (typeof empfangScanLaeuftFuer === "function" && empfangScanLaeuftFuer(walletId)) {
+    return;
+  }
+  const jetzt = Date.now();
+  if (
+    Zustand._lastEmpfangSprungRefreshUm
+    && jetzt - Zustand._lastEmpfangSprungRefreshUm < 2500
+  ) {
+    return;
+  }
+  Zustand._lastEmpfangSprungRefreshUm = jetzt;
+  // zeigeWallet: zweiter Request mit Mempool — Pending sichtbar.
+  // Empfang nicht erneut anstoßen (ohneEmpfang), sonst QR-Loop / Animation-Kill.
+  Promise.resolve(zeigeWallet(walletId, { ohneEmpfang: true })).catch(() => {});
+}
+
+/**
+ * Mempool/History hat die gezeigte Adresse benutzt.
+ * 1) Alter QR bleibt · 2) Konfetti · 3) Wallet-Update · 4) neuer QR nach Animation.
+ */
+function starteEmpfangSprungMitKonfetti(walletId, neueDaten, alterEmpfang) {
+  // Schon in Konfetti: nur neueren Empfangsstand merken.
+  if (Zustand._empfangSprungInArbeit === String(walletId)) {
+    Zustand._pendingEmpfangNachKonfetti = {
+      walletId: String(walletId),
+      daten: neueDaten,
+    };
+    return neueDaten;
+  }
+  Zustand._pendingEmpfangNachKonfetti = { walletId: String(walletId), daten: neueDaten };
+  Zustand._empfangSprungInArbeit = String(walletId);
+
+  // Alten QR behalten (nicht neueDaten speichern/zeichnen).
+  if (alterEmpfang && alterEmpfang.address) {
+    Zustand.empfangByWallet[walletId] = alterEmpfang;
+    Zustand.empfang = alterEmpfang;
+    if (!empfangSonderAtemLaeuft()) {
+      zeichneEmpfang(alterEmpfang, { zahlung: false });
+    }
+  }
+
+  frischeWalletNachEmpfangSprung(walletId);
+
+  const zeigeNeuenQr = () => {
+    const pending = Zustand._pendingEmpfangNachKonfetti;
+    Zustand._pendingEmpfangNachKonfetti = null;
+    Zustand._empfangSprungInArbeit = null;
+    if (!pending || String(pending.walletId) !== String(Zustand.walletId)) return;
+    Zustand.empfangByWallet[pending.walletId] = pending.daten;
+    Zustand.empfang = pending.daten;
+    zeichneEmpfang(pending.daten, { zahlung: false });
+  };
+
+  const jetzt = Date.now();
+  if (
+    Zustand._lastIncomingFlashUm
+    && jetzt - Zustand._lastIncomingFlashUm <= 4000
+  ) {
+    // Debounce: kein zweites Konfetti — neuen QR trotzdem nachziehen.
+    zeigeNeuenQr();
+    return neueDaten;
+  }
+  Zustand._lastIncomingFlashUm = jetzt;
+  Zustand._queuedIncomingFlash = null;
+  EmpfangPuls.flashIncoming(walletId, undefined, {
+    halteDanach: false,
+    onDone: zeigeNeuenQr,
+  });
+  return neueDaten;
+}
+
+/** Nach Tip-Sync/Scan: gemerktes Mempool-Incoming als Ka-Ching nachholen. */
+function spieleQueuedIncomingFlash(walletId) {
+  if (!walletId || Zustand.walletId !== walletId) return false;
+  if (Zustand._empfangSprungInArbeit === String(walletId)) return false;
+  if (typeof empfangScanLaeuftFuer === "function" && empfangScanLaeuftFuer(walletId)) {
+    return false;
+  }
+  if (!holeQueuedIncomingFlash(walletId)) return false;
+  const jetzt = Date.now();
+  if (
+    Zustand._lastIncomingFlashUm
+    && jetzt - Zustand._lastIncomingFlashUm <= 4000
+  ) {
+    return false;
+  }
+  Zustand._lastIncomingFlashUm = jetzt;
+  EmpfangPuls.flashIncoming(walletId, undefined, {
+    halteDanach: false,
+    onDone: () => {
+      if (Zustand.walletId !== walletId) return;
+      const pending = Zustand._pendingEmpfangNachKonfetti;
+      if (pending && String(pending.walletId) === String(walletId)) {
+        Zustand._pendingEmpfangNachKonfetti = null;
+        Zustand.empfangByWallet[walletId] = pending.daten;
+        Zustand.empfang = pending.daten;
+        zeichneEmpfang(pending.daten, { zahlung: false });
+        return;
+      }
+      ladeEmpfang(walletId, { still: true }).catch(() => {});
+    },
+  });
+  return true;
+}
+
 function meldePendingAenderung(walletId, pendIn, pendOut, { internOut = false } = {}) {
   if (!walletId) return;
   const prev = Zustand.pendingByWallet[walletId] || { in: 0, out: 0 };
@@ -5377,7 +5682,7 @@ function meldePendingAenderung(walletId, pendIn, pendOut, { internOut = false } 
   // Nur *Anstieg* nach gesehenem Stand = echte neue Mempool-Tx.
   const scanLaeuft = typeof empfangScanLaeuftFuer === "function"
     && empfangScanLaeuftFuer(walletId);
-  if (prev.seen && Zustand.walletId === walletId && !scanLaeuft) {
+  if (prev.seen && Zustand.walletId === walletId) {
     const inNeu = neuIn > prev.in;
     const outNeu = neuOut > prev.out;
     const jetzt = Date.now();
@@ -5392,6 +5697,11 @@ function meldePendingAenderung(walletId, pendIn, pendOut, { internOut = false } 
       return true;
     };
     const starteIncoming = () => {
+      if (scanLaeuft) {
+        // Tip-Sync läuft oft parallel: QR wird geschärft, Konfetti sonst verschluckt.
+        merkeQueuedIncomingFlash(walletId);
+        return;
+      }
       if (!darfIncoming()) return;
       EmpfangPuls.flashIncoming(walletId, undefined, {
         halteDanach: false,
@@ -5412,7 +5722,7 @@ function meldePendingAenderung(walletId, pendIn, pendOut, { internOut = false } 
       if (internOut) {
         // Interner Transfer (z. B. Cash+Carry → Bitkey): nur Konfetti, kein OH NO.
         starteIncoming();
-      } else {
+      } else if (!scanLaeuft) {
         EmpfangPuls.flashOhNo();
       }
     }
@@ -5701,6 +6011,14 @@ function springeZuJob(job) {
   }
   if (kind === "sanctions-check") {
     zeigeAnsicht("sanktionen");
+    fuellSankWallets();
+    // Laufenden Check wieder an die Fortschrittszeile binden (sonst fehlt
+    // die Leiste nach Seitenwechsel — Timer/UI waren nur lokal in starte…).
+    if (job.running && job.id) {
+      bindeSanktionsCheckJob(job.id, { hops: job.meta?.hops });
+    } else {
+      ladeSankCache();
+    }
   }
 }
 
@@ -6040,34 +6358,41 @@ function zeichneTraceListe(daten) {
   setzeText($("#trace-liste-zusatz"), teile.join(" · "));
 
   // Sortier-Dropdown in der gleichen Zeile wie Anzahl + Legende
-  let sortWrap = $("#trace-sort-wrap");
-  if (!sortWrap) {
-    sortWrap = document.createElement("span");
-    sortWrap.id = "trace-sort-wrap";
-    sortWrap.className = "karte-zusatz";
-    const sel = document.createElement("select");
-    sel.id = "trace-sort";
-    sel.className = "knopf knopf-klein";
-    sel.innerHTML = `
+  const sortWrap = $("#trace-sort-wrap");
+  const sel = $("#trace-sort");
+  if (sel) {
+    sel.value = Zustand.traceSort || "volume-desc";
+    if (!sel.dataset.gebunden) {
+      sel.dataset.gebunden = "1";
+      sel.addEventListener("change", () => {
+        Zustand.traceSort = sel.value;
+        if (Zustand.traceLastData) {
+          zeichneTraceListe(Zustand.traceLastData);
+        }
+      });
+    }
+  } else if (!sortWrap) {
+    // Fallback falls HTML-IDs fehlen
+    const wrap = document.createElement("span");
+    wrap.id = "trace-sort-wrap";
+    wrap.className = "karte-zusatz";
+    const neu = document.createElement("select");
+    neu.id = "trace-sort";
+    neu.className = "knopf knopf-klein";
+    neu.innerHTML = `
       <option value="volume-desc">Volumen (absteigend)</option>
       <option value="age-desc">Alter (neueste zuerst)</option>
       <option value="age-asc">Alter (älteste zuerst)</option>
     `;
-    sel.value = Zustand.traceSort;
-    sel.addEventListener("change", () => {
-      Zustand.traceSort = sel.value;
-      // Neu rendern mit gleicher Datenbasis (client-seitig sortiert)
-      if (Zustand.traceLastData) {
-        zeichneTraceListe(Zustand.traceLastData);
-      }
+    neu.value = Zustand.traceSort || "volume-desc";
+    neu.dataset.gebunden = "1";
+    neu.addEventListener("change", () => {
+      Zustand.traceSort = neu.value;
+      if (Zustand.traceLastData) zeichneTraceListe(Zustand.traceLastData);
     });
-    sortWrap.appendChild(sel);
-    // In die Karte-Kopf-Zeile einfügen (nach dem Zusatz-Text)
+    wrap.appendChild(neu);
     const kopf = document.querySelector("#ansicht-trace .karte-kopf");
-    if (kopf) kopf.appendChild(sortWrap);
-  } else {
-    const sel = $("#trace-sort");
-    if (sel) sel.value = Zustand.traceSort;
+    if (kopf) kopf.appendChild(wrap);
   }
 
   // Daten für spätere Sortier-Wechsel merken
@@ -6082,37 +6407,69 @@ function zeichneTraceListe(daten) {
   }
 
   const sortMode = Zustand.traceSort || "volume-desc";
-  if (sortMode === "volume-desc") {
-    // Standard: nach Adresse gruppiert (Server-Lieferreihenfolge = Volumen absteigend)
-    for (const gruppe of daten.addresses || []) {
-      liste.append(zeichneTraceAdressGruppe(gruppe));
-    }
-  } else {
-    // Client-seitig sortiert: flache Liste nach Alter oder Volumen
-    const alle = [];
-    for (const gruppe of daten.addresses || []) {
-      for (const utxo of gruppe.utxos || []) {
-        alle.push({ ...utxo, _address: gruppe.address });
-      }
-    }
-    if (sortMode === "age-desc") {
-      alle.sort((a, b) => (b.block_height || 0) - (a.block_height || 0));
-    } else if (sortMode === "age-asc") {
-      alle.sort((a, b) => (a.block_height || 0) - (b.block_height || 0));
-    } else if (sortMode === "volume-desc") {
-      alle.sort((a, b) => (b.value_sats || 0) - (a.value_sats || 0));
-    }
-    for (const utxo of alle) {
-      // Minimale Adress-Info am Wurzel-Block anzeigen, wenn nicht gruppiert
-      const block = zeichneTraceWurzel(utxo);
-      if (utxo._address) {
-        block.dataset.address = utxo._address;
-      }
-      liste.append(block);
-    }
-  }
+  fuelleTraceSortiert(liste, daten.addresses || [], sortMode);
 
   liste.append(zeichneAusgegeben(daten));
+}
+
+/**
+ * Sortierung wie Dropdown „Herkunft tracen“: Volumen → Adressgruppen,
+ * Alter → flache UTXO-Liste. Wird für Bestand und „Bereits ausgegeben“ genutzt.
+ */
+function _traceUtxoAlterTs(utxo) {
+  return Number(
+    utxo.spent_time_ts
+    || utxo.spent_block_time
+    || utxo.block_time
+    || 0,
+  );
+}
+
+function _traceUtxoAlterHoehe(utxo) {
+  return Number(
+    utxo.spent_block_height
+    || utxo.block_height
+    || 0,
+  );
+}
+
+function fuelleTraceSortiert(behaelter, addresses, sortMode) {
+  const mode = sortMode || "volume-desc";
+  if (mode === "volume-desc") {
+    const gruppen = [...(addresses || [])].sort(
+      (a, b) => (b.total_sats || 0) - (a.total_sats || 0),
+    );
+    for (const gruppe of gruppen) {
+      behaelter.append(zeichneTraceAdressGruppe(gruppe));
+    }
+    return;
+  }
+  const alle = [];
+  for (const gruppe of addresses || []) {
+    for (const utxo of gruppe.utxos || []) {
+      alle.push({ ...utxo, _address: gruppe.address });
+    }
+  }
+  if (mode === "age-desc") {
+    alle.sort((a, b) => {
+      const dh = _traceUtxoAlterHoehe(b) - _traceUtxoAlterHoehe(a);
+      if (dh) return dh;
+      return _traceUtxoAlterTs(b) - _traceUtxoAlterTs(a);
+    });
+  } else if (mode === "age-asc") {
+    alle.sort((a, b) => {
+      const dh = _traceUtxoAlterHoehe(a) - _traceUtxoAlterHoehe(b);
+      if (dh) return dh;
+      return _traceUtxoAlterTs(a) - _traceUtxoAlterTs(b);
+    });
+  } else {
+    alle.sort((a, b) => (b.value_sats || 0) - (a.value_sats || 0));
+  }
+  for (const utxo of alle) {
+    const block = zeichneTraceWurzel(utxo);
+    if (utxo._address) block.dataset.address = utxo._address;
+    behaelter.append(block);
+  }
 }
 
 /**
@@ -6187,9 +6544,11 @@ function zeichneAusgegeben(daten) {
       inhalt.dataset.gezeichnet = "ja";
       Promise.resolve(ladeKursSerie()).finally(() => {
         inhalt.replaceChildren();
-        for (const gruppe of verlauf.addresses || []) {
-          inhalt.append(zeichneTraceAdressGruppe(gruppe));
-        }
+        fuelleTraceSortiert(
+          inhalt,
+          verlauf.addresses || [],
+          Zustand.traceSort || "volume-desc",
+        );
       });
     }
   });
@@ -6241,10 +6600,6 @@ function zeichneTraceAdressGruppe(gruppe) {
   }
   haengeGruppenJuengsteAn(kopf, gruppe);
 
-  // Nur Icons, wenn gespeicherte Herkunft Mix-Formen kennt — sonst nichts.
-  const mixLeiste = zeichneMixIconLeiste(mixArtenDerGruppe(gruppe));
-  if (mixLeiste) kopf.append(mixLeiste);
-
   const betrag = document.createElement("span");
   betrag.className = "betrag adress-betrag";
   if ((gruppe.utxos || []).some((u) => u.spent || u.spent_pending)) {
@@ -6253,6 +6608,8 @@ function zeichneTraceAdressGruppe(gruppe) {
     betrag.textContent = formatSats(gruppe.total_sats);
   }
   kopf.append(betrag);
+  // Mix-Icons + Börsen-Pillen vor dem Betrag (wie nach Trace-Update).
+  _haengeGruppenLeistenAn(kopf, gruppe);
 
   const inhalt = document.createElement("div");
   inhalt.className = "trace-utxos";
@@ -6861,7 +7218,7 @@ function zeichneFolgeBand(ergebnis, zweig, utxo, klapp) {
   zweig.append(band);
 }
 
-function setzeWurzelTxClass(zweig, ergebnis) {
+function setzeWurzelTxClass(zweig, ergebnis, utxo = null) {
   /** Soft-Label (+ Icon) rechts neben Timestamp in der UTXO-Wurzelzeile. */
   const wurzel = zweig && zweig.closest(".utxo-wurzel");
   if (!wurzel) return;
@@ -6873,7 +7230,19 @@ function setzeWurzelTxClass(zweig, ergebnis) {
     rechts.className = "knoten-unten-rechts";
     unten.append(rechts);
   }
-  fuelleTxClassRechts(rechts, ergebnis.root || ergebnis);
+  const basis = ergebnis.root || ergebnis || {};
+  // boerse_namen am UTXO/Ergebnis → „Auszahlung von Kraken“ statt „Wahrscheinlich…“.
+  const ausErgebnis = boerseNamenAusErgebnis(ergebnis);
+  const namen = (utxo && utxo.boerse_namen && utxo.boerse_namen.length)
+    ? utxo.boerse_namen
+    : (ausErgebnis.namen || basis.boerse_namen || []);
+  fuelleTxClassRechts(rechts, {
+    ...basis,
+    boerse_namen: namen,
+    tx_class: basis.tx_class || ergebnis.tx_class,
+    tx_class_label: basis.tx_class_label || ergebnis.tx_class_label,
+    tx_class_label_en: basis.tx_class_label_en || ergebnis.tx_class_label_en,
+  });
 }
 
 function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
@@ -6885,8 +7254,12 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
     return;
   }
 
-  const klasseHinweis = softTxClassLabel(ergebnis.root || ergebnis);
-  setzeWurzelTxClass(zweig, ergebnis);
+  setzeWurzelTxClass(zweig, ergebnis, utxo);
+  const klasseHinweis = softTxClassLabel({
+    ...(ergebnis.root || ergebnis || {}),
+    boerse_namen: (utxo && utxo.boerse_namen) || boerseNamenAusErgebnis(ergebnis).namen,
+    tx_class: (ergebnis.root || ergebnis || {}).tx_class || ergebnis.tx_class,
+  });
 
   if (ergebnis.children.length === 0) {
     // Leere Kinder sind kein Trace-Ergebnis: entweder CJ-Soft-Label ohne
@@ -7364,8 +7737,12 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   }
 
   // Wem die fremde Adresse zuzuordnen ist — das ist an einem externen Ende
-  // die eigentliche Auskunft.
-  const marke = labelMarke(knoten.label);
+  // die eigentliche Auskunft. Herkunftsblatt = Zufluss (Börse→Wallet → grün).
+  const marke = labelMarke(knoten.label, {
+    herkunft: true,
+    zufluss: !knoten.abfluss,
+    abfluss: Boolean(knoten.abfluss),
+  });
   if (marke) oben.append(marke);
 
   info.append(oben);
@@ -7620,15 +7997,34 @@ function zeichneSteuerjahr(daten) {
       knopf.textContent = t("tax.originAll");
       knopf.setAttribute("data-i18n", "tax.originAll");
       if (art === "warn") {
-        // Gelber Scorecard-Knopf: nur gelbe UTXOs (innerhalb Frist / nach Stichtag)
-        knopf.title = "alle gelben UTXOs, d.h. UTXOs innerhalb der Haltefrist bzw. später als Stichtag datiert, werden noch gründlicher untersucht und können dabei evtl. grün werden.";
-        knopf.setAttribute("data-i18n-title", "");
-        knopf.addEventListener("click", () => herkunftGelbUtxos());
+        // Gelb: voll bis extern/Coinbase — erst dann grün oder bestätigt gelb.
+        knopf.title = t("tax.yellowClarifyTitle") !== "tax.yellowClarifyTitle"
+          ? t("tax.yellowClarifyTitle")
+          : "Gelbe UTXOs bis extern/Coinbase klären — können grün werden oder bestätigt gelb bleiben.";
+        knopf.setAttribute("data-i18n-title", "tax.yellowClarifyTitle");
+        knopf.addEventListener("click", () => {
+          herkunftGelbUtxos().catch((fehler) => {
+            Zustand.herkunftAlleLaeuft = false;
+            const k = $("#steuer-meldung");
+            if (!k) return;
+            k.className = "hinweis hinweis-krit";
+            setzeText(k, fehler.message || String(fehler));
+            k.hidden = false;
+          });
+        });
       } else {
         // Grauer Scorecard-Knopf: alle noch nie analysierten UTXOs
         knopf.title = "Alle noch grauen, d.h. UTXOs unklarer Vergangenheit, werden analysiert bis sie grün oder gelb sind";
         knopf.setAttribute("data-i18n-title", "");
-        knopf.addEventListener("click", () => herkunftAllerUtxos());
+        knopf.addEventListener("click", () => {
+          Promise.resolve(herkunftAllerUtxos()).catch((fehler) => {
+            const k = $("#steuer-meldung");
+            if (!k) return;
+            k.className = "hinweis hinweis-krit";
+            setzeText(k, fehler.message || String(fehler));
+            k.hidden = false;
+          });
+        });
       }
       w.append(knopf);
     }
@@ -7734,10 +8130,9 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
     klaeren.textContent = t("tax.originAll") !== "tax.originAll"
       ? t("tax.originAll")
       : "klären";
-    klaeren.title =
-      t("tax.originAllTitle") !== "tax.originAllTitle"
-        ? t("tax.originAllTitle")
-        : "Steuerrelevantes Alter gründlicher prüfen — kann gelb → grün werden.";
+    klaeren.title = t("tax.yellowClarifyTitle") !== "tax.yellowClarifyTitle"
+      ? t("tax.yellowClarifyTitle")
+      : "Bis extern/Coinbase nachziehen — kann gelb→grün werden oder gelb bestätigen.";
     klaeren.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -7751,7 +8146,8 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
         meldung: "#steuer-meldung",
         danach: ladeSteuerjahrMitKandidaten,
         utxo_keys: [key],
-        steuer: true,
+        steuer: false,
+        gelbVertiefen: true,
       });
     });
     grundlage.append(klaeren);
@@ -8239,8 +8635,8 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     const punkt = document.createElement("span");
     // Farbe:
     // - außerhalb Haltefrist / prä-Stichtag → grün (auch ohne Herkunft)
-    // - innerhalb Haltefrist + Herkunft → gelb
-    // - innerhalb Haltefrist + ohne Herkunft → grau (nicht gelb)
+    // - innerhalb Haltefrist + Herkunft: gelb
+    // - innerhalb Haltefrist + ohne Herkunft: grau (nicht gelb)
     let farbe;
     if (eintrag.erfuellt) {
       farbe = "erfuellt";
@@ -8753,16 +9149,40 @@ async function scanneAlleWalletsUtxo({
 }
 
 async function herkunftGelbUtxos() {
-  // Nur UTXOs der gelben Scorecard (geprueft && !erfuellt) tracen
-  const daten = await api("/tax/steuerjahr");
-  const liste = daten?.utxos || [];
+  // Gelbe Scorecard (geprueft && !erfuellt): gründlich bis extern/Coinbase.
+  // Steuer-Horizont allein reicht nicht — gelb ist erst „fertig“, wenn grün
+  // oder der volle Baum bestätigt, dass gelb korrekt ist.
+  if (Zustand.herkunftAlleLaeuft) {
+    const k = $("#steuer-meldung");
+    if (k) {
+      k.className = "hinweis hinweis-warn";
+      setzeText(k, t("tax.originAlreadyRunning") !== "tax.originAlreadyRunning"
+        ? t("tax.originAlreadyRunning")
+        : "Klärung läuft bereits…");
+      k.hidden = false;
+    }
+    return;
+  }
+  let daten = Zustand.steuer;
+  if (!daten || !Array.isArray(daten.eintraege)) {
+    const jahr = $("#jahr-wahl")?.value || "";
+    const frist = $("#frist-wahl")?.value || "";
+    const stichtag = steuerEinstellungen().stichtag || "";
+    const abfrage =
+      `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
+      `&stichtag=${encodeURIComponent(stichtag)}`;
+    daten = await api(`/tax${abfrage}`);
+  }
+  const liste = daten.eintraege || [];
   const keys = liste
     .filter((e) => e.geprueft && !e.erfuellt)
     .map((e) => `${e.txid}:${e.vout}`);
   if (!keys.length) {
     const k = $("#steuer-meldung");
     k.className = "hinweis hinweis-warn";
-    setzeText(k, "Keine gelben UTXOs zu klären.");
+    setzeText(k, t("tax.noYellowToClarify") !== "tax.noYellowToClarify"
+      ? t("tax.noYellowToClarify")
+      : "Keine gelben UTXOs zu klären.");
     k.hidden = false;
     return;
   }
@@ -8774,6 +9194,9 @@ async function herkunftGelbUtxos() {
     meldung: "#steuer-meldung",
     danach: ladeSteuerjahrMitKandidaten,
     utxo_keys: keys,
+    // voll bis extern/Coinbase — nicht nur Steuer-Horizont
+    steuer: false,
+    gelbVertiefen: true,
   });
 }
 
@@ -8786,11 +9209,27 @@ async function herkunftAllerUtxos(ziele = {
   danach: ladeSteuerjahrMitKandidaten,
   utxo_keys: null,
   steuer: false,
+  gelbVertiefen: false,
 }) {
   // Selector-String oder bereits aufgelöstes Element (Zeilen-„klären“).
   const knopf = typeof ziele.knopf === "string"
     ? $(ziele.knopf)
     : ziele.knopf;
+  if (Zustand.herkunftAlleLaeuft) {
+    const kasten = $(ziele.meldung);
+    if (kasten) {
+      kasten.className = "hinweis hinweis-warn";
+      setzeText(
+        kasten,
+        t("tax.originAlreadyRunning") !== "tax.originAlreadyRunning"
+          ? t("tax.originAlreadyRunning")
+          : "Klärung läuft bereits…",
+      );
+      kasten.hidden = false;
+    }
+    return;
+  }
+  Zustand.herkunftAlleLaeuft = true;
   if (knopf) knopf.disabled = true;
   $(ziele.lauf).hidden = false;
   setzeText($(ziele.text), "Wird vorbereitet…");
@@ -8805,6 +9244,7 @@ async function herkunftAllerUtxos(ziele = {
 
   const fertig = (meldung, art) => {
     clearInterval(timer);
+    Zustand.herkunftAlleLaeuft = false;
     if (knopf) knopf.disabled = false;
     $(ziele.lauf).hidden = true;
     if (meldung) {
@@ -8828,14 +9268,21 @@ async function herkunftAllerUtxos(ziele = {
     }
   };
 
-  const steuerModus = Boolean(ziele.steuer)
+  // Grau / initial: Steuer-Horizont reicht für erste Einstufung.
+  // Gelb vertiefen: voll bis extern/Coinbase (gelb erst „fertig“ wenn grün
+  // oder voll bestätigt).
+  const gelbVoll = Boolean(ziele.gelbVertiefen) || ziele.knopf === "#herkunft-gelb";
+  const steuerModus = !gelbVoll && (
+    Boolean(ziele.steuer)
     || ziele.knopf === "#herkunft-alle"
-    || ziele.knopf === "#herkunft-gelb"
-    || ziele.knopf === "#herkunft-grau";
+    || ziele.knopf === "#herkunft-grau"
+  );
   logZeile(
-    steuerModus
-      ? "Starte Steuerrelevantes Alter (Horizont Stichtag/Haltefrist)…"
-      : "Starte Herkunft bis extern/Coinbase…",
+    gelbVoll
+      ? "Starte gründliche Klärung gelber UTXOs (bis extern/Coinbase)…"
+      : steuerModus
+        ? "Starte Steuerrelevantes Alter (Horizont Stichtag/Haltefrist)…"
+        : "Starte Herkunft bis extern/Coinbase…",
   );
   try {
     const traceDaten = steuerModus
@@ -8850,7 +9297,10 @@ async function herkunftAllerUtxos(ziele = {
             || "",
           utxo_keys: ziele.utxo_keys || null,
         }
-      : { modus: "voll" };
+      : {
+          modus: "voll",
+          utxo_keys: ziele.utxo_keys || null,
+        };
     let antwort = await api("/trace/alle", {
       methode: "POST",
       daten: traceDaten,
@@ -8885,6 +9335,13 @@ async function herkunftAllerUtxos(ziele = {
     if (antwort.nichts_zu_tun) {
       if (antwort.keine_utxos) {
         fertig(t("trace.allOriginsNeedUtxo"), "warn");
+      } else if (gelbVoll) {
+        fertig(
+          t("tax.yellowAlreadyDone") !== "tax.yellowAlreadyDone"
+            ? t("tax.yellowAlreadyDone")
+            : "Gelbe UTXOs sind bereits vollständig geklärt (grün oder bestätigt gelb).",
+          "gut",
+        );
       } else {
         fertig(t("trace.allOriginsNothing"), "gut");
       }
@@ -10110,9 +10567,10 @@ function zeichneBoersenReports(stand) {
     zeile.append(text);
     const knopf = document.createElement("button");
     knopf.type = "button";
-    knopf.className = "knopf knopf-klein";
-    knopf.textContent = t("sources.exchangeRemove");
+    knopf.className = "stift papierkorb";
+    knopf.textContent = "🗑";
     knopf.title = t("sources.exchangeRemoveTitle");
+    knopf.setAttribute("aria-label", t("sources.exchangeRemove"));
     knopf.addEventListener("click", () => verwerfeBoersenReport(e.slug));
     zeile.append(knopf);
     kasten.append(zeile);
@@ -10120,8 +10578,10 @@ function zeichneBoersenReports(stand) {
   if (liste.length > 1) {
     const alle = document.createElement("button");
     alle.type = "button";
-    alle.className = "knopf knopf-klein";
-    alle.textContent = t("sources.exchangeRemoveAll");
+    alle.className = "stift papierkorb";
+    alle.textContent = "🗑";
+    alle.title = t("sources.exchangeRemoveAll");
+    alle.setAttribute("aria-label", t("sources.exchangeRemoveAll"));
     alle.addEventListener("click", () => verwerfeBoersenReport(null, true));
     kasten.append(alle);
   }
@@ -11297,7 +11757,35 @@ async function verwirfLabels() {
  * Eine Forenerwähnung wird bewusst anders formuliert als ein Dienst: „auf
  * BitcoinTalk erwähnt" ist keine Aussage darüber, wem die Adresse gehört.
  */
-function labelMarke(label) {
+/**
+ * Börse: nur Klarname. Grün = Zufluss von der Börse ins Wallet;
+ * rot = Sats zur Börse geschickt (Einzahlung dort).
+ */
+function istBoersenLabel(label) {
+  if (!label) return false;
+  return (
+    label.kategorie === "exchange"
+    || label.kategorie_label === "Börse"
+    || label.quelle === "Börsen-CSV"
+    || Boolean(label.nutzer_import && label.kategorie === "exchange")
+  );
+}
+
+/** "in" = von Börse→Wallet, "out" = Wallet→Börse, "" = unklar. */
+function boerseRichtung(label, kontext) {
+  const rolle = String(label?.rolle || "").toLowerCase();
+  const hatEin = rolle.includes("einzahlung") || rolle.includes("deposit");
+  const hatAus = rolle.includes("auszahlung") || rolle.includes("withdrawal");
+  if (hatEin && !hatAus) return "out"; // Einzahlung auf die Börse
+  if (hatAus && !hatEin) return "in"; // Auszahlung von der Börse
+  if (kontext && kontext.zufluss) return "in"; // Herkunfts-Zufluss
+  if (kontext && kontext.abfluss) return "out";
+  // Ohne Rolle: im Herkunftsbaum typisch Zufluss von außen.
+  if (kontext && kontext.herkunft) return "in";
+  return "";
+}
+
+function labelMarke(label, kontext) {
   if (!label) return null;
 
   const marke = document.createElement("span");
@@ -11312,6 +11800,25 @@ function labelMarke(label) {
   if (label.art === "erwaehnung") {
     marke.textContent = t("labels.mentionedOn", { name: label.name });
     marke.title = t("labels.mentionedTitle", { hint: hinweis });
+    return marke;
+  }
+
+  // Börsen: nur Name; Farbe nach Richtung.
+  if (istBoersenLabel(label)) {
+    const name = String(label.name || "").trim() || t("labels.cat.exchange");
+    marke.textContent = name;
+    marke.classList.add("label-boerse");
+    const richtung = boerseRichtung(label, kontext || {});
+    if (richtung === "in") marke.classList.add("label-boerse-in");
+    else if (richtung === "out") marke.classList.add("label-boerse-out");
+    const teile = [name];
+    if (label.rolle) teile.push(label.rolle);
+    if (richtung === "in") teile.push(t("labels.exchangeInflow"));
+    else if (richtung === "out") teile.push(t("labels.exchangeOutflow"));
+    if (label.quelle) teile.push(label.quelle);
+    if (label.hinweis) teile.push(label.hinweis);
+    teile.push(hinweis);
+    marke.title = teile.filter(Boolean).join(" · ");
     return marke;
   }
 
@@ -11539,7 +12046,102 @@ async function verwerfeSankCache() {
   sankMeldung("");
 }
 
+/** Stoppt den lokalen Sanktions-Check-Poller (Seitenwechsel / Neustart). */
+function stoppeSanktionsCheckPoller() {
+  if (Zustand.sanktionsCheckTimer) {
+    clearInterval(Zustand.sanktionsCheckTimer);
+    Zustand.sanktionsCheckTimer = null;
+  }
+}
+
+/**
+ * Bindet UI an einen laufenden (oder fertigen) sanctions-check-Job.
+ * Nach Seitenwechsel / Klick auf den Vorgang wieder aufrufen.
+ */
+function bindeSanktionsCheckJob(jobId, opts = {}) {
+  if (!jobId) return;
+  stoppeSanktionsCheckPoller();
+  Zustand.sanktionsCheckJobId = jobId;
+
+  const knopf = $("#sank-start");
+  const abbruch = $("#sank-abbruch");
+  const lauf = $("#sank-lauf");
+  const laufText = $("#sank-lauf-text");
+  if (knopf) knopf.disabled = true;
+  if (abbruch) abbruch.hidden = false;
+  if (lauf) lauf.hidden = false;
+  if (laufText) {
+    setzeText(laufText, t("sanctions.running") || "Prüfe…");
+  }
+  if (opts.hops && $("#sank-hops")) {
+    $("#sank-hops").value = opts.hops;
+  }
+
+  const fertig = (meldung, kritisch = true) => {
+    stoppeSanktionsCheckPoller();
+    Zustand.sanktionsCheckJobId = null;
+    if (knopf) knopf.disabled = false;
+    if (abbruch) abbruch.hidden = true;
+    if (lauf) lauf.hidden = true;
+    if (meldung) sankMeldung(meldung, kritisch);
+  };
+
+  if (abbruch) {
+    abbruch.onclick = async () => {
+      setzeText(laufText, t("common.abortRequested") || "Abbruch angefordert…");
+      try {
+        await api(`/jobs/${jobId}`, { methode: "DELETE" });
+      } catch (_) {
+        /* Job evtl. schon weg */
+      }
+    };
+  }
+
+  const tick = async () => {
+    try {
+      const job = await api(`/jobs/${jobId}`);
+      if (laufText) {
+        setzeText(
+          laufText,
+          übersetzeLogText(job.message || t("common.runningEllipsis")),
+        );
+      }
+      if (job.running) return;
+      if (job.status === "done" && job.result) {
+        fertig(übersetzeLogText(job.message || ""), false);
+        zeichneSankErgebnis(job.result);
+      } else if (job.status === "cancelled") {
+        fertig(t("common.cancelled") || "Abgebrochen", false);
+        ladeSankCache();
+      } else {
+        fertig(
+          übersetzeServerMeldung(job.error)
+            || übersetzeLogText(job.message)
+            || t("common.failed"),
+        );
+      }
+    } catch (fehler) {
+      // Kurz weg: Poll weiter — Job kann noch laufen (Netz/Throttle).
+      if (laufText) {
+        setzeText(
+          laufText,
+          t("sanctions.checkPollError", { msg: fehler.message }) !== "sanctions.checkPollError"
+            ? t("sanctions.checkPollError", { msg: fehler.message })
+            : `Prüfe weiter… (${fehler.message})`,
+        );
+      }
+    }
+  };
+
+  tick();
+  Zustand.sanktionsCheckTimer = setInterval(tick, 1200);
+}
+
 async function starteSanktionsCheck() {
+  if (Zustand.sanktionsCheckJobId) {
+    bindeSanktionsCheckJob(Zustand.sanktionsCheckJobId);
+    return;
+  }
   const knopf = $("#sank-start");
   const abbruch = $("#sank-abbruch");
   knopf.disabled = true;
@@ -11558,45 +12160,17 @@ async function starteSanktionsCheck() {
   const walletId = $("#sank-wallet").value;
   if (walletId) daten.wallet_id = walletId;
 
-  let jobId = null;
-  let timer = null;
-  const fertig = (meldung, kritisch = true) => {
-    clearInterval(timer);
+  try {
+    const job = await api("/sanctions/check", { methode: "POST", daten });
+    bindeSanktionsCheckJob(job.id, { hops });
+  } catch (fehler) {
+    stoppeSanktionsCheckPoller();
+    Zustand.sanktionsCheckJobId = null;
     knopf.disabled = false;
     abbruch.hidden = true;
     $("#sank-lauf").hidden = true;
-    if (meldung) sankMeldung(meldung, kritisch);
-  };
-
-  abbruch.onclick = async () => {
-    if (jobId) {
-      try { await api(`/jobs/${jobId}`, { methode: "DELETE" }); } catch (e) { /* Job evtl. schon weg */ }
-    }
-  };
-
-  try {
-    const job = await api("/sanctions/check", { methode: "POST", daten });
-    jobId = job.id;
-  } catch (fehler) {
-    fertig(t("sanctions.checkFailed", { msg: fehler.message }));
-    return;
+    sankMeldung(t("sanctions.checkFailed", { msg: fehler.message }));
   }
-
-  timer = setInterval(async () => {
-    try {
-      const job = await api(`/jobs/${jobId}`);
-      setzeText($("#sank-lauf-text"), übersetzeLogText(job.message || t("common.runningEllipsis")));
-      if (job.running) return;
-      if (job.status === "done" && job.result) {
-        fertig(übersetzeLogText(job.message || ""), false);
-        zeichneSankErgebnis(job.result);
-      } else {
-        fertig(übersetzeServerMeldung(job.error) || übersetzeLogText(job.message) || t("common.failed"));
-      }
-    } catch (fehler) {
-      fertig(fehler.message);
-    }
-  }, 1200);
 }
 
 // ---------------------------------------------------------------------------
@@ -11883,7 +12457,10 @@ function mempoolUrlWirktOeffentlich(roh) {
   let text = String(roh || "").trim();
   if (!text) return false;
   try {
-    if (!/^https?:\/\//i.test(text)) text = `https://${text}`;
+    // Kein /…/-Literal mit // — sonst stolpert der Klammer-Check in tests/test_web_js.
+    if (!(text.startsWith("http://") || text.startsWith("https://"))) {
+      text = `https://${text}`;
+    }
     const u = new URL(text);
     const host = String(u.hostname || "").toLowerCase();
     if (!host) return false;
@@ -14358,6 +14935,10 @@ function loeseWalletSyncBindung() {
     clearInterval(Zustand.walletSyncTimer);
     Zustand.walletSyncTimer = null;
   }
+  if (Zustand.walletSyncJob) {
+    // Für Ka-Ching nach Empfangs-Index-Sprung (QR oft vor Pending-Flash).
+    Zustand._tipSyncEndedUm = Date.now();
+  }
   Zustand.walletSyncJob = null;
   Zustand.walletSyncWalletIds = [];
   Zustand.walletSyncDoneIds = [];
@@ -14541,8 +15122,9 @@ async function pruefeWalletSyncJob() {
     const pulsAn = EmpfangPuls.laeuft()
       || Boolean(Zustand.empfang && Zustand.empfang.puls);
     loeseWalletSyncBindung();
-    // Puls/QR nur anfassen, wenn der Tip-Sync dieses Wallet betraf und wir atmeten.
-    if (betrifftAktuell && pulsAn) {
+    // Puls/QR nur anfassen, wenn Tip-Sync dieses Wallet betraf und wir atmeten —
+    // nicht wenn gerade Ka-Ching nachgeholt wird.
+    if (betrifftAktuell && pulsAn && !EmpfangPuls.laeuft()) {
       EmpfangPuls.stop();
     }
     setzeWalletScanGesperrt();
@@ -14572,10 +15154,15 @@ async function pruefeWalletSyncJob() {
       await ladeJobsNav();
       setzeWalletScanGesperrt();
       if (betrifftAktuell && Zustand.walletId) {
+        // Pending während Tip-Sync → Konfetti jetzt (QR-Sprung ohne Ka-Ching vermeiden).
+        const kaChing = spieleQueuedIncomingFlash(Zustand.walletId);
         if (Zustand.ansicht === "wallet") {
           await zeigeWallet(Zustand.walletId);
+          if (!kaChing && !EmpfangPuls.laeuft()) {
+            ladeEmpfang(Zustand.walletId).catch(() => {});
+          }
         } else if (!Zustand.lernThema) {
-          ladeEmpfang(Zustand.walletId).catch(() => {});
+          if (!kaChing) ladeEmpfang(Zustand.walletId).catch(() => {});
           zeichneNav();
         } else {
           zeichneNav();
@@ -14586,13 +15173,17 @@ async function pruefeWalletSyncJob() {
     } else if (job.status === "cancelled") {
       logZeile("Tip-Nachzug abgebrochen.");
       if (betrifftAktuell && Zustand.walletId && !Zustand.lernThema) {
-        ladeEmpfang(Zustand.walletId).catch(() => {});
+        if (!spieleQueuedIncomingFlash(Zustand.walletId)) {
+          ladeEmpfang(Zustand.walletId).catch(() => {});
+        }
       }
       zeichneNav();
     } else {
       if (job.error) logZeile(`Tip-Nachzug: ${job.error}`);
       if (betrifftAktuell && Zustand.walletId && !Zustand.lernThema) {
-        ladeEmpfang(Zustand.walletId).catch(() => {});
+        if (!spieleQueuedIncomingFlash(Zustand.walletId)) {
+          ladeEmpfang(Zustand.walletId).catch(() => {});
+        }
       }
       zeichneNav();
     }
@@ -14998,9 +15589,26 @@ async function start() {
     });
   document
     .querySelector('[data-ansicht="sanktionen"]')
-    .addEventListener("click", () => {
+    .addEventListener("click", async () => {
       zeigeAnsicht("sanktionen");
       fuellSankWallets();
+      // Laufenden Check bevorzugen — sonst verschwindet die Fortschrittszeile.
+      try {
+        const nav = Zustand.jobsNav?.jobs || [];
+        const laufend = nav.find(
+          (j) => j.kind === "sanctions-check" && j.running,
+        );
+        if (laufend?.id) {
+          bindeSanktionsCheckJob(laufend.id, { hops: laufend.meta?.hops });
+          return;
+        }
+        if (Zustand.sanktionsCheckJobId) {
+          bindeSanktionsCheckJob(Zustand.sanktionsCheckJobId);
+          return;
+        }
+      } catch (_) {
+        /* Cache laden */
+      }
       ladeSankCache();
     });
 

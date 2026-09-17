@@ -47,6 +47,87 @@ class TestParseCsv(unittest.TestCase):
         with self.assertRaises(boerse.ExchangeReportError):
             boerse.parse_csv_btc_refs("a,b\n1,2\n")
 
+    def test_reine_adressliste_ohne_kopf(self):
+        legacy = "1BoatSLRHtKNngkdXEeobR76b53LETtpyT"
+        p2sh = "3J98t1WpEZ73CNmYviecrnyiWrnqRhWNLy"
+        bech = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        text = f"{legacy}\n{p2sh}\n{bech}\n# kommentar\n\n"
+        p = boerse.parse_csv_btc_refs(text)
+        self.assertIn(legacy, p["addresses"])
+        self.assertIn(p2sh, p["addresses"])
+        self.assertIn(bech, p["addresses"])
+        self.assertEqual(len(p["addresses"]), 3)
+
+    def test_liste_mit_txid_ohne_kopf(self):
+        text = f"{KRK_ADDR}\n{TX_DEP}\n"
+        p = boerse.parse_csv_btc_refs(text)
+        self.assertIn(KRK_ADDR, p["addresses"])
+        self.assertIn(TX_DEP, p["txids"])
+
+
+class TestExchangeBatchSoftLabel(unittest.TestCase):
+    def test_auszahlung_von_namen(self):
+        from core.tx_classify import soft_label_exchange_batch
+
+        self.assertEqual(
+            soft_label_exchange_batch(["Kraken"], lang="de"),
+            "u. a. Auszahlung von Kraken",
+        )
+        self.assertEqual(
+            soft_label_exchange_batch(["Kraken", "Coinbase"], lang="de"),
+            "u. a. Auszahlung von Kraken, Coinbase",
+        )
+        self.assertTrue(
+            soft_label_exchange_batch([], lang="de").startswith("Wahrscheinlich"),
+        )
+
+
+class TestBoerseNamenImBaum(unittest.TestCase):
+    def test_sammelt_exchange_labels(self):
+        from core import trace_cache as tc
+
+        baum = {
+            "root": {"type": "internal", "children": []},
+            "children": [
+                {
+                    "type": "external",
+                    "label": {
+                        "name": "Kraken",
+                        "kategorie": "exchange",
+                        "nutzer_import": True,
+                    },
+                    "children": [],
+                },
+                {
+                    "type": "external",
+                    "exchange_label": {
+                        "name": "Coinbase",
+                        "kategorie": "exchange",
+                    },
+                    "children": [],
+                },
+                {
+                    "type": "external",
+                    "label": {"name": "OFAC", "kategorie": "sanction"},
+                    "children": [],
+                },
+            ],
+        }
+        namen = tc.boerse_namen_im_baum(baum)
+        self.assertEqual(namen, ["Coinbase", "Kraken"])
+
+    def test_oberflaeche_boerse_nur_name_mit_farbe(self):
+        js = (
+            Path(__file__).resolve().parent.parent / "web" / "app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function istBoersenLabel", js)
+        self.assertIn("label-boerse-in", js)
+        self.assertIn("label-boerse-out", js)
+        # Anzeige nur Name, kein „Börse · …“-Prefix für Exchanges.
+        start = js.index("if (istBoersenLabel(label))")
+        block = js[start:start + 500]
+        self.assertIn("marke.textContent = name", block)
+
 
 class TestImportUndLabel(unittest.TestCase):
     def setUp(self):
