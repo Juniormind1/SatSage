@@ -70,7 +70,8 @@ satsage-webgui.exe.sha256
 
 .grok-local-notes.txt
 
-# lokale Geheimnisse / Backups
+# Personal / machine-local secrets (never commit)
 .env.haukesecrets
+.env.*secrets
 .env.backup*
 exchange_reports/
