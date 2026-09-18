@@ -7,9 +7,9 @@ services:
       APP_PORT: 8730
 
   web:
-    # Dev auf dev-juniormind: floating tag, kein Digest. Vor Store-Release
-    # (nächster Merge → 0.9.6) Tag+Digest aus dem Image-Workflow einsetzen.
-    image: ghcr.io/juniormind1/satsage:latest
+    # Image-Pin: Busch setzt nach 0.9.6-Build Tag+Digest (wie 0.9.5).
+    # Bis dahin floating 0.9.6-Tag (Digest folgt).
+    image: ghcr.io/juniormind1/satsage:0.9.6
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m

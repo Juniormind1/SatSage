@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.6] — 2026-09-17
+
 - **Tests / Stabilität:** Unittest-Suite wieder grün — u. a. Tor erst nach LAN-Fail, SSL-Hinweistexte an Auto-Flip, Trace-Sort-IDs im HTML, Job-Gate-Reset in Tests, Empfangs-Ka-Ching nach Tip-Sync.
 - **Empfang · Mempool-Sprung:** Reihenfolge jetzt: Adresse benutzt bemerkt → **Konfetti auf alter QR** → Wallet-Update (Pending) → **neuer QR erst nach Animation**.
 - **Empfang · Ka-Ching:** Mempool-Eingang während Tip-Sync / Empfangs-Schärfung wurde verschluckt (QR sprang, kein Konfetti). Incoming wird gemerkt; Index-Sprung kurz nach Tip-Sync holt Ka-Ching nach.
@@ -132,6 +134,27 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **Lab · Kalender:** Regtest-Szenarien streuen Blockzeiten mit `setmocktime` über 2022–2025 bis Tip≈heute — Steuerjahr-/Haltefrist-Visualisierung testbar. Frische Chain nötig (`.data/` wipen). Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`; Phasen in `scenario-report.json`.
 - **Empfangen · QR:** Rechts neben dem Assistenten zeigt ein quadratisches Dock-Feld die nächste Empfangsadresse der gewählten Wallet als QR (lokal generiert, kein CDN), mit Name, Index und Quelle. Ableitung nur serverseitig; Electrs/Fulcrum bevorzugt, sonst „Schätzung aus Cache“. Bei aktivem Wallet-Watch werden die Adresse und Index+1 abonniert. Kurzes Polling erkennt eingehende Zahlungen.
 - **Tests · CI:** Vier Unittests nach dem WPKH-/Gap-Scan-Fix wieder grün — Skripttyp-Registry vor Ableitungstests leeren, Sofort-Speichern-Prüfung an Deskriptor-Umleitung anpassen, Specter-`wpkh` als Single-Sig erwarten, Regex-Literal in `fuegeWalletHinzu` ohne falsche Klammerbilanz.
+
+## [0.9.5] - 2026-09-13
+
+- **Version:** 0.9.5 — die Sprachwahl aus 0.9.4 greift jetzt auch in der Oberfläche.
+- **Web · Sprache (Nachtrag zu 0.9.4):** Die in 0.9.4 eingeführte Sprachwahl kam in der Hauptoberfläche nicht an. `storedLang()` in `web/i18n.js` gab `normalizeLang(localStorage.getItem(…))` zurück, und `normalizeLang()` macht aus allem Unbekannten — auch aus `null` — ein `"de"`. Damit lieferte `storedLang()` selbst ohne gespeicherte Wahl immer `"de"`, und der Zweig `|| config.ui_lang` in `initI18n` war unerreichbar: die API meldete `ui_lang: en`, die Oberfläche blieb deutsch. Nur die servergerenderte Anmeldeseite funktionierte, weil sie kein JS-i18n nutzt. `storedLang()` gibt jetzt `null` ohne gespeicherten Wert, letzter Rückfall ist die Browsersprache statt eines festen `"de"`. Neue Tests in `tests/test_web_i18n.py` laden `i18n.js` in Node mit gestubbtem `localStorage`/`navigator` und prüfen die Auflösungsreihenfolge.
+
+## [0.9.4] - 2026-09-13
+
+- **Version:** 0.9.4 — Weboberfläche spricht die Sprache des Browsers; Fußzeile behauptet nichts Falsches mehr.
+- **Web · Sprache:** Ohne gesetztes `UI_LANG` entscheidet jetzt der `Accept-Language`-Header des Browsers über die Oberflächensprache, sonst Englisch. Hintergrund: umbrelOS reicht seine eigene Spracheinstellung nicht an Apps durch, der Browser-Header ist das einzige verfügbare Signal. Der DE/EN-Umschalter überschreibt weiterhin alles und wird in `UI_LANG` gespeichert. CLI und Terminal-Menü bleiben unverändert bei Deutsch.
+- **Web · Anmeldeseite:** War hartcodiert Deutsch und damit die einzige Ansicht ohne Übersetzung — im App Store das Erste, was ein Nutzer sieht. Alle Texte inklusive der StartOS- und Umbrel-Hinweise liegen jetzt zweisprachig in `_LOGIN_TEXTE`; `<html lang>` und Seitentitel folgen der gewählten Sprache.
+- **Web · Fußzeile:** „127.0.0.1 — nur lokal erreichbar“ stand unabhängig von der tatsächlichen Bind-Adresse im HTML. Hinter Umbrels `app_proxy` bindet SatSage an `0.0.0.0` und ist aus dem ganzen LAN erreichbar — die Zeile erscheint jetzt nur noch, wenn der Listener wirklich auf Loopback sitzt (`local_only` in `/api/config`).
+
+## [0.9.3] - 2026-09-13
+
+- **Version:** 0.9.3 — Umbrel-Paketierung: SatSage läuft als App im Umbrel App Store und nutzt den dort installierten Bitcoin Node, Electrum-Server und mempool.
+- **Umbrel · Managed-Modus:** Neuer Wert `SATSAGE_MANAGED_BY=umbrel`. Electrum-, Core- und Mempool-Adressen kommen als Compose-Env aus den Umbrel-Dependencies (`electrs`, transitiv `bitcoin`) und werden zur Laufzeit übernommen, ohne in die `.env` geschrieben zu werden. Die Datenquellen-Felder `own_fulcrum`/`own_core` sind wie unter StartOS gesperrt; der Managed-Hinweis nennt Umbrel und den erkannten Indexer.
+- **Umbrel · Login:** Umbrel reicht `APP_PASSWORD` als `SATSAGE_BOOTSTRAP_PASSWORD` herein; SatSage hinterlegt daraus seinen Passwort-Hash und verlangt hinter dem `app_proxy` weiterhin den eigenen Login — das Docker-Netz gilt als nicht vertrauenswürdig. Die Login-Seite verweist auf die Umbrel-App-Details.
+- **Intern:** Die Start9-spezifischen Modus-Abfragen laufen jetzt über die Mengen `_NODE_MANAGED`/`_MANAGED_MODI`; `_start9_electrum_indexer` heißt `_electrum_indexer`, die Bridge-Konstanten heißen `_BRIDGE_QUELLEN`/`_BRIDGE_SCHLUESSEL`. Verhalten unter StartOS und Specter unverändert.
+- **Container:** `packaging/Dockerfile` setzt `SATSAGE_MANAGED_BY` nicht mehr fest auf `start9` — der Modus kommt von der Plattform (StartOS-Daemon-Env bzw. Umbrel-Compose). `/data` gehört `1000:1000`, weil Umbrel den Dienst unter dieser UID startet.
+
 
 ## [0.9.2] - 2026-09-11
 

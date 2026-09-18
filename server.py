@@ -328,15 +328,15 @@ _LOGIN_TEXTE = {
             "No password yet — set one below, "
             "or open with the token from the console."
         ),
-        "ersteinrichtung": "Initial setup",
-        "nur_loopback": "Without a password, setup is only possible via loopback.",
+        "ersteinrichtung": "First-time setup",
+        "nur_loopback": "Without a password, setup is only possible over loopback.",
         "neues_passwort": "New password",
         "wiederholen": "Repeat",
         "passwort_setzen": "Set password",
         "status_pruefen": "Check status",
         "hinweis_start9": (
             "StartOS: username <strong>admin</strong>. While the service is "
-            "stopped, find or rotate the password under "
+            "stopped you can find or rotate the password under "
             "<strong>Actions &amp; Config</strong>."
         ),
         "hinweis_umbrel": "Umbrel shows this password in the SatSage app details.",
