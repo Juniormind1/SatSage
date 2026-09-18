@@ -68,3 +68,7 @@ satsage-webgui.exe
 satsage-webgui.exe.sha256
 
 .grok-local-notes.txt
+
+# Personal / machine-local secrets (never commit)
+.env.haukesecrets
+.env.*secrets
