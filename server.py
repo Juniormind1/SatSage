@@ -1662,7 +1662,12 @@ def _datenquellen_config_gesperrt(
             raise ApiError(403, schluessel_text)
 
 
-def api_config(state: AppState, query: dict, accept_language: str | None = None) -> dict:
+def api_config(
+    state: AppState,
+    query: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
+) -> dict:
     from core.version import version as app_version
     from core import selbstanzeige as sa_mod
 
@@ -1709,7 +1714,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         # Derselbe Absatz wie in Exporten und LLM-Kontext, in der Sprache,
         # die diese Anfrage aufgelöst hat.
         "hinweis_onchain": tax_mod.hinweis_onchain(
-            _ui_lang_fuer_web(werte, accept_language)
+            _ui_lang_fuer_web(werte, accept_language, client_lang)
         ),
         "hinweis_onchain_bestaetigt": tax_mod.hinweis_onchain_bestaetigt(werte),
         # Wallet-Blöcke hinter einer Lücke werden nicht gelesen. Das muss die
@@ -1729,7 +1734,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         # Ohne Netzprobe — die Pille bleibt grau, bis /api/llm/status?check=1.
         "llm": llm_mod.status_dict(werte, check=False),
         "status_mail": status_mail_mod.als_dict(werte),
-        "ui_lang": _ui_lang_fuer_web(werte, accept_language),
+        "ui_lang": _ui_lang_fuer_web(werte, accept_language, client_lang),
         # Hinter Umbrels app_proxy bindet SatSage an 0.0.0.0 — die Fußzeile
         # darf dann nicht "nur lokal erreichbar" behaupten.
         "local_only": _ist_local_only(state),
@@ -1756,16 +1761,29 @@ def _ui_lang_aus_env(werte: dict) -> str:
     return "de"
 
 
-def _ui_lang_fuer_web(werte: dict, accept_language: str | None = None) -> str:
+def _ui_lang_fuer_web(
+    werte: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
+) -> str:
     """``de`` oder ``en`` für die Weboberfläche.
 
-    Eine ausdrückliche Wahl (``UI_LANG``) gewinnt immer. Ohne sie entscheidet
+    Schickt der Browser seine angezeigte Sprache mit (``X-Satsage-Lang``),
+    gilt diese: Servertexte wie Haftungsabsatz und Steuerhinweise müssen zur
+    Oberfläche passen, und die Wahl im Browser (``localStorage``) kann von
+    ``UI_LANG`` abweichen — etwa nach einer Neuinstallation, die die
+    ``.env`` ersetzt, den Browserspeicher aber nicht.
+
+    Sonst gewinnt eine ausdrückliche Wahl (``UI_LANG``). Ohne sie entscheidet
     der Browser über ``Accept-Language`` — umbrelOS reicht seine eigene
     Spracheinstellung nicht an Apps durch, das ist also das einzige Signal.
     Gibt auch der nichts her, ist Englisch die Vorgabe: die Web-GUI hat im
     App Store internationales Publikum. CLI und Terminal-Menü bleiben davon
     unberührt und antworten weiter auf Deutsch.
     """
+    client = str(client_lang or "").strip().lower()
+    if client in ("de", "en"):
+        return client
     roh = str((werte or {}).get("UI_LANG") or "").strip().lower()
     if roh.startswith("en"):
         return "en"
@@ -5363,10 +5381,15 @@ def _steuer_auswertung(
 
 
 def api_tax(
-    state: AppState, query: dict, accept_language: str | None = None
+    state: AppState,
+    query: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
 ) -> dict:
     auswertung = _steuer_auswertung(
-        state, query, _ui_lang_fuer_web(state.env().values(), accept_language)
+        state,
+        query,
+        _ui_lang_fuer_web(state.env().values(), accept_language, client_lang),
     )
     auswertung.pop("_objekte", None)
     return auswertung
@@ -7376,7 +7399,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if teile == ["config"] and methode == "GET":
             return 200, api_config(
-                state, query, self.headers.get("Accept-Language")
+                state, query,
+                self.headers.get("Accept-Language"),
+                self.headers.get("X-Satsage-Lang"),
             )
         if teile == ["config", "wallets"] and methode == "PUT":
             return 200, api_save_wallets(state, self._body())
@@ -7481,7 +7506,9 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_llm_chat(state, self._body())
         if teile == ["tax"] and methode == "GET":
             return 200, api_tax(
-                state, query, self.headers.get("Accept-Language")
+                state, query,
+                self.headers.get("Accept-Language"),
+                self.headers.get("X-Satsage-Lang"),
             )
         if teile == ["tax", "selbstanzeige", "kandidaten"] and methode == "GET":
             return 200, api_selbstanzeige_kandidaten(state, query)

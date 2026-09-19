@@ -39,6 +39,18 @@ class ApiFehler extends Error {
   }
 }
 
+/**
+ * Die im Browser gewählte Sprache für den Server. Ohne sie löst der Server
+ * die Sprache selbst auf (UI_LANG, Accept-Language) — weicht das von der
+ * Wahl im Browser ab, kämen Haftungsabsatz und Steuerhinweise in einer
+ * anderen Sprache als die Oberfläche. Ohne gespeicherte Wahl kein Header:
+ * dann entscheidet beim ersten Laden der Server, und der Client übernimmt.
+ */
+function sprachKopf() {
+  const gewaehlt = window.SatSageI18n && window.SatSageI18n.storedLang();
+  return gewaehlt ? { "X-Satsage-Lang": gewaehlt } : {};
+}
+
 async function api(pfad, { methode = "GET", daten, timeoutMs } = {}) {
   const ctrl = timeoutMs ? new AbortController() : null;
   const timer = ctrl
@@ -51,6 +63,7 @@ async function api(pfad, { methode = "GET", daten, timeoutMs } = {}) {
       credentials: "same-origin",
       headers: {
         "X-Satsage-Token": Token,
+        ...sprachKopf(),
         ...(daten !== undefined ? { "Content-Type": "application/json" } : {}),
       },
       body: daten !== undefined ? JSON.stringify(daten) : undefined,

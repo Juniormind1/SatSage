@@ -163,3 +163,53 @@ class TestLoginSeiteGerendert(unittest.TestCase):
         self.assertIn(
             "Umbrel zeigt dieses Passwort", self._seite("de", managed_by="umbrel")
         )
+
+
+class TestClientSpracheHatVorrang(unittest.TestCase):
+    """Die Sprache, die der Browser anzeigt, bestimmt auch die Servertexte.
+
+    Client und Server lösten die Sprache getrennt auf: der Client aus
+    ``localStorage``, der Server aus ``UI_LANG``/``Accept-Language``. Stand
+    die Wahl nur im Browser, war die Oberfläche englisch, Haftungsabsatz und
+    Steuerhinweise aber deutsch. Der Client schickt seine Wahl deshalb als
+    ``X-Satsage-Lang`` mit.
+    """
+
+    def test_client_sprache_schlaegt_alles(self):
+        self.assertEqual(
+            server._ui_lang_fuer_web({"UI_LANG": "de"}, "de-DE", "en"), "en"
+        )
+        self.assertEqual(
+            server._ui_lang_fuer_web({"UI_LANG": "en"}, "en-US", "de"), "de"
+        )
+
+    def test_unbrauchbare_client_sprache_wird_ignoriert(self):
+        for roh in (None, "", "fr", "xx", "  "):
+            with self.subTest(roh=roh):
+                self.assertEqual(
+                    server._ui_lang_fuer_web({}, "de-DE,de;q=0.9", roh), "de"
+                )
+
+    def _state(self, tmp):
+        (Path(tmp) / ".env").write_text("", encoding="utf-8")
+        return server.AppState(
+            env_path=Path(tmp) / ".env",
+            cache_dir=Path(tmp) / "cache",
+            immutable_cache_dir=Path(tmp) / "imm",
+        )
+
+    def test_config_folgt_der_client_sprache(self):
+        """Weg A: EN nur im Browser, deutscher Browser, kein UI_LANG."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = server.api_config(self._state(tmp), {}, "de-DE,de;q=0.9", "en")
+            self.assertEqual(cfg["ui_lang"], "en")
+            self.assertIn("reconstructs", cfg["hinweis_onchain"])
+
+    def test_steuerhinweise_folgen_der_client_sprache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            daten = server.api_tax(
+                self._state(tmp), {"jahr": ["2026"]}, "de-DE,de;q=0.9", "en"
+            )
+            text = " ".join(daten.get("hinweise") or [])
+            self.assertIn("This statement is not tax advice", text)
+            self.assertNotIn("keine Steuerberatung", text)
