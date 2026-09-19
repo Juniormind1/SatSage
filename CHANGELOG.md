@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Web · Sprache von Client und Server einheitlich:** Stand die Sprachwahl nur im Browser (`localStorage`), nicht aber als `UI_LANG` in der `.env`, war die Oberfläche englisch, Haftungsabsatz und Steuerhinweise vom Server aber deutsch. Auf Umbrel leicht erreichbar, weil der Browserspeicher Updates und Neuinstallationen der App überdauert. Der Client schickt seine gespeicherte Wahl jetzt als `X-Satsage-Lang` mit; `api_config` und `api_tax` richten sich danach. Ohne gespeicherte Wahl entscheidet beim ersten Laden weiter der Server.
+
 ## [0.9.7] — 2026-09-19
 
 - **Version:** 0.9.7 — englische Oberfläche vollständig für die Steuerjahr-Ansicht; Vorbereitung der Einreichung im Umbrel App Store.
