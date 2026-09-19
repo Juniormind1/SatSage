@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.7] — 2026-09-19
+
+- **Version:** 0.9.7 — englische Oberfläche vollständig für die Steuerjahr-Ansicht; Vorbereitung der Einreichung im Umbrel App Store.
+- **Web · Steuerjahr englisch:** Kacheln, Zeitstrahl-Zusatz, Was-wäre-wenn-Zeilen, Abgänge und Verlaufsüberblick laufen über `t()`. Bei englischer Oberfläche sank die Zahl deutscher Reste über alle Ansichten von 82 auf 1 (Datenquellen, folgt).
+- **Web · Sortier-Menü:** Die vier Schlüssel `trace.sort*` fehlten in beiden Katalogen — das Menü der Herkunftsansicht zeigte deshalb in **beiden** Sprachen den rohen Schlüssel `trace.sortVolumeDesc`. Neuer Test `tests/test_web_locales.py` verlangt jeden verwendeten Schlüssel in beiden Katalogen.
+- **On-Chain-Hinweis sprachfähig:** Der Haftungsabsatz war eine deutsche Konstante in `core/tax.py`, die die Oberfläche über ihre eigene Übersetzung stempelte. `core/i18n.t_lang()` liest eine bestimmte Sprache ohne globalen Zustand (der Webserver antwortet nebenläufig in wechselnden Sprachen); `api_config` und `api_tax` liefern Absatz und die elf Steuerhinweise in der Anfragesprache. Exporte und LLM-Kontext bleiben vorerst deutsch — dort steht der Absatz zwischen weiteren deutschen Texten.
+
 ## [0.9.6] — 2026-09-17
 
 - **Tests / Stabilität:** Unittest-Suite wieder grün — u. a. Tor erst nach LAN-Fail, SSL-Hinweistexte an Auto-Flip, Trace-Sort-IDs im HTML, Job-Gate-Reset in Tests, Empfangs-Ka-Ching nach Tip-Sync.
