@@ -7939,6 +7939,13 @@ function fuelleJahresauswahl(jahre, gewaehlt) {
   if (gewaehlt) wahl.value = gewaehlt;
 }
 
+/** Stichtag-/Heute-Label aus den Rohdaten — der Server liefert es deutsch. */
+function stichtagLabel(daten) {
+  return daten.laufend
+    ? t("tax.asOfToday", { datum: daten.stichtag })
+    : t("tax.asOfCutoff", { datum: daten.stichtag });
+}
+
 function zeichneSteuerjahr(daten) {
   fuelleJahresauswahl(daten.verfuegbare_jahre || [], daten.jahr);
   fuelleHaltefristAuswahl(
@@ -7952,25 +7959,28 @@ function zeichneSteuerjahr(daten) {
   const kasten = $("#steuer-kennzahlen");
   kasten.replaceChildren();
 
+  const utxoZahl = (n) => `${n} ${t("tax.utxos")}`;
   const kennzahlen = [
-    ["Bestand gesamt", formatSats(k.gesamt_sats), `${k.gesamt_count} UTXOs`, ""],
-    ["außerhalb Haltefrist", formatSats(k.erfuellt_sats),
-     `${k.erfuellt_count} UTXOs`, "gut"],
-    ["innerhalb Haltefrist", formatSats(k.offen_sats),
-     k.naechste_frist ? `nächste am ${k.naechste_frist}` : `${k.offen_count} UTXOs`,
+    [t("tax.tileTotal"), formatSats(k.gesamt_sats), utxoZahl(k.gesamt_count), ""],
+    [t("tax.haltefristOut"), formatSats(k.erfuellt_sats),
+     utxoZahl(k.erfuellt_count), "gut"],
+    [t("tax.haltefristIn"), formatSats(k.offen_sats),
+     k.naechste_frist
+       ? t("tax.tileNextDeadline", { datum: k.naechste_frist })
+       : utxoZahl(k.offen_count),
      "warn",
      true], // separater „klären“ nur für gelbe UTXOs
   ];
   if (k.ungeprueft_count > 0) {
     kennzahlen.push([
-      "Ohne Herkunftsanalyse", formatSats(k.ungeprueft_sats),
-      `${k.ungeprueft_count} UTXOs — Frist evtl. länger`, "ungeprueft",
+      t("tax.tileNoOrigin"), formatSats(k.ungeprueft_sats),
+      t("tax.tileNoOriginNote", { anzahl: k.ungeprueft_count }), "ungeprueft",
       true, // Aktion „klären“ nur für graue UTXOs
     ]);
   }
   if (k.ohne_datum > 0) {
     kennzahlen.push([
-      "Ohne Datum", String(k.ohne_datum), "unbestätigt, nicht gewertet", "",
+      t("tax.tileNoDate"), String(k.ohne_datum), t("tax.tileNoDateNote"), "",
       false,
     ]);
   }
@@ -7998,9 +8008,7 @@ function zeichneSteuerjahr(daten) {
       knopf.setAttribute("data-i18n", "tax.originAll");
       if (art === "warn") {
         // Gelb: voll bis extern/Coinbase — erst dann grün oder bestätigt gelb.
-        knopf.title = t("tax.yellowClarifyTitle") !== "tax.yellowClarifyTitle"
-          ? t("tax.yellowClarifyTitle")
-          : "Gelbe UTXOs bis extern/Coinbase klären — können grün werden oder bestätigt gelb bleiben.";
+        knopf.title = t("tax.yellowClarifyTitle");
         knopf.setAttribute("data-i18n-title", "tax.yellowClarifyTitle");
         knopf.addEventListener("click", () => {
           herkunftGelbUtxos().catch((fehler) => {
@@ -8014,8 +8022,8 @@ function zeichneSteuerjahr(daten) {
         });
       } else {
         // Grauer Scorecard-Knopf: alle noch nie analysierten UTXOs
-        knopf.title = "Alle noch grauen, d.h. UTXOs unklarer Vergangenheit, werden analysiert bis sie grün oder gelb sind";
-        knopf.setAttribute("data-i18n-title", "");
+        knopf.title = t("tax.greyClarifyTitle");
+        knopf.setAttribute("data-i18n-title", "tax.greyClarifyTitle");
         knopf.addEventListener("click", () => {
           Promise.resolve(herkunftAllerUtxos()).catch((fehler) => {
             const k = $("#steuer-meldung");
@@ -8033,11 +8041,17 @@ function zeichneSteuerjahr(daten) {
 
   zeichneZeitstrahl(daten);
 
+  const fristText = daten.haltefrist_jahre
+    ? (Number(daten.haltefrist_jahre) === 1
+      ? t("tax.yearsOne")
+      : t("tax.yearsN", { n: daten.haltefrist_jahre }))
+    : t("tax.holdingNone");
   setzeText(
     $("#steuer-zusatz"),
-    `${daten.stichtag_label} · Haltefrist ` +
-    (daten.haltefrist_jahre ? `${daten.haltefrist_jahre} Jahr(e)` : "keine") +
-    (daten.stichtag_regel ? ` · Altbestand bis ${daten.stichtag_regel}` : "")
+    `${stichtagLabel(daten)} · ${t("tax.holding")} ${fristText}` +
+    (daten.stichtag_regel
+      ? ` · ${t("tax.legacyUntil", { datum: daten.stichtag_regel })}`
+      : "")
   );
 
   zeichneSteuerUtxoGruppen(daten);
@@ -8108,13 +8122,10 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
     : "grundlage-offen";
   marke.textContent = eintrag.grundlage_label;
   marke.title = nurWallet
-    ? "Bisher nur der Wallet-Eingang bekannt. Gründlicherer Trace kann ein "
-      + "älteres Anschaffungsdatum finden und die Haltefrist erfüllen."
+    ? t("tax.basisWalletEntryTitle")
     : (eintrag.geprueft
-      ? "Anschaffungsdatum aus der Herkunftsanalyse"
-      : "Nur das Entstehungsdatum des Outputs. Bei Wechselgeld oder "
-        + "Konsolidierung ist das zu jung — die Haltefrist kann in Wahrheit "
-        + "länger sein.");
+      ? t("tax.basisFromOriginTitle")
+      : t("tax.basisOutputOnlyTitle"));
   grundlage.append(marke);
   if (eintrag.herkunft) {
     const zusatz = document.createElement("div");
@@ -8127,12 +8138,8 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
     const klaeren = document.createElement("button");
     klaeren.type = "button";
     klaeren.className = "knopf knopf-klein steuer-utxo-klaeren";
-    klaeren.textContent = t("tax.originAll") !== "tax.originAll"
-      ? t("tax.originAll")
-      : "klären";
-    klaeren.title = t("tax.yellowClarifyTitle") !== "tax.yellowClarifyTitle"
-      ? t("tax.yellowClarifyTitle")
-      : "Bis extern/Coinbase nachziehen — kann gelb→grün werden oder gelb bestätigen.";
+    klaeren.textContent = t("tax.originAll");
+    klaeren.title = t("tax.rowClarifyTitle");
     klaeren.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -8694,9 +8701,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     ticks.append(span);
   }
 
-  const zusatz = [`${strahl.von} bis ${strahl.bis}`];
+  const zusatz = [t("tax.timelineRange", { von: strahl.von, bis: strahl.bis })];
   if (daten.laufend) {
-    zusatz.push("Jahr läuft noch — Fristen gegen heute gerechnet");
+    zusatz.push(t("tax.timelineRunningYear"));
   }
   setzeText($("#zeitstrahl-zusatz"), zusatz.join(" · "));
 }
@@ -8738,19 +8745,17 @@ function zeichneAbgaenge(daten) {
   setzeText(
     $("#abgaenge-zusatz"),
     abgaenge.length === 0
-      ? "keine im gewählten Jahr"
+      ? t("tax.disposalsNoneInYear")
       : `${abgaenge.length} · ${formatSats(k.abgang_sats)}` +
         (k.abgang_steuerpflichtig_count
-          ? ` · davon ${k.abgang_steuerpflichtig_count} innerhalb der Frist`
-          : " · alle nach Ablauf der Frist")
+          ? ` · ${t("tax.disposalsWithinPeriod", { anzahl: k.abgang_steuerpflichtig_count })}`
+          : ` · ${t("tax.disposalsAllAfter")}`)
   );
 
   const liste = $("#abgaenge-liste");
   liste.replaceChildren();
   if (abgaenge.length === 0) {
-    liste.append(hinweisZeile(
-      "In diesem Jahr wurde nichts ausgegeben."
-    ));
+    liste.append(hinweisZeile(t("tax.disposalsNothingSpent")));
     return;
   }
 
@@ -9555,8 +9560,7 @@ function zeichneSaAbflussZeile(k) {
   box.dataset.art = "abfluss";
   box.checked = Boolean(k.ausgewaehlt);
   if (k.eigenuebertrag) {
-    box.title =
-      "Wirkt wie Eigenübertrag — nur ankreuzen, wenn es doch ein Verkauf war.";
+    box.title = t("tax.selfTransferHint");
   }
   const text = document.createElement("span");
   const titel = document.createElement("div");
@@ -9565,10 +9569,10 @@ function zeichneSaAbflussZeile(k) {
   const meta = document.createElement("div");
   meta.className = "sa-meta";
   meta.textContent =
-    `${k.abgang_datum} ${k.abgang_zeit} · Netto ${formatSats(k.netto_sats)}` +
-    ` · ${k.input_count} Inputs` +
+    `${k.abgang_datum} ${k.abgang_zeit} · ${t("tax.metaNet", { betrag: formatSats(k.netto_sats) })}` +
+    ` · ${t("tax.metaInputs", { anzahl: k.input_count })}` +
     (k.wallets?.length ? ` · ${k.wallets.join(", ")}` : "") +
-    (k.eigenuebertrag ? " · vermutlich Eigenübertrag" : "");
+    (k.eigenuebertrag ? ` · ${t("tax.selfTransferLikely")}` : "");
   text.append(titel, meta);
   if (k.inputs && k.inputs.length) {
     const inp = document.createElement("div");
@@ -9610,8 +9614,9 @@ function zeichneSaUtxoZeile(u) {
   meta.className = "sa-meta";
   meta.textContent =
     `${formatSats(u.value_sats)} · ${u.wallet || "?"}` +
-    (u.anschaffung_datum ? ` · Anschaffung ${u.anschaffung_datum}` : "") +
-    (u.stichtag ? ` · Stichtag ${u.stichtag}` : "") +
+    (u.anschaffung_datum
+      ? ` · ${t("tax.metaAcquired", { datum: u.anschaffung_datum })}` : "") +
+    (u.stichtag ? ` · ${t("tax.asOfCutoff", { datum: u.stichtag })}` : "") +
     (u.address ? ` · ${u.address}` : "");
   text.append(titel, meta);
   zeile.append(box, text);
@@ -9693,16 +9698,14 @@ function zeichneSelbstanzeigeKandidaten() {
   const verlauf = Zustand.saVerlauf;
 
   const ab = saAbschnitt(
-    "Abflüsse im Steuerjahr",
+    t("tax.outflowsHeading"),
     abfluesse.length
-      ? `${abfluesse.length} Kandidat(en)`
-      : "keine",
+      ? t("tax.candidatesN", { anzahl: abfluesse.length })
+      : t("tax.holdingNone"),
     {
       offen: false,
       ausklappbar: abfluesse.length > 0,
-      leerText: abfluesse.length
-        ? ""
-        : "Keine Netto-Abflüsse in diesem Jahr — Verlauf fehlt oder nichts ausgegeben.",
+      leerText: abfluesse.length ? "" : t("tax.outflowsEmpty"),
     },
   );
   const abFrag = document.createDocumentFragment();
@@ -9711,28 +9714,24 @@ function zeichneSelbstanzeigeKandidaten() {
   liste.append(ab.details);
 
   const stichtag = Zustand.saStichtag
-    ? ` · Stichtag ${Zustand.saStichtag}`
+    ? ` · ${t("tax.cutoffLabel", { datum: Zustand.saStichtag })}`
     : "";
   // UTXOs aufklappen, wenn keine Abflüsse — sonst sieht man keine Checkboxen.
   const ut = saAbschnitt(
-    "Offene UTXOs — Was wäre wenn",
+    t("tax.openUtxosHeading"),
     utxos.length
-      ? `${utxos.length} UTXO(s)${stichtag}`
-      : `keine${stichtag}`,
+      ? `${utxos.length} ${t("tax.utxos")}${stichtag}`
+      : `${t("tax.holdingNone")}${stichtag}`,
     {
       offen: utxos.length > 0 && abfluesse.length === 0,
       ausklappbar: utxos.length > 0,
-      leerText: utxos.length
-        ? ""
-        : "Keine offenen UTXOs im Cache. Zuerst Bestand.",
+      leerText: utxos.length ? "" : t("tax.openUtxosEmpty"),
     },
   );
   if (utxos.length) {
     const hinweis = document.createElement("p");
     hinweis.className = "sa-leer";
-    hinweis.textContent =
-      "Checkbox ankreuzen → Report. Angekreuzte UTXOs werden fiktiv zum Stichtag " +
-      "als veräußert gerechnet (Haltedauer / FiFo). Keine echte Ausgabe.";
+    hinweis.textContent = t("tax.openUtxosHint");
     ut.innen.append(hinweis);
 
     const werkzeug = document.createElement("div");
@@ -9787,7 +9786,7 @@ function zeichneSelbstanzeigeKandidaten() {
     host.append(frag);
     if (gezeigt < utxos.length) {
       mehr.hidden = false;
-      mehr.textContent = `Weitere laden (${utxos.length - gezeigt} übrig)`;
+      mehr.textContent = t("tax.loadMore", { rest: utxos.length - gezeigt });
     } else {
       mehr.hidden = true;
     }
@@ -9803,22 +9802,20 @@ function zeichneSelbstanzeigeKandidaten() {
 
   if (verlauf) {
     const teile = [];
-    if (verlauf.vorhanden) teile.push("Verlaufsdaten vorhanden");
-    else teile.push("wenig/kein Verlauf");
+    if (verlauf.vorhanden) teile.push(t("tax.historyPresent"));
+    else teile.push(t("tax.historySparse"));
     if (verlauf.empfaenge_im_jahr != null) {
-      teile.push(`${verlauf.empfaenge_im_jahr} Empfang(e) im Jahr`);
+      teile.push(t("tax.historyReceipts", { anzahl: verlauf.empfaenge_im_jahr }));
     }
     if (verlauf.abgaenge_im_jahr != null) {
-      teile.push(`${verlauf.abgaenge_im_jahr} Abgangszeilen im Jahr`);
+      teile.push(t("tax.historyDisposalRows", { anzahl: verlauf.abgaenge_im_jahr }));
     }
     if (verlauf.offen_utxos != null) {
-      teile.push(`${verlauf.offen_utxos} offen`);
+      teile.push(t("tax.historyOpen", { anzahl: verlauf.offen_utxos }));
     }
-    const vl = saAbschnitt("Verlauf (Überblick)", teile.join(" · "), {
+    const vl = saAbschnitt(t("tax.historyHeading"), teile.join(" · "), {
       ausklappbar: false,
-      leerText:
-        "Nur Orientierung: Abflüsse oben brauchen Verlauf; " +
-        "UTXOs kommen aus dem Bestand.",
+      leerText: t("tax.historyHint"),
     });
     liste.append(vl.details);
   }

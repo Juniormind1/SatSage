@@ -1786,7 +1786,18 @@ class TestSteuerjahr(ApiTestBasis):
         self.assertTrue(körper["laufend"])
         self.assertEqual(körper["stichtag"], date.today().strftime("%d.%m.%Y"))
         self.assertIn("Stand heute", körper["stichtag_label"])
-        self.assertIn("läuft noch", " ".join(körper["hinweise"]))
+        # Die Hinweise folgen seit 0.9.7 der Sprache der Anfrage — auf den
+        # deutschen Wortlaut zu prüfen würde nur die Vorgabe festschreiben.
+        from core import i18n
+        erwartet = [
+            i18n.t_lang(sprache, "tax.hintRunningYear", jahr=date.today().year)
+            for sprache in ("de", "en")
+        ]
+        text = " ".join(körper["hinweise"])
+        self.assertTrue(
+            any(e in text for e in erwartet),
+            "Hinweis auf das laufende Steuerjahr fehlt",
+        )
 
     def test_haltefrist_wirkt(self):
         _, mit = self.anfrage("/api/tax?jahr=2026&frist=1")
@@ -1797,11 +1808,16 @@ class TestSteuerjahr(ApiTestBasis):
         )
 
     def test_hinweise_werden_mitgeliefert(self):
+        from core import tax
         _, körper = self.anfrage("/api/tax?jahr=2026")
         self.assertTrue(körper["hinweise"])
         text = " ".join(körper["hinweise"])
-        self.assertIn("keine Steuerberatung", text)
-        self.assertIn("Börsenhistorien", text)
+        # Sprachunabhängig: der Haftungsvorbehalt samt On-Chain-Absatz muss
+        # in der Aufstellung stehen, gleich in welcher Sprache.
+        self.assertTrue(
+            any(tax.hinweis_keine_beratung(s) in text for s in ("de", "en")),
+            "Haftungsvorbehalt fehlt in den Hinweisen",
+        )
 
     def test_verfuegbare_jahre(self):
         _, körper = self.anfrage("/api/tax")
@@ -1907,7 +1923,12 @@ class TestSteuerjahr(ApiTestBasis):
     def test_onchain_hinweis_steht_in_der_config(self):
         from core import tax
         _, cfg = self.anfrage("/api/config")
-        self.assertEqual(cfg["hinweis_onchain"], tax.HINWEIS_ONCHAIN)
+        # Der Absatz folgt seit 0.9.7 der aufgeloesten Oberflaechensprache —
+        # Oberflaeche, Exporte und LLM-Kontext zitieren denselben Wortlaut.
+        self.assertEqual(
+            cfg["hinweis_onchain"], tax.hinweis_onchain(cfg["ui_lang"])
+        )
+        self.assertTrue(cfg["hinweis_onchain"].strip())
         self.assertFalse(cfg["hinweis_onchain_bestaetigt"])
 
     def test_onchain_hinweis_wird_in_der_env_gemerkt(self):

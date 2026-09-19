@@ -1706,7 +1706,11 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         ),
         "wallet_watch": _wallet_watch_status(),
 
-        "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
+        # Derselbe Absatz wie in Exporten und LLM-Kontext, in der Sprache,
+        # die diese Anfrage aufgelöst hat.
+        "hinweis_onchain": tax_mod.hinweis_onchain(
+            _ui_lang_fuer_web(werte, accept_language)
+        ),
         "hinweis_onchain_bestaetigt": tax_mod.hinweis_onchain_bestaetigt(werte),
         # Wallet-Blöcke hinter einer Lücke werden nicht gelesen. Das muss die
         # Oberfläche sagen können, sonst fehlt ein Wallet ohne jeden Hinweis.
@@ -5291,7 +5295,9 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     return eintraege, ohne_verlauf
 
 
-def _steuer_auswertung(state: AppState, query: dict) -> dict:
+def _steuer_auswertung(
+    state: AppState, query: dict, lang: str | None = None
+) -> dict:
     utxos, ohne_verlauf = _steuer_grundlage(state)
     jahre = tax_mod.verfuegbare_jahre(utxos)
 
@@ -5328,32 +5334,40 @@ def _steuer_auswertung(state: AppState, query: dict) -> dict:
         anschaffung=anschaffung,
         wallet=state.wallet_ctx,
         immutable_cache_dir=state.immutable_cache_dir,
+        lang=lang,
     )
+    from core.i18n import t_lang
+
     auswertung["verfuegbare_jahre"] = jahre
     auswertung["ohne_verlauf"] = ohne_verlauf
     phantome = int(getattr(state, "_steuer_phantome", 0) or 0)
     auswertung["phantom_unspent_count"] = phantome
     if phantome:
-        auswertung["hinweise"].insert(0, (
-            f"{phantome} Verlaufs-Einträge wirkten unspent, fehlen aber im "
-            "aktuellen UTXO-Bestand (Phantom) — für „Bestand gesamt“ ignoriert. "
-            "Verlaufsscan erneut aktualisiert spent-Flags."
-        ))
+        auswertung["hinweise"].insert(
+            0, t_lang(lang, "tax.hintPhantom", anzahl=phantome)
+        )
     if ohne_verlauf:
         # Eine gemischte Grundlage muss auffallen: Für die einen Wallets sind
         # Veräußerungen erfasst, für die anderen nur der heutige Bestand.
-        auswertung["hinweise"].insert(0, (
-            "Für " + ", ".join(f"„{name}“" for name in ohne_verlauf)
-            + (" liegt" if len(ohne_verlauf) == 1 else " liegen")
-            + " kein Verlauf vor — dort zählt nur der heutige Bestand, "
-            "bereits ausgegebene Beträge fehlen. „Verlaufsscan“ in der "
-            "Wallet-Ansicht oder „Verlauf aller Wallets“ schließt die Lücke."
-        ))
+        auf = t_lang(lang, "common.quoteOpen")
+        zu = t_lang(lang, "common.quoteClose")
+        namen = ", ".join(f"{auf}{name}{zu}" for name in ohne_verlauf)
+        schluessel = (
+            "tax.hintNoHistoryOne" if len(ohne_verlauf) == 1
+            else "tax.hintNoHistoryMany"
+        )
+        auswertung["hinweise"].insert(
+            0, t_lang(lang, schluessel, wallets=namen)
+        )
     return auswertung
 
 
-def api_tax(state: AppState, query: dict) -> dict:
-    auswertung = _steuer_auswertung(state, query)
+def api_tax(
+    state: AppState, query: dict, accept_language: str | None = None
+) -> dict:
+    auswertung = _steuer_auswertung(
+        state, query, _ui_lang_fuer_web(state.env().values(), accept_language)
+    )
     auswertung.pop("_objekte", None)
     return auswertung
 
@@ -7466,7 +7480,9 @@ class Handler(BaseHTTPRequestHandler):
         if teile == ["llm", "chat"] and methode == "POST":
             return 200, api_llm_chat(state, self._body())
         if teile == ["tax"] and methode == "GET":
-            return 200, api_tax(state, query)
+            return 200, api_tax(
+                state, query, self.headers.get("Accept-Language")
+            )
         if teile == ["tax", "selbstanzeige", "kandidaten"] and methode == "GET":
             return 200, api_selbstanzeige_kandidaten(state, query)
         if teile == ["trace", "alle"] and methode == "POST":
