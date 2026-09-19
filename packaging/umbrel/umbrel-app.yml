@@ -32,6 +32,12 @@ description: >-
   - Tax year view with a configurable holding period, chart and export
 
 
+  - Receive view with the next unused address as a locally generated QR code
+
+
+  - Exchange CSV import that labels deposits and withdrawals in the provenance view
+
+
   - Sanctions screening against OFAC, OpenSanctions and scam lists
 
 
