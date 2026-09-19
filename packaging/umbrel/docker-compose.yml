@@ -7,9 +7,7 @@ services:
       APP_PORT: 8730
 
   web:
-    # Image-Pin: Busch setzt nach 0.9.6-Build Tag+Digest (wie 0.9.5).
-    # Bis dahin floating 0.9.6-Tag (Digest folgt).
-    image: ghcr.io/juniormind1/satsage:0.9.6
+    image: ghcr.io/juniormind1/satsage:0.9.6@sha256:89fe69cc8b02e862e73febf263ff9df17019eb2d19b50388f2b39f12ba9aa01e
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m
