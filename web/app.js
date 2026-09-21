@@ -10066,6 +10066,24 @@ function zeichneWalletVerwaltung() {
     if (wallet.is_new) {
       cache.className = "pille pille-warn";
       cache.textContent = t("wallets.newBadge");
+    } else if (wallet.export_import === "complete") {
+      // Sparrow/Wasabi: alle Export-Adressen zugeordnet.
+      cache.className = "pille pille-gut";
+      cache.textContent = t("wallets.importedOk");
+      const teile = [
+        t("wallets.importedOkTitle"),
+        wallet.has_cache ? `${wallet.utxo_count} UTXO` : "",
+        walletAlter(wallet),
+      ];
+      cache.title = teile.filter(Boolean).join(" · ");
+    } else if (wallet.export_import === "partial") {
+      // Sparrow/Wasabi: noch Einträge ohne Adresse.
+      cache.className = "pille pille-warn";
+      cache.textContent = t("wallets.importedPartial");
+      cache.title = t("wallets.importedPartialTitle", {
+        ohne: wallet.export_ohne_adresse || 0,
+        n: wallet.export_verlauf_n || 0,
+      });
     } else if (wallet.has_cache) {
       cache.className = "pille pille-gut";
       const hinweis = cacheHinweis(wallet);
@@ -10434,6 +10452,13 @@ function format_dateigroesse_client(bytes) {
   const n = Number(bytes) || 0;
   if (n <= 0) return "0 MB";
   const mb = n / (1024 * 1024);
+  // Ab 1000 MB → GB, max. 2 Nachkommastellen; Tausendertrenner per Locale.
+  if (mb >= 1000) {
+    const gb = n / (1024 * 1024 * 1024);
+    return `${gb.toLocaleString(formatLocale(), {
+      maximumFractionDigits: 2,
+    })} GB`;
+  }
   if (mb >= 0.1) {
     return `${mb.toLocaleString(formatLocale(), {
       minimumFractionDigits: 1,
@@ -13357,7 +13382,9 @@ async function ggfAdressenNachziehenNachExport(antwort) {
         id: (job && job.id) || "?",
       }),
     );
-    // Job-Log kommt über den normalen Job-Stream; hier nur Start.
+    if (job && job.id) {
+      folgeExportAdressenJob(job.id, name, meta.wallet_id || antwort.wallet_id);
+    }
   } catch (fehler) {
     logZeile(
       t("wallets.exportAddrJobFailed", {
@@ -13366,6 +13393,97 @@ async function ggfAdressenNachziehenNachExport(antwort) {
       true,
     );
   }
+}
+
+/** Job-Log „Adressen nachziehen“ in den GUI-Log-Bereich spiegeln. */
+function folgeExportAdressenJob(jobId, walletName, walletId) {
+  if (!jobId) return;
+  if (!Zustand.exportAddrLogStand) {
+    Zustand.exportAddrLogStand = { index: 0, knoten: [], texte: [] };
+  }
+  const stand = Zustand.exportAddrLogStand;
+  // Neuer Job → Log-Stand zurücksetzen
+  if (Zustand.exportAddrJob !== jobId) {
+    stand.index = 0;
+    stand.knoten = [];
+    stand.texte = [];
+    Zustand.exportAddrJob = jobId;
+  }
+  if (Zustand.exportAddrTimer) {
+    clearInterval(Zustand.exportAddrTimer);
+    Zustand.exportAddrTimer = null;
+  }
+
+  const tick = async () => {
+    try {
+      const job = await api(`/jobs/${jobId}`);
+      nimmLogZeilen(job, stand, walletName || "");
+      if (job.running || job.status === "running" || job.status === "queued") {
+        return;
+      }
+      clearInterval(Zustand.exportAddrTimer);
+      Zustand.exportAddrTimer = null;
+      Zustand.exportAddrJob = null;
+      if (job.status === "done") {
+        const st = job.result || {};
+        const quelle = st.quelle === "cache"
+          ? t("wallets.exportAddrQuelleCache")
+          : st.quelle === "electrs-batch"
+            ? t("wallets.exportAddrQuelleBatch")
+            : st.quelle === "electrs"
+              ? t("wallets.exportAddrQuelleElectrs")
+              : "";
+        logZeile(
+          t("wallets.exportAddrJobDone", {
+            name: walletName || "?",
+            filled: st.filled || 0,
+            failed: st.failed || 0,
+          }) + (quelle ? ` · ${quelle}` : ""),
+        );
+        try {
+          ladeCacheDashboard();
+        } catch (_) {
+          /* optional */
+        }
+        // Pille grün/gelb „importiert“ + Wallet-Ansicht aktualisieren.
+        try {
+          await ladeConfig();
+          Zustand.entwurf = (Zustand.config?.wallets || []).map((w) => ({ ...w }));
+          if (Zustand.ansicht === "wallets") {
+            zeichneWalletVerwaltung();
+          }
+        } catch (_) {
+          /* Config optional */
+        }
+        const wid = walletId || (job.meta && job.meta.wallet_id) || "";
+        if (wid && Zustand.ansicht === "wallet" && Zustand.walletId === wid) {
+          try {
+            await zeigeWallet(wid, { ohneEmpfang: true });
+          } catch (_) {
+            /* Ansicht optional */
+          }
+        }
+      } else if (job.status === "cancelled") {
+        logZeile(t("wallets.exportAddrJobCancelled", { name: walletName || "?" }));
+      } else if (job.error) {
+        logZeile(
+          t("wallets.exportAddrJobFailed", { msg: job.error }),
+          true,
+        );
+      }
+    } catch (fehler) {
+      clearInterval(Zustand.exportAddrTimer);
+      Zustand.exportAddrTimer = null;
+      logZeile(
+        t("wallets.exportAddrJobFailed", {
+          msg: (fehler && fehler.message) || String(fehler),
+        }),
+        true,
+      );
+    }
+  };
+  tick();
+  Zustand.exportAddrTimer = setInterval(tick, 900);
 }
 
 /** Wallet-Export-Dateien als Klartext lesen (kein Base64 — große CSVs frieren sonst ein). */

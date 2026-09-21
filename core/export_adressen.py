@@ -55,37 +55,47 @@ def sats_from_vout_value(wert: Any) -> int | None:
         return None
 
 
+#: Pro Kette mindestens so viele Indizes beim Nachziehen (Import-Gap oft eng).
+NACHZIEHEN_MIN_PRO_KETTE = 500
+
+
 def eigene_adressen_mengen(
     entry,
     *,
     wallet_ctx=None,
+    min_pro_kette: int | None = None,
 ) -> set[str]:
     """
-    Empfang+Change bis max_addresses für Match gegen Tx-Outputs/Prevouts.
+    Empfang+Change für Match gegen Tx-Outputs/Prevouts.
+
+    ``derive_descriptor_addresses`` teilt ``max_addresses`` auf die Zweige
+    (Empfang/Change). Fürs Nachziehen brauchen wir **pro Kette** genug Tiefe
+    — sonst bleiben alte Ausgaben ohne Treffer („ohne Adresse (Export)“).
     """
     import main
-    from core import config as config_mod
 
     addrs: set[str] = set()
-    max_a = max(2, int(getattr(entry, "max_addresses", 50) or 50))
+    basis = max(2, int(getattr(entry, "max_addresses", 50) or 50))
+    pro_kette = max(basis, int(min_pro_kette or NACHZIEHEN_MIN_PRO_KETTE))
     desc = (getattr(entry, "descriptor", None) or "").strip()
     if desc:
         try:
-            for a in main.derive_descriptor_addresses(desc, max_addresses=max_a) or []:
+            # *2: Empfang+Change bei /<0;1>/* — sonst nur pro_kette/2 je Zweig.
+            for a in main.derive_descriptor_addresses(
+                desc, max_addresses=pro_kette * 2,
+            ) or []:
                 if a:
                     addrs.add(str(a))
-            # Change-Zweig falls multipath nicht in derive steckt — oft <0;1>
-            # ist schon drin. Zusätzlich WalletContext-Cache.
         except Exception:
             pass
     else:
         xpub = getattr(entry, "analyse_schluessel", None) or getattr(entry, "xpub", "")
         script = getattr(entry, "script_type", "auto") or "auto"
         try:
-            for a in main.derive_addresses(xpub, "receive", max_a, script) or []:
-                if a:
-                    addrs.add(str(a))
-            for a in main.derive_addresses(xpub, "change", max_a, script) or []:
+            # derive_addresses teilt intern 50/50 Empfang/Change.
+            for a in main.derive_addresses(
+                xpub, pro_kette * 2, 0, script,
+            ) or []:
                 if a:
                     addrs.add(str(a))
         except Exception:
@@ -93,7 +103,6 @@ def eigene_adressen_mengen(
 
     if wallet_ctx is not None:
         try:
-            # bereits geseedete Adressen dieses Wallets
             label = entry.display_name
             for addr, name in (getattr(wallet_ctx, "address_to_wallet", {}) or {}).items():
                 if name == label and addr:
@@ -103,19 +112,59 @@ def eigene_adressen_mengen(
     return addrs
 
 
+def _own_script_hexes(own: set[str]) -> set[str]:
+    """scriptPubKey-Hex zu eigenen Adressen (Match wenn Electrs nur hex liefert)."""
+    from embit.script import address_to_scriptpubkey
+
+    out: set[str] = set()
+    for addr in own:
+        try:
+            out.add(address_to_scriptpubkey(addr).data.hex().lower())
+        except Exception:
+            continue
+    return out
+
+
+def _vout_eigene_adresse(
+    vout: dict, own: set[str], own_spk: set[str],
+) -> str:
+    """Eigene Adresse aus vout (address-Feld oder scriptPubKey-Hex)."""
+    from fulcrum import _vout_addresses
+
+    for addr in _vout_addresses(vout):
+        if addr in own:
+            return addr
+    spk = vout.get("scriptPubKey") or {}
+    hex_spk = str(spk.get("hex") or "").strip().lower()
+    if hex_spk and hex_spk in own_spk:
+        # Adresse aus own rekonstruieren, deren SPK passt
+        from embit.script import address_to_scriptpubkey
+        for addr in own:
+            try:
+                if address_to_scriptpubkey(addr).data.hex().lower() == hex_spk:
+                    return addr
+            except Exception:
+                continue
+    return ""
+
+
 def adresse_fuer_tx_eintrag(
     eintrag: dict,
     tx: dict,
     *,
     own: set[str],
     get_tx: Callable[[str], dict | None] | None = None,
+    own_spk: set[str] | None = None,
 ) -> tuple[str, int | None]:
     """
     Bestimme eigene Adresse (+ optional vout) zu einem Verlaufs-Eintrag.
 
     Rückgabe ``(address, vout_or_None)``. Leere address = kein Treffer.
+
+    Bei Ausgaben (spent): CSV-Wert ist oft Netto/Summe — **nicht** mit einem
+    einzelnen Prevout vergleichen. Jeder eigene Input zählt.
     """
-    from fulcrum import _vout_addresses
+    spk_set = own_spk if own_spk is not None else _own_script_hexes(own)
 
     value = eintrag.get("value")
     try:
@@ -149,14 +198,9 @@ def adresse_fuer_tx_eintrag(
             vout = vouts[prev_vout]
             if not isinstance(vout, dict):
                 continue
-            if want_sats is not None:
-                vs = sats_from_vout_value(vout.get("value"))
-                if vs is not None and vs != want_sats:
-                    # Wert-Mismatch: trotzdem Adresse merken als Kandidat
-                    pass
-            for addr in _vout_addresses(vout):
-                if addr in own:
-                    return addr, prev_vout
+            addr = _vout_eigene_adresse(vout, own, spk_set)
+            if addr:
+                return addr, prev_vout
 
     # Empfang oder Fallback: eigener Output in dieser Tx
     kandidaten: list[tuple[str, int, int | None]] = []
@@ -164,10 +208,10 @@ def adresse_fuer_tx_eintrag(
         if not isinstance(vout, dict):
             continue
         vs = sats_from_vout_value(vout.get("value"))
-        for addr in _vout_addresses(vout):
-            if addr not in own:
-                continue
-            kandidaten.append((addr, i, vs))
+        addr = _vout_eigene_adresse(vout, own, spk_set)
+        if not addr:
+            continue
+        kandidaten.append((addr, i, vs))
     if not kandidaten:
         return "", None
     if want_sats is not None:
@@ -185,16 +229,19 @@ def _prefetch_tx_map(
     immutable_cache_dir=None,
     on_progress: Callable[[str], None] | None = None,
     raise_if_cancelled: Callable[[], None] | None = None,
-) -> dict[str, dict]:
+) -> tuple[dict[str, dict], dict[str, int]]:
     """
     Tx-Map aufbauen: Immutable-Cache zuerst, Rest per Electrs-Batch (Tor) oder
     einzeln über ``get_tx``.
+
+    Zweiter Rückgabewert: ``cache_hits``, ``electrs_n``, ``batched`` (0/1).
     """
     import main
     from fulcrum import fetch_txs_fulcrum_batch
 
     tx_map: dict[str, dict] = {}
     fehlend: list[str] = []
+    meta = {"cache_hits": 0, "electrs_n": 0, "batched": 0}
     cache_root = immutable_cache_dir
     for t in txids:
         if raise_if_cancelled:
@@ -206,11 +253,12 @@ def _prefetch_tx_map(
                 cached = None
             if isinstance(cached, dict):
                 tx_map[t] = cached
+                meta["cache_hits"] += 1
                 continue
         fehlend.append(t)
 
     if not fehlend:
-        return tx_map
+        return tx_map, meta
 
     if fulcrum_client is not None:
         def _prog(text: str, *, sofort: bool = True) -> None:
@@ -221,25 +269,29 @@ def _prefetch_tx_map(
             except TypeError:
                 on_progress(text)
 
-        if fehlend:
-            _prog(
-                f"Adressen nachziehen: hole {len(fehlend)} Tx "
-                f"({len(txids) - len(fehlend)} aus Cache)…",
-                sofort=True,
-            )
+        _prog(
+            f"Adressen nachziehen: hole {len(fehlend)} Tx "
+            f"({meta['cache_hits']} aus Cache)…",
+            sofort=True,
+        )
         geholt = fetch_txs_fulcrum_batch(
             fulcrum_client,
             fehlend,
             on_progress=_prog,
         )
+        if getattr(fulcrum_client, "tor_batch_sinnvoll", lambda _n: False)(
+            len(fehlend)
+        ):
+            meta["batched"] = 1
         for t, tx in geholt.items():
             tx_map[t] = tx
+            meta["electrs_n"] += 1
             if cache_root is not None:
                 try:
                     main.save_cached_tx(t, tx, cache_root, "fulcrum_batch")
                 except Exception:
                     pass
-        return tx_map
+        return tx_map, meta
 
     # Fallback: serielles get_tx
     for i, t in enumerate(fehlend, start=1):
@@ -255,7 +307,8 @@ def _prefetch_tx_map(
             tx = None
         if isinstance(tx, dict):
             tx_map[t] = tx
-    return tx_map
+            meta["electrs_n"] += 1
+    return tx_map, meta
 
 
 def nachziehen_verlauf_adressen(
@@ -283,6 +336,9 @@ def nachziehen_verlauf_adressen(
         "txids": 0,
         "batched": 0,
         "prev_txids": 0,
+        "cache_hits": 0,
+        "electrs_n": 0,
+        "quelle": "",
     }
     if not own:
         stats["skipped"] = len(verlauf_ohne_adresse(verlauf))
@@ -294,7 +350,15 @@ def nachziehen_verlauf_adressen(
     if not txids:
         return list(verlauf), stats
 
-    tx_map = _prefetch_tx_map(
+    def _prog(text: str, *, sofort: bool = True) -> None:
+        if not on_progress:
+            return
+        try:
+            on_progress(text, sofort=sofort)
+        except TypeError:
+            on_progress(text)
+
+    tx_map, meta1 = _prefetch_tx_map(
         txids,
         get_tx=get_tx,
         fulcrum_client=fulcrum_client,
@@ -302,10 +366,15 @@ def nachziehen_verlauf_adressen(
         on_progress=on_progress,
         raise_if_cancelled=raise_if_cancelled,
     )
-    if fulcrum_client is not None and getattr(
-        fulcrum_client, "tor_batch_sinnvoll", lambda _n: False
-    )(len(txids)):
-        stats["batched"] = 1
+    stats["cache_hits"] += int(meta1.get("cache_hits") or 0)
+    stats["electrs_n"] += int(meta1.get("electrs_n") or 0)
+    stats["batched"] = max(stats["batched"], int(meta1.get("batched") or 0))
+    if meta1.get("cache_hits") and not meta1.get("electrs_n"):
+        _prog(
+            f"Adressen nachziehen: {meta1['cache_hits']} Tx aus lokalem Cache "
+            f"(kein Electrs-Abruf nötig)…",
+            sofort=True,
+        )
 
     # Prevouts für Spends in einem zweiten Rutsch holen (Batch).
     prev_ids: list[str] = []
@@ -325,19 +394,11 @@ def nachziehen_verlauf_adressen(
     prev_ids = unique_txids([{"txid": p} for p in prev_ids])
     stats["prev_txids"] = len(prev_ids)
     if prev_ids:
-        def _prog_prev(text: str, *, sofort: bool = True) -> None:
-            if not on_progress:
-                return
-            try:
-                on_progress(text, sofort=sofort)
-            except TypeError:
-                on_progress(text)
-
-        _prog_prev(
+        _prog(
             f"Adressen nachziehen: {len(prev_ids)} Prevout-Tx…",
             sofort=True,
         )
-        prev_map = _prefetch_tx_map(
+        prev_map, meta2 = _prefetch_tx_map(
             prev_ids,
             get_tx=get_tx,
             fulcrum_client=fulcrum_client,
@@ -346,9 +407,35 @@ def nachziehen_verlauf_adressen(
             raise_if_cancelled=raise_if_cancelled,
         )
         tx_map.update(prev_map)
+        stats["cache_hits"] += int(meta2.get("cache_hits") or 0)
+        stats["electrs_n"] += int(meta2.get("electrs_n") or 0)
+        stats["batched"] = max(stats["batched"], int(meta2.get("batched") or 0))
+
+    if stats["electrs_n"] and stats["batched"]:
+        stats["quelle"] = "electrs-batch"
+    elif stats["electrs_n"]:
+        stats["quelle"] = "electrs"
+    elif stats["cache_hits"]:
+        stats["quelle"] = "cache"
+    else:
+        stats["quelle"] = ""
 
     def _tx(txid: str) -> dict | None:
         return tx_map.get(str(txid or "").strip().lower())
+
+    own_spk = _own_script_hexes(own)
+    if on_progress:
+        try:
+            on_progress(
+                f"Adressen nachziehen: {len(own)} Ableitungen, "
+                f"{len(ziel)} Einträge zuordnen…",
+                sofort=True,
+            )
+        except TypeError:
+            on_progress(
+                f"Adressen nachziehen: {len(own)} Ableitungen, "
+                f"{len(ziel)} Einträge zuordnen…"
+            )
 
     fill_map: dict[tuple[str, int, bool], tuple[str, int | None]] = {}
     for e in ziel:
@@ -361,6 +448,7 @@ def nachziehen_verlauf_adressen(
             continue
         addr, vout = adresse_fuer_tx_eintrag(
             e, tx, own=own, get_tx=_tx if e.get("spent") else None,
+            own_spk=own_spk,
         )
         if addr:
             fill_map[key] = (addr, vout)

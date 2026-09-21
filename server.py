@@ -907,17 +907,56 @@ def _datei_groesse(pfad: Path | None) -> int:
         return 0
 
 
+def _format_de_zahl(wert: float, *, max_nk: int = 2) -> str:
+    """
+    Deutsche Zahl: Punkt als Tausendertrenner, Komma als Dezimal.
+    Höchstens *max_nk* Nachkommastellen, trailing zeros weg.
+    """
+    if max_nk < 0:
+        max_nk = 0
+    gerundet = round(float(wert), max_nk)
+    if max_nk == 0:
+        ganz = int(gerundet)
+        return f"{ganz:,}".replace(",", ".")
+    # Feste NK, dann Nullen am Ende streichen (1,50 → 1,5; 1,00 → 1).
+    roh = f"{gerundet:.{max_nk}f}"
+    if "." in roh:
+        ganz_s, nk_s = roh.split(".", 1)
+        nk_s = nk_s.rstrip("0")
+    else:
+        ganz_s, nk_s = roh, ""
+    try:
+        ganz_fmt = f"{int(ganz_s):,}".replace(",", ".")
+    except ValueError:
+        ganz_fmt = ganz_s
+    if nk_s:
+        return f"{ganz_fmt},{nk_s}"
+    return ganz_fmt
+
+
 def format_dateigroesse(bytes_anzahl: int) -> str:
-    """Lesbare Größe für Dialoge — immer mit MB-Angabe, darunter zusätzlich KB/B."""
-    mb = bytes_anzahl / (1024 * 1024)
-    if bytes_anzahl <= 0:
+    """
+    Lesbare Cache-/Dateigröße.
+
+    Ab 1000 MB → GB (max. 2 Nachkommastellen). Darunter MB/KB/B wie bisher
+    (MB mit 1 NK). Tausendertrenner bei großen Zahlen.
+    """
+    n = int(bytes_anzahl or 0)
+    if n <= 0:
         return "0 MB"
+    mb = n / (1024 * 1024)
+    if mb >= 1000:
+        gb = n / (1024 * 1024 * 1024)
+        return f"{_format_de_zahl(gb, max_nk=2)} GB"
     if mb >= 0.1:
-        return f"{mb:.1f} MB".replace(".", ",")
-    if bytes_anzahl >= 1024:
-        kb = bytes_anzahl / 1024
-        return f"{kb:.1f} KB ({mb:.3f} MB)".replace(".", ",")
-    return f"{bytes_anzahl} B ({mb:.3f} MB)".replace(".", ",")
+        return f"{_format_de_zahl(mb, max_nk=1)} MB"
+    if n >= 1024:
+        kb = n / 1024
+        return (
+            f"{_format_de_zahl(kb, max_nk=1)} KB "
+            f"({_format_de_zahl(mb, max_nk=3)} MB)"
+        )
+    return f"{n} B ({_format_de_zahl(mb, max_nk=3)} MB)"
 
 
 def _cache_utxo_schluessel(eintrag: dict) -> tuple[str, int] | None:
@@ -2335,18 +2374,25 @@ def api_wallet_export_adressen_nachziehen(state: AppState, payload: dict) -> dic
                 )
             except Exception:
                 pass
-            batch_hinweis = (
-                " · Electrs-Batch"
-                if stats.get("batched")
-                else ""
-            )
+            quelle = str(stats.get("quelle") or "")
+            if quelle == "electrs-batch":
+                q_hinweis = " · Electrs-Batch"
+            elif quelle == "electrs":
+                q_hinweis = " · Electrs"
+            elif quelle == "cache":
+                q_hinweis = " · nur lokaler Tx-Cache"
+            else:
+                q_hinweis = ""
             prev_n = int(stats.get("prev_txids") or 0)
             prev_hinweis = f", {prev_n} Prevout-Tx" if prev_n else ""
+            cache_n = int(stats.get("cache_hits") or 0)
+            electrs_n = int(stats.get("electrs_n") or 0)
             stand.phase(
                 f"Adressen nachziehen fertig: {stats.get('filled', 0)} "
                 f"Einträge, {stats.get('failed', 0)} ohne Treffer "
-                f"({stats.get('txids', 0)} Tx{prev_hinweis})"
-                f"{batch_hinweis}."
+                f"({stats.get('txids', 0)} Tx{prev_hinweis}; "
+                f"Cache {cache_n}, Electrs {electrs_n})"
+                f"{q_hinweis}."
             )
             return stats
         finally:

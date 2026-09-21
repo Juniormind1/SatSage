@@ -49,6 +49,38 @@ class TestExportAdressen(unittest.TestCase):
         self.assertEqual(addr, BIP84_RECEIVE_0)
         self.assertEqual(vout, 0)
 
+    def test_spent_ohne_wert_match_prevout(self):
+        """CSV-Wert ≠ einzelnes Prevout (Gebühr/Summe) — trotzdem eigene Adresse."""
+        spend = txid("s1")
+        prev = txid("p1")
+        own = {BIP84_RECEIVE_0}
+        prev_tx = {
+            "txid": prev,
+            "vout": [{
+                "value": 1.55781662,
+                "scriptPubKey": {"address": BIP84_RECEIVE_0},
+            }],
+        }
+        spend_tx = {
+            "txid": spend,
+            "vin": [{"txid": prev, "vout": 0}],
+            "vout": [{"value": 1.55, "scriptPubKey": {"address": "bc1qotherxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}],
+        }
+        cache = {spend: spend_tx, prev: prev_tx}
+
+        def get_tx(t):
+            return cache.get(t)
+
+        # CSV: Netto-Abfluss ungleich Prevout
+        eintrag = {
+            "txid": spend, "vout": 0, "value": 476494803,
+            "spent": True,
+        }
+        addr, _vout = adr.adresse_fuer_tx_eintrag(
+            eintrag, spend_tx, own=own, get_tx=get_tx,
+        )
+        self.assertEqual(addr, BIP84_RECEIVE_0)
+
     def test_nachziehen_fuellt(self):
         t = txid("r2")
         own = {BIP84_RECEIVE_0}
@@ -71,6 +103,7 @@ class TestExportAdressen(unittest.TestCase):
         )
         self.assertEqual(stats["filled"], 1)
         self.assertEqual(neu[0]["address"], BIP84_RECEIVE_0)
+        self.assertIn(stats.get("quelle"), ("", "electrs", "cache", "electrs-batch"))
 
     def test_batch_prefetch_via_client(self):
         """Fulcrum-Client mit request_batch füllt mehrere Tx in einem Rutsch."""

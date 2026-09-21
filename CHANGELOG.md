@@ -9,7 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Wallet-Export · Adressen nachziehen:** Nach Import mit Tx ohne Adresse: Job über eigenen Electrs (≤100 Tx auto / >100 Nachfrage). Electrs@Tor: JSON-RPC-Batch (Chunk 32). Fortschritt: Herzschlag „Moment noch“, Chunk-Zwischenstand „noch X Tx“; Job in Vorgänge.
+- **Wallets · Import-Pille:** Nach Sparrow/Wasabi-Export grün **importiert** (alle Verlaufsadressen) bzw. gelb **importiert** (noch Lücken); aktualisiert sich nach Adressen-Nachziehen.
+- **Wallet-Export · Adressen nachziehen:** Electrs-Job mit Batch; Fortschritt im **GUI-Log** (nicht nur stdio). Ableitung mind. 500/Kette (Gap); Spends ohne Wert-Match am Prevout. Knopf **Datei(en) importieren** orange.
 - **Wallet-Export-Import · Stabilität:** Descriptor+CSV per Klartext (kein Base64-Freeze), Timeout, Sofort-Log, Fehler beenden „Export wird gelesen…“; CSV immer als Tabelle; Server-Text-Upload und Größenlimit.
 - **Bereits ausgegeben · Export-Verlauf:** Wallet-Name aus Cache-Kontext, wenn Sparrow-Tx-CSV keine Adresse hat (nicht mehr „unbekanntes Wallet“); leere Adresszeile als „ohne Adresse (Export)“.
 - **Log · Release-Zeile:** Beim Start steht die laufende SatSage-Version (`SatSage v…`) als erste Zeile im Log-Bereich.

@@ -44,6 +44,12 @@ class WalletSummary:
     cache_mtime: int | None = None
     #: Letzte bekannte Chain-Höhe des UTXO-Scans (v. a. BIP-158), sonst None.
     scan_tip_height: int | None = None
+    #: Sparrow/Wasabi-Import: complete | partial | None (kein Export-Import).
+    export_import: str | None = None
+    #: Verlaufseinträge ohne Adresse (Export-Lücke).
+    export_ohne_adresse: int = 0
+    #: Verlaufseinträge gesamt (für Tooltip).
+    export_verlauf_n: int = 0
 
     def as_dict(self) -> dict:
         typ = self.entry.script_type
@@ -73,6 +79,9 @@ class WalletSummary:
             "first_seen_height": self.first_seen_height,
             "cache_mtime": self.cache_mtime,
             "scan_tip_height": self.scan_tip_height,
+            "export_import": self.export_import,
+            "export_ohne_adresse": self.export_ohne_adresse,
+            "export_verlauf_n": self.export_verlauf_n,
         }
 
 
@@ -118,6 +127,34 @@ def find_entry(entries: list[WalletEntry], kennung: str) -> WalletEntry | None:
     return None
 
 
+def _export_import_stand(
+    entry: WalletEntry, cache_dir: Path,
+) -> tuple[str | None, int, int]:
+    """
+    Status nach Sparrow/Wasabi-Export-Import.
+
+    Rückgabe ``(status, ohne_adresse, verlauf_n)``:
+    * ``complete`` — importiert, alle Verlaufs-Adressen zugeordnet (grün)
+    * ``partial`` — importiert, einige ohne Adresse (gelb)
+    * ``None`` — kein Wallet-Export-Ursprung
+    """
+    from core.config import WALLET_ORIGIN_WALLET_EXPORT
+    from core import export_adressen as adr_mod
+
+    origin = (getattr(entry, "origin", "") or "").strip()
+    if origin != WALLET_ORIGIN_WALLET_EXPORT:
+        return None, 0, 0
+    verlauf = main.load_xpub_verlauf_cache(entry.analyse_schluessel, cache_dir) or []
+    n = len(verlauf)
+    ohne = len(adr_mod.verlauf_ohne_adresse(verlauf))
+    # Nur Deskriptor ohne CSV-Verlauf: Import gilt als vollständig.
+    if n == 0:
+        return "complete", 0, 0
+    if ohne > 0:
+        return "partial", ohne, n
+    return "complete", 0, n
+
+
 def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary]:
     """Baut die Übersicht ausschließlich aus dem lokalen Cache."""
     zusammenfassungen: list[WalletSummary] = []
@@ -142,6 +179,7 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
                     scan_tip = int(tip_roh)
                 except (TypeError, ValueError):
                     scan_tip = None
+        exp_status, exp_ohne, exp_n = _export_import_stand(entry, cache_dir)
         zusammenfassungen.append(
             WalletSummary(
                 entry=entry,
@@ -153,6 +191,9 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
                 first_seen_height=alter.get("height"),
                 cache_mtime=cache_mtime,
                 scan_tip_height=scan_tip,
+                export_import=exp_status,
+                export_ohne_adresse=exp_ohne,
+                export_verlauf_n=exp_n,
             )
         )
     return zusammenfassungen
