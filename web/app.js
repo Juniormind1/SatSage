@@ -6578,8 +6578,15 @@ function zeichneTraceAdressGruppe(gruppe) {
 
   const adresse = document.createElement("span");
   adresse.className = "mono";
-  adresse.textContent = kuerze(gruppe.address, 16, 8);
-  macheKopierbar(adresse, gruppe.address, "Adresse");
+  if (gruppe.address) {
+    adresse.textContent = kuerze(gruppe.address, 16, 8);
+    macheKopierbar(adresse, gruppe.address, "Adresse");
+  } else {
+    // Sparrow-Tx-CSV u. ä.: Verlauf ohne Adresse — kein leeres mono-Feld.
+    adresse.classList.remove("mono");
+    adresse.classList.add("zart");
+    adresse.textContent = t("wallet.noAddressInExport");
+  }
 
   const wallet = document.createElement("span");
   wallet.className = "zart";
@@ -12811,6 +12818,7 @@ function walletsNutzlast() {
     script_type: w.script_type,
     max_addresses: w.max_addresses,
     read_only: Boolean(w.read_only),
+    ...(w.origin ? { origin: w.origin } : {}),
   }));
 }
 
@@ -13094,6 +13102,351 @@ function liesDeskriptorDatei(ereignis) {
   leser.readAsText(datei);
 }
 
+function oeffneSparrowImport() {
+  const feld = $("#sparrow-dateien");
+  if (feld) feld.click();
+}
+
+function liesSparrowDateien(ereignis) {
+  const liste = ereignis.target.files;
+  ereignis.target.value = "";
+  if (!liste || !liste.length) return;
+  starteSparrowImport(Array.from(liste));
+}
+
+/** Letzte Suchtreffer (Pfad → Meta) für den Import-Knopf. */
+let _walletExportTreffer = [];
+
+async function starteWalletExportSuche() {
+  const kasten = $("#sparrow-befund");
+  const fund = $("#wallet-export-fund");
+  const liste = $("#wallet-export-liste");
+  if (kasten) {
+    kasten.hidden = false;
+    kasten.replaceChildren(hinweisZeile(t("wallets.exportSearching")));
+  }
+  try {
+    const antwort = await api("/config/wallet-export-suchen", {
+      methode: "POST",
+      daten: {},
+    });
+    _walletExportTreffer = antwort.wallets || [];
+    zeichneWalletExportListe(_walletExportTreffer);
+    if (fund) fund.hidden = false;
+    const n = _walletExportTreffer.length;
+    const imp = Number(antwort.importable || 0);
+    const text = n
+      ? t("wallets.exportSearchDone", { n, imp })
+      : t("wallets.exportSearchEmpty");
+    if (kasten) kasten.replaceChildren(hinweisZeile(text));
+    logZeile(`Wallet-Suche: ${text}`);
+  } catch (fehler) {
+    _walletExportTreffer = [];
+    if (liste) liste.replaceChildren();
+    if (fund) fund.hidden = true;
+    if (kasten) {
+      kasten.replaceChildren(
+        hinweisZeile(fehler.message || t("wallets.exportFailed")),
+      );
+    }
+    meldung(fehler.message || t("wallets.exportFailed"), "krit");
+  }
+}
+
+function zeichneWalletExportListe(treffer) {
+  const liste = $("#wallet-export-liste");
+  if (!liste) return;
+  liste.replaceChildren();
+  for (const w of treffer || []) {
+    const zeile = document.createElement("div");
+    zeile.className = "export-zeile";
+    if (w.locked) zeile.classList.add("export-gesperrt");
+    if (!w.importable) zeile.classList.add("export-blockiert");
+
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = w.path || "";
+    cb.disabled = !w.importable;
+    cb.dataset.exportId = w.id || "";
+    if (w.importable) cb.checked = true;
+    label.append(cb);
+
+    const app = document.createElement("span");
+    app.className = "export-app";
+    app.textContent = w.app || "?";
+    label.append(app);
+
+    const name = document.createElement("span");
+    name.className = "export-name";
+    name.textContent = w.name || w.path || "?";
+    name.title = w.path || "";
+    label.append(name);
+
+    if (w.locked) {
+      const lock = document.createElement("span");
+      lock.className = "export-schloss";
+      lock.textContent = "🔒";
+      lock.title = t("wallets.exportLockTitle");
+      label.append(lock);
+    }
+    zeile.append(label);
+
+    if (w.reason && (!w.importable || w.locked)) {
+      const grund = document.createElement("span");
+      grund.className = "export-grund";
+      grund.textContent = w.reason;
+      grund.title = w.importable
+        ? t("wallets.exportLockTitle")
+        : t("wallets.exportBlockedTitle");
+      zeile.append(grund);
+    }
+    liste.append(zeile);
+  }
+}
+
+async function starteWalletExportImportAuswahl(bestaetigt = false) {
+  const kasten = $("#sparrow-befund");
+  const liste = $("#wallet-export-liste");
+  const knopf = $("#wallet-export-import-wahl");
+  if (!liste) return;
+  const pfade = [...liste.querySelectorAll('input[type="checkbox"]:checked:not(:disabled)')]
+    .map((el) => el.value)
+    .filter(Boolean);
+  if (!pfade.length) {
+    if (kasten) {
+      kasten.hidden = false;
+      kasten.replaceChildren(hinweisZeile(t("wallets.exportNoSelection")));
+    }
+    return;
+  }
+  if (knopf) knopf.disabled = true;
+  if (kasten) {
+    kasten.hidden = false;
+    kasten.replaceChildren(hinweisZeile(t("wallets.exportImporting")));
+  }
+  logZeile(`Wallet-Export: importiere ${pfade.length} Pfad(e)…`);
+  try {
+    const antwort = await api("/config/wallet-export-import-pfade", {
+      methode: "POST",
+      daten: { paths: pfade, confirm: bestaetigt },
+      timeoutMs: 180_000,
+    });
+    await nachWalletExportErfolg(antwort);
+    try {
+      await starteWalletExportSuche();
+    } catch (_) {
+      /* Suche optional nachziehen */
+    }
+  } catch (fehler) {
+    if (fehler && fehler.status === 409 && !bestaetigt) {
+      const ok = window.confirm(
+        `${fehler.message || ""}\n\n${t("wallets.saveAnyway")}?`,
+      );
+      if (ok) {
+        if (knopf) knopf.disabled = false;
+        await starteWalletExportImportAuswahl(true);
+        return;
+      }
+    }
+    const msg = (fehler && fehler.message) || t("wallets.exportFailed");
+    if (kasten) {
+      kasten.replaceChildren(hinweisZeile(msg));
+    }
+    meldung(msg, "krit");
+    logZeile(`Wallet-Export: ${msg}`, true);
+  } finally {
+    if (knopf) knopf.disabled = false;
+  }
+}
+
+async function nachWalletExportErfolg(antwort) {
+  const kasten = $("#sparrow-befund");
+  const fmt = antwort.format
+    ? t("wallets.exportFormat", { format: antwort.format })
+    : "";
+  const teile = [
+    antwort.already_present
+      ? t("wallets.exportAlreadyPresent", { name: antwort.name || "", format: fmt })
+      : t("wallets.exportSaved", { name: antwort.name || "", format: fmt }),
+    t("wallets.exportCounts", {
+      utxo: antwort.utxo_count || 0,
+      verlauf: antwort.verlauf_count || 0,
+    }),
+  ];
+  if (antwort.wallets_added > 1) {
+    teile.push(`${antwort.wallets_added} Wallets`);
+  }
+  if (antwort.erste_adresse) {
+    teile.push(t("wallets.exportFirstAddr", { addr: antwort.erste_adresse }));
+  }
+  for (const h of antwort.hinweise || []) {
+    if (h) teile.push(String(h));
+  }
+  // Erfolg sofort sichtbar — Config-Reload darf die Meldung nicht blockieren.
+  if (kasten) {
+    kasten.hidden = false;
+    kasten.replaceChildren(hinweisZeile(teile.join(" · ")));
+  }
+  meldung(teile[0], "ok");
+  const fmtLog = antwort.format ? ` · ${antwort.format}` : "";
+  logZeile(
+    `Wallet-Export${fmtLog}: ${antwort.name || "?"} · ${antwort.utxo_count || 0} UTXO · ${antwort.verlauf_count || 0} Tx`,
+  );
+  try {
+    await ladeConfig();
+    Zustand.entwurf = (Zustand.config?.wallets || []).map((w) => ({ ...w }));
+    zeichneEinstellungen();
+  } catch (fehler) {
+    logZeile(
+      `Wallet-Export: Import ok, Ansicht nicht aktualisiert — ${fehler.message || fehler}`,
+      true,
+    );
+  }
+  try {
+    ladeCacheDashboard();
+  } catch (_) {
+    /* optional */
+  }
+  await ggfAdressenNachziehenNachExport(antwort);
+}
+
+/**
+ * Nach Wallet-Export: Adressen per Electrs nachziehen.
+ * ≤100 Tx automatisch, >100 mit Nachfrage, ohne Electrs nur Hinweis.
+ */
+async function ggfAdressenNachziehenNachExport(antwort) {
+  const meta = antwort && antwort.address_nachziehen;
+  if (!meta) return;
+  const n = Number(meta.pending_txids || 0);
+  const name = meta.name || antwort.name || "?";
+  if (n <= 0) return;
+
+  if (!meta.electrs) {
+    logZeile(
+      t("wallets.exportAddrNoElectrs", { name, n }),
+    );
+    return;
+  }
+
+  if (meta.needs_confirm) {
+    logZeile(t("wallets.exportAddrAskLog", { name, n }));
+    const ok = window.confirm(
+      t("wallets.exportAddrConfirm", { name, n, max: meta.auto_max || 100 }),
+    );
+    if (!ok) {
+      logZeile(t("wallets.exportAddrSkipped", { name, n }));
+      return;
+    }
+  } else if (meta.auto_start) {
+    logZeile(t("wallets.exportAddrAutoLog", { name, n }));
+  } else {
+    return;
+  }
+
+  try {
+    const job = await api("/config/wallet-export-adressen-nachziehen", {
+      methode: "POST",
+      daten: { wallet_id: meta.wallet_id },
+      timeoutMs: 30_000,
+    });
+    logZeile(
+      t("wallets.exportAddrJobStarted", {
+        name,
+        n,
+        id: (job && job.id) || "?",
+      }),
+    );
+    // Job-Log kommt über den normalen Job-Stream; hier nur Start.
+  } catch (fehler) {
+    logZeile(
+      t("wallets.exportAddrJobFailed", {
+        msg: (fehler && fehler.message) || String(fehler),
+      }),
+      true,
+    );
+  }
+}
+
+/** Wallet-Export-Dateien als Klartext lesen (kein Base64 — große CSVs frieren sonst ein). */
+function dateiAlsText(datei) {
+  return new Promise((resolve, reject) => {
+    const maxBytes = 25 * 1024 * 1024;
+    if (datei && typeof datei.size === "number" && datei.size > maxBytes) {
+      reject(new Error(
+        t("wallets.exportFileTooLarge", {
+          name: datei.name || "?",
+          mb: Math.ceil(datei.size / (1024 * 1024)),
+        }),
+      ));
+      return;
+    }
+    const leser = new FileReader();
+    leser.onload = () => resolve(String(leser.result || ""));
+    leser.onerror = () => reject(new Error(t("common.fileUnreadable")));
+    leser.readAsText(datei);
+  });
+}
+
+async function dateienAlsTextImportPayload(dateiListe) {
+  const files = [];
+  for (const datei of dateiListe) {
+    const text = await dateiAlsText(datei);
+    files.push({ name: datei.name || "export", text });
+  }
+  return { files };
+}
+
+async function starteSparrowImport(dateiListe, bestaetigt = false) {
+  const kasten = $("#sparrow-befund");
+  const knopf = $("#sparrow-import");
+  if (knopf) knopf.disabled = true;
+  if (kasten) {
+    kasten.hidden = false;
+    kasten.replaceChildren(hinweisZeile(t("wallets.exportImporting")));
+  }
+  const namen = (dateiListe || []).map((d) => d.name || "?").join(", ");
+  logZeile(`Wallet-Export: lese ${dateiListe.length} Datei(en) — ${namen}`);
+  try {
+    let payload;
+    try {
+      payload = await dateienAlsTextImportPayload(dateiListe);
+    } catch (fehler) {
+      throw new Error(fehler.message || t("common.fileUnreadable"));
+    }
+    const files = (payload && payload.files) || [];
+    if (!files.length) {
+      throw new Error(t("wallets.exportNoFiles"));
+    }
+    logZeile(`Wallet-Export: sende ${files.length} Datei(en) an Server…`);
+    const antwort = await api("/config/wallet-export-import", {
+      methode: "POST",
+      daten: { files, confirm: bestaetigt },
+      timeoutMs: 180_000,
+    });
+    await nachWalletExportErfolg(antwort);
+  } catch (fehler) {
+    if (fehler && fehler.status === 409 && !bestaetigt) {
+      const ok = window.confirm(
+        `${fehler.message || ""}\n\n${t("wallets.saveAnyway")}?`,
+      );
+      if (ok) {
+        if (knopf) knopf.disabled = false;
+        await starteSparrowImport(dateiListe, true);
+        return;
+      }
+    }
+    const msg = (fehler && fehler.message) || t("wallets.exportFailed");
+    if (kasten) {
+      kasten.replaceChildren(hinweisZeile(msg));
+    }
+    meldung(msg, "krit");
+    logZeile(`Wallet-Export: ${msg}`, true);
+  } finally {
+    if (knopf) knopf.disabled = false;
+  }
+}
+
 function uebernimmDeskriptor(treffer) {
   const nameFeld = $("#neuer-deskriptor-name");
   const name = (nameFeld && nameFeld.value.trim()) || "";
@@ -13109,6 +13462,7 @@ function uebernimmDeskriptor(treffer) {
     script_type_label: treffer.script_type_label,
     max_addresses: 50,
     read_only: false,
+    origin: "descriptor",
     has_cache: false,
     utxo_count: 0,
     is_new: true,
@@ -13156,6 +13510,7 @@ function fuegeWalletHinzu() {
     script_type: "auto",
     max_addresses: 50,
     read_only: false,
+    origin: "xpub",
     has_cache: false,
     utxo_count: 0,
     is_new: true,
@@ -15214,6 +15569,35 @@ function zeichneFussVersion() {
   ziel.textContent = `v${ver} · `;
 }
 
+/**
+ * Laufende SatSage-Version als erste Log-Zeile (einmalig, bleibt oben).
+ */
+function logReleaseAlsErsteZeile() {
+  const ziel = $("#log-text");
+  if (!ziel) return;
+  const ver = (Zustand.config?.version || "").trim();
+  if (!ver) return;
+  const text = `SatSage v${ver}`;
+  let zeile = ziel.querySelector(".log-zeile.log-release");
+  if (zeile) {
+    const meldung = zeile.querySelector(".log-meldung");
+    if (meldung) meldung.textContent = text;
+    if (ziel.firstChild !== zeile) ziel.prepend(zeile);
+    return;
+  }
+  zeile = document.createElement("div");
+  zeile.className = "log-zeile log-release";
+  const zeit = document.createElement("span");
+  zeit.className = "log-zeit";
+  zeit.textContent = logZeitstempel();
+  zeile.append(zeit);
+  const meldung = document.createElement("span");
+  meldung.className = "log-meldung";
+  meldung.textContent = text;
+  zeile.append("  ", meldung);
+  ziel.prepend(zeile);
+}
+
 // "nur lokal erreichbar" nur behaupten, wenn es stimmt. Hinter Umbrels
 // app_proxy bindet der Server an 0.0.0.0 und ist aus dem ganzen LAN offen.
 function zeichneFussLocalOnly() {
@@ -15414,6 +15798,7 @@ async function ladeConfig() {
   zeichneChatAnbindung();
   zeichneNav();
   zeichneFussVersion();
+  logReleaseAlsErsteZeile();
   if (Zustand.config?.lernhinweise_plebs) {
     wendeAlleLernTooltipsAn().catch(() => {});
   }
@@ -15786,6 +16171,16 @@ async function start() {
   $("#hinzufuegen").addEventListener("click", fuegeWalletHinzu);
   $("#deskriptor-import").addEventListener("click", oeffneDeskriptorImport);
   $("#deskriptor-datei").addEventListener("change", liesDeskriptorDatei);
+  const sparrowImport = $("#sparrow-import");
+  if (sparrowImport) sparrowImport.addEventListener("click", oeffneSparrowImport);
+  const sparrowDateien = $("#sparrow-dateien");
+  if (sparrowDateien) sparrowDateien.addEventListener("change", liesSparrowDateien);
+  const exportSuchen = $("#wallet-export-suchen");
+  if (exportSuchen) exportSuchen.addEventListener("click", starteWalletExportSuche);
+  const exportImportWahl = $("#wallet-export-import-wahl");
+  if (exportImportWahl) {
+    exportImportWahl.addEventListener("click", () => starteWalletExportImportAuswahl(false));
+  }
 
   let deskriptorTimer = null;
   $("#neuer-deskriptor").addEventListener("input", () => {

@@ -52,7 +52,14 @@ def utxo_as_dict(
     bei der Anzeige, damit unterwegs nichts durch float verloren geht.
     """
     address = utxo.get("address", "")
-    label = wallet.resolve_address(address) if wallet else None
+    label = wallet.resolve_address(address) if wallet and address else None
+    # Verlauf aus Wallet-Export (z. B. Sparrow-Tx-CSV) hat oft keine Adresse —
+    # resolve_address schlägt fehl. Der Cache gehört aber zu einem bekannten
+    # Wallet: Fallback-Name vom Ladevorgang (``_wallet_fallback``).
+    if not label:
+        fallback = utxo.get("_wallet_fallback") or utxo.get("wallet")
+        if isinstance(fallback, str) and fallback.strip():
+            label = fallback.strip()
 
     # scantxoutset liefert oft nur die Höhe — Zeit aus lokalem Header-Cache.
     if immutable_cache_dir is not None:

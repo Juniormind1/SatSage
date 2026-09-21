@@ -2034,6 +2034,143 @@ def fetch_tx_fulcrum(
         return tx
 
 
+def fetch_txs_fulcrum_batch(
+    client: FulcrumClient,
+    txids: list[str],
+    *,
+    on_progress=None,
+) -> dict[str, dict]:
+    """
+    Mehrere Txs laden — bei Tor/Batch-fähigem Client per ``request_batch``.
+
+    Chunks à ``TOR_RPC_BATCH_SIZE`` mit Zwischenstand (noch X Tx), damit
+    lange Onion-Batches nicht stumm wirken. Rückgabe nur erfolgreiche Treffer.
+    """
+    ergebnis: dict[str, dict] = {}
+    offen: list[str] = []
+    gesehen: set[str] = set()
+    for roh in txids:
+        t = str(roh or "").strip().lower()
+        if len(t) != 64 or t in gesehen:
+            continue
+        gesehen.add(t)
+        offen.append(t)
+    if not offen:
+        return ergebnis
+
+    batch_ok = bool(getattr(client, "tor_batch_sinnvoll", lambda _n: False)(2))
+    total = len(offen)
+    chunk_n = max(1, int(TOR_RPC_BATCH_SIZE)) if batch_ok else 1
+
+    def _norm_eine(txid: str, roh: Any) -> dict | None:
+        try:
+            if isinstance(roh, str):
+                return _normalize_electrum_tx(
+                    _parse_tx_hex(roh, expected_txid=txid)
+                )
+            if isinstance(roh, dict):
+                return _normalize_electrum_tx(roh)
+        except Exception:
+            return None
+        return None
+
+    def _melde(text: str, *, sofort: bool = False) -> None:
+        if not on_progress:
+            return
+        try:
+            on_progress(text, sofort=sofort)
+        except TypeError:
+            on_progress(text)
+
+    def _chunk_verbose(chunk: list[str]) -> list[str]:
+        """Lädt Chunk verbose; Rückgabe Txids die Hex-Nachzug brauchen."""
+        hex_nachzug: list[str] = []
+        if len(chunk) == 1 or not batch_ok:
+            for t in chunk:
+                try:
+                    ergebnis[t] = fetch_tx_fulcrum(
+                        client, t, enrich_block_info=False,
+                    )
+                except Exception:
+                    pass
+            return hex_nachzug
+        calls = [("blockchain.transaction.get", [t, True]) for t in chunk]
+        try:
+            answers = client.request_batch(calls)
+        except Exception:
+            answers = None
+        if not isinstance(answers, list) or len(answers) != len(chunk):
+            for t in chunk:
+                try:
+                    ergebnis[t] = fetch_tx_fulcrum(
+                        client, t, enrich_block_info=False,
+                    )
+                except Exception:
+                    pass
+            return hex_nachzug
+        for t, ant in zip(chunk, answers):
+            if isinstance(ant, str):
+                hex_nachzug.append(t)
+                continue
+            tx = _norm_eine(t, ant)
+            if tx is not None:
+                ergebnis[t] = tx
+            else:
+                hex_nachzug.append(t)
+        return hex_nachzug
+
+    def _chunk_hex(chunk: list[str]) -> None:
+        if not chunk:
+            return
+        if len(chunk) == 1 or not batch_ok:
+            for t in chunk:
+                try:
+                    ergebnis[t] = fetch_tx_fulcrum(
+                        client, t, enrich_block_info=False,
+                    )
+                except Exception:
+                    pass
+            return
+        try:
+            answers = client.request_batch([
+                ("blockchain.transaction.get", [t, False]) for t in chunk
+            ])
+        except Exception:
+            answers = None
+        if not isinstance(answers, list) or len(answers) != len(chunk):
+            for t in chunk:
+                try:
+                    ergebnis[t] = fetch_tx_fulcrum(
+                        client, t, enrich_block_info=False,
+                    )
+                except Exception:
+                    pass
+            return
+        for t, ant in zip(chunk, answers):
+            tx = _norm_eine(t, ant)
+            if tx is not None:
+                ergebnis[t] = tx
+
+    modus = "Batch" if batch_ok and total >= 2 else "einzeln"
+    _melde(f"Tx-Abruf ({modus}): {total} Tx…", sofort=True)
+
+    erledigt = 0
+    for start in range(0, total, chunk_n):
+        chunk = offen[start : start + chunk_n]
+        rest = total - erledigt
+        _melde(
+            f"Tx-Abruf: noch {rest} Tx "
+            f"(Chunk {start // chunk_n + 1}, je {len(chunk)})…",
+            sofort=True,
+        )
+        hex_nachzug = _chunk_verbose(chunk)
+        if hex_nachzug:
+            _chunk_hex(hex_nachzug)
+        erledigt += len(chunk)
+
+    return ergebnis
+
+
 def _vout_value_sats(vout: dict) -> int:
     value = vout.get("value", 0)
     if isinstance(value, float):

@@ -506,6 +506,8 @@ class WalletEntry:
     script_typ_wirksam: str = ""
     #: Nur beobachten — kein Empfangs-QR (z. B. fremdes/archiviertes Wallet).
     read_only: bool = False
+    #: Herkunft der Anlage: ``xpub`` | ``descriptor`` | ``wallet_export``.
+    origin: str = ""
 
     def __post_init__(self):
         self.xpub = (self.xpub or "").strip()
@@ -514,6 +516,8 @@ class WalletEntry:
         self.xpubs = [x.strip() for x in (self.xpubs or []) if x and x.strip()]
         self.max_addresses = max(2, int(self.max_addresses))
         self.read_only = bool(self.read_only)
+        origin = (self.origin or "").strip().lower()
+        self.origin = origin if origin in WALLET_ORIGINS else ""
 
         # Aus dem Deskriptor ergänzen, was nicht ausdrücklich angegeben ist.
         # Er ist die knappere Schreibweise, nicht die schwächere.
@@ -1315,7 +1319,20 @@ def _split_list(raw: str, trenner: str) -> list[str]:
 
 
 #: Felder eines Wallet-Blocks.
-_BLOCK_FELDER = ("NAME", "XPUB", "XPUBS", "DESC", "M", "SCRIPT", "MAX_ADDRESSES")
+_BLOCK_FELDER = (
+    "NAME", "XPUB", "XPUBS", "DESC", "M", "SCRIPT", "MAX_ADDRESSES",
+    "READ_ONLY", "ORIGIN",
+)
+
+#: Wie das Wallet in SatSage ankam — steuert u. a. die Such-Liste.
+WALLET_ORIGIN_XPUB = "xpub"
+WALLET_ORIGIN_DESCRIPTOR = "descriptor"
+WALLET_ORIGIN_WALLET_EXPORT = "wallet_export"
+WALLET_ORIGINS = (
+    WALLET_ORIGIN_XPUB,
+    WALLET_ORIGIN_DESCRIPTOR,
+    WALLET_ORIGIN_WALLET_EXPORT,
+)
 
 _BLOCK_RE = re.compile(r"^WALLET_(\d+)_([A-Z_]+)$")
 
@@ -1385,6 +1402,7 @@ def _block_eintrag(values: dict[str, str], nummer: int, standard: int) -> Wallet
         threshold=schwelle,
         descriptor=feld("DESC"),
         read_only=read_only,
+        origin=feld("ORIGIN"),
     )
 
 
@@ -1529,6 +1547,10 @@ def wallet_updates(
             updates[f"{praefix}_SCRIPT"] = eintrag.script_type
         updates[f"{praefix}_MAX_ADDRESSES"] = str(eintrag.max_addresses)
         updates[f"{praefix}_READ_ONLY"] = "1" if eintrag.read_only else "0"
+        # Herkunft nur schreiben wenn gesetzt — alte .env ohne ORIGIN bleibt leer.
+        updates[f"{praefix}_ORIGIN"] = (
+            eintrag.origin if eintrag.origin in WALLET_ORIGINS else None
+        )
 
     return updates
 

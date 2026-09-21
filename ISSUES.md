@@ -2,6 +2,50 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Setup · UTXO + Tx-Verlauf aus bestehenden Wallets importieren
+
+**Stand:** 2026-09-21 · **offen** · Idee / notiert · Setup / Cache
+
+**Ziel:** Initiales Aufsetzen **beschleunigen** (Erstscan/Gap/P2P), indem **UTXO-Bestand** und **Tx-Verlauf** aus bereits vorhandenen Wallets des Nutzers übernommen und in die SatSage-Caches geschrieben werden.
+
+**Nicht hier:** Labels (BIP-329) — eigener Punkt unten. Labels ersetzen keinen Scan-Boost.
+
+**Standard?** Es gibt **keinen** verbreiteten Standard für „UTXO-Set + voller Tx-Verlauf exportieren“. BIP-329 = nur Labels; Deskriptoren = nur was abgeleitet/gescannt werden soll, nicht der Bestand. Deshalb: **Adapter je Wallet** (RPC, Wallet-Datei, App-DB, Export-CSV — je nachdem, was die App hergibt). Gemeinsam nur die **Zielseite** in SatSage (UTXO-Cache, Verlaufs-Cache, ggf. Deskriptor/XPUB anlegen).
+
+**Kriterien:** Popularität und **Einfachheit der Implementation**. Unten nach Aufwand (leicht → schwer); Popularität zweites Kriterium.
+
+**Kandidaten** (UTXO/History-Pfad, ohne BIP-329):
+
+1. **Bitcoin Core / Knots** — RPC `listunspent` / History / Deskriptoren; Stack teilweise schon da
+2. **Electrum** — Wallet-JSON / History-Export; Formate im Projekt bekannt
+3. **Sparrow** — lokale DB / Export; OSS, nachvollziehbar
+4. **Wasabi 2** — Wallet-JSON / RPC; OSS, CJ-Modell komplexer
+5. **Liana / Bitcoin Safe** — OSS, Deskriptor-Wallets; History-Export je App klären
+6. **JoinMarket** — OSS, spezielles Layout
+7. **BitBoxApp** — Bulk-History/UTXO-Pfad unklar
+8. **Nunchuk** — eher proprietär / Multisig
+9. **Trezor Suite** — wenig lokaler Full-History-Dump
+10. **BlueWallet** — mobil, App-DB mühsam
+11. **Blockstream Green** — GDK/mobil, am unzugänglichsten
+
+**Noch offen:** Konkretes Format je Wallet, was vertrauenswürdig in den Cache darf (Höhe, Bestätigt-only?), Abgleich mit späterem Node-Scan, UI-Einstieg. Nur notiert.
+
+---
+
+## Labels · BIP-329 Import (separat vom Scan-Boost)
+
+**Stand:** 2026-09-21 · **offen** · Idee / später · UI / Cache
+
+**Ziel:** BIP-329-Label-Dateien (`.jsonl`) importieren und an Adressen/Txs/Outputs in der UI anzeigen (Herkunft, Bestand, Steuerjahr lesbarer).
+
+**Nicht:** Erstscan beschleunigen — BIP-329 liefert **keine** UTXOs und **keinen** Tx-Verlauf, nur Namensschilder. Scan-Boost = Issue „UTXO + Tx-Verlauf aus bestehenden Wallets“.
+
+**Quellen (wo Nutzer BIP-329 herkriegen):** u. a. Sparrow, Nunchuk, BitBoxApp, Liana, Bitcoin Safe — sobald die Labels in SatSage landen, egal welches Wallet den Scan gefüttert hat.
+
+**Noch offen:** Mapping auf SatSage-Caches, Überschreiben vs. mergen, UI-Einstieg. Nur notiert.
+
+---
+
 ## Empfang · Ka-Ching mit libbitcoin
 
 **Stand:** 2026-09-17 · **kein SatSage-Bug** · Hinweis

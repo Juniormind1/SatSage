@@ -191,6 +191,7 @@ NUTZER_JOB_KINDS = frozenset({
     "sanctions",
     "sanctions-check",
     "wallet_sync",  # Start-Aktualisierung — Nutzer soll „wird frisch“ sehen
+    "export_adressen",  # Adressen nach Wallet-Export (Electrs-Batch)
 })
 
 
@@ -208,6 +209,7 @@ ELECTRUM_SERIAL_KINDS = frozenset({
     "trace-alle",
     "trace-tief",
     "wallet_sync",
+    "export_adressen",
 })
 
 

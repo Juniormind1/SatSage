@@ -2313,6 +2313,94 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   cursor: help;
 }
 #deskriptor-import { width: 100%; }
+.sparrow-fuss .feld-titel { grid-column: 1 / -1; }
+.sparrow-fuss .sparrow-anleitung {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.45;
+  max-width: 42rem;
+}
+.sparrow-fuss .export-suche-zeile {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-start;
+}
+.sparrow-fuss .export-fund-zeile {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.sparrow-fuss .export-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--linie);
+  border-radius: var(--r);
+  background: var(--flaeche-2);
+}
+.sparrow-fuss .export-zeile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.sparrow-fuss .export-zeile label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.sparrow-fuss .export-zeile.export-gesperrt label,
+.sparrow-fuss .export-zeile.export-blockiert label {
+  cursor: default;
+  opacity: 0.75;
+}
+.sparrow-fuss .export-app {
+  color: var(--blass);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.sparrow-fuss .export-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sparrow-fuss .export-schloss {
+  flex-shrink: 0;
+  color: var(--gedaempft);
+  font-size: 13px;
+  line-height: 1;
+}
+.sparrow-fuss .export-grund {
+  color: var(--blass);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.sparrow-fuss #wallet-export-import-wahl {
+  align-self: start;
+  min-width: 6.5rem;
+}
+.sparrow-fuss .export-datei-zeile,
+.sparrow-fuss .sparrow-neben {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 18rem;
+}
+.sparrow-fuss #sparrow-import { width: 100%; }
+.sparrow-fuss #sparrow-befund { grid-column: 1 / -1; }
 .feld-voll { width: 100%; }
 #neuer-deskriptor {
   resize: vertical; font-size: 11px; line-height: 1.45;

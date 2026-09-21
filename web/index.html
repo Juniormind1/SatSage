@@ -734,13 +734,53 @@
               </p>
               <input type="file" id="deskriptor-datei" hidden
                      accept=".json,.txt,.desc,application/json,text/plain">
-              <button type="button" id="deskriptor-import" class="knopf"
+              <button type="button" id="deskriptor-import" class="knopf knopf-primaer"
                       data-i18n="common.import" data-i18n-title="wallets.importTitle"
                       title="Liest eine Exportdatei und prüft sie wie eingefügter Text. Verstanden werden: nackter Output-Deskriptor (auch mit Prüfsumme), Sparrow-JSON, Specter-JSON und Bitcoin Core listdescriptors — Empfang und Change werden zusammengeführt. Taproot multi_a und Miniscript, sofern sich Adressen ableiten lassen. Nicht: Electrum-Walletdatei, Caravan, Coldcard-Cosigner, BSMS, UR/BBQr und nichts mit privaten Schlüsseln.">
                 Import
               </button>
             </div>
             <div id="deskriptor-befund" class="deskriptor-befund" hidden></div>
+          </div>
+
+          <div class="karte-fuss wallet-einfuegen sparrow-fuss">
+            <span class="feld-titel" data-i18n="wallets.exportLabel">Wallet-Export · Sparrow / Wasabi</span>
+            <p class="meta sparrow-anleitung" data-i18n-html="wallets.exportHelpHtml">
+              <strong>Suchen</strong> scannt die üblichen Sparrow-/Wasabi-Ordner.
+              Passwortgeschützte Dateien mit Schloss — ohne Passwort-Dialog.
+              Schon in SatSage vorhandene (per XPUB, Deskriptor oder Export)
+              entfallen. Importierbar u. a. Wasabi-JSON (View-only/HW) und
+              Sparrow-Klartext; native Sparrow-<span class="mono">.mv.db</span>
+              braucht weiter Descriptor-Export. Optional Dateien manuell wählen.
+            </p>
+            <div class="export-suche-zeile">
+              <button type="button" id="wallet-export-suchen" class="knopf"
+                      data-i18n="wallets.exportSearch"
+                      data-i18n-title="wallets.exportSearchTitle"
+                      title="Durchsucht die Standardordner von Sparrow und Wasabi auf diesem Rechner.">
+                Suchen
+              </button>
+            </div>
+            <div class="export-fund-zeile" id="wallet-export-fund" hidden>
+              <div id="wallet-export-liste" class="export-liste" role="list"></div>
+              <button type="button" id="wallet-export-import-wahl" class="knopf knopf-primaer"
+                      data-i18n="wallets.exportImportChecked"
+                      data-i18n-title="wallets.exportImportCheckedTitle"
+                      title="Importiert die angehakten, lesbaren Wallets ohne Passwort.">
+                Import
+              </button>
+            </div>
+            <div class="sparrow-neben export-datei-zeile">
+              <input type="file" id="sparrow-dateien" hidden multiple
+                     accept=".txt,.csv,.json,.desc,text/plain,text/csv,application/json">
+              <button type="button" id="sparrow-import" class="knopf"
+                      data-i18n="wallets.exportImportFile"
+                      data-i18n-title="wallets.exportImportTitle"
+                      title="Exportdateien manuell wählen (Descriptor/CSV/Wasabi-JSON).">
+                Datei wählen…
+              </button>
+            </div>
+            <div id="sparrow-befund" class="deskriptor-befund" hidden></div>
           </div>
         </div>
 

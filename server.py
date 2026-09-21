@@ -1904,6 +1904,469 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
     return {"gefunden": beschreibungen, "fehler": ""}
 
 
+def api_sparrow_import(state: AppState, payload: dict) -> dict:
+    """Alias — historischer Pfad; siehe ``api_wallet_export_import``."""
+    return api_wallet_export_import(state, payload)
+
+
+def api_wallet_export_import(state: AppState, payload: dict) -> dict:
+    """
+    Klartext-Exporte Sparrow / Wasabi (Auto-Erkennung) → .env + Cache.
+
+    Kein Passwort. Sparrow: Descriptor + optional CSV. Wasabi: View-only-/
+    Hardware-JSON (``ExtPubKey``) und optional RPC-Dumps. Mehrere Deskriptoren
+    (z. B. SegWit+Taproot) werden als getrennte Wallets angelegt.
+    """
+    _wallets_config_gesperrt(state)
+    from core import wallet_export_import as export_mod
+
+    try:
+        roh_dateien = _dateien_aus_import_payload(payload)
+        dateien = []
+        for name, roh in roh_dateien.items():
+            try:
+                text = roh.decode("utf-8")
+            except UnicodeDecodeError:
+                try:
+                    text = roh.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    text = roh.decode("latin-1", errors="replace")
+            # Anzeigename ohne internen #2-Suffix aus Kollisions-Schutz.
+            anzeige = name.split("#", 1)[0] if "#" in name else name
+            dateien.append({"name": anzeige, "text": text})
+
+        parsed = export_mod.parse_wallet_export_dateien(dateien)
+        if not parsed.ok:
+            raise ApiError(400, parsed.fehler or "Import fehlgeschlagen.")
+
+        max_addr = int(payload.get("max_addresses", main.DEFAULT_MAX_ADDRESSES))
+        read_only = bool(payload.get("read_only", False))
+        bestaetigt = bool(payload.get("confirm", False))
+        cache_source = (
+            "wasabi_export" if "wasabi" in (parsed.formate or [])
+            else "sparrow_csv"
+        )
+
+        neu_liste: list[WalletEntry] = []
+        for i, desc in enumerate(parsed.descriptors):
+            if i < len(parsed.namen) and str(parsed.namen[i] or "").strip():
+                name = str(parsed.namen[i]).strip()
+            elif parsed.name_vorschlag:
+                name = (
+                    parsed.name_vorschlag
+                    if len(parsed.descriptors) == 1
+                    else f"{parsed.name_vorschlag} #{i + 1}"
+                )
+            else:
+                name = f"Import {i + 1}"
+            try:
+                neu = WalletEntry(
+                    name=name,
+                    descriptor=desc,
+                    max_addresses=max_addr,
+                    read_only=read_only,
+                    origin=config_mod.WALLET_ORIGIN_WALLET_EXPORT,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ApiError(400, str(exc)) from exc
+            if not neu.is_valid():
+                raise ApiError(
+                    400, f"Deskriptor lässt sich nicht ableiten: {desc[:64]}"
+                )
+            neu_liste.append(neu)
+
+        return _wallet_export_anlegen_und_cache(
+            state,
+            neu_liste,
+            parsed,
+            bestaetigt=bestaetigt,
+            cache_source=cache_source,
+        )
+    except ApiError:
+        raise
+    except Exception as exc:
+        LOGGER.exception("wallet-export-import fehlgeschlagen")
+        raise ApiError(500, f"Import fehlgeschlagen: {exc}") from exc
+
+
+def api_wallet_export_suchen(state: AppState) -> dict:
+    """Übliche Sparrow-/Wasabi-Ordner scannen (ohne Passwort)."""
+    _wallets_config_gesperrt(state)
+    from core import wallet_discover as discover_mod
+
+    vorhandene = {wallets_mod.eintrag_id(e) for e in state.entries}
+    treffer = discover_mod.suche_lokale_wallets(vorhandene_wallet_ids=vorhandene)
+    wurzeln = [
+        str(p) for p in discover_mod.standard_suchwurzeln() if p.is_dir()
+    ]
+    return {
+        "wallets": [t.as_dict() for t in treffer],
+        "roots": wurzeln,
+        "count": len(treffer),
+        "importable": sum(1 for t in treffer if t.importable),
+    }
+
+
+def api_wallet_export_import_pfade(state: AppState, payload: dict) -> dict:
+    """Importiert per Such-Liste gewählte lokale Dateipfade."""
+    _wallets_config_gesperrt(state)
+    from core import wallet_discover as discover_mod
+
+    pfade = payload.get("paths")
+    if not isinstance(pfade, list) or not pfade:
+        raise ApiError(400, "Feld 'paths' fehlt oder ist leer.")
+    sauber = [str(p).strip() for p in pfade if str(p or "").strip()]
+    if not sauber:
+        raise ApiError(400, "Keine Pfade gewählt.")
+
+    # Nur unter bekannten Wallet-Wurzeln (kein beliebiges Dateilesen).
+    erlaubt = discover_mod.standard_suchwurzeln()
+    for p in sauber:
+        path = Path(p).expanduser()
+        try:
+            resolved = path.resolve()
+        except OSError as exc:
+            raise ApiError(400, f"Pfad ungültig: {exc}") from exc
+        if not any(
+            _pfad_unter(resolved, w.resolve() if w.exists() else w)
+            for w in erlaubt
+        ):
+            raise ApiError(
+                400,
+                f"„{path.name}“ liegt nicht in einem bekannten "
+                "Sparrow-/Wasabi-Ordner.",
+            )
+
+    parsed = discover_mod.importiere_pfade(sauber)
+    if not parsed.ok:
+        raise ApiError(400, parsed.fehler or "Import fehlgeschlagen.")
+
+    max_addr = int(payload.get("max_addresses", main.DEFAULT_MAX_ADDRESSES))
+    read_only = bool(payload.get("read_only", False))
+    bestaetigt = bool(payload.get("confirm", False))
+    cache_source = (
+        "wasabi_export" if "wasabi" in (parsed.formate or [])
+        else "sparrow_csv"
+    )
+    neu_liste: list[WalletEntry] = []
+    for i, desc in enumerate(parsed.descriptors):
+        if i < len(parsed.namen) and str(parsed.namen[i] or "").strip():
+            name = str(parsed.namen[i]).strip()
+        elif parsed.name_vorschlag:
+            name = (
+                parsed.name_vorschlag
+                if len(parsed.descriptors) == 1
+                else f"{parsed.name_vorschlag} #{i + 1}"
+            )
+        else:
+            name = f"Import {i + 1}"
+        try:
+            neu = WalletEntry(
+                name=name,
+                descriptor=desc,
+                max_addresses=max_addr,
+                read_only=read_only,
+                origin=config_mod.WALLET_ORIGIN_WALLET_EXPORT,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ApiError(400, str(exc)) from exc
+        if not neu.is_valid():
+            raise ApiError(400, f"Deskriptor lässt sich nicht ableiten: {desc[:64]}")
+        neu_liste.append(neu)
+
+    return _wallet_export_anlegen_und_cache(
+        state,
+        neu_liste,
+        parsed,
+        bestaetigt=bestaetigt,
+        cache_source=cache_source,
+    )
+
+
+def _pfad_unter(kind: Path, eltern: Path) -> bool:
+    try:
+        kind.relative_to(eltern)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _wallet_export_anlegen_und_cache(
+    state: AppState,
+    neu_liste: list[WalletEntry],
+    parsed,
+    *,
+    bestaetigt: bool,
+    cache_source: str,
+) -> dict:
+    if not neu_liste:
+        raise ApiError(400, "Keine Wallets zum Anlegen.")
+
+    vorhandene_ids = {wallets_mod.eintrag_id(e) for e in state.entries}
+    entries = list(state.entries)
+    angelegt = 0
+    schon_da_n = 0
+    for neu in neu_liste:
+        wid = neu.wallet_id()
+        if wid in vorhandene_ids or any(
+            wallets_mod.eintrag_id(e) == wid for e in entries
+        ):
+            schon_da_n += 1
+            continue
+        entries.append(neu)
+        vorhandene_ids.add(wid)
+        angelegt += 1
+
+    if angelegt:
+        try:
+            write_wallets(state.env(), entries, bestaetigt=bestaetigt)
+        except BestaetigungNoetig as exc:
+            raise ApiError(409, " ".join(exc.warnungen)) from exc
+        except ValueError as exc:
+            raise ApiError(400, str(exc)) from exc
+        except OSError as exc:
+            raise ApiError(500, "Interner Serverfehler.") from exc
+        state.reload()
+
+    prim = neu_liste[0]
+    wid = prim.wallet_id()
+    bekannt = wallets_mod.find_entry(state.entries, wid) or prim
+    schluessel = bekannt.analyse_schluessel
+    utxo_n = 0
+    verlauf_n = 0
+    try:
+        if parsed.utxos:
+            main.save_xpub_utxo_cache(
+                schluessel,
+                parsed.utxos,
+                state.cache_dir,
+                source=cache_source,
+                max_addresses=bekannt.max_addresses,
+            )
+            utxo_n = len(parsed.utxos)
+        if parsed.verlauf:
+            bisher = main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or []
+            merge = list(bisher)
+            gesehen = {
+                f"{e.get('txid')}:{e.get('vout')}:{e.get('spent')}"
+                for e in merge
+                if isinstance(e, dict)
+            }
+            for e in parsed.verlauf:
+                key = f"{e.get('txid')}:{e.get('vout')}:{e.get('spent')}"
+                if key in gesehen:
+                    continue
+                gesehen.add(key)
+                merge.append(e)
+            main.save_xpub_verlauf_cache(
+                schluessel,
+                merge,
+                state.cache_dir,
+                scanned_addresses=parsed.adressen or None,
+                incomplete=True,
+            )
+            verlauf_n = len(parsed.verlauf)
+        elif parsed.adressen:
+            main.save_xpub_verlauf_cache(
+                schluessel,
+                main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or [],
+                state.cache_dir,
+                scanned_addresses=parsed.adressen,
+                incomplete=True,
+            )
+    except main.CacheDiskFullError as exc:
+        raise ApiError(507, str(exc)) from exc
+    except OSError as exc:
+        raise ApiError(500, "Cache schreiben fehlgeschlagen.") from exc
+
+    try:
+        main.seed_wallet_addresses_from_utxo_cache(
+            state.wallet_ctx, [schluessel], state.cache_dir
+        )
+    except Exception:
+        pass
+
+    erste = config_mod.erste_empfangsadresse(bekannt) or ""
+    nachziehen = _export_adressen_nachziehen_meta(state, bekannt)
+    return {
+        "saved": True,
+        "already_present": angelegt == 0 and schon_da_n > 0,
+        "wallets_added": angelegt,
+        "wallets_existing": schon_da_n,
+        "wallet_id": wid,
+        "name": bekannt.display_name,
+        "format": parsed.format_label,
+        "descriptor": bool(bekannt.descriptor),
+        "is_multisig": bekannt.is_multisig,
+        "erste_adresse": erste,
+        "utxo_count": utxo_n,
+        "verlauf_count": verlauf_n,
+        "address_count": len(parsed.adressen),
+        "files": parsed.dateien,
+        "hinweise": parsed.hinweise,
+        "wallet_count": len(state.entries),
+        "address_nachziehen": nachziehen,
+    }
+
+
+def _export_adressen_nachziehen_meta(state: AppState, entry: WalletEntry) -> dict:
+    """
+    Wie viele Tx im Verlauf noch ohne Adresse sind und ob Electrs greifbar ist.
+    """
+    from core import export_adressen as adr_mod
+
+    verlauf = main.load_xpub_verlauf_cache(
+        entry.analyse_schluessel, state.cache_dir
+    ) or []
+    ohne = adr_mod.verlauf_ohne_adresse(verlauf)
+    txids = adr_mod.unique_txids(ohne)
+    n = len(txids)
+    electrs = False
+    try:
+        electrs = _eigener_fulcrum_client(state) is not None
+    except Exception:
+        electrs = False
+    return {
+        "wallet_id": wallets_mod.eintrag_id(entry),
+        "name": entry.display_name,
+        "pending_txids": n,
+        "pending_entries": len(ohne),
+        "electrs": electrs,
+        "auto_max": adr_mod.NACHZIEHEN_AUTO_MAX,
+        "auto_start": bool(electrs and 0 < n <= adr_mod.NACHZIEHEN_AUTO_MAX),
+        "needs_confirm": bool(electrs and n > adr_mod.NACHZIEHEN_AUTO_MAX),
+    }
+
+
+def api_wallet_export_adressen_nachziehen(state: AppState, payload: dict) -> dict:
+    """
+    Job: Adressen zu Export-Verlauf per eigenem Electrs nachziehen.
+    """
+    _wallets_config_gesperrt(state)
+    from core import export_adressen as adr_mod
+
+    kennung = str(payload.get("wallet_id") or "").strip()
+    if not kennung:
+        raise ApiError(400, "wallet_id fehlt.")
+    entry = wallets_mod.find_entry(state.entries, kennung)
+    if entry is None:
+        raise ApiError(404, "Wallet nicht gefunden.")
+
+    client = _eigener_fulcrum_client(state)
+    if client is None:
+        raise ApiError(
+            503,
+            "Kein eigener Electrs/Fulcrum erreichbar — Adressen nachziehen "
+            "unterbleibt. Später „Historie“ nutzen.",
+        )
+
+    schluessel = entry.analyse_schluessel
+    name = entry.display_name
+    max_a = entry.max_addresses
+
+    def lauf(job):
+        from core.jobs import Fortschritt, herzschlag
+
+        stand = Fortschritt(job)
+        halt = threading.Event()
+        threading.Thread(
+            target=herzschlag, args=(stand, halt), daemon=True,
+        ).start()
+        try:
+            job.raise_if_cancelled()
+            verlauf = main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or []
+            ohne = adr_mod.verlauf_ohne_adresse(verlauf)
+            txids = adr_mod.unique_txids(ohne)
+            if not txids:
+                stand.phase("Keine Einträge ohne Adresse.")
+                return {"filled": 0, "txids": 0}
+
+            stand.phase(
+                f"Adressen nachziehen für {name}: {len(txids)} Tx "
+                f"ohne Adresse…"
+            )
+            own = adr_mod.eigene_adressen_mengen(
+                entry, wallet_ctx=state.wallet_ctx,
+            )
+            if not own:
+                # Ableitung erzwingen
+                try:
+                    if state.wallet_ctx is not None:
+                        main.seed_wallet_addresses_from_utxo_cache(
+                            state.wallet_ctx, [schluessel], state.cache_dir,
+                        )
+                except Exception:
+                    pass
+                own = adr_mod.eigene_adressen_mengen(
+                    entry, wallet_ctx=state.wallet_ctx,
+                )
+            if not own:
+                raise RuntimeError(
+                    "Keine Ableitungs-Adressen für dieses Wallet — "
+                    "Deskriptor prüfen."
+                )
+
+            def on_prog(text: str, *, sofort: bool = False) -> None:
+                # sofort=True: neue Zwischenstände ins Log (Chunk-Grenzen)
+                if sofort:
+                    stand.phase(text)
+                else:
+                    stand.tick(text)
+
+            # Electrs@Tor: request_batch (Chunk TOR_RPC_BATCH_SIZE); LAN: seriell.
+            neu, stats = adr_mod.nachziehen_verlauf_adressen(
+                verlauf,
+                own=own,
+                fulcrum_client=client,
+                immutable_cache_dir=state.immutable_cache_dir,
+                on_progress=on_prog,
+                raise_if_cancelled=job.raise_if_cancelled,
+            )
+            job.raise_if_cancelled()
+            main.save_xpub_verlauf_cache(
+                schluessel,
+                neu,
+                state.cache_dir,
+                incomplete=True,
+            )
+            try:
+                main.seed_wallet_addresses_from_utxo_cache(
+                    state.wallet_ctx, [schluessel], state.cache_dir,
+                )
+            except Exception:
+                pass
+            batch_hinweis = (
+                " · Electrs-Batch"
+                if stats.get("batched")
+                else ""
+            )
+            prev_n = int(stats.get("prev_txids") or 0)
+            prev_hinweis = f", {prev_n} Prevout-Tx" if prev_n else ""
+            stand.phase(
+                f"Adressen nachziehen fertig: {stats.get('filled', 0)} "
+                f"Einträge, {stats.get('failed', 0)} ohne Treffer "
+                f"({stats.get('txids', 0)} Tx{prev_hinweis})"
+                f"{batch_hinweis}."
+            )
+            return stats
+        finally:
+            halt.set()
+            stand.close()
+
+    job = state.jobs.start(
+        "export_adressen",
+        f"Adressen nachziehen · {name}",
+        lauf,
+        meta={
+            "art": "export_adressen",
+            "wallet_id": kennung,
+            "wallet_name": name,
+            "max_addresses": max_a,
+        },
+    )
+    return job.as_dict()
+
+
 def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
     """
     Wandelt die Wallet-Liste aus der Oberfläche in Einträge um.
@@ -1929,6 +2392,9 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
         neuer_deskriptor = str(eintrag.get("descriptor", "")).strip()
         if neuer_deskriptor and not str(eintrag.get("id", "")).strip():
             try:
+                origin = str(eintrag.get("origin") or "").strip() or (
+                    config_mod.WALLET_ORIGIN_DESCRIPTOR
+                )
                 entries.append(WalletEntry(
                     name=str(eintrag.get("name", "")),
                     descriptor=neuer_deskriptor,
@@ -1936,6 +2402,7 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                         eintrag.get("max_addresses", main.DEFAULT_MAX_ADDRESSES)
                     ),
                     read_only=bool(eintrag.get("read_only", False)),
+                    origin=origin,
                 ))
             except (TypeError, ValueError) as exc:
                 raise ApiError(400, f"Wallet {index}: {exc}") from exc
@@ -1969,6 +2436,7 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     read_only=bool(
                         eintrag.get("read_only", bekannt.read_only)
                     ),
+                    origin=bekannt.origin,
                 ))
                 continue
 
@@ -1986,15 +2454,22 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
                     read_only=bool(
                         eintrag.get("read_only", bekannt.read_only)
                     ),
+                    origin=bekannt.origin,
                 ))
                 continue
 
+            origin = str(eintrag.get("origin") or "").strip()
+            if not origin and bekannt is not None:
+                origin = bekannt.origin
+            if not origin and not kennung:
+                origin = config_mod.WALLET_ORIGIN_XPUB
             entries.append(WalletEntry(
                 xpub=xpub,
                 name=str(eintrag.get("name", "")),
                 script_type=str(eintrag.get("script_type", "auto")),
                 max_addresses=int(eintrag.get("max_addresses", main.DEFAULT_MAX_ADDRESSES)),
                 read_only=bool(eintrag.get("read_only", False)),
+                origin=origin,
             ))
         except (TypeError, ValueError) as exc:
             raise ApiError(400, f"Wallet {index}: {exc}") from exc
@@ -2823,8 +3298,18 @@ def _verlaufs_anhang(state: AppState, entries, *, limit: int | None = None,
         gespeichert = main.load_xpub_verlauf_cache(
             entry.analyse_schluessel, state.cache_dir
         )
-        if gespeichert:
-            verlauf.extend(gespeichert)
+        if not gespeichert:
+            continue
+        # Name mitgeben: Sparrow-Tx-CSV-Einträge ohne Adresse sonst
+        # „unbekanntes Wallet“, obwohl der Cache klar diesem Wallet gehört.
+        name = entry.display_name
+        for roh in gespeichert:
+            if not isinstance(roh, dict):
+                continue
+            kopie = dict(roh)
+            if name and not kopie.get("_wallet_fallback"):
+                kopie["_wallet_fallback"] = name
+            verlauf.append(kopie)
     return {
         "verlauf": utxos_mod.historische_eintraege(
             verlauf,
@@ -3164,6 +3649,21 @@ def _verlauf_anhang_fuer_xpub(
     sort: str,
 ) -> dict:
     gespeichert = main.load_xpub_verlauf_cache(xpub, state.cache_dir) or []
+    name = ""
+    for e in state.entries:
+        if e.analyse_schluessel == xpub or e.xpub == xpub:
+            name = e.display_name
+            break
+    if name:
+        angereichert = []
+        for roh in gespeichert:
+            if not isinstance(roh, dict):
+                continue
+            kopie = dict(roh)
+            if not kopie.get("_wallet_fallback"):
+                kopie["_wallet_fallback"] = name
+            angereichert.append(kopie)
+        gespeichert = angereichert
     return {
         "verlauf": utxos_mod.historische_eintraege(
             gespeichert,
@@ -4045,39 +4545,67 @@ def api_labels_verwerfen(state: AppState, query: dict) -> dict:
 
 def _dateien_aus_import_payload(payload: dict) -> dict[str, bytes]:
     """
-    Body: ``files`` = [{name, data_b64}, …] oder {name: data_b64}.
-    Base64 der Dateiinhalte (lokal, große Label-ZIPs).
+    Body: ``files`` = [{name, data_b64|text}, …] oder {name: data_b64}.
+
+    Base64 für Binär (Labels); Klartext ``text`` für Wallet-Exporte (CSV/Descriptor),
+    damit der Browser große Dateien nicht unnötig base64-kodieren muss.
     """
     import base64
+
+    #: harte Grenze je Datei (Wallet-CSV/Descriptor) — ~25 MiB Rohbytes
+    _max_bytes = 25 * 1024 * 1024
 
     roh = payload.get("files")
     ergebnis: dict[str, bytes] = {}
     if isinstance(roh, dict):
-        eintraege = roh.items()
+        eintraege = [(str(k), v, None) for k, v in roh.items()]
     elif isinstance(roh, list):
         eintraege = []
         for eintrag in roh:
             if not isinstance(eintrag, dict):
                 continue
             name = str(eintrag.get("name") or "").strip()
-            data = eintrag.get("data_b64") or eintrag.get("data") or ""
-            if name:
-                eintraege.append((name, data))
+            if not name:
+                continue
+            if eintrag.get("text") is not None:
+                eintraege.append((name, None, str(eintrag.get("text") or "")))
+            else:
+                data = eintrag.get("data_b64") or eintrag.get("data") or ""
+                eintraege.append((name, data, None))
     else:
         raise ApiError(400, "Feld „files“ fehlt oder ist ungültig.")
 
-    for name, data in eintraege:
+    for name, data, text in eintraege:
         name = str(name or "").strip()
-        if not name or data is None:
+        if not name:
             continue
-        if not isinstance(data, str):
-            raise ApiError(400, f"Datei {name}: data_b64 muss Text sein.")
-        try:
-            ergebnis[name] = base64.b64decode(data, validate=False)
-        except Exception as exc:
-            raise ApiError(400, f"Datei {name}: Base64 ungültig ({exc})") from exc
-        if not ergebnis[name]:
+        if text is not None:
+            roh_bytes = text.encode("utf-8")
+        else:
+            if data is None:
+                continue
+            if not isinstance(data, str):
+                raise ApiError(400, f"Datei {name}: data_b64 muss Text sein.")
+            try:
+                roh_bytes = base64.b64decode(data, validate=False)
+            except Exception as exc:
+                raise ApiError(400, f"Datei {name}: Base64 ungültig ({exc})") from exc
+        if not roh_bytes:
             raise ApiError(400, f"Datei {name} ist leer.")
+        if len(roh_bytes) > _max_bytes:
+            raise ApiError(
+                400,
+                f"Datei {name} ist zu groß ({len(roh_bytes) // (1024 * 1024)} MiB, "
+                f"max. {_max_bytes // (1024 * 1024)} MiB).",
+            )
+        # Gleicher Dateiname zweimal (txt+csv selten): Suffix, nicht überschreiben.
+        schluessel = name
+        if schluessel in ergebnis:
+            n = 2
+            while f"{name}#{n}" in ergebnis:
+                n += 1
+            schluessel = f"{name}#{n}"
+        ergebnis[schluessel] = roh_bytes
     if not ergebnis:
         raise ApiError(400, "Keine Dateien im Upload.")
     return ergebnis
@@ -7479,6 +8007,16 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_trace_gespeichert(state, query)
         if teile == ["config", "deskriptor"] and methode == "POST":
             return 200, api_deskriptor_pruefen(state, self._body())
+        if teile == ["config", "sparrow-import"] and methode == "POST":
+            return 200, api_sparrow_import(state, self._body())
+        if teile == ["config", "wallet-export-import"] and methode == "POST":
+            return 200, api_wallet_export_import(state, self._body())
+        if teile == ["config", "wallet-export-suchen"] and methode == "POST":
+            return 200, api_wallet_export_suchen(state)
+        if teile == ["config", "wallet-export-import-pfade"] and methode == "POST":
+            return 200, api_wallet_export_import_pfade(state, self._body())
+        if teile == ["config", "wallet-export-adressen-nachziehen"] and methode == "POST":
+            return 200, api_wallet_export_adressen_nachziehen(state, self._body())
         if teile == ["verlauf"] and methode == "POST":
             return 202, api_verlauf(state, self._body())
         if teile == ["cache", "unreferenziert"] and methode == "GET":

@@ -9,6 +9,12 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallet-Export · Adressen nachziehen:** Nach Import mit Tx ohne Adresse: Job über eigenen Electrs (≤100 Tx auto / >100 Nachfrage). Electrs@Tor: JSON-RPC-Batch (Chunk 32). Fortschritt: Herzschlag „Moment noch“, Chunk-Zwischenstand „noch X Tx“; Job in Vorgänge.
+- **Wallet-Export-Import · Stabilität:** Descriptor+CSV per Klartext (kein Base64-Freeze), Timeout, Sofort-Log, Fehler beenden „Export wird gelesen…“; CSV immer als Tabelle; Server-Text-Upload und Größenlimit.
+- **Bereits ausgegeben · Export-Verlauf:** Wallet-Name aus Cache-Kontext, wenn Sparrow-Tx-CSV keine Adresse hat (nicht mehr „unbekanntes Wallet“); leere Adresszeile als „ohne Adresse (Export)“.
+- **Log · Release-Zeile:** Beim Start steht die laufende SatSage-Version (`SatSage v…`) als erste Zeile im Log-Bereich.
+- **Wallets · Export-Import (Sparrow / Wasabi):** Unter Multisig: **Suchen** in Standardordnern, Liste mit Checkboxen (Schloss = nicht direkt lesbar: Passwort **oder** native Sparrow-DB), orangener **Import** der Auswahl; manuell **Datei wählen…**. Format-Auto-Erkennung; Herkunft `WALLET_n_ORIGIN` (`xpub` / `descriptor` / `wallet_export`) — schon vorhandene entfallen in der Suche. Wasabi-JSON View-only/HW importierbar; Sparrow-`.mv.db` nur nach Descriptor-Export. Kein Passwort-Dialog. Multisig-**Import** orange wie „Hinzufügen“.
+
 ## [0.9.6] — 2026-09-17
 
 - **Tests / Stabilität:** Unittest-Suite wieder grün — u. a. Tor erst nach LAN-Fail, SSL-Hinweistexte an Auto-Flip, Trace-Sort-IDs im HTML, Job-Gate-Reset in Tests, Empfangs-Ka-Ching nach Tip-Sync.
