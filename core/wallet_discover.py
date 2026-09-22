@@ -146,7 +146,15 @@ def suche_lokale_wallets(
                 pass
             treffer.append(fund)
 
-    treffer.sort(key=lambda t: (t.app, t.name.lower(), t.path))
+    # Importierbar zuerst, dann gesperrt/blockiert; innerhalb Name A–Z.
+    treffer.sort(
+        key=lambda t: (
+            0 if t.importable else 1,
+            (t.name or "").lower(),
+            t.app or "",
+            t.path or "",
+        )
+    )
     return treffer
 
 

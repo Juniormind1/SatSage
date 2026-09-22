@@ -1088,12 +1088,21 @@ def api_cache_wallet_leeren(state: AppState, kennung: str) -> dict:
     Löscht den Analyse-Cache eines Wallets: UTXO-Datei, Verlauf und
     Herkunftsbäume seiner bekannten Outputs. Gemeinsame Tx-/Block-Dateien
     und die Caches der anderen Wallets bleiben. Wallet-Alter bleibt.
+
+    Auch verwaiste Cache-Kennungen (kein Wallet in der .env) sind erlaubt.
     """
     entry = wallets_mod.find_entry(state.entries, kennung)
-    if entry is None:
-        raise ApiError(404, "Wallet nicht gefunden.")
-
-    bericht = _wallet_cache_loeschen(state, entry, mit_alter=False)
+    if entry is not None:
+        bericht = _wallet_cache_loeschen(state, entry, mit_alter=False)
+    else:
+        kid = (kennung or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{16}", kid or ""):
+            raise ApiError(404, "Wallet nicht gefunden.")
+        if not _cache_kennung_hat_dateien(state, kid):
+            raise ApiError(404, "Kein Cache zu dieser Kennung.")
+        bericht = _wallet_cache_loeschen_kennung(
+            state, kid, name=f"Cache {kid[:8]}…", mit_alter=True,
+        )
     return {
         "ok": True,
         "wallet_id": bericht["wallet_id"],
@@ -1101,7 +1110,171 @@ def api_cache_wallet_leeren(state: AppState, kennung: str) -> dict:
         "utxo_eintraege": bericht["utxo_eintraege"],
         "verlauf_eintraege": bericht["verlauf_eintraege"],
         "herkunft_eintraege": bericht["herkunft_eintraege"],
+        "configured": entry is not None,
     }
+
+
+def _cache_kennung_hat_dateien(state: AppState, kennung: str) -> bool:
+    base = state.cache_dir
+    if not base.is_dir():
+        return False
+    for name in (
+        f"{kennung}.json",
+        f"{kennung}_verlauf.json",
+        f"{kennung}_alter.json",
+    ):
+        if (base / name).is_file():
+            return True
+    return False
+
+
+def _wallet_cache_pfade_kennung(
+    state: AppState,
+    kennung: str,
+    *,
+    mit_alter: bool = False,
+) -> list[Path]:
+    """Cache-Dateien zu einer 16-hex-Kennung (auch ohne WalletEntry)."""
+    kid = (kennung or "").strip().lower()
+    pfade: list[Path] = []
+    base = state.cache_dir
+    for name in (f"{kid}.json", f"{kid}_verlauf.json"):
+        p = base / name
+        if p.is_file():
+            pfade.append(p)
+    if mit_alter:
+        alter = base / f"{kid}_alter.json"
+        if alter.is_file():
+            pfade.append(alter)
+
+    orphan_refs: set[tuple[str, int]] = set()
+    for p in list(pfade):
+        orphan_refs |= _utxo_refs_aus_datei(p)
+    noch_aktiv = _aktive_utxo_refs(state)
+    for txid, vout in orphan_refs - noch_aktiv:
+        for pfad in (
+            main._utxo_ingress_cache_path(txid, vout, state.immutable_cache_dir),
+            trace_cache.pfad(txid, vout, state.immutable_cache_dir),
+        ):
+            if pfad is not None and pfad.is_file():
+                pfade.append(pfad)
+    return pfade
+
+
+def _wallet_cache_loeschen_kennung(
+    state: AppState,
+    kennung: str,
+    *,
+    name: str = "",
+    mit_alter: bool = False,
+) -> dict:
+    pfade = _wallet_cache_pfade_kennung(state, kennung, mit_alter=mit_alter)
+    bytes_anzahl = sum(_datei_groesse(p) for p in pfade)
+    utxo_n = 0
+    verlauf_n = 0
+    herkunft_n = 0
+    alter_n = 0
+    for pfad in pfade:
+        if pfad.parent == state.cache_dir:
+            if pfad.name.endswith("_verlauf.json"):
+                verlauf_n += _datei_loeschen(pfad)
+            elif pfad.name.endswith("_alter.json"):
+                alter_n += _datei_loeschen(pfad)
+            else:
+                utxo_n += _datei_loeschen(pfad)
+        else:
+            herkunft_n += _datei_loeschen(pfad)
+    return {
+        "wallet_id": kennung,
+        "wallet_name": name or f"Cache {kennung[:8]}…",
+        "dateien": utxo_n + verlauf_n + herkunft_n + alter_n,
+        "bytes": bytes_anzahl,
+        "groesse_label": format_dateigroesse(bytes_anzahl),
+        "utxo_eintraege": utxo_n,
+        "verlauf_eintraege": verlauf_n,
+        "herkunft_eintraege": herkunft_n,
+        "alter_eintraege": alter_n,
+    }
+
+
+def api_cache_wallet_zeilen(state: AppState) -> dict:
+    """
+    Alle Cache-Zeilen für Danger Zone: konfigurierte Wallets + verwaiste
+    Kennungen (stale cache ohne .env-Eintrag).
+    """
+    aktiv = _aktive_cache_kennungen(state)
+    zeilen: list[dict] = []
+    for entry in state.entries:
+        kid = main._xpub_cache_key(entry.analyse_schluessel)
+        utxos = utxos_mod.load_cached_utxos(
+            entry.analyse_schluessel, state.cache_dir
+        ) or []
+        verlauf = main.load_xpub_verlauf_cache(
+            entry.analyse_schluessel, state.cache_dir
+        ) or []
+        has = bool(utxos) or bool(verlauf) or _cache_kennung_hat_dateien(
+            state, kid
+        )
+        # Auch leere konfigurierte Wallets listen (Löschen disabled client-side)
+        zeilen.append({
+            "id": wallets_mod.eintrag_id(entry),
+            "name": entry.display_name,
+            "configured": True,
+            "has_cache": has,
+            "utxo_count": len(utxos),
+            "verlauf_count": len(verlauf),
+            "stale": False,
+        })
+
+    gesehen = {str(z["id"]).lower() for z in zeilen}
+    if state.cache_dir.is_dir():
+        orphans: dict[str, dict] = {}
+        for kind in state.cache_dir.iterdir():
+            if not kind.is_file():
+                continue
+            kid = _cache_datei_kennung(kind.name)
+            if not kid or kid in aktiv or kid in gesehen:
+                continue
+            slot = orphans.setdefault(kid, {
+                "id": kid,
+                "name": f"Cache {kid[:8]}…",
+                "configured": False,
+                "has_cache": True,
+                "utxo_count": 0,
+                "verlauf_count": 0,
+                "stale": True,
+            })
+            low = kind.name.lower()
+            if low == f"{kid}.json":
+                try:
+                    roh = json.loads(kind.read_text(encoding="utf-8"))
+                    u = roh.get("utxos") if isinstance(roh, dict) else None
+                    if isinstance(u, list):
+                        slot["utxo_count"] = len(u)
+                except (OSError, json.JSONDecodeError, UnicodeError):
+                    pass
+            elif low.endswith("_verlauf.json"):
+                try:
+                    roh = json.loads(kind.read_text(encoding="utf-8"))
+                    e = (
+                        roh.get("eintraege")
+                        if isinstance(roh, dict)
+                        else roh if isinstance(roh, list) else []
+                    )
+                    if isinstance(e, list):
+                        slot["verlauf_count"] = len(e)
+                except (OSError, json.JSONDecodeError, UnicodeError):
+                    pass
+        zeilen.extend(orphans.values())
+
+    zeilen.sort(
+        key=lambda z: (
+            0 if z.get("configured") else 1,
+            str(z.get("name") or "").lower(),
+            str(z.get("id") or ""),
+        )
+    )
+    return {"wallets": zeilen, "count": len(zeilen)}
 
 
 #: utxo_cache/{16 hex}.json | _verlauf.json | _alter.json
@@ -2138,22 +2311,38 @@ def _wallet_export_anlegen_und_cache(
     if not neu_liste:
         raise ApiError(400, "Keine Wallets zum Anlegen.")
 
+    from dataclasses import replace as dc_replace
+
     vorhandene_ids = {wallets_mod.eintrag_id(e) for e in state.entries}
     entries = list(state.entries)
     angelegt = 0
     schon_da_n = 0
+    origin_touch = False
     for neu in neu_liste:
         wid = neu.wallet_id()
-        if wid in vorhandene_ids or any(
-            wallets_mod.eintrag_id(e) == wid for e in entries
-        ):
+        idx = next(
+            (
+                i for i, e in enumerate(entries)
+                if wallets_mod.eintrag_id(e) == wid
+            ),
+            None,
+        )
+        if idx is not None or wid in vorhandene_ids:
             schon_da_n += 1
+            if idx is not None:
+                alt = entries[idx]
+                soll_origin = (
+                    getattr(neu, "origin", "") or ""
+                ).strip() or config_mod.WALLET_ORIGIN_WALLET_EXPORT
+                if (getattr(alt, "origin", "") or "").strip() != soll_origin:
+                    entries[idx] = dc_replace(alt, origin=soll_origin)
+                    origin_touch = True
             continue
         entries.append(neu)
         vorhandene_ids.add(wid)
         angelegt += 1
 
-    if angelegt:
+    if angelegt or origin_touch:
         try:
             write_wallets(state.env(), entries, bestaetigt=bestaetigt)
         except BestaetigungNoetig as exc:
@@ -2168,28 +2357,29 @@ def _wallet_export_anlegen_und_cache(
     utxo_n = 0
     verlauf_n = 0
     seed_keys: list[str] = []
-    prim = neu_liste[0]
-    bekannt = (
-        wallets_mod.find_entry(state.entries, prim.wallet_id()) or prim
-    )
+    importierte: list[tuple[str, str, str]] = []  # name_lower, id, name
     try:
         for neu in neu_liste:
             wid_i = neu.wallet_id()
             ein = wallets_mod.find_entry(state.entries, wid_i) or neu
             schluessel = ein.analyse_schluessel
             seed_keys.append(schluessel)
+            name_i = ein.display_name or neu.display_name or wid_i
+            importierte.append((name_i.lower(), wid_i, name_i))
             utxos_i = _export_eintraege_fuer_wallet(parsed.utxos, ein)
             verlauf_i = _export_eintraege_fuer_wallet(parsed.verlauf, ein)
             addrs_i = _export_adressen_fuer_wallet(parsed.adressen, ein)
-            if utxos_i:
+            # Immer UTXO-Cache anlegen (auch leer) — sonst has_cache/Pille fehlen
+            # bei reinem Verlauf-Import (Wasabi ohne offene Coins).
+            if utxos_i or verlauf_i or addrs_i or parsed.adressen:
                 main.save_xpub_utxo_cache(
                     schluessel,
-                    utxos_i,
+                    utxos_i or [],
                     state.cache_dir,
                     source=cache_source,
                     max_addresses=ein.max_addresses,
                 )
-                utxo_n += len(utxos_i)
+                utxo_n += len(utxos_i or [])
             if verlauf_i:
                 bisher = main.load_xpub_verlauf_cache(
                     schluessel, state.cache_dir
@@ -2229,6 +2419,10 @@ def _wallet_export_anlegen_und_cache(
     except OSError as exc:
         raise ApiError(500, "Cache schreiben fehlgeschlagen.") from exc
 
+    importierte.sort(key=lambda t: (t[0], t[1]))
+    prim_id = importierte[0][1] if importierte else neu_liste[0].wallet_id()
+    bekannt = wallets_mod.find_entry(state.entries, prim_id) or neu_liste[0]
+
     try:
         main.seed_wallet_addresses_from_utxo_cache(
             state.wallet_ctx, seed_keys or [bekannt.analyse_schluessel],
@@ -2244,7 +2438,11 @@ def _wallet_export_anlegen_und_cache(
         "already_present": angelegt == 0 and schon_da_n > 0,
         "wallets_added": angelegt,
         "wallets_existing": schon_da_n,
-        "wallet_id": bekannt.wallet_id() if hasattr(bekannt, "wallet_id") else prim.wallet_id(),
+        "wallet_id": prim_id,
+        "wallet_ids": [t[1] for t in importierte],
+        "wallets": [
+            {"id": t[1], "name": t[2]} for t in importierte
+        ],
         "name": bekannt.display_name,
         "format": parsed.format_label,
         "descriptor": bool(bekannt.descriptor),
@@ -8163,6 +8361,8 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_cache_unreferenziert_loeschen(state)
         if teile == ["cache", "stats"] and methode == "GET":
             return 200, api_cache_stats(state)
+        if teile == ["cache", "wallets"] and methode == "GET":
+            return 200, api_cache_wallet_zeilen(state)
         if teile == ["cache"] and methode == "DELETE":
             return 200, api_cache_leeren(state)
         if len(teile) == 2 and teile[0] == "cache" and methode == "DELETE":

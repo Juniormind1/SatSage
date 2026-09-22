@@ -10,9 +10,12 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 ## [Unveröffentlicht]
 
 - **Wallets · Wasabi-Suche:** Wallet-JSON mit UTF-8-BOM (Wasabi-Standard) gilt wieder als importierbar — vorher fälschlich „Kein JSON“.
-- **Wallets · Export-Suche:** Gefundene importierbare Wallets standardmäßig **unchecked** — Nutzer wählt ausdrücklich.
+- **Wallets · Export-Suche:** Gefundene importierbare Wallets standardmäßig **unchecked** — Nutzer wählt ausdrücklich. Liste: zuerst importierbar, dann gesperrt; jeweils A–Z.
+- **Wallets · Export-Knopf:** Ein Knopf **Datei(en) importieren** / bei Auswahl **Wallet(s) importieren** (separater Import-Knopf entfernt). Nach Import Wechsel zum Wallet (bei mehreren: alphabetisch erstes).
+- **Wallets · Import-Pille:** Nach Export-Import grün **importiert** auch ohne offene UTXOs (leerer UTXO-Cache + Verlauf zählt); `ORIGIN=wallet_export` wird bei Re-Import nachgezogen.
 - **Wallets · Wasabi-Hot:** Passwortgeschützte Wallets (`EncryptedSecret`) nicht mehr importierbar (nur gelistet mit Schloss); kein automatisches Anlegen von SegWit/Taproot aus dem Hot-Secret.
 - **Wallets · Wasabi-Import:** Adressen aus `HdPubKeys` (PubKey→Adresse); UTXOs und **bereits ausgegeben** aus lokalem `BitcoinStore`/`Transactions.sqlite`, soweit vorhanden.
+- **Wallets · Cache löschen:** Listet auch **nicht konfigurierte** (verwaiste) Cache-Kennungen — einzeln löschbar, ohne Gesamtlöschung.
 - **Wallets · Import-Pille:** Nach Sparrow/Wasabi-Export grün **importiert** (alle Verlaufsadressen) bzw. gelb **importiert** (noch Lücken); aktualisiert sich nach Adressen-Nachziehen.
 - **Wallet-Export · Adressen nachziehen:** Electrs-Job mit Batch; Fortschritt im **GUI-Log** (nicht nur stdio). Ableitung mind. 500/Kette (Gap); Spends ohne Wert-Match am Prevout. Knopf **Datei(en) importieren** orange.
 - **Wallet-Export-Import · Stabilität:** Descriptor+CSV per Klartext (kein Base64-Freeze), Timeout, Sofort-Log, Fehler beenden „Export wird gelesen…“; CSV immer als Tabelle; Server-Text-Upload und Größenlimit.

@@ -10072,7 +10072,10 @@ function zeichneWalletVerwaltung() {
       cache.textContent = t("wallets.importedOk");
       const teile = [
         t("wallets.importedOkTitle"),
-        wallet.has_cache ? `${wallet.utxo_count} UTXO` : "",
+        Number(wallet.utxo_count) > 0 ? `${wallet.utxo_count} UTXO` : "",
+        Number(wallet.export_verlauf_n) > 0
+          ? `${wallet.export_verlauf_n} Tx`
+          : "",
         walletAlter(wallet),
       ];
       cache.title = teile.filter(Boolean).join(" · ");
@@ -10087,7 +10090,8 @@ function zeichneWalletVerwaltung() {
     } else if (wallet.has_cache) {
       cache.className = "pille pille-gut";
       const hinweis = cacheHinweis(wallet);
-      cache.textContent = hinweis || `${wallet.utxo_count} UTXO`;
+      const nUtxo = Number(wallet.utxo_count) || 0;
+      cache.textContent = hinweis || (nUtxo ? `${nUtxo} UTXO` : t("wallets.importedOk"));
       cache.title = [hinweis, walletAlter(wallet)].filter(Boolean).join(" · ");
     } else {
       cache.className = "pille pille-warn";
@@ -10152,7 +10156,7 @@ function zeichneWalletVerwaltung() {
     liste.append(fragment);
   });
   if (window.SatSageI18n) window.SatSageI18n.applyDom(liste);
-  zeichneGefahrWallets();
+  ladeGefahrWallets();
 
   if (Zustand.entwurf.length === 0) {
     const leer = document.createElement("div");
@@ -12656,34 +12660,81 @@ function setzeWalletCacheBestaetigung(walletId) {
   }
 }
 
-function zeichneGefahrWallets() {
+async function ladeGefahrWallets() {
+  const ziel = $("#cache-wallets");
+  if (!ziel) return;
+  try {
+    const antwort = await api("/cache/wallets");
+    zeichneGefahrWallets(antwort?.wallets || []);
+  } catch (_) {
+    // Fallback: nur konfigurierte Wallets aus der Config.
+    const fallback = (Zustand.config?.wallets || [])
+      .filter((w) => !w.is_new)
+      .map((w) => ({
+        id: w.id,
+        name: w.name,
+        configured: true,
+        has_cache: Boolean(w.has_cache),
+        utxo_count: w.utxo_count || 0,
+        verlauf_count: w.export_verlauf_n || 0,
+        stale: false,
+      }));
+    zeichneGefahrWallets(fallback);
+  }
+}
+
+function zeichneGefahrWallets(wallets) {
   const ziel = $("#cache-wallets");
   if (!ziel) return;
   ziel.replaceChildren();
-  const wallets = (Zustand.config?.wallets || []).filter((w) => !w.is_new);
-  if (!wallets.length) {
+  const liste = Array.isArray(wallets) ? wallets : [];
+  if (!liste.length) {
     const leer = document.createElement("p");
     leer.className = "gefahr-leer";
     leer.textContent = t("wallets.noWallets");
     ziel.append(leer);
     return;
   }
-  for (const wallet of wallets) {
+  for (const wallet of liste) {
     const zeile = document.createElement("div");
     zeile.className = "gefahr-zeile";
+    if (wallet.stale || wallet.configured === false) {
+      zeile.classList.add("gefahr-stale");
+    }
     zeile.dataset.walletId = wallet.id;
 
     const name = document.createElement("span");
     name.className = "gefahr-name";
     name.textContent = wallet.name || t("common.wallet");
+    if (wallet.stale || wallet.configured === false) {
+      name.title = t("wallets.cacheStaleTitle");
+      const badge = document.createElement("span");
+      badge.className = "pille pille-warn";
+      badge.textContent = t("wallets.cacheStaleBadge");
+      badge.title = t("wallets.cacheStaleTitle");
+      name.append(document.createTextNode(" "), badge);
+    }
 
     const stand = document.createElement("span");
     stand.className = "gefahr-stand";
-    if (wallet.has_cache) {
-      const utxo = wallet.utxo_count === 1
-        ? t("wallets.utxoOne")
-        : t("wallets.utxoMany", { n: wallet.utxo_count });
-      stand.textContent = cacheHinweis(wallet) ? `${utxo} · ${cacheHinweis(wallet)}` : utxo;
+    const has = Boolean(wallet.has_cache)
+      || Number(wallet.utxo_count || 0) > 0
+      || Number(wallet.verlauf_count || 0) > 0;
+    if (has) {
+      const teile = [];
+      const u = Number(wallet.utxo_count || 0);
+      const v = Number(wallet.verlauf_count || 0);
+      if (u > 0) {
+        teile.push(u === 1 ? t("wallets.utxoOne") : t("wallets.utxoMany", { n: u }));
+      }
+      if (v > 0) {
+        teile.push(v === 1 ? "1 Tx" : `${v} Tx`);
+      }
+      if (!teile.length) teile.push("Cache");
+      // Konfigurierte: optional Frische-Hinweis
+      const cfg = (Zustand.config?.wallets || []).find((w) => w.id === wallet.id);
+      if (cfg && cacheHinweis(cfg)) teile.push(cacheHinweis(cfg));
+      stand.textContent = teile.join(" · ");
     } else {
       stand.textContent = t("wallets.noCache");
     }
@@ -12693,7 +12744,7 @@ function zeichneGefahrWallets() {
     loeschen.className = "knopf knopf-gefahr knopf-klein wallet-cache-leeren";
     loeschen.textContent = t("wallets.cacheDelete");
     loeschen.title = t("wallets.cacheDeleteTitle");
-    loeschen.disabled = !wallet.has_cache;
+    loeschen.disabled = !has;
     loeschen.addEventListener("click", () => {
       setzeCacheLeerenBestaetigung(false);
       setzeWalletCacheBestaetigung(wallet.id);
@@ -12703,7 +12754,9 @@ function zeichneGefahrWallets() {
     ok.type = "button";
     ok.className = "knopf knopf-gefahr knopf-klein wallet-cache-ok";
     ok.textContent = t("wallets.cacheDeleteReally");
-    ok.title = t("wallets.cacheDeleteReallyTitle", { name: wallet.name });
+    ok.title = t("wallets.cacheDeleteReallyTitle", {
+      name: wallet.name || wallet.id || "?",
+    });
     ok.hidden = true;
     ok.addEventListener("click", () => leereWalletCache(wallet));
 
@@ -12733,8 +12786,11 @@ async function leereWalletCache(wallet) {
       + (ergebnis.verlauf_eintraege || 0)
       + (ergebnis.herkunft_eintraege || 0);
     const name = ergebnis.wallet_name || wallet.name;
+    const stale = wallet.stale || wallet.configured === false;
     const text = n
-      ? `Cache von „${name}“ gelöscht (${n} Einträge). Wallet-Alter bleibt — neu scannen ab First-seen.`
+      ? (stale
+        ? `Verwaister Cache „${name}“ gelöscht (${n} Einträge).`
+        : `Cache von „${name}“ gelöscht (${n} Einträge). Wallet-Alter bleibt — neu scannen ab First-seen.`)
       : `Cache von „${name}“ war bereits leer.`;
     kasten.className = "hinweis hinweis-gut";
     setzeText(kasten, text);
@@ -12742,6 +12798,8 @@ async function leereWalletCache(wallet) {
     logZeile(text, undefined, name);
     await ladeConfig();
     zeichneEinstellungen();
+    await ladeGefahrWallets();
+    await ladeUnreferenziertenCache();
     if (Zustand.ansicht === "wallet" && Zustand.walletId === wallet.id) {
       await zeigeWallet(Zustand.walletId);
     }
@@ -13127,7 +13185,43 @@ function liesDeskriptorDatei(ereignis) {
   leser.readAsText(datei);
 }
 
+/** Gewählte Pfade in der Sparrow/Wasabi-Suchliste. */
+function walletExportGewaehltePfade() {
+  const liste = $("#wallet-export-liste");
+  if (!liste) return [];
+  return [...liste.querySelectorAll('input[type="checkbox"]:checked:not(:disabled)')]
+    .map((el) => el.value)
+    .filter(Boolean);
+}
+
+/** Knopf-Text: Datei(en) vs. Wallet(s) je nach Checkbox-Auswahl. */
+function aktualisiereWalletExportImportKnopf() {
+  const knopf = $("#sparrow-import");
+  if (!knopf) return;
+  const n = walletExportGewaehltePfade().length;
+  if (n > 0) {
+    knopf.textContent = t("wallets.exportImportWallets");
+    knopf.title = t("wallets.exportImportWalletsTitle");
+    knopf.dataset.i18n = "wallets.exportImportWallets";
+    knopf.dataset.i18nTitle = "wallets.exportImportWalletsTitle";
+  } else {
+    knopf.textContent = t("wallets.exportImportFile");
+    knopf.title = t("wallets.exportImportTitle");
+    knopf.dataset.i18n = "wallets.exportImportFile";
+    knopf.dataset.i18nTitle = "wallets.exportImportTitle";
+  }
+}
+
+/**
+ * Ein Knopf: mit Checkbox-Auswahl → Wallet-Pfade importieren,
+ * sonst Datei-Dialog.
+ */
 function oeffneSparrowImport() {
+  const pfade = walletExportGewaehltePfade();
+  if (pfade.length) {
+    starteWalletExportImportAuswahl(false);
+    return;
+  }
   const feld = $("#sparrow-dateien");
   if (feld) feld.click();
 }
@@ -13165,6 +13259,7 @@ async function starteWalletExportSuche() {
       : t("wallets.exportSearchEmpty");
     if (kasten) kasten.replaceChildren(hinweisZeile(text));
     logZeile(`Wallet-Suche: ${text}`);
+    aktualisiereWalletExportImportKnopf();
   } catch (fehler) {
     _walletExportTreffer = [];
     if (liste) liste.replaceChildren();
@@ -13175,6 +13270,7 @@ async function starteWalletExportSuche() {
       );
     }
     meldung(fehler.message || t("wallets.exportFailed"), "krit");
+    aktualisiereWalletExportImportKnopf();
   }
 }
 
@@ -13182,7 +13278,19 @@ function zeichneWalletExportListe(treffer) {
   const liste = $("#wallet-export-liste");
   if (!liste) return;
   liste.replaceChildren();
-  for (const w of treffer || []) {
+  // Server sortiert bereits: importierbar → locked, jeweils A–Z.
+  // Client-seitig nochmals absichern.
+  const sortiert = [...(treffer || [])].sort((a, b) => {
+    const ai = a && a.importable ? 0 : 1;
+    const bi = b && b.importable ? 0 : 1;
+    if (ai !== bi) return ai - bi;
+    const an = String((a && a.name) || "").toLowerCase();
+    const bn = String((b && b.name) || "").toLowerCase();
+    if (an < bn) return -1;
+    if (an > bn) return 1;
+    return 0;
+  });
+  for (const w of sortiert) {
     const zeile = document.createElement("div");
     zeile.className = "export-zeile";
     if (w.locked) zeile.classList.add("export-gesperrt");
@@ -13196,6 +13304,7 @@ function zeichneWalletExportListe(treffer) {
     cb.dataset.exportId = w.id || "";
     // Default unchecked: Nutzer wählt ausdrücklich, was importiert wird.
     cb.checked = false;
+    cb.addEventListener("change", aktualisiereWalletExportImportKnopf);
     label.append(cb);
 
     const app = document.createElement("span");
@@ -13229,16 +13338,13 @@ function zeichneWalletExportListe(treffer) {
     }
     liste.append(zeile);
   }
+  aktualisiereWalletExportImportKnopf();
 }
 
 async function starteWalletExportImportAuswahl(bestaetigt = false) {
   const kasten = $("#sparrow-befund");
-  const liste = $("#wallet-export-liste");
-  const knopf = $("#wallet-export-import-wahl");
-  if (!liste) return;
-  const pfade = [...liste.querySelectorAll('input[type="checkbox"]:checked:not(:disabled)')]
-    .map((el) => el.value)
-    .filter(Boolean);
+  const knopf = $("#sparrow-import");
+  const pfade = walletExportGewaehltePfade();
   if (!pfade.length) {
     if (kasten) {
       kasten.hidden = false;
@@ -13283,6 +13389,47 @@ async function starteWalletExportImportAuswahl(bestaetigt = false) {
     logZeile(`Wallet-Export: ${msg}`, true);
   } finally {
     if (knopf) knopf.disabled = false;
+    aktualisiereWalletExportImportKnopf();
+  }
+}
+
+/** Nach Import: alphabetisch erstes importiertes Wallet öffnen. */
+async function wechsleZuImportiertemWallet(antwort) {
+  let zielId = "";
+  const liste = Array.isArray(antwort?.wallets) ? antwort.wallets : [];
+  if (liste.length) {
+    const sortiert = [...liste].sort((a, b) => {
+      const an = String((a && a.name) || "").toLowerCase();
+      const bn = String((b && b.name) || "").toLowerCase();
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+      return String((a && a.id) || "").localeCompare(String((b && b.id) || ""));
+    });
+    zielId = sortiert[0]?.id || "";
+  }
+  if (!zielId && antwort?.wallet_id) zielId = antwort.wallet_id;
+  if (!zielId && Array.isArray(antwort?.wallet_ids) && antwort.wallet_ids[0]) {
+    zielId = antwort.wallet_ids[0];
+  }
+  if (!zielId) return;
+  // Config kann IDs frisch haben — Prefer Matching aus config.
+  const cfg = (Zustand.config?.wallets || []).find((w) => w.id === zielId);
+  if (!cfg && (Zustand.config?.wallets || []).length) {
+    const names = new Set(
+      liste.map((w) => String((w && w.name) || "").toLowerCase()).filter(Boolean),
+    );
+    const treffer = (Zustand.config.wallets || [])
+      .filter((w) => names.has(String(w.name || "").toLowerCase()))
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
+    if (treffer[0]?.id) zielId = treffer[0].id;
+  }
+  try {
+    await zeigeWallet(zielId);
+  } catch (fehler) {
+    logZeile(
+      `Wallet-Export: Wechsel zur Ansicht fehlgeschlagen — ${fehler.message || fehler}`,
+      true,
+    );
   }
 }
 
@@ -13335,6 +13482,7 @@ async function nachWalletExportErfolg(antwort) {
     /* optional */
   }
   await ggfAdressenNachziehenNachExport(antwort);
+  await wechsleZuImportiertemWallet(antwort);
 }
 
 /**
@@ -16018,8 +16166,8 @@ async function start() {
       if (typeof zeichneWalletVerwaltung === "function" && Zustand.ansicht === "wallets") {
         zeichneWalletVerwaltung();
       }
-      if (typeof zeichneGefahrWallets === "function" && Zustand.ansicht === "wallets") {
-        zeichneGefahrWallets();
+      if (typeof ladeGefahrWallets === "function" && Zustand.ansicht === "wallets") {
+        ladeGefahrWallets();
       }
       if (typeof zeichneQuellen === "function" && Zustand.ansicht === "datenquellen") {
         zeichneQuellen(Zustand.config?.sources || []);
@@ -16296,10 +16444,7 @@ async function start() {
   if (sparrowDateien) sparrowDateien.addEventListener("change", liesSparrowDateien);
   const exportSuchen = $("#wallet-export-suchen");
   if (exportSuchen) exportSuchen.addEventListener("click", starteWalletExportSuche);
-  const exportImportWahl = $("#wallet-export-import-wahl");
-  if (exportImportWahl) {
-    exportImportWahl.addEventListener("click", () => starteWalletExportImportAuswahl(false));
-  }
+  aktualisiereWalletExportImportKnopf();
 
   let deskriptorTimer = null;
   $("#neuer-deskriptor").addEventListener("input", () => {

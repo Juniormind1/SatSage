@@ -86,6 +86,34 @@ class TestWalletDiscover(unittest.TestCase):
             self.assertTrue(treffer[0].locked)
             self.assertIn("Passwort", treffer[0].reason)
 
+    def test_sortierung_importierbar_vor_locked(self):
+        xpub = _xpub()
+        view = {
+            "EncryptedSecret": None,
+            "MasterFingerprint": "aabbccdd",
+            "ExtPubKey": xpub,
+            "AccountKeyPath": "84'/0'/0'",
+            "HdPubKeys": [],
+            "BlockchainState": {"Network": "Main"},
+        }
+        hot = dict(view)
+        hot["EncryptedSecret"] = "6PYfake"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "WalletWasabi" / "Client" / "Wallets"
+            root.mkdir(parents=True)
+            (root / "Zulu.json").write_text(json.dumps(view), encoding="utf-8")
+            (root / "Alpha.json").write_text(json.dumps(view), encoding="utf-8")
+            (root / "BetaHot.json").write_text(json.dumps(hot), encoding="utf-8")
+            treffer = discover.suche_lokale_wallets(wurzeln=[root])
+            self.assertEqual(len(treffer), 3)
+            self.assertTrue(treffer[0].importable)
+            self.assertTrue(treffer[1].importable)
+            self.assertFalse(treffer[2].importable)
+            self.assertEqual(
+                [t.name for t in treffer if t.importable],
+                ["Alpha", "Zulu"],
+            )
+
     def test_schon_vorhanden_ausgeblendet(self):
         xpub = _xpub()
         wallet = {

@@ -161,6 +161,9 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
     for entry in entries:
         eintrag = main.load_xpub_cache_entry(entry.analyse_schluessel, cache_dir)
         utxos = (eintrag or {}).get("utxos") or []
+        verlauf = main.load_xpub_verlauf_cache(
+            entry.analyse_schluessel, cache_dir
+        ) or []
         alter = main.xpub_first_seen(entry.analyse_schluessel, cache_dir) or {}
         cache_mtime = None
         scan_tip = None
@@ -179,11 +182,22 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
                     scan_tip = int(tip_roh)
                 except (TypeError, ValueError):
                     scan_tip = None
+        elif verlauf:
+            # Nur Verlauf (z. B. Wasabi-Store ohne offene UTXOs): mtime der
+            # Verlaufsdatei, damit die Oberfläche „hat Daten“ erkennt.
+            vpfad = main._xpub_verlauf_cache_path(
+                entry.analyse_schluessel, cache_dir
+            )
+            try:
+                cache_mtime = int(vpfad.stat().st_mtime)
+            except OSError:
+                cache_mtime = None
         exp_status, exp_ohne, exp_n = _export_import_stand(entry, cache_dir)
         zusammenfassungen.append(
             WalletSummary(
                 entry=entry,
-                has_cache=eintrag is not None,
+                # UTXO-Datei oder Verlauf zählt als Cache (Import-Pille / Nav).
+                has_cache=eintrag is not None or bool(verlauf),
                 utxo_count=len(utxos),
                 total_sats=sum(int(u.get("value", 0)) for u in utxos),
                 scan_end_index=(eintrag or {}).get("scan_end_index"),
