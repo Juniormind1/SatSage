@@ -2,6 +2,34 @@
 
 Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diesem Repository arbeiten.
 
+## HART · Geheimnisse und Doxxing (nie brechen)
+
+**Niemals Geheimnisse pushen oder persönliche Daten doxxen.**
+
+Gilt für **Commit, Push, PR, Issue, Changelog, Log-Ausgabe, Screenshot, Chat-Antwort und Tool-Output** — ohne Ausnahme, ohne „nur kurz / Test / Worktree / schon lokal“. Diese Regel steht über Bequemlichkeit und Task-Tempo.
+
+**Geheimnisse** (Beispiele, nicht abschließend):
+
+- `.env`, `.env.backup*`, scrambled `.env`, `.satsage-password` (+ `.tmp`)
+- RPC-/API-Keys, App-Passwörter **und** Passwort-Hashes, Session-Token, SMTP/LLM-Keys
+- Seed / Mnemonic / xprv / WIF; volle XPUBs/Deskriptoren in Commits oder öffentlichem Text
+- Heim-Node-Credentials, Tor-Control-Passwörter, private Onion-URLs mit Auth
+
+**Persönliche Daten / Doxxing** (Beispiele):
+
+- Klarnamen, Anschrift, Telefon, private E-Mails (außer der freigegebenen Maintainer-Git-ID)
+- Persönliche Wallet-Namen, reale Mainnet-Adressen/TxIDs des Nutzers in Issues, PRs, Doku, Changelogs
+- Screenshots oder Logs, die Obiges erkennbar machen
+
+**Pflicht vor jedem Commit und vor jedem Push:**
+
+1. `git status` und den staged Diff lesen.
+2. Trifft ein Pfad oder Diff-Inhalt die Listen oben → **abbrechen**, nicht committen/pushen.
+3. Versehentlich gestaged: `git rm --cached -- <pfad>`, Eintrag in `.gitignore`, Commit nur der Bereinigung.
+4. Versehentlich remote: History bereinigen (filter) + Force-Push nur mit Auftrag; betroffene Secrets **rotieren**.
+
+Technische Riegel: `.gitignore`, `githooks/pre-commit` (Secret-Pfade), Dealbreaker **S1** in [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Hooks ersetzen diese Prüfung nicht — Agents prüfen den Diff selbst.
+
 ## Zweck
 
 **SatSage â€“ know your sats** (frÃ¼her xPubQuery) ist ein Multi-XPUB- und Taproot-Analyzer fÃ¼r Wasabi- und Standard-Wallets. Das Tool analysiert Transaktionen und unspent UTXOs und zeigt, **woher die Sats wann kamen** â€” insbesondere wann sie ein xPub-Wallet betraten oder es wieder verlieÃŸen. Typischer Anwendungsfall: Nachweise fÃ¼r die SteuererklÃ¤rung (Haltedauer, Stichtage). Anzeigename, Logo und technische IDs (`satsage`, Binary `satsage-webgui`, Specter-Package) sind vereinheitlicht.
@@ -177,7 +205,7 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 - **Python:** 3.10+, Standardbibliothek bevorzugen; AbhÃ¤ngigkeiten: `embit`, `chiabip158` (nur Self-Tests)
 - **Stil:** Bestehenden Code-Stil beibehalten â€” gleiche Namensgebung, Import-Stil, Docstring-Niveau
 - **Scope:** Nur Ã¤ndern, was die Aufgabe erfordert; keine Drive-by-Refactors
-- **Secrets:** `.env`, XPUBs, RPC-PasswÃ¶rter, persÃ¶nliche Wallet-Namen nie committen oder in Ausgaben wiederholen
+- **Secrets / Doxxing:** siehe **HART · Geheimnisse und Doxxing** oben — nie pushen, nie in Ausgaben wiederholen
 - **Tests:** `py` statt `python` auf Windows; bei Netzwerk-Tests `.env` laden via `_load_dotenv()`
 - **TemporÃ¤re Skripte:** `_patch_*.py`, `_test_*.py`, `_profile_*.py` sind Entwicklungs-Hilfen â€” nicht committen
 - **Changelog:** CHANGELOG.md bei nennenswerten Änderungen nachziehen — spätestens zusammen mit dem Commit. Neue Punkte unter [Unveröffentlicht]. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
@@ -229,7 +257,7 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten.
 
 **Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
@@ -238,6 +266,7 @@ Assistenten sollen:
 - Änderungen vorstellen und testen, aber **nicht** automatisch committen oder pushen
 - Nicht nach jedem Task „Soll ich committen/pushen?“ fragen
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
+- Vor Commit/Push: **HART · Geheimnisse und Doxxing** am staged Diff prüfen; bei Treffer abbrechen
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 - Für Commit/Push ohne Token-Verbrauch die Maintainer-Skripte vorschlagen (`scripts/commit.*`, `scripts/push.*`)
 
@@ -275,6 +304,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 
 ## Sicherheit & Datenschutz
 
+- **HART:** Niemals Geheimnisse pushen oder persönliche Daten doxxen — Abschnitt oben; Dealbreaker **S1**
 - XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
 - Lern-URLs / Kaninchenbau: nur Bitcoin-only-Content für Plebs (Mechanismen, keine SatSage-Internals); Shitcoins/Eth im Zweifel warnen (Dealbreaker T13)
 - Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen

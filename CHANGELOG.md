@@ -10,6 +10,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 ## [Unveröffentlicht]
 
 - **Sicherheit · `.satsage-password`:** aus dem Git-Index entfernt und in `.gitignore` — Login-Hash gehört nie ins Repo.
+- **Agents · HART:** Grundregel „niemals Geheimnisse pushen oder persönliche Daten doxxen“ prominent in `AGENTS.md`, Dealbreaker **S1**, `githooks/pre-commit` blockiert Secret-Pfade.
 - **.env-Scramble:** Eine Datei **`.env`** — mit Passwort scrambled (Magic `SSGB1`), ohne Passwort Klartext. **`.env.backup0`…`9`** werden mitgesetzt (scramble bei Passwort, unscramble bei Löschen, Umschlüsselung bei Änderung). Kein `.env.gobbledigook` mehr; Legacy wird migriert. Login = Hash + File-Key. CLI/Specter/Umbrel/Start9 ausgenommen. Doku (Handbuch §11, README): `.env` at rest mit Passwort; Caches/Exporte Klartext — Schutz über verschlüsselte Volume (FDE/VeraCrypt), SatSage vor dem Schließen beenden.
 - **Login · Passwort bei GUI-Start:** Ist ein App-Passwort gesetzt, reicht ``?t=``/Token auch auf Loopback nicht mehr — Login-Seite nach Serverstart. Session-Cookie nach Anmeldung wie bisher.
 - **Einstellungen · Passwort (Windows):** Login-Hash ohne ``os.fchmod`` (fehlte → ``AttributeError`` → Browser-NetworkError). Löschen per **POST** statt DELETE+Body. Aktuelles Passwort wird bei Entfernen eingefordert (Fokus aufs Feld).

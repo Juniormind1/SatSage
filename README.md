@@ -397,6 +397,7 @@ Production-Binaries von Specter laden fremde Extensions **nicht** aus dem CWD; d
 
 - **XPUBs** erlauben das Ableiten aller Wallet-Adressen — behandle sie wie sensible Daten.
 - **Wallet-Namen** in `.env`, `utxo_cache/` und `immutable_cache/` können persönliche Bezeichnungen enthalten — nicht committen oder in Screenshots zeigen.
+- **`.env`-Scramble:** `.env` ist mit Passwort at rest verschlüsselt. Caches und Exporte sind Klartext — wer die mit schützen will, legt das SatSage-Verzeichnis auf eine verschlüsselte Volume (System-FDE und/oder VeraCrypt) und beendet SatSage, bevor die Volume wieder zu geht.
 - Nutze das Tool lokal; teile keine XPUBs in Issues oder Screenshots.
 - **Fulcrum (öffentliche Onions/Clearnet):** Rotation mildert Einzelserver-Risiko — Privatsphäre „mäßig“.
 - **Eigener Node (BIP-158 / eigener Fulcrum):** beste Option — Privatsphäre „hoch“.
