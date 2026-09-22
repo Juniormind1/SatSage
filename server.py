@@ -511,21 +511,163 @@ def _verify_password(password: str, stored: str) -> bool:
 
 
 def _write_password_hash(state, password: str) -> None:
+    """Schreibt den Login-Hash atomar (tmp + replace), ohne fd-chmod-APIs."""
     path = _auth_file(state)
     path.parent.mkdir(parents=True, exist_ok=True)
     value = (_hash_password(password) + "\n").encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(path, flags, 0o600)
+    tmp = path.with_name(path.name + ".tmp")
+    if tmp.is_file() and os.name == "nt":
+        try:
+            os.chmod(tmp, 0o666)
+        except OSError:
+            pass
+    tmp.write_bytes(value)
     try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            fd = None
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
-    finally:
-        if fd is not None:
-            os.close(fd)
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    if path.is_file() and os.name == "nt":
+        try:
+            os.chmod(path, 0o666)
+        except OSError:
+            pass
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        if path.is_file():
+            try:
+                os.chmod(path, 0o666)
+            except OSError:
+                pass
+            path.unlink()
+        os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _clear_password_hash(state) -> None:
+    """Entfernt die Passwortdatei (optionales App-Passwort). Env-Hash unberührt."""
+    path = _auth_file(state)
+    try:
+        path.unlink(missing_ok=True)
+    except TypeError:
+        # Python < 3.8 missing_ok — hier 3.10+
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        if path.is_file():
+            path.unlink()
+
+
+def _env_scramble_erlaubt(state) -> bool:
+    """Phase 1: kein Scramble unter Umbrel/Start9/Specter-managed."""
+    return getattr(state, "managed_by", None) not in _NODE_MANAGED and (
+        getattr(state, "managed_by", None) != "specter"
+    )
+
+
+def _env_scramble_status(state) -> dict:
+    try:
+        from core import env_scramble as sc
+
+        scrambled = sc.is_scramble_file_present(state.env_path)
+        path = Path(state.env_path)
+        plain = path.is_file() and not sc.is_env_scrambled(path)
+        locked = scrambled and sc.get_session_key() is None
+        return {
+            "active": scrambled,
+            "locked": locked,
+            "plain_env_present": plain,
+            "allowed": _env_scramble_erlaubt(state),
+        }
+    except Exception:
+        return {
+            "active": False,
+            "locked": False,
+            "plain_env_present": Path(state.env_path).is_file(),
+            "allowed": False,
+        }
+
+
+def _scramble_enable_for_password(state, password: str) -> None:
+    """Nach Passwort-Setzen: ``.env`` scrambled (eine Datei)."""
+    if not _env_scramble_erlaubt(state):
+        return
+    from core import env_scramble as sc
+
+    try:
+        env = state.env()
+        plain = env.render()
+    except Exception:
+        plain = ""
+    if not plain.strip() and Path(state.env_path).is_file():
+        plain = Path(state.env_path).read_text(encoding="utf-8")
+    if not plain.strip() and sc.is_scramble_file_present(state.env_path):
+        sc.change_scramble_password(state.env_path, password, password)
+        state.env_scramble_unlocked = True
+        try:
+            state.reload()
+        except Exception:
+            pass
+        return
+    if not plain.strip():
+        plain = "\n"
+    sc.enable_scramble(state.env_path, plain, password)
+    state.env_scramble_unlocked = True
+    try:
+        state.reload()
+    except Exception:
+        pass
+
+
+def _scramble_change_password(state, old_password: str, new_password: str) -> None:
+    if not _env_scramble_erlaubt(state):
+        return
+    from core import env_scramble as sc
+
+    if sc.is_scramble_file_present(state.env_path):
+        sc.change_scramble_password(state.env_path, old_password, new_password)
+        state.env_scramble_unlocked = True
+        try:
+            state.reload()
+        except Exception:
+            pass
+        return
+    _scramble_enable_for_password(state, new_password)
+
+
+def _scramble_disable_for_password(state, password: str) -> None:
+    if not _env_scramble_erlaubt(state):
+        return
+    from core import env_scramble as sc
+
+    if not sc.is_scramble_file_present(state.env_path):
+        sc.clear_session_key()
+        state.env_scramble_unlocked = True
+        return
+    sc.disable_scramble(state.env_path, password)
+    state.env_scramble_unlocked = True
+    try:
+        state.reload()
+    except Exception:
+        pass
+
+
+def _scramble_unlock(state, password: str) -> None:
+    """File-Key aus Passwort + Config neu laden (auch Dual-Write-Migration)."""
+    from core import env_scramble as sc
+
+    if not _env_scramble_erlaubt(state):
+        state.env_scramble_unlocked = True
+        return
+    if not sc.is_scramble_file_present(state.env_path) and not Path(state.env_path).is_file():
+        state.env_scramble_unlocked = True
+        return
+    sc.unlock_with_password(state.env_path, password)
+    state.env_scramble_unlocked = True
+    state.reload()
 
 
 def _seed_managed_password(state) -> None:
@@ -624,7 +766,16 @@ class AppState:
         self.sessions: dict[str, float] = {}
         self._login_failures: dict[str, list[float]] = {}
         self._auth_lock = threading.Lock()
-        self.max_parallel_jobs = _max_parallel_jobs(env_values=EnvFile.load(self.env_path).values())
+        # File-Key für .env.gobbledigook nur RAM (core.env_scramble Session).
+        self.env_scramble_unlocked = False
+        try:
+            env0 = EnvFile.load(self.env_path)
+            env_vals = env0.values()
+            self.env_scramble_unlocked = not bool(getattr(env0, "scramble_locked", False))
+        except Exception:
+            env_vals = {}
+            self.env_scramble_unlocked = True
+        self.max_parallel_jobs = _max_parallel_jobs(env_values=env_vals)
         self.jobs = JobRegistry(max_parallel_heavy=self.max_parallel_jobs)
         self.scan_queue = ScanQueue(self.jobs)
         self.header_job_id: str | None = None
@@ -2011,6 +2162,9 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
             _specter_labels_for_api(state) if state.managed_by == "specter" else None
         ),
         "local_core": _local_core_status_for_api(state),
+        # App-Passwort (Hash in .satsage-password) — UI Einstellungen; Scrambling später.
+        "password_set": _password_is_set(state),
+        "env_scramble": _env_scramble_status(state),
     }
 
 
@@ -2046,6 +2200,82 @@ def _ui_theme_aus_env(werte: dict) -> str:
     if roh in ("dark", "dunkel"):
         return "dark"
     return "light"
+
+
+def api_save_app_password(state: AppState, payload: dict) -> dict:
+    """
+    Einstellungen · Passwort setzen/ändern (Token-API, wie übrige Config).
+
+    Reihenfolge: zuerst Login-Hash (atomar), dann Scramble
+    (``.env`` als Cipher).
+    """
+    current = str(payload.get("current_password") or payload.get("old_password") or "")
+    password = str(payload.get("new_password") or payload.get("password") or "")
+    confirm = str(
+        payload.get("confirm") or payload.get("password_confirm") or password
+    )
+    stored = _password_hash(state)
+    if stored and not _verify_password(current, stored):
+        raise ApiError(403, "Aktuelles Passwort ist falsch.")
+    if not password or password != confirm:
+        raise ApiError(400, "Passwörter stimmen nicht überein oder sind leer.")
+    try:
+        _write_password_hash(state, password)
+    except OSError as exc:
+        raise ApiError(500, f"Passwort-Hash konnte nicht geschrieben werden: {exc}") from exc
+    except Exception as exc:
+        raise ApiError(500, f"Passwort-Hash fehlgeschlagen: {exc}") from exc
+    try:
+        from core import env_scramble as sc_mod
+
+        if stored and sc_mod.is_scramble_file_present(state.env_path):
+            _scramble_change_password(state, current, password)
+        else:
+            _scramble_enable_for_password(state, password)
+    except Exception as exc:
+        raise ApiError(400, f"env-scramble: {exc}") from exc
+    return {
+        "ok": True,
+        "password_set": True,
+        "env_scramble": _env_scramble_status(state),
+    }
+
+
+def api_delete_app_password(state: AppState, payload: dict) -> dict:
+    """Einstellungen · Passwort entfernen + Klartext-.env wiederherstellen."""
+    current = str(payload.get("current_password") or payload.get("old_password") or "")
+    if not _password_is_set(state):
+        return {
+            "ok": True,
+            "password_set": False,
+            "env_scramble": _env_scramble_status(state),
+        }
+    if not current or not _verify_password(current, _password_hash(state)):
+        raise ApiError(403, "Aktuelles Passwort ist falsch.")
+    try:
+        _scramble_disable_for_password(state, current)
+    except Exception as exc:
+        raise ApiError(400, f"env-scramble: {exc}") from exc
+    _clear_password_hash(state)
+    return {
+        "ok": True,
+        "password_set": False,
+        "env_scramble": _env_scramble_status(state),
+    }
+
+
+def api_unlock_env(state: AppState, payload: dict) -> dict:
+    """Nach Neustart: gobbledigook mit Passwort öffnen (File-Key nur RAM)."""
+    password = str(payload.get("password") or payload.get("current_password") or "")
+    if not password:
+        raise ApiError(400, "Passwort fehlt.")
+    if _password_is_set(state) and not _verify_password(password, _password_hash(state)):
+        raise ApiError(403, "Passwort ist falsch.")
+    try:
+        _scramble_unlock(state, password)
+    except Exception as exp:
+        raise ApiError(403, f"Unlock fehlgeschlagen: {exp}") from exp
+    return {"ok": True, "env_scramble": _env_scramble_status(state)}
 
 
 def api_save_ui_lang(state: AppState, payload: dict) -> dict:
@@ -8117,16 +8347,17 @@ class Handler(BaseHTTPRequestHandler):
         return bool(value) and secrets.compare_digest(value, self.state.token)
 
     def _token_ok(self, query: dict) -> bool:
-        password_set = _password_is_set(self.state)
+        # Passwort gesetzt → nur Login-Session (Cookie). Weder ?t= noch
+        # X-Satsage-Token ersetzen die Passwort-Abfrage — auch nicht auf
+        # Loopback (sonst öffnet server.py die GUI ohne Login).
+        if _password_is_set(self.state):
+            return False
         if self._has_valid_token_header():
-            return not password_set or self._loopback_request()
+            return True
         gestellt = (query.get("t") or [""])[0]
         if not gestellt or not secrets.compare_digest(gestellt, self.state.token):
             return False
-        # Query-Token bleibt ausschließlich Bootstrap. Remote-Clients mit
-        # gesetztem Passwort müssen die Passwort-Session verwenden.
-        if password_set and not self._loopback_request():
-            return False
+        # Query-Token: Bootstrap ohne Passwort → Session anlegen.
         self._new_session()
         return True
 
@@ -8313,10 +8544,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._fehler(403, "Passwort ist falsch.")
                 return True
             self._login_succeeded()
+            # File-Key aus demselben Passwort (gobbledigook → RAM).
+            try:
+                _scramble_unlock(self.state, password)
+            except Exception as exc:
+                self._fehler(403, f"Konfiguration entsperren fehlgeschlagen: {exc}")
+                return True
             if (self.headers.get("Content-Type") or "").split(";", 1)[0].lower() == "application/x-www-form-urlencoded":
                 self._redirect("/")
             else:
-                self._json(200, {"ok": True, "authenticated": True})
+                self._json(200, {
+                    "ok": True,
+                    "authenticated": True,
+                    "env_scramble": _env_scramble_status(self.state),
+                })
             return True
         if pfad == "/api/auth/setup" and methode == "POST":
             if _password_is_set(self.state):
@@ -8336,17 +8577,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._fehler(400, "Passwörter stimmen nicht überein oder sind leer.")
                 return True
             _write_password_hash(self.state, password)
+            try:
+                _scramble_enable_for_password(self.state, password)
+            except Exception as exc:
+                self._fehler(400, f"env-scramble: {exc}")
+                return True
             self._login_succeeded()
             if (self.headers.get("Content-Type") or "").split(";", 1)[0].lower() == "application/x-www-form-urlencoded":
                 self._redirect("/")
             else:
-                self._json(201, {"ok": True, "authenticated": True})
+                self._json(201, {
+                    "ok": True,
+                    "authenticated": True,
+                    "env_scramble": _env_scramble_status(self.state),
+                })
             return True
         if pfad == "/api/auth/logout" and methode in ("POST", "DELETE"):
             sid = self._session_id()
             if sid:
                 with self.state._auth_lock:
                     self.state.sessions.pop(sid, None)
+            try:
+                from core import env_scramble as sc_mod
+                sc_mod.clear_session_key()
+            except Exception:
+                pass
+            self.state.env_scramble_unlocked = False
             self._set_session_cookie("", delete=True)
             self._json(200, {"ok": True, "authenticated": False})
             return True
@@ -8369,14 +8625,115 @@ class Handler(BaseHTTPRequestHandler):
             if stored and not _verify_password(current, stored) and not self._loopback_request():
                 self._fehler(403, "Aktuelles Passwort ist falsch.")
                 return True
+            # Auch lokal: bei gesetztem Passwort muss das aktuelle stimmen
+            # (Einstellungen-UI), außer Ersteinrichtung ohne Hash.
+            if stored and not _verify_password(current, stored):
+                self._fehler(403, "Aktuelles Passwort ist falsch.")
+                return True
             if not password or password != confirm:
                 self._fehler(400, "Passwörter stimmen nicht überein oder sind leer.")
                 return True
-            _write_password_hash(self.state, password)
+            # Hash zuerst (atomar), dann Scramble — siehe api_save_app_password.
+            try:
+                _write_password_hash(self.state, password)
+            except Exception as exc:
+                self._fehler(500, f"Passwort-Hash fehlgeschlagen: {exc}")
+                return True
+            try:
+                from core import env_scramble as sc_mod
+
+                if stored and sc_mod.is_scramble_file_present(self.state.env_path):
+                    _scramble_change_password(self.state, current, password)
+                else:
+                    # Ersteinrichtung oder Hash ohne Cipher (Feature neu): enable.
+                    _scramble_enable_for_password(self.state, password)
+            except Exception as exc:
+                self._fehler(400, f"env-scramble: {exc}")
+                return True
             with self.state._auth_lock:
                 self.state.sessions.clear()
             self._login_succeeded()
-            self._json(200, {"ok": True, "authenticated": True})
+            self._json(200, {
+                "ok": True,
+                "authenticated": True,
+                "password_set": True,
+                "env_scramble": _env_scramble_status(self.state),
+            })
+            return True
+        if pfad == "/api/auth/password" and methode == "DELETE":
+            if not self._auth_ok({}):
+                self._fehler(403, "Anmeldung erforderlich.")
+                return True
+            if not self._csrf_ok(methode):
+                self._fehler(403, "Origin/Referer fehlt oder ist nicht erlaubt.")
+                return True
+            try:
+                body = self._body()
+                current = str(
+                    body.get("current_password") or body.get("old_password") or ""
+                )
+            except ApiError as exc:
+                self._fehler(exc.status, exc.message)
+                return True
+            if not _password_is_set(self.state):
+                self._json(200, {
+                    "ok": True,
+                    "password_set": False,
+                    "env_scramble": _env_scramble_status(self.state),
+                })
+                return True
+            if not current or not _verify_password(current, _password_hash(self.state)):
+                self._fehler(403, "Aktuelles Passwort ist falsch.")
+                return True
+            try:
+                _scramble_disable_for_password(self.state, current)
+            except Exception as exc:
+                self._fehler(400, f"env-scramble: {exc}")
+                return True
+            _clear_password_hash(self.state)
+            with self.state._auth_lock:
+                self.state.sessions.clear()
+            # Nach Entfernen: Session neu (Token bleibt Session-Cookie-Flow).
+            self._login_succeeded()
+            self._json(200, {
+                "ok": True,
+                "password_set": False,
+                "env_scramble": _env_scramble_status(self.state),
+            })
+            return True
+        if pfad == "/api/auth/unlock-env" and methode == "POST":
+            # Nach Serverstart: gobbledigook öffnen (File-Key nur RAM).
+            if not self._auth_ok({}) and not self._loopback_request():
+                self._fehler(403, "Anmeldung erforderlich.")
+                return True
+            if not self._csrf_ok(methode) and not self._loopback_request():
+                self._fehler(403, "Origin/Referer fehlt oder ist nicht erlaubt.")
+                return True
+            try:
+                body = self._body()
+                password = str(body.get("password") or body.get("current_password") or "")
+            except ApiError as exc:
+                self._fehler(exc.status, exc.message)
+                return True
+            if not password:
+                self._fehler(400, "Passwort fehlt.")
+                return True
+            if _password_is_set(self.state) and not _verify_password(
+                password, _password_hash(self.state),
+            ):
+                self._fehler(403, "Passwort ist falsch.")
+                return True
+            try:
+                _scramble_unlock(self.state, password)
+            except Exception as exp:
+                self._fehler(403, f"Unlock fehlgeschlagen: {exp}")
+                return True
+            if not self._session_ok():
+                self._login_succeeded()
+            self._json(200, {
+                "ok": True,
+                "env_scramble": _env_scramble_status(self.state),
+            })
             return True
         return False
 
@@ -8444,19 +8801,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(*self._api(methode, pfad, query))
                 return
             if methode == "GET" and pfad in ("/handbuch.html", "/handbuch"):
-                if _password_is_set(self.state) and not self._loopback_request() and not auth_ok:
+                if _password_is_set(self.state) and not auth_ok:
                     self._redirect("/login?next=/handbuch.html")
                 else:
                     self._sende_handbuch()
                 return
             if methode == "GET":
-                if _password_is_set(self.state) and not self._loopback_request() and not auth_ok:
-                    self._redirect("/login?next=" + (pfad or "/"))
+                if _password_is_set(self.state) and not auth_ok:
+                    # Auch Loopback: gesetztes Passwort → Login, nicht nur ?t=.
+                    next_pfad = pfad or "/"
+                    if next_pfad == "/":
+                        self._redirect("/login?next=/")
+                    else:
+                        self._redirect("/login?next=" + next_pfad)
                 else:
-                    # Token (?t=) bewusst in der URL belassen: die Web-GUI liest es
-                    # clientseitig und entfernt es per history.replaceState. Ein
-                    # serverseitiges Redirect auf "/" wuerde das Token verwerfen,
-                    # bevor app.js laeuft ("Token fehlt"-Dialog).
+                    # Ohne Passwort: Token (?t=) in der URL belassen — die Web-GUI
+                    # liest es clientseitig und entfernt es per history.replaceState.
                     self._statisch(pfad)
                 return
             self._fehler(405, "Methode nicht erlaubt.")
@@ -8504,6 +8864,19 @@ class Handler(BaseHTTPRequestHandler):
             return 200, api_save_mempool(state, self._body())
         if teile == ["config", "start-sync"] and methode == "PUT":
             return 200, api_save_start_sync(state, self._body())
+        if teile == ["config", "app-password"] and methode == "PUT":
+            return 200, api_save_app_password(state, self._body())
+        if teile == ["config", "app-password"] and methode == "POST":
+            # Löschen per POST (Body); DELETE+Body bricht in manchen Browsern ab.
+            body = self._body()
+            aktion = str(body.get("action") or body.get("op") or "").strip().lower()
+            if aktion in ("delete", "remove", "clear", "loeschen", "löschen"):
+                return 200, api_delete_app_password(state, body)
+            raise ApiError(400, "Unbekannte app-password-Aktion.")
+        if teile == ["config", "app-password"] and methode == "DELETE":
+            return 200, api_delete_app_password(state, self._body())
+        if teile == ["config", "unlock-env"] and methode == "POST":
+            return 200, api_unlock_env(state, self._body())
         if teile == ["config", "ui-lang"] and methode == "PUT":
             return 200, api_save_ui_lang(state, self._body())
         if teile == ["config", "ui-theme"] and methode == "PUT":

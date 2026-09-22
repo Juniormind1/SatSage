@@ -5,6 +5,10 @@
 .env.backup[0-9]
 .env.tmp
 .env.*.bak
+# Passwort-Scramble von .env (nie committen)
+# Legacy (wird nach .env migriert und gelöscht)
+.env.gobbledigook
+.env.gobbledigook.tmp
 
 __pycache__/
 *.pyc

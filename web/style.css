@@ -1032,6 +1032,79 @@ select,
 input[type="date"] { font-family: var(--mono); font-size: 11px; }
 /* In Zeilen: horizontal dehnen. In .feld-Spalte: Input nicht mit flex hochziehen. */
 .feld-breit { flex: 1; min-width: 200px; font-size: 12px; }
+/* Passwort-Karte: linksbündig. */
+.karte-fuss.steuer-einstellungen.app-passwort-fuss {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  align-content: flex-start;
+  justify-content: flex-start;
+}
+.app-passwort-fuss .feld {
+  width: 100%;
+  max-width: 28rem;
+  min-width: 0;
+  align-items: flex-start;
+}
+.app-passwort-fuss .feld-titel {
+  text-align: left;
+  width: 100%;
+}
+.app-passwort-aktuell-reihe,
+.app-passwort-repeat-reihe {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.app-passwort-aktuell-reihe .feld-breit,
+.app-passwort-repeat-reihe .feld-breit {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.app-passwort-match {
+  flex-shrink: 0;
+  width: 1.6rem;
+  text-align: center;
+  font-size: 1.15rem;
+  line-height: 1;
+  user-select: none;
+  font-weight: 700;
+}
+.app-passwort-match.match-ok {
+  color: var(--gut, #1a7f37);
+}
+.app-passwort-match.match-bad {
+  color: var(--krit, #c62828);
+}
+.app-passwort-match.match-leer {
+  color: var(--blass, #999);
+}
+.app-passwort-fuss .knopf-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 28rem;
+}
+.app-passwort-meldung {
+  max-width: 28rem;
+  width: 100%;
+  margin: 0;
+  text-align: left;
+}
+.knopf-icon {
+  flex-shrink: 0;
+  min-width: 2.2rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  line-height: 1.2;
+}
 .feld > input,
 .feld > select,
 .feld input.feld-breit,

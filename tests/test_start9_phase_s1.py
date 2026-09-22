@@ -84,6 +84,39 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertTrue(payload["ok"])
         self.assertIn("satsage_session=", headers.get("Set-Cookie", ""))
 
+    def test_passwort_gesetzt_loopback_token_reicht_nicht(self):
+        """Mit Passwort: ?t=/Header öffnen die GUI nicht ohne Login — auch lokal."""
+        self.setup_password()
+        # API mit Token-Header
+        status, _, _ = self.request(
+            "/api/config", headers={"X-Satsage-Token": self.state.token},
+        )
+        self.assertEqual(status, 403)
+        # HTML-Start mit Query-Token → Login
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/?t={self.state.token}"
+        )
+        request.add_header("Host", f"127.0.0.1:{self.port}")
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            with opener.open(request, timeout=10) as response:
+                status = response.status
+                location = response.headers.get("Location", "")
+        except urllib.error.HTTPError as error:
+            status = error.code
+            location = error.headers.get("Location", "")
+        self.assertEqual(status, 303)
+        self.assertTrue(location.startswith("/login"), location)
+        # Nach Login: Session erlaubt Config
+        st, _, headers = self.request(
+            "/api/auth/login", method="POST",
+            data={"password": "test-passwort"},
+        )
+        self.assertEqual(st, 200)
+        cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
+        st, _, _ = self.request("/api/config", cookie=cookie)
+        self.assertEqual(st, 200)
+
     def test_login_setzt_cookie_und_erlaubt_config(self):
         self.setup_password()
         status, _, headers = self.request(

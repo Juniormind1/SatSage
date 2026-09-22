@@ -1191,16 +1191,40 @@ class EnvFile:
     path: Path
     lines: list[str] = field(default_factory=list)
     runtime_values: dict[str, str] = field(default_factory=dict)
+    #: True: nur Cipher auf Platte, Session-Key fehlt — Unlock nötig.
+    scramble_locked: bool = False
 
     @classmethod
     def load(cls, path: Path | str) -> "EnvFile":
+        """
+        Read-Hook: scrambled ``.env`` (+ Session-Key) → RAM; sonst Klartext.
+
+        Siehe ``core.env_scramble``. Scrambled ohne Key → leere Datei
+        (``scramble_locked``); Caller/Login füllt nach.
+        """
         path = Path(path)
-        if path.is_file():
-            text = path.read_text(encoding="utf-8")
-            lines = text.splitlines()
-        else:
-            lines = []
-        return cls(path=path, lines=lines)
+        text = ""
+        locked = False
+        try:
+            from core import env_scramble as scramble_mod
+
+            try:
+                text = scramble_mod.load_plaintext_or_scramble(path)
+            except scramble_mod.ScrambleLocked:
+                locked = True
+                text = ""
+            except scramble_mod.ScrambleError:
+                if scramble_mod.is_env_scrambled(path) or scramble_mod.is_scramble_file_present(path):
+                    raise
+                if path.is_file():
+                    text = path.read_text(encoding="utf-8")
+                else:
+                    raise
+        except ImportError:
+            if path.is_file():
+                text = path.read_text(encoding="utf-8")
+        lines = text.splitlines() if text else []
+        return cls(path=path, lines=lines, scramble_locked=locked)
 
     # -- lesen --------------------------------------------------------------
 
@@ -1292,12 +1316,20 @@ class EnvFile:
 
     def save(self, *, backup: bool = False) -> Path | None:
         """
-        Schreibt atomar (temporäre Datei + os.replace).
+        Write-Hook: mit Session-Key scrambled ``.env``; sonst Klartext-``.env``
+        (``core.env_scramble``).
 
         ``backup`` ist veraltet und wird ignoriert: Rotierende Sicherungen
         entstehen nur beim Serverstart (``rotate_env_backups_at_start``), nicht
         bei jedem Speichern während der Laufzeit. Rückgabe bleibt ``None``.
         """
+        try:
+            from core import env_scramble as scramble_mod
+
+            scramble_mod.save_plaintext_or_scramble(self.path, self.render())
+            return None
+        except ImportError:
+            pass
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_name(self.path.name + ".tmp")
         temp.write_text(self.render(), encoding="utf-8")

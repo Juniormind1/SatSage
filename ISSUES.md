@@ -32,21 +32,23 @@ Aufwand: **gering** (Inventar + gezielte Fixes); Steuer-Fiat/P&L-Anbindung spät
 | Einstellungen · Datenquellen | Status, „Jetzt nachziehen“, CSV-Import |
 | Build-Script Bundle | Release-Historie aktualisieren |
 
-**Verbrauch (Anzeige)**
+**Verbrauch (Anzeige) — on the fly**
 
-| Nutzung | Spot | Tages-Historie |
-|---------|------|----------------|
+| Nutzung | Spot | Tages-Historie (Client-Serie) |
+|---------|------|-------------------------------|
 | Kopfzeile / `Zustand.kurs` | ja | — |
-| Beträge **ohne** Datum (`formatEurAusSats` / viele `formatSats`) | ja | — |
-| **Ausgegebene** UTXOs / Gruppen mit Ausgabedatum (`setzeSatsBetrag` + `atTs` / `spentUtxos`) | Fallback | **ja** (Tag der Ausgabe; fehlt Tag → Spot + gelbe Warnung) |
-| Wallet-Bestand „jetzt“ | ja | — |
+| Beträge **ohne** einheitliches Datum | ja / nur sats | — |
+| Mit `atTs` / `gemeinsamerAtTs` (einheitlicher Kalendertag): ausgegebene UTXOs, Gruppen, Steuerjahr-Zeilen/Meta, Trace-Knoten, Abgänge | Fallback | **ja** (`tageskursAusSerie`) |
+| Saldo mit **gemischten** Tagen | — | **kein** Fiat (nur sats/BTC) |
 
-**Heute bewusst ohne Kurs-Historie**
+**Cache-Felder (Schreiben, UI liest sie noch nicht)**
 
-- `core/tax.py` / Steuerjahr-Kern (keine Kurs-API)
+Beim Speichern neuer UTXO-/Verlaufs-/Ingress-/…-Einträge: `btc_eur` / `btc_usd` / `btc_day` / `value_eur` / `value_usd` (und `spent_*` …) aus lokaler Historie. **Kein** Backfill-Job; GUI hängt weiter an Spot + Client-Serie.
+
+**Heute bewusst ohne Kurs in Reports/Kern**
+
 - Selbstanzeige / HTML- und CSV-Steuerbericht (sats/BTC, kein historischer Fiat-Ausweis)
 - Scorecard / Dotplot / Haltefrist-Logik (Zeit/Hops, kein €)
-- Herkunftsbaum-Knoten oft nur sats
 - LLM/Assistent, CLI `display.py`
 
 ### Künftig sinnvoll
@@ -58,11 +60,14 @@ Aufwand: **gering** (Inventar + gezielte Fixes); Steuer-Fiat/P&L-Anbindung spät
 2. **„Sats sind teilweise steuerpflichtig“ · P&L in der Zusammenfassung**  
    Wenn die Auswertung **teilweise** innerhalb der Haltefrist / steuerrelevant ausweist: in der **Zusammenfassung** eine einfache **Gewinn-/Verlust-Skizze (P&L)** auf Basis der **Tageskurs-Historie** mitliefern (z. B. Wert am Zufluss- vs. Abgangstag bzw. Stichtag — Formel im Entwurf festnageln). Kein Buchhaltungsersatz, aber greifbare Plausibilitätszahl neben den sats.
 
-3. Weitere (nachrangig): Steuerjahr-UI € neben sats; Herkunfts-Hops mit Fiat-Lesbarkeit; Assistent nur mit Quellenzeile; optional Export-Spalten.
+3. **Anzeige auf Cache-Fiat verbiegen (später, optional)**  
+   GUI liest `btc_eur`/`value_eur` (bzw. USD) **aus dem Eintrags-Cache**, statt on the fly über `kursSerie`/Spot. Vorteil: ein Bewertungspfad mit dem, was beim Scan geschrieben wurde; Offline/ohne Serie; konsistent mit Export. Voraussetzung: genug Einträge haben die Felder (oder gezielter Nachzug). **Kein Muss** — aktueller on-the-fly-Pfad bleibt ok, bis man umstellt.
+
+4. Weitere (nachrangig): Assistent nur mit Quellenzeile; optional Export-Spalten.
 
 **Nicht-Ziel:** Intraday-Charts, Multi-Fiat-Trading, „exakter Exchange-Fill“.
 
-**Nächste Schritte:** Dieses Inventar halten; Steuer-Export + P&L-Zusammenfassung spezifizieren/bauen; UI-Stellen prüfen, die Historie wollen aber Spot nehmen (Fallback-Warnungen).
+**Nächste Schritte:** Steuer-Export + P&L-Zusammenfassung; Cache→UI-Verbiegung nur wenn gewünscht (Punkt 3).
 
 ---
 
@@ -130,6 +135,7 @@ Aufwand: **gering–mittel** (ein Feld + Sichtbarkeitslogik; kein Backend)
 - **Erledigt · Wallet-Ansicht:** Filter **aktiv**; Teiltext Adresse/TxID; Betrag `>n`/`<n` (sats); Bestand + ausgegeben.
 - **Erledigt · Herkunft tracen:** dieselbe Logik auf `#trace-liste` (Gruppen, flache Sortierung, Fokus-UTXO, ausgegeben).
 - **Erledigt · Datum:** `>1.1.25` / `<05.12.2023` (TT.MM.JJ oder TT.MM.JJJJ); nach dem Tag = ab Folgetag, vor dem Tag = vor 00:00; Ereignis = Ausgabe- bzw. Ankunftszeit.
+- **Erledigt · Labels:** Börsen- und CJ-Namen im Suchtext (`Kraken`, `Wasabi`, `Whirlpool`, …) über `mix_arten` / `boerse_namen` an UTXO und Adressgruppe.
 - **Als Nächstes:** weitere Ansichten (Steuerjahr, …).
 
 ### Soll · MVP
@@ -206,52 +212,64 @@ Horizont vs. voll bis Extern/Coinbase: hohe Komplexität. Für 0.9.6 keine syste
 
 ## Datenschutz · Scrambling + Config-Zugriff (EnvFile / dict)
 
-**Stand:** 2026-09-22 · **offen** · Idee / notiert · Sicherheit / UX / Cache / Config-API
+**Stand:** 2026-09-22 · **offen** · spezifiziert · Sicherheit / UX / Config-API  
+Aufwand: **hoch** (Krypto + zentraler Read/Write-Hook + Config)
 
-Aufwand: **hoch** (Krypto + Envelope + Config)
+Zwei Bausteine **gemeinsam** (ein IO-Umbau):
 
-Zwei Bausteine **gemeinsam** angehen (ein Envelope-/Config-Umbau, kein zweites Parallelprojekt):
+### A · `.env`-Scramble (Web-GUI, nur `.env`) — **Privacy erledigt**
 
-### A · Optionales Scrambling geheimnistragender Dateien
-
-**Ziel:** Klartext von Secrets (XPUBs, Wallet-Namen, RPC-Credentials, Cache-Inhalte mit Adressen/Tx) **nur noch im Speicher**. Auf der Platte liegen die betroffenen Dateien gescrambled, sobald der Nutzer ein Passwort setzt.
+**Ziel (aktuell):** Eine Datei **`.env`**: mit App-Passwort **scrambled** (Magic `SSGB1`), ohne Passwort **Klartext**. Klartext-Werte nur im **RAM** nach Login. **Backups** weiter Klartext-Kopien beim Start wenn möglich. Caches später. **CLI / Specter / Umbrel / Start9:** vorerst **ausgenommen**.
 
 **UX**
 
-- Einstellungen: Feld **„Passwort festlegen:“** (optional; Default = kein Scrambling, Verhalten wie heute).
-- **Passwort setzen:** Alle geheimnistragenden Dateien werden konvertiert (Scramble). Fortschritt im **Log**.
-- **Web-GUI-Start:** Passwort abfragen → **Proberead** (falsches Passwort sofort zurückweisen) → danach jede Lese- und Schreiboperation über die **Scramble-Envelope**.
-- **Passwort löschen:** Alle Dateien wieder unscrambled konvertieren. Fortschritt im **Log**.
+- Passwort-UI; Setzen/Ändern/Löschen steuert Hash + scrambled `.env` (`core/env_scramble.py`).
+- **Login** = Hash-Check **und** File-Key (KDF) + Config-Reload.
+- **Passwort setzen:** `.env` wird scrambled (ersetzt Klartext-Inhalt).
+- **Passwort ändern:** umschlüsseln in derselben `.env`.
+- **Passwort löschen:** `.env` wieder Klartext. **Kein Recovery** jenseits Backups.
+- **Start:** ohne Session → Login; scrambled ohne Key → `env_scramble.locked`.
+- Legacy **`.env.gobbledigook`**: beim Unlock/Login nach `.env` migrieren und löschen.
 
-**Betroffene Dateien (mindestens)**
+#### Wahrheit & Dateien
 
-- `.env` und deren Backups
-- UTXO-Caches (`utxo_cache/`)
-- Tx-/immutable Caches mit Wallet-Bezug (`immutable_cache/` u. a. `tx/`, `utxo_ingress/`)
-- ggf. Adress-Auflösungs-Cache (`external_addresses.json`) und weitere Dateien, die XPUB/Adresse/Wallet-Klartext tragen
+| | |
+|--|--|
+| **Wahrheit im laufenden Prozess** | EnvFile / Werte **im RAM** |
+| **Wahrheit auf der Platte** | **eine** `.env` (scrambled oder Klartext) |
+| **Wahrheit zum Abgleich nach Write** | entschlüsselter Blob ≡ RAM (strukturell) |
+| **Backups** | `.env.backup0`…`9` — bei Passwort-Setzen/Ändern mitscrambled, bei Löschen Klartext; Start-Rotation kopiert `.env` 1:1 |
 
-**Nicht hier:** Seed/xprv/WIF (SatSage nimmt die nicht an). Sanktionslisten-Clearnet-Pools ohne Wallet-Bezug ggf. ausnehmen — beim Entwurf klären.
+#### Read-Hook und Write-Hook
 
-**Technik (Skizze)**
+- **Write:** Session-Key → scrambled `.env` + Probe. Ohne Key bei aktivem Scramble → Locked. Ohne Passwort → Klartext-`.env`.
+- **Read:** scrambled + Key → RAM; scrambled ohne Key → Locked; sonst Klartext.
+- File-Key **prozessweit**.
 
-- Ableitung aus Passwort (z. B. KDF) → Schlüssel nur in-memory für die Session
-- Einheitliche Envelope um Read/Write
-- Erkennung scrambled vs. plain (Magic/Header)
-- Proberead beim Unlock; CLI/Specter: gleiches Unlock-Modell oder dokumentierte Einschränkung
+#### Session-Key
+
+- **Nicht** auf die Platte.  
+- Login-Hash prüft „Passwort korrekt“; File-Key = KDF(Passwort, Salt im Scramble-Header der `.env`).  
+- Login setzt beides; Logout löscht den Key. Prozess tot = Key tot.
+
+#### Krypto · festgelegt
+
+- **Login-Hash:** bereits **Argon2id** via **`argon2-cffi`** (wie `server._hash_password`); Stdlib-**scrypt**-Fallback nur ohne Dependency.  
+- **File-Key-Ableitung:** **Argon2id** (`argon2-cffi`) — **eigener Salt** (Header in scrambled `.env`), **nicht** den Login-Hash als AES-Key.  
+- **Nutzdaten-Cipher:** AES-256-GCM; eine Datei `.env` (scrambled oder Klartext).  
+
+- Primär immer argon2-cffi; scrypt-Fallback analog Login nur Minimalinstall.
+
+#### Explizit später / ausgenommen
+
+- Backups verschlüsseln; UTXO-/Tx-Caches; CLI; Specter; **Umbrel & Start9** (managed Passwort) bis eigene Story  
+- EnvFile vs. dict Härtung (B) im gleichen Hook-Wurf wo sinnvoll  
 
 ### B · EnvFile vs. plain `dict` — Aufrufstellen härten
 
-**Mit A koppeln:** Dieselbe Config-/IO-Naht, die die Scramble-Envelope braucht, soll **ein** klarer Einstieg für `.env`-Werte sein — sonst brechen Assistenten/Skripte und die Envelope an denselben Stellen.
+**Mit A koppeln** am Read/Write-Hook: ein Einstieg, klare Typen (`EnvFile` vs. `werte`), `als_env_values` oder harter TypeError.
 
-**Ist-Falle:** `read_wallets`/`write_wallets` erwarten **`EnvFile`** (`env.values()`); viele Helfer und `main._load_dotenv()` liefern **`dict`**. Dict an EnvFile-API → `AttributeError: 'dict_values' …`.
-
-**Soll (im selben Wurf wie A):**
-
-- Klare Typen / Param-Namen (`EnvFile` vs. `werte`/`Mapping`)
-- Helfer z. B. `als_env_values(env_or_dict)` **oder** harter TypeError mit lesbarer Meldung
-- Alle Lese-/Schreibpfade für Secrets und `.env` über die gemeinsamen Einstiege (Envelope + normalisierte Values)
-
-**Noch offen (A+B):** Krypto-Wahl, Envelope-Pfade, Teil-Migration, Backup-Rotation, wo genau EnvFile vs. dict normalisiert wird. Gemeinsam erschlagen.
+**Ist-Falle:** Dict an `read_wallets` → `env.values()` auf dict → `dict_values` ohne `.get`.
 
 ---
 ---

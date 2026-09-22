@@ -933,6 +933,65 @@
           </p>
         </div>
 
+        <div class="karte" id="karte-app-passwort">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.password.title">Passwort</span>
+            <span class="karte-zusatz" id="app-passwort-zusatz"
+                  data-i18n="settings.password.zusatzOff">optional · nicht gesetzt</span>
+          </div>
+          <div class="karte-fuss steuer-einstellungen app-passwort-fuss">
+            <div class="feld app-passwort-aktuell-zeile">
+              <span class="feld-titel" data-i18n="settings.password.current">Aktuelles Passwort</span>
+              <div class="app-passwort-aktuell-reihe">
+                <input type="password" id="app-passwort-aktuell" class="feld-breit"
+                       autocomplete="current-password" spellcheck="false"
+                       disabled
+                       data-i18n-placeholder="settings.password.currentPh"
+                       placeholder="—">
+                <button type="button" id="app-passwort-entfernen" class="knopf knopf-klein knopf-icon"
+                        disabled
+                        data-i18n-title="settings.password.removeTitle"
+                        title="Aktuelles Passwort eingeben und hier klicken entfernt das Passwort."
+                        aria-label="Passwort entfernen">
+                  🗑
+                </button>
+              </div>
+            </div>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.password.new">Neues Passwort</span>
+              <input type="password" id="app-passwort-neu" class="feld-breit"
+                     autocomplete="new-password" spellcheck="false"
+                     data-i18n-placeholder="settings.password.newPh"
+                     placeholder="neues Passwort">
+            </label>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.password.repeat">Neues Passwort (Wiederholung)</span>
+              <div class="app-passwort-repeat-reihe">
+                <input type="password" id="app-passwort-neu2" class="feld-breit"
+                       autocomplete="new-password" spellcheck="false"
+                       data-i18n-placeholder="settings.password.repeatPh"
+                       placeholder="neues Passwort wiederholen">
+                <span id="app-passwort-match" class="app-passwort-match"
+                      aria-live="polite" title="">—</span>
+              </div>
+            </label>
+            <div class="knopf-zeile">
+              <button type="button" id="app-passwort-setzen" class="knopf"
+                      data-i18n="settings.password.save"
+                      data-i18n-title="settings.password.saveTitle"
+                      title="Speichert nur, wenn beide neuen Passwörter übereinstimmen."
+                      onclick="typeof speichereAppPasswort==='function'&&speichereAppPasswort();return false;">
+                Passwort setzen
+              </button>
+            </div>
+            <p id="app-passwort-meldung" class="hinweis app-passwort-meldung" hidden></p>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.password.hint">
+            Optional. Schützt die .env (scrambled auf der Platte).
+            Ohne Passwort nach Verlust: neu konfigurieren oder Backup. Caches noch unverschlüsselt.
+          </p>
+        </div>
+
         <div class="karte">
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="settings.lernhinweise.title">Lernhinweise für Plebs</span>

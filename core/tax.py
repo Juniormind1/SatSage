@@ -595,6 +595,8 @@ class Eingang:
             "value_sats": self.value_sats,
             "datum": self.zeitpunkt.strftime("%d.%m.%Y"),
             "zeit": self.zeitpunkt.strftime("%H:%M:%S"),
+            # Unix für GUI-Fiat am Anschaffungstag (nur bei einheitlichem Saldo-Datum).
+            "time_ts": int(self.zeitpunkt.timestamp()),
             "frist_ende": self.frist_ende.strftime("%d.%m.%Y") if self.frist_ende else "",
             "erfuellt": self.erfuellt,
             "haltedauer_tage": self.haltedauer_tage,
@@ -723,7 +725,9 @@ def auswerten(
                     ) or "unbekannt",
                     "value_sats": netto,
                     "datum": zeitpunkt.strftime("%d.%m.%Y"),
+                    "time_ts": int(zeitpunkt.timestamp()),
                     "abgang_datum": abgang.strftime("%d.%m.%Y"),
+                    "abgang_time_ts": int(abgang.timestamp()),
                     "abgang_txid": utxo.get("spent_txid") or "",
                     "haltedauer_tage": max(0, (abgang - zeitpunkt).days),
                     "frist_erfuellt": erfuellt_ab,

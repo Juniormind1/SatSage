@@ -723,17 +723,93 @@ function formatSats(sats, opts = {}) {
 }
 
 /**
+ * Unix-ts aus Objekt: time_ts / block_time / spent / datum TT.MM.JJJJ.
+ * Für Salden: nur wenn *alle* Zeilen denselben UTC-Kalendertag haben.
+ */
+function tsAusBewertungsObjekt(obj) {
+  if (!obj) return 0;
+  const direkt = Number(
+    obj.time_ts
+    || obj.abgang_time_ts
+    || obj.block_time
+    || obj.spent_time_ts
+    || obj.spent_block_time
+    || obj.juengste_sats_ts
+    || (obj.status && (obj.status.block_time || obj.status.spent_time_ts))
+    || 0,
+  );
+  if (direkt > 1_000_000_000) return direkt;
+  // utxoEreignisTs ist später definiert — zur Laufzeit verfügbar.
+  if (typeof utxoEreignisTs === "function") {
+    const e = utxoEreignisTs(obj);
+    if (e > 0) return e;
+  }
+  for (const label of [obj.abgang_datum, obj.datum, obj.time_label]) {
+    if (!label) continue;
+    const m = String(label).match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+    if (!m) continue;
+    let y = Number(m[3]);
+    if (m[3].length <= 2) y += 2000;
+    const d = Date.UTC(y, Number(m[2]) - 1, Number(m[1]), 12, 0, 0);
+    if (!Number.isNaN(d)) return Math.floor(d / 1000);
+  }
+  return 0;
+}
+
+/**
+ * Gemeinsamer Bewertungszeitpunkt für ein Saldo.
+ * Nur wenn *jede* Zeile ein Datum hat und alle denselben UTC-Tag teilen.
+ * Sonst null — kein Spot-Mix unterschiedlicher Tage in eine Summe.
+ */
+function gemeinsamerAtTs(items, tsFn) {
+  const liste = items || [];
+  if (!liste.length) return null;
+  const fn = tsFn || tsAusBewertungsObjekt;
+  const tage = [];
+  let sample = 0;
+  for (const item of liste) {
+    const ts = Number(fn(item) || 0);
+    if (!ts || ts <= 0) return null;
+    const tag = utcTagAusTs(ts);
+    if (!tag) return null;
+    tage.push(tag);
+    sample = ts;
+  }
+  if (new Set(tage).size !== 1) return null;
+  return sample;
+}
+
+/** formatSats mit atTs nur bei einheitlichem Datum der saldierten Zeilen. */
+function formatSatsGemeinsam(sats, items, tsFn) {
+  const atTs = gemeinsamerAtTs(items, tsFn);
+  if (atTs) return formatSats(sats, { atTs });
+  // Gemischt / ohne Datum: nur sats/BTC — kein Spot als Pseudo-Historie.
+  return formatSatsBasis(sats);
+}
+
+/**
  * Betragszelle füllen; bei Spot-Fallback trotz Ausgabedatum gelb + Tooltip.
  * opts.atTs oder opts.spentUtxos (Summe je Tageskurs).
+ * opts.gemeinsam: Liste — Fiat nur bei einheitlichem Bewertungsdatum.
  */
 function setzeSatsBetrag(el, sats, opts = {}) {
   if (!el) return;
   el.replaceChildren();
   const basis = formatSatsBasis(sats);
   el.append(document.createTextNode(basis));
-  const info = opts.spentUtxos
-    ? eurInfoFuerSpentUtxos(opts.spentUtxos)
-    : eurInfoAusSats(sats, opts.atTs);
+
+  let info = null;
+  if (opts.gemeinsam) {
+    const atTs = gemeinsamerAtTs(opts.gemeinsam, opts.tsFn);
+    if (atTs) info = eurInfoAusSats(sats, atTs);
+    // sonst: kein Fiat (keine Mischung)
+  } else if (opts.spentUtxos) {
+    // Ausgaben-Summe: nur bei gleichem Ausgabetag historisch, sonst kein Mix.
+    const atTs = gemeinsamerAtTs(opts.spentUtxos, spentZeitstempel);
+    if (atTs) info = eurInfoAusSats(sats, atTs);
+  } else {
+    info = eurInfoAusSats(sats, opts.atTs);
+  }
   if (!info) return;
   el.append(document.createTextNode(" (≈ "));
   const fiat = document.createElement("span");
@@ -4602,9 +4678,15 @@ function zeichneUtxos(daten, wallet) {
 
   const teile = [];
   if (daten.has_cache) {
-    teile.push(`${daten.total_count} UTXO`, formatSats(daten.total_sats));
+    const utxoListe = daten.utxos || [];
+    teile.push(
+      `${daten.total_count} UTXO`,
+      formatSatsGemeinsam(daten.total_sats, utxoListe),
+    );
     if (daten.shown_count < daten.total_count) {
-      teile.push(`angezeigt: ${daten.shown_count} · ${formatSats(daten.shown_sats)}`);
+      teile.push(
+        `angezeigt: ${daten.shown_count} · ${formatSatsGemeinsam(daten.shown_sats, utxoListe)}`,
+      );
     }
     const pendOut = Number(daten.pending_spending_count || 0);
     const pendIn = Number(daten.pending_receive_count || 0);
@@ -4828,6 +4910,9 @@ function setzeKlapp(kopf, klapp, inhalt, auf) {
 function zeichneAdressGruppe(gruppe) {
   const block = document.createElement("div");
   block.className = "adress-gruppe";
+  block.dataset.address = gruppe.address || "";
+  const gLabels = kopfFilterLabelText(gruppe);
+  if (gLabels) block.dataset.filterLabels = gLabels;
 
   const kopf = document.createElement("button");
   kopf.type = "button";
@@ -4849,7 +4934,9 @@ function zeichneAdressGruppe(gruppe) {
 
   const betrag = document.createElement("span");
   betrag.className = "betrag adress-betrag";
-  betrag.textContent = formatSats(gruppe.total_sats);
+  setzeSatsBetrag(betrag, gruppe.total_sats, {
+    gemeinsam: gruppe.utxos || [],
+  });
 
   kopf.append(klapp, adresse, anzahl);
   if (gruppe.utxos.some((u) => u.flagged)) {
@@ -4916,6 +5003,39 @@ function utxoEreignisTs(utxo) {
   return js > 0 ? js : 0;
 }
 
+/** Suchtext für Kopf-Filter: Mix-Formen + Börsennamen (Kraken, Wasabi, …). */
+function kopfFilterLabelText(utxoOderGruppe) {
+  if (!utxoOderGruppe || typeof utxoOderGruppe !== "object") return "";
+  const teile = [];
+  const mix = utxoOderGruppe.mix_arten
+    || (utxoOderGruppe.utxos ? mixArtenDerGruppe(utxoOderGruppe) : []);
+  for (const k of mix || []) {
+    if (!k) continue;
+    teile.push(String(k));
+    teile.push(MIX_ICON_KURZ[k] || "");
+    const soft = softTxClassLabel({ tx_class: k });
+    if (soft) teile.push(soft);
+  }
+  const txc = utxoOderGruppe.tx_class;
+  if (txc) {
+    teile.push(String(txc));
+    teile.push(MIX_ICON_KURZ[txc] || "");
+    const soft = softTxClassLabel({ tx_class: txc });
+    if (soft) teile.push(soft);
+  }
+  let boerse = utxoOderGruppe.boerse_namen;
+  if (!boerse && utxoOderGruppe.utxos) {
+    boerse = boerseNamenDerGruppe(utxoOderGruppe).namen;
+  }
+  for (const n of boerse || []) {
+    if (n) teile.push(String(n));
+  }
+  // Einzel-Label-Objekte (falls am Root)
+  const ein = boerseNameAusKnoten(utxoOderGruppe);
+  if (ein) teile.push(ein);
+  return teile.filter(Boolean).join(" ");
+}
+
 function setzeUtxoTraceDaten(el, utxo) {
   if (!el || !utxo) return;
   if (utxo.key) el.dataset.key = utxo.key;
@@ -4940,6 +5060,9 @@ function setzeUtxoTraceDaten(el, utxo) {
   const ets = utxoEreignisTs(utxo);
   if (ets > 0) el.dataset.eventTs = String(ets);
   else delete el.dataset.eventTs;
+  const labels = kopfFilterLabelText(utxo);
+  if (labels) el.dataset.filterLabels = labels;
+  else delete el.dataset.filterLabels;
 }
 
 function zeichneUtxoZeile(utxo) {
@@ -4951,7 +5074,11 @@ function zeichneUtxoZeile(utxo) {
 
   const betrag = document.createElement("span");
   betrag.className = "betrag";
-  betrag.textContent = formatSats(utxo.value_sats);
+  {
+    const atTs = tsAusBewertungsObjekt(utxo);
+    if (atTs) setzeSatsBetrag(betrag, utxo.value_sats, { atTs });
+    else betrag.textContent = formatSats(utxo.value_sats);
+  }
 
   const kennung = document.createElement("span");
   kennung.className = "mono zart";
@@ -6398,7 +6525,14 @@ function zeichneTraceListe(daten) {
   const liste = $("#trace-liste");
   liste.replaceChildren();
 
-  const teile = [`${daten.total_count} UTXO`, formatSats(daten.total_sats)];
+  const traceUtxos = [];
+  for (const g of daten.addresses || []) {
+    for (const u of g.utxos || []) traceUtxos.push(u);
+  }
+  const teile = [
+    `${daten.total_count} UTXO`,
+    formatSatsGemeinsam(daten.total_sats, traceUtxos),
+  ];
   if (daten.wallets_ohne_cache && daten.wallets_ohne_cache.length > 0) {
     teile.push(`ohne Cache: ${daten.wallets_ohne_cache.join(", ")}`);
   }
@@ -6618,7 +6752,9 @@ function zeichneAusgegeben(daten) {
 function zeichneTraceAdressGruppe(gruppe) {
   const block = document.createElement("div");
   block.className = "adress-gruppe";
-  block.dataset.address = gruppe.address;
+  block.dataset.address = gruppe.address || "";
+  const gLabels = kopfFilterLabelText(gruppe);
+  if (gLabels) block.dataset.filterLabels = gLabels;
 
   const kopf = document.createElement("button");
   kopf.type = "button";
@@ -6662,9 +6798,14 @@ function zeichneTraceAdressGruppe(gruppe) {
   const betrag = document.createElement("span");
   betrag.className = "betrag adress-betrag";
   if ((gruppe.utxos || []).some((u) => u.spent || u.spent_pending)) {
-    setzeSatsBetrag(betrag, gruppe.total_sats, { spentUtxos: gruppe.utxos });
+    setzeSatsBetrag(betrag, gruppe.total_sats, {
+      gemeinsam: gruppe.utxos || [],
+      tsFn: spentZeitstempel,
+    });
   } else {
-    betrag.textContent = formatSats(gruppe.total_sats);
+    setzeSatsBetrag(betrag, gruppe.total_sats, {
+      gemeinsam: gruppe.utxos || [],
+    });
   }
   kopf.append(betrag);
   // Mix-Icons + Börsen-Pillen vor dem Betrag (wie nach Trace-Update).
@@ -6739,12 +6880,13 @@ function zeichneTraceWurzel(utxo) {
     betrag.textContent = t("trace.amountPending");
     betrag.classList.add("zart");
   } else if (utxo.spent || utxo.spent_pending) {
-    setzeSatsBetrag(betrag, utxo.value_sats, {
-      atTs: spentZeitstempel(utxo) || undefined,
-      spentUtxos: [utxo],
-    });
+    const st = spentZeitstempel(utxo);
+    if (st) setzeSatsBetrag(betrag, utxo.value_sats, { atTs: st });
+    else betrag.textContent = formatSatsBasis(utxo.value_sats);
   } else {
-    betrag.textContent = formatSats(utxo.value_sats);
+    const atTs = tsAusBewertungsObjekt(utxo);
+    if (atTs) setzeSatsBetrag(betrag, utxo.value_sats, { atTs });
+    else betrag.textContent = formatSats(utxo.value_sats);
   }
   const wer = document.createElement("span");
   wer.textContent = utxo.wallet || t("wallet.unknownWallet");
@@ -7771,7 +7913,9 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   if (knoten.amount_sats > 0) {
     const betrag = document.createElement("span");
     betrag.className = "betrag";
-    betrag.textContent = formatSats(knoten.amount_sats);
+    const atTs = Number(knoten.time_ts || 0);
+    if (atTs > 0) setzeSatsBetrag(betrag, knoten.amount_sats, { atTs });
+    else betrag.textContent = formatSats(knoten.amount_sats);
     oben.append(betrag);
   }
   const wer = document.createElement("span");
@@ -8012,18 +8156,24 @@ function zeichneSteuerjahr(daten) {
   const kasten = $("#steuer-kennzahlen");
   kasten.replaceChildren();
 
+  const alleE = daten.eintraege || [];
+  const erfuelltE = alleE.filter((e) => e.erfuellt);
+  const offenE = alleE.filter((e) => !e.erfuellt);
+  const ungeprueftE = alleE.filter((e) => !e.geprueft);
+  const fiatE = (sats, liste) => formatSatsGemeinsam(sats, liste);
+
   const kennzahlen = [
-    ["Bestand gesamt", formatSats(k.gesamt_sats), `${k.gesamt_count} UTXOs`, ""],
-    ["außerhalb Haltefrist", formatSats(k.erfuellt_sats),
+    ["Bestand gesamt", fiatE(k.gesamt_sats, alleE), `${k.gesamt_count} UTXOs`, ""],
+    ["außerhalb Haltefrist", fiatE(k.erfuellt_sats, erfuelltE),
      `${k.erfuellt_count} UTXOs`, "gut"],
-    ["innerhalb Haltefrist", formatSats(k.offen_sats),
+    ["innerhalb Haltefrist", fiatE(k.offen_sats, offenE),
      k.naechste_frist ? `nächste am ${k.naechste_frist}` : `${k.offen_count} UTXOs`,
      "warn",
      true], // separater „klären“ nur für gelbe UTXOs
   ];
   if (k.ungeprueft_count > 0) {
     kennzahlen.push([
-      "Ohne Herkunftsanalyse", formatSats(k.ungeprueft_sats),
+      "Ohne Herkunftsanalyse", fiatE(k.ungeprueft_sats, ungeprueftE),
       `${k.ungeprueft_count} UTXOs — Frist evtl. länger`, "ungeprueft",
       true, // Aktion „klären“ nur für graue UTXOs
     ]);
@@ -8143,8 +8293,11 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
 
   const betrag = document.createElement("td");
   betrag.className = "r betrag";
-  // Ohne Fiat-Lookup je Zeile — Tabelle bleibt flink.
-  betrag.textContent = formatSatsBasis(eintrag.value_sats);
+  {
+    const atTs = Number(eintrag.time_ts || 0) || tsAusBewertungsObjekt(eintrag);
+    if (atTs) betrag.textContent = formatSats(eintrag.value_sats, { atTs });
+    else betrag.textContent = formatSatsBasis(eintrag.value_sats);
+  }
 
   const wallet = document.createElement("td");
   wallet.textContent = eintrag.wallet;
@@ -8264,7 +8417,7 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten }) {
 
   const meta = document.createElement("span");
   meta.className = "steuer-gruppe-meta zart";
-  meta.textContent = `${anzahlText} · ${formatSatsBasis(sats)}`;
+  meta.textContent = `${anzahlText} · ${formatSatsGemeinsam(sats, eintraege)}`;
 
   kopf.append(klapp, name, meta);
   kopfZelle.append(kopf);
@@ -8799,7 +8952,11 @@ function zeichneAbgaenge(daten) {
     $("#abgaenge-zusatz"),
     abgaenge.length === 0
       ? "keine im gewählten Jahr"
-      : `${abgaenge.length} · ${formatSats(k.abgang_sats)}` +
+      : `${abgaenge.length} · ${formatSatsGemeinsam(
+        k.abgang_sats,
+        abgaenge,
+        (a) => Number(a.abgang_time_ts || 0) || tsAusBewertungsObjekt(a),
+      )}` +
         (k.abgang_steuerpflichtig_count
           ? ` · davon ${k.abgang_steuerpflichtig_count} innerhalb der Frist`
           : " · alle nach Ablauf der Frist")
@@ -8828,7 +8985,13 @@ function zeichneAbgaenge(daten) {
 
     const betrag = document.createElement("span");
     betrag.className = "mono";
-    betrag.textContent = formatSats(abgang.value_sats);
+    {
+      // Fiat am Abgangstag (Veräußerung), nicht Anschaffung.
+      const atTs = Number(abgang.abgang_time_ts || 0)
+        || tsAusBewertungsObjekt({ datum: abgang.abgang_datum });
+      if (atTs) betrag.textContent = formatSats(abgang.value_sats, { atTs });
+      else betrag.textContent = formatSatsBasis(abgang.value_sats);
+    }
 
     const zeitraum = document.createElement("span");
     zeitraum.className = "zart";
@@ -10537,10 +10700,279 @@ function zeichneAppEinstellungen() {
   zeichneSteuerEinstellungen();
   zeichneUiLang();
   zeichneUiTheme();
+  zeichneAppPasswort();
   zeichneStartSync();
   zeichneStatusMailEinstellungen();
   zeichneMempoolStatus();
   setzeEnvPfad(Zustand.config?.env_path);
+}
+
+/**
+ * Meldung in der Passwort-Karte (nicht #speicher-meldung — die ist nur unter Wallets).
+ */
+function appPasswortMeldung(text, art) {
+  const kasten = $("#app-passwort-meldung");
+  if (!kasten) {
+    try { meldung(text, art); } catch (_) { /* ignore */ }
+    return;
+  }
+  kasten.className = `hinweis app-passwort-meldung hinweis-${art || "krit"}`;
+  setzeText(kasten, text);
+  kasten.hidden = !text;
+  if (art === "gut" && text) {
+    setTimeout(() => {
+      if (kasten.textContent === text) kasten.hidden = true;
+    }, 5000);
+  }
+}
+
+/** Live: ✕ rot bis neu===wiederholung und nicht leer, dann ✓ grün. */
+function aktualisiereAppPasswortMatch() {
+  const mark = $("#app-passwort-match");
+  if (!mark) return;
+  const neu = String($("#app-passwort-neu")?.value || "");
+  const neu2 = String($("#app-passwort-neu2")?.value || "");
+  mark.classList.remove("match-ok", "match-bad", "match-leer");
+  if (!neu && !neu2) {
+    mark.textContent = "—";
+    mark.classList.add("match-leer");
+    mark.title = "";
+    return;
+  }
+  if (neu && neu2 && neu === neu2) {
+    mark.textContent = "✓";
+    mark.classList.add("match-ok");
+    mark.title = t("settings.password.matchOk");
+    return;
+  }
+  mark.textContent = "✕";
+  mark.classList.add("match-bad");
+  mark.title = t("settings.password.matchBad");
+}
+
+/** Einstellungen · optionales App-Passwort + .env-Scramble. */
+function zeichneAppPasswort() {
+  const karte = $("#karte-app-passwort");
+  if (!karte) return;
+  const gesetzt = Boolean(Zustand.config?.password_set);
+  const aktuell = $("#app-passwort-aktuell");
+  const entfernen = $("#app-passwort-entfernen");
+  const zusatz = $("#app-passwort-zusatz");
+  if (aktuell) {
+    aktuell.disabled = !gesetzt;
+    if (!gesetzt) aktuell.value = "";
+    aktuell.placeholder = gesetzt ? "" : t("settings.password.currentPh");
+  }
+  if (entfernen) entfernen.disabled = !gesetzt;
+  if (zusatz) {
+    zusatz.textContent = gesetzt
+      ? t("settings.password.zusatzOn")
+      : t("settings.password.zusatzOff");
+    zusatz.setAttribute(
+      "data-i18n",
+      gesetzt ? "settings.password.zusatzOn" : "settings.password.zusatzOff",
+    );
+  }
+  aktualisiereAppPasswortMatch();
+  bindeAppPasswortUi();
+}
+
+function _appPasswortFelderLeeren({ auchAktuell = true } = {}) {
+  if (auchAktuell) {
+    const a = $("#app-passwort-aktuell");
+    if (a) a.value = "";
+  }
+  const n = $("#app-passwort-neu");
+  const n2 = $("#app-passwort-neu2");
+  if (n) n.value = "";
+  if (n2) n2.value = "";
+  aktualisiereAppPasswortMatch();
+}
+
+async function speichereAppPasswort() {
+  const neu = String($("#app-passwort-neu")?.value || "");
+  const neu2 = String($("#app-passwort-neu2")?.value || "");
+  const aktuell = String($("#app-passwort-aktuell")?.value || "");
+  const gesetzt = Boolean(Zustand.config?.password_set);
+  aktualisiereAppPasswortMatch();
+  if (!neu) {
+    appPasswortMeldung(t("settings.password.emptyNew"), "krit");
+    return;
+  }
+  if (neu !== neu2) {
+    appPasswortMeldung(t("settings.password.mismatch"), "krit");
+    return;
+  }
+  if (gesetzt && !aktuell) {
+    appPasswortMeldung(t("settings.password.needCurrent"), "krit");
+    return;
+  }
+  const knopf = $("#app-passwort-setzen");
+  if (knopf) knopf.disabled = true;
+  appPasswortMeldung(t("settings.password.saving"), "warn");
+  try {
+    const ergebnis = await api("/config/app-password", {
+      methode: "PUT",
+      daten: {
+        current_password: aktuell,
+        new_password: neu,
+        confirm: neu2,
+      },
+    });
+    if (!Zustand.config) Zustand.config = {};
+    Zustand.config.password_set = true;
+    if (ergebnis && ergebnis.env_scramble) {
+      Zustand.config.env_scramble = ergebnis.env_scramble;
+    }
+    _appPasswortFelderLeeren();
+    zeichneAppPasswort();
+    appPasswortMeldung(t("settings.password.saved"), "gut");
+    try {
+      await ladeConfig();
+    } catch (e) {
+      appPasswortMeldung(
+        t("settings.password.saved") + " (" + ((e && e.message) || e) + ")",
+        "warn",
+      );
+    }
+    zeichneAppPasswort();
+  } catch (fehler) {
+    appPasswortMeldung(
+      t("settings.password.saveFailed", {
+        msg: (fehler && fehler.message) || String(fehler),
+      }),
+      "krit",
+    );
+  } finally {
+    if (knopf) knopf.disabled = false;
+  }
+}
+
+async function entferneAppPasswort() {
+  const aktuellFeld = $("#app-passwort-aktuell");
+  const aktuell = String(aktuellFeld?.value || "");
+  if (!Boolean(Zustand.config?.password_set)) {
+    appPasswortMeldung(t("settings.password.zusatzOff"), "warn");
+    return;
+  }
+  if (!aktuell) {
+    appPasswortMeldung(t("settings.password.needCurrent"), "krit");
+    if (aktuellFeld) {
+      aktuellFeld.disabled = false;
+      aktuellFeld.focus();
+    }
+    return;
+  }
+  const knopf = $("#app-passwort-entfernen");
+  if (knopf) knopf.disabled = true;
+  appPasswortMeldung(t("settings.password.removing"), "warn");
+  try {
+    // POST statt DELETE+Body — Firefox/manche Stacks brechen DELETE mit Body ab
+    // („NetworkError when attempting to fetch resource“).
+    const ergebnis = await api("/config/app-password", {
+      methode: "POST",
+      daten: { action: "delete", current_password: aktuell },
+    });
+    if (!Zustand.config) Zustand.config = {};
+    Zustand.config.password_set = Boolean(ergebnis.password_set);
+    if (ergebnis.env_scramble) {
+      Zustand.config.env_scramble = ergebnis.env_scramble;
+    }
+    _appPasswortFelderLeeren();
+    zeichneAppPasswort();
+    appPasswortMeldung(t("settings.password.removed"), "gut");
+    try { await ladeConfig(); } catch (_) { /* ignore */ }
+    zeichneAppPasswort();
+  } catch (fehler) {
+    appPasswortMeldung(
+      t("settings.password.removeFailed", {
+        msg: (fehler && fehler.message) || String(fehler),
+      }),
+      "krit",
+    );
+  } finally {
+    zeichneAppPasswort();
+  }
+}
+
+function bindeAppPasswortUi() {
+  const karte = $("#karte-app-passwort");
+  if (!karte || karte.dataset.passBound === "1") return;
+  karte.dataset.passBound = "1";
+  karte.addEventListener("click", (e) => {
+    const el = e.target instanceof Element ? e.target : null;
+    if (!el) return;
+    if (el.closest("#app-passwort-setzen")) {
+      e.preventDefault();
+      speichereAppPasswort();
+    } else if (el.closest("#app-passwort-entfernen")) {
+      e.preventDefault();
+      entferneAppPasswort();
+    }
+  });
+  karte.addEventListener("input", (e) => {
+    const el = e.target instanceof Element ? e.target : null;
+    if (!el) return;
+    if (el.id === "app-passwort-neu" || el.id === "app-passwort-neu2") {
+      aktualisiereAppPasswortMatch();
+    }
+  });
+  karte.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const el = e.target instanceof Element ? e.target : null;
+    if (!el) return;
+    if (
+      el.id === "app-passwort-neu"
+      || el.id === "app-passwort-neu2"
+      || el.id === "app-passwort-aktuell"
+    ) {
+      e.preventDefault();
+      speichereAppPasswort();
+    }
+  });
+}
+
+// Global für onclick-Fallback / Konsole.
+try {
+  window.speichereAppPasswort = speichereAppPasswort;
+  window.entferneAppPasswort = entferneAppPasswort;
+} catch (_) { /* ignore */ }
+
+/** Nach Server-Neustart: gobbledigook entsperren. */
+async function unlockEnvScramble(password) {
+  const ergebnis = await api("/config/unlock-env", {
+    methode: "POST",
+    daten: { password: String(password || "") },
+  });
+  if (Zustand.config && ergebnis.env_scramble) {
+    Zustand.config.env_scramble = ergebnis.env_scramble;
+  }
+  await ladeConfig();
+  return ergebnis;
+}
+
+function ggfEnvScrambleUnlockDialog() {
+  const st = Zustand.config?.env_scramble;
+  if (!st || !st.locked || !st.active) return;
+  const pw = window.prompt(
+    t("settings.password.unlockPrompt") !== "settings.password.unlockPrompt"
+      ? t("settings.password.unlockPrompt")
+      : "Geschützte .env — Passwort eingeben:",
+  );
+  if (pw == null || pw === "") return;
+  unlockEnvScramble(pw).then(() => {
+    meldung(
+      t("settings.password.unlocked") !== "settings.password.unlocked"
+        ? t("settings.password.unlocked")
+        : "Konfiguration entsperrt.",
+      "gut",
+    );
+  }).catch((fehler) => {
+    meldung(
+      (fehler && fehler.message) || String(fehler),
+      "krit",
+    );
+  });
 }
 
 function zeichneLocalCoreHinweis() {
@@ -15136,6 +15568,10 @@ function _kopfFilterHaystack(el) {
     txid,
     String(el.dataset.address || ""),
     String(el.dataset.timeLabel || ""),
+    // Börsen (Kraken, …) und CJ-Formen (Wasabi, Whirlpool, …)
+    String(el.dataset.filterLabels || ""),
+    // Sichtbarer Pillen-/Icon-Text (aria-label), falls schon gerendert
+    String(el.getAttribute("aria-label") || ""),
   ].join(" ").toLowerCase();
 }
 
@@ -15179,8 +15615,11 @@ function _kopfFilterAdressGruppe(gruppe, f) {
     ? leaves
     : [...gruppe.querySelectorAll(".utxo-zeile, .utxo-wurzel")];
 
-  const addr = String(gruppe.dataset.address || "").toLowerCase();
-  const groupTextOk = _kopfFilterTextOk(addr, f.terms);
+  const groupHay = [
+    String(gruppe.dataset.address || ""),
+    String(gruppe.dataset.filterLabels || ""),
+  ].join(" ").toLowerCase();
+  const groupTextOk = _kopfFilterTextOk(groupHay, f.terms);
 
   let any = false;
   for (const leaf of liste) {
@@ -16569,6 +17008,7 @@ async function ladeConfig() {
   zeichneUiTheme();
   fuellOnchainHinweisTexte();
   zeichneStartSync();
+  zeichneAppPasswort();
   zeichneLernhinweiseEinstellung();
   setzeEmpfangLabSenden();
   zeichneLlmEinstellungen();
@@ -16576,6 +17016,7 @@ async function ladeConfig() {
   zeichneMempoolStatus();
   zeichneChatAnbindung();
   zeichneNav();
+  ggfEnvScrambleUnlockDialog();
   zeichneFussVersion();
   logReleaseAlsErsteZeile();
   if (Zustand.config?.lernhinweise_plebs) {
@@ -16594,15 +17035,20 @@ async function ladeConfig() {
 }
 
 async function start() {
-  // Console-Token OR password session (StartOS / remote login).
+  // Auth: Session-Cookie und/oder Bootstrap-Token. Mit gesetztem Passwort
+  // reicht ?t= nicht — Login ist Pflicht (auch Loopback / nach Server-Neustart).
+  let auth = null;
+  try {
+    const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
+    if (antwort.ok) auth = await antwort.json();
+  } catch (_) {
+    auth = null;
+  }
+  if (auth && auth.password_set && !auth.authenticated) {
+    location.href = "/login?next=/";
+    return;
+  }
   if (!Token) {
-    let auth = null;
-    try {
-      const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
-      if (antwort.ok) auth = await antwort.json();
-    } catch (_) {
-      auth = null;
-    }
     if (auth && auth.authenticated) {
       // Session-Cookie reicht — kein ?t= nötig.
     } else if (auth && auth.password_set) {
@@ -16825,6 +17271,8 @@ async function start() {
   $("#steuer-uebernehmen").addEventListener("click", speichereSteuerEinstellungen);
   const personBtn = $("#person-uebernehmen");
   if (personBtn) personBtn.addEventListener("click", speicherePersonEinstellungen);
+  bindeAppPasswortUi();
+  zeichneAppPasswort();
   const lernPlebs = $("#lernhinweise-plebs");
   if (lernPlebs) {
     lernPlebs.addEventListener("change", () => {

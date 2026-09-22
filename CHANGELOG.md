@@ -9,8 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **.env-Scramble:** Eine Datei **`.env`** — mit Passwort scrambled (Magic `SSGB1`), ohne Passwort Klartext. **`.env.backup0`…`9`** werden mitgesetzt (scramble bei Passwort, unscramble bei Löschen, Umschlüsselung bei Änderung). Kein `.env.gobbledigook` mehr; Legacy wird migriert. Login = Hash + File-Key. CLI/Specter/Umbrel/Start9 ausgenommen.
+- **Login · Passwort bei GUI-Start:** Ist ein App-Passwort gesetzt, reicht ``?t=``/Token auch auf Loopback nicht mehr — Login-Seite nach Serverstart. Session-Cookie nach Anmeldung wie bisher.
+- **Einstellungen · Passwort (Windows):** Login-Hash ohne ``os.fchmod`` (fehlte → ``AttributeError`` → Browser-NetworkError). Löschen per **POST** statt DELETE+Body. Aktuelles Passwort wird bei Entfernen eingefordert (Fokus aufs Feld).
+- **UI · Fiat-Historie an Summen:**
+ Steuerjahr (Kennzahlen, Gruppen, Abgänge), Meta-Zeilen und Trace-Knoten/`atTs` — **nur** wenn alle saldierten Zeilen denselben Kalendertag haben; sonst nur sats/BTC (kein Spot-Mix).
 - **Cache · Tageskurs EUR+USD:** Neue UTXO-/Verlaufs-/Ingress-/First-seen-/Blockzeit-Einträge speichern bei Datum den **BTC-Tageskurs EUR und USD** sowie bei Sat-Volumen die **Fiat-Gegenwerte** (`btc_eur`/`btc_usd`/`value_eur`/…, bei Ausgaben `spent_*`). Nur lokal aus Historie, kein Backfill-Job, bestehende Felder bleiben.
-- **UI · Listen-Filter:** Wallet + Herkunft — Teiltext Adresse/TxID, Betrag `>n`/`<n` (sats), Datum `>1.1.25` / `<05.12.2023` (TT.MM.JJJJ). Andere Ansichten ausgegraut.
+- **UI · Listen-Filter:** Wallet + Herkunft — Adresse/TxID, Börse/CJ-Label (`Kraken`, `Wasabi`, …), Betrag `>n`/`<n`, Datum. Andere Ansichten ausgegraut.
 - **Start · .env-Modus:** Unter Windows keine Dauer-Warnung mehr „Modus … 0666 → 0600“ — ``chmod`` greift dort nicht; Prüfung nur noch auf POSIX.
 - **Wallets · Löschen:** Log **„Lösche …“** / **„Löschen beendet“** (Timestamps), bei vielen Cache-Dateien Zwischenstand. Langsam v. a. durch Walk über UTXO-/Verlauf → je Tx Herkunfts-/Ingress-Dateien (Import-Wallets).
 - **Wallets · Adressen nachziehen:** Nach Export-Import wartet der Job bis ~2 min auf den Indexer (Tor-Bootstrap), statt still abzubrechen. Log: **„Adressen nachziehen braucht Indexer…“** / Warte-Zeilen; ohne Konfiguration klare Meldung, Adressen bleiben unzugeordnet sichtbar.
