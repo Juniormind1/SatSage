@@ -1,0 +1,127 @@
+Die großen Klumpen in SatSage sind real und messbar: server.py (327 KB), main.py (246 KB), analyze.py (143 KB), web/app.js (533 KB), dazu fulcrum.py und bip158_scanner.py. Es gibt schon eine sinnvolle Richtung — eine Engine, mehrere Oberflächen, core/ als Datenschicht — aber die Root-Dateien sind trotzdem God-Files. Genau deshalb wächst das Projekt weiter monolithisch: AGENTS.md verlangt sogar explizit „keine Drive-by-Refactors“. Ohne einen engen Auftrag macht Grok Build deshalb weiter im bestehenden Stil.
+
+Nicht alles auf einmal umbauen. Erst Plan, dann eine bounded Extraction, Verhalten unverändert, Tests als Sicherheitsnetz.
+
+Warum ein naiver „refaktoriere alles“-Prompt scheitert
+
+Der Agent mischt Umbenennung, Feature-Arbeit und Packaging und bricht Specter/PyInstaller.
+Ohne Inventar zieht er Logik nur in andere große Dateien um.
+Ohne „Done when“ stoppt er nach kosmetischen Splits.
+Die bestehende Regel „Scope: nur das Nötigste“ blockiert genau diese Arbeit, wenn du sie nicht für diese Session außer Kraft setzt.
+
+Arbeitsweise in Grok Build
+
+Eigenen Branch, z. B. refactor/modular-engine.
+/effort high oder xhigh.
+Zuerst Plan Mode, Plan freigeben, dann implementieren.
+Danach die Standing Rules in AGENTS.md nachziehen, sonst entstehen die Monolithen wieder.
+
+Prompt 1 — Inventar und Plan (zuerst diesen)
+
+Ziel: Erarbeite einen inkrementellen Modularisierungsplan für SatSage. Noch keinen Produktionscode ändern.
+
+Kontext:
+Repo: SatSage. Architektur laut @AGENTS.md und Handbuch: eine Engine, mehrere Oberflächen.
+Bereits vorhanden: core/ als Datenschicht ohne print(), tests/ mit vielen pytest-Dateien, Specter-Plugin in specter_plugin/, PyInstaller-Packaging.
+Bekannte God-Files (ungefähre Größen):
+  @web/app.js (~533 KB)
+  @server.py (~327 KB)
+  @main.py (~246 KB)
+  @analyze.py (~143 KB)
+  @bip158_scanner.py, @fulcrum.py, @sanctioned.py, @menu.py
+core/ ist schon teilweise modular (config, jobs, tax, trace, source, wallets, utxos, …), wird aber von den Root-Monolithen umgangen oder verdoppelt.
+
+Auftrag:
+Inventarisiere Kopplung: welche Symbole aus main.py/server.py/analyze.py/web/app.js werden von tests/, specter_plugin/, packaging und core/ importiert.
+Zeichne die Ist-Schichten vs. Soll-Schichten.
+   Soll (pragmatisch, kein Hexagonal-Overkill):
+   engine: Ableitung, Caches, Datenquellen, Trace
+   core: Daten-APIs, Jobs, Steuer, Config (weiterhin kein print())
+   adapters: fulcrum / p2p / bitcoind / sanctioned
+   surfaces: thin server.py, web/* nach Views, legacy CLI
+Finde 4–6 Extraktionen mit höchstem Wartbarkeitsgewinn und niedrigstem Bruchrisiko.
+Für jede Extraktion: Zielpfad, öffentliche API, Import-Fassade damit alte Pfade erstmal weiterlaufen, betroffene Tests, Risiko für Specter/PyInstaller/.env-Semantik.
+Empfiehl genau EINE erste Extraktion als Slice 1. Begründe.
+
+Constraints:
+Verhalten 1:1 erhalten. Keine Features, kein UI-Redesign, keine neuen Dependencies.
+Python 3.10+, Stdlib + embit + chiabip158.
+Secrets/.env/XPUBs niemals anfassen oder loggen.
+Deutsche Nutzertexte unverändert.
+Keine Big-Bang-Paketumbenennung (kein kompletter Move nach src/satsage in Slice 1).
+Root-Dateien dürfen zu Fassaden werden (Re-Export), damit bestehende Imports nicht brechen.
+Plan auf Deutsch, als ADR-ähnliche Liste. Datei: doc/adr-modularisierung.md
+
+Done when:
+doc/adr-modularisierung.md existiert mit Ist/Soll, Kopplungsinventar, priorisierten Slices und explizitem Slice-1-Schnitt.
+Kein Anwendungscode geändert außer ggf. der ADR-Datei.
+Kurze Risiko-Liste: was Slice 1 bewusst NICHT anfasst.
+
+Prompt 2 — Slice 1 umsetzen (nach Planfreigabe)
+
+Passe die konkreten Dateinamen an den Plan an. Als Startkandidat ist meist server.py → Routen/Handler in core/ bzw. server/ am wertvollsten, parallel oder als Nächstes web/app.js nach Views.
+
+Ziel: Führe Slice 1 der Modularisierung verhaltensgleich aus. Lies zuerst @doc/adr-modularisierung.md und @AGENTS.md.
+
+Slice 1 (falls der Plan nichts Abweichendes sagt):
+Entflechte @server.py in eine dünne HTTP-Fassade plus fachliche Module.
+Vorschlag, nur übernehmen wenn der Inventar-Plan das bestätigt:
+server.py bleibt Einstieg (Bind 127.0.0.1, Token, main_cli, Specter-Kompatibilität)
+HTTP-Routing/Auth nach core/http_server.py oder server/app.py
+API-Handler nach Kerngrenzen gruppieren, z.B. core/api_wallets.py, core/api_utxos.py, core/api_trace.py, core/api_tax.py, core/api_jobs.py
+Keine Business-Logik neu erfinden: Handler rufen bestehende core/* und Engine-Funktionen auf.
+
+Falls der Plan stattdessen web/app.js als Slice 1 wählt:
+index.html und öffentliche Funktionsnamen stabil lassen
+Split nach Views: wallets, utxos, herkunft, steuerjahr, settings, assistant, i18n-glue
+Ein Bootstrap-Modul lädt und verdrahtet; keine neuen Bundler/Frameworks.
+
+Arbeitsregeln:
+Zuerst Characterization: bestehende Tests laufen lassen, fehlende Nahtstellen mit gezielten Tests absichern (Importpfade, API-Statuscodes, Token-Header X-Satsage-Token).
+Dann extrahieren: Funktionen/Klassen verschieben, öffentliche Namen über Fassaden re-exportieren.
+Nach jeder sinnvollen Etappe: py -m pytest tests/test_api.py tests/test_eingebetteter_server.py tests/test_gui_session.py tests/test_jobs.py tests/test_web_js.py tests/test_web_sprache.py -q
+Weitere relevante Tests der berührten Module ebenfalls ausführen.
+Importzyklen vermeiden. core/ darf weiterhin die Engine aufrufen, aber keine GUI-Texte drucken.
+Specter-Adapter und Packaging-Specs prüfen; interne main.py-Signaturen nicht still ändern.
+CHANGELOG.md unter [Unveröffentlicht] nur nutzenwirksam ergänzen, falls sich Start/Bedienung ändert (sollte nicht).
+
+Constraints:
+Keine neuen Dependencies, kein Type-System-Big-Bang, kein Rewrite in FastAPI/Flask für die Standalone-GUI.
+Keine Formatierungsorgien außerhalb der verschobenen Blöcke.
+Keine Secrets committen. Nicht pushen. Nicht nach main mergen.
+Deutsche UI-Strings und Hinweistexte byte-genau lassen, sofern nicht zwingend verschoben.
+Dateien > ca. 80–100 KB nach dem Split sind nicht fertig; dann weiter schneiden statt stehenlassen.
+
+Done when:
+server.py (bzw. app.js) ist Fassade + Delegation, nicht mehr der God-Object-Kern.
+Alte Importpfade funktionieren oder haben bewusst aktualisierte, getestete Nachfolger.
+Genannte Tests sind grün.
+Kurzes Abschlussmemo: verschobene Symbole, neue Module, offene Folgeslices, bekannte Restkopplung.
+
+Damit das nicht zurückfällt: in AGENTS.md ergänzen
+
+Ohne diese Regeln schreibt der nächste Agent wieder 400-Zeilen-Funktionen in server.py.
+
+Modularität
+Neue Logik nicht in Root-God-Files (server.py, main.py, analyze.py, web/app.js) anhängen.
+server.py / main.py bleiben dünne Einstiege. Fachcode nach core/ oder klar benannten Untermodulen.
+web/app.js nach View/Feature splitten; keine neuen globalen God-Funktionen.
+core/ gibt Daten zurück, kein print(). Oberflächen formatieren.
+Öffentliche Engine-Funktionen, die Specter oder Tests importieren, nur mit Fassade und Test ändern.
+Harte Grenze: Datei > 80 KB oder Funktion > 80 Zeilen ist ein Split-Kandidat, kein Platz für das nächste Feature.
+Refactor-Slices sind explizite Aufgaben, keine Drive-by-Änderungen in Feature-PRs.
+
+Optional als Skill .grok/skills/refactor-satsage/SKILL.md mit genau diesen Grenzen, dann in späteren Sessions nur noch: Use refactor-satsage. Nächster Slice laut doc/adr-modularisierung.md.
+
+Reihenfolge, die hier am meisten bringt
+
+Inventar/ADR (Prompt 1)  
+server.py entkernen — API wird testbar, Web und Specter profitieren sofort  
+web/app.js nach Ansichten — das ist der unübersichtlichste Monolith  
+main.py: Ableitung, Cache, Datenquellenwahl hinter stabile Funktionen  
+analyze.py / trace_engine.py: Trace-Pipeline als echte Module, analyze.py nur noch Orchestrierung  
+
+Nicht parallel umbenennen und „aufräumen“. Jeder Slice muss alleine mergefähig sein.
+
+Wenn du willst, formuliere ich als Nächstes den Prompt fest auf genau eine Datei — am schärfsten wäre aktuell web/app.js oder server.py.
+
