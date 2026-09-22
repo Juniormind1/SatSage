@@ -720,6 +720,18 @@ def save_cached_block_time(
         "cached_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": source,
     }
+    try:
+        from core import price as price_mod
+
+        price_mod.reichere_fiat_an(
+            payload,
+            time_ts=int(block_time),
+            value_sats=None,
+            immutable_cache_dir=root,
+            prefix="",
+        )
+    except Exception:
+        pass
     if not cache_disk_write_allowed(root):
         return path
     tmp = path.with_suffix(".json.tmp")
@@ -952,6 +964,23 @@ def save_utxo_ingress_cache(
         "external_untergrenze": bool(ingress.get("external_untergrenze")),
         "address": ingress.get("address"),
     }
+    if ingress.get("tax_horizon_time_ts") is not None:
+        payload["tax_horizon_time_ts"] = ingress.get("tax_horizon_time_ts")
+    # Kursfelder aus *ingress* übernehmen (falls schon gesetzt) + lokal anreichern.
+    for k, v in (ingress or {}).items():
+        if k.startswith(("youngest_btc_", "youngest_value_",
+                         "external_btc_", "external_value_",
+                         "external_oldest_btc_", "external_oldest_value_",
+                         "tax_horizon_btc_", "tax_horizon_value_")):
+            payload[k] = v
+    try:
+        from core import price as price_mod
+
+        payload = price_mod.anreichere_ingress(
+            payload, immutable_cache_dir=root,
+        )
+    except Exception:
+        pass
     if not cache_disk_write_allowed(root):
         return path
     tmp = path.with_suffix(".json.tmp")
@@ -4909,8 +4938,26 @@ def save_xpub_verlauf_cache(
         meta["planned_addresses"] = sorted(set(planned_addresses))
     if incomplete is not None:
         meta["incomplete"] = bool(incomplete)
+    imm = resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
+
+    def _bt_hoehe(h: int):
+        try:
+            return load_cached_block_time(int(h), imm)
+        except Exception:
+            return None
+
+    try:
+        from core import price as price_mod
+
+        eintraege_out = price_mod.anreichere_utxo_liste(
+            list(eintraege or []),
+            immutable_cache_dir=imm,
+            block_time_fuer_hoehe=_bt_hoehe,
+        )
+    except Exception:
+        eintraege_out = list(eintraege or [])
     payload = {
-        "eintraege": eintraege,
+        "eintraege": eintraege_out,
         "scan": {
             "incomplete": bool(meta["incomplete"]),
             "scanned_addresses": list(meta["scanned_addresses"]),
@@ -5099,6 +5146,19 @@ def save_xpub_first_seen(
     wert = _alter_aus_payload(first_seen)
     if not wert:
         return path
+    try:
+        from core import price as price_mod
+
+        imm = resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
+        price_mod.reichere_fiat_an(
+            wert,
+            time_ts=wert.get("time_ts"),
+            value_sats=None,
+            immutable_cache_dir=imm,
+            prefix="",
+        )
+    except Exception:
+        pass
     if not cache_disk_write_allowed(cache_dir):
         return path
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
@@ -5259,6 +5319,26 @@ def save_xpub_utxo_cache(
         except (TypeError, ValueError):
             scan_tip_height = None
     save_xpub_first_seen(xpub, cache_dir, first_seen)
+    # Tageskurs EUR/USD + Fiat-Gegenwert nur lokal, nur fehlende Felder
+    # (kein Migrations-Rerun; neue/ergänzte Einträge beim Schreiben).
+    imm = resolve_immutable_cache_dir(None, utxo_cache_dir=cache_dir)
+
+    def _bt_hoehe(h: int):
+        try:
+            return load_cached_block_time(int(h), imm)
+        except Exception:
+            return None
+
+    try:
+        from core import price as price_mod
+
+        utxos_out = price_mod.anreichere_utxo_liste(
+            list(utxos or []),
+            immutable_cache_dir=imm,
+            block_time_fuer_hoehe=_bt_hoehe,
+        )
+    except Exception:
+        utxos_out = list(utxos or [])
     payload = {
         "xpub": xpub,
         "xpub_prefix": xpub[:25],
@@ -5266,12 +5346,31 @@ def save_xpub_utxo_cache(
         "source": source,
         "scan_end_index": scan_end_index,
         "max_addresses": max_addresses,
-        "utxo_count": len(utxos),
-        "utxos": utxos,
+        "utxo_count": len(utxos_out),
+        "utxos": utxos_out,
     }
     if first_seen:
         payload["first_seen_height"] = first_seen.get("height")
         payload["first_seen_ts"] = first_seen.get("time_ts")
+        try:
+            from core import price as price_mod
+
+            fs = dict(first_seen)
+            price_mod.reichere_fiat_an(
+                fs,
+                time_ts=fs.get("time_ts"),
+                value_sats=None,
+                immutable_cache_dir=imm,
+                prefix="first_seen_",
+            )
+            if fs.get("first_seen_btc_eur") is not None:
+                payload["first_seen_btc_eur"] = fs["first_seen_btc_eur"]
+            if fs.get("first_seen_btc_usd") is not None:
+                payload["first_seen_btc_usd"] = fs["first_seen_btc_usd"]
+            if fs.get("first_seen_btc_day"):
+                payload["first_seen_btc_day"] = fs["first_seen_btc_day"]
+        except Exception:
+            pass
     if scan_tip_height is not None:
         payload["scan_tip_height"] = int(scan_tip_height)
     if bip158_fullscan_ok is not None:

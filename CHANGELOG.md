@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Cache · Tageskurs EUR+USD:** Neue UTXO-/Verlaufs-/Ingress-/First-seen-/Blockzeit-Einträge speichern bei Datum den **BTC-Tageskurs EUR und USD** sowie bei Sat-Volumen die **Fiat-Gegenwerte** (`btc_eur`/`btc_usd`/`value_eur`/…, bei Ausgaben `spent_*`). Nur lokal aus Historie, kein Backfill-Job, bestehende Felder bleiben.
 - **UI · Listen-Filter:** Wallet + Herkunft — Teiltext Adresse/TxID, Betrag `>n`/`<n` (sats), Datum `>1.1.25` / `<05.12.2023` (TT.MM.JJJJ). Andere Ansichten ausgegraut.
 - **Start · .env-Modus:** Unter Windows keine Dauer-Warnung mehr „Modus … 0666 → 0600“ — ``chmod`` greift dort nicht; Prüfung nur noch auf POSIX.
 - **Wallets · Löschen:** Log **„Lösche …“** / **„Löschen beendet“** (Timestamps), bei vielen Cache-Dateien Zwischenstand. Langsam v. a. durch Walk über UTXO-/Verlauf → je Tx Herkunfts-/Ingress-Dateien (Import-Wallets).

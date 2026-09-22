@@ -42,6 +42,69 @@ class TestHilfen(unittest.TestCase):
         self.assertAlmostEqual(price.sats_in_fiat(50_000_000, 40_000), 20_000.0)
         self.assertEqual(price.fiat_in_sats(20_000, 40_000), 50_000_000)
 
+    def test_anreichere_cache_eintrag_eur_usd(self):
+        """UTXO-Dict bekommt btc_eur/usd + value_* aus lokaler Serie."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            btc = root / "btc_price"
+            btc.mkdir(parents=True)
+            # 2024-01-15 UTC ≈ 1705276800
+            (btc / "EUR.csv").write_text(
+                "date,price\n2024-01-15,40000.0\n", encoding="utf-8",
+            )
+            (btc / "USD.csv").write_text(
+                "date,price\n2024-01-15,43000.0\n", encoding="utf-8",
+            )
+            imm = root  # preis_cache_dir erwartet immutable root mit btc_price/
+            # historie_lesepfad uses preis_cache_dir(immutable) = imm/btc_price
+            u = {
+                "txid": "ab" * 32,
+                "vout": 0,
+                "value": 100_000_000,
+                "status": {"block_time": 1_705_276_800, "block_height": 800_000},
+            }
+            price.anreichere_utxo_oder_verlauf(u, immutable_cache_dir=imm)
+            self.assertEqual(u.get("btc_day"), "2024-01-15")
+            self.assertEqual(u.get("btc_eur"), 40000.0)
+            self.assertEqual(u.get("btc_usd"), 43000.0)
+            self.assertAlmostEqual(u.get("value_eur"), 40000.0)
+            self.assertAlmostEqual(u.get("value_usd"), 43000.0)
+            # kein Rerun: bestehende Werte bleiben
+            u["btc_eur"] = 1.0
+            price.anreichere_utxo_oder_verlauf(u, immutable_cache_dir=imm)
+            self.assertEqual(u["btc_eur"], 1.0)
+
+    def test_anreichere_spent_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            btc = root / "btc_price"
+            btc.mkdir()
+            (btc / "EUR.csv").write_text(
+                "date,price\n2024-02-01,50000\n2024-06-01,60000\n",
+                encoding="utf-8",
+            )
+            (btc / "USD.csv").write_text(
+                "date,price\n2024-02-01,55000\n2024-06-01,65000\n",
+                encoding="utf-8",
+            )
+            u = {
+                "value": 50_000_000,
+                "status": {"block_time": 1_706_745_600},  # ~2024-02-01
+                "spent": True,
+                "spent_time_ts": 1_717_200_000,  # ~2024-06-01 area — adjust
+            }
+            # exact days from CSV
+            u["status"]["block_time"] = int(
+                datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp()
+            )
+            u["spent_time_ts"] = int(
+                datetime(2024, 6, 1, tzinfo=timezone.utc).timestamp()
+            )
+            price.anreichere_utxo_oder_verlauf(u, immutable_cache_dir=root)
+            self.assertEqual(u.get("btc_eur"), 50000.0)
+            self.assertEqual(u.get("spent_btc_eur"), 60000.0)
+            self.assertAlmostEqual(u.get("spent_value_eur"), 30000.0)
+
     def test_parse_tag(self):
         self.assertEqual(price.parse_tag("2024-01-01"), date(2024, 1, 1))
         self.assertEqual(price.parse_tag(1_704_067_200), date(2024, 1, 1))

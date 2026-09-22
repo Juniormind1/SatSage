@@ -992,3 +992,304 @@ def tageskurs(
     if cache_root is not None:
         _schreibe_cache(_tag_pfad(preis_cache_dir(cache_root), w, kalender), preis)
     return preis
+
+
+# ---------------------------------------------------------------------------
+# Cache-Anreicherung: Tageskurs EUR+USD + Fiat-Gegenwert (nur lokal, kein Netz)
+# ---------------------------------------------------------------------------
+
+def _serie_lokal(
+    immutable_cache_dir: Path | str | None,
+    currency: str,
+) -> dict[str, float]:
+    """ISO-Tag → Preis nur aus Bundle/Import-CSV (kein Mempool)."""
+    if currency.upper() not in HISTORIE_WAEHRUNGEN:
+        return {}
+    w = normalisiere_historie_waehrung(currency)
+    path, _src = historie_lesepfad(immutable_cache_dir, w)
+    if path is None:
+        return {}
+    try:
+        return dict(_serie_aus_pfad(path))
+    except (PriceError, OSError):
+        return {}
+
+
+def lade_tageskurs_serien_lokal(
+    immutable_cache_dir: Path | str | None,
+) -> dict[str, dict[str, float]]:
+    """``{\"EUR\": {tag: preis}, \"USD\": {...}}`` für Batch-Anreicherung."""
+    return {
+        "EUR": _serie_lokal(immutable_cache_dir, "EUR"),
+        "USD": _serie_lokal(immutable_cache_dir, "USD"),
+    }
+
+
+def _int_oder_none(wert) -> int | None:
+    if wert is None or wert == "":
+        return None
+    try:
+        n = int(wert)
+    except (TypeError, ValueError):
+        try:
+            n = int(float(wert))
+        except (TypeError, ValueError):
+            return None
+    return n if n > 0 else None
+
+
+def ts_aus_cache_eintrag(eintrag: dict) -> int | None:
+    """Unix-Zeit aus UTXO-/Verlaufs-Dict (status.block_time, time_ts, …)."""
+    if not isinstance(eintrag, dict):
+        return None
+    status = eintrag.get("status") if isinstance(eintrag.get("status"), dict) else {}
+    for roh in (
+        status.get("block_time"),
+        eintrag.get("block_time"),
+        eintrag.get("time_ts"),
+        eintrag.get("time"),
+        eintrag.get("youngest_time_ts"),
+        eintrag.get("external_time_ts"),
+        eintrag.get("first_seen_ts"),
+    ):
+        n = _int_oder_none(roh)
+        if n is not None and n > 1_000_000_000:  # grob Unix, nicht Höhe
+            return n
+        # time als ISO?
+        if isinstance(roh, str) and "T" in roh:
+            try:
+                dt = datetime.fromisoformat(roh.replace("Z", "+00:00"))
+                return int(dt.timestamp())
+            except ValueError:
+                pass
+    return None
+
+
+def sats_aus_cache_eintrag(eintrag: dict) -> int | None:
+    if not isinstance(eintrag, dict):
+        return None
+    for key in ("value_sats", "value", "amount_sats", "youngest_sats", "external_sats"):
+        if key not in eintrag or eintrag.get(key) is None:
+            continue
+        try:
+            return int(eintrag[key])
+        except (TypeError, ValueError):
+            try:
+                return int(float(eintrag[key]))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def reichere_fiat_an(
+    ziel: dict,
+    *,
+    time_ts: int | None = None,
+    value_sats: int | None = None,
+    serien: dict[str, dict[str, float]] | None = None,
+    immutable_cache_dir: Path | str | None = None,
+    prefix: str = "",
+    nur_wenn_fehlt: bool = True,
+) -> bool:
+    """
+    Setzt ``{prefix}btc_eur``, ``btc_usd``, ``btc_day`` und bei Sats
+    ``value_eur`` / ``value_usd`` aus **lokaler** Tageskurs-Historie.
+
+    Kein Netzabruf. Fehlender Kurs → keine Felder. Bereits gesetzte Kurse
+    bleiben (kein Backfill-Zwang / kein Rerun alter Semantik).
+
+    Rückgabe True, wenn etwas geschrieben wurde.
+    """
+    if not isinstance(ziel, dict):
+        return False
+    k_eur = f"{prefix}btc_eur"
+    k_usd = f"{prefix}btc_usd"
+    k_day = f"{prefix}btc_day"
+    k_ve = f"{prefix}value_eur"
+    k_vu = f"{prefix}value_usd"
+    if nur_wenn_fehlt and ziel.get(k_eur) is not None and ziel.get(k_usd) is not None:
+        # Kurs da — fehlende value_* ggf. nachziehen
+        if value_sats is None or (
+            ziel.get(k_ve) is not None and ziel.get(k_vu) is not None
+        ):
+            return False
+
+    ts = _int_oder_none(time_ts)
+    if ts is None:
+        return False
+    try:
+        tag = tag_aus_unix(ts)
+    except (OverflowError, OSError, ValueError):
+        return False
+    tag_s = tag.isoformat()
+
+    if serien is None:
+        serien = lade_tageskurs_serien_lokal(immutable_cache_dir)
+    eur_s = serien.get("EUR") or {}
+    usd_s = serien.get("USD") or {}
+    eur = eur_s.get(tag_s)
+    usd = usd_s.get(tag_s)
+    if eur is None and usd is None:
+        return False
+
+    geschrieben = False
+    if eur is not None and (not nur_wenn_fehlt or ziel.get(k_eur) is None):
+        ziel[k_eur] = float(eur)
+        geschrieben = True
+    if usd is not None and (not nur_wenn_fehlt or ziel.get(k_usd) is None):
+        ziel[k_usd] = float(usd)
+        geschrieben = True
+    if geschrieben or ziel.get(k_eur) is not None or ziel.get(k_usd) is not None:
+        ziel[k_day] = tag_s
+
+    sats = value_sats
+    if sats is None:
+        sats = sats_aus_cache_eintrag(ziel)
+    if sats is not None and sats >= 0:
+        if ziel.get(k_eur) is not None and (
+            not nur_wenn_fehlt or ziel.get(k_ve) is None
+        ):
+            ziel[k_ve] = round(sats_in_fiat(sats, float(ziel[k_eur])), 8)
+            geschrieben = True
+        if ziel.get(k_usd) is not None and (
+            not nur_wenn_fehlt or ziel.get(k_vu) is None
+        ):
+            ziel[k_vu] = round(sats_in_fiat(sats, float(ziel[k_usd])), 8)
+            geschrieben = True
+    return geschrieben
+
+
+def anreichere_utxo_oder_verlauf(
+    eintrag: dict,
+    *,
+    serien: dict[str, dict[str, float]] | None = None,
+    immutable_cache_dir: Path | str | None = None,
+    block_time_fuer_hoehe=None,
+) -> dict:
+    """
+    UTXO- oder Verlaufs-Eintrag: Ankunftskurs + optional Ausgaben-Kurs.
+
+    *block_time_fuer_hoehe*: optional ``callable(height) -> ts|None`` wenn
+    nur Blockhöhe bekannt ist.
+    """
+    if not isinstance(eintrag, dict):
+        return eintrag
+    if serien is None:
+        serien = lade_tageskurs_serien_lokal(immutable_cache_dir)
+
+    ts = ts_aus_cache_eintrag(eintrag)
+    if ts is None and block_time_fuer_hoehe is not None:
+        status = eintrag.get("status") if isinstance(eintrag.get("status"), dict) else {}
+        for roh in (
+            status.get("block_height"),
+            eintrag.get("block_height"),
+            eintrag.get("height"),
+        ):
+            h = _int_oder_none(roh)
+            if h is None:
+                continue
+            try:
+                ts = block_time_fuer_hoehe(h)
+            except Exception:
+                ts = None
+            if ts:
+                break
+
+    sats = sats_aus_cache_eintrag(eintrag)
+    reichere_fiat_an(
+        eintrag,
+        time_ts=ts,
+        value_sats=sats,
+        serien=serien,
+        immutable_cache_dir=immutable_cache_dir,
+        prefix="",
+    )
+
+    # Ausgaben-Zeitpunkt (Verlauf spent_*)
+    spent_ts = _int_oder_none(eintrag.get("spent_time_ts"))
+    if spent_ts is None and eintrag.get("spent"):
+        spent_ts = _int_oder_none(
+            (eintrag.get("status") or {}).get("spent_time_ts")
+            if isinstance(eintrag.get("status"), dict) else None
+        )
+    if spent_ts is not None:
+        reichere_fiat_an(
+            eintrag,
+            time_ts=spent_ts,
+            value_sats=sats,
+            serien=serien,
+            immutable_cache_dir=immutable_cache_dir,
+            prefix="spent_",
+        )
+    return eintrag
+
+
+def anreichere_utxo_liste(
+    utxos: list[dict] | None,
+    *,
+    immutable_cache_dir: Path | str | None = None,
+    block_time_fuer_hoehe=None,
+) -> list[dict]:
+    """Batch: lokale Serien einmal laden, jeden Eintrag anreichern."""
+    if not utxos:
+        return list(utxos or [])
+    serien = lade_tageskurs_serien_lokal(immutable_cache_dir)
+    out = []
+    for u in utxos:
+        if not isinstance(u, dict):
+            out.append(u)
+            continue
+        e = dict(u)
+        anreichere_utxo_oder_verlauf(
+            e,
+            serien=serien,
+            immutable_cache_dir=immutable_cache_dir,
+            block_time_fuer_hoehe=block_time_fuer_hoehe,
+        )
+        out.append(e)
+    return out
+
+
+def anreichere_ingress(
+    ingress: dict,
+    *,
+    immutable_cache_dir: Path | str | None = None,
+) -> dict:
+    """Ingress-Cache: youngest_ / external_ / external_oldest_ mit Kursen."""
+    if not isinstance(ingress, dict):
+        return ingress
+    serien = lade_tageskurs_serien_lokal(immutable_cache_dir)
+    e = dict(ingress)
+    # jüngster Wallet-Eingang
+    reichere_fiat_an(
+        e,
+        time_ts=_int_oder_none(e.get("youngest_time_ts")),
+        value_sats=_int_oder_none(e.get("youngest_sats")),
+        serien=serien,
+        prefix="youngest_",
+    )
+    # jüngster Extern
+    reichere_fiat_an(
+        e,
+        time_ts=_int_oder_none(e.get("external_time_ts")),
+        value_sats=_int_oder_none(e.get("external_sats")),
+        serien=serien,
+        prefix="external_",
+    )
+    # ältester Extern
+    reichere_fiat_an(
+        e,
+        time_ts=_int_oder_none(e.get("external_oldest_time_ts")),
+        value_sats=_int_oder_none(e.get("external_oldest_sats")),
+        serien=serien,
+        prefix="external_oldest_",
+    )
+    # Steuer-Horizont
+    reichere_fiat_an(
+        e,
+        time_ts=_int_oder_none(e.get("tax_horizon_time_ts")),
+        value_sats=None,
+        serien=serien,
+        prefix="tax_horizon_",
+    )
+    return e
