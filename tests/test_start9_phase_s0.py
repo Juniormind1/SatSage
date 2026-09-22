@@ -5,6 +5,7 @@ import urllib.request
 from unittest import mock
 
 import server
+from tests.env_scramble_helpers import read_env_plaintext, write_env_scrambled
 from tests.test_api import ApiTestBasis
 
 
@@ -19,6 +20,13 @@ class TestStart9PhaseS0(ApiTestBasis):
                 return response.status, json.loads(response.read() or b"{}")
         except urllib.error.HTTPError as error:
             return error.code, json.loads(error.read() or b"{}")
+
+    def _append_env(self, zeile: str) -> None:
+        """Scrambled .env erweitern (kein Roh-append auf Cipher-Bytes)."""
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad) + zeile,
+        )
 
     def test_default_bind_bleibt_loopback(self):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -39,8 +47,7 @@ class TestStart9PhaseS0(ApiTestBasis):
         self.assertEqual(status, 403)
 
     def test_allowlist_erlaubt_local_und_onion_muster(self):
-        with self.env_pfad.open("a", encoding="utf-8") as env_file:
-            env_file.write("SATSAGE_HOST_ALLOWLIST=*.local,.onion\n")
+        self._append_env("SATSAGE_HOST_ALLOWLIST=*.local,.onion\n")
         for host in ("ui.start9.local", "service.onion"):
             status, _ = self.anfrage("/api/health", token=False, host=host)
             self.assertEqual(status, 200)
@@ -57,8 +64,7 @@ class TestStart9PhaseS0(ApiTestBasis):
                 "/api/health", Host="proxy.invalid", **{"X-Forwarded-Host": "ui.start9.local"}
             )
         self.assertEqual(mit_trust, 403)
-        with self.env_pfad.open("a", encoding="utf-8") as env_file:
-            env_file.write("SATSAGE_HOST_ALLOWLIST=ui.start9.local\n")
+        self._append_env("SATSAGE_HOST_ALLOWLIST=ui.start9.local\n")
         with mock.patch.dict(os.environ, {"SATSAGE_TRUST_PROXY": "1"}, clear=False):
             mit_allowlist, _ = self._request_headers(
                 "/api/health", Host="proxy.invalid", **{"X-Forwarded-Host": "ui.start9.local"}

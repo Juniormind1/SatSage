@@ -14,6 +14,11 @@ from pathlib import Path
 from unittest import mock
 
 import server
+from tests.env_scramble_helpers import (
+    clear_scramble_session,
+    read_env_plaintext,
+    write_env_scrambled,
+)
 
 
 UMBREL_ENV = {
@@ -30,9 +35,13 @@ UMBREL_ENV = {
 
 
 class UmbrelModeTestCase(unittest.TestCase):
+    def setUp(self):
+        clear_scramble_session()
+        self.addCleanup(clear_scramble_session)
+
     def _state(self, tmp: str, env_text: str = "", process_env: dict | None = None):
         env_path = Path(tmp) / ".env"
-        env_path.write_text(env_text, encoding="utf-8")
+        write_env_scrambled(env_path, env_text or "\n")
         with mock.patch.dict(os.environ, process_env or UMBREL_ENV, clear=False):
             return server.AppState(
                 env_path=env_path,
@@ -71,7 +80,7 @@ class TestUmbrelManagedMode(UmbrelModeTestCase):
             state, env_path = self._state(tmp)
             with mock.patch.dict(os.environ, UMBREL_ENV, clear=False):
                 state.env().values()
-            self.assertNotIn("RPCPASSWORD", env_path.read_text(encoding="utf-8"))
+            self.assertNotIn("RPCPASSWORD", read_env_plaintext(env_path))
 
     def test_nutzer_env_schlaegt_prozess_env(self):
         with tempfile.TemporaryDirectory() as tmp:

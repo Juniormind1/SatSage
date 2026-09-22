@@ -20,6 +20,11 @@ import main
 import server
 from core import sanctions as sanctions_mod
 from core import trace as trace_mod
+from tests.env_scramble_helpers import (
+    clear_scramble_session,
+    read_env_plaintext,
+    write_env_scrambled,
+)
 from tests.fixtures import (
     BIP84_AS_XPUB,
     BIP84_RECEIVE_0,
@@ -44,12 +49,16 @@ def utxo(sats, adresse=BIP84_RECEIVE_0, marker="a1", vout=0):
 class ApiTestBasis(unittest.TestCase):
 
     def setUp(self):
+        clear_scramble_session()
+        self.addCleanup(clear_scramble_session)
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         wurzel = Path(self._tmp.name)
 
         self.env_pfad = wurzel / ".env"
-        self.env_pfad.write_text(
+        # Scramble mit tralala123 — Roh-read_text auf der Datei wäre Binär.
+        write_env_scrambled(
+            self.env_pfad,
             "# Testkonfiguration\n"
             f"XPUBS={BIP84_ZPUB} {ZWEITER_ALS_XPUB}\n"
             "WALLET_NAMES=Cold Storage|Ledger Alt\n"
@@ -66,7 +75,6 @@ class ApiTestBasis(unittest.TestCase):
             # Feldnamen oder Hinweistexten vorkommen und die Prüfung
             # auf Preisgabe wertlos machen.
             "RPCPASSWORD=xpq-testgeheimnis-8f3a2c\n",
-            encoding="utf-8",
         )
         self.cache = wurzel / "utxo_cache"
         self.cache.mkdir()
@@ -229,7 +237,7 @@ class TestWalletsSpeichern(ApiTestBasis):
             methode="PUT",
             daten={"wallets": [{"xpub": BIP84_ZPUB, "name": "Neu"}]},
         )
-        text = self.env_pfad.read_text(encoding="utf-8")
+        text = read_env_plaintext(self.env_pfad)
         self.assertIn("# Testkonfiguration", text)
         self.assertIn("RPCPASSWORD=xpq-testgeheimnis-8f3a2c", text)
 
@@ -266,7 +274,7 @@ class TestWalletsSpeichern(ApiTestBasis):
         ]})
         _, danach = self.anfrage("/api/config")
         self.assertEqual(danach["wallets"][0]["xpub_masked"], vorher)
-        self.assertIn(BIP84_ZPUB, self.env_pfad.read_text(encoding="utf-8"))
+        self.assertIn(BIP84_ZPUB, read_env_plaintext(self.env_pfad))
 
     def test_unbekannte_kennung_wird_abgelehnt(self):
         status, körper = self.anfrage(
@@ -286,13 +294,13 @@ class TestWalletsSpeichern(ApiTestBasis):
         self.assertIn("gültiger", körper["error"])
 
     def test_abgelehnte_eingabe_veraendert_die_datei_nicht(self):
-        vorher = self.env_pfad.read_text(encoding="utf-8")
+        vorher = read_env_plaintext(self.env_pfad)
         self.anfrage(
             "/api/config/wallets",
             methode="PUT",
             daten={"wallets": [{"xpub": "unsinn", "name": "X"}]},
         )
-        self.assertEqual(self.env_pfad.read_text(encoding="utf-8"), vorher)
+        self.assertEqual(read_env_plaintext(self.env_pfad), vorher)
 
     def test_gleicher_schluessel_verlangt_bestaetigung(self):
         """
@@ -977,10 +985,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
 
     def test_port_speichern_loescht_stale_tor_port(self):
         """UI-Port muss Tor-Endpoint steuern — altes FULCRUM_TOR_PORT weg."""
-        self.env_pfad.write_text(
-            self.env_pfad.read_text(encoding="utf-8")
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad)
             + "\nFULCRUM_TOR=abc.onion\nFULCRUM_TOR_PORT=443\nFULCRUM_TOR_SSL=true\n",
-            encoding="utf-8",
         )
         status, _ = self.anfrage(
             "/api/config/source", methode="PUT",
@@ -1024,7 +1032,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         )
         self.assertEqual(status, 400)
         self.assertIn("gehört nicht", körper["error"])
-        self.assertNotIn("zpub6BOESE", self.env_pfad.read_text(encoding="utf-8"))
+        self.assertNotIn("zpub6BOESE", read_env_plaintext(self.env_pfad))
 
     def test_unbekannte_quelle_wird_abgelehnt(self):
         status, _ = self.anfrage(
@@ -1079,7 +1087,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             "/api/config/source", methode="PUT",
             daten={"source": "own_fulcrum", "values": {"FULCRUM_HOST": "192.0.2.9"}},
         )
-        text = self.env_pfad.read_text(encoding="utf-8")
+        text = read_env_plaintext(self.env_pfad)
         self.assertIn("# Testkonfiguration", text)
         self.assertIn(BIP84_ZPUB, text)
 
@@ -1266,10 +1274,9 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
 
     def test_oeffentliche_electrum_bestaetigung_ist_sitzung(self):
         """Opt-in gilt nur sitzungsweise — nicht dauerhaft in der .env."""
-        self.env_pfad.write_text(
-            self.env_pfad.read_text(encoding="utf-8")
-            + "\nOEFFENTLICHE_ELECTRUM=1\n",
-            encoding="utf-8",
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad) + "\nOEFFENTLICHE_ELECTRUM=1\n",
         )
         # Frischer State streicht Dauer-Flag und startet ohne Sitzung.
         self.state = server.AppState(
@@ -1374,9 +1381,9 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertNotIn("FULCRUM_TOR_2", werte)
 
     def test_electrum_laden_clearnet_laesst_onion_env_in_ruhe(self):
-        self.env_pfad.write_text(
-            self.env_pfad.read_text(encoding="utf-8") + "FULCRUM_TOR_0=keep.onion\n",
-            encoding="utf-8",
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad) + "FULCRUM_TOR_0=keep.onion\n",
         )
         daten = {
             "n.onion": {"s": "50002"},
@@ -1532,7 +1539,7 @@ class TestSanktionsCheck(ApiTestBasis):
         self.assertIn("erreichbar", job["error"])
 
     def test_ohne_wallet_konfiguration_fehler(self):
-        self.env_pfad.write_text("# leer\n", encoding="utf-8")
+        write_env_scrambled(self.env_pfad, "# leer\n")
         self.state.reload()
         status, _ = self.anfrage(
             "/api/sanctions/check", methode="POST", daten={}

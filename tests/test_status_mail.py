@@ -107,16 +107,34 @@ class TestStatusMailHook(unittest.TestCase):
 
 
 class TestStatusMailApi(unittest.TestCase):
+    def setUp(self):
+        from tests.env_scramble_helpers import clear_scramble_session
+
+        clear_scramble_session()
+
+    def tearDown(self):
+        from tests.env_scramble_helpers import clear_scramble_session
+
+        clear_scramble_session()
+
     def test_save_und_config_ohne_passwort(self):
         import tempfile
         from pathlib import Path
 
         import server
+        from core import env_scramble as sc
         from core.config import EnvFile
+        from tests.env_scramble_helpers import (
+            assert_env_scrambled,
+            read_env_plaintext,
+            write_env_scrambled,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
-            env_path.write_text("", encoding="utf-8")
+            # Fest: Scramble mit tralala123, Speichern bleibt Cipher auf Platte.
+            write_env_scrambled(env_path, "")
+            assert_env_scrambled(env_path)
             state = SimpleNamespace(
                 env_path=env_path,
                 env=lambda: EnvFile.load(env_path),
@@ -147,7 +165,9 @@ class TestStatusMailApi(unittest.TestCase):
                 "starttls": True,
             })
             self.assertTrue(out2["status_mail"]["smtp_password_set"])
-            roh = env_path.read_text(encoding="utf-8")
+            assert_env_scrambled(env_path)
+            self.assertTrue(sc.is_env_scrambled(env_path))
+            roh = read_env_plaintext(env_path)
             self.assertIn("SMTP_PASSWORD=geheim", roh)
 
 

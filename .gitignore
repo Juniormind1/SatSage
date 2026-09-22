@@ -75,6 +75,10 @@ price_cache/
 satsage-webgui.exe
 satsage-webgui.exe.sha256
 
+# Lokale Tcl/Tk-Entpackung (python3-tk ohne Root) — nie committen
+.local-tk/
+python3-tk_*.deb
+
 .grok-local-notes.txt
 
 # Personal / machine-local secrets (never commit)
