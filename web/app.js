@@ -13236,6 +13236,21 @@ function liesSparrowDateien(ereignis) {
 /** Letzte Suchtreffer (Pfad → Meta) für den Import-Knopf. */
 let _walletExportTreffer = [];
 
+/**
+ * Wallet-Export-Suche als normales JSON (kein NDJSON-Stream).
+ *
+ * Die Suche ist lokal und schnell; NDJSON ohne Content-Length/Chunked
+ * endet unter WebKit oft mit „Load failed“, obwohl die Log-Zeilen schon da
+ * waren. logs[] kommt mit der Antwort und wird hier ins GUI-Log geschrieben.
+ */
+async function holeWalletExportSuche() {
+  return api("/config/wallet-export-suchen", {
+    methode: "POST",
+    daten: {},
+    timeoutMs: 60_000,
+  });
+}
+
 async function starteWalletExportSuche() {
   const kasten = $("#sparrow-befund");
   const fund = $("#wallet-export-fund");
@@ -13244,12 +13259,13 @@ async function starteWalletExportSuche() {
     kasten.hidden = false;
     kasten.replaceChildren(hinweisZeile(t("wallets.exportSearching")));
   }
+  logZeile(t("wallets.exportSearching"));
   try {
-    const antwort = await api("/config/wallet-export-suchen", {
-      methode: "POST",
-      daten: {},
-    });
+    const antwort = await holeWalletExportSuche();
     _walletExportTreffer = antwort.wallets || [];
+    for (const z of antwort.logs || []) {
+      if (z) logZeile(String(z));
+    }
     zeichneWalletExportListe(_walletExportTreffer);
     if (fund) fund.hidden = false;
     const n = _walletExportTreffer.length;
@@ -13307,11 +13323,6 @@ function zeichneWalletExportListe(treffer) {
     cb.addEventListener("change", aktualisiereWalletExportImportKnopf);
     label.append(cb);
 
-    const app = document.createElement("span");
-    app.className = "export-app";
-    app.textContent = w.app || "?";
-    label.append(app);
-
     const name = document.createElement("span");
     name.className = "export-name";
     name.textContent = w.name || w.path || "?";
@@ -13325,7 +13336,6 @@ function zeichneWalletExportListe(treffer) {
       lock.title = t("wallets.exportLockTitle");
       label.append(lock);
     }
-    zeile.append(label);
 
     if (w.reason && (!w.importable || w.locked)) {
       const grund = document.createElement("span");
@@ -13334,8 +13344,20 @@ function zeichneWalletExportListe(treffer) {
       grund.title = w.importable
         ? t("wallets.exportLockTitle")
         : t("wallets.exportBlockedTitle");
-      zeile.append(grund);
+      label.append(grund);
     }
+
+    // Herkunft rechtsbündig (Wasabi / Specter / Electrum / Core / …)
+    const herkunft = document.createElement("span");
+    herkunft.className = "export-herkunft";
+    herkunft.textContent = w.origin_label
+      || (w.app
+        ? String(w.app).charAt(0).toUpperCase() + String(w.app).slice(1)
+        : "");
+    herkunft.title = w.path || herkunft.textContent || "";
+    label.append(herkunft);
+
+    zeile.append(label);
     liste.append(zeile);
   }
   aktualisiereWalletExportImportKnopf();

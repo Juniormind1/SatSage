@@ -7,10 +7,15 @@ Unterstützte Formate (Auto-Erkennung, gemischt erlaubt):
 - **Wasabi 2:** View-only-/Hardware-Wallet-JSON (``ExtPubKey`` / Taproot),
   optional Tx-Verlauf/UTXOs aus lokalem ``BitcoinStore`` (Transactions.sqlite),
   optional RPC-Dumps ``listunspentcoins`` / ``listcoins`` / ``gethistory``
+- **Specter Desktop:** Wallet-JSON (``recv_descriptor`` / ``change_descriptor``)
+  — gleiche Felder wie im Specter-Plugin-``bridge.wallet_to_info``
+- **Electrum:** Wallet-JSON unverschlüsselt, nur Öffentliches (xpub); xprv/seed
+  werden verworfen, nie gespeichert
+- **Bitcoin Core:** Descriptor-Wallets per RPC (``listdescriptors``)
 
 Kein Passwort, keine verschlüsselte Sparrow-``.mv.db``. Passwortgeschützte
-Wasabi-Hot-Wallets (``EncryptedSecret`` gesetzt) werden abgelehnt — nur
-View-only/Hardware ohne Secret.
+Wasabi-Hot-Wallets (``EncryptedSecret``) und verschlüsselte Electrum-Dateien
+werden abgelehnt.
 """
 from __future__ import annotations
 
@@ -100,16 +105,11 @@ def parse_wallet_export_dateien(
         name = str(roh.get("name") or "").strip() or "export"
         text = str(roh.get("text") or "")
         pfad_hinweis = str(roh.get("path") or "").strip() or None
+        # Suche/Liste: nur Deskriptor, kein Wasabi-Store-Walk (sonst ~10–20 s).
+        nur_deskriptor = bool(roh.get("nur_deskriptor"))
         if not text.strip():
             ergebnis.hinweise.append(f"„{name}“ ist leer — übersprungen.")
             continue
-        if _PRIVKEY_HINT.search(text) or config_mod._XPRV_RE.search(text):
-            ergebnis.fehler = (
-                f"„{name}“ enthält private Schlüssel oder Seed-Material. "
-                "SatSage nimmt nur öffentliche Deskriptoren, Wasabi-View-only-"
-                "JSON und CSVs/RPC-Dumps ohne Secrets."
-            )
-            return ergebnis
         if _sieht_aus_wie_h2_oder_binaer(text):
             ergebnis.fehler = (
                 f"„{name}“ wirkt wie eine verschlüsselte Sparrow-Wallet-Datei. "
@@ -121,6 +121,20 @@ def parse_wallet_export_dateien(
         ergebnis.dateien.append(name)
         datei_name = _name_aus_dateiname(name)
         art = _datei_art(name, text)
+
+        # Electrum/Specter/Wasabi: Secrets ggf. im JSON — Parser nehmen nur
+        # Öffentliches. Generischer Text mit xprv bleibt tabu.
+        if art not in (
+            "electrum_wallet", "specter_wallet", "wasabi_wallet",
+            "core_descriptors",
+        ):
+            if _PRIVKEY_HINT.search(text) or config_mod._XPRV_RE.search(text):
+                ergebnis.fehler = (
+                    f"„{name}“ enthält private Schlüssel oder Seed-Material. "
+                    "SatSage nimmt nur öffentliche Deskriptoren und "
+                    "View-only-Exporte ohne Secrets."
+                )
+                return ergebnis
 
         if art == "csv_utxo":
             utxos, hinw = _parse_utxo_csv(text)
@@ -139,11 +153,12 @@ def parse_wallet_export_dateien(
             _merke_format(ergebnis, "sparrow")
         elif art == "wasabi_wallet":
             descs, addrs, utxos, verlauf, hinw = _parse_wasabi_wallet_json(
-                text, name, wallet_pfad=pfad_hinweis,
+                text,
+                name,
+                wallet_pfad=pfad_hinweis,
+                mit_verlauf=not nur_deskriptor,
             )
             if not descs and hinw:
-                # Hot-Wallet / harter Parse-Fehler → Abbruch statt generischem
-                # „kein Deskriptor“.
                 hart = next(
                     (
                         h for h in hinw
@@ -164,6 +179,45 @@ def parse_wallet_export_dateien(
             if not ergebnis.name_vorschlag and datei_name:
                 ergebnis.name_vorschlag = datei_name
             _merke_format(ergebnis, "wasabi")
+        elif art == "specter_wallet":
+            descs, hinw = _parse_specter_wallet_json(text, name)
+            if not descs and hinw:
+                ergebnis.fehler = hinw[0]
+                return ergebnis
+            sparte_deskriptoren.extend(descs)
+            ergebnis.hinweise.extend(hinw)
+            if not ergebnis.name_vorschlag and datei_name:
+                ergebnis.name_vorschlag = datei_name
+            _merke_format(ergebnis, "specter")
+        elif art == "electrum_wallet":
+            descs, addrs, hinw = _parse_electrum_wallet_json(text, name)
+            if not descs and hinw:
+                hart = next(
+                    (
+                        h for h in hinw
+                        if "passwort" in h.lower()
+                        or "verschlüsselt" in h.lower()
+                        or "kein xpub" in h.lower()
+                        or "json ungültig" in h.lower()
+                    ),
+                    None,
+                )
+                if hart:
+                    ergebnis.fehler = hart
+                    return ergebnis
+            sparte_deskriptoren.extend(descs)
+            ergebnis.adressen.extend(addrs)
+            ergebnis.hinweise.extend(hinw)
+            if not ergebnis.name_vorschlag and datei_name:
+                ergebnis.name_vorschlag = datei_name
+            _merke_format(ergebnis, "electrum")
+        elif art == "core_descriptors":
+            descs, hinw = _parse_core_descriptors_json(text, name)
+            sparte_deskriptoren.extend(descs)
+            ergebnis.hinweise.extend(hinw)
+            if not ergebnis.name_vorschlag and datei_name:
+                ergebnis.name_vorschlag = datei_name
+            _merke_format(ergebnis, "core")
         elif art == "wasabi_coins":
             utxos, verlauf, hinw = _parse_wasabi_coins_json(text)
             ergebnis.utxos.extend(utxos)
@@ -201,10 +255,10 @@ def parse_wallet_export_dateien(
 
     if not unique:
         ergebnis.fehler = (
-            "Kein Output-Deskriptor / Wasabi-xpub gefunden. Sparrow: File → "
-            "Export Wallet → Output Descriptor (+ optional UTXO/Tx-CSV). "
-            "Wasabi: View-only- oder Hardware-Wallet-JSON (ExtPubKey) aus dem "
-            "Wallets-Ordner; optional RPC listunspentcoins / gethistory als JSON."
+            "Kein Output-Deskriptor / xpub gefunden. Unterstützt: Sparrow-"
+            "Descriptor/CSV, Wasabi-View-only-JSON, Specter-Wallet-JSON, "
+            "Electrum (unverschlüsselt, nur Öffentliches), Bitcoin-Core-"
+            "listdescriptors."
         )
         return ergebnis
 
@@ -293,16 +347,34 @@ def _datei_art(name: str, text: str) -> str:
 
 
 def _json_art(data: Any) -> str | None:
-    """Erkennt Wasabi-Wallet-JSON und RPC-Result-Arrays."""
+    """Erkennt Wallet-JSON und RPC-Result-Arrays."""
     if isinstance(data, dict):
         # JSON-RPC-Hülle
         if "result" in data and data.get("result") is not None:
-            return _json_art(data["result"])
+            inner = data["result"]
+            art = _json_art(inner)
+            if art:
+                return art
+            # Core listdescriptors: {descriptors: [...]}
+            if isinstance(inner, dict) and "descriptors" in inner:
+                return "core_descriptors"
         keys = {str(k) for k in data.keys()}
         if "ExtPubKey" in keys or "TaprootExtPubKey" in keys or (
             "HdPubKeys" in keys and "AccountKeyPath" in keys
         ):
             return "wasabi_wallet"
+        # Specter Desktop Wallet-JSON (wie Plugin-Bridge)
+        if "recv_descriptor" in keys or (
+            "keys" in keys and "address_type" in keys and "alias" in keys
+        ):
+            return "specter_wallet"
+        # Electrum Wallet-JSON
+        if "wallet_type" in keys and (
+            "keystore" in keys or "keystores" in keys or "seed_version" in keys
+        ):
+            return "electrum_wallet"
+        if "descriptors" in keys and isinstance(data.get("descriptors"), list):
+            return "core_descriptors"
         # Einzel-Coin
         if _ist_wasabi_coin(data):
             return "wasabi_coins"
@@ -316,6 +388,9 @@ def _json_art(data: Any) -> str | None:
             return "wasabi_coins"
         if _ist_wasabi_history(erste):
             return "wasabi_history"
+        # Core: reine Descriptor-Liste
+        if "desc" in {str(k).lower() for k in erste.keys()}:
+            return "core_descriptors"
     return None
 
 
@@ -336,11 +411,343 @@ def _ist_wasabi_history(obj: dict) -> bool:
     )
 
 
+def _deskriptor_brauchbar(desc: str) -> str | None:
+    """Normalisiert/prüft Deskriptor; ``None`` wenn unbrauchbar."""
+    d = (desc or "").strip()
+    if not d:
+        return None
+    gefunden = config_mod.deskriptoren_aus_text(d)
+    if gefunden:
+        return gefunden[0]
+    try:
+        if __import__("main").derive_descriptor_addresses(d, max_addresses=2):
+            return d
+    except Exception:
+        pass
+    return None
+
+
+def _merge_recv_change_deskriptor(recv: str, change: str) -> str | None:
+    """
+    Specter speichert Empfang ``…/0/*`` und Change ``…/1/*`` getrennt.
+    SatSage bevorzugt kombiniert ``…/<0;1>/*``.
+    """
+    r = (recv or "").strip()
+    c = (change or "").strip()
+    if not r:
+        return None
+    if not c:
+        return r
+    # …/0/*)#chk  →  …/<0;1>/*)#chk   (Checksumme steht hinter der Klammer)
+    def _kombiniere(s: str) -> str | None:
+        m = re.search(r"/0/\*\)(#[a-z0-9]+)?\s*$", s, re.I)
+        if not m:
+            return None
+        chk = m.group(1) or ""
+        base = s[: m.start()]
+        return f"{base}/<0;1>/*){chk}"
+
+    komb = _kombiniere(r)
+    if not komb:
+        return r
+
+    def _ohne_chk(s: str) -> str:
+        return re.sub(r"#[a-z0-9]+\s*$", "", s, flags=re.I).strip()
+
+    # Change …/1/* → Stamm wie Empfang …/0/*
+    c_stamm = re.sub(r"/1/\*\)(#[a-z0-9]+)?\s*$", "/0/*)", c, flags=re.I)
+    r_stamm = re.sub(r"/0/\*\)(#[a-z0-9]+)?\s*$", "/0/*)", r, flags=re.I)
+    if _ohne_chk(c_stamm) == _ohne_chk(r_stamm) or "/1/*" in c:
+        ok = _deskriptor_brauchbar(komb)
+        if ok:
+            return ok
+        ohne = _ohne_chk(komb)
+        return _deskriptor_brauchbar(ohne) or r
+    return r
+
+
+def _parse_specter_wallet_json(
+    text: str, dateiname: str,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """
+    Specter-Desktop-Wallet-JSON → Deskriptoren.
+
+    Feldlayout wie ``specter_plugin…bridge.wallet_to_info`` (recv/change/
+    keys/name) — Datei auf Disk statt In-Process-Objekt.
+    """
+    hinweise: list[str] = []
+    try:
+        data = _json_loads(text)
+    except json.JSONDecodeError as exc:
+        return [], [f"„{dateiname}“: JSON ungültig ({exc})."]
+    if not isinstance(data, dict):
+        return [], [f"„{dateiname}“: kein Specter-Wallet-Objekt."]
+
+    name = (
+        str(data.get("name") or data.get("alias") or "").strip()
+        or _name_aus_dateiname(dateiname)
+        or "Specter"
+    )
+    recv = str(data.get("recv_descriptor") or "").strip()
+    change = str(data.get("change_descriptor") or "").strip()
+    descs: list[tuple[str, str]] = []
+
+    komb = _merge_recv_change_deskriptor(recv, change) if recv else None
+    if komb:
+        ok = _deskriptor_brauchbar(komb)
+        if ok:
+            descs.append((ok, name))
+    if not descs and recv:
+        ok = _deskriptor_brauchbar(recv)
+        if ok:
+            descs.append((ok, f"{name} Empfang" if change else name))
+        if change:
+            ok_c = _deskriptor_brauchbar(change)
+            if ok_c and ok_c not in {d for d, _ in descs}:
+                descs.append((ok_c, f"{name} Change"))
+
+    # Fallback: keys[].xpub + derivation (Single-Sig)
+    if not descs:
+        keys = data.get("keys") or []
+        if isinstance(keys, list):
+            for k in keys:
+                if not isinstance(k, dict):
+                    continue
+                xpub = str(k.get("xpub") or k.get("original") or "").strip()
+                m = _XPUB_RE.search(xpub)
+                if not m:
+                    continue
+                xpub = m.group(1)
+                fp = str(k.get("fingerprint") or "").strip().lower()
+                fp = re.sub(r"[^0-9a-f]", "", fp)[:8]
+                der = str(k.get("derivation") or "").strip()
+                origin = _wasabi_origin_path(der) if der else ""
+                at = str(data.get("address_type") or k.get("type") or "").lower()
+                if "taproot" in at or at in ("p2tr", "tr"):
+                    kind = "tr"
+                elif "sh-w" in at or "p2sh-p2w" in at or at in ("p2sh_segwit",):
+                    # Nested: sh(wpkh(...))
+                    desc = _baue_deskriptor("wpkh", fp, origin, xpub)
+                    desc = f"sh({desc})" if not desc.startswith("sh(") else desc
+                    ok = _deskriptor_brauchbar(desc)
+                    if ok:
+                        descs.append((ok, name))
+                    break
+                elif "legacy" in at or at in ("p2pkh",):
+                    kind = "pkh"
+                else:
+                    kind = "wpkh"
+                if kind == "pkh":
+                    if fp and origin:
+                        key = f"[{fp}/{origin}]{xpub}/<0;1>/*"
+                    elif origin:
+                        key = f"[{origin}]{xpub}/<0;1>/*"
+                    else:
+                        key = f"{xpub}/<0;1>/*"
+                    desc = f"pkh({key})"
+                else:
+                    desc = _baue_deskriptor(kind, fp, origin, xpub)
+                ok = _deskriptor_brauchbar(desc)
+                if ok:
+                    descs.append((ok, name))
+                    break
+
+    if not descs:
+        return [], [f"„{dateiname}“: Specter-JSON ohne ableitbaren Deskriptor."]
+    return descs, hinweise
+
+
+def _electrum_xtype_zu_kind(xtype: str, derivation: str) -> str:
+    t = (xtype or "").lower().strip()
+    if t in ("p2wpkh", "native_segwit", "segwit"):
+        return "wpkh"
+    if t in ("p2wpkh-p2sh", "p2sh-p2wpkh", "p2wsh-p2sh"):
+        return "sh-wpkh"
+    if t in ("p2wsh",):
+        return "wsh"
+    if t in ("p2tr", "taproot"):
+        return "tr"
+    # Ableitung raten
+    d = derivation.replace("h", "'")
+    if "86'" in d or "/86/" in d:
+        return "tr"
+    if "84'" in d or "/84/" in d:
+        return "wpkh"
+    if "49'" in d or "/49/" in d:
+        return "sh-wpkh"
+    if "48'" in d:
+        return "wsh"
+    return "pkh"
+
+
+def _parse_electrum_wallet_json(
+    text: str, dateiname: str,
+) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """
+    Electrum-Wallet-JSON unverschlüsselt → Deskriptor aus xpub.
+
+    ``xprv``/``seed`` werden ignoriert (Hinweis), nie in Deskriptoren übernommen.
+    """
+    hinweise: list[str] = []
+    # Verschlüsselt: Base64-Blob, oft mit BIE1 (``QklF…``)
+    stripped = (text or "").lstrip("\ufeff").lstrip()
+    if stripped.startswith("QklF") or stripped.startswith("BIE1"):
+        return [], [], [
+            f"„{dateiname}“: Electrum-Wallet verschlüsselt (Passwort)."
+        ]
+    if stripped and stripped[0] not in "{[" and "wallet_type" not in stripped[:500]:
+        return [], [], [
+            f"„{dateiname}“: Electrum-Wallet verschlüsselt oder kein JSON."
+        ]
+    try:
+        data = _json_loads(text)
+    except json.JSONDecodeError as exc:
+        return [], [], [f"„{dateiname}“: JSON ungültig ({exc})."]
+    if not isinstance(data, dict):
+        return [], [], [f"„{dateiname}“: kein Electrum-Wallet."]
+
+    if data.get("use_encryption") in (True, 1, "1", "true"):
+        return [], [], [
+            f"„{dateiname}“: Electrum-Wallet ist kennwortgeschützt."
+        ]
+
+    name = _name_aus_dateiname(dateiname) or "Electrum"
+    keystores: list[dict] = []
+    ks = data.get("keystore")
+    if isinstance(ks, dict):
+        keystores.append(ks)
+    kss = data.get("keystores")
+    if isinstance(kss, list):
+        keystores.extend([k for k in kss if isinstance(k, dict)])
+
+    descs: list[tuple[str, str]] = []
+    for i, k in enumerate(keystores):
+        if k.get("xprv") or k.get("seed") or k.get("privkey"):
+            hinweise.append(
+                "Electrum: privates Material ignoriert — nur öffentlicher xpub."
+            )
+        xpub = str(k.get("xpub") or "").strip()
+        m = _XPUB_RE.search(xpub)
+        if not m:
+            continue
+        xpub = m.group(1)
+        fp = str(k.get("root_fingerprint") or k.get("fingerprint") or "").strip()
+        fp = re.sub(r"[^0-9a-fA-F]", "", fp)[:8].lower()
+        der = str(k.get("derivation") or "").strip()
+        origin = _wasabi_origin_path(der) if der else ""
+        kind = _electrum_xtype_zu_kind(str(k.get("xtype") or ""), der)
+        label = name if len(keystores) == 1 else f"{name} #{i + 1}"
+        if kind == "sh-wpkh":
+            inner = _baue_deskriptor("wpkh", fp, origin, xpub)
+            desc = f"sh({inner})"
+        elif kind == "pkh":
+            if fp and origin:
+                key = f"[{fp}/{origin}]{xpub}/<0;1>/*"
+            elif origin:
+                key = f"[{origin}]{xpub}/<0;1>/*"
+            else:
+                key = f"{xpub}/<0;1>/*"
+            desc = f"pkh({key})"
+        elif kind == "wsh":
+            # Multisig bräuchte cosigner — einzeln wsh(sortedmulti) unvollständig
+            hinweise.append(
+                f"„{dateiname}“: Electrum-Multisig/wsh ohne volle Policy — "
+                "übersprungen."
+            )
+            continue
+        else:
+            desc = _baue_deskriptor(kind if kind in ("wpkh", "tr") else "wpkh",
+                                    fp, origin, xpub)
+        ok = _deskriptor_brauchbar(desc)
+        if ok:
+            descs.append((ok, label))
+
+    # Adressen aus Electrum-JSON (receiving/change)
+    adressen: list[str] = []
+    addrs_obj = data.get("addresses") or {}
+    if isinstance(addrs_obj, dict):
+        for kette in ("receiving", "change"):
+            lst = addrs_obj.get(kette) or []
+            if isinstance(lst, list):
+                for a in lst:
+                    s = str(a or "").strip()
+                    if s and s not in adressen:
+                        adressen.append(s)
+
+    if not descs:
+        wt = str(data.get("wallet_type") or "")
+        if wt == "imported":
+            return [], adressen, [
+                f"„{dateiname}“: Electrum „imported“ ohne xpub — "
+                "nur Adressliste, kein Deskriptor."
+            ]
+        return [], adressen, [f"„{dateiname}“: Electrum ohne öffentlichen xpub."]
+    return descs, adressen, hinweise
+
+
+def _parse_core_descriptors_json(
+    text: str, dateiname: str,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Bitcoin Core ``listdescriptors``-Antwort → Deskriptoren."""
+    hinweise: list[str] = []
+    try:
+        data = _json_loads(text)
+    except json.JSONDecodeError as exc:
+        return [], [f"„{dateiname}“: JSON ungültig ({exc})."]
+
+    if isinstance(data, dict) and "result" in data:
+        data = data["result"]
+    items: list = []
+    if isinstance(data, dict) and "descriptors" in data:
+        items = list(data.get("descriptors") or [])
+        wname = str(data.get("wallet_name") or data.get("name") or "").strip()
+    elif isinstance(data, list):
+        items = data
+        wname = ""
+    else:
+        return [], [f"„{dateiname}“: keine Core-Descriptor-Liste."]
+
+    basis = wname or _name_aus_dateiname(dateiname) or "Core"
+    descs: list[tuple[str, str]] = []
+    gesehen: set[str] = set()
+    for it in items:
+        if isinstance(it, str):
+            raw = it
+            internal = False
+            active = True
+        elif isinstance(it, dict):
+            raw = str(it.get("desc") or it.get("descriptor") or "").strip()
+            internal = bool(it.get("internal"))
+            active = it.get("active", True) is not False
+        else:
+            continue
+        if not raw or not active:
+            continue
+        # Nur Empfang (external) primär; Change steckt oft in multipath
+        ok = _deskriptor_brauchbar(raw)
+        if not ok:
+            # Prüfsumme ab und nochmal
+            ohne = re.sub(r"#[a-z0-9]+\s*$", "", raw, flags=re.I)
+            ok = _deskriptor_brauchbar(ohne)
+        if not ok or ok in gesehen:
+            continue
+        gesehen.add(ok)
+        label = basis
+        if internal and len(items) > 1:
+            label = f"{basis} Change"
+        descs.append((ok, label))
+
+    if not descs:
+        return [], [f"„{dateiname}“: Core-Descriptors leer oder nicht ableitbar."]
+    return descs, hinweise
+
+
 def _parse_wasabi_wallet_json(
     text: str,
     dateiname: str,
     *,
     wallet_pfad: str | None = None,
+    mit_verlauf: bool = True,
 ) -> tuple[
     list[tuple[str, str]],
     list[str],
@@ -352,8 +759,9 @@ def _parse_wasabi_wallet_json(
     View-only / Hardware: ExtPubKey + optional Taproot → Deskriptoren.
 
     Passwortgeschützte Hot-Wallets (EncryptedSecret) werden abgelehnt.
-    Adressen aus HdPubKeys; UTXOs/Verlauf aus lokalem BitcoinStore, falls
-    vorhanden (``wallet_pfad`` oder Standard-Wasabi-Ordner).
+    Bei ``mit_verlauf=True``: Adressen aus HdPubKeys + UTXOs/Verlauf aus
+    lokalem BitcoinStore (Import). Bei ``False`` (Suche/Liste): nur
+    Deskriptoren — sonst dauert die Ordnersuche sekundenlang pro Wallet.
     """
     hinweise: list[str] = []
     try:
@@ -422,6 +830,10 @@ def _parse_wasabi_wallet_json(
         return ([], [], [], [], [
             f"„{dateiname}“: xpubs vorhanden, aber keine ableitbaren Deskriptoren."
         ])
+
+    if not mit_verlauf:
+        # Nur Meta für die Suchliste — kein Store, keine HdPubKey-Ableitung.
+        return brauchbar, [], [], [], hinweise
 
     net_name = ""
     try:

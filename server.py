@@ -2198,13 +2198,35 @@ def api_wallet_export_import(state: AppState, payload: dict) -> dict:
         raise ApiError(500, f"Import fehlgeschlagen: {exc}") from exc
 
 
-def api_wallet_export_suchen(state: AppState) -> dict:
+def api_wallet_export_suchen(state: AppState, *, on_log=None) -> dict:
     """Übliche Sparrow-/Wasabi-Ordner scannen (ohne Passwort)."""
     _wallets_config_gesperrt(state)
     from core import wallet_discover as discover_mod
 
+    logs: list[str] = []
+
+    def _log(text: str) -> None:
+        s = str(text or "").strip()
+        if not s:
+            return
+        logs.append(s)
+        if on_log:
+            try:
+                on_log(s)
+            except Exception:
+                pass
+
     vorhandene = {wallets_mod.eintrag_id(e) for e in state.entries}
-    treffer = discover_mod.suche_lokale_wallets(vorhandene_wallet_ids=vorhandene)
+    try:
+        env_werte = state.env().values()
+    except Exception:
+        env_werte = {}
+    treffer = discover_mod.suche_lokale_wallets(
+        vorhandene_wallet_ids=vorhandene,
+        on_log=_log,
+        env=env_werte,
+        mit_core_rpc=True,
+    )
     wurzeln = [
         str(p) for p in discover_mod.standard_suchwurzeln() if p.is_dir()
     ]
@@ -2213,6 +2235,7 @@ def api_wallet_export_suchen(state: AppState) -> dict:
         "roots": wurzeln,
         "count": len(treffer),
         "importable": sum(1 for t in treffer if t.importable),
+        "logs": logs,
     }
 
 
@@ -2228,9 +2251,18 @@ def api_wallet_export_import_pfade(state: AppState, payload: dict) -> dict:
     if not sauber:
         raise ApiError(400, "Keine Pfade gewählt.")
 
-    # Nur unter bekannten Wallet-Wurzeln (kein beliebiges Dateilesen).
+    # Nur unter bekannten Wallet-Wurzeln bzw. corerpc: (kein beliebiges Lesen).
     erlaubt = discover_mod.standard_suchwurzeln()
+    # Specter: …/wallets und Unterordner (main/test…)
+    for w in list(erlaubt):
+        if w.name.lower() == "wallets" and w.is_dir():
+            try:
+                erlaubt.extend([p for p in w.iterdir() if p.is_dir()])
+            except OSError:
+                pass
     for p in sauber:
+        if str(p).startswith("corerpc:"):
+            continue
         path = Path(p).expanduser()
         try:
             resolved = path.resolve()
@@ -2243,20 +2275,31 @@ def api_wallet_export_import_pfade(state: AppState, payload: dict) -> dict:
             raise ApiError(
                 400,
                 f"„{path.name}“ liegt nicht in einem bekannten "
-                "Sparrow-/Wasabi-Ordner.",
+                "Wallet-Ordner (Sparrow/Wasabi/Specter/Electrum).",
             )
 
-    parsed = discover_mod.importiere_pfade(sauber)
+    try:
+        env_werte = state.env().values()
+    except Exception:
+        env_werte = {}
+    parsed = discover_mod.importiere_pfade(sauber, env=env_werte)
     if not parsed.ok:
         raise ApiError(400, parsed.fehler or "Import fehlgeschlagen.")
 
     max_addr = int(payload.get("max_addresses", main.DEFAULT_MAX_ADDRESSES))
     read_only = bool(payload.get("read_only", False))
     bestaetigt = bool(payload.get("confirm", False))
-    cache_source = (
-        "wasabi_export" if "wasabi" in (parsed.formate or [])
-        else "sparrow_csv"
-    )
+    formate = set(parsed.formate or [])
+    if "wasabi" in formate:
+        cache_source = "wasabi_export"
+    elif "core" in formate:
+        cache_source = "core_rpc"
+    elif "specter" in formate:
+        cache_source = "specter_export"
+    elif "electrum" in formate:
+        cache_source = "electrum_export"
+    else:
+        cache_source = "sparrow_csv"
     neu_liste: list[WalletEntry] = []
     for i, desc in enumerate(parsed.descriptors):
         if i < len(parsed.namen) and str(parsed.namen[i] or "").strip():
@@ -7724,6 +7767,47 @@ class Handler(BaseHTTPRequestHandler):
                 return
             raise
 
+    def _stream_wallet_export_suchen(self) -> None:
+        """Wallet-Suche: Log-Zeilen live („Suche Sparrow…“), danach Ergebnis."""
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+        except Exception as exc:
+            if _client_weg(exc):
+                return
+            raise
+
+        def on_log(text: str) -> None:
+            try:
+                self._ndjson_zeile({"log": text})
+            except Exception as exc:
+                if _client_weg(exc):
+                    return
+                raise
+
+        try:
+            payload = api_wallet_export_suchen(self.state, on_log=on_log)
+            self._ndjson_zeile(payload)
+        except ApiError as exc:
+            try:
+                self._ndjson_zeile({"error": str(exc)})
+            except Exception as exc2:
+                if _client_weg(exc2):
+                    return
+        except Exception as exc:
+            if _shutdown_rauschen(exc) or _server_faehrt_runter(self.state):
+                return
+            LOGGER.exception("wallet-export-suchen fehlgeschlagen")
+            try:
+                self._ndjson_zeile({"error": "Interner Serverfehler."})
+            except Exception as exc2:
+                if _client_weg(exc2) or _shutdown_rauschen(exc2):
+                    return
+
     def _stream_source_status(self, query: dict) -> None:
         """
         Schreibt Log-Zeilen, sobald sie entstehen — nicht erst nach Tor-Start.
@@ -8184,6 +8268,8 @@ class Handler(BaseHTTPRequestHandler):
                 if (pfad == "/api/source/status" and methode == "GET" and self._will_ndjson() and query.get("check", ["0"])[0] in ("1", "true", "ja")):
                     self._stream_source_status(query)
                     return
+                # Wallet-Suche: bewusst normales JSON (logs[] in der Antwort).
+                # NDJSON-Stream endete unter WebKit mit „Load failed“.
                 self._json(*self._api(methode, pfad, query))
                 return
             if methode == "GET" and pfad in ("/handbuch.html", "/handbuch"):
@@ -8348,6 +8434,7 @@ class Handler(BaseHTTPRequestHandler):
         if teile == ["config", "wallet-export-import"] and methode == "POST":
             return 200, api_wallet_export_import(state, self._body())
         if teile == ["config", "wallet-export-suchen"] and methode == "POST":
+            # NDJSON-Stream läuft in _verarbeite (nicht hier), sonst doppelte Antwort.
             return 200, api_wallet_export_suchen(state)
         if teile == ["config", "wallet-export-import-pfade"] and methode == "POST":
             return 200, api_wallet_export_import_pfade(state, self._body())

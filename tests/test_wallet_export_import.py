@@ -120,6 +120,51 @@ class TestWasabiViewOnly(unittest.TestCase):
         self.assertIn("passwort", (r.fehler or "").lower())
         self.assertEqual(r.descriptors, [])
 
+    def test_specter_wallet_json(self):
+        xpub = _xpub()
+        wallet = {
+            "name": "Cold",
+            "alias": "cold",
+            "address_type": "segwit",
+            "recv_descriptor": f"wpkh([aabbccdd/84h/0h/0h]{xpub}/0/*)",
+            "change_descriptor": f"wpkh([aabbccdd/84h/0h/0h]{xpub}/1/*)",
+            "keys": [],
+        }
+        r = parse_wallet_export_dateien([
+            {"name": "cold.json", "text": json.dumps(wallet)},
+        ])
+        self.assertTrue(r.ok, r.fehler)
+        self.assertIn("specter", r.formate)
+        self.assertEqual(len(r.descriptors), 1)
+        self.assertIn("<0;1>", r.descriptors[0])
+        self.assertEqual(r.namen[0], "Cold")
+
+    def test_electrum_wallet_public_only(self):
+        xpub = _xpub()
+        wallet = {
+            "wallet_type": "standard",
+            "use_encryption": False,
+            "seed_version": 18,
+            "keystore": {
+                "type": "bip32",
+                "xpub": xpub,
+                "xprv": "xprv9s21ZrQH143Kfake",
+                "derivation": "m/84'/0'/0'",
+                "root_fingerprint": "aabbccdd",
+                "xtype": "p2wpkh",
+            },
+            "addresses": {"receiving": [], "change": []},
+        }
+        r = parse_wallet_export_dateien([
+            {"name": "el", "text": json.dumps(wallet)},
+        ])
+        self.assertTrue(r.ok, r.fehler)
+        self.assertIn("electrum", r.formate)
+        self.assertEqual(len(r.descriptors), 1)
+        self.assertIn("wpkh(", r.descriptors[0])
+        self.assertNotIn("xprv", r.descriptors[0])
+        self.assertTrue(any("ignoriert" in h.lower() for h in r.hinweise))
+
     def test_listunspentcoins_rpc(self):
         xpub = _xpub()
         d = _wpkh()

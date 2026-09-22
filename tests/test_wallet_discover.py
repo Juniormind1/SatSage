@@ -114,6 +114,43 @@ class TestWalletDiscover(unittest.TestCase):
                 ["Alpha", "Zulu"],
             )
 
+    def test_on_log_pro_app(self):
+        xpub = _xpub()
+        view = {
+            "EncryptedSecret": None,
+            "MasterFingerprint": "aabbccdd",
+            "ExtPubKey": xpub,
+            "AccountKeyPath": "84'/0'/0'",
+            "HdPubKeys": [],
+            "BlockchainState": {"Network": "Main"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            wasabi = base / "WalletWasabi" / "Client" / "Wallets"
+            sparrow = base / "Sparrow" / "wallets"
+            wasabi.mkdir(parents=True)
+            sparrow.mkdir(parents=True)
+            (wasabi / "W.json").write_text(json.dumps(view), encoding="utf-8")
+            (sparrow / "S.mv.db").write_bytes(b"H:2,block:2" + b"\x00" * 20)
+            logs: list[str] = []
+            discover.suche_lokale_wallets(
+                wurzeln=[sparrow, wasabi],
+                on_log=logs.append,
+                mit_core_rpc=False,
+            )
+            self.assertIn("Suche Sparrow…", logs)
+            self.assertIn("Suche Wasabi…", logs)
+            self.assertEqual(logs.index("Suche Sparrow…"), 0)
+            # Nach jedem Block: „Suche X… n gefunden“
+            self.assertTrue(
+                any(z.startswith("Suche Sparrow…") and "gefunden" in z for z in logs)
+            )
+            self.assertTrue(
+                any(z.startswith("Suche Wasabi…") and "gefunden" in z for z in logs)
+            )
+            # Wasabi: 1 Treffer in der Abschlusszeile
+            self.assertIn("Suche Wasabi… 1 gefunden", logs)
+
     def test_schon_vorhanden_ausgeblendet(self):
         xpub = _xpub()
         wallet = {

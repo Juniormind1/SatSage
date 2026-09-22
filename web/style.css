@@ -2356,6 +2356,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   gap: 8px;
   flex: 1;
   min-width: 0;
+  width: 100%;
   cursor: pointer;
 }
 .sparrow-fuss .export-zeile.export-gesperrt label,
@@ -2372,6 +2373,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .sparrow-fuss .export-name {
   min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2386,6 +2388,20 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   color: var(--blass);
   font-size: 11px;
   flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sparrow-fuss .export-herkunft {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--blass);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  text-align: right;
+  white-space: nowrap;
 }
 .sparrow-fuss #wallet-export-import-wahl {
   align-self: start;

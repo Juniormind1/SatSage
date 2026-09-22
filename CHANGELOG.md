@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallets · Suche-Log:** Beim Suchen erscheinen im GUI-Log nacheinander **Suche Sparrow…** / **Wasabi…** / **Specter…** / **Electrum…** / **Bitcoin Core…** (live); Log-Zeilen nicht mehr doppelt; Abschluss **Suche X… n gefunden**.
+- **Wallets · Suche:** „Load failed“ behoben — Antwort wieder normales JSON mit `logs[]` (NDJSON-Stream unter WebKit unzuverlässig); Log-Reihenfolge inkl. „n gefunden“ bleibt.
+- **Wallets · Wasabi-Suche:** Ordnersuche liest den BitcoinStore **nicht** mehr mit (nur Deskriptor) — vorher ~15 s Pause vor Electrum; Store-Verlauf weiter beim **Import**.
+- **Wallets · Specter:** Lokale Specter-Desktop-JSON (`recv_descriptor`/`change_descriptor`, gleiches Layout wie Plugin-Bridge) such- und importierbar.
+- **Wallets · Electrum:** Unverschlüsselte Wallet-Dateien (nur xpub/Öffentliches; xprv/seed verworfen); verschlüsselte mit Schloss.
+- **Wallets · Bitcoin Core:** Angeschlossener Node per RPC (`listwallets`/`listdescriptors`) — Descriptor-Wallets importierbar.
+- **Wallets · Suchliste:** Herkunft **rechtsbündig** (Wasabi / Specter / Electrum / Bitcoin Core / …).
 - **Wallets · Wasabi-Suche:** Wallet-JSON mit UTF-8-BOM (Wasabi-Standard) gilt wieder als importierbar — vorher fälschlich „Kein JSON“.
 - **Wallets · Export-Suche:** Gefundene importierbare Wallets standardmäßig **unchecked** — Nutzer wählt ausdrücklich. Liste: zuerst importierbar, dann gesperrt; jeweils A–Z.
 - **Wallets · Export-Knopf:** Ein Knopf **Datei(en) importieren** / bei Auswahl **Wallet(s) importieren** (separater Import-Knopf entfernt). Nach Import Wechsel zum Wallet (bei mehreren: alphabetisch erstes).
