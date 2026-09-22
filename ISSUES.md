@@ -2,6 +2,40 @@
 
 Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
+## Datenschutz · Optionales Scrambling geheimnistragender Dateien
+
+**Stand:** 2026-09-22 · **offen** · Idee / notiert · Sicherheit / UX / Cache
+
+**Ziel:** Klartext von Secrets (XPUBs, Wallet-Namen, RPC-Credentials, Cache-Inhalte mit Adressen/Tx) **nur noch im Speicher**. Auf der Platte liegen die betroffenen Dateien gescrambled, sobald der Nutzer ein Passwort setzt.
+
+**UX**
+
+- Einstellungen: Feld **„Passwort festlegen:“** (optional; Default = kein Scrambling, Verhalten wie heute).
+- **Passwort setzen:** Alle geheimnistragenden Dateien werden konvertiert (Scramble). Fortschritt im **Log**.
+- **Web-GUI-Start:** Passwort abfragen → **Proberead** (falsches Passwort sofort zurückweisen) → danach jede Lese- und Schreiboperation über die **Scramble-Envelope**.
+- **Passwort löschen:** Alle Dateien wieder unscrambled konvertieren. Fortschritt im **Log**.
+
+**Betroffene Dateien (mindestens)**
+
+- `.env` und deren Backups
+- UTXO-Caches (`utxo_cache/`)
+- Tx-/immutable Caches mit Wallet-Bezug (`immutable_cache/` u. a. `tx/`, `utxo_ingress/`)
+- ggf. Adress-Auflösungs-Cache (`external_addresses.json`) und weitere Dateien, die XPUB/Adresse/Wallet-Klartext tragen
+
+**Nicht hier:** Seed/xprv/WIF (SatSage nimmt die nicht an). Sanktionslisten-Clearnet-Pools ohne Wallet-Bezug ggf. ausnehmen, wenn sie keine Nutzer-Secrets enthalten — beim Entwurf klären.
+
+**Technik (Skizze, noch offen)**
+
+- Ableitung aus Passwort (z. B. KDF) → Schlüssel nur in-memory für die Session
+- Einheitliche Envelope um Read/Write (ein Einstiegspunkt, kein ad-hoc Open in Dutzenden Pfaden)
+- Erkennung scrambled vs. plain (Magic/Header), damit Mischzustände und Migration robust sind
+- Proberead beim Unlock: bekannte Datei oder Envelope-Header prüfen, bevor die App weiterarbeitet
+- CLI/Specter: gleiches Unlock-Modell oder dokumentierte Einschränkung
+
+**Noch offen:** Krypto-Wahl (nur lokal, kein Cloud-Key), welche Pfade exakt in der Envelope liegen, Verhalten bei Teil-Migration/Abbruch, Backup-Rotation unter Scramble, ob Header-Caches ohne Adressbezug draußen bleiben. Nur notiert.
+
+---
+
 ## Setup · UTXO + Tx-Verlauf aus bestehenden Wallets importieren
 
 **Stand:** 2026-09-21 · **offen** · Idee / notiert · Setup / Cache

@@ -76,8 +76,10 @@ class TestSocksCache(unittest.TestCase):
     def setUp(self):
         with tor_mod._socks_ok_lock:
             tor_mod._socks_ok_cache.clear()
+            tor_mod._socks_down.clear()
 
-    def test_cache_vermeidet_zweiten_log(self):
+    def test_happy_path_bleibt_still(self):
+        """SOCKS ok — weder Erst- noch Cache-Aufruf spammen das Log."""
         logs: list[str] = []
 
         def log(t: str) -> None:
@@ -89,9 +91,36 @@ class TestSocksCache(unittest.TestCase):
                 b = tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=log)
         self.assertEqual(a, ("127.0.0.1", 9050))
         self.assertEqual(b, a)
-        # Erster Aufruf loggt, zweiter (Cache) still.
-        self.assertEqual(sum(1 for t in logs if "Prüfe Tor-SOCKS" in t), 1)
-        self.assertEqual(sum(1 for t in logs if "erreichbar" in t), 1)
+        self.assertEqual(logs, [])
+
+    def test_ttl_recheck_ohne_ausfall_still(self):
+        logs: list[str] = []
+        with patch.object(tor_mod, "erkenne_tor_socks", return_value=("127.0.0.1", 9050)):
+            with patch.object(tor_mod, "socks_erreichbar", return_value=True):
+                tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=logs.append)
+                # Cache künstlich ablaufen lassen → erneuter Fund, SOCKS war nie down.
+                key = tor_mod._socks_cache_key(("127.0.0.1", 9050))
+                with tor_mod._socks_ok_lock:
+                    ts, proxy = tor_mod._socks_ok_cache[key]
+                    tor_mod._socks_ok_cache[key] = (ts - tor_mod.SOCKS_OK_CACHE_TTL_S - 1, proxy)
+                tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=logs.append)
+        self.assertEqual(logs, [])
+
+    def test_wiederherstellung_nach_ping_fail_loggt(self):
+        logs: list[str] = []
+        with patch.object(tor_mod, "erkenne_tor_socks", return_value=("127.0.0.1", 9050)):
+            # Erster Fund → Cache.
+            with patch.object(tor_mod, "socks_erreichbar", return_value=True):
+                tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=logs.append)
+            # Cache-Ping scheitert → SOCKS als down markiert.
+            with patch.object(tor_mod, "socks_erreichbar", return_value=False):
+                self.assertIsNone(tor_mod._socks_cache_get(("127.0.0.1", 9050)))
+            # Nächster Fund = echte Wiederherstellung.
+            with patch.object(tor_mod, "socks_erreichbar", return_value=True):
+                tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=logs.append)
+        self.assertEqual(len(logs), 1)
+        self.assertIn("wieder erreichbar", logs[0])
+        self.assertIn("9050", logs[0])
 
 
 class TestAutostart(unittest.TestCase):
@@ -99,6 +128,7 @@ class TestAutostart(unittest.TestCase):
     def setUp(self):
         with tor_mod._socks_ok_lock:
             tor_mod._socks_ok_cache.clear()
+            tor_mod._socks_down.clear()
 
     def test_standard_ist_an(self):
         self.assertTrue(tor_mod._autostart_erlaubt({}))
@@ -124,11 +154,11 @@ class TestAutostart(unittest.TestCase):
                     tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), env={})
         self.assertIn("Kein Tor-Binary", str(ctx.exception))
 
-    def test_log_prueft_socks_bevor_tor_startet(self):
+    def test_socks_ok_ohne_tor_start_still(self):
         zeilen = []
         with patch.object(tor_mod, "erkenne_tor_socks", return_value=("127.0.0.1", 9050)):
             tor_mod.stelle_tor_socks_bereit(("127.0.0.1", 9050), log=zeilen.append)
-        self.assertTrue(any("Prüfe Tor-SOCKS" in z for z in zeilen), zeilen)
+        self.assertEqual(zeilen, [])
         self.assertFalse(any("Starte Tor" in z for z in zeilen), zeilen)
 
     def test_log_sucht_binary_wenn_kein_socks(self):
@@ -139,7 +169,7 @@ class TestAutostart(unittest.TestCase):
                     tor_mod.stelle_tor_socks_bereit(
                         ("127.0.0.1", 9050), env={}, log=zeilen.append,
                     )
-        self.assertTrue(any("Prüfe Tor-SOCKS" in z for z in zeilen), zeilen)
+        self.assertFalse(any("Prüfe Tor-SOCKS" in z for z in zeilen), zeilen)
         self.assertTrue(any("suche Binary" in z for z in zeilen), zeilen)
         self.assertFalse(any("Starte Tor" in z for z in zeilen), zeilen)
 

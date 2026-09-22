@@ -9,6 +9,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallets · Adressen nachziehen:** Nach Export-Import wartet der Job bis ~2 min auf den Indexer (Tor-Bootstrap), statt still abzubrechen. Log: **„Adressen nachziehen braucht Indexer…“** / Warte-Zeilen; ohne Konfiguration klare Meldung, Adressen bleiben unzugeordnet sichtbar.
+- **Wallets · Suche:** Schon bekannte Schlüssel (z. B. zpub „Cash & Carry“) blenden Specter-/Wasabi-Treffer mit anderem Namen („Cash+Carry“) aus — Abgleich über Adress-ID und Schlüsselkennung, nicht nur rohe zpub-String-ID. Import legt solche Duplikate nicht erneut an.
+- **Log · Tor-SOCKS:** Kein Heartbeat mehr („Prüfe Tor-SOCKS… / erreichbar“) bei Routine-Recheck mitten im Scan. Log nur noch bei **echter Wiederherstellung** nach Ausfall bzw. Tor-Autostart.
+- **Empfang · QR:** QR-Bereich bleibt nach Dock-/Spalten-Resize **quadratisch** (größtes 1:1 in der Pane-Fläche); Maske und Konfetti am Quadrat.
+- **Log · UTXO-Scan:** „BIP-158 ab Wallet-Beginn …“ / „BIP-158 nicht vor …“ nur noch, wenn der Scan wirklich über BIP-158 läuft — nicht mehr vor der Quellenwahl (z. B. Fulcrum).
 - **Wallets · Suche-Log:** Beim Suchen erscheinen im GUI-Log nacheinander **Suche Sparrow…** / **Wasabi…** / **Specter…** / **Electrum…** / **Bitcoin Core…** (live); Log-Zeilen nicht mehr doppelt; Abschluss **Suche X… n gefunden**.
 - **Wallets · Suche:** „Load failed“ behoben — Antwort wieder normales JSON mit `logs[]` (NDJSON-Stream unter WebKit unzuverlässig); Log-Reihenfolge inkl. „n gefunden“ bleibt.
 - **Wallets · Wasabi-Suche:** Ordnersuche liest den BitcoinStore **nicht** mehr mit (nur Deskriptor) — vorher ~15 s Pause vor Electrum; Store-Verlauf weiter beim **Import**.

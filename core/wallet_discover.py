@@ -167,6 +167,7 @@ def _specter_wallet_json_dateien(root: Path) -> list[Path]:
 def suche_lokale_wallets(
     *,
     vorhandene_wallet_ids: set[str] | None = None,
+    vorhandene_schluessel_kennungen: set[str] | None = None,
     wurzeln: list[Path] | None = None,
     on_log=None,
     env: dict[str, str] | None = None,
@@ -176,8 +177,15 @@ def suche_lokale_wallets(
     Scannt Standardordner (+ optional Bitcoin Core per RPC).
 
     *on_log*: optional ``callable(str)`` — z. B. „Suche Wasabi…“.
+    *vorhandene_wallet_ids*: Cache-/Deskriptor-IDs (inkl. adressbasierter
+    zpub-Form, siehe ``wallets.vorhandene_abgleich``).
+    *vorhandene_schluessel_kennungen*: Single-Sig-Schlüsselmaterial
+    (zpub/xpub unabhängig vom SLIP-Prefix).
     """
     vorhanden = {str(x) for x in (vorhandene_wallet_ids or set()) if x}
+    vorhanden_kenn = {
+        str(x) for x in (vorhandene_schluessel_kennungen or set()) if x
+    }
     treffer: list[GefundenesWallet] = []
     gesehen_pfade: set[str] = set()
 
@@ -241,10 +249,8 @@ def suche_lokale_wallets(
                 fund = _analysiere_datei(pfad, app=app)
                 if fund is None:
                     continue
-                if fund.descriptors and vorhanden:
-                    ids = {_deskriptor_wallet_id(d) for d in fund.descriptors}
-                    if ids and ids.issubset(vorhanden):
-                        continue
+                if _fund_schon_vorhanden(fund, vorhanden, vorhanden_kenn):
+                    continue
                 treffer.append(fund)
         _log(f"Suche {label}… {len(treffer) - n_vor} gefunden")
 
@@ -253,6 +259,7 @@ def suche_lokale_wallets(
             suche_core_rpc_wallets(
                 env=env,
                 vorhandene_wallet_ids=vorhanden,
+                vorhandene_schluessel_kennungen=vorhanden_kenn,
                 on_log=_log,
             )
         )
@@ -272,10 +279,14 @@ def suche_core_rpc_wallets(
     *,
     env: dict[str, str] | None = None,
     vorhandene_wallet_ids: set[str] | None = None,
+    vorhandene_schluessel_kennungen: set[str] | None = None,
     on_log=None,
 ) -> list[GefundenesWallet]:
     """Listet Descriptor-Wallets am angeschlossenen Bitcoin Core."""
     vorhanden = {str(x) for x in (vorhandene_wallet_ids or set()) if x}
+    vorhanden_kenn = {
+        str(x) for x in (vorhandene_schluessel_kennungen or set()) if x
+    }
     out: list[GefundenesWallet] = []
 
     def _log(text: str) -> None:
@@ -390,11 +401,7 @@ def suche_core_rpc_wallets(
             ))
             continue
         wid = _deskriptor_wallet_id(parsed.descriptors[0])
-        if wid in vorhanden:
-            continue
-        if all(_deskriptor_wallet_id(d) in vorhanden for d in parsed.descriptors):
-            continue
-        out.append(GefundenesWallet(
+        probe = GefundenesWallet(
             id=wid,
             name=(parsed.namen[0] if parsed.namen else anzeige) or anzeige,
             app="core",
@@ -404,7 +411,10 @@ def suche_core_rpc_wallets(
             descriptors=list(parsed.descriptors),
             namen=list(parsed.namen) or [anzeige],
             reason="",
-        ))
+        )
+        if _fund_schon_vorhanden(probe, vorhanden, vorhanden_kenn):
+            continue
+        out.append(probe)
     _log(f"Suche Bitcoin Core… {len(out) - n_vor} gefunden")
     return out
 
@@ -871,3 +881,41 @@ def _deskriptor_wallet_id(descriptor: str) -> str:
     except Exception:
         import hashlib
         return hashlib.sha256(descriptor.encode("utf-8")).hexdigest()[:16]
+
+
+def _fund_ist_multisig(fund: GefundenesWallet) -> bool:
+    for d in fund.descriptors or []:
+        low = (d or "").lower()
+        if "multi(" in low or "sortedmulti(" in low or "multi_a(" in low:
+            return True
+    return False
+
+
+def _fund_schon_vorhanden(
+    fund: GefundenesWallet,
+    vorhanden_ids: set[str],
+    vorhanden_kennungen: set[str],
+) -> bool:
+    """
+    True, wenn der Treffer schon in SatSage liegt.
+
+    1) Deskriptor-/Adress-IDs ⊆ vorhandene IDs (zpub-String-ID + Adress-ID).
+    2) Single-Sig: Schlüsselkennung(en) ⊆ bekannte Single-Sig-Kennungen.
+       Multisig nur über (1) — Cosigner einzeln bekannt ≠ Multisig bekannt.
+    """
+    if not fund.descriptors:
+        return False
+    ids = {_deskriptor_wallet_id(d) for d in fund.descriptors if d}
+    if ids and vorhanden_ids and ids.issubset(vorhanden_ids):
+        return True
+    if _fund_ist_multisig(fund) or not vorhanden_kennungen:
+        return False
+    from core.config import extract_xpubs_from_text, schluessel_kennung
+
+    kenn: set[str] = set()
+    for d in fund.descriptors:
+        for x in extract_xpubs_from_text(d):
+            k = schluessel_kennung(x)
+            if k:
+                kenn.add(k)
+    return bool(kenn) and kenn.issubset(vorhanden_kennungen)

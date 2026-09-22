@@ -120,9 +120,110 @@ def eintrag_id(entry: WalletEntry) -> str:
     return entry.wallet_id()
 
 
+def _adress_basierte_id(schluessel: str, script_type: str | None = None) -> str | None:
+    """
+    Dieselbe ID-Basis wie Deskriptor-``wallet_id``: SHA256 der lexikografisch
+    ersten abgeleiteten Adresse (``derive_addresses`` / max 2).
+
+    Reiner zpub und ``wpkh(…xpub…)`` treffen sich hier — der Cache-Key aus dem
+    zpub-String allein tut das nicht.
+    """
+    import hashlib
+
+    if not schluessel:
+        return None
+    typ = script_type if script_type and script_type != "auto" else None
+    try:
+        addrs = main.derive_addresses(schluessel, max_addresses=2, script_type=typ)
+    except Exception:
+        return None
+    if not addrs:
+        return None
+    grundlage = sorted(addrs)[0]
+    return hashlib.sha256(grundlage.encode("utf-8")).hexdigest()[:16]
+
+
+def abgleich_ids_fuer_eintrag(entry: WalletEntry) -> set[str]:
+    """
+    Alle IDs, unter denen dieser Eintrag als „schon bekannt“ gelten soll.
+
+    Enthält die normale ``wallet_id`` und die adressbasierte Form — damit
+    zpub in der .env und Specter-/Wasabi-Deskriptor denselben Treffer treffen.
+    """
+    ids = {eintrag_id(entry)}
+    key = (entry.analyse_schluessel or "").strip()
+    if not key:
+        return ids
+    adr = _adress_basierte_id(key, entry.script_type)
+    if adr:
+        ids.add(adr)
+    return ids
+
+
+def singlesig_schluessel_kennungen(entry: WalletEntry) -> set[str]:
+    """
+    Schlüsselmaterial-Kennungen nur für Single-Sig.
+
+    Multisig-Cosigner absichtlich ausgelassen — sonst würde ein gefundenes
+    Einzel-Wallet ausgeblendet, nur weil sein XPUB in einer Multisig steckt
+    (oder umgekehrt eine Multisig, deren Cosigner schon einzeln da sind).
+    """
+    if entry.is_multisig:
+        return set()
+    from core.config import extract_xpubs_from_text, schluessel_kennung
+
+    out: set[str] = set()
+    if entry.xpub:
+        k = schluessel_kennung(entry.xpub)
+        if k:
+            out.add(k)
+    if entry.descriptor:
+        for x in extract_xpubs_from_text(entry.descriptor):
+            k = schluessel_kennung(x)
+            if k:
+                out.add(k)
+    return out
+
+
+def vorhandene_abgleich(
+    entries: list[WalletEntry],
+) -> tuple[set[str], set[str]]:
+    """``(wallet_ids inkl. Adress-Form, singlesig-Schlüsselkennungen)``."""
+    ids: set[str] = set()
+    kennungen: set[str] = set()
+    for entry in entries:
+        ids |= abgleich_ids_fuer_eintrag(entry)
+        kennungen |= singlesig_schluessel_kennungen(entry)
+    return ids, kennungen
+
+
+def finde_gleichwertigen_eintrag(
+    entries: list[WalletEntry],
+    neu: WalletEntry,
+) -> WalletEntry | None:
+    """
+    Vorhandener Eintrag mit demselben Schlüsselmaterial wie *neu*.
+
+    zpub „Cash & Carry“ und Deskriptor „Cash+Carry“ → Treffer.
+    """
+    neu_ids = abgleich_ids_fuer_eintrag(neu)
+    neu_kenn = singlesig_schluessel_kennungen(neu)
+    for entry in entries:
+        if abgleich_ids_fuer_eintrag(entry) & neu_ids:
+            return entry
+        alt_kenn = singlesig_schluessel_kennungen(entry)
+        if neu_kenn and alt_kenn and neu_kenn == alt_kenn:
+            return entry
+    return None
+
+
 def find_entry(entries: list[WalletEntry], kennung: str) -> WalletEntry | None:
     for entry in entries:
         if eintrag_id(entry) == kennung:
+            return entry
+    # Deskriptor-ID vs. zpub-ID: Adress-Form mitprüfen.
+    for entry in entries:
+        if kennung in abgleich_ids_fuer_eintrag(entry):
             return entry
     return None
 

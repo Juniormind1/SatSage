@@ -2089,13 +2089,18 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
         }
 
     beschreibungen = []
-    vorhandene_ids = {wallets_mod.eintrag_id(e) for e in state.entries}
+    vorhanden_ids, _vorhanden_kenn = wallets_mod.vorhandene_abgleich(state.entries)
     for descriptor in gefunden:
         eintrag = WalletEntry(descriptor=descriptor)
         # Empfang #0 — nie Change, nie lexikografische Sortierung (Bitkey-Check).
         erste = config_mod.erste_empfangsadresse(eintrag)
         if not erste:
             erste = main.derive_address_at_index(descriptor, 0, 0) or ""
+        schon = wallets_mod.finde_gleichwertigen_eintrag(state.entries, eintrag) is not None
+        if not schon:
+            schon = bool(
+                wallets_mod.abgleich_ids_fuer_eintrag(eintrag) & vorhanden_ids
+            )
         beschreibungen.append({
             "descriptor": descriptor,
             "is_multisig": eintrag.is_multisig,
@@ -2111,7 +2116,7 @@ def api_deskriptor_pruefen(state: AppState, payload: dict) -> dict:
                 else ([eintrag.masked_xpub()] if eintrag.masked_xpub() else [])
             ),
             "erste_adresse": erste,
-            "bereits_vorhanden": eintrag.wallet_id() in vorhandene_ids,
+            "bereits_vorhanden": schon,
         })
     return {"gefunden": beschreibungen, "fehler": ""}
 
@@ -2216,13 +2221,14 @@ def api_wallet_export_suchen(state: AppState, *, on_log=None) -> dict:
             except Exception:
                 pass
 
-    vorhandene = {wallets_mod.eintrag_id(e) for e in state.entries}
+    vorhanden_ids, vorhanden_kenn = wallets_mod.vorhandene_abgleich(state.entries)
     try:
         env_werte = state.env().values()
     except Exception:
         env_werte = {}
     treffer = discover_mod.suche_lokale_wallets(
-        vorhandene_wallet_ids=vorhandene,
+        vorhandene_wallet_ids=vorhanden_ids,
+        vorhandene_schluessel_kennungen=vorhanden_kenn,
         on_log=_log,
         env=env_werte,
         mit_core_rpc=True,
@@ -2356,33 +2362,34 @@ def _wallet_export_anlegen_und_cache(
 
     from dataclasses import replace as dc_replace
 
-    vorhandene_ids = {wallets_mod.eintrag_id(e) for e in state.entries}
+    vorhanden_ids, _kenn = wallets_mod.vorhandene_abgleich(state.entries)
     entries = list(state.entries)
     angelegt = 0
     schon_da_n = 0
     origin_touch = False
     for neu in neu_liste:
         wid = neu.wallet_id()
-        idx = next(
-            (
-                i for i, e in enumerate(entries)
-                if wallets_mod.eintrag_id(e) == wid
-            ),
-            None,
-        )
-        if idx is not None or wid in vorhandene_ids:
+        # zpub vs. Deskriptor: gleicher Schlüssel → nicht nochmal anlegen.
+        alt = wallets_mod.finde_gleichwertigen_eintrag(entries, neu)
+        if alt is None and wid in vorhanden_ids:
+            alt = wallets_mod.find_entry(entries, wid)
+        if alt is not None:
             schon_da_n += 1
+            idx = next(
+                (i for i, e in enumerate(entries) if e is alt or wallets_mod.eintrag_id(e) == wallets_mod.eintrag_id(alt)),
+                None,
+            )
             if idx is not None:
-                alt = entries[idx]
+                alt_e = entries[idx]
                 soll_origin = (
                     getattr(neu, "origin", "") or ""
                 ).strip() or config_mod.WALLET_ORIGIN_WALLET_EXPORT
-                if (getattr(alt, "origin", "") or "").strip() != soll_origin:
-                    entries[idx] = dc_replace(alt, origin=soll_origin)
+                if (getattr(alt_e, "origin", "") or "").strip() != soll_origin:
+                    entries[idx] = dc_replace(alt_e, origin=soll_origin)
                     origin_touch = True
             continue
         entries.append(neu)
-        vorhandene_ids.add(wid)
+        vorhanden_ids |= wallets_mod.abgleich_ids_fuer_eintrag(neu)
         angelegt += 1
 
     if angelegt or origin_touch:
@@ -2581,9 +2588,84 @@ def _export_adressen_fuer_wallet(
     return out
 
 
+def _indexer_konfiguriert(state: AppState) -> bool:
+    """Eigener Electrs/Fulcrum in der .env (LAN oder Onion) — nicht öffentlicher Pool."""
+    try:
+        werte = state.env().values()
+    except Exception:
+        return False
+    return bool(
+        (werte.get("FULCRUM_HOST") or "").strip()
+        or (werte.get("FULCRUM_TOR") or "").strip()
+    )
+
+
+#: Nach Import oft noch Tor-Bootstrap — Job wartet, statt still abzubrechen.
+_INDEXER_WARTE_S = 120.0
+_INDEXER_WARTE_SCHRITT_S = 3.0
+
+
+def _warte_auf_eigenen_indexer(state: AppState, stand, job, *, timeout_s: float = _INDEXER_WARTE_S):
+    """
+    Electrs/Fulcrum holen; bei konfiguriertem Onion/Tor mehrfach versuchen.
+
+    Loggt klar, wenn der Indexer noch fehlt (typisch: Tor startet länger als
+    der Import dauert). Rückgabe Client oder ``None``.
+    """
+    import time
+
+    client = None
+    try:
+        client = _eigener_fulcrum_client(state)
+    except Exception:
+        client = None
+    if client is not None:
+        return client
+
+    if not _indexer_konfiguriert(state):
+        stand.phase(
+            "Adressen nachziehen braucht Indexer "
+            "(kein Electrs/Fulcrum konfiguriert)."
+        )
+        return None
+
+    stand.phase(
+        "Adressen nachziehen braucht Indexer — noch nicht verbunden "
+        "(z. B. Tor startet noch). Warte…"
+    )
+    deadline = time.monotonic() + max(5.0, float(timeout_s))
+    n = 0
+    while time.monotonic() < deadline:
+        job.raise_if_cancelled()
+        time.sleep(_INDEXER_WARTE_SCHRITT_S)
+        n += 1
+        try:
+            client = _eigener_fulcrum_client(state)
+        except Exception:
+            client = None
+        if client is not None:
+            stand.phase("Indexer verbunden — Adressen nachziehen…")
+            return client
+        if n == 1 or n % 5 == 0:
+            rest = max(0, int(deadline - time.monotonic()))
+            stand.phase(
+                f"Adressen nachziehen braucht Indexer — warte weiter "
+                f"(noch ~{rest}s)…"
+            )
+    stand.phase(
+        "Adressen nachziehen braucht Indexer "
+        "(Timeout — Tor/Electrs nicht erreichbar). "
+        "Später erneut oder „Historie“."
+    )
+    return None
+
+
 def _export_adressen_nachziehen_meta(state: AppState, entry: WalletEntry) -> dict:
     """
     Wie viele Tx im Verlauf noch ohne Adresse sind und ob Electrs greifbar ist.
+
+    *indexer_configured*: FULCRUM_HOST/TOR gesetzt — Job kann auf Tor warten.
+    *electrs*: jetzt schon verbunden (sonst warte der Job).
     """
     from core import export_adressen as adr_mod
 
@@ -2593,26 +2675,33 @@ def _export_adressen_nachziehen_meta(state: AppState, entry: WalletEntry) -> dic
     ohne = adr_mod.verlauf_ohne_adresse(verlauf)
     txids = adr_mod.unique_txids(ohne)
     n = len(txids)
+    configured = _indexer_konfiguriert(state)
     electrs = False
     try:
         electrs = _eigener_fulcrum_client(state) is not None
     except Exception:
         electrs = False
+    # Konfiguriert genügt für Auto/Nachfrage — Job wartet auf Tor-Bootstrap.
+    kann = bool(configured and n > 0)
     return {
         "wallet_id": wallets_mod.eintrag_id(entry),
         "name": entry.display_name,
         "pending_txids": n,
         "pending_entries": len(ohne),
         "electrs": electrs,
+        "indexer_configured": configured,
         "auto_max": adr_mod.NACHZIEHEN_AUTO_MAX,
-        "auto_start": bool(electrs and 0 < n <= adr_mod.NACHZIEHEN_AUTO_MAX),
-        "needs_confirm": bool(electrs and n > adr_mod.NACHZIEHEN_AUTO_MAX),
+        "auto_start": bool(kann and n <= adr_mod.NACHZIEHEN_AUTO_MAX),
+        "needs_confirm": bool(kann and n > adr_mod.NACHZIEHEN_AUTO_MAX),
     }
 
 
 def api_wallet_export_adressen_nachziehen(state: AppState, payload: dict) -> dict:
     """
     Job: Adressen zu Export-Verlauf per eigenem Electrs nachziehen.
+
+    Indexer muss konfiguriert sein; die Verbindung darf im Job noch kommen
+    (Tor-Bootstrap nach Serverstart).
     """
     _wallets_config_gesperrt(state)
     from core import export_adressen as adr_mod
@@ -2624,12 +2713,11 @@ def api_wallet_export_adressen_nachziehen(state: AppState, payload: dict) -> dic
     if entry is None:
         raise ApiError(404, "Wallet nicht gefunden.")
 
-    client = _eigener_fulcrum_client(state)
-    if client is None:
+    if not _indexer_konfiguriert(state):
         raise ApiError(
             503,
-            "Kein eigener Electrs/Fulcrum erreichbar — Adressen nachziehen "
-            "unterbleibt. Später „Historie“ nutzen.",
+            "Adressen nachziehen braucht Indexer "
+            "(kein Electrs/Fulcrum konfiguriert). Später „Historie“ nutzen.",
         )
 
     schluessel = entry.analyse_schluessel
@@ -2657,6 +2745,14 @@ def api_wallet_export_adressen_nachziehen(state: AppState, payload: dict) -> dic
                 f"Adressen nachziehen für {name}: {len(txids)} Tx "
                 f"ohne Adresse…"
             )
+            client = _warte_auf_eigenen_indexer(state, stand, job)
+            if client is None:
+                raise RuntimeError(
+                    "Adressen nachziehen braucht Indexer "
+                    "(noch nicht verbunden — Tor startet ggf. noch). "
+                    "Später erneut oder „Historie“."
+                )
+
             own = adr_mod.eigene_adressen_mengen(
                 entry, wallet_ctx=state.wallet_ctx,
             )
@@ -5959,16 +6055,13 @@ def api_rescan(state: AppState, payload: dict) -> dict:
             args = state.args_namespace()
             args.xpubs = [entry.analyse_schluessel]
             args.rescan = True
+            # Start­höhe still setzen (für den Fall BIP-158). Log erst nach
+            # Quellenwahl — sonst „BIP-158 …“ und direkt danach Fulcrum.
             if start_hoehe is not None:
                 args.bip158_start = start_hoehe
-                stand.phase(
-                    f"BIP-158 nicht vor {scan_ab} "
-                    f"(ca. Block {start_hoehe:,})".replace(",", ".")
-                )
             else:
                 # First-seen überlebt Cache-Löschen — Scan dort ansetzen,
-                # nicht wieder bei SegWit. BIP-158 liest das zusätzlich
-                # selbst; hier nur für die Tip-Zeile der Datenquelle.
+                # nicht wieder bei SegWit. BIP-158 liest das zusätzlich selbst.
                 alter_start = main.bip158_start_aus_first_seen(
                     entry.analyse_schluessel,
                     state.cache_dir,
@@ -5976,15 +6069,24 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 )
                 if alter_start is not None:
                     args.bip158_start = alter_start
-                    stand.phase(
-                        f"BIP-158 ab Wallet-Beginn "
-                        f"(Block {alter_start:,})…".replace(",", ".")
-                    )
 
             quelle, backend = main._setup_blockchain_client(args, state.env().values())
             job.raise_if_cancelled()
             if isinstance(job.meta, dict):
                 job.meta["source"] = quelle
+
+            if quelle == "bip158":
+                bip_start = getattr(args, "bip158_start", None)
+                if scan_ab and bip_start is not None:
+                    stand.phase(
+                        f"BIP-158 nicht vor {scan_ab} "
+                        f"(ca. Block {bip_start:,})".replace(",", ".")
+                    )
+                elif bip_start is not None and start_hoehe is None:
+                    stand.phase(
+                        f"BIP-158 ab Wallet-Beginn "
+                        f"(Block {bip_start:,})…".replace(",", ".")
+                    )
 
             fetchers = main._build_blockchain_fetchers(
                 quelle, backend, args, state.wallet_ctx,

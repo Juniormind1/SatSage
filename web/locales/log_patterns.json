@@ -308,6 +308,14 @@
     "en": "Checking Tor SOCKS $1…"
   },
   {
+    "re": "^Tor-SOCKS (.+) wieder erreichbar \\(in \\.env: (.+)\\)$",
+    "en": "Tor SOCKS $1 reachable again (in .env: $2)"
+  },
+  {
+    "re": "^Tor-SOCKS (.+) wieder erreichbar$",
+    "en": "Tor SOCKS $1 reachable again"
+  },
+  {
     "re": "^Tor-SOCKS (.+) erreichbar$",
     "en": "Tor SOCKS $1 reachable"
   },
@@ -322,6 +330,30 @@
   {
     "re": "^Kein laufender Tor-SOCKS — suche Binary…$",
     "en": "No running Tor SOCKS — searching binary…"
+  },
+  {
+    "re": "^Adressen nachziehen braucht Indexer \\(kein Electrs/Fulcrum konfiguriert\\)\\.$",
+    "en": "Fill addresses needs indexer (no Electrs/Fulcrum configured)."
+  },
+  {
+    "re": "^Adressen nachziehen braucht Indexer — noch nicht verbunden \\(z\\. B\\. Tor startet noch\\)\\. Warte…$",
+    "en": "Fill addresses needs indexer — not connected yet (e.g. Tor still starting). Waiting…"
+  },
+  {
+    "re": "^Adressen nachziehen braucht Indexer — warte weiter \\(noch ~(\\d+)s\\)…$",
+    "en": "Fill addresses needs indexer — still waiting (~$1s left)…"
+  },
+  {
+    "re": "^Adressen nachziehen braucht Indexer \\(Timeout — Tor/Electrs nicht erreichbar\\)\\. Später erneut oder „Historie“\\.$",
+    "en": "Fill addresses needs indexer (timeout — Tor/Electrs unreachable). Retry later or use “History”."
+  },
+  {
+    "re": "^Indexer verbunden — Adressen nachziehen…$",
+    "en": "Indexer connected — filling addresses…"
+  },
+  {
+    "re": "^Adressen nachziehen für (.+): (\\d+) Tx ohne Adresse…$",
+    "en": "Fill addresses for $1: $2 txs without address…"
   },
   {
     "re": "^Tor für Core-RPC nicht bereit: (.+)$",

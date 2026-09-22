@@ -321,28 +321,55 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; flex-direction: column; gap: 6px;
 }
 .empfang-qr-wrap {
+  /* Verbleibende Pane-Fläche; QR darin immer 1:1 (auch nach Spalten-Resize). */
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  container-type: size;
+  container-name: empfang-qr;
+}
+.empfang-qr {
+  /* Größtes Quadrat in der Wrap-Box — nicht auf volle Rechteck-Fläche strecken. */
+  --empfang-qr-seite: min(100cqw, 100cqh);
+  grid-area: 1 / 1;
+  width: var(--empfang-qr-seite);
+  height: var(--empfang-qr-seite);
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.empfang-qr {
-  flex: 1 1 auto;
-  min-height: 0;
+.empfang-qr svg,
+.empfang-qr img,
+.empfang-qr .empfang-puls-canvas {
   width: 100%;
   height: 100%;
-  display: flex; align-items: center; justify-content: center;
-}
-.empfang-qr svg {
-  width: 100%; height: 100%;
-  max-width: 100%; max-height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   aspect-ratio: 1 / 1;
+  object-fit: contain;
+  display: block;
 }
 .empfang-qr-maske {
-  position: absolute;
-  inset: 12%;
+  /* Gleiches Quadrat wie der QR (Grid-Stack), Glyph per padding eingerückt. */
+  grid-area: 1 / 1;
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  padding: 12%;
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -534,10 +561,13 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 1.2em;
 }
 .empfang-konfetti {
+  /* Sitzt auf dem QR-Quadrat (Host = #empfang-qr), nicht der Rechteck-Wrap-Box. */
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   pointer-events: none;
   z-index: 20;
 }

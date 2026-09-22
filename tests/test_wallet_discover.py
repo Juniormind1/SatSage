@@ -173,6 +173,53 @@ class TestWalletDiscover(unittest.TestCase):
             )
             self.assertEqual(leer, [])
 
+    def test_zpub_blendet_deskriptor_treffer_aus(self):
+        """Bekannter zpub (andere ID als Deskriptor) → Specter/Wasabi-Fund weg."""
+        from core.config import WalletEntry, schluessel_kennung
+        from core import wallets as wallets_mod
+
+        xpub = _xpub()
+        zpub = BIP84_ZPUB
+        # zpub-String-ID ≠ Deskriptor-Adress-ID, Schlüssel material gleich.
+        self.assertNotEqual(
+            wallets_mod.wallet_id(zpub),
+            wallets_mod.wallet_id(
+                f"wpkh([aabbccdd/84h/0h/0h]{xpub}/<0;1>/*)"
+            ),
+        )
+        self.assertEqual(schluessel_kennung(zpub), schluessel_kennung(xpub))
+
+        wallet = {
+            "EncryptedSecret": None,
+            "MasterFingerprint": "aabbccdd",
+            "ExtPubKey": xpub,
+            "AccountKeyPath": "84'/0'/0'",
+            "HdPubKeys": [],
+        }
+        known = WalletEntry(name="Cash & Carry", xpub=zpub)
+        ids, kenn = wallets_mod.vorhandene_abgleich([known])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "WalletWasabi" / "Client" / "Wallets"
+            root.mkdir(parents=True)
+            (root / "Cash+Carry.json").write_text(
+                json.dumps(wallet), encoding="utf-8",
+            )
+            # Nur String-ID des zpub → Treffer bliebe (Regression).
+            noch = discover.suche_lokale_wallets(
+                wurzeln=[root],
+                vorhandene_wallet_ids={wallets_mod.eintrag_id(known)},
+                mit_core_rpc=False,
+            )
+            self.assertEqual(len(noch), 1, "ohne Abgleich-IDs muss Treffer bleiben")
+            # Mit adressbasierter ID + Kennung → ausgeblendet.
+            leer = discover.suche_lokale_wallets(
+                wurzeln=[root],
+                vorhandene_wallet_ids=ids,
+                vorhandene_schluessel_kennungen=kenn,
+                mit_core_rpc=False,
+            )
+            self.assertEqual(leer, [])
+
     def test_sparrow_mv_db_nicht_importierbar(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "Sparrow" / "wallets"

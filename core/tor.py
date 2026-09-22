@@ -39,10 +39,13 @@ _started: subprocess.Popen[str] | None = None
 _started_lock = threading.Lock()
 _log_tail: list[str] = []
 
-#: Erfolgreicher SOCKS-Fund — TTL spart Dauer-„Prüfe Tor-SOCKS“-Spam
-#: (Peer-Takt + parallele Jobs + Reconnects).
+#: Erfolgreicher SOCKS-Fund — TTL spart Dauer-Rechecks
+#: (Peer-Takt + parallele Jobs + Reconnects). Happy-Path bleibt still;
+#: Log nur bei echter Wiederherstellung nach Ausfall (siehe ``_socks_down``).
 _socks_ok_cache: dict[tuple[str, int], tuple[float, tuple[str, int]]] = {}
 _socks_ok_lock = threading.Lock()
+#: Keys, bei denen SOCKS zuletzt als tot galt (Ping-Fail / kein Proxy).
+_socks_down: set[tuple[str, int]] = set()
 SOCKS_OK_CACHE_TTL_S = 90.0
 
 
@@ -400,8 +403,10 @@ def _socks_cache_get(
     # Kurzer stiller Ping — kein Log.
     if socks_erreichbar(proxy[0], proxy[1], timeout=0.4):
         return proxy
+    # Echter Ausfall des zuvor ok-geprüften SOCKS.
     with _socks_ok_lock:
         _socks_ok_cache.pop(key, None)
+        _socks_down.add(key)
     return None
 
 
@@ -412,6 +417,36 @@ def _socks_cache_set(
     key = _socks_cache_key(konfiguriert)
     with _socks_ok_lock:
         _socks_ok_cache[key] = (time.monotonic(), proxy)
+        _socks_down.discard(key)
+
+
+def _socks_war_down(konfiguriert: tuple[str, int] | None) -> bool:
+    key = _socks_cache_key(konfiguriert)
+    with _socks_ok_lock:
+        return key in _socks_down
+
+
+def _socks_mark_down(konfiguriert: tuple[str, int] | None) -> None:
+    key = _socks_cache_key(konfiguriert)
+    with _socks_ok_lock:
+        _socks_down.add(key)
+
+
+def _log_socks_wieder_da(
+    log: Callable[[str], None] | None,
+    proxy: tuple[str, int],
+    konfiguriert: tuple[str, int] | None,
+) -> None:
+    """Nur nach bekanntem Ausfall — kein Heartbeat bei TTL-/Routine-Recheck."""
+    if not log:
+        return
+    if konfiguriert and proxy != konfiguriert:
+        log(
+            f"Tor-SOCKS {proxy[0]}:{proxy[1]} wieder erreichbar "
+            f"(in .env: {konfiguriert[0]}:{konfiguriert[1]})"
+        )
+    else:
+        log(f"Tor-SOCKS {proxy[0]}:{proxy[1]} wieder erreichbar")
 
 
 def stelle_tor_socks_bereit(
@@ -428,28 +463,25 @@ def stelle_tor_socks_bereit(
     Startet bei Bedarf ein lokales Tor. Wirft :class:`TorFehler`, wenn weder
     ein Proxy läuft noch eines startbar ist.
 
-    Erfolgreiche Funde werden kurz gecacht (``SOCKS_OK_CACHE_TTL_S``), damit
-    parallele Jobs und der Peer-Takt nicht dauernd „Prüfe Tor-SOCKS…“ spammen.
+    Erfolgreiche Funde werden kurz gecacht (``SOCKS_OK_CACHE_TTL_S``).
+    Routine-Rechecks (TTL abgelaufen, SOCKS weiter ok) bleiben **still**.
+    Log nur bei echtem Ausfall und Wiederherstellung bzw. Tor-Autostart.
     """
-    ziel = konfiguriert or (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
-
     gecacht = _socks_cache_get(konfiguriert)
     if gecacht is not None:
         return gecacht
 
-    if log:
-        log(f"Prüfe Tor-SOCKS {ziel[0]}:{ziel[1]}…")
+    war_down = _socks_war_down(konfiguriert)
+    # Still prüfen — „Prüfe Tor-SOCKS… / erreichbar“ war Heartbeat-Spam
+    # mitten im Gap-Scan, ohne dass Fulcrum/SOCKS wirklich weg war.
     gefunden = erkenne_tor_socks(konfiguriert)
     if gefunden is not None:
-        if log and konfiguriert and gefunden != konfiguriert:
-            log(
-                f"Tor-SOCKS {gefunden[0]}:{gefunden[1]} "
-                f"(in .env: {konfiguriert[0]}:{konfiguriert[1]})"
-            )
-        elif log:
-            log(f"Tor-SOCKS {gefunden[0]}:{gefunden[1]} erreichbar")
+        if war_down:
+            _log_socks_wieder_da(log, gefunden, konfiguriert)
         _socks_cache_set(konfiguriert, gefunden)
         return gefunden
+
+    _socks_mark_down(konfiguriert)
 
     darf = starten and _autostart_erlaubt(env)
     if not darf:
@@ -474,6 +506,8 @@ def stelle_tor_socks_bereit(
     if schon is not None and schon.poll() is None:
         if socks_erreichbar(TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT):
             proxy = (TOR_SOCKS_HOST, TOR_DAEMON_SOCKS_PORT)
+            if war_down:
+                _log_socks_wieder_da(log, proxy, konfiguriert)
             _socks_cache_set(konfiguriert, proxy)
             return proxy
 

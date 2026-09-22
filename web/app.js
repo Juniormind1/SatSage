@@ -2354,11 +2354,12 @@ const EmpfangPuls = (() => {
     } else if (!host.contains(canvas)) {
       host.replaceChildren(canvas);
     }
-    const wrap = host.closest(".empfang-qr-wrap") || host;
-    const seite = Math.max(
-      64,
-      Math.floor(Math.min(wrap.clientWidth || 160, wrap.clientHeight || 160)),
-    );
+    // Seite = größtes Quadrat in der Wrap-Box (CSS: min(cqw,cqh)); Host selbst
+    // kann vor dem ersten Layout noch 0 sein.
+    const box = host.closest(".empfang-qr-wrap") || host;
+    const amHost = Math.min(host.clientWidth || 0, host.clientHeight || 0);
+    const amBox = Math.min(box.clientWidth || 160, box.clientHeight || 160);
+    const seite = Math.max(64, Math.floor(amHost > 0 ? amHost : amBox));
     if (canvas.width !== seite || canvas.height !== seite) {
       canvas.width = seite;
       canvas.height = seite;
@@ -2776,12 +2777,14 @@ const EmpfangPuls = (() => {
   }
 
   function starteKonfetti(opts, onDone) {
+    const qr = document.getElementById("empfang-qr");
     const wrap = document.querySelector(".empfang-qr-wrap");
     const pane = document.getElementById("empfang-pane");
     const fullVp = Boolean(opts && opts.fullViewport);
+    // Konfetti auf dem QR-Quadrat (nicht der ggf. rechteckigen Wrap-Box).
     let host = fullVp
       ? (document.body || document.getElementById("app"))
-      : (wrap || pane);
+      : (qr || wrap || pane);
     if (!host) {
       if (typeof onDone === "function") onDone();
       return 3000;
@@ -13509,7 +13512,9 @@ async function nachWalletExportErfolg(antwort) {
 
 /**
  * Nach Wallet-Export: Adressen per Electrs nachziehen.
- * ≤100 Tx automatisch, >100 mit Nachfrage, ohne Electrs nur Hinweis.
+ * ≤100 Tx automatisch, >100 mit Nachfrage.
+ * Indexer konfiguriert aber noch nicht da (Tor): Job startet und wartet.
+ * Ohne konfigurierten Indexer: klare Log-Zeile, kein stiller Abbruch.
  */
 async function ggfAdressenNachziehenNachExport(antwort) {
   const meta = antwort && antwort.address_nachziehen;
@@ -13518,9 +13523,11 @@ async function ggfAdressenNachziehenNachExport(antwort) {
   const name = meta.name || antwort.name || "?";
   if (n <= 0) return;
 
-  if (!meta.electrs) {
+  const indexerDa = Boolean(meta.indexer_configured);
+  if (!indexerDa) {
     logZeile(
-      t("wallets.exportAddrNoElectrs", { name, n }),
+      t("wallets.exportAddrNeedsIndexer", { name, n }),
+      true,
     );
     return;
   }
@@ -13535,16 +13542,21 @@ async function ggfAdressenNachziehenNachExport(antwort) {
       return;
     }
   } else if (meta.auto_start) {
-    logZeile(t("wallets.exportAddrAutoLog", { name, n }));
+    if (!meta.electrs) {
+      logZeile(t("wallets.exportAddrIndexerPending", { name, n }));
+    } else {
+      logZeile(t("wallets.exportAddrAutoLog", { name, n }));
+    }
   } else {
     return;
   }
 
   try {
+    // Job wartet intern auf Tor — API-Timeout länger als Bootstrap-Rest.
     const job = await api("/config/wallet-export-adressen-nachziehen", {
       methode: "POST",
       daten: { wallet_id: meta.wallet_id },
-      timeoutMs: 30_000,
+      timeoutMs: 60_000,
     });
     logZeile(
       t("wallets.exportAddrJobStarted", {
@@ -13557,12 +13569,14 @@ async function ggfAdressenNachziehenNachExport(antwort) {
       folgeExportAdressenJob(job.id, name, meta.wallet_id || antwort.wallet_id);
     }
   } catch (fehler) {
+    const msg = (fehler && fehler.message) || String(fehler);
     logZeile(
-      t("wallets.exportAddrJobFailed", {
-        msg: (fehler && fehler.message) || String(fehler),
-      }),
+      t("wallets.exportAddrJobFailed", { msg }),
       true,
     );
+    if (/Indexer|Electrs|Fulcrum|Tor/i.test(msg)) {
+      logZeile(t("wallets.exportAddrNeedsIndexer", { name, n }), true);
+    }
   }
 }
 
