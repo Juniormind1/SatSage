@@ -332,6 +332,18 @@
     "en": "No running Tor SOCKS — searching binary…"
   },
   {
+    "re": "^Lösche (.+)$",
+    "en": "Deleting $1"
+  },
+  {
+    "re": "^Lösche (.+): Datei (\\d+)/(\\d+)…$",
+    "en": "Deleting $1: file $2/$3…"
+  },
+  {
+    "re": "^Löschen beendet$",
+    "en": "Delete finished"
+  },
+  {
     "re": "^Adressen nachziehen braucht Indexer \\(kein Electrs/Fulcrum konfiguriert\\)\\.$",
     "en": "Fill addresses needs indexer (no Electrs/Fulcrum configured)."
   },

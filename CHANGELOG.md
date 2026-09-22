@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Start · .env-Modus:** Unter Windows keine Dauer-Warnung mehr „Modus … 0666 → 0600“ — ``chmod`` greift dort nicht; Prüfung nur noch auf POSIX.
+- **Wallets · Löschen:** Log **„Lösche …“** / **„Löschen beendet“** (Timestamps), bei vielen Cache-Dateien Zwischenstand. Langsam v. a. durch Walk über UTXO-/Verlauf → je Tx Herkunfts-/Ingress-Dateien (Import-Wallets).
 - **Wallets · Adressen nachziehen:** Nach Export-Import wartet der Job bis ~2 min auf den Indexer (Tor-Bootstrap), statt still abzubrechen. Log: **„Adressen nachziehen braucht Indexer…“** / Warte-Zeilen; ohne Konfiguration klare Meldung, Adressen bleiben unzugeordnet sichtbar.
 - **Wallets · Suche:** Schon bekannte Schlüssel (z. B. zpub „Cash & Carry“) blenden Specter-/Wasabi-Treffer mit anderem Namen („Cash+Carry“) aus — Abgleich über Adress-ID und Schlüsselkennung, nicht nur rohe zpub-String-ID. Import legt solche Duplikate nicht erneut an.
 - **Log · Tor-SOCKS:** Kein Heartbeat mehr („Prüfe Tor-SOCKS… / erreichbar“) bei Routine-Recheck mitten im Scan. Log nur noch bei **echter Wiederherstellung** nach Ausfall bzw. Tor-Autostart.

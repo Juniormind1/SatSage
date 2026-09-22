@@ -10153,7 +10153,8 @@ function zeichneWalletVerwaltung() {
       );
       if (!ok) return;
       Zustand.entwurf.splice(index, 1);
-      speichereWallets(false);
+      // Name merken — speichereWallets loggt „Lösche …“ / „Löschen beendet“.
+      speichereWallets(false, false, null, [nameHint]);
     });
 
     liste.append(fragment);
@@ -12779,6 +12780,8 @@ async function leereWalletCache(wallet) {
   const kasten = $("#cache-leeren-meldung");
   kasten.hidden = true;
   setzeWalletCacheBestaetigung(null);
+  const nameVorab = wallet.name || wallet.id || t("wallets.thisWallet");
+  logZeile(`Lösche ${nameVorab}`, undefined, nameVorab);
   try {
     const ergebnis = await api(`/cache/${encodeURIComponent(wallet.id)}`, {
       methode: "DELETE",
@@ -12799,6 +12802,13 @@ async function leereWalletCache(wallet) {
     setzeText(kasten, text);
     kasten.hidden = false;
     logZeile(text, undefined, name);
+    for (const z of ergebnis.logs || []) {
+      const s = String(z || "").trim();
+      // Start/Ende loggt die UI selbst (Timestamps um den API-Call).
+      if (!s || s === "Löschen beendet" || /^Lösche [^:]/.test(s)) continue;
+      logZeile(s, undefined, name);
+    }
+    logZeile("Löschen beendet", undefined, name);
     await ladeConfig();
     zeichneEinstellungen();
     await ladeGefahrWallets();
@@ -12807,6 +12817,7 @@ async function leereWalletCache(wallet) {
       await zeigeWallet(Zustand.walletId);
     }
   } catch (fehler) {
+    logZeile("Löschen beendet", true, nameVorab);
     kasten.className = "hinweis hinweis-krit";
     setzeText(kasten, `Löschen fehlgeschlagen: ${fehler.message}`);
     kasten.hidden = false;
@@ -12954,6 +12965,7 @@ async function speichereWallets(
   bestaetigt = false,
   privatsphaereOk = false,
   cacheEntfernteLoeschen = null,
+  loeschNamenHinweis = null,
 ) {
   if (Zustand.walletSpeichernLaeuft) return;
   if (!privatsphaereOk && ersterXpubOhneSicherenNode(Zustand.entwurf.length)) {
@@ -12964,23 +12976,41 @@ async function speichereWallets(
     (Zustand.config?.wallets || []).map((w) => w.id).filter(Boolean),
   );
   const hatteNeue = Zustand.entwurf.some((w) => w.is_new);
+  const behaltenIds = new Set(
+    Zustand.entwurf.filter((w) => !w.is_new && w.id).map((w) => w.id),
+  );
+  const entferntVorab = (Zustand.config?.wallets || []).filter(
+    (w) => w.id && !behaltenIds.has(w.id),
+  );
+  const loeschNamen = (
+    Array.isArray(loeschNamenHinweis) && loeschNamenHinweis.length
+      ? loeschNamenHinweis
+      : entferntVorab.map((w) => w.name || w.id || "?")
+  ).filter(Boolean);
   Zustand.walletSpeichernLaeuft = true;
   setzeWalletSpeichernGesperrt(true);
+  let loeschLogOffen = false;
   try {
     const nutzlast = walletsNutzlast();
     if (cacheEntfernteLoeschen === null) {
-      const behalten = new Set(
-        Zustand.entwurf.filter((w) => !w.is_new && w.id).map((w) => w.id),
-      );
-      const vielleichtEntfernt = (Zustand.config?.wallets || []).some(
-        (w) => w.id && !behalten.has(w.id),
-      );
+      const vielleichtEntfernt = entferntVorab.length > 0;
       if (vielleichtEntfernt) {
+        if (loeschNamen.length) {
+          for (const n of loeschNamen) {
+            logZeile(`Lösche ${n}`, undefined, n);
+          }
+          loeschLogOffen = true;
+        }
         const entscheidung = await frageCacheBeiWalletLoeschung(nutzlast);
         cacheEntfernteLoeschen = entscheidung === true;
       } else {
         cacheEntfernteLoeschen = false;
       }
+    } else if (loeschNamen.length) {
+      for (const n of loeschNamen) {
+        logZeile(`Lösche ${n}`, undefined, n);
+      }
+      loeschLogOffen = true;
     }
     const ergebnis = await api("/config/wallets", {
       methode: "PUT",
@@ -12990,6 +13020,12 @@ async function speichereWallets(
         cache_entfernte_loeschen: Boolean(cacheEntfernteLoeschen),
       },
     });
+    for (const z of ergebnis.logs || []) {
+      const s = String(z || "").trim();
+      // Start/Ende loggt die UI selbst (Timestamps um den API-Call).
+      if (!s || s === "Löschen beendet" || /^Lösche [^:]/.test(s)) continue;
+      logZeile(s);
+    }
     let text = ergebnis.backup
       ? `Gespeichert. Sicherung der vorherigen Fassung: ${ergebnis.backup}`
       : "Gespeichert.";
@@ -12997,6 +13033,10 @@ async function speichereWallets(
       text += ` Cache entfernt (${ergebnis.cache_groesse_label || "0 MB"}).`;
     }
     meldung(text, "gut");
+    if (loeschLogOffen || (ergebnis.cache_entfernt || []).length) {
+      logZeile("Löschen beendet");
+      loeschLogOffen = false;
+    }
     await ladeConfig();
     zeichneEinstellungen();
     if (Zustand.ansicht === "wallets") ladeUnreferenziertenCache();
@@ -13007,6 +13047,10 @@ async function speichereWallets(
       if (neu.length) await nachNeuemWalletScannen(neu);
     }
   } catch (fehler) {
+    if (loeschLogOffen) {
+      logZeile("Löschen beendet", true);
+      loeschLogOffen = false;
+    }
     if (fehler.brauchtBestaetigung) {
       warnungMitBestaetigung(fehler.message, cacheEntfernteLoeschen);
     } else {

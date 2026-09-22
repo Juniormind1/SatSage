@@ -236,7 +236,16 @@ def _max_parallel_jobs(state=None, env_values=None) -> int:
 
 
 def _pruefe_env_modus(env_path: Path) -> None:
-    """Sichert .env und Start-Backups (backup0–9, legacy .bak) gegen Mitlesen."""
+    """
+    Sichert .env und Start-Backups (backup0–9, legacy .bak) gegen Mitlesen.
+
+    POSIX: Dateimodus ``0600``. Unter **Windows** greift ``chmod`` faktisch
+    nicht (``stat`` bleibt oft ``0666``) — Warnungen wären Dauer-Spam ohne
+    Nutzen; NTFS-ACLs steuern den Zugriff. Deshalb hier still übersprungen.
+    """
+    if sys.platform == "win32":
+        return
+
     from core.config import ENV_BACKUP_SLOTS, env_backup_path
 
     kandidaten = [env_path, env_path.with_suffix(env_path.suffix + ".bak")]
@@ -250,9 +259,16 @@ def _pruefe_env_modus(env_path: Path) -> None:
             if modus == 0o600:
                 continue
             os.chmod(pfad, 0o600)
-            warnung = f"Warnung: Modus von {pfad.name} war {modus:04o}; auf 0600 korrigiert."
-            print(warnung, file=sys.stderr, flush=True)
-            LOGGER.warning(warnung)
+            neu = stat.S_IMODE(pfad.stat().st_mode)
+            if neu != 0o600:
+                # chmod wirkungslos (seltenes FS) — nicht jeden Start spammen
+                continue
+            # Nur stderr — LOGGER + print doppelte die Zeile in der Konsole.
+            print(
+                f"Warnung: Modus von {pfad.name} war {modus:04o}; auf 0600 korrigiert.",
+                file=sys.stderr,
+                flush=True,
+            )
         except OSError as exc:
             LOGGER.warning("Konnte Modus von %s nicht prüfen/korrigieren: %s", pfad, exc)
 
@@ -1034,15 +1050,28 @@ def _wallet_cache_loeschen(
     entry,
     *,
     mit_alter: bool = False,
+    on_log=None,
 ) -> dict:
     """Löscht den Analyse-Cache eines Wallets. Siehe ``_wallet_cache_pfade``."""
+    name = entry.display_name or wallets_mod.eintrag_id(entry)
+
+    def _log(text: str) -> None:
+        if on_log:
+            try:
+                on_log(text)
+            except Exception:
+                pass
+
+    _log(f"Lösche {name}")
+    # Teuer bei Import-Wallets: UTXO+Verlauf laden, je Tx Ingress/Trace-Pfad.
     pfade = _wallet_cache_pfade(state, entry, mit_alter=mit_alter)
     bytes_anzahl = sum(_datei_groesse(p) for p in pfade)
     utxo_n = 0
     verlauf_n = 0
     herkunft_n = 0
     alter_n = 0
-    for pfad in pfade:
+    n_pfade = len(pfade)
+    for i, pfad in enumerate(pfade, start=1):
         if pfad.parent == state.cache_dir:
             if pfad.name.endswith("_verlauf.json"):
                 verlauf_n += _datei_loeschen(pfad)
@@ -1052,6 +1081,10 @@ def _wallet_cache_loeschen(
                 utxo_n += _datei_loeschen(pfad)
         else:
             herkunft_n += _datei_loeschen(pfad)
+        # Fortschritt nur bei vielen Herkunftsdateien (sonst Rauschen).
+        if n_pfade >= 50 and (i == 1 or i == n_pfade or i % 100 == 0):
+            _log(f"Lösche {name}: Datei {i}/{n_pfade}…")
+    _log("Löschen beendet")
     return {
         "wallet_id": wallets_mod.eintrag_id(entry),
         "wallet_name": entry.display_name,
@@ -1091,9 +1124,18 @@ def api_cache_wallet_leeren(state: AppState, kennung: str) -> dict:
 
     Auch verwaiste Cache-Kennungen (kein Wallet in der .env) sind erlaubt.
     """
+    logs: list[str] = []
+
+    def _log(text: str) -> None:
+        s = str(text or "").strip()
+        if s:
+            logs.append(s)
+
     entry = wallets_mod.find_entry(state.entries, kennung)
     if entry is not None:
-        bericht = _wallet_cache_loeschen(state, entry, mit_alter=False)
+        bericht = _wallet_cache_loeschen(
+            state, entry, mit_alter=False, on_log=_log,
+        )
     else:
         kid = (kennung or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{16}", kid or ""):
@@ -1101,7 +1143,7 @@ def api_cache_wallet_leeren(state: AppState, kennung: str) -> dict:
         if not _cache_kennung_hat_dateien(state, kid):
             raise ApiError(404, "Kein Cache zu dieser Kennung.")
         bericht = _wallet_cache_loeschen_kennung(
-            state, kid, name=f"Cache {kid[:8]}…", mit_alter=True,
+            state, kid, name=f"Cache {kid[:8]}…", mit_alter=True, on_log=_log,
         )
     return {
         "ok": True,
@@ -1111,6 +1153,7 @@ def api_cache_wallet_leeren(state: AppState, kennung: str) -> dict:
         "verlauf_eintraege": bericht["verlauf_eintraege"],
         "herkunft_eintraege": bericht["herkunft_eintraege"],
         "configured": entry is not None,
+        "logs": logs,
     }
 
 
@@ -1167,14 +1210,26 @@ def _wallet_cache_loeschen_kennung(
     *,
     name: str = "",
     mit_alter: bool = False,
+    on_log=None,
 ) -> dict:
+    anzeige = name or f"Cache {kennung[:8]}…"
+
+    def _log(text: str) -> None:
+        if on_log:
+            try:
+                on_log(text)
+            except Exception:
+                pass
+
+    _log(f"Lösche {anzeige}")
     pfade = _wallet_cache_pfade_kennung(state, kennung, mit_alter=mit_alter)
     bytes_anzahl = sum(_datei_groesse(p) for p in pfade)
     utxo_n = 0
     verlauf_n = 0
     herkunft_n = 0
     alter_n = 0
-    for pfad in pfade:
+    n_pfade = len(pfade)
+    for i, pfad in enumerate(pfade, start=1):
         if pfad.parent == state.cache_dir:
             if pfad.name.endswith("_verlauf.json"):
                 verlauf_n += _datei_loeschen(pfad)
@@ -1184,9 +1239,12 @@ def _wallet_cache_loeschen_kennung(
                 utxo_n += _datei_loeschen(pfad)
         else:
             herkunft_n += _datei_loeschen(pfad)
+        if n_pfade >= 50 and (i == 1 or i == n_pfade or i % 100 == 0):
+            _log(f"Lösche {anzeige}: Datei {i}/{n_pfade}…")
+    _log("Löschen beendet")
     return {
         "wallet_id": kennung,
-        "wallet_name": name or f"Cache {kennung[:8]}…",
+        "wallet_name": anzeige,
         "dateien": utxo_n + verlauf_n + herkunft_n + alter_n,
         "bytes": bytes_anzahl,
         "groesse_label": format_dateigroesse(bytes_anzahl),
@@ -3011,12 +3069,22 @@ def api_save_wallets(state: AppState, payload: dict) -> dict:
         raise ApiError(500, "Interner Serverfehler.") from exc
 
     cache_bericht: list[dict] = []
+    logs: list[str] = []
+
+    def _log(text: str) -> None:
+        s = str(text or "").strip()
+        if s:
+            logs.append(s)
+
     if bool(payload.get("cache_entfernte_loeschen")) and entfernt:
         # Vor reload: Einträge und Cache-Pfade beziehen sich noch auf den
         # vorherigen Zustand — genau die entfernten Wallets.
+        # Teuer bei großen Import-Verläufen (je Tx Herkunftsdatei).
         for entry in entfernt:
             cache_bericht.append(
-                _wallet_cache_loeschen(state, entry, mit_alter=True)
+                _wallet_cache_loeschen(
+                    state, entry, mit_alter=True, on_log=_log,
+                )
             )
 
     state.reload()
@@ -3028,6 +3096,7 @@ def api_save_wallets(state: AppState, payload: dict) -> dict:
         "cache_entfernt": cache_bericht,
         "cache_bytes": bytes_gesamt,
         "cache_groesse_label": format_dateigroesse(bytes_gesamt) if cache_bericht else "",
+        "logs": logs,
     }
 
 
