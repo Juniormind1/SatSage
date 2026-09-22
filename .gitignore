@@ -9,6 +9,9 @@
 # Legacy (wird nach .env migriert und gelöscht)
 .env.gobbledigook
 .env.gobbledigook.tmp
+# App-Login-Hash (Argon2id/scrypt) — nie committen
+.satsage-password
+.satsage-password.tmp
 
 __pycache__/
 *.pyc
