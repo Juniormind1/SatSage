@@ -1964,12 +1964,9 @@ def api_wallet_export_import(state: AppState, payload: dict) -> dict:
         dateien = []
         for name, roh in roh_dateien.items():
             try:
-                text = roh.decode("utf-8")
+                text = roh.decode("utf-8-sig")
             except UnicodeDecodeError:
-                try:
-                    text = roh.decode("utf-8-sig")
-                except UnicodeDecodeError:
-                    text = roh.decode("latin-1", errors="replace")
+                text = roh.decode("latin-1", errors="replace")
             # Anzeigename ohne internen #2-Suffix aus Kollisions-Schutz.
             anzeige = name.split("#", 1)[0] if "#" in name else name
             dateien.append({"name": anzeige, "text": text})
@@ -2167,52 +2164,66 @@ def _wallet_export_anlegen_und_cache(
             raise ApiError(500, "Interner Serverfehler.") from exc
         state.reload()
 
-    prim = neu_liste[0]
-    wid = prim.wallet_id()
-    bekannt = wallets_mod.find_entry(state.entries, wid) or prim
-    schluessel = bekannt.analyse_schluessel
+    # Cache je angelegtem/bekanntem Wallet (SegWit+Taproot getrennt).
     utxo_n = 0
     verlauf_n = 0
+    seed_keys: list[str] = []
+    prim = neu_liste[0]
+    bekannt = (
+        wallets_mod.find_entry(state.entries, prim.wallet_id()) or prim
+    )
     try:
-        if parsed.utxos:
-            main.save_xpub_utxo_cache(
-                schluessel,
-                parsed.utxos,
-                state.cache_dir,
-                source=cache_source,
-                max_addresses=bekannt.max_addresses,
-            )
-            utxo_n = len(parsed.utxos)
-        if parsed.verlauf:
-            bisher = main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or []
-            merge = list(bisher)
-            gesehen = {
-                f"{e.get('txid')}:{e.get('vout')}:{e.get('spent')}"
-                for e in merge
-                if isinstance(e, dict)
-            }
-            for e in parsed.verlauf:
-                key = f"{e.get('txid')}:{e.get('vout')}:{e.get('spent')}"
-                if key in gesehen:
-                    continue
-                gesehen.add(key)
-                merge.append(e)
-            main.save_xpub_verlauf_cache(
-                schluessel,
-                merge,
-                state.cache_dir,
-                scanned_addresses=parsed.adressen or None,
-                incomplete=True,
-            )
-            verlauf_n = len(parsed.verlauf)
-        elif parsed.adressen:
-            main.save_xpub_verlauf_cache(
-                schluessel,
-                main.load_xpub_verlauf_cache(schluessel, state.cache_dir) or [],
-                state.cache_dir,
-                scanned_addresses=parsed.adressen,
-                incomplete=True,
-            )
+        for neu in neu_liste:
+            wid_i = neu.wallet_id()
+            ein = wallets_mod.find_entry(state.entries, wid_i) or neu
+            schluessel = ein.analyse_schluessel
+            seed_keys.append(schluessel)
+            utxos_i = _export_eintraege_fuer_wallet(parsed.utxos, ein)
+            verlauf_i = _export_eintraege_fuer_wallet(parsed.verlauf, ein)
+            addrs_i = _export_adressen_fuer_wallet(parsed.adressen, ein)
+            if utxos_i:
+                main.save_xpub_utxo_cache(
+                    schluessel,
+                    utxos_i,
+                    state.cache_dir,
+                    source=cache_source,
+                    max_addresses=ein.max_addresses,
+                )
+                utxo_n += len(utxos_i)
+            if verlauf_i:
+                bisher = main.load_xpub_verlauf_cache(
+                    schluessel, state.cache_dir
+                ) or []
+                merge = list(bisher)
+                gesehen = {
+                    f"{e.get('txid')}:{e.get('vout')}:{e.get('spent')}"
+                    for e in merge
+                    if isinstance(e, dict)
+                }
+                for e in verlauf_i:
+                    key = f"{e.get('txid')}:{e.get('vout')}:{e.get('spent')}"
+                    if key in gesehen:
+                        continue
+                    gesehen.add(key)
+                    merge.append(e)
+                # Store-/CSV-Verlauf gilt als vollständig genug; Adressen gesetzt.
+                main.save_xpub_verlauf_cache(
+                    schluessel,
+                    merge,
+                    state.cache_dir,
+                    scanned_addresses=addrs_i or parsed.adressen or None,
+                    incomplete=False if (utxos_i or verlauf_i) else True,
+                )
+                verlauf_n += len(verlauf_i)
+            elif addrs_i or parsed.adressen:
+                main.save_xpub_verlauf_cache(
+                    schluessel,
+                    main.load_xpub_verlauf_cache(schluessel, state.cache_dir)
+                    or [],
+                    state.cache_dir,
+                    scanned_addresses=addrs_i or parsed.adressen,
+                    incomplete=True,
+                )
     except main.CacheDiskFullError as exc:
         raise ApiError(507, str(exc)) from exc
     except OSError as exc:
@@ -2220,7 +2231,8 @@ def _wallet_export_anlegen_und_cache(
 
     try:
         main.seed_wallet_addresses_from_utxo_cache(
-            state.wallet_ctx, [schluessel], state.cache_dir
+            state.wallet_ctx, seed_keys or [bekannt.analyse_schluessel],
+            state.cache_dir,
         )
     except Exception:
         pass
@@ -2232,7 +2244,7 @@ def _wallet_export_anlegen_und_cache(
         "already_present": angelegt == 0 and schon_da_n > 0,
         "wallets_added": angelegt,
         "wallets_existing": schon_da_n,
-        "wallet_id": wid,
+        "wallet_id": bekannt.wallet_id() if hasattr(bekannt, "wallet_id") else prim.wallet_id(),
         "name": bekannt.display_name,
         "format": parsed.format_label,
         "descriptor": bool(bekannt.descriptor),
@@ -2246,6 +2258,86 @@ def _wallet_export_anlegen_und_cache(
         "wallet_count": len(state.entries),
         "address_nachziehen": nachziehen,
     }
+
+
+def _export_script_familie(entry: WalletEntry) -> str:
+    """Grobe Skriptfamilie für Wasabi-SegWit/Taproot-Split."""
+    d = (getattr(entry, "descriptor", None) or "").lower()
+    if d.startswith("tr(") or "/86h/" in d or "/86'/" in d:
+        return "tr"
+    if "wsh(" in d or "sh(wsh" in d:
+        return "wsh"
+    if "wpkh(" in d or "sh(wpkh" in d:
+        return "wpkh"
+    x = (getattr(entry, "xpub", None) or "").lower()
+    if x.startswith(("zpub", "vpub")):
+        return "wpkh"
+    if x.startswith(("xpub", "tpub")):
+        return "mixed"
+    return "mixed"
+
+
+def _export_adresse_familie(addr: str) -> str:
+    a = (addr or "").strip().lower()
+    if a.startswith(("bc1p", "tb1p", "bcrt1p")):
+        return "tr"
+    if a.startswith(("bc1q", "tb1q", "bcrt1q")):
+        return "wpkh"
+    if a.startswith(("3", "2")):
+        return "sh"
+    if a.startswith(("1", "m", "n")):
+        return "pkh"
+    return "other"
+
+
+def _export_eintraege_fuer_wallet(
+    eintraege: list | None, entry: WalletEntry,
+) -> list:
+    """Filtert UTXO/Verlauf-Einträge auf die Skriptfamilie des Wallets."""
+    if not eintraege:
+        return []
+    fam = _export_script_familie(entry)
+    if fam == "mixed":
+        return list(eintraege)
+    out = []
+    for e in eintraege:
+        if not isinstance(e, dict):
+            continue
+        addr = str(e.get("address") or "")
+        if not addr:
+            out.append(e)
+            continue
+        af = _export_adresse_familie(addr)
+        if fam == "tr" and af == "tr":
+            out.append(e)
+        elif fam == "wpkh" and af in ("wpkh", "sh", "pkh"):
+            out.append(e)
+        elif fam == af:
+            out.append(e)
+    return out
+
+
+def _export_adressen_fuer_wallet(
+    adressen: list | None, entry: WalletEntry,
+) -> list[str]:
+    if not adressen:
+        return []
+    fam = _export_script_familie(entry)
+    if fam == "mixed":
+        return [str(a) for a in adressen if a]
+    out = []
+    for a in adressen:
+        s = str(a or "").strip()
+        if not s:
+            continue
+        af = _export_adresse_familie(s)
+        if fam == "tr" and af == "tr":
+            out.append(s)
+        elif fam == "wpkh" and af in ("wpkh", "sh", "pkh"):
+            out.append(s)
+        elif fam == af:
+            out.append(s)
+    return out
 
 
 def _export_adressen_nachziehen_meta(state: AppState, entry: WalletEntry) -> dict:

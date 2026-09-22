@@ -62,6 +62,23 @@ class TestWasabiViewOnly(unittest.TestCase):
         self.assertIn(f"[{fp}/84h/0h/0h]", r.descriptors[0])
         self.assertEqual(r.namen[0], "Coldcard")
 
+    def test_hardware_wallet_json_with_bom(self):
+        xpub = _xpub()
+        wallet = {
+            "EncryptedSecret": None,
+            "MasterFingerprint": "aabbccdd",
+            "ExtPubKey": xpub,
+            "AccountKeyPath": "84'/0'/0'",
+            "HdPubKeys": [],
+        }
+        # Browser/Datei-Upload kann BOM als U+FEFF im Text behalten.
+        r = parse_wallet_export_dateien([
+            {"name": "HW.json", "text": "\ufeff" + json.dumps(wallet)},
+        ])
+        self.assertTrue(r.ok, r.fehler)
+        self.assertIn("wasabi", r.formate)
+        self.assertEqual(len(r.descriptors), 1)
+
     def test_segwit_und_taproot_zwei_konten(self):
         xpub = _xpub()
         # Zweiter xpub: andere Ableitung simulieren (gleicher Key reicht für Parse-Test
@@ -87,7 +104,7 @@ class TestWasabiViewOnly(unittest.TestCase):
         self.assertEqual(kinds, ["tr", "wpkh"])
         self.assertEqual(sorted(r.namen), ["HW SegWit", "HW Taproot"])
 
-    def test_hot_wallet_secret_ignoriert(self):
+    def test_hot_wallet_secret_abgelehnt(self):
         xpub = _xpub()
         wallet = {
             "EncryptedSecret": "6PR…fake",
@@ -99,9 +116,9 @@ class TestWasabiViewOnly(unittest.TestCase):
         r = parse_wallet_export_dateien([
             {"name": "Hot.json", "text": json.dumps(wallet)},
         ])
-        self.assertTrue(r.ok, r.fehler)
-        self.assertTrue(any("ignoriert" in h.lower() for h in r.hinweise))
-        self.assertNotIn("6PR", json.dumps(r.descriptors))
+        self.assertFalse(r.ok)
+        self.assertIn("passwort", (r.fehler or "").lower())
+        self.assertEqual(r.descriptors, [])
 
     def test_listunspentcoins_rpc(self):
         xpub = _xpub()

@@ -42,6 +42,50 @@ class TestWalletDiscover(unittest.TestCase):
             self.assertFalse(treffer[0].locked)
             self.assertTrue(treffer[0].descriptors)
 
+    def test_wasabi_utf8_bom_importierbar(self):
+        """Wasabi speichert Wallet-JSON mit UTF-8-BOM (ef bb bf)."""
+        xpub = _xpub()
+        wallet = {
+            "EncryptedSecret": None,
+            "MasterFingerprint": "aabbccdd",
+            "ExtPubKey": xpub,
+            "AccountKeyPath": "84'/0'/0'",
+            "HdPubKeys": [],
+            "BlockchainState": {"Network": "Main"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "WalletWasabi" / "Client" / "Wallets"
+            root.mkdir(parents=True)
+            pfad = root / "BomWallet.json"
+            # Wie Wasabi auf Disk: BOM + JSON (encoding=utf-8-sig schreibt BOM)
+            pfad.write_text(json.dumps(wallet), encoding="utf-8-sig")
+            self.assertEqual(pfad.read_bytes()[:3], b"\xef\xbb\xbf")
+            treffer = discover.suche_lokale_wallets(wurzeln=[root])
+            self.assertEqual(len(treffer), 1)
+            self.assertTrue(treffer[0].importable, treffer[0].reason)
+            self.assertTrue(treffer[0].descriptors)
+            self.assertNotEqual(treffer[0].reason, "Kein JSON")
+
+    def test_wasabi_hot_nicht_importierbar(self):
+        xpub = _xpub()
+        wallet = {
+            "EncryptedSecret": "6PYfakeSecretMaterialXXXX",
+            "MasterFingerprint": "aabbccdd",
+            "ExtPubKey": xpub,
+            "AccountKeyPath": "84'/0'/0'",
+            "HdPubKeys": [],
+            "BlockchainState": {"Network": "Main"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "WalletWasabi" / "Client" / "Wallets"
+            root.mkdir(parents=True)
+            (root / "Hot.json").write_text(json.dumps(wallet), encoding="utf-8")
+            treffer = discover.suche_lokale_wallets(wurzeln=[root])
+            self.assertEqual(len(treffer), 1)
+            self.assertFalse(treffer[0].importable)
+            self.assertTrue(treffer[0].locked)
+            self.assertIn("Passwort", treffer[0].reason)
+
     def test_schon_vorhanden_ausgeblendet(self):
         xpub = _xpub()
         wallet = {

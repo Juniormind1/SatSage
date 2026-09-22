@@ -5,23 +5,31 @@ Unterstützte Formate (Auto-Erkennung, gemischt erlaubt):
 
 - **Sparrow:** Output-Descriptor, UTXO-/Tx-/Address-CSV
 - **Wasabi 2:** View-only-/Hardware-Wallet-JSON (``ExtPubKey`` / Taproot),
+  optional Tx-Verlauf/UTXOs aus lokalem ``BitcoinStore`` (Transactions.sqlite),
   optional RPC-Dumps ``listunspentcoins`` / ``listcoins`` / ``gethistory``
 
-Kein Passwort, keine verschlüsselte Sparrow-``.mv.db``. Bei Wasabi-Hot-Wallet
-wird nur Öffentliches gelesen; ``EncryptedSecret`` wird verworfen, nie
-gespeichert.
+Kein Passwort, keine verschlüsselte Sparrow-``.mv.db``. Passwortgeschützte
+Wasabi-Hot-Wallets (``EncryptedSecret`` gesetzt) werden abgelehnt — nur
+View-only/Hardware ohne Secret.
 """
 from __future__ import annotations
 
 import csv
 import io
 import json
+import os
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from core import config as config_mod
+
+# Wasabi: Mempool-/unbekannte Höhe in Transactions.sqlite
+_WASABI_MEMPOOL_HEIGHT = 2_147_483_646
+_WASABI_UNKNOWN_HEIGHT = 2_147_483_647
 
 _TXID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _OUTPOINT_RE = re.compile(r"^\s*([0-9a-fA-F]{64})\s*[:/]\s*(\d+)\s*$")
@@ -91,6 +99,7 @@ def parse_wallet_export_dateien(
             continue
         name = str(roh.get("name") or "").strip() or "export"
         text = str(roh.get("text") or "")
+        pfad_hinweis = str(roh.get("path") or "").strip() or None
         if not text.strip():
             ergebnis.hinweise.append(f"„{name}“ ist leer — übersprungen.")
             continue
@@ -129,9 +138,28 @@ def parse_wallet_export_dateien(
             ergebnis.hinweise.extend(hinw)
             _merke_format(ergebnis, "sparrow")
         elif art == "wasabi_wallet":
-            descs, addrs, hinw = _parse_wasabi_wallet_json(text, name)
+            descs, addrs, utxos, verlauf, hinw = _parse_wasabi_wallet_json(
+                text, name, wallet_pfad=pfad_hinweis,
+            )
+            if not descs and hinw:
+                # Hot-Wallet / harter Parse-Fehler → Abbruch statt generischem
+                # „kein Deskriptor“.
+                hart = next(
+                    (
+                        h for h in hinw
+                        if "passwort" in h.lower()
+                        or "ohne extpubkey" in h.lower()
+                        or "json ungültig" in h.lower()
+                    ),
+                    None,
+                )
+                if hart:
+                    ergebnis.fehler = hart
+                    return ergebnis
             sparte_deskriptoren.extend(descs)
             ergebnis.adressen.extend(addrs)
+            ergebnis.utxos.extend(utxos)
+            ergebnis.verlauf.extend(verlauf)
             ergebnis.hinweise.extend(hinw)
             if not ergebnis.name_vorschlag and datei_name:
                 ergebnis.name_vorschlag = datei_name
@@ -212,6 +240,11 @@ def _merke_format(ergebnis: WalletExportErgebnis, name: str) -> None:
         ergebnis.formate.append(name)
 
 
+def _json_loads(text: str) -> Any:
+    """``json.loads`` mit UTF-8-BOM-Toleranz (Wasabi speichert oft mit BOM)."""
+    return json.loads((text or "").lstrip("\ufeff"))
+
+
 def _datei_art(name: str, text: str) -> str:
     lower = name.lower()
     kopf = _csv_header_norm(text)
@@ -231,7 +264,7 @@ def _datei_art(name: str, text: str) -> str:
 
     if stripped[:1] in "{[":
         try:
-            data = json.loads(text)
+            data = _json_loads(stripped)
         except json.JSONDecodeError:
             data = None
         if data is not None:
@@ -304,30 +337,42 @@ def _ist_wasabi_history(obj: dict) -> bool:
 
 
 def _parse_wasabi_wallet_json(
-    text: str, dateiname: str,
-) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    text: str,
+    dateiname: str,
+    *,
+    wallet_pfad: str | None = None,
+) -> tuple[
+    list[tuple[str, str]],
+    list[str],
+    list[dict],
+    list[dict],
+    list[str],
+]:
     """
     View-only / Hardware: ExtPubKey + optional Taproot → Deskriptoren.
 
-    Hot-Wallet mit EncryptedSecret: nur Öffentliches, Secret wird ignoriert.
+    Passwortgeschützte Hot-Wallets (EncryptedSecret) werden abgelehnt.
+    Adressen aus HdPubKeys; UTXOs/Verlauf aus lokalem BitcoinStore, falls
+    vorhanden (``wallet_pfad`` oder Standard-Wasabi-Ordner).
     """
     hinweise: list[str] = []
     try:
-        data = json.loads(text)
+        data = _json_loads(text)
     except json.JSONDecodeError as exc:
-        return [], [], [f"„{dateiname}“: JSON ungültig ({exc})."]
+        return ([], [], [], [], [f"„{dateiname}“: JSON ungültig ({exc})."])
 
     if isinstance(data, dict) and "result" in data and isinstance(data["result"], dict):
         data = data["result"]
     if not isinstance(data, dict):
-        return [], [], [f"„{dateiname}“: kein Wasabi-Wallet-Objekt."]
+        return ([], [], [], [], [f"„{dateiname}“: kein Wasabi-Wallet-Objekt."])
 
     secret = data.get("EncryptedSecret")
     if secret not in (None, "", "null"):
-        hinweise.append(
-            "Wasabi-Hot-Wallet: verschlüsseltes Geheimnis ignoriert — nur "
-            "öffentliche xpubs/Deskriptoren (kein Passwort)."
-        )
+        return ([], [], [], [], [
+            f"„{dateiname}“: passwortgeschützte Wasabi-Hot-Wallet. "
+            "SatSage importiert nur View-only-/Hardware-JSON ohne Secret "
+            "(in Wasabi als Beobachtungswallet exportieren)."
+        ])
 
     fp = _wasabi_fingerprint(data.get("MasterFingerprint"))
     segwit_path = _wasabi_origin_path(
@@ -350,16 +395,18 @@ def _parse_wasabi_wallet_json(
         ))
     if tap and _XPUB_RE.search(tap):
         xpub = _XPUB_RE.search(tap).group(1)
-        label = f"{basis} Taproot" if (ext and _XPUB_RE.search(str(ext))) else basis
+        label = (
+            f"{basis} Taproot" if (ext and _XPUB_RE.search(str(ext))) else basis
+        )
         descs.append((
             _baue_deskriptor("tr", fp, tap_path, xpub),
             label,
         ))
 
     if not descs:
-        return [], [], [
+        return ([], [], [], [], [
             f"„{dateiname}“: Wasabi-JSON ohne ExtPubKey/TaprootExtPubKey."
-        ]
+        ])
 
     # Ableitbarkeit prüfen — kaputte xpubs verwerfen.
     brauchbar: list[tuple[str, str]] = []
@@ -372,11 +419,21 @@ def _parse_wasabi_wallet_json(
             hinweise.append(f"Deskriptor nicht ableitbar, übersprungen: {desc[:48]}…")
 
     if not brauchbar:
-        return [], [], [
+        return ([], [], [], [], [
             f"„{dateiname}“: xpubs vorhanden, aber keine ableitbaren Deskriptoren."
-        ]
+        ])
 
-    adressen = _wasabi_adressen_aus_hdpubkeys(data.get("HdPubKeys") or [])
+    net_name = ""
+    try:
+        net_name = str((data.get("BlockchainState") or {}).get("Network") or "")
+    except Exception:
+        net_name = ""
+    embit_net, store_ordner = _wasabi_netzwerk(net_name)
+
+    adressen, labels = _wasabi_adressen_aus_hdpubkeys(
+        data.get("HdPubKeys") or [],
+        network=embit_net,
+    )
     gap = data.get("MinGapLimit")
     if gap is not None:
         try:
@@ -385,7 +442,26 @@ def _parse_wasabi_wallet_json(
                 hinweise.append(f"Wasabi MinGapLimit={g} (Scan-Tiefe ggf. anpassen).")
         except (TypeError, ValueError):
             pass
-    return brauchbar, adressen, hinweise
+
+    utxos: list[dict] = []
+    verlauf: list[dict] = []
+    if adressen:
+        store_utxo, store_verlauf, store_hinw = _wasabi_coins_aus_bitcoin_store(
+            set(adressen),
+            store_ordner=store_ordner,
+            embit_network=embit_net,
+            wallet_pfad=wallet_pfad,
+            address_labels=labels,
+        )
+        utxos.extend(store_utxo)
+        verlauf.extend(store_verlauf)
+        hinweise.extend(store_hinw)
+    else:
+        hinweise.append(
+            f"„{dateiname}“: keine HdPubKeys-Adressen — Verlauf/UTXO erst nach Scan."
+        )
+
+    return brauchbar, adressen, utxos, verlauf, hinweise
 
 
 def _wasabi_fingerprint(wert: Any) -> str:
@@ -441,20 +517,356 @@ def _baue_deskriptor(kind: str, fp: str, origin: str, xpub: str) -> str:
     return f"wpkh({key})"
 
 
-def _wasabi_adressen_aus_hdpubkeys(keys: Any) -> list[str]:
+def _wasabi_netzwerk(name: str) -> tuple[str, str]:
+    """→ (embit-Netzwerkname, BitcoinStore-Ordner)."""
+    n = (name or "Main").strip().lower()
+    if n in ("testnet", "test", "testnet3"):
+        return "test", "TestNet"
+    if n in ("testnet4",):
+        return "test", "TestNet4"
+    if n in ("regtest", "reg"):
+        return "regtest", "RegTest"
+    if n in ("signet",):
+        return "signet", "Signet"
+    return "main", "Main"
+
+
+def _wasabi_script_art_aus_pfad(full_path: str) -> str:
+    """``84'/0'/0'/0/1`` → wpkh | tr | sh-wpkh | pkh."""
+    s = (full_path or "").replace("h", "'").replace("H", "'")
+    if s.lower().startswith("m/"):
+        s = s[2:]
+    teile = [t.strip() for t in s.split("/") if t.strip()]
+    if not teile:
+        return "wpkh"
+    erst = teile[0].rstrip("'hH")
+    if erst == "86":
+        return "tr"
+    if erst == "49":
+        return "sh-wpkh"
+    if erst == "44":
+        return "pkh"
+    return "wpkh"
+
+
+def _wasabi_adresse_aus_pubkey(
+    pubkey_hex: str,
+    *,
+    script_art: str,
+    network: str,
+) -> str | None:
+    try:
+        from embit import ec, script
+        from embit.networks import NETWORKS
+    except ImportError:
+        return None
+    net = NETWORKS.get(network) or NETWORKS["main"]
+    try:
+        raw = bytes.fromhex(str(pubkey_hex or "").strip())
+        pub = ec.PublicKey.parse(raw)
+    except Exception:
+        return None
+    try:
+        if script_art == "tr":
+            # x-only: embit p2tr erwartet PublicKey; intern x-only
+            return script.p2tr(pub).address(net)
+        if script_art == "sh-wpkh":
+            return script.p2sh(script.p2wpkh(pub)).address(net)
+        if script_art == "pkh":
+            return script.p2pkh(pub).address(net)
+        return script.p2wpkh(pub).address(net)
+    except Exception:
+        return None
+
+
+def _wasabi_adressen_aus_hdpubkeys(
+    keys: Any,
+    *,
+    network: str = "main",
+) -> tuple[list[str], dict[str, str]]:
+    """
+    Adressen + optionale Labels aus HdPubKeys.
+
+    Wasabi speichert oft nur PubKey+FullKeyPath (kein Address-Feld).
+    """
     addrs: list[str] = []
+    labels: dict[str, str] = {}
     if not isinstance(keys, list):
-        return addrs
+        return addrs, labels
+    gesehen: set[str] = set()
     for eintrag in keys:
         if not isinstance(eintrag, dict):
             continue
+        addr = ""
         for k in ("Address", "address", "ScriptPubKey"):
             val = eintrag.get(k)
-            if isinstance(val, str) and val.startswith(("bc1", "tb1", "bcrt1", "1", "3")):
-                if val not in addrs:
-                    addrs.append(val)
+            if isinstance(val, str) and val.startswith(
+                ("bc1", "tb1", "bcrt1", "1", "3")
+            ):
+                addr = val.strip()
                 break
-    return addrs
+        if not addr:
+            pk = str(eintrag.get("PubKey") or "").strip()
+            path = str(
+                eintrag.get("FullKeyPath")
+                or eintrag.get("KeyPath")
+                or eintrag.get("keyPath")
+                or ""
+            )
+            if pk:
+                addr = _wasabi_adresse_aus_pubkey(
+                    pk,
+                    script_art=_wasabi_script_art_aus_pfad(path),
+                    network=network,
+                ) or ""
+        if not addr or addr in gesehen:
+            continue
+        gesehen.add(addr)
+        addrs.append(addr)
+        lab = str(eintrag.get("Label") or eintrag.get("label") or "").strip()
+        if lab:
+            labels[addr] = lab
+    return addrs, labels
+
+
+def _wasabi_client_wurzeln(wallet_pfad: str | None) -> list[Path]:
+    """Mögliche Wasabi-Client-Verzeichnisse (enthalten BitcoinStore)."""
+    out: list[Path] = []
+    gesehen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        try:
+            key = str(p.resolve()) if p.exists() else str(p)
+        except OSError:
+            key = str(p)
+        if key in gesehen:
+            return
+        gesehen.add(key)
+        out.append(p)
+
+    if wallet_pfad:
+        p = Path(wallet_pfad).expanduser()
+        # .../Client/Wallets/foo.json → Client
+        for parent in list(p.parents)[:6]:
+            if (parent / "BitcoinStore").is_dir() or parent.name.lower() in (
+                "client", "walletwasabi",
+            ):
+                _add(parent)
+                if (parent / "BitcoinStore").is_dir():
+                    break
+            if (parent.parent / "BitcoinStore").is_dir():
+                _add(parent.parent)
+                break
+
+    home = Path.home()
+    appdata = os.environ.get("APPDATA") or ""
+    xdg = os.environ.get("XDG_DATA_HOME") or ""
+    for c in (
+        home / ".walletwasabi" / "client",
+        home / "Library" / "Application Support" / "WalletWasabi" / "Client",
+        Path(appdata) / "WalletWasabi" / "Client" if appdata else None,
+        Path(xdg) / "WalletWasabi" / "Client" if xdg else None,
+        home / ".local" / "share" / "WalletWasabi" / "Client",
+    ):
+        if c is not None:
+            _add(c)
+    return out
+
+
+def _wasabi_sqlite_kandidaten(
+    store_ordner: str,
+    wallet_pfad: str | None,
+) -> list[Path]:
+    pfade: list[Path] = []
+    gesehen: set[str] = set()
+    for client in _wasabi_client_wurzeln(wallet_pfad):
+        base = client / "BitcoinStore" / store_ordner
+        for rel in (
+            Path("ConfirmedTransactions") / "2" / "Transactions.sqlite",
+            Path("ConfirmedTransactions") / "1" / "Transactions.sqlite",
+            Path("ConfirmedTransactions") / "Transactions.sqlite",
+            Path("Mempool") / "Transactions.sqlite",
+        ):
+            p = base / rel
+            try:
+                key = str(p.resolve()) if p.exists() else str(p)
+            except OSError:
+                key = str(p)
+            if key in gesehen:
+                continue
+            gesehen.add(key)
+            if p.is_file():
+                pfade.append(p)
+    return pfade
+
+
+def _wasabi_coins_aus_bitcoin_store(
+    adressen: set[str],
+    *,
+    store_ordner: str,
+    embit_network: str,
+    wallet_pfad: str | None,
+    address_labels: dict[str, str] | None = None,
+) -> tuple[list[dict], list[dict], list[str]]:
+    """
+    Liest Wasabi ``Transactions.sqlite`` und filtert Outputs zu ``adressen``.
+
+    Liefert UTXOs (unspent) und Verlauf (spent + unspent als Bestandshistorie
+    nur unspent in utxos; spent in verlauf).
+    """
+    hinweise: list[str] = []
+    if not adressen:
+        return [], [], hinweise
+
+    try:
+        from embit.networks import NETWORKS
+        from embit.transaction import Transaction
+    except ImportError:
+        return [], [], ["embit fehlt — Wasabi-Store nicht lesbar."]
+
+    net = NETWORKS.get(embit_network) or NETWORKS["main"]
+    sqlites = _wasabi_sqlite_kandidaten(store_ordner, wallet_pfad)
+    if not sqlites:
+        hinweise.append(
+            "Kein Wasabi-BitcoinStore (Transactions.sqlite) gefunden — "
+            "nur Deskriptor/Adressen importiert; UTXO/Verlauf per Scan."
+        )
+        return [], [], hinweise
+
+    # outpoint → meta
+    our: dict[tuple[str, int], dict[str, Any]] = {}
+    # spend: outpoint → (spend_txid, spend_height, spend_time)
+    spends: dict[tuple[str, int], tuple[str, int | None, int | None]] = {}
+
+    gelesen = 0
+    for db in sqlites:
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        except sqlite3.Error:
+            continue
+        try:
+            cur = con.cursor()
+            try:
+                rows = cur.execute(
+                    'SELECT block_height, labels, first_seen, tx '
+                    'FROM "transaction"'
+                )
+            except sqlite3.Error:
+                continue
+            for height, labels, first_seen, txblob in rows:
+                try:
+                    tx = Transaction.parse(txblob)
+                except Exception:
+                    continue
+                try:
+                    txid = tx.txid().hex()
+                except Exception:
+                    continue
+                gelesen += 1
+                h = int(height) if height is not None else None
+                if h is not None and h >= _WASABI_MEMPOOL_HEIGHT:
+                    h = None
+                ts = None
+                try:
+                    ts = int(first_seen) if first_seen not in (None, "") else None
+                    if ts is not None and ts <= 0:
+                        ts = None
+                except (TypeError, ValueError):
+                    ts = None
+                lab_tx = str(labels or "").strip()
+
+                for i, out in enumerate(tx.vout):
+                    try:
+                        addr = out.script_pubkey.address(net)
+                    except Exception:
+                        addr = None
+                    if not addr or addr not in adressen:
+                        continue
+                    key = (txid, int(i))
+                    if key not in our:
+                        our[key] = {
+                            "value": int(out.value),
+                            "address": addr,
+                            "height": h,
+                            "first_seen": ts,
+                            "labels": lab_tx,
+                        }
+                    else:
+                        # confirmed schlägt mempool
+                        if our[key].get("height") is None and h is not None:
+                            our[key]["height"] = h
+                        if not our[key].get("labels") and lab_tx:
+                            our[key]["labels"] = lab_tx
+
+                for vin in tx.vin:
+                    try:
+                        prev = vin.txid.hex()
+                        vout = int(vin.vout)
+                    except Exception:
+                        continue
+                    pkey = (prev, vout)
+                    # Alle Spends merken; Zuordnung zu our-Outs erst danach
+                    # (eine DB-Reihenfolge reicht nicht für „our zuerst“).
+                    if pkey not in spends:
+                        spends[pkey] = (txid, h, ts)
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+    if not our:
+        hinweise.append(
+            f"Wasabi-Store gelesen ({gelesen} Tx in {len(sqlites)} DB), "
+            "keine Outputs zu Wallet-Adressen — ggf. anderer Store/Netz."
+        )
+        return [], [], hinweise
+
+    labels_map = address_labels or {}
+    utxos: list[dict] = []
+    verlauf: list[dict] = []
+    for (txid, vout), meta in our.items():
+        addr = str(meta.get("address") or "")
+        value = int(meta.get("value") or 0)
+        h = meta.get("height")
+        ts = meta.get("first_seen")
+        confirmed = h is not None
+        status: dict[str, Any] = {"confirmed": confirmed}
+        if h is not None:
+            status["block_height"] = int(h)
+        if ts is not None:
+            status["block_time"] = int(ts)
+        lab = labels_map.get(addr) or str(meta.get("labels") or "").strip()
+        eintrag: dict[str, Any] = {
+            "txid": txid,
+            "vout": int(vout),
+            "value": value,
+            "status": status,
+            "address": addr,
+            "source": "wasabi_store",
+        }
+        if lab:
+            eintrag["label"] = lab
+
+        sp = spends.get((txid, vout))
+        if sp:
+            spend_txid, spend_h, spend_ts = sp
+            eintrag["spent"] = True
+            eintrag["spent_txid"] = spend_txid
+            if spend_h is not None:
+                eintrag["spent_height"] = int(spend_h)
+            if spend_ts is not None:
+                eintrag["spent_time_ts"] = int(spend_ts)
+            verlauf.append(eintrag)
+        else:
+            eintrag["spent"] = False
+            utxos.append(eintrag)
+
+    hinweise.append(
+        f"Wasabi-BitcoinStore: {len(utxos)} UTXO, {len(verlauf)} ausgegeben "
+        f"({gelesen} Tx in {len(sqlites)} DB)."
+    )
+    return utxos, verlauf, hinweise
 
 
 def _parse_wasabi_coins_json(
@@ -462,7 +874,7 @@ def _parse_wasabi_coins_json(
 ) -> tuple[list[dict], list[dict], list[str]]:
     hinweise: list[str] = []
     try:
-        data = json.loads(text)
+        data = _json_loads(text)
     except json.JSONDecodeError:
         return [], [], ["Wasabi-Coins-JSON ungültig."]
     if isinstance(data, dict) and "result" in data:
@@ -520,7 +932,7 @@ def _parse_wasabi_coins_json(
 def _parse_wasabi_history_json(text: str) -> tuple[list[dict], list[str]]:
     hinweise: list[str] = []
     try:
-        data = json.loads(text)
+        data = _json_loads(text)
     except json.JSONDecodeError:
         return [], ["Wasabi-History-JSON ungültig."]
     if isinstance(data, dict) and "result" in data:
@@ -610,7 +1022,7 @@ def _sparrow_label_aus_json(text: str) -> str:
     if not s.startswith("{"):
         return ""
     try:
-        data = json.loads(text)
+        data = _json_loads(s)
     except json.JSONDecodeError:
         return ""
     if not isinstance(data, dict):

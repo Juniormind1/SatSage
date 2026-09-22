@@ -3,7 +3,7 @@ Lokale Sparrow-/Wasabi-Wallets finden (übliche Datenverzeichnisse).
 
 Kein Passwort, kein Entschlüsseln. Passwortgeschützte Dateien werden nur
 gelistet (Schloss); importierbar sind lesbare Klartext-Artefakte
-(Wasabi-JSON View-only/HW, Sparrow-JSON/Descriptor).
+(Wasabi-JSON View-only/HW ohne EncryptedSecret, Sparrow-JSON/Descriptor).
 """
 from __future__ import annotations
 
@@ -178,13 +178,11 @@ def importiere_pfade(
                 )
             )
         try:
-            text = data.decode("utf-8")
+            # utf-8-sig: Wasabi-Wallet-JSON oft mit BOM
+            text = data.decode("utf-8-sig")
         except UnicodeDecodeError:
-            try:
-                text = data.decode("utf-8-sig")
-            except UnicodeDecodeError:
-                text = data.decode("latin-1", errors="replace")
-        dateien.append({"name": p.name, "text": text})
+            text = data.decode("latin-1", errors="replace")
+        dateien.append({"name": p.name, "text": text, "path": str(p)})
     return export_mod.parse_wallet_export_dateien(dateien)
 
 
@@ -245,22 +243,19 @@ def _analysiere_sparrow(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
             ),
         )
 
-    # JSON / Descriptor-Text
+    # JSON / Descriptor-Text (utf-8-sig: BOM wie bei Wasabi/Editor-Exporten)
     try:
-        text = pfad.read_text(encoding="utf-8")
+        text = pfad.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
-        try:
-            text = pfad.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
-            return GefundenesWallet(
-                id=f"sparrow:{pfad.name}",
-                name=name,
-                app="sparrow",
-                path=str(pfad),
-                locked=True,
-                importable=False,
-                reason="Nicht als Text lesbar",
-            )
+        return GefundenesWallet(
+            id=f"sparrow:{pfad.name}",
+            name=name,
+            app="sparrow",
+            path=str(pfad),
+            locked=True,
+            importable=False,
+            reason="Nicht als Text lesbar",
+        )
 
     parsed = export_mod.parse_wallet_export_dateien(
         [{"name": pfad.name, "text": text}]
@@ -288,24 +283,23 @@ def _analysiere_sparrow(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
 
 
 def _analysiere_wasabi(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
+    # Wasabi schreibt Wallet-JSON mit UTF-8-BOM; encoding=utf-8 behält U+FEFF
+    # und json.loads scheitert dann mit „Unexpected UTF-8 BOM“.
     try:
-        text = pfad.read_text(encoding="utf-8")
+        text = pfad.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
-        try:
-            text = pfad.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
-            return GefundenesWallet(
-                id=f"wasabi:{pfad.name}",
-                name=name,
-                app="wasabi",
-                path=str(pfad),
-                locked=True,
-                importable=False,
-                reason="Nicht lesbar",
-            )
+        return GefundenesWallet(
+            id=f"wasabi:{pfad.name}",
+            name=name,
+            app="wasabi",
+            path=str(pfad),
+            locked=True,
+            importable=False,
+            reason="Nicht lesbar",
+        )
 
     try:
-        data = json.loads(text)
+        data = export_mod._json_loads(text)
     except json.JSONDecodeError:
         return GefundenesWallet(
             id=f"wasabi:{pfad.name}",
@@ -321,7 +315,6 @@ def _analysiere_wasabi(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
         return None  # type: ignore[return-value]
 
     secret = data.get("EncryptedSecret")
-    # Hot-Wallet hat Secret, View-only/HW oft null — beides importierbar öffentlich.
     has_secret = secret not in (None, "", "null")
     net = ""
     try:
@@ -329,8 +322,21 @@ def _analysiere_wasabi(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
     except Exception:
         net = ""
 
+    # Hot-Wallet: gelistet mit Schloss, nicht importierbar (kein Passwort-Dialog).
+    if has_secret:
+        return GefundenesWallet(
+            id=f"wasabi:{pfad.name}",
+            name=name,
+            app="wasabi",
+            path=str(pfad),
+            locked=True,
+            importable=False,
+            reason="Passwortgeschützt",
+            network=net,
+        )
+
     parsed = export_mod.parse_wallet_export_dateien(
-        [{"name": pfad.name, "text": text}]
+        [{"name": pfad.name, "text": text, "path": str(pfad)}]
     )
     if not parsed.ok:
         return GefundenesWallet(
@@ -338,7 +344,7 @@ def _analysiere_wasabi(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
             name=name,
             app="wasabi",
             path=str(pfad),
-            locked=has_secret,
+            locked=False,
             importable=False,
             reason=parsed.fehler or "Kein ExtPubKey",
             network=net,
@@ -348,15 +354,12 @@ def _analysiere_wasabi(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
         name=(parsed.namen[0] if parsed.namen else name) or name,
         app="wasabi",
         path=str(pfad),
-        # Schloss nur wenn wirklich passwortgeschütztes Material die Datei sperrt
-        # — View-only bleibt ohne Schloss; Hot mit Secret: Schloss, aber
-        # Öffentliches bleibt importierbar.
-        locked=has_secret,
+        locked=False,
         importable=True,
         descriptors=list(parsed.descriptors),
         namen=list(parsed.namen),
         network=net,
-        reason=("Hot-Wallet — nur Öffentliches" if has_secret else ""),
+        reason="",
     )
 
 

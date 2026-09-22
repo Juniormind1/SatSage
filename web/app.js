@@ -13194,7 +13194,8 @@ function zeichneWalletExportListe(treffer) {
     cb.value = w.path || "";
     cb.disabled = !w.importable;
     cb.dataset.exportId = w.id || "";
-    if (w.importable) cb.checked = true;
+    // Default unchecked: Nutzer wählt ausdrücklich, was importiert wird.
+    cb.checked = false;
     label.append(cb);
 
     const app = document.createElement("span");
