@@ -41,10 +41,16 @@ class TestStart9PhaseS1(ApiTestBasis):
 
     def setUp(self):
         super().setUp()
-        with self.env_pfad.open("a", encoding="utf-8") as env_file:
-            env_file.write("SATSAGE_HOST_ALLOWLIST=remote.example\n")
+        from tests.env_scramble_helpers import read_env_plaintext, write_env_scrambled
 
-    def setup_password(self, password="test-passwort"):
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad)
+            + "SATSAGE_HOST_ALLOWLIST=remote.example\n",
+        )
+
+    def setup_password(self, password="tralala123"):
+        """Festes Scramble-/Login-Passwort wie in der Unittest-Suite."""
         return self.request(
             "/api/auth/setup", method="POST",
             data={"password": password, "confirm": password},
@@ -75,7 +81,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertTrue(password_file.is_file())
         if sys.platform != "win32":
             self.assertEqual(stat.S_IMODE(password_file.stat().st_mode), 0o600)
-        self.assertNotIn("test-passwort", password_file.read_text())
+        self.assertNotIn("tralala123", password_file.read_text())
 
         status, _, _ = self.request("/api/config", host="remote.example")
         self.assertEqual(status, 403)
@@ -110,7 +116,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         # Nach Login: Session erlaubt Config
         st, _, headers = self.request(
             "/api/auth/login", method="POST",
-            data={"password": "test-passwort"},
+            data={"password": "tralala123"},
         )
         self.assertEqual(st, 200)
         cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
@@ -121,7 +127,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.setup_password()
         status, _, headers = self.request(
             "/api/auth/login", method="POST", host="remote.example",
-            data={"password": "test-passwort"},
+            data={"password": "tralala123"},
         )
         self.assertEqual(status, 200)
         cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
@@ -147,7 +153,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.setup_password()
         _, _, headers = self.request(
             "/api/auth/login", method="POST", host="remote.example",
-            data={"password": "test-passwort"},
+            data={"password": "tralala123"},
         )
         cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
         status, _, _ = self.request(

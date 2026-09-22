@@ -22,6 +22,11 @@ from core.config import (
     wallet_updates,
     write_wallets,
 )
+from tests.env_scramble_helpers import (
+    clear_scramble_session,
+    read_env_plaintext,
+    write_env_scrambled,
+)
 from tests.fixtures import (
     BIP84_AS_XPUB,
     BIP84_RECEIVE_0,
@@ -51,14 +56,20 @@ RPCPASSWORD=geheim
 class EnvTestBasis(unittest.TestCase):
 
     def setUp(self):
+        clear_scramble_session()
+        self.addCleanup(clear_scramble_session)
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self._tmp.name)
         self.pfad = self.dir / ".env"
-        self.pfad.write_text(BEISPIEL_ENV, encoding="utf-8")
+        # Scramble mit tralala123 — Lesen über EnvFile / read_env_plaintext.
+        write_env_scrambled(self.pfad, BEISPIEL_ENV)
         self.addCleanup(self._tmp.cleanup)
 
     def neu_laden(self) -> EnvFile:
         return EnvFile.load(self.pfad)
+
+    def env_text(self) -> str:
+        return read_env_plaintext(self.pfad)
 
 
 class TestLesen(EnvTestBasis):
@@ -87,7 +98,7 @@ class TestStrukturErhalt(EnvTestBasis):
         env = self.neu_laden()
         env.set("FULCRUM_SSL", "true")
         env.save()
-        text = self.pfad.read_text(encoding="utf-8")
+        text = self.env_text()
         self.assertIn("# Fulcrum / Electrum", text)
         self.assertIn("# XPUBS=zpub6DeinXPUB zpub6ZweiterXPUB", text)
         self.assertIn("# Bitcoin Core RPC", text)
@@ -102,11 +113,11 @@ class TestStrukturErhalt(EnvTestBasis):
         self.assertEqual(werte["FULCRUM_PORT"], "50002")
 
     def test_reihenfolge_bleibt_erhalten(self):
-        vorher = [z for z in self.pfad.read_text().splitlines() if z.strip()]
+        vorher = [z for z in self.env_text().splitlines() if z.strip()]
         env = self.neu_laden()
         env.set("FULCRUM_PORT", "50001")
         env.save()
-        nachher = [z for z in self.pfad.read_text().splitlines() if z.strip()]
+        nachher = [z for z in self.env_text().splitlines() if z.strip()]
         self.assertEqual(len(vorher), len(nachher))
         self.assertEqual(
             [z.split("=")[0] for z in vorher],
@@ -118,14 +129,14 @@ class TestStrukturErhalt(EnvTestBasis):
         env.set("SCRIPT_TYPES", "segwit|auto")
         env.save()
         self.assertEqual(self.neu_laden().get("SCRIPT_TYPES"), "segwit|auto")
-        self.assertIn("verwaltet", self.pfad.read_text())
+        self.assertIn("verwaltet", self.env_text())
 
     def test_wiederholtes_schreiben_haengt_nicht_doppelt_an(self):
         for wert in ("a", "b", "c"):
             env = self.neu_laden()
             env.set("SCRIPT_TYPES", wert)
             env.save()
-        text = self.pfad.read_text()
+        text = self.env_text()
         self.assertEqual(text.count("SCRIPT_TYPES="), 1)
         self.assertEqual(text.count("verwaltet"), 1)
 
@@ -148,7 +159,7 @@ class TestStrukturErhalt(EnvTestBasis):
         backup0 = rotate_env_backups_at_start(self.pfad)
         self.assertIsNotNone(backup0)
         self.assertTrue(backup0.exists())
-        self.assertIn("FULCRUM_PORT=50001", backup0.read_text())
+        self.assertIn("FULCRUM_PORT=50001", read_env_plaintext(backup0))
 
     def test_keine_temporaere_datei_bleibt_liegen(self):
         env = self.neu_laden()
@@ -157,7 +168,7 @@ class TestStrukturErhalt(EnvTestBasis):
         self.assertEqual(list(self.dir.glob("*.tmp")), [])
 
     def test_datei_ohne_abschliessenden_umbruch(self):
-        self.pfad.write_text("A=1", encoding="utf-8")
+        write_env_scrambled(self.pfad, "A=1")
         env = self.neu_laden()
         env.set("B", "2")
         env.save()
@@ -167,10 +178,14 @@ class TestStrukturErhalt(EnvTestBasis):
 
     def test_neue_datei_wird_angelegt(self):
         pfad = self.dir / "neu" / ".env"
+        clear_scramble_session()
         env = EnvFile.load(pfad)
         env.set("XPUBS", "zpub6AAA")
         self.assertIsNone(env.save())
+        # Nach erstem Klartext-Save: Scramble mit tralala123 und erneut lesen.
+        write_env_scrambled(pfad, EnvFile.load(pfad).render())
         self.assertEqual(EnvFile.load(pfad).get("XPUBS"), "zpub6AAA")
+        self.assertIn("XPUBS=zpub6AAA", read_env_plaintext(pfad))
 
     def test_verbindungsversuch_steht_vor_den_core_feldern(self):
         env = self.neu_laden()
@@ -319,12 +334,17 @@ class TestPruefung(unittest.TestCase):
 
     def test_schreiben_wird_bei_fehlern_abgelehnt(self):
         with tempfile.TemporaryDirectory() as tmp:
+            clear_scramble_session()
+            self.addCleanup(clear_scramble_session)
             pfad = Path(tmp) / ".env"
-            pfad.write_text("A=1\n", encoding="utf-8")
+            write_env_scrambled(pfad, "A=1\n")
             env = EnvFile.load(pfad)
             with self.assertRaises(ValueError):
                 write_wallets(env, [WalletEntry("unsinn", "X")])
-            self.assertEqual(pfad.read_text(), "A=1\n", "Datei wurde trotzdem verändert")
+            self.assertEqual(
+                read_env_plaintext(pfad), "A=1\n",
+                "Datei wurde trotzdem verändert",
+            )
 
 
 class TestMehrereKontenAusEinemSeed(unittest.TestCase):
@@ -428,16 +448,20 @@ class TestGleicherSchluesselZweiFassungen(unittest.TestCase):
 
     def test_speichern_ohne_bestaetigung_wird_abgelehnt(self):
         with tempfile.TemporaryDirectory() as tmp:
+            clear_scramble_session()
+            self.addCleanup(clear_scramble_session)
             pfad = Path(tmp) / ".env"
-            pfad.write_text("A=1\n", encoding="utf-8")
+            write_env_scrambled(pfad, "A=1\n")
             with self.assertRaises(BestaetigungNoetig):
                 write_wallets(EnvFile.load(pfad), self.eintraege())
-            self.assertEqual(pfad.read_text(), "A=1\n")
+            self.assertEqual(read_env_plaintext(pfad), "A=1\n")
 
     def test_mit_bestaetigung_wird_gespeichert(self):
         with tempfile.TemporaryDirectory() as tmp:
+            clear_scramble_session()
+            self.addCleanup(clear_scramble_session)
             pfad = Path(tmp) / ".env"
-            pfad.write_text("A=1\n", encoding="utf-8")
+            write_env_scrambled(pfad, "A=1\n")
             write_wallets(EnvFile.load(pfad), self.eintraege(), bestaetigt=True)
             werte = EnvFile.load(pfad).values()
             geschrieben = {werte["WALLET_0_XPUB"], werte["WALLET_1_XPUB"]}

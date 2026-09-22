@@ -24,6 +24,11 @@ from core.config import (
     wallet_updates,
     write_wallets,
 )
+from tests.env_scramble_helpers import (
+    clear_scramble_session,
+    read_env_plaintext,
+    write_env_scrambled,
+)
 from tests.fixtures import BIP84_ZPUB, ZWEITER_ALS_XPUB
 
 #: Drei gültige Schlüssel für Multisig-Tests.
@@ -33,16 +38,22 @@ COSIGNER = [BIP84_ZPUB, ZWEITER_ALS_XPUB]
 class EnvBasis(unittest.TestCase):
 
     def setUp(self):
+        clear_scramble_session()
+        self.addCleanup(clear_scramble_session)
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.pfad = Path(self._tmp.name) / ".env"
 
     def schreibe(self, text: str) -> EnvFile:
-        self.pfad.write_text(text, encoding="utf-8")
+        # Immer scrambled mit tralala123 — wie produktive Passwort-Session.
+        write_env_scrambled(self.pfad, text)
         return EnvFile.load(self.pfad)
 
     def neu_laden(self) -> EnvFile:
         return EnvFile.load(self.pfad)
+
+    def env_text(self) -> str:
+        return read_env_plaintext(self.pfad)
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +302,7 @@ class TestSchreiben(EnvBasis):
             "FULCRUM_HOST=192.168.1.50\n"
         )
         write_wallets(self.neu_laden(), self.eintraege())
-        text = self.pfad.read_text(encoding="utf-8")
+        text = self.env_text()
         self.assertIn("# Meine Notiz", text)
         werte = self.neu_laden().values()
         self.assertEqual(werte["RPCPASSWORD"], "geheim")

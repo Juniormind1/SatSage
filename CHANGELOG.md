@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Tests · .env-Scramble:** Unittests schreiben/lesen mit festem Passwort `tralala123` (scramble + descramble); kein Roh-`read_text` mehr auf Cipher-`.env`. `main._load_dotenv` liest scrambled Dateien mit Session-Key.
 - **Sicherheit · `.satsage-password`:** aus dem Git-Index entfernt und in `.gitignore` — Login-Hash gehört nie ins Repo.
 - **Agents · HART:** Grundregel „niemals Geheimnisse pushen oder persönliche Daten doxxen“ prominent in `AGENTS.md`, Dealbreaker **S1**, `githooks/pre-commit` blockiert Secret-Pfade.
 - **.env-Scramble:** Eine Datei **`.env`** — mit Passwort scrambled (Magic `SSGB1`), ohne Passwort Klartext. **`.env.backup0`…`9`** werden mitgesetzt (scramble bei Passwort, unscramble bei Löschen, Umschlüsselung bei Änderung). Kein `.env.gobbledigook` mehr; Legacy wird migriert. Login = Hash + File-Key. CLI/Specter/Umbrel/Start9 ausgenommen. Doku (Handbuch §11, README): `.env` at rest mit Passwort; Caches/Exporte Klartext — Schutz über verschlüsselte Volume (FDE/VeraCrypt), SatSage vor dem Schließen beenden.

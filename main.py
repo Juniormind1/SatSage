@@ -182,6 +182,9 @@ def _load_dotenv(env_path: Path | None = None) -> dict[str, str]:
     *env_path* default zur Laufzeit ``ENV_FILE`` — nicht als Default-Argument
     einfrieren, sonst bleibt nach ``server --env lab/…`` die Root-``.env``
     (und z. B. ``NETWORK=main``) aktiv und setzt Regtest-Adressen zurück.
+
+    Scrambled ``.env`` (SSGB1): Klartext nur mit Session-Key; ohne Key leeres
+    Dict (wie ``EnvFile`` mit ``scramble_locked``).
     """
     if env_path is None:
         env_path = ENV_FILE
@@ -189,7 +192,22 @@ def _load_dotenv(env_path: Path | None = None) -> dict[str, str]:
     if not env_path.is_file():
         return values
 
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    text = ""
+    try:
+        from core import env_scramble as scramble_mod
+
+        try:
+            text = scramble_mod.load_plaintext_or_scramble(env_path)
+        except scramble_mod.ScrambleLocked:
+            return values
+        except scramble_mod.ScrambleError:
+            if scramble_mod.is_env_scrambled(env_path):
+                return values
+            text = env_path.read_text(encoding="utf-8")
+    except ImportError:
+        text = env_path.read_text(encoding="utf-8")
+
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
