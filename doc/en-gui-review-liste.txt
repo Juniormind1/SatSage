@@ -1,0 +1,1021 @@
+EN-GUI Review-Liste — hardcodiertes Deutsch (Production-GUI)
+============================================================
+
+Nur Texte der potentiellen Production-GUI, die bei UI-Sprache EN noch DE bleiben.
+Lab, Konfetti-Prototyp, Anim-Debug und lab-faucet sind entfernt.
+EN-Zeilen sind VORSCHLÄGE — ändern, so lassen, oder streichen.
+
+Anleitung:
+  - EN-Text anpassen, wenn nötig
+  - Eintrag streichen:  EN: --skip--
+  - Platzhalter ${...} beibehalten
+  - Wenn fertig: Datei zurück, dann verdrahte ich t()/Locales
+
+Nicht drin: Lab-UI, bestehende en.json-Keys, T_FALLBACK, Log-Mapping-Eingang, Kommentare.
+
+============================================================
+
+------------------------------------------------------------
+## A Fehlende Locale-Keys
+------------------------------------------------------------
+
+### 1
+Ort: index.html → data-i18n=trace.sortTitle
+Hinweis: Key fehlt in de.json/en.json
+DE: Sortierung Bestand und Bereits ausgegeben
+EN: Sorting of open UTXOs and already spent
+
+### 2
+Ort: index.html → data-i18n=trace.sortVolumeDesc
+Hinweis: Key fehlt
+DE: Volumen ↓
+EN: Volume ↓
+
+### 3
+Ort: index.html → data-i18n=trace.sortAgeDesc
+Hinweis: Key fehlt
+DE: Alter ↓ (neueste zuerst)
+EN: Age ↓ (newest first)
+
+### 4
+Ort: index.html → data-i18n=trace.sortAgeAsc
+Hinweis: Key fehlt
+DE: Alter ↑ (älteste zuerst)
+EN: Age ↑ (oldest first)
+
+------------------------------------------------------------
+## B index.html Produkt-UI
+------------------------------------------------------------
+
+### 5
+Ort: index.html #local-core-uebernehmen
+DE: Lokalen Core übernehmen
+EN: Connect local Core
+
+------------------------------------------------------------
+## C QR-Atem-Witze
+------------------------------------------------------------
+
+### 6
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: hyperventiliere…
+EN: hyperventilating…
+
+### 7
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: schultere den Header…
+EN: shouldering the rock…
+
+### 8
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: besumme die Peers…
+EN: humming at the peers…
+
+### 9
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: dies…
+EN: offs…
+
+### 10
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: das…
+EN: and…
+
+### 11
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: ananas…
+EN: ends…
+
+### 12
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: tunnele Gap-Limits…
+EN: tunneling gap limits…
+
+### 13
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: falte Compact Filter…
+EN: folding compact filters…
+
+### 14
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: seufze satoshi-mäßig…
+EN: sighing satoshi-style…
+
+### 15
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: dipsybake den Tip…
+EN: dipsy-baking the tip…
+
+### 16
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: überrede mehr Peers…
+EN: persuading more peers…
+
+### 17
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: schnuppere am Mempool…
+EN: sniffing the mempool…
+
+### 18
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: galoppiere die Gaps…
+EN: galloping the gaps…
+
+### 19
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: trällere den Tip…
+EN: warbling the tip…
+
+### 20
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: aurakämme die Filter…
+EN: aura-combing the filters…
+
+### 21
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: entstaube UTXOs…
+EN: dusting off UTXOs…
+
+### 22
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: Mine bitcoin (nein, war nur Spaß)
+EN: Mine bitcoin (nope, just kidding)
+
+### 23
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: ärgere mich über scams…
+EN: fuming about scams…
+
+### 24
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: plane Bootsunfall…
+EN: planning the boating accident…
+
+### 25
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: ärgere mich über die Frage…
+EN: annoyed by the question…
+
+### 26
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: bin ein bisschen wütend deshalb…
+EN: a bit mad about it…
+
+### 27
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: finde mein mojo…
+EN: finding my mojo…
+
+### 28
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: kontempliere orangenes Nichts…
+EN: contemplating orange void…
+
+### 29
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: fast fertig (gelogen)…
+EN: almost done (lying)…
+
+### 30
+Ort: app.js ATEM_WORTE
+Hinweis: QR-Atem, spielerisch
+DE: noch ein Atemzug…
+EN: one more breath…
+
+------------------------------------------------------------
+## D Steuerjahr/FiFo/Scorecard
+------------------------------------------------------------
+
+### 31
+Ort: app.js Scorecard
+DE: Bestand gesamt
+EN: Total balance
+
+### 32
+Ort: app.js Scorecard
+DE: außerhalb Haltefrist
+EN: Outside holding period
+
+### 33
+Ort: app.js Scorecard
+DE: nächste am ${naechste_frist}
+EN: next on ${naechste_frist}
+
+### 34
+Ort: app.js Scorecard
+DE: ${count} UTXOs — Frist evtl. länger
+EN: ${count} UTXOs — holding period may be longer
+
+### 35
+Ort: app.js Scorecard
+DE: Ohne Datum
+EN: No date
+
+### 36
+Ort: app.js Scorecard
+DE: unbestätigt, nicht gewertet
+EN: unconfirmed, not counted
+
+### 37
+Ort: app.js Scorecard title
+DE: Gelbe UTXOs bis extern/Coinbase klären — können grün werden oder bestätigt gelb bleiben.
+EN: Resolve yellow UTXOs to external/coinbase — they may turn green or stay confirmed yellow.
+
+### 38
+Ort: app.js Scorecard title
+DE: Alle noch grauen, d.h. UTXOs unklarer Vergangenheit, werden analysiert bis sie grün oder gelb sind
+EN: All still-grey UTXOs (unclear history) are analyzed until they are green or yellow
+
+### 39
+Ort: app.js UTXO-Zeile title
+DE: Bisher nur der Wallet-Eingang bekannt. Gründlicherer Trace kann ein älteres Anschaffungsdatum finden und die Haltefrist erfüllen.
+EN: Only the wallet entrydate is known so far. A deeper trace may find an older acquisition date and satisfy the holding period.
+
+### 40
+Ort: app.js UTXO-Zeile title
+DE: Anschaffungsdatum aus der Herkunftsanalyse
+EN: Acquisition date from origin analysis
+
+### 41
+Ort: app.js UTXO-Zeile title
+DE: Nur das Entstehungsdatum des Outputs. Bei Wechselgeld oder Konsolidierung ist das zu jung — die Haltefrist kann in Wahrheit länger sein.
+EN: Only the output’s creation date. With change or consolidation that is too young — the holding period may actually be longer.
+
+### 42
+Ort: app.js UTXO-Zeile Knopf
+DE: klären
+EN: resolve
+
+### 43
+Ort: app.js UTXO-Zeile title
+DE: Bis extern/Coinbase nachziehen — kann gelb→grün werden oder gelb bestätigen.
+EN: Follow through to external/coinbase — may turn yellow→green or confirm yellow.
+
+### 44
+Ort: app.js Steuer leer
+DE: Keine UTXOs bis zum Stichtag. Wallets zuerst scannen (Bestand in der Wallet-Ansicht).
+EN: No UTXOs up to the cutoff date. Scan wallets first (balance in the wallet view).
+
+### 45
+Ort: app.js Steuer
+DE: Auswertung fehlgeschlagen: ${msg}
+EN: Analysis failed: ${msg}
+
+### 46
+Ort: app.js title
+DE: HTML-Report für dieses UTXO (Was-wäre-wenn). Angekreuzte Abflüsse/UTXOs unten werden mit einbezogen.
+EN: HTML report for this UTXO (what-if). Checked outflows/UTXOs below are included.
+
+### 47
+Ort: app.js
+DE: ohne Herkunft
+EN: no origin
+
+### 48
+Ort: app.js
+DE: Jahr läuft noch — Fristen gegen heute gerechnet
+EN: Year still in progress — holding periods measured against today
+
+### 49
+Ort: app.js
+DE: keine im gewählten Jahr
+EN: none in the selected year
+
+### 50
+Ort: app.js Job-Stand
+DE: · ${n}× vollständig
+EN: · ${n}× complete
+
+### 51
+Ort: app.js Job-Stand
+DE: · ${n}× jüngste sats
+EN: · ${n}× newest sats
+
+### 52
+Ort: app.js
+DE: Klärung läuft bereits…
+EN: Resolution already running…
+
+### 53
+Ort: app.js
+DE: Keine gelben UTXOs zu klären.
+EN: No yellow UTXOs to resolve.
+
+### 54
+Ort: app.js
+DE: Starte gründliche Klärung gelber UTXOs (bis extern/Coinbase)…
+EN: Starting deep resolution of yellow UTXOs (to external/coinbase)…
+
+### 55
+Ort: app.js
+DE: Starte Steuerrelevantes Alter (Horizont Stichtag/Haltefrist)…
+EN: Starting tax-relevant age (cutoff/holding-period horizon)…
+
+### 56
+Ort: app.js
+DE: Starte Herkunft bis extern/Coinbase…
+EN: Starting origin trace to external/coinbase…
+
+### 57
+Ort: app.js
+DE: Gelbe UTXOs sind bereits vollständig geklärt (grün oder bestätigt gelb).
+EN: Yellow UTXOs are already fully resolved (green or confirmed yellow).
+
+### 58
+Ort: app.js log
+DE: FiFo-Kandidaten: ${n} Abfluss(e) · ${u} UTXO(s) Was-wäre-wenn.
+EN: FIFO candidates: ${n} outflow(s) · ${u} UTXO(s) what-if.
+
+### 59
+Ort: app.js log
+DE: FiFo-Kandidaten: aus Cache…
+EN: FIFO candidates: from cache…
+
+### 60
+Ort: app.js log
+DE: FiFo-Kandidaten: fehlgeschlagen — ${msg}
+EN: FIFO candidates: failed — ${msg}
+
+### 61
+Ort: app.js title
+DE: Wirkt wie Eigenübertrag — nur ankreuzen, wenn es doch ein Verkauf war.
+EN: Looks like a self-transfer — check only if it was actually a sale.
+
+### 62
+Ort: app.js
+DE: · vermutlich Eigenübertrag
+EN: · likely self-transfer
+
+### 63
+Ort: app.js title
+DE: Hypothese: fiktive Veräußerung zum Stichtag (Jahresende bzw. heute).
+EN: Hypothesis: fictional disposal at the cutoff (year-end or today).
+
+### 64
+Ort: app.js
+DE: · Stichtag ${stichtag}
+EN: · cutoff ${stichtag}
+
+### 65
+Ort: app.js title
+DE: HTML-Report: alle angekreuzten Abflüsse/UTXOs, sonst nur diese Zeile.
+EN: HTML report: all checked outflows/UTXOs, otherwise this row only.
+
+### 66
+Ort: app.js title
+DE: CSV-Export: alle angekreuzten Abflüsse/UTXOs, sonst nur diese Zeile.
+EN: CSV export: all checked outflows/UTXOs, otherwise this row only.
+
+### 67
+Ort: app.js saAbschnitt
+DE: Abflüsse im Steuerjahr
+EN: Outflows within the tax year
+
+### 68
+Ort: app.js
+DE: Keine Netto-Abflüsse in diesem Jahr — Verlauf fehlt oder nichts ausgegeben.
+EN: No net outflows this year — history missing or nothing spent.
+
+### 69
+Ort: app.js saAbschnitt
+DE: Offene UTXOs — Was wäre wenn
+EN: Open UTXOs — what if
+
+### 70
+Ort: app.js
+DE: Keine offenen UTXOs im Cache. Zuerst Bestand.
+EN: No open UTXOs in cache. Scan balance first.
+
+### 71
+Ort: app.js
+DE: als veräußert gerechnet (Haltedauer / FiFo). Keine echte Ausgabe.
+EN: treated as sold (holding period / FIFO). Not a real spend.
+
+### 72
+Ort: app.js Knopf
+DE: Alle UTXOs ankreuzen
+EN: Check all UTXOs
+
+### 73
+Ort: app.js Knopf
+Hinweis: Checkboxen leeren
+DE: Keine
+EN: None
+
+### 74
+Ort: app.js Knopf
+DE: Weitere laden (${n} übrig)
+EN: Load more (${n} left)
+
+### 75
+Ort: app.js saAbschnitt
+DE: Verlauf (Überblick)
+EN: History (overview)
+
+### 76
+Ort: app.js
+DE: wenig/kein Verlauf
+EN: little/no history
+
+### 77
+Ort: app.js
+DE: ${n} Empfang(e) im Jahr
+EN: ${n} receive(s) in the year
+
+### 78
+Ort: app.js
+DE: Nur Orientierung: Abflüsse oben brauchen Verlauf; UTXOs kommen aus dem Bestand.
+EN: Orientation only: outflows above need history; UTXOs come from the balance scan.
+
+### 79
+Ort: app.js
+DE: Report geöffnet und als Datei gespeichert.
+EN: Report opened and saved as a file.
+
+### 80
+Ort: app.js
+DE: Report: ${msg}
+EN: Report: ${msg}
+
+### 81
+Ort: app.js
+DE: · Altbestand bis ${stichtag_regel}
+EN: · prior stash until ${stichtag_regel}
+
+### 82
+Ort: app.js Abschnitts-Zusatz
+DE: ${n} UTXO(s) · Stichtag ${stichtag}
+EN: ${n} UTXO(s) · cutoff ${stichtag}
+
+### 83
+Ort: app.js Abschnitts-Zusatz
+DE: keine · Stichtag ${stichtag}
+EN: none · cutoff ${stichtag}
+
+------------------------------------------------------------
+## E Sanktionen
+------------------------------------------------------------
+
+### 84
+Ort: app.js
+DE: Geprüfte Adressen (erste ${shown} von ${total})
+EN: Checked addresses (first ${shown} of ${total})
+
+### 85
+Ort: app.js
+DE: Geprüfte Adressen (${n})
+EN: Checked addresses (${n})
+
+### 86
+Ort: app.js
+DE: Prüfe weiter… (${msg})
+EN: Still checking… (${msg})
+
+------------------------------------------------------------
+## F Herkunft/Trace
+------------------------------------------------------------
+
+### 87
+Ort: app.js klapp title
+DE: Herkunft dieses UTXO verfolgen
+EN: Trace origin of this UTXO
+
+### 88
+Ort: app.js
+DE: Gewähltes UTXO
+EN: Selected UTXO
+
+### 89
+Ort: app.js
+DE: Alle UTXOs zeigen
+EN: Show all UTXOs
+
+### 90
+Ort: app.js
+DE: Zur vollen Herkunftsliste wie über die Navigation.
+EN: Open the full origin list as via navigation.
+
+### 91
+Ort: app.js
+DE: Gespeicherte Herkunft konnte nicht gezeichnet werden.
+EN: Saved origin could not be rendered.
+
+### 92
+Ort: app.js
+DE: Gespeicherte Herkunft nicht lesbar. „Scan neu“ startet eine frische Analyse.
+EN: Saved origin unreadable. “Scan again” starts a fresh analysis.
+
+### 93
+Ort: app.js
+DE: Aufgelöste externe Zuflüsse: ${sats}. Hinter fremden Adressen endet die Analyse.
+EN: Resolved external inflows: ${sats}. Analysis stops behind foreign addresses.
+
+### 94
+Ort: app.js
+DE: ${n} weitere Eingänge wurden nicht aufgelöst — ihre Beträge fehlen in dieser Summe. Sie ist damit eine Untergrenze, keine Gesamtsumme.
+EN: ${n} further inputs were not resolved — their amounts are missing from this total. It is therefore a lower bound, not a full sum.
+
+### 95
+Ort: app.js
+DE: Ein Zweig endet bei frisch geschürften Sats.
+EN: One branch ends at freshly mined sats.
+
+### 96
+Ort: app.js title
+DE: Gesamte Herkunftskette auf einmal öffnen.
+EN: Expand the entire origin chain at once.
+
+### 97
+Ort: app.js title
+DE: Gesamte Herkunftskette wieder einklappen.
+EN: Collapse the entire origin chain again.
+
+### 98
+Ort: app.js dynamic sort options
+DE: Volumen (absteigend)
+EN: Volume (descending)
+
+### 99
+Ort: app.js dynamic sort options
+DE: Alter (neueste zuerst)
+EN: Age (newest first)
+
+### 100
+Ort: app.js dynamic sort options
+DE: Alter (älteste zuerst)
+EN: Age (oldest first)
+
+### 101
+Ort: app.js
+DE: Ausgegebene Beträge sind nicht erfasst. „Historie“ in der Wallet-Ansicht holt die Historie dieses Wallets — danach lassen sich auch längst abgeflossene Sats hier verfolgen.
+EN: Spent amounts are not included. “History” in the wallet view fetches this wallet’s history — then long-spent sats can be traced here too.
+
+------------------------------------------------------------
+## G Scans/Queue
+------------------------------------------------------------
+
+### 102
+Ort: app.js
+DE: Läuft für „${name}“, nicht für dieses Wallet. ${art} · ${schritt}${danach}
+EN: Running for “${name}”, not this wallet. ${art} · ${schritt}${danach}
+
+### 103
+Ort: app.js
+DE: ${art} für „${name}“ läuft schon oder wartet.
+EN: ${art} for “${name}” is already running or queued.
+
+### 104
+Ort: app.js
+DE: Starte ${art} für „${name}“…
+EN: Starting ${art} for “${name}”…
+
+### 105
+Ort: app.js
+DE: ${art} für „${name}“ in die Warteschlange.
+EN: ${art} for “${name}” queued.
+
+### 106
+Ort: app.js
+DE: „${name}“ gespeichert. Scans später in der Wallet-Ansicht.
+EN: “${name}” saved. Run scans later in the wallet view.
+
+### 107
+Ort: app.js
+DE: Starte Scan neu für ${key}…
+EN: Restarting scan for ${key}…
+
+### 108
+Ort: app.js log
+DE: Starte Verlauf aller Wallets…
+EN: Starting history for all wallets…
+
+### 109
+Ort: app.js log
+DE: Starte Verbindungstest…
+EN: Starting connection test…
+
+### 110
+Ort: app.js Haltefrist-Hinweis
+DE: ${tage} Tage — ein Jahr überschritten
+EN: ${tage} days — past one year
+
+------------------------------------------------------------
+## H Cache
+------------------------------------------------------------
+
+### 111
+Ort: app.js
+Hinweis: ${was} = „einem entfernten Wallet“ / „N entfernten Wallets“
+DE: Cache von ${was} liegt noch auf der Platte (${mb}, ${dateien} Dateien) — die Oberfläche nutzt ihn nicht mehr.
+EN: Cache from ${was} is still on disk (${mb}, ${dateien} files) — the UI no longer uses it.
+
+### 112
+Ort: app.js
+Hinweis: Teil von ${was}
+DE: einem entfernten Wallet
+EN: one removed wallet
+
+### 113
+Ort: app.js
+Hinweis: Teil von ${was}
+DE: ${n} entfernten Wallets
+EN: ${n} removed wallets
+
+### 114
+Ort: app.js
+DE: Unreferenzierte Cachedaten gelöscht (${label}, ${n} Dateien).
+EN: Unreferenced cache data deleted (${label}, ${n} files).
+
+### 115
+Ort: app.js
+DE: Keine unreferenzierten Cachedaten.
+EN: No unreferenced cache data.
+
+### 116
+Ort: app.js
+DE: Aufräumen fehlgeschlagen — ${msg}
+EN: Cleanup failed — ${msg}
+
+### 117
+Ort: app.js log
+DE: Lösche ${name}
+EN: Deleting ${name}
+
+### 118
+Ort: app.js log
+DE: Löschen beendet
+EN: Delete finished
+
+### 119
+Ort: app.js
+DE: Löschen fehlgeschlagen: ${msg}
+EN: Delete failed: ${msg}
+
+### 120
+Ort: app.js
+DE: Cache-Vorschau fehlgeschlagen — ${msg}
+EN: Cache preview failed — ${msg}
+
+### 121
+Ort: app.js
+DE: Verwaister Cache „${name}“ gelöscht (${n} Einträge).
+EN: Orphaned cache “${name}” deleted (${n} entries).
+
+### 122
+Ort: app.js
+DE: Cache von „${name}“ gelöscht (${n} Einträge). Wallet-Alter bleibt — neu scannen ab First-seen.
+EN: Cache for “${name}” deleted (${n} entries). Wallet age kept — rescan from first-seen.
+
+### 123
+Ort: app.js
+DE: Cache von „${name}“ war bereits leer.
+EN: Cache for “${name}” was already empty.
+
+### 124
+Ort: app.js
+DE: Cache gelöscht (${n} Einträge). Wallet-Alter bleibt — neu scannen ab First-seen.
+EN: Cache deleted (${n} entries). Wallet age kept — rescan from first-seen.
+
+### 125
+Ort: app.js confirm
+DE: Zugehörigen Analyse-Cache auch löschen (${mb})?
+EN: Also delete the related analysis cache (${mb})?
+
+### 126
+Ort: app.js
+DE: kein UTXO-Cache
+EN: no UTXO cache
+
+------------------------------------------------------------
+## I Wallets/Deskriptor
+------------------------------------------------------------
+
+### 127
+Ort: app.js error
+DE: Keine Empfangsadresse — Wallet wählen.
+EN: No receive address — choose a wallet.
+
+### 128
+Ort: app.js title
+DE: Bei Multisig durch die .env vorgegeben.
+EN: For multisig, set via .env.
+
+### 129
+Ort: app.js
+DE: Multisig: gespeichert und hier sichtbar. Bestände und Herkunft werden dafür noch nicht ermittelt.
+EN: Multisig: saved and visible here. Balances and origin are not computed for it yet.
+
+### 130
+Ort: app.js Deskriptor-Treffer
+DE: ${n} Schlüssel
+EN: ${n} keys
+
+### 131
+Ort: app.js
+DE: Single-Sig · Deskriptor
+EN: Single-sig · descriptor
+
+### 132
+Ort: app.js Pille
+DE: bereits eingetragen
+EN: already listed
+
+### 133
+Ort: app.js
+DE: Erste Empfangsadresse — mit der Wallet vergleichen
+EN: First receive address — compare with the wallet
+
+### 134
+Ort: app.js Knopf
+DE: Trotzdem übernehmen
+EN: Accept anyway
+
+### 135
+Ort: app.js Knopf
+DE: Übernehmen
+EN: Accept
+
+### 136
+Ort: app.js title
+DE: Diese Wallet ist bereits eingetragen — ein zweiter Eintrag zählte die Beträge doppelt.
+EN: This wallet is already listed — a second entry would double-count amounts.
+
+### 137
+Ort: app.js title
+DE: Übernimmt den Deskriptor und schreibt ihn sofort in die .env.
+EN: Adopts the descriptor and writes it to .env immediately.
+
+### 138
+Ort: app.js log
+DE: Wallet-Export: importiere ${n} Pfad(e)…
+EN: Wallet export: importing ${n} path(s)…
+
+### 139
+Ort: app.js
+DE: Nicht gespeichert — ${msg}
+EN: Not saved — ${msg}
+
+### 140
+Ort: app.js
+DE: Gespeichert. Sicherung der vorherigen Fassung: ${backup}
+EN: Saved. Backup of previous version: ${backup}
+
+------------------------------------------------------------
+## J Datenquellen/Core/Explorer
+------------------------------------------------------------
+
+### 141
+Ort: app.js
+DE: Lokaler Bitcoin Core erkannt: ${host}:${port} (${chain}, ${art}, ~${blocks} Blöcke). Nicht still verbunden — „Lokalen Core übernehmen“ schreibt RPC + BIP-158-Prefer-Peer (LOCAL_CORE_OPT_IN=1).${p2pHinweis}
+EN: Local Bitcoin Core found: ${host}:${port} (${chain}, ${art}, ~${blocks} blocks). Not connected silently — “Adopt local Core” writes RPC + BIP-158 prefer-peer (LOCAL_CORE_OPT_IN=1).${p2pHinweis}
+
+### 142
+Ort: app.js log
+DE: Lokaler Bitcoin Core verbunden.
+EN: Local Bitcoin Core connected.
+
+### 143
+Ort: app.js
+DE: pruned (scantxoutset trotzdem nützlich)
+EN: pruned (scantxoutset still useful)
+
+### 144
+Ort: app.js
+Hinweis: Core-Art: Gegensatz zu pruned
+DE: vollständig
+EN: not pruned
+
+### 145
+Ort: app.js
+DE: P2P :${p2p} derzeit nicht offen — BIP-158 Prefer-Peer wird trotzdem gesetzt (peerblockfilters=1 nötig).
+EN: P2P :${p2p} not open right now — BIP-158 prefer-peer is set anyway (peerblockfilters=1 required).
+
+### 146
+Ort: app.js
+DE: Opt-in setzt auch BIP158_HOST=${host}:${p2p} (Compact Filter zuerst lokal).
+EN: Opt-in also sets BIP158_HOST=${host}:${p2p} (compact filters local first).
+
+### 147
+Ort: app.js log
+DE: Öffentliche Electrum-Server nur nach Bestätigung.
+EN: Public Electrum servers only after confirmation.
+
+### 148
+Ort: app.js log
+DE: Öffentliche Electrum-Server abgelehnt.
+EN: Public Electrum servers declined.
+
+### 149
+Ort: app.js log
+DE: Öffentliche Server: ${msg}
+EN: Public servers: ${msg}
+
+### 150
+Ort: app.js
+DE: Öffentliche Electrum-Server bestätigt (nur diese Sitzung) — verbinde…
+EN: Public Electrum servers confirmed (this session only) — connecting…
+
+### 151
+Ort: app.js log
+DE: Öffentliche Electrum-Nutzung gekappt (höhere Privatsphäre).
+EN: Public Electrum disconnected (higher privacy).
+
+### 152
+Ort: app.js log
+DE: Öffentlich kappen: ${msg}
+EN: Disconnect public: ${msg}
+
+### 153
+Ort: app.js log
+DE: Öffentliche Electrum bleiben als Fallback erlaubt.
+EN: Public Electrum remains allowed as fallback.
+
+### 154
+Ort: app.js title
+DE: Aktiv für Filter/Tip-Sync: ${n} Peer(s).
+EN: Active for filters/tip sync: ${n} peer(s).
+
+### 155
+Ort: app.js title
+DE: Kein Block-Explorer eingetragen — keine ↗-Verweise nach außen.
+EN: No block explorer set — no outbound ↗ links.
+
+### 156
+Ort: app.js
+DE: Block-Explorer privat
+EN: Block explorer private
+
+### 157
+Ort: app.js
+DE: Block-Explorer öffentlich
+EN: Block explorer public
+
+### 158
+Ort: app.js title
+DE: Öffentlicher Explorer${host} — jeder ↗-Klick verrät Interesse.
+EN: Public explorer${host} — every ↗ click reveals interest.
+
+### 159
+Ort: app.js confirm-Fallback
+Hinweis: Fallback wenn sources.mempool.publicConfirm fehlt — Key prüfen
+DE:
+  Du trägst einen öffentlich erreichbaren Block-Explorer ein.
+  
+  Jeder Klick auf ↗ verrät diesem Server, welche Adresse oder Transaktion dich interessiert.
+  
+  Trotzdem speichern und nutzen?
+EN:
+  You are entering a publicly reachable block explorer.
+  
+  Every ↗ click tells that server which address or transaction you care about.
+  
+  Save and use it anyway?
+
+------------------------------------------------------------
+## K Börsen-CSV/Kurs-Import
+------------------------------------------------------------
+
+### 160
+Ort: app.js log
+DE: Importiere Börsen-CSV „${name}“ (${boerse})…
+EN: Importing exchange CSV “${name}” (${boerse})…
+
+### 161
+Ort: app.js log
+DE: Börsen-CSV: ${msg}
+EN: Exchange CSV: ${msg}
+
+### 162
+Ort: app.js log
+DE: Börsen-CSV ließ sich nicht lesen.
+EN: Could not read exchange CSV.
+
+### 163
+Ort: app.js log
+DE: Kurs-Historie: prüfe Lücken und lade Kurse…
+EN: Price history: checking gaps and loading rates…
+
+### 164
+Ort: app.js log
+DE: Importiere BTC/${ccy}-Kurs-CSV „${name}“…
+EN: Importing BTC/${ccy} price CSV “${name}”…
+
+### 165
+Ort: app.js
+DE: BTC/${ccy}-Historie aktualisiert.
+EN: BTC/${ccy} history updated.
+
+### 166
+Ort: app.js log
+DE: Kurs-CSV ließ sich nicht lesen.
+EN: Could not read price CSV.
+
+### 167
+Ort: app.js log
+DE: Kurs-Import: ${msg}
+EN: Price import: ${msg}
+
+### 168
+Ort: app.js log
+DE: Kurs: aktueller Kurs nicht beschaffbar.
+EN: Price: current rate unavailable.
+
+### 169
+Ort: app.js log
+DE: Label-Import: ${msg}
+EN: Label import: ${msg}
+
+### 170
+Ort: app.js log
+DE: Listen-Import: ${msg}
+EN: List import: ${msg}
+
+------------------------------------------------------------
+## L Assistent/Person
+------------------------------------------------------------
+
+### 171
+Ort: app.js log
+DE: Prüfe Assistenten-Anbindung…
+EN: Checking assistant connection…
+
+### 172
+Ort: app.js log
+DE: Assistent: ${msg}
+EN: Assistant: ${msg}
+
+### 173
+Ort: app.js log
+DE: Assistent nicht erreichbar${grund}
+EN: Assistant unreachable${grund}
+
+### 174
+Ort: app.js log
+DE: Assistent nicht konfiguriert.
+EN: Assistant not configured.
+
+### 175
+Ort: app.js
+DE: Persönliche Daten gespeichert.
+EN: Personal data saved.
+
+------------------------------------------------------------
+## M .env-Passwort
+------------------------------------------------------------
+
+### 176
+Ort: app.js prompt
+DE: Geschützte .env — Passwort eingeben:
+EN: Protected .env — enter password:
+
+------------------------------------------------------------
+## P Sonstige
+------------------------------------------------------------
+
+### 177
+Ort: app.js
+DE: Hinweis nicht gespeichert — ${msg}
+EN: Notice not saved — ${msg}
+
+### 178
+Ort: app.js
+DE: Test fehlgeschlagen: ${msg}
+EN: Test failed: ${msg}
+
+### 179
+Ort: app.js
+DE: Entfernen fehlgeschlagen: ${msg}
+EN: Remove failed: ${msg}
+
+### 180
+Ort: app.js
+Hinweis: falls UI-sichtbar
+DE: Privatsphäre nur extrem zeitaufwändig geschützt
+EN: Privacy only protected at extreme time cost
+
+============================================================
+Anzahl: 180
