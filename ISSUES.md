@@ -1,10 +1,218 @@
 # Offene Punkte
 
-Bekannte Lücken, noch ohne Lösung. Neueste oben.
+Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst).
+Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalten).
 
-## Datenschutz · Optionales Scrambling geheimnistragender Dateien
+## Specter-Plugin · manuelle Abnahme
 
-**Stand:** 2026-09-22 · **offen** · Idee / notiert · Sicherheit / UX / Cache
+**Stand:** 2026-09-09 · **Kern umgesetzt** · Abnahme in Specter-UI offen
+
+Aufwand: **gering** (manuelle Abnahme)
+
+---
+---
+
+## Kurs-Historie · wo überall verwendet?
+
+**Stand:** 2026-09-22 · **offen** · Inventar / Konsistenz
+
+Aufwand: **gering** (Inventar + gezielte Fixes); Steuer-Fiat/P&L-Anbindung später **mittel**
+
+**Bundle/Nachzug erledigt** (`core/price.py`, `price_history_sync`, Opt-in, Bundle, API). Offen: konsistente **Nutzung** und sinnvolle Erweiterungen (unten).
+
+### Inventar · heute
+
+**Pipeline (liefern)**
+
+| Baustein | Rolle |
+|----------|--------|
+| `core/price.py` | Spot, Tageskurs, CSV Bundle/Cache |
+| `core/price_history_sync.py` | Lücken-Nachzug (Opt-in) |
+| `server.py` | `/api/price`, `/api/price/history`, Import, Sync |
+| Einstellungen · Datenquellen | Status, „Jetzt nachziehen“, CSV-Import |
+| Build-Script Bundle | Release-Historie aktualisieren |
+
+**Verbrauch (Anzeige)**
+
+| Nutzung | Spot | Tages-Historie |
+|---------|------|----------------|
+| Kopfzeile / `Zustand.kurs` | ja | — |
+| Beträge **ohne** Datum (`formatEurAusSats` / viele `formatSats`) | ja | — |
+| **Ausgegebene** UTXOs / Gruppen mit Ausgabedatum (`setzeSatsBetrag` + `atTs` / `spentUtxos`) | Fallback | **ja** (Tag der Ausgabe; fehlt Tag → Spot + gelbe Warnung) |
+| Wallet-Bestand „jetzt“ | ja | — |
+
+**Heute bewusst ohne Kurs-Historie**
+
+- `core/tax.py` / Steuerjahr-Kern (keine Kurs-API)
+- Selbstanzeige / HTML- und CSV-Steuerbericht (sats/BTC, kein historischer Fiat-Ausweis)
+- Scorecard / Dotplot / Haltefrist-Logik (Zeit/Hops, kein €)
+- Herkunftsbaum-Knoten oft nur sats
+- LLM/Assistent, CLI `display.py`
+
+### Künftig sinnvoll
+
+1. **Steuer-HTML und CSV — wichtigste Erweiterung**  
+   Optional Fiat am Anschaffungs-/Zufluss- bzw. Abgangsdatum aus der **Tageskurs-Historie**, mit Quellenangabe (Bundle/Cache).  
+   **Zweck:** Steuerschätzung der Finanzverwaltung **kontern** — **Plausibilität** zählt mehr als der exakte Börsenkaufpreis (den SatSage ohnehin nicht hat). Grobe, nachvollziehbare €-Größenordnung aus On-Chain-Zeit + Historie reicht dafür besser als nichts; Feintuning „echter Kaufbeleg“ bleibt externe Belege.
+
+2. **„Sats sind teilweise steuerpflichtig“ · P&L in der Zusammenfassung**  
+   Wenn die Auswertung **teilweise** innerhalb der Haltefrist / steuerrelevant ausweist: in der **Zusammenfassung** eine einfache **Gewinn-/Verlust-Skizze (P&L)** auf Basis der **Tageskurs-Historie** mitliefern (z. B. Wert am Zufluss- vs. Abgangstag bzw. Stichtag — Formel im Entwurf festnageln). Kein Buchhaltungsersatz, aber greifbare Plausibilitätszahl neben den sats.
+
+3. Weitere (nachrangig): Steuerjahr-UI € neben sats; Herkunfts-Hops mit Fiat-Lesbarkeit; Assistent nur mit Quellenzeile; optional Export-Spalten.
+
+**Nicht-Ziel:** Intraday-Charts, Multi-Fiat-Trading, „exakter Exchange-Fill“.
+
+**Nächste Schritte:** Dieses Inventar halten; Steuer-Export + P&L-Zusammenfassung spezifizieren/bauen; UI-Stellen prüfen, die Historie wollen aber Spot nehmen (Fallback-Warnungen).
+
+---
+
+## Auswerten · Tools · Adresse nachschlagen
+
+**Stand:** 2026-09-17 · **offen** · Idee / später · UI
+
+Aufwand: **gering–mittel** (eine Tools-Ansicht)
+
+Unter **Auswerten → Tools**: Adresse eingeben → Wallet-Zuordnung, Verwendung, Trace-Link oder Explorer. Kein 0.9.6-Blocker.
+
+---
+---
+
+## Steuerbericht · HTML/CSV-Knöpfe gelb/grün nach Trace-Tiefe (BMF)
+
+**Stand:** 2026-09-16 · **offen** · Produkt / UI / Steuer
+
+Aufwand: **mittel** (UI + Trace-Tiefe-Status)
+
+Berichtsknöpfe gelb ohne Kette bis extern/Coinbase (Scan anstoßen), grün wenn vollständig im Cache. Dotplot bleibt begrenzter Scan.
+
+---
+---
+
+## Steuerbericht · zwei Berichtsarten (Geldwäsche vs. Haltefrist/Stichtag)
+
+**Stand:** 2026-09-15 · **offen** · Produkt / Export
+
+Aufwand: **mittel** (Export-Semantik + UI)
+
+1. Voll bis externem Zugang (AML).  
+2. Abbruch an Haltefrist/Stichtag. UI/API-Wahl, Tests.
+
+---
+---
+
+## Labels · BIP-329 Import
+
+**Stand:** 2026-09-21 · **offen** · Idee / später · UI / Cache
+
+Aufwand: **mittel** (Import + Anzeige)
+
+**Ziel:** BIP-329-Label-Dateien (`.jsonl`) importieren und an Adressen/Txs/Outputs in der UI anzeigen.
+
+**Nicht:** Erstscan beschleunigen. UTXO/Verlauf-Import aus Wallets ist **erledigt**.
+
+**Quellen:** u. a. Sparrow, Nunchuk, BitBoxApp, Liana, Bitcoin Safe.
+
+**Noch offen:** Mapping, Überschreiben vs. mergen, UI-Einstieg.
+
+---
+---
+
+## UI · Globaler Stichwort-Filter (Pillen-Zeile)
+
+**Stand:** 2026-09-22 · **in Arbeit** · UI  
+**Ersetzt:** frühere Idee „Filter je Sammelzeile / Gruppenkopf“ (zu viele Einstiege).
+
+Aufwand: **gering–mittel** (ein Feld + Sichtbarkeitslogik; kein Backend)
+
+### Fortschritt
+
+- **Erledigt:** Eingabefeld links in der Pillen-Zeile (`#kopf-filter`), optisch abgesetzt; Pillen in `#quelle-pillen`.
+- **Erledigt · Wallet-Ansicht:** Filter **aktiv**; Teiltext Adresse/TxID; Betrag `>n`/`<n` (sats); Bestand + ausgegeben.
+- **Erledigt · Herkunft tracen:** dieselbe Logik auf `#trace-liste` (Gruppen, flache Sortierung, Fokus-UTXO, ausgegeben).
+- **Erledigt · Datum:** `>1.1.25` / `<05.12.2023` (TT.MM.JJ oder TT.MM.JJJJ); nach dem Tag = ab Folgetag, vor dem Tag = vor 00:00; Ereignis = Ausgabe- bzw. Ankunftszeit.
+- **Als Nächstes:** weitere Ansichten (Steuerjahr, …).
+
+### Soll · MVP
+
+- In der **Pillen-Zeile oben** ein **Filter-Eingabefeld** (ein Suchbegriff, „googleartig“ / Excel-Autofilter über **alle** Textfelder der Zeile — nicht spaltenweise eigene Begriffe).
+- Filtert, **was im Hauptbereich gerade** an Listen/Bäumen angezeigt wird: nur **Treffer-Zeilen** bleiben sichtbar.
+- Match case-insensitive auf Daten der Zeile (Adresse, TxID, Labels, Datumstexte, Wallet-Name, Mix-/Börsen-Hinweise, …) — ideal aus dem **Datenobjekt**, nicht nur DOM-Kurztext.
+- **Bäume/Gruppen:** Zeile oder Vorfahr sichtbar, wenn sie selbst oder ein Nachkomme matcht; Treffer-Gruppen bei Bedarf aufklappen.
+- Debounce; leerer Begriff = alles wie heute. Optional Chip „Suche: … ×“.
+
+### Aktiv nur wenn filterbar
+
+- Das Feld ist **nur aktiv**, wenn der **aktuelle Hauptinhalt filterbar** ist (z. B. Wallet-UTXO/Ausgaben, Herkunfts-Trace, ggf. Steuerjahr-Listen mit vielen Zeilen).
+- Sonst: **ausgegraut** (`disabled` / `aria-disabled`), kein Fokus — damit klar ist, dass die Suche nicht „kaputt“ ist.
+- Beim Wechsel auf eine filterbare Ansicht: Feld aktivieren (ggf. letzten Begriff behalten oder leeren — einmal festlegen).
+
+### Nicht MVP (später optional)
+
+Strukturfilter (Datumsbereich, Volumen `</>`/zwischen, nur Coinjoins, nur Börsen) als Chips/Widgets — ersetzen den globalen Stichwort-Filter nicht; ergänzen ihn höchstens.
+
+### Nicht-Ziel
+
+- Filter pro Sammelzeile / pro Gruppenkopf als erster Wurf  
+- Server-seitige Suche  
+- Einstellungen/Datenquellen-Formulare durchsuchen  
+
+Kein 0.9.6-Blocker.
+
+---
+
+## Tests · Blind spots (vs. Specter / LNbits / Jam)
+
+**Stand:** 2026-09-10 · **teilweise** (CI-Unittests da)
+
+Aufwand: **mittel** (Infrastruktur, schrittweise)
+
+Offen: Browser-E2E-Smoke, Test-Marker/Schichten, weniger String-Suche in app.js, stabile Selektoren, Coverage/Lint-Gates.
+
+---
+---
+
+## Web-UI · Mobile-Darstellung für Tablet
+
+**Stand:** 2026-09-10 · **offen** · notiert
+
+Aufwand: **mittel–hoch** (Layout/CSS)
+
+Tablet-Viewport; Handy später.
+
+---
+---
+
+## BIP-158 · ein Filterpass für alle XPUBs (ohne eigenen Indexer)
+
+**Stand:** 2026-09-17 · **offen** · später · P2P / Performance
+
+Aufwand: **hoch** (Scan-Engine)
+
+Gemeinsamer Compact-Filter-Pass für alle XPUBs statt pro-Wallet-Lauf. Kein 0.9.6-Blocker.
+
+---
+---
+
+## Steuerjahr · Zwei Tiefen (Horizont vs. voll) — Abnahme später
+
+**Stand:** 2026-09-17 · **offen für späteres Release** · Semantik / Test
+
+Aufwand: **hoch** (Semantik + Tests)
+
+Horizont vs. voll bis Extern/Coinbase: hohe Komplexität. Für 0.9.6 keine systematische Abnahme (C1 verschoben). Später: Gelb erst fertig wenn grün oder voller Baum gelb bestätigt.
+
+---
+---
+
+## Datenschutz · Scrambling + Config-Zugriff (EnvFile / dict)
+
+**Stand:** 2026-09-22 · **offen** · Idee / notiert · Sicherheit / UX / Cache / Config-API
+
+Aufwand: **hoch** (Krypto + Envelope + Config)
+
+Zwei Bausteine **gemeinsam** angehen (ein Envelope-/Config-Umbau, kein zweites Parallelprojekt):
+
+### A · Optionales Scrambling geheimnistragender Dateien
 
 **Ziel:** Klartext von Secrets (XPUBs, Wallet-Namen, RPC-Credentials, Cache-Inhalte mit Adressen/Tx) **nur noch im Speicher**. Auf der Platte liegen die betroffenen Dateien gescrambled, sobald der Nutzer ein Passwort setzt.
 
@@ -19,24 +227,116 @@ Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
 - `.env` und deren Backups
 - UTXO-Caches (`utxo_cache/`)
-- Tx-/immutable Caches mit Wallet-Bezug (`immutable_cache/` u. a. `tx/`, `utxo_ingress/`)
+- Tx-/immutable Caches mit Wallet-Bezug (`immutable_cache/` u. a. `tx/`, `utxo_ingress/`)
 - ggf. Adress-Auflösungs-Cache (`external_addresses.json`) und weitere Dateien, die XPUB/Adresse/Wallet-Klartext tragen
 
-**Nicht hier:** Seed/xprv/WIF (SatSage nimmt die nicht an). Sanktionslisten-Clearnet-Pools ohne Wallet-Bezug ggf. ausnehmen, wenn sie keine Nutzer-Secrets enthalten — beim Entwurf klären.
+**Nicht hier:** Seed/xprv/WIF (SatSage nimmt die nicht an). Sanktionslisten-Clearnet-Pools ohne Wallet-Bezug ggf. ausnehmen — beim Entwurf klären.
 
-**Technik (Skizze, noch offen)**
+**Technik (Skizze)**
 
-- Ableitung aus Passwort (z. B. KDF) → Schlüssel nur in-memory für die Session
-- Einheitliche Envelope um Read/Write (ein Einstiegspunkt, kein ad-hoc Open in Dutzenden Pfaden)
-- Erkennung scrambled vs. plain (Magic/Header), damit Mischzustände und Migration robust sind
-- Proberead beim Unlock: bekannte Datei oder Envelope-Header prüfen, bevor die App weiterarbeitet
-- CLI/Specter: gleiches Unlock-Modell oder dokumentierte Einschränkung
+- Ableitung aus Passwort (z. B. KDF) → Schlüssel nur in-memory für die Session
+- Einheitliche Envelope um Read/Write
+- Erkennung scrambled vs. plain (Magic/Header)
+- Proberead beim Unlock; CLI/Specter: gleiches Unlock-Modell oder dokumentierte Einschränkung
 
-**Noch offen:** Krypto-Wahl (nur lokal, kein Cloud-Key), welche Pfade exakt in der Envelope liegen, Verhalten bei Teil-Migration/Abbruch, Backup-Rotation unter Scramble, ob Header-Caches ohne Adressbezug draußen bleiben. Nur notiert.
+### B · EnvFile vs. plain `dict` — Aufrufstellen härten
+
+**Mit A koppeln:** Dieselbe Config-/IO-Naht, die die Scramble-Envelope braucht, soll **ein** klarer Einstieg für `.env`-Werte sein — sonst brechen Assistenten/Skripte und die Envelope an denselben Stellen.
+
+**Ist-Falle:** `read_wallets`/`write_wallets` erwarten **`EnvFile`** (`env.values()`); viele Helfer und `main._load_dotenv()` liefern **`dict`**. Dict an EnvFile-API → `AttributeError: 'dict_values' …`.
+
+**Soll (im selben Wurf wie A):**
+
+- Klare Typen / Param-Namen (`EnvFile` vs. `werte`/`Mapping`)
+- Helfer z. B. `als_env_values(env_or_dict)` **oder** harter TypeError mit lesbarer Meldung
+- Alle Lese-/Schreibpfade für Secrets und `.env` über die gemeinsamen Einstiege (Envelope + normalisierte Values)
+
+**Noch offen (A+B):** Krypto-Wahl, Envelope-Pfade, Teil-Migration, Backup-Rotation, wo genau EnvFile vs. dict normalisiert wird. Gemeinsam erschlagen.
+
+---
+---
+
+## Architektur · Modularisierung (kleinere Module)
+
+**Stand:** 2026-09-22 · **offen** · Plan/Prompt · Architektur  
+
+Aufwand: **sehr hoch** (viele Slices)
+**Prompt/Detail:** [`doc/issues/modularisiere_prompt.txt`](doc/issues/modularisiere_prompt.txt)
+
+**Hauptziel:** God-Files (`server.py`, `main.py`, `analyze.py`, `web/app.js`, …) inkrementell entkernen — Engine / core / Adapter / Surfaces, Verhalten 1:1, Tests als Netz. Kein Big-Bang.
+
+**Pflicht-Nebeneffekt · Parallel-Dev / Merges** (nicht Hauptziel, aber hart):
+
+Viele Entwickler und Assistenten arbeiten in **vielen Branches/Worktrees parallel**. Solange Fast-alles an denselben Monolithen hängt, sind Merge-Konflikte teuer. Wenn wir modularisieren, muss sich die **Merge-Lage massiv verbessern** (Schnitte nach Änderungsdomäne). Nur umbenennen / in ein neues God-File schieben gilt als **ungenügend** → gründlicher nachschneiden.
+
+**Done-Check je Slice (neben Tests grün):** Typische parallele Features können weitgehend **ohne dieselbe Datei** landen; ADR/Abschlussmemo sagt das explizit.
+
+---
+---
+
+## Immutable-Cache · SQLite (tx / utxo_ingress)
+
+**Stand:** 2026-09-15 · **zurückgestellt**
+
+Aufwand: **sehr hoch** (zurückgestellt)
+
+Nach CJ-MVP; Design in Historie. Welle 1 nur tx+ingress; keine zweite Chain.
+
+---
+---
+
+## Start9 Community Package — Härtung
+
+**Stand:** 2026-09-06 · **Backlog** · Community-Einreichung (S4-7) offen  
+
+Aufwand: **hoch** (Prozess/Geräte, extern getrieben)
+Fulcrum/Electrs-Auswahl: **erledigt**.
+
+---
+---
+
+## Ideensammlung: Besitz-Signatur pro Wallet für Reports
+
+**Stand:** 2026-08-31 · **nur notiert**
+
+Aufwand: **sehr hoch** (Produkt + Crypto-Flow)
+
+Message-Signatur A (Besitz, cachebar) + B (Report-gebunden). Detail in Historie.
+
+---
+---
+
+## UTXO-Bestand · libbitcoin `scantxoutset` (RPC wie Core)
+
+**Stand:** 2026-09-22 · **offen** · später · **hängt an libbitcoin**
+
+Aufwand: **unbekannt/hoch** · hängt an libbitcoin
+
+`scantxoutset` über libbitcoin-RPC für Exoten-Wallets (Vollständigkeit, nicht Speed). **Abhängig von libbitcoin-Fähigkeit/Verfügbarkeit.** Priorität niedrig.
 
 ---
 
-## Setup · UTXO + Tx-Verlauf aus bestehenden Wallets importieren
+# Historie / Langtexte
+
+## Erledigt: Empfang · Ka-Ching mit libbitcoin
+
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme) · Hinweis, kein SatSage-Bug
+
+Konfetti/Ka-Ching braucht Mempool; libbitcoin hat keinen Tx-Pool — mit electrs/Fulcrum ok. Als Limit der Datenquelle abgehakt, kein offener SatSage-Punkt.
+
+---
+
+## Erledigt: Herkunft · Soft-Label „Wahrscheinlich Coinjoin/Mix“ ohne CJ-Icon
+
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme)
+
+Soft-Label und CJ-/Mix-Icon-Darstellung abgestimmt bzw. als erledigt abgenommen.
+
+---
+
+## Erledigt: Setup · UTXO + Tx-Verlauf aus bestehenden Wallets importieren
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-21 · **offen** · Idee / notiert · Setup / Cache
 
@@ -66,48 +366,10 @@ Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
 ---
 
-## Labels · BIP-329 Import (separat vom Scan-Boost)
 
-**Stand:** 2026-09-21 · **offen** · Idee / später · UI / Cache
+## Erledigt: Herkunft · „Scan neu“ auf Adresszeile
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
 
-**Ziel:** BIP-329-Label-Dateien (`.jsonl`) importieren und an Adressen/Txs/Outputs in der UI anzeigen (Herkunft, Bestand, Steuerjahr lesbarer).
-
-**Nicht:** Erstscan beschleunigen — BIP-329 liefert **keine** UTXOs und **keinen** Tx-Verlauf, nur Namensschilder. Scan-Boost = Issue „UTXO + Tx-Verlauf aus bestehenden Wallets“.
-
-**Quellen (wo Nutzer BIP-329 herkriegen):** u. a. Sparrow, Nunchuk, BitBoxApp, Liana, Bitcoin Safe — sobald die Labels in SatSage landen, egal welches Wallet den Scan gefüttert hat.
-
-**Noch offen:** Mapping auf SatSage-Caches, Überschreiben vs. mergen, UI-Einstieg. Nur notiert.
-
----
-
-## Empfang · Ka-Ching mit libbitcoin
-
-**Stand:** 2026-09-17 · **kein SatSage-Bug** · Hinweis
-
-**Beobachtung:** Konfetti/Ka-Ching bei Mempool-Empfang funktioniert; **mit libbitcoin als Indexer nicht**, weil libbitcoin **keinen Tx-Pool/Mempool** hat — Pending-Receive steigt nicht.
-
-**Bewertung:** Erwartetes Limit der Datenquelle, kein SatSage-Fehler. Mit electrs/Fulcrum (Mempool) ok.
-
----
-
-## Herkunft · Soft-Label „Wahrscheinlich Coinjoin/Mix“ ohne CJ-Icon
-
-**Stand:** 2026-09-17 · **offen** · näher untersuchen · UI / Trace
-
-**Beobachtung:** In **Herkunft tracen** erscheint häufiger der Soft-Text **„Wahrscheinlich Coinjoin/Mix“** (o. Ä.), aber das zugehörige **CJ-/Mix-Icon** taucht darunter **nicht** auf (weder an der Zeile noch in der Gruppen-Kopf-Leiste).
-
-**Zu klären:**
-
-- Welche `tx_class`-Werte den Text setzen vs. welche in `MIX_ICON_ORDER` / `TX_CLASS_ICON` ein Icon haben
-- Ob Icon nur bei konkreten Formen (Wasabi/Whirlpool/…) gerendert wird, Soft-Label aber bei generischem `coinjoin`/`mix`
-- Ob `mix_arten` am UTXO/Gruppe nach Trace nicht gesetzt wird, obwohl `tx_class_label` da ist
-- Soft-Label an Wurzel vs. Icon nur an Kindknoten / Gruppenkopf
-
-**Nächster Schritt:** Repro mit einer betroffenen Tx, `tx_class` / `mix_arten` / DOM prüfen. Kein 0.9.6-Blocker, aber UX-Inkonsistenz.
-
----
-
-## Herkunft · „Scan neu“ auf Adresszeile (Bereits ausgegeben)
 
 **Stand:** 2026-09-17 · **offen** · Idee / später · UI / Herkunft
 
@@ -119,167 +381,10 @@ Bekannte Lücken, noch ohne Lösung. Neueste oben.
 
 ---
 
-## Steuerjahr · Zwei Tiefen (Horizont vs. voll) — Abnahme später
 
-**Stand:** 2026-09-17 · **offen für späteres Release** · Semantik / Test
+## Erledigt: Eastereggs · Ereignis-Atemzüge
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
 
-**Hintergrund:** Steuer-Horizont vs. voll bis Extern/Coinbase war als Optimierung gedacht, erzeugt aber hohe Komplexität (Scorecard gelb/grau, `steuer_ausreichend`, gelb-klären, Berichtstiefe).
-
-**Für 0.9.6:** Keine systematische Abnahme der Zwei-Tiefen-Sonderfälle. Pragmatisch: klären möglichst vollständig, aufs Beste hoffen. Testplan **C1** (und verwandte Horizont-Semantik) **verschoben**.
-
-**Später:** Gelb erst „fertig“, wenn **grün** oder voller Baum gelb bestätigt; Horizont-Stop ≠ gelb erledigt. UI/Backend und Testfälle dann bewusst nachziehen.
-
----
-
-## Herkunft · Stichwort-Filter in Sammelzeilen
-
-**Stand:** 2026-09-17 · **offen** · Idee / später · UI / Herkunft tracen
-
-**Soll:** In jeder **Sammelzeile** (Gruppe zum Ausklappen darunter) ein Eingabefeld **„Stichwort“** + **Filtern**. Danach bleiben nur noch die Teile der Gruppe sichtbar, die zum Stichwort passen.
-
-**Match egal worauf** (Teilstring, case-insensitive sinnvoll):
-
-- Adresse (auch Teil)
-- TxID (auch Teil)
-- Börsenlabel (z. B. Kraken)
-- Monat / Jahr (Datumsfelder)
-
-**Bezug:** Ergänzt die geplanten Filter in der Gruppen-Überschrift (Datumsbereich, Coinjoins, Börsen, Volumen) — Stichwort ist der schnelle Freitext. Kein 0.9.6-Blocker.
-
----
-
-## Auswerten · Tools · Adresse nachschlagen
-
-**Stand:** 2026-09-17 · **offen** · Idee / später · UI
-
-**Soll:** Unter **Auswerten** einen Punkt **Tools**. Darin:
-
-- Eingabefeld für eine **Adresse**
-- Knopf **„Auswerten“**
-
-**Verhalten:**
-
-1. Gehört die Adresse zu einem der konfigurierten Wallets? Wenn ja → welches (Name / XPUB-Kontext).
-2. Wurde sie schon verwendet? (Historie/UTXO-Cache)
-3. Wenn verwendet **und** Herkunfts-Trace vorliegt → **Link zum Trace** anbieten.
-4. Gehört sie zu **keinem** Wallet → **„nicht gefunden“** und, sofern konfiguriert, **Link zum Block-Explorer**.
-
-**Nutzen:** Schnelle Zuordnung ohne manuell Wallets/Listen durchzuklicken. Kein 0.9.6-Blocker — nur Idee notiert.
-
----
-
-## Herkunft · Filter in der Gruppen-Überschriftenzeile
-
-**Stand:** 2026-09-17 · **offen** · später · UI / Herkunft tracen
-
-**Soll:** In jeder **Adressgruppen-Kopfzeile** (Bestand und „Bereits ausgegeben“) Filteroptionen:
-
-- **Datumsbereich**
-- **Coinjoins** (Mix-Formen vorhanden / Art)
-- **Börsen** (z. B. nur Kraken/Coinbase / mit Börsen-Label)
-- **Volumen** `<` / `>` / **zwischen**
-
-**Kontext:** Sortierung (Volumen/Alter) wirkt bereits auf Bestand und Ausgaben; Mix-Icons und Börsen-Pillen stehen schon in der Kopfzeile — Filter wären die nächste Stufe zum Eingrenzen großer Listen.
-
-**Nutzen:** Hoch bei vielen Adressen/UTXOs. Kein 0.9.6-Blocker — **später bauen**.
-
----
-
-## BIP-158 · ein Filterpass für alle XPUBs (ohne eigenen Indexer)
-
-**Stand:** 2026-09-17 · **offen** · später · Datenquelle / P2P · Performance
-
-**Problem:** Ohne eigenen Electrs/Fulcrum läuft der UTXO-Bestand über Compact Filter **pro Wallet / XPUB** (Scan-Queue + `fetch_wallet_utxos_bip158`: `for xpub in xpubs`). Mehrere Wallets ⇒ mehrfacher Lauf über dieselben Höhen (Turbo/Historie) — großer Zeitfresser für P2P-only-Nutzer.
-
-**Soll (Idee):** Ein gemeinsamer Filterpass: Scripts **aller** konfigurierten XPUBs in einem `watched`-Set matchen, Treffer dem richtigen XPUB zuordnen, Caches weiter **pro Wallet** schreiben. Abbruch, Zwischenstand und unterschiedliche Start­höhen/Alter sauber lösen.
-
-**Nicht:** Herkunft-Trace umbauen — der liest den Bestand aus dem Cache und macht Tx-Graph-Walks; der Boost trifft die **Bestands-Population**.
-
-**Nutzen:** Sehr hoch für Nutzer ohne Indexer. Architektur-Hebel, kein Mikro-Polish — **später bauen**, kein 0.9.6-Blocker.
-
----
-
-## Steuerbericht · HTML/CSV-Knöpfe gelb/grün nach Trace-Tiefe (BMF)
-
-**Stand:** 2026-09-16 · **offen** · Produkt / UI / Steuer
-
-**Hintergrund (BMF 2022 / 2025):** Die Sat-Historie muss **durchgehend** sein — auch wenn die Haltefrist schon **innerhalb** der XPUB-Wallets erreicht wurde. Abbruch nur an Haltefrist/Stichtag reicht für den **amtlichen Herkunftsnachweis nicht**.
-
-**Ist / Abgrenzung:**
-- **Dotplot + UTXO-Klassifikation** (innerhalb / außerhalb Haltefrist): begrenzter Scan, der früher abbricht als „extern / Coinbase“, **reicht**.
-- **HTML- oder CSV-Bericht:** ohne Kette bis **extern / Coinbase** wäre der Bericht **unvollständig** (BMF-Lesart).
-
-**Soll:**
-1. HTML-Bericht-Knöpfe **gelb**, wenn der Verlauf **nicht** bis extern/Coinbase im Cache liegt → Klick löst tieferen Herkunftsscan aus (kann dauern).
-2. HTML-Bericht-Knöpfe **grün**, wenn die Herkunft **schon vollständig** im Cache liegt → Export schnell.
-3. **Tooltips:**  
-   - Gelb: „erfordert Herkunftsscan. Kann dauern…“  
-   - Grün: „Herkunft liegt schon im Cache“
-4. Analog ggf. CSV, falls derselbe Vollständigkeits-Anspruch gilt.
-
-**Nicht:** Dotplot/Klassifikation auf Voll-Trace umstellen — der begrenzte Scan bleibt dort korrekt und schneller.
-
----
-
-## UTXO-Bestand · libbitcoin `scantxoutset` (RPC wie Core)
-
-**Stand:** 2026-09-16 · **offen** · später · Datenquelle / UTXO-Scan
-
-**Idee:** Libbitcoin (bzw. vergleichbarer Stack) per **RPC wie Bitcoin Core** anbinden und **`scantxoutset`** für den UTXO-Bestand nutzen — parallel/alternativ zum Electrum-Gap-Scan.
-
-**Nutzen:** Kann bei **exotischen Wallets** (Miniscript, unübliche Deskriptoren, Adressen jenseits typischer Gap-Annahmen) Treffer liefern, die ein Gap-Scan **übersieht**.
-
-**Nicht der Treiber:** Laut Einschätzung **nicht schneller** als Gap-Scan am eigenen Indexer — also kein Performance-Projekt, sondern **Vollständigkeit / Exoten**.
-
-**Voraussetzung:** Libbitcoin wie Core konfigurierbar (Host/Port/User/Pass oder Cookie), eigene Slot-Logik oder Erweiterung von `UTXO_RPC_*` / `own_utxo_core`, klare Priorität gegenüber Electrs-LAN-Gap und Core-`scantxoutset`.
-
-**Priorität:** niedrig — **irgendwann später**, wenn Exoten-Wallets oder fehlende UTXOs das rechtfertigen. Kein Blocker für den normalen Electrs/Fulcrum/libbitcoin-Electrum-Pfad.
-
----
-
-## Steuerbericht · zwei Berichtsarten (Geldwäsche vs. Haltefrist/Stichtag)
-
-**Stand:** 2026-09-15 · **offen** · Produkt / Export
-
-Der HTML-Herkunftsnachweis (Hop-Kette aus Trace-Cache) braucht **zwei getrennte Berichtsarten** — nicht eine Vollkette für alles:
-
-1. **Geldwäsche / vollständiger Herkunftsnachweis**  
-   Hop-Kette bis zum **externen Zugang** (Kauf-/Zuflussdatum außerhalb der eigenen Wallets). Länger, für Nachvollziehbarkeit „woher die Sats kamen“.
-
-2. **Haltefrist / Stichtag**  
-   Hop-Kette nur so weit, bis die Sats **älter als Haltefrist bzw. vor dem Stichtag** sind — dann Abbruch. Kürzer, reicht zur Untermauerung der Haltedauer-/Altbestand-Behauptung.
-
-**Abgrenzung:** On-chain Hops only. Börsen-/Konto-/Kaufbelege („externe Belege“ im Sinne von Drittunterlagen) baut SatSage **nicht**.
-
-**Ist:** Ein Hop-Abschnitt im Steuer-/Selbstanzeige-HTML, immer volle Trace-Tiefe (sofern Cache vorhanden).
-
-**Soll:** UI/API-Wahl der Berichtsart; Haltefrist-Modus schneidet den Baum am Frist-/Stichtags-Horizont; Dateiname/Titel kennzeichnen die Art; Tests für Abbruchkriterium.
-
----
-
-## Config · EnvFile vs. plain `dict` — Aufrufstellen härten
-
-**Stand:** 2026-09-15 · **offen** · API-Klarheit / Härtung
-
-Wiederkehrende Stolperfalle (Assistenten und Skripte): Manche Einstiege erwarten ein **`EnvFile`** (`.values()` → `dict[str, str]`), andere ein **plain `dict`**. Wer ein `dict` an eine EnvFile-API übergibt, bekommt still `dict_values` statt Key-Zugriff (`AttributeError: 'dict_values' object has no attribute 'get'` — z. B. `read_wallets(env)` ruft `env.values()` auf).
-
-**Ist-Zustand (Stichprobe):**
-- `EnvFile` in `core/config.py` — `values()` liefert den Key/Value-Dict.
-- `read_wallets(env: EnvFile)`, ähnliche Block-APIs: brauchen **EnvFile**, nicht Dict.
-- Viele interne Helfer und Tests: erwarten bereits **`dict`** / `env.values()`.
-- `_load_dotenv()` in `main` liefert **Dict**, nicht EnvFile — Verwechslung vorprogrammiert.
-
-**Ziel:**
-1. Pro öffentlicher Funktion eindeutig: Param-Name + Typ (`env: EnvFile` vs. `values: Mapping[str, str]`), Docstring eine Zeile.
-2. An EnvFile-Grenzen **tolerant oder klar**: entweder `isinstance`-Normalisierung (`EnvFile` | `Mapping` → values-dict) **oder** harter TypeError mit lesbarer Meldung („EnvFile erwartet, got dict“).
-3. Keine stillen `env.values()`-Aufrufe auf Objekten, die schon ein Dict sind.
-4. Optional: schmaler Helfer `als_env_values(env_or_dict) -> dict[str, str]` an einer Stelle, alle Config-Leser darüber.
-
-**Nicht:** Drive-by-Refactor aller Call-Sites ohne Nutzen; zuerst die öffentlichen Config/Wallet-Leser und die Stellen, an denen Assistenten/Tests typisch anecken.
-
----
-
-## Eastereggs · SatSage-würdige Ereignis-Atemzüge
 
 **Stand:** 2026-09-13 · **offen** · Ideen (Form: Ereignis → ein Atemzug → fertig; Flüchtigkeit beachten)
 
@@ -298,7 +403,10 @@ Anschluss an bestehende Empfangs-Animationen (Konfetti/OH-NO/✓/oranges B) und 
 
 ---
 
-## Empfangen · Mempool-Lebenszeichen (Herzschlag + Wallet-Blink)
+
+## Erledigt: Empfangen · Mempool-Lebenszeichen
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-12 · **offen** · Idee / Experiment
 
@@ -322,7 +430,9 @@ Wenn dieselbe Tx **bestätigt** (erster Block — binär, nicht „Pending sinkt
 
 ---
 
-## Kurs-Historie · Bundle veraltet / Lücken bis „heute“ — teilweise gelöst
+
+## Erledigt: Kurs-Historie · Bundle / Nachzug
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
 
 
 **Stand:** 2026-09-11 · **umgesetzt (MVP)** · **zurückgestellt** (Feinschliff im Büro)
@@ -333,7 +443,10 @@ Täglicher Job + Opt-in ``SATSAGE_PRICE_HISTORY_OPT_IN`` lädt Bitstamp/CDD bei 
 
 ---
 
-## Datenquellen · Onion-Electrs zu langsam → früh BIP-158 / Abbruch
+
+## Erledigt: Datenquellen · Onion-Latenz → BIP-158
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-11 · **umgesetzt (MVP)** · Feinschliff offen
 
@@ -343,7 +456,10 @@ Latenz-Gate beim Setup öffentlicher Onion-Electrs (Auto-Priorität): Probe-`get
 
 ---
 
-## Marke · Sherlock-Satoshi-Kopf statt Sat-Symbol
+
+## Erledigt: Marke · Sherlock-Satoshi / Pfeiffe
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-11 · **umgesetzt**
 
@@ -351,7 +467,10 @@ Marke aus `Pfeiffe-Icon.jpg` (S/W, Schwarz = Vordergrund) → transparente `web/
 
 ---
 
-## Core-Rollen · UTXO-Set vs. Tx/Block-Lookup (+ lokaler pruned Qt)
+
+## Erledigt: Core-Rollen · UTXO vs. Tx/Block-Lookup
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-11 · **umgesetzt** (Morgen-Plan inkl. Block-Fetch)
 
@@ -361,34 +480,10 @@ Marke aus `Pfeiffe-Icon.jpg` (S/W, Schwarz = Vordergrund) → transparente `web/
 
 ---
 
-## Tests · Blind spots (vs. Specter / LNbits / Jam)
 
-**Stand:** 2026-09-10 · **teilweise** · Vergleich Python-Server + Browser-UI
+## Erledigt: Kopf · Pillen entschlacken
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
 
-Kurzanalyse: SatSage hat starke Domain-/API-Unittests und Chaos/Session-Helfer; gegenüber Specter (pytest+Cypress), LNbits (unit/api/regtest/e2e-Playwright) und Jam (Vitest+Playwright) fehlen vor allem deterministische Browser-E2E (CI-Unittest ist da).
-
-| # | Punkt | Status |
-|---|--------|--------|
-| 1 | **CI: Unittest-Suite** auf Push/PR (`dev-juniormind` / `main`), nur schnelle Tests (kein Regtest/E2E/Chaos) | **umgesetzt** (Suite grün vorausgesetzt; lokal 1202 OK) |
-| 2 | **Browser-E2E-Smoke** (Playwright): Spawn → Token → Kernansichten / Kopf-Pillen — deterministisch, optional CI | offen |
-| 3 | **Test-Marker / Schichten** (`fast` vs. `regtest` vs. `e2e`) statt einer flachen `tests/`-Liste | offen |
-| 4 | Weniger **String-Suche in `app.js`**, mehr API+DOM-Verhalten | offen |
-| 5 | Stabile UI-Selektoren (`data-cy` o. Ä.) für Chaos/E2E | offen |
-| 6 | Coverage-/Lint-Gates in CI (Python; JS optional ohne npm-Zwang) | offen |
-
-Chaos-Harness und GUI-Session-Protokoll bleiben Vorsprung — nicht durch E2E ersetzen, sondern ergänzen.
-
----
-
-## Web-UI · Mobile-Darstellung für Tablet
-
-**Stand:** 2026-09-10 · **offen** · nur notiert
-
-Desktop-GUI auf Tablet-Viewport brauchbar machen (Kopf-Pillen, Nav, Inhalt, Dock). Handy optional später — Fokus zuerst Tablet. Bisher nur schmaler Viewport-Check der Quellen-Pillen, kein Responsive-Umbau.
-
----
-
-## Kopf · Pillen entschlacken (Electrs privat / öffentlich) — erledigt
 
 **Stand:** 2026-09-10 · **umgesetzt** · UI-Kopfzeile
 
@@ -396,7 +491,10 @@ Nur noch aktive / Aufbau- / Fehler-Quellen plus Privatsphäre-Pille (hoch/mittel
 
 ---
 
-## Lokal Bitcoin Core erkennen (Desktop, ohne Start9/Specter)
+
+## Erledigt: Lokal Bitcoin Core erkennen
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-09 · **MVP umgesetzt** (Opt-in) · Sonderfälle offen
 
@@ -420,7 +518,8 @@ Wenn SatSage **standalone** auf derselben Maschine wie ein laufendes `bitcoind` 
 
 ---
 
-## Immutable-Cache · SQLite statt Winz-JSONs (tx / utxo_ingress)
+
+## Zurückgestellt / Detail: Immutable-Cache · SQLite
 
 **Stand:** 2026-09-15 · **zurückgestellt** — erst **nach** Implementation der CoinJoin-Verfolgung (siehe Ideensammlung unten)
 
@@ -480,7 +579,10 @@ Punktzugriff per TxID / `(txid, vout)` ist mit Flatfiles schon O(1). SQLite lohn
 
 ---
 
-## Start9 · Fulcrum als Electrum-Datenquelle (neben electrs)
+
+## Erledigt: Start9 · Fulcrum/Electrs-Auswahl
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-09 · **in Arbeit (Vorbereitung)** · Bezug: [`doc/START9-fulcrum-indexer.md`](doc/START9-fulcrum-indexer.md), [`doc/START9-packaging.md`](doc/START9-packaging.md)
 
@@ -498,27 +600,8 @@ Der Start9-Build-/Package-Prozess soll **Fulcrum** können, nicht nur `electrs-s
 
 ---
 
-## Specter-Plugin · Node & Wallets aus Specter übernehmen (read-only)
 
-**Stand:** 2026-09-09 · **umgesetzt (Kern + Cache-Seed)** · manuelle Abnahme in Specter-UI noch offen
-
-Das Specter-Plugin übernimmt **Node-Connections** und **Wallets** aus Specter (Bridge/Session), ohne Doppelpflege in SatSage.
-
-**Soll / Ist:**
-
-- Specter-Node (Core → BIP-158/RPC, Electrum/Spectrum → `FULCRUM_*`) und Wallets/XPUBs/Deskriptoren → Plugin-`.env` (`managed_by=specter`); UI/API Wallets + Datenquellen gesperrt/ausgeblendet.
-- **UTXO-Seed** aus `full_utxo` → `utxo_cache` (`source=specter`), Scan-Fenster aus Specter-Indizes (`address_index` / `change_index`).
-- **Verlaufs-Merge** aus Specter-UTXOs + Receive-Txs → `merke_bip158_verlauf`.
-- **Labels** → `utxo_cache/specter_address_labels.json`, API `specter_labels` / UTXO-Feld `label`.
-- Änderungen in Specter: Fingerprint-Reload + erneuter Seed.
-
-**Modul:** `specter_plugin/.../specter_seed.py`. Tests: `tests/test_specter_seed.py`.
-
-**Abgrenzung:** Standalone-`server.py` / Lab bleiben editierbar. PSBT/Devices/Explorer-URL aus Specter = Folge-Issues.
-
----
-
-## Start9 Community Package â€” HÃ¤rtung
+## Start9 Community Package — Härtung (Detail)
 
 **Stand:** 2026-09-06 Â· **Backlog aktiv, Umsetzung schrittweise**
 
@@ -530,7 +613,10 @@ Kurz: Loopback+Token-URL reichen nicht fÃ¼r LAN/Tor hinter StartOS. S0â€“
 
 ---
 
-## Ideensammlung: Was trennt SatSage von einer echten Wallet-Software?
+
+## Erledigt: Ideensammlung · echte Wallet-Software
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-04 Â· **nur notiert, noch nicht umsetzen**  
 **Ort:** Analyse-Stack vs. Key-Material; experimentell schon `consolidate.py` (PSBT); Web/CLI
@@ -611,6 +697,7 @@ Kurz: Loopback+Token-URL reichen nicht fÃ¼r LAN/Tor hinter StartOS. S0â€“
 
 **Wenn wir wieder drankommen:** API `POST /psbt` (build) / `POST /psbt/finalize` / `POST /tx/broadcast`; Web-Karten â€žPSBT exportieren / importieren / sendenâ€œ; Tests mit Fixtures ohne Mainnet-Broadcast; Cache-Invalidierung nach send.
 
+
 ## Erledigt: Englisch umschaltbare Web-GUI
 
 **Stand:** 2026-09-02 Â· **erledigt** (Phase 0â€“3)  
@@ -683,7 +770,8 @@ Umschalter in Einstellungen; sichtbare Web-GUI DE/EN; Datums-/Zahlenformat folgt
 
 **SpÃ¤ter (Merkliste):** `ApiError`/`error_code`; Job-Logs EN; Handbuch EN; CLI; weitere `app.js`-Nebenstrings; weitere Sprachen.
 
-## Ideensammlung: Besitz-Signatur pro Wallet fÃ¼r Reports
+
+## Ideensammlung (Detail): Besitz-Signatur pro Wallet
 
 **Stand:** 2026-08-31 Â· **nur notiert, noch nicht umsetzen**  
 **Ort:** Steuer-/Verlaufs-Export (`core/tax.py`, ggf. Selbstanzeige), Web-UI, Cache; Signatur extern (Sparrow/Electrum)
@@ -738,7 +826,10 @@ Export â†’ A fehlt? â†’ Dialog A â†’ Cache
 
 **Wenn wir wieder drankommen:** Challenge-/Hash-Schema festlegen; Verify in SatSage; UI-Dialoge + Cache; HTML/CSV-Abschnitt; Multisig/BIP-322 spÃ¤ter.
 
-## Ideensammlung: CoinJoins rückverfolgen können
+
+## Erledigt: CoinJoins rückverfolgen (MVP)
+**Stand:** 2026-09-22 · **erledigt** (Maintainer-Abnahme).
+
 
 **Stand:** 2026-09-11 · **MVP umgesetzt** (Klassifikation + Soft-Label + Own-only-Walk; ohne Einstellungs-UI A/B/C)  
 **Kurzfassung:** [`doc/issues/coinjoin-herkunft.md`](doc/issues/coinjoin-herkunft.md)  
@@ -839,12 +930,14 @@ Rückwärts in eine erkannte n:m-CoinJoin-Tx `C`. Semantik: CoinJoin ist **kein*
 **Erledigt (MVP):** Detektor + Soft-Labels + Own-Input-Walk + Lab-Fixtures.  
 **Wenn wir wieder drankommen:** Einstellungs-Enum A/B/C → Whirlpool-Kette (Remix × n) → Handbuch-Abschnitt Trace-Verhalten.
 
+
 ## Erledigt: Logo einbinden
 
 **Stand:** 2026-08-29 Â· **erledigt**  
 **Ort:** `web/img/` (Favicon, Marke, Wortmarke), Specter-Plugin `static/â€¦/logo.png`, mit `web/` im Packaging
 
 Eulen-Logo eingebunden: Favicon/`apple-touch-icon`, Kopfzeile (`logo-mark.png` + Name/Slogan), volles Wortmark-Logo fÃ¼rs Handbuch. Quelldatei: `SatSage final.jpg` im Repo-Root.
+
 
 ## Erledigt: Server bleibt nach Browser-SchlieÃŸung â€” Terminal-Steuerung
 
@@ -855,12 +948,14 @@ Browser schlieÃŸen hat den Server schon zuvor nicht beendet; jetzt gibt es ein
 
 Weiter offen / verwandt: **Status-Mails**; curses-Scroll-Pane optional spÃ¤ter; Specter-iframe unverÃ¤ndert.
 
+
 ## Erledigt: Umbenennung in â€žSatSage â€“ know your satsâ€œ
 
 **Stand:** 2026-08-29 Â· **erledigt (Branding + technische IDs)**  
 **Ort:** Anzeige, Docs, Packaging, Specter-Plugin
 
 Branding und technische IDs: Extension/Package `satsage.specterext.satsage`, Binary `satsage-webgui`, Token-Header `X-Satsage-Token`, Specter-Env `satsage.env`, Config-Keys `SATSAGE_*`.
+
 
 ## Erledigt: Popup bei neuem XPUB â€” Scan-Wahl + Hinweis Hintergrundbetrieb
 
@@ -869,12 +964,14 @@ Branding und technische IDs: Extension/Package `satsage.specterext.satsage`, Bin
 
 Nach Speichern eines neuen Wallets: Dialog UTXO-Scan (Standard) / Verlaufsscan / SpÃ¤ter manuell. Scan Ã¼ber `starteScanFuer`; Hinweis auf Terminal-Hintergrundbetrieb. Status-Mails weiter offen (kein Hinweis â€žMail kommtâ€œ, solange SMTP fehlt).
 
+
 ## Erledigt: Status-Mails (neutrale Fertigmeldungen)
 
 **Stand:** 2026-08-29 Â· **erledigt (v1)**  
 **Ort:** `core/status_mail.py`, Hook in `core/jobs.py`, `PUT /api/config/status-mail`, Einstellungen-Karte
 
 SMTP aus `.env` / Web (Opt-in). Bei Job-Ende `rescan` / `verlauf`: Mail nur mit Ereignis, Status, Zeit â€” keine Wallet-/Scan-Daten. Weitere Job-Arten und API-Provider spÃ¤ter.
+
 
 ## Erledigt: PrioritÃ¤tsreihenfolge fÃ¼r den Verlaufsscan
 
@@ -889,6 +986,7 @@ Eigene Kette (nicht UTXO-/Auto-PrioritÃ¤t), Log mit BegrÃ¼ndung:
 4. Ã¶ffentliche Electrum (Onion â†’ Clearnet, nur nach BestÃ¤tigung)  
 
 Core `scantxoutset` bewusst nicht. Verwandt offen: **Server im Hintergrund** und **Status-Mails** fÃ¼r lange LÃ¤ufe.
+
 
 ## Erledigt: GrÃ¼ndlichere Herkunft in der Web-GUI
 
@@ -938,3 +1036,4 @@ Umsetzungsskizze: Einstellung z.â€¯B. `STEUER_ANSCHAFFUNG=juengste|aelteste`
 **Umgesetzt:** A (Opt-in-Followups `tx_oriented` / `resolve_unresolved`) und B (`STEUER_ANSCHAFFUNG`). CoinJoin-Hybrid bleibt Issue â€žCoinJoins rÃ¼ckverfolgenâ€œ.
 
 **Wenn wir wieder drankommen:** Andock an CoinJoin-Hybrid; Specter-Plugin-Followup optional.
+

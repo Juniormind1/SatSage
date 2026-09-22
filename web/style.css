@@ -231,8 +231,68 @@ button, input, select { font: inherit; color: inherit; }
   font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
   text-transform: lowercase; color: var(--blass);
 }
-.quelle { margin-left: auto; display: flex; align-items: center; gap: 10px;
-          font-family: var(--mono); font-size: 11px; color: var(--gedaempft); }
+.quelle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--gedaempft);
+  min-width: 0;
+}
+/* Abstand Suchfeld ↔ Pillen: funktionale Abgrenzung. */
+.kopf-filter-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-right: 18px;
+  padding-right: 14px;
+  border-right: 1px solid var(--linie);
+}
+.kopf-filter {
+  width: min(11rem, 28vw);
+  max-width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid var(--rahmen);
+  border-radius: 4px;
+  background: var(--flaeche);
+  color: var(--text);
+  outline: none;
+}
+.kopf-filter::placeholder {
+  color: var(--blass);
+  opacity: 0.9;
+}
+.kopf-filter:disabled,
+.kopf-filter[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--blass);
+  background: var(--flaeche-2);
+}
+.quelle-pillen {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .kopf-lang {
   display: flex; align-items: center; gap: 2px; flex-shrink: 0;
   margin-left: 8px;

@@ -2,6 +2,34 @@ Die großen Klumpen in SatSage sind real und messbar: server.py (327 KB), main
 
 Nicht alles auf einmal umbauen. Erst Plan, dann eine bounded Extraction, Verhalten unverändert, Tests als Sicherheitsnetz.
 
+Neben Ziel · Parallel-Entwicklung und Merge-Konflikte (nicht Hauptziel, aber Pflicht-Nebeneffekt)
+
+Hauptziel bleibt: Wartbarkeit, klare Module, sichere Extraktion, Verhalten 1:1.
+Wenn wir uns die Modularisierungs-Arbeit schon machen, muss sich parallel auch die
+Merge-Lage massiv verbessern — sonst war der Schnitt zu kosmetisch und wir müssen
+gründlicher refaktorieren.
+
+Kontext: Mehrere Entwickler und Assistenten arbeiten in vielen Branches/Worktrees
+parallel (z. B. dev-juniormind, Feature-Branches, Mac + Windows). God-Files
+(server.py, app.js, main.py, …) sind Hotspots: fast jedes Feature berührt dieselben
+Dateien → teure Merge-Konflikte, Rebase-Schmerz, blockierte PRs.
+
+Anforderungen an jeden Slice (zusätzlich zu Wartbarkeit):
+
+- Schnitt nach Änderungsdomäne (z. B. Wallets-API, Trace-API, Settings-UI), nicht
+  nur „Code in eine andere große Datei schieben“.
+- Anti-Pattern: ein neuer core/mega.py, den wieder alle Branches anfassen = Konflikte
+  wandern mit. Dann Slice ungenügend → weiter schneiden.
+- Fassaden dünn halten: Re-Exports ok, aber neue Logik landet im Fachmodul, nicht
+  wieder in der Fassade.
+- Priorisierung der Slices: neben Bruchrisiko auch Konflikt-Hotspots (welche Dateien
+  in PRs/Merges am häufigsten kollidieren) berücksichtigen.
+- Done-Check je Slice: „Zwei typische parallele Features (z. B. Steuer-UI +
+  Wallet-Import) können weitgehend ohne Berührung derselben Dateien landen.“
+  Wenn nein → gründlicher nachschneiden, nicht abhaken.
+- Der Modularisierungs-Branch selbst: kurze Lebensdauer, klarer Owner, oft rebasen —
+  sonst wird der Refactor zum Super-Konflikt.
+
 Warum ein naiver „refaktoriere alles“-Prompt scheitert
 
 Der Agent mischt Umbenennung, Feature-Arbeit und Packaging und bricht Specter/PyInstaller.
@@ -39,9 +67,12 @@ Zeichne die Ist-Schichten vs. Soll-Schichten.
    core: Daten-APIs, Jobs, Steuer, Config (weiterhin kein print())
    adapters: fulcrum / p2p / bitcoind / sanctioned
    surfaces: thin server.py, web/* nach Views, legacy CLI
-Finde 4–6 Extraktionen mit höchstem Wartbarkeitsgewinn und niedrigstem Bruchrisiko.
-Für jede Extraktion: Zielpfad, öffentliche API, Import-Fassade damit alte Pfade erstmal weiterlaufen, betroffene Tests, Risiko für Specter/PyInstaller/.env-Semantik.
-Empfiehl genau EINE erste Extraktion als Slice 1. Begründe.
+Finde 4–6 Extraktionen mit höchstem Wartbarkeitsgewinn, niedrigstem Bruchrisiko und
+sinnvollem Beitrag zu weniger Merge-Hotspots (Änderungsdomänen trennen).
+Für jede Extraktion: Zielpfad, öffentliche API, Import-Fassade damit alte Pfade erstmal weiterlaufen, betroffene Tests, Risiko für Specter/PyInstaller/.env-Semantik,
+kurz: welche parallelen Feature-Arten danach seltener kollidieren.
+Empfiehl genau EINE erste Extraktion als Slice 1. Begründe (Wartbarkeit + Hotspot).
+Kennzeichne kosmetische Splits (nur Umzug ohne Domänentrennung) als ungenügend.
 
 Constraints:
 Verhalten 1:1 erhalten. Keine Features, kein UI-Redesign, keine neuen Dependencies.
@@ -54,6 +85,8 @@ Plan auf Deutsch, als ADR-ähnliche Liste. Datei: doc/adr-modularisierung.md
 
 Done when:
 doc/adr-modularisierung.md existiert mit Ist/Soll, Kopplungsinventar, priorisierten Slices und explizitem Slice-1-Schnitt.
+Darin ein kurzer Abschnitt „Parallel-Dev / Merge-Hotspots“: Ist-Hotspots, Soll nach
+Slice 1–n, und wann ein Slice als „zu flach“ gilt (Konflikte wandern nur mit).
 Kein Anwendungscode geändert außer ggf. der ADR-Datei.
 Kurze Risiko-Liste: was Slice 1 bewusst NICHT anfasst.
 
@@ -97,6 +130,9 @@ server.py (bzw. app.js) ist Fassade + Delegation, nicht mehr der God-Object-Kern
 Alte Importpfade funktionieren oder haben bewusst aktualisierte, getestete Nachfolger.
 Genannte Tests sind grün.
 Kurzes Abschlussmemo: verschobene Symbole, neue Module, offene Folgeslices, bekannte Restkopplung.
+Explizit: Einschätzung Merge-Lage — welche Domänen jetzt in getrennten Dateien liegen;
+ob der Slice Hotspots wirklich entzerrt hat oder nur umbenannt. Wenn nur kosmetisch →
+Folgeschnitt vorschlagen, nicht als „fertig modular“ verkaufen.
 
 Damit das nicht zurückfällt: in AGENTS.md ergänzen
 
@@ -110,6 +146,8 @@ core/ gibt Daten zurück, kein print(). Oberflächen formatieren.
 Öffentliche Engine-Funktionen, die Specter oder Tests importieren, nur mit Fassade und Test ändern.
 Harte Grenze: Datei > 80 KB oder Funktion > 80 Zeilen ist ein Split-Kandidat, kein Platz für das nächste Feature.
 Refactor-Slices sind explizite Aufgaben, keine Drive-by-Änderungen in Feature-PRs.
+Neue Module so schneiden, dass parallele Feature-Branches möglichst verschiedene Dateien
+anfassen (Domänen-Trennung). Kein zweites God-File unter neuem Namen.
 
 Optional als Skill .grok/skills/refactor-satsage/SKILL.md mit genau diesen Grenzen, dann in späteren Sessions nur noch: Use refactor-satsage. Nächster Slice laut doc/adr-modularisierung.md.
 

@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **UI · Listen-Filter:** Wallet + Herkunft — Teiltext Adresse/TxID, Betrag `>n`/`<n` (sats), Datum `>1.1.25` / `<05.12.2023` (TT.MM.JJJJ). Andere Ansichten ausgegraut.
 - **Start · .env-Modus:** Unter Windows keine Dauer-Warnung mehr „Modus … 0666 → 0600“ — ``chmod`` greift dort nicht; Prüfung nur noch auf POSIX.
 - **Wallets · Löschen:** Log **„Lösche …“** / **„Löschen beendet“** (Timestamps), bei vielen Cache-Dateien Zwischenstand. Langsam v. a. durch Walk über UTXO-/Verlauf → je Tx Herkunfts-/Ingress-Dateien (Import-Wallets).
 - **Wallets · Adressen nachziehen:** Nach Export-Import wartet der Job bis ~2 min auf den Indexer (Tor-Bootstrap), statt still abzubrechen. Log: **„Adressen nachziehen braucht Indexer…“** / Warte-Zeilen; ohne Konfiguration klare Meldung, Adressen bleiben unzugeordnet sichtbar.

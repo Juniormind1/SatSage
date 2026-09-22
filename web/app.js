@@ -4461,6 +4461,7 @@ function zeigeAnsicht(name) {
     if (el) el.hidden = ansicht !== name;
   }
   zeichneNav();
+  aktualisiereKopfFilterFuerAnsicht();
 }
 
 function setzeEnvPfad(pfad) {
@@ -4575,6 +4576,8 @@ function zeigeLeer(titel, text) {
 }
 
 function zeichneUtxos(daten, wallet) {
+  // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
+  Zustand._walletUtxoDaten = daten || null;
   const hatVerlauf = Boolean(daten.hat_verlauf);
   const hatUtxos = Boolean(daten.has_cache && daten.total_count);
 
@@ -4584,6 +4587,7 @@ function zeichneUtxos(daten, wallet) {
       t("wallet.emptyNoCacheHint"),
     );
     setzeText($("#wallet-meta"), t("wallet.metaNeverScanned"));
+    aktualisiereKopfFilterFuerAnsicht();
     return;
   }
   if (daten.has_cache && !hatUtxos && !hatVerlauf) {
@@ -4592,6 +4596,7 @@ function zeichneUtxos(daten, wallet) {
       t("wallet.emptyNoUtxoHint"),
     );
     setzeText($("#wallet-meta"), t("wallet.metaZeroCache"));
+    aktualisiereKopfFilterFuerAnsicht();
     return;
   }
 
@@ -4683,6 +4688,8 @@ function zeichneUtxos(daten, wallet) {
 
   $("#wallet-leer").hidden = true;
   $("#adress-liste").hidden = false;
+  aktualisiereKopfFilterFuerAnsicht();
+  wendeKopfFilterAn();
 }
 
 /**
@@ -4877,6 +4884,38 @@ function zeichneAdressGruppe(gruppe) {
   return block;
 }
 
+/** Unix-Sekunden für Kopf-Filter (Ausgabe bevorzugt, sonst Ankunft). */
+function utxoEreignisTs(utxo) {
+  if (!utxo) return 0;
+  if (utxo.spent || utxo.spent_pending) {
+    const st = Number(
+      utxo.spent_time_ts
+      || utxo.spent_block_time
+      || (utxo.status && utxo.status.spent_time_ts)
+      || 0,
+    );
+    if (st > 0) return st;
+  }
+  const bt = Number(utxo.block_time || 0);
+  if (bt > 0) return bt;
+  if (utxo.time_label) {
+    const m = String(utxo.time_label).match(
+      /(\d{1,2})\.(\d{1,2})\.(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+    );
+    if (m) {
+      let y = Number(m[3]);
+      if (m[3].length <= 2) y += 2000;
+      const d = new Date(
+        y, Number(m[2]) - 1, Number(m[1]),
+        Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0),
+      );
+      if (!Number.isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    }
+  }
+  const js = Number(utxo.juengste_sats_ts || 0);
+  return js > 0 ? js : 0;
+}
+
 function setzeUtxoTraceDaten(el, utxo) {
   if (!el || !utxo) return;
   if (utxo.key) el.dataset.key = utxo.key;
@@ -4898,6 +4937,9 @@ function setzeUtxoTraceDaten(el, utxo) {
   } else {
     delete el.dataset.juengsteSatsTs;
   }
+  const ets = utxoEreignisTs(utxo);
+  if (ets > 0) el.dataset.eventTs = String(ets);
+  else delete el.dataset.eventTs;
 }
 
 function zeichneUtxoZeile(utxo) {
@@ -6336,6 +6378,8 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
   }
   aktualisiereTraceWurzelKopf(utxo, block);
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  aktualisiereKopfFilterFuerAnsicht();
+  wendeKopfFilterAn();
 }
 
 function hinweisZeile(text) {
@@ -6406,6 +6450,7 @@ function zeichneTraceListe(daten) {
       "Keine UTXOs im Cache. Wallets zuerst scannen — in der Wallet-Ansicht " +
       "über „Bestand“."
     ));
+    aktualisiereKopfFilterFuerAnsicht();
     return;
   }
 
@@ -6413,6 +6458,8 @@ function zeichneTraceListe(daten) {
   fuelleTraceSortiert(liste, daten.addresses || [], sortMode);
 
   liste.append(zeichneAusgegeben(daten));
+  aktualisiereKopfFilterFuerAnsicht();
+  wendeKopfFilterAn();
 }
 
 /**
@@ -6552,6 +6599,8 @@ function zeichneAusgegeben(daten) {
           verlauf.addresses || [],
           Zustand.traceSort || "volume-desc",
         );
+        // Aktiven Kopf-Filter auf frisch gezeichnete Zeilen anwenden.
+        if (kopfFilterAnsichtAktiv(Zustand.ansicht)) wendeKopfFilterAn();
       });
     }
   });
@@ -6637,6 +6686,7 @@ function zeichneTraceAdressGruppe(gruppe) {
     }
     setzeKlapp(kopf, klapp, inhalt, auf);
     // Bäume bleiben zu — erst bei Klick aufs einzelne UTXO (oeffneZweig).
+    if (kopfFilterAnsichtAktiv(Zustand.ansicht)) wendeKopfFilterAn();
   });
 
   const kopfzeile = document.createElement("div");
@@ -14918,23 +14968,405 @@ function zeichneKopfStatus(quellen) {
 
   setzeText($("#fuss-quelle"), privText);
 
-  const status = $("#quelle-status");
-  status.replaceChildren();
+  // Nur Pillen neu bauen — Suchfeld (#kopf-filter) bleibt links stehen.
+  const pillen = $("#quelle-pillen") || $("#quelle-status");
+  if (!pillen) return;
+  pillen.replaceChildren();
   for (const eintrag of eintraege) {
     const pill = pille(eintrag.stufe, eintrag.label);
     pill.title = eintrag.title;
     if (eintrag.lern) pill.setAttribute("data-lern", eintrag.lern);
-    status.append(pill);
+    pillen.append(pill);
   }
   const privPill = pille(privStufe, privText);
   privPill.title = t("header.privacyTitle");
   privPill.setAttribute("data-lern", "privatsphaere");
-  status.append(privPill);
+  pillen.append(privPill);
   zeichneKursPille();
   zeichneLlmPille();
+  aktualisiereKopfFilterFuerAnsicht();
   if (lernhinweiseAn()) {
     wendeAlleLernTooltipsAn().catch(() => {});
   }
+}
+
+/**
+ * Globaler Listen-Filter in der Pillen-Zeile.
+ * *aktiv* = false: ausgegraut. Wallet-Ansicht: aktiv (Text + >/<-Sats).
+ */
+function setzeKopfFilterAktiv(aktiv) {
+  const feld = $("#kopf-filter");
+  if (!feld) return;
+  const an = Boolean(aktiv);
+  const warAn = !feld.disabled;
+  feld.disabled = !an;
+  feld.setAttribute("aria-disabled", an ? "false" : "true");
+  feld.title = an
+    ? t("header.filterTitleActive")
+    : t("header.filterTitleDisabled");
+  feld.setAttribute(
+    "data-i18n-title",
+    an ? "header.filterTitleActive" : "header.filterTitleDisabled",
+  );
+  if (!an) {
+    if (warAn || feld.value) {
+      feld.value = "";
+      wendeKopfFilterAn();
+    }
+  } else if (feld.value.trim()) {
+    wendeKopfFilterAn();
+  }
+}
+
+/** Welche Ansichten den Kopf-Filter nutzen (weitere folgen schrittweise). */
+function kopfFilterAnsichtAktiv(ansicht) {
+  return ansicht === "wallet" || ansicht === "trace";
+}
+
+function aktualisiereKopfFilterFuerAnsicht() {
+  setzeKopfFilterAktiv(kopfFilterAnsichtAktiv(Zustand.ansicht));
+}
+
+/**
+ * Kalendertag TT.MM.JJJJ oder TT.MM.JJ (lokal) → Date 00:00 oder null.
+ * Zweistellige Jahre: 2000+ (Bitcoin-Kontext).
+ */
+function parseKopfFilterDatum(dd, mm, yy) {
+  const day = Number(dd);
+  const month = Number(mm);
+  let year = Number(yy);
+  if (!Number.isFinite(day) || !Number.isFinite(month) || !Number.isFinite(year)) {
+    return null;
+  }
+  if (String(yy).length <= 2) year += 2000;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const d = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (
+    d.getFullYear() !== year
+    || d.getMonth() !== month - 1
+    || d.getDate() !== day
+  ) {
+    return null;
+  }
+  return d;
+}
+
+/**
+ * Parse: Freitext + `>1234`/`<1234` (sats) + `>1.1.25`/`<05.12.2023` (Datum).
+ * Datum: nach dem Tag = ab Folgetag 00:00; vor dem Tag = vor 00:00 dieses Tags.
+ * Mehrere Tokens = UND.
+ */
+function parseKopfFilter(roh) {
+  const text = String(roh || "").trim();
+  if (!text) {
+    return {
+      leer: true, terms: [], minSats: null, maxSats: null,
+      afterTs: null, beforeTs: null,
+    };
+  }
+  const terms = [];
+  let minSats = null;
+  let maxSats = null;
+  let afterTs = null;
+  let beforeTs = null;
+  // Datum vor reinem Betrag prüfen (Punkte!).
+  const reDatum = /^([<>])(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/;
+  const reSats = /^([<>])(\d+(?:[.,]\d+)?)$/;
+  for (const tok of text.split(/\s+/)) {
+    if (!tok) continue;
+    const dm = tok.match(reDatum);
+    if (dm) {
+      const start = parseKopfFilterDatum(dm[2], dm[3], dm[4]);
+      if (start) {
+        if (dm[1] === ">") {
+          // nach dem Kalendertag → ab 00:00 des Folgetags
+          const next = new Date(start);
+          next.setDate(next.getDate() + 1);
+          const ts = Math.floor(next.getTime() / 1000);
+          afterTs = afterTs == null ? ts : Math.max(afterTs, ts);
+        } else {
+          // vor dem Kalendertag → vor 00:00 dieses Tags
+          const ts = Math.floor(start.getTime() / 1000);
+          beforeTs = beforeTs == null ? ts : Math.min(beforeTs, ts);
+        }
+      }
+      continue;
+    }
+    const sm = tok.match(reSats);
+    if (sm) {
+      const n = Number(String(sm[2]).replace(",", "."));
+      if (Number.isFinite(n)) {
+        if (sm[1] === ">") {
+          minSats = minSats == null ? n : Math.max(minSats, n);
+        } else {
+          maxSats = maxSats == null ? n : Math.min(maxSats, n);
+        }
+      }
+      continue;
+    }
+    terms.push(tok.toLowerCase());
+  }
+  return { leer: false, terms, minSats, maxSats, afterTs, beforeTs };
+}
+
+function _kopfFilterBetragOk(sats, f) {
+  if (f.minSats != null) {
+    if (!Number.isFinite(sats) || !(sats > f.minSats)) return false;
+  }
+  if (f.maxSats != null) {
+    if (!Number.isFinite(sats) || !(sats < f.maxSats)) return false;
+  }
+  return true;
+}
+
+function _kopfFilterDatumOk(eventTs, f) {
+  if (f.afterTs == null && f.beforeTs == null) return true;
+  const ts = Number(eventTs);
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+  if (f.afterTs != null && !(ts >= f.afterTs)) return false;
+  if (f.beforeTs != null && !(ts < f.beforeTs)) return false;
+  return true;
+}
+
+function _kopfFilterHaystack(el) {
+  const key = String(el.dataset.key || "");
+  const txid = key.includes(":") ? key.split(":")[0] : key;
+  return [
+    key,
+    txid,
+    String(el.dataset.address || ""),
+    String(el.dataset.timeLabel || ""),
+  ].join(" ").toLowerCase();
+}
+
+function _kopfFilterTextOk(hay, terms) {
+  if (!terms.length) return true;
+  return terms.every((t) => hay.includes(t));
+}
+
+function _kopfFilterLeafOk(leaf, f, { textSchonOk = false } = {}) {
+  const sats = Number(leaf.dataset.valueSats);
+  if (!_kopfFilterBetragOk(sats, f)) return false;
+  if (!_kopfFilterDatumOk(leaf.dataset.eventTs, f)) return false;
+  if (textSchonOk) return true;
+  return _kopfFilterTextOk(_kopfFilterHaystack(leaf), f.terms);
+}
+
+function _kopfFilterGruppeAufklappen(gruppe) {
+  const kopf = gruppe.querySelector(":scope > .kopf-mit-verweis .adress-kopf, :scope > .adress-kopf");
+  const inhalt = gruppe.querySelector(
+    ":scope > .adress-utxos, :scope > .trace-utxos",
+  );
+  const klapp = kopf && kopf.querySelector(".klapp");
+  if (kopf && inhalt && inhalt.hidden) {
+    setzeKlapp(kopf, klapp, inhalt, true);
+  }
+}
+
+/**
+ * Filter auf eine Adressgruppe (Bestand oder ausgegeben/Trace-Stil).
+ * @returns {boolean} Gruppe hat sichtbare Treffer
+ */
+function _kopfFilterAdressGruppe(gruppe, f) {
+  if (typeof gruppe.baueUtxos === "function") {
+    try { gruppe.baueUtxos(); } catch (_) { /* ignore */ }
+  }
+  const leaves = [...gruppe.querySelectorAll(
+    ":scope > .adress-utxos > .utxo-zeile, :scope > .trace-utxos > .utxo-wurzel",
+  )];
+  // Fallback, falls verschachtelt anders
+  const liste = leaves.length
+    ? leaves
+    : [...gruppe.querySelectorAll(".utxo-zeile, .utxo-wurzel")];
+
+  const addr = String(gruppe.dataset.address || "").toLowerCase();
+  const groupTextOk = _kopfFilterTextOk(addr, f.terms);
+
+  let any = false;
+  for (const leaf of liste) {
+    const ok = _kopfFilterLeafOk(leaf, f, { textSchonOk: groupTextOk });
+    leaf.hidden = !ok;
+    if (ok) any = true;
+  }
+
+  // Nur Gruppen-Adresse matched, keine Betrags-/Datumsgrenzen, noch keine Leaves:
+  // Gruppe zeigen (UTXOs ggf. lazy).
+  if (!any && groupTextOk && liste.length === 0
+      && f.minSats == null && f.maxSats == null
+      && f.afterTs == null && f.beforeTs == null) {
+    any = true;
+  }
+
+  gruppe.hidden = !any;
+  if (any && liste.some((el) => !el.hidden)) {
+    _kopfFilterGruppeAufklappen(gruppe);
+  }
+  return any;
+}
+
+/**
+ * Ausgegeben-Block unter *container*: Inhalt bei Bedarf zeichnen.
+ * *daten* liefert verlauf.addresses (Wallet- oder Trace-LastData).
+ */
+function _kopfFilterStelleAusgegebenBereit(container, daten) {
+  if (!container) return null;
+  const block = container.querySelector(".ausgegeben-block");
+  if (!block) return null;
+  const inhalt = block.querySelector(".ausgegeben-inhalt");
+  const kopf = block.querySelector(".adress-kopf");
+  if (!inhalt || !kopf) return block;
+  if (!inhalt.dataset.gezeichnet) {
+    const klapp = kopf.querySelector(".klapp");
+    inhalt.dataset.gezeichnet = "ja";
+    setzeKlapp(kopf, klapp, inhalt, true);
+    const addrs = daten?.verlauf?.addresses || [];
+    inhalt.replaceChildren();
+    fuelleTraceSortiert(
+      inhalt,
+      addrs,
+      Zustand.traceSort || "volume-desc",
+    );
+  } else if (inhalt.hidden) {
+    const klapp = kopf.querySelector(".klapp");
+    setzeKlapp(kopf, klapp, inhalt, true);
+  }
+  return block;
+}
+
+function _kopfFilterAusgegebenAnwenden(ausBlock, f) {
+  if (!ausBlock) return;
+  if (f.leer) {
+    ausBlock.hidden = false;
+    for (const el of ausBlock.querySelectorAll(
+      ".adress-gruppe, .utxo-zeile, .utxo-wurzel",
+    )) {
+      el.hidden = false;
+    }
+    return;
+  }
+  let any = false;
+  for (const gruppe of ausBlock.querySelectorAll(".adress-gruppe")) {
+    if (_kopfFilterAdressGruppe(gruppe, f)) any = true;
+  }
+  for (const leaf of ausBlock.querySelectorAll(
+    ".ausgegeben-inhalt > .utxo-wurzel",
+  )) {
+    const ok = _kopfFilterLeafOk(leaf, f);
+    leaf.hidden = !ok;
+    if (ok) any = true;
+  }
+  ausBlock.hidden = !any;
+}
+
+function _kopfFilterRootLeeren(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll(
+    ".adress-gruppe, .utxo-zeile, .utxo-wurzel, .ausgegeben-block, .trace-fokus",
+  )) {
+    el.hidden = false;
+  }
+}
+
+function wendeKopfFilterWalletAn(f) {
+  const root = $("#ansicht-wallet");
+  if (!root) return;
+
+  if (f.leer) {
+    _kopfFilterRootLeeren(root);
+    return;
+  }
+
+  for (const gruppe of root.querySelectorAll("#adress-koerper .adress-gruppe")) {
+    _kopfFilterAdressGruppe(gruppe, f);
+  }
+
+  const ausBlock = _kopfFilterStelleAusgegebenBereit(
+    $("#wallet-ausgegeben") || root,
+    Zustand._walletUtxoDaten,
+  );
+  _kopfFilterAusgegebenAnwenden(ausBlock, f);
+}
+
+/** Herkunft tracen: Bestand (#trace-liste) + ausgegeben + Fokus-UTXO. */
+function wendeKopfFilterTraceAn(f) {
+  const root = $("#ansicht-trace");
+  const liste = $("#trace-liste");
+  if (!root || !liste) return;
+
+  if (f.leer) {
+    _kopfFilterRootLeeren(root);
+    return;
+  }
+
+  // Adressgruppen (Volumen-Sortierung)
+  for (const gruppe of liste.querySelectorAll(":scope > .adress-gruppe")) {
+    _kopfFilterAdressGruppe(gruppe, f);
+  }
+
+  // Flache UTXO-Wurzeln (Alter-Sortierung) und Fokus-Hülle
+  for (const leaf of liste.querySelectorAll(":scope > .utxo-wurzel")) {
+    const ok = _kopfFilterLeafOk(leaf, f);
+    leaf.hidden = !ok;
+  }
+  for (const fokus of liste.querySelectorAll(":scope > .trace-fokus")) {
+    const wurzel = fokus.querySelector(".utxo-wurzel");
+    if (!wurzel) {
+      fokus.hidden = true;
+      continue;
+    }
+    const ok = _kopfFilterLeafOk(wurzel, f);
+    fokus.hidden = !ok;
+    wurzel.hidden = false;
+  }
+
+  const ausBlock = _kopfFilterStelleAusgegebenBereit(liste, Zustand.traceLastData);
+  _kopfFilterAusgegebenAnwenden(ausBlock, f);
+}
+
+function wendeKopfFilterAn() {
+  const feld = $("#kopf-filter");
+  const f = parseKopfFilter(feld && !feld.disabled ? feld.value : "");
+  if (Zustand.ansicht === "wallet") {
+    wendeKopfFilterWalletAn(f);
+    // Trace-DOM zurücksetzen, falls zuvor gefiltert
+    _kopfFilterRootLeeren($("#ansicht-trace"));
+    return;
+  }
+  if (Zustand.ansicht === "trace") {
+    wendeKopfFilterTraceAn(f);
+    _kopfFilterRootLeeren($("#ansicht-wallet"));
+    return;
+  }
+  const leer = {
+    leer: true, terms: [], minSats: null, maxSats: null,
+    afterTs: null, beforeTs: null,
+  };
+  wendeKopfFilterWalletAn(leer);
+  wendeKopfFilterTraceAn(leer);
+}
+
+let _kopfFilterTimer = null;
+function planeKopfFilter() {
+  if (_kopfFilterTimer) clearTimeout(_kopfFilterTimer);
+  _kopfFilterTimer = setTimeout(() => {
+    _kopfFilterTimer = null;
+    wendeKopfFilterAn();
+  }, 150);
+}
+
+function bindeKopfFilter() {
+  const feld = $("#kopf-filter");
+  if (!feld || feld.dataset.gebunden === "1") return;
+  feld.dataset.gebunden = "1";
+  feld.addEventListener("input", planeKopfFilter);
+  feld.addEventListener("search", planeKopfFilter);
+  feld.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      feld.value = "";
+      wendeKopfFilterAn();
+      feld.blur();
+    }
+  });
 }
 
 const LLM_TAKT_MS = 30000;
@@ -14966,8 +15398,8 @@ function formatKursTooltip(preis) {
 }
 
 function zeichneKursPille() {
-  const status = $("#quelle-status");
-  if (!status) return;
+  const pillen = $("#quelle-pillen") || $("#quelle-status");
+  if (!pillen) return;
   const preis = Zustand.kurs;
   const stufe = preis && Number(preis.amount) > 0 ? "gut" : "neutral";
   const neu = pille(stufe, formatKursLabel(preis));
@@ -14982,8 +15414,8 @@ function zeichneKursPille() {
     return;
   }
   const llm = $("#llm-pille");
-  if (llm) status.insertBefore(neu, llm);
-  else status.append(neu);
+  if (llm) pillen.insertBefore(neu, llm);
+  else pillen.append(neu);
   if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
 }
 
@@ -15084,15 +15516,15 @@ function aktualisiereFiatAnzeigen() {
 }
 
 function zeichneLlmPille() {
-  const status = $("#quelle-status");
-  if (!status) return;
+  const pillen = $("#quelle-pillen") || $("#quelle-status");
+  if (!pillen) return;
   const s = Zustand.llmStatus || Zustand.config?.llm || {};
   const neu = pille(s.pille || "neutral", übersetzeLlmLabel(s.pille_label) || "LLM");
   neu.id = "llm-pille";
   neu.title = übersetzeLlmLabel(s.tooltip) || t("settings.llm.notConfigured");
   const alt = $("#llm-pille");
   if (alt) alt.replaceWith(neu);
-  else status.append(neu);
+  else pillen.append(neu);
 }
 
 function übersetzeLlmLabel(roh) {
@@ -16554,6 +16986,8 @@ async function start() {
       ladeCacheDashboard();
     });
   }
+  bindeKopfFilter();
+  aktualisiereKopfFilterFuerAnsicht();
   $("#privatsphaere-entfernen").addEventListener("click", verwerfeErstenXpub);
   $("#privatsphaere-ok").addEventListener("click", akzeptiereOhneSicherenNode);
   $("#oeffentliche-electrum-nein").addEventListener("click", lehneOeffentlicheElectrumAb);

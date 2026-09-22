@@ -266,8 +266,23 @@
       </div>
     </div>
     <div id="quelle-status" class="quelle" aria-live="polite">
-      <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
-      <span id="llm-pille" class="pille pille-neutral">LLM</span>
+      <!-- Globaler Listen-Filter (MVP: immer inaktiv; Aktivierung schrittweise). -->
+      <label class="kopf-filter-wrap" for="kopf-filter">
+        <span class="visually-hidden" data-i18n="header.filterAria">Listen filtern</span>
+        <input type="search" id="kopf-filter" class="kopf-filter"
+               disabled
+               autocomplete="off" spellcheck="false"
+               data-i18n-placeholder="header.filterPlaceholder"
+               data-i18n-title="header.filterTitleDisabled"
+               placeholder="Filtern…"
+               title="Filter noch nicht aktiv — kommt schrittweise für filterbare Ansichten."
+               aria-disabled="true">
+      </label>
+      <div id="quelle-pillen" class="quelle-pillen" role="group"
+           data-i18n-aria-label="header.pillsAria" aria-label="Status">
+        <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
+        <span id="llm-pille" class="pille pille-neutral">LLM</span>
+      </div>
     </div>
     <div class="kopf-lang">
       <button type="button" id="log-anzeige" class="lang-knopf log-knopf aktiv"
