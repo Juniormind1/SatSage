@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Login · Dialog:** Falsches Passwort bleibt im Anmelde-Dialog („Passwort falsch.“) — keine rohe JSON-/Fehlerseite mehr. Nach korrektem Passwort Fortschritt „Passwort korrekt — Entschlüsselung läuft…“ (Auth und Unlock getrennt; spürbar v. a. im PyInstaller-Build).
 - **UI · Englisch:** Hardcodierte Production-GUI-Texte (Steuerjahr, Herkunft, Scans, Cache, Wallets, Datenquellen, Importe, Assistent, QR-Atem-Witze u. a.) über Locales `de.json`/`en.json` und `t()` verdrahtet — inkl. fehlender Trace-Sort-Keys und „Lokalen Core übernehmen“.
 - **Tests · .env-Scramble:** Unittests schreiben/lesen mit festem Passwort `tralala123` (scramble + descramble); kein Roh-`read_text` mehr auf Cipher-`.env`. `main._load_dotenv` liest scrambled Dateien mit Session-Key.
 - **Sicherheit · `.satsage-password`:** aus dem Git-Index entfernt und in `.gitignore` — Login-Hash gehört nie ins Repo.

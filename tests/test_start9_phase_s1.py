@@ -183,7 +183,62 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertIn("StartOS", html)
         self.assertIn("Actions &amp; Config", html)
         self.assertIn('class="karte"', html)
+        # AJAX-Login: Fehler und Fortschritt bleiben im Dialog.
+        self.assertIn('id="login-form"', html)
+        self.assertIn('id="login-meldung"', html)
+        self.assertIn("/api/auth/login", html)
+        self.assertIn("phase", html)
 
+    def test_login_falsches_passwort_bleibt_json(self):
+        """Kein HTML-Fehlerdokument — Dialog kann die Meldung inline zeigen."""
+        self.setup_password()
+        status, body, _ = self.request(
+            "/api/auth/login", method="POST", host="remote.example",
+            data={"password": "voellig-falsch"},
+        )
+        self.assertEqual(status, 403)
+        self.assertIsInstance(body, dict)
+        self.assertIn("error", body)
+        self.assertIn("falsch", body["error"].lower())
+
+    def test_login_phase_auth_dann_unlock(self):
+        """Zwei Schritte: Session sofort, Unlock danach (Fortschrittsmeldung)."""
+        self.setup_password()
+        # Server-Neustart simulieren: File-Key weg, Session weg.
+        try:
+            from core import env_scramble as sc_mod
+            sc_mod.clear_session_key()
+        except Exception:
+            pass
+        self.state.env_scramble_unlocked = False
+        with self.state._auth_lock:
+            self.state.sessions.clear()
+        # Loopback: Allowlist steckt in der noch gesperrten .env.
+        status, payload, headers = self.request(
+            "/api/auth/login", method="POST",
+            data={"password": "tralala123", "phase": "auth"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload.get("ok"))
+        self.assertTrue(payload.get("authenticated"))
+        cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
+        self.assertTrue(cookie.startswith("satsage_session="))
+        # Scramble aktiv → Unlock noch nötig
+        self.assertTrue(payload.get("unlock_needed"), payload)
+        status2, payload2, _ = self.request(
+            "/api/auth/login", method="POST",
+            cookie=cookie,
+            data={"password": "tralala123", "phase": "unlock"},
+        )
+        self.assertEqual(status2, 200, payload2)
+        self.assertTrue(payload2.get("unlocked") or payload2.get("ok"))
+        scramble = payload2.get("env_scramble") or {}
+        self.assertFalse(scramble.get("locked", False))
+
+    def test_login_public_assets_ohne_auth(self):
+        self.setup_password()
+        self.state.managed_by = "start9"
+        opener = urllib.request.build_opener(_NoRedirect)
         logo = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/img/sat-logo.png",
             method="GET",

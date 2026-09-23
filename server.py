@@ -170,9 +170,151 @@ button{
   font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.03em;cursor:pointer;
 }
 button:hover{filter:brightness(1.08)}
+button:disabled{opacity:.65;cursor:wait;filter:none}
+.meldung{
+  margin:14px 0 0;padding:10px 12px;border-radius:var(--r);font-size:13px;line-height:1.45;
+  border:1px solid var(--linie);background:var(--flaeche-2);color:var(--gedaempft);
+}
+.meldung[hidden]{display:none!important}
+.meldung-krit{
+  border-color:#c45c4a;background:rgba(196,92,74,.12);color:var(--text);font-weight:600;
+}
+.meldung-gut{
+  border-color:#3d8f6e;background:rgba(61,143,110,.12);color:var(--text);
+}
+.meldung-warn{
+  border-color:var(--akzent);background:var(--akzent-zart);color:var(--text);
+}
 .fuss{margin-top:18px;font-size:12px}
 .fuss a{color:var(--akzent);text-decoration:none}
 .fuss a:hover{text-decoration:underline}
+""".strip()
+
+# Login ohne app.js: Form per fetch, Fehler im Dialog, Fortschritt bei Unlock.
+LOGIN_PAGE_JS = r"""
+(function () {
+  var T = __LOGIN_T__;
+  function safeNext() {
+    try {
+      var n = new URLSearchParams(location.search).get("next") || "/";
+      if (n.charAt(0) !== "/" || n.indexOf("//") === 0) return "/";
+      return n;
+    } catch (e) {
+      return "/";
+    }
+  }
+  function $(sel, root) {
+    return (root || document).querySelector(sel);
+  }
+  function setMsg(el, text, art) {
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.className = "meldung" + (art ? " meldung-" + art : "");
+  }
+  function mapError(msg) {
+    var s = String(msg || "");
+    if (/falsch|wrong|incorrect|invalid password/i.test(s)) return T.passwort_falsch;
+    if (/viele|rate|later|später|spaeter/i.test(s)) return T.zu_viele;
+    if (/überein|ueberein|match|leer|empty/i.test(s)) return T.mismatch;
+    return s || T.fehler;
+  }
+  async function postJson(url, body) {
+    var res = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    var data = {};
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = {};
+    }
+    if (!res.ok) {
+      var err = new Error((data && data.error) || res.statusText || T.fehler);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+  function bindLogin(form) {
+    if (!form) return;
+    var msg = $("#login-meldung");
+    var btn = form.querySelector('button[type="submit"]');
+    var pw = form.querySelector("#password");
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var password = pw ? String(pw.value || "") : "";
+      if (!password) {
+        setMsg(msg, T.passwort_falsch, "krit");
+        return;
+      }
+      if (btn) btn.disabled = true;
+      setMsg(msg, T.pruefen, "warn");
+      postJson("/api/auth/login", { password: password, phase: "auth" })
+        .then(function (data) {
+          var need =
+            data &&
+            (data.unlock_needed === true ||
+              (data.env_scramble && data.env_scramble.locked));
+          if (need) {
+            setMsg(msg, T.entschluesseln, "gut");
+            return postJson("/api/auth/login", {
+              password: password,
+              phase: "unlock",
+            });
+          }
+          return data;
+        })
+        .then(function () {
+          setMsg(msg, T.fertig, "gut");
+          location.href = safeNext();
+        })
+        .catch(function (err) {
+          setMsg(msg, mapError(err && err.message), "krit");
+          if (btn) btn.disabled = false;
+          if (pw) {
+            pw.focus();
+            try {
+              pw.select();
+            } catch (e) {}
+          }
+        });
+    });
+  }
+  function bindSetup(form) {
+    if (!form) return;
+    var msg = $("#login-meldung");
+    var btn = form.querySelector('button[type="submit"]');
+    var a = form.querySelector("#new-password");
+    var b = form.querySelector("#confirm-password");
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var password = a ? String(a.value || "") : "";
+      var confirm = b ? String(b.value || "") : "";
+      if (!password || password !== confirm) {
+        setMsg(msg, T.mismatch, "krit");
+        return;
+      }
+      if (btn) btn.disabled = true;
+      setMsg(msg, T.einrichten, "warn");
+      postJson("/api/auth/setup", { password: password, confirm: confirm })
+        .then(function () {
+          setMsg(msg, T.fertig, "gut");
+          location.href = safeNext();
+        })
+        .catch(function (err) {
+          setMsg(msg, mapError(err && err.message), "krit");
+          if (btn) btn.disabled = false;
+        });
+    });
+  }
+  bindLogin($("#login-form"));
+  bindSetup($("#setup-form"));
+})();
 """.strip()
 
 
@@ -333,6 +475,15 @@ _LOGIN_TEXTE = {
             "<strong>Actions &amp; Config</strong>."
         ),
         "hinweis_umbrel": "Umbrel zeigt dieses Passwort in den App-Details von SatSage an.",
+        # Client-JS (Login-Dialog, kein app.js)
+        "passwort_falsch": "Passwort falsch.",
+        "pruefen": "Passwort wird geprüft…",
+        "entschluesseln": "Passwort korrekt — Entschlüsselung läuft…",
+        "fertig": "Bereit — öffne SatSage…",
+        "einrichten": "Passwort wird gesetzt und Konfiguration geschützt…",
+        "zu_viele": "Zu viele Fehlversuche. Später erneut versuchen.",
+        "mismatch": "Passwörter stimmen nicht überein oder sind leer.",
+        "fehler": "Anmeldung fehlgeschlagen.",
     },
     "en": {
         "titel": "SatSage – Sign in",
@@ -356,8 +507,44 @@ _LOGIN_TEXTE = {
             "<strong>Actions &amp; Config</strong>."
         ),
         "hinweis_umbrel": "Umbrel shows this password in the SatSage app details.",
+        "passwort_falsch": "Wrong password.",
+        "pruefen": "Checking password…",
+        "entschluesseln": "Password correct — decrypting…",
+        "fertig": "Ready — opening SatSage…",
+        "einrichten": "Setting password and protecting configuration…",
+        "zu_viele": "Too many failed attempts. Try again later.",
+        "mismatch": "Passwords do not match or are empty.",
+        "fehler": "Sign-in failed.",
     },
 }
+
+
+def _login_js_texte(t: dict) -> dict:
+    """Untermenge der Login-Texte für das eingebettete Anmelde-Skript."""
+    keys = (
+        "passwort_falsch",
+        "pruefen",
+        "entschluesseln",
+        "fertig",
+        "einrichten",
+        "zu_viele",
+        "mismatch",
+        "fehler",
+    )
+    return {k: t[k] for k in keys if k in t}
+
+
+def _unlock_needed_after_auth(state) -> bool:
+    """Ob nach Login-Auth noch File-Key/Scramble-Unlock nötig ist."""
+    if not _env_scramble_erlaubt(state):
+        return False
+    st = _env_scramble_status(state)
+    if st.get("locked"):
+        return True
+    # Passwort gesetzt, .env noch Klartext → Unlock scramblt nach.
+    if st.get("allowed") and st.get("plain_env_present"):
+        return True
+    return False
 
 
 def _sprache_aus_accept_language(header: str | None) -> str | None:
@@ -8138,7 +8325,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Set-Cookie", self._pending_cookie)
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:",
             )
             self.end_headers()
             if self.command != "HEAD":
@@ -8457,7 +8647,7 @@ class Handler(BaseHTTPRequestHandler):
             setup = (
                 f"<h2>{t['ersteinrichtung']}</h2>"
                 f"<p>{t['nur_loopback']}</p>"
-                '<form action="/api/auth/setup" method="post">'
+                '<form id="setup-form" action="/api/auth/setup" method="post">'
                 f'<label for="new-password">{t["neues_passwort"]}</label>'
                 '<input id="new-password" name="password" type="password" '
                 'autocomplete="new-password" required autofocus>'
@@ -8477,7 +8667,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"<h1>{t['anmelden']}</h1>"
                 f"<p>{t['passwort_eingeben']}</p>"
                 f"{plattform_hinweis}"
-                '<form action="/api/auth/login" method="post">'
+                '<form id="login-form" action="/api/auth/login" method="post">'
                 f'<label for="password">{t["passwort"]}</label>'
                 '<input id="password" name="password" type="password" '
                 'autocomplete="current-password" required autofocus>'
@@ -8488,6 +8678,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"<h1>{t['willkommen']}</h1>"
                 f"<p>{t['noch_kein_passwort']}</p>"
             )
+        js = LOGIN_PAGE_JS.replace(
+            "__LOGIN_T__",
+            json.dumps(_login_js_texte(t), ensure_ascii=False),
+        )
         body = (
             f'<!doctype html><html lang="{lang}">'
             "<head><meta charset=\"utf-8\">"
@@ -8509,8 +8703,11 @@ class Handler(BaseHTTPRequestHandler):
             "<span class=\"marke-zusatz\">know your sats</span>"
             "</div></div>"
             f"{inhalt}{setup}"
+            '<p id="login-meldung" class="meldung" hidden role="status" aria-live="polite"></p>'
             f'<p class="fuss"><a href="/api/health">{t["status_pruefen"]}</a></p>'
-            "</main></body></html>"
+            "</main>"
+            f"<script>{js}</script>"
+            "</body></html>"
         ).encode("utf-8")
         self._send(200, body, "text/html; charset=utf-8")
 
@@ -8535,28 +8732,62 @@ class Handler(BaseHTTPRequestHandler):
                 self._fehler(429, "Zu viele Fehlversuche. Später erneut versuchen.")
                 return True
             try:
-                password = str(self._body().get("password") or "")
+                body = self._body()
+                password = str(body.get("password") or "")
+                phase = str(body.get("phase") or "full").strip().lower()
             except ApiError as exc:
                 self._fehler(exc.status, exc.message)
+                return True
+            is_form = (
+                (self.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+                == "application/x-www-form-urlencoded"
+            )
+            # phase=unlock: Session aus phase=auth; Passwort nur für File-Key
+            # (kein zweites Argon2 — spart Zeit im PyInstaller-Build).
+            if phase == "unlock":
+                if not self._session_ok():
+                    self._fehler(403, "Anmeldung erforderlich.")
+                    return True
+                if not password:
+                    self._fehler(400, "Passwort fehlt.")
+                    return True
+                try:
+                    _scramble_unlock(self.state, password)
+                except Exception as exc:
+                    self._fehler(403, f"Konfiguration entsperren fehlgeschlagen: {exc}")
+                    return True
+                self._json(200, {
+                    "ok": True,
+                    "authenticated": True,
+                    "unlocked": True,
+                    "env_scramble": _env_scramble_status(self.state),
+                })
                 return True
             if not _verify_password(password, _password_hash(self.state)):
                 self._record_login_failure()
                 self._fehler(403, "Passwort ist falsch.")
                 return True
             self._login_succeeded()
-            # File-Key aus demselben Passwort (gobbledigook → RAM).
-            try:
-                _scramble_unlock(self.state, password)
-            except Exception as exc:
-                self._fehler(403, f"Konfiguration entsperren fehlgeschlagen: {exc}")
-                return True
-            if (self.headers.get("Content-Type") or "").split(";", 1)[0].lower() == "application/x-www-form-urlencoded":
+            # JSON phase=auth: Session sofort, Unlock folgt als zweiter Request
+            # (Login-Dialog kann „Passwort korrekt — Entschlüsselung…“ zeigen).
+            # Form-POST und phase=full: Unlock im selben Schritt (kein JS / API).
+            defer_unlock = (not is_form) and phase == "auth"
+            if not defer_unlock:
+                try:
+                    _scramble_unlock(self.state, password)
+                except Exception as exc:
+                    self._fehler(403, f"Konfiguration entsperren fehlgeschlagen: {exc}")
+                    return True
+            if is_form:
                 self._redirect("/")
             else:
+                scramble = _env_scramble_status(self.state)
+                unlock_needed = defer_unlock and _unlock_needed_after_auth(self.state)
                 self._json(200, {
                     "ok": True,
                     "authenticated": True,
-                    "env_scramble": _env_scramble_status(self.state),
+                    "unlock_needed": unlock_needed,
+                    "env_scramble": scramble,
                 })
             return True
         if pfad == "/api/auth/setup" and methode == "POST":

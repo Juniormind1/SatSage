@@ -1,14 +1,14 @@
 {
-  "width": 983,
-  "height": 712,
+  "width": 832,
+  "height": 610,
   "text_pos": [
-    385,
-    684
+    310,
+    582
   ],
   "source": "logo.jpg",
   "logo_size": [
-    951,
-    640
+    800,
+    538
   ],
   "scaled_down": false
 }
