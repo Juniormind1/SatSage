@@ -705,8 +705,8 @@ def _run_tx_oriented_followups(
 ):
     """Führt die transaktionsorientierte Folge-Analyse für Vorgänger-Txs aus."""
     from core.jobs import Cancelled
-    # Late: analyze_tx bleibt bis Slice-4-Schritt 3 in analyze.py.
-    from analyze import analyze_tx
+    # Late: vermeidet Importzyklus tx_utxo_analyze ↔ utxo_ingress_report.
+    from core.tx_utxo_analyze import analyze_tx
 
     preds = [t for t in sorted(internal_predecessors) if t != current_txid]
     gesamt = len(preds)
