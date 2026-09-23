@@ -24,7 +24,7 @@ def _unlock_needed_after_auth(state) -> bool:
 
 def _env_scramble_erlaubt(state) -> bool:
     """Phase 1: kein Scramble unter Umbrel/Start9/Specter-managed."""
-    from server import _NODE_MANAGED
+    from httpserver.app_state import _NODE_MANAGED
 
     return getattr(state, "managed_by", None) not in _NODE_MANAGED and (
         getattr(state, "managed_by", None) != "specter"
@@ -146,7 +146,7 @@ def _seed_managed_password(state) -> None:
         _verify_password,
         _write_password_hash,
     )
-    from server import _MANAGED_PLATTFORM, _NODE_MANAGED
+    from httpserver.app_state import _MANAGED_PLATTFORM, _NODE_MANAGED
 
     bootstrap = os.environ.get("SATSAGE_BOOTSTRAP_PASSWORD", "")
     if state.managed_by not in _NODE_MANAGED and not bootstrap:

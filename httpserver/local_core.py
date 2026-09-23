@@ -124,7 +124,7 @@ def _discover_local_core_cached(werte: dict | None = None):
 
 def _local_core_status_for_api(state: AppState) -> dict | None:
     """Erkennung für die Datenquellen-UI — ohne Secrets, ohne Managed-Modi."""
-    from server import _MANAGED_MODI
+    from httpserver.app_state import _MANAGED_MODI
     from core import local_bitcoind as local_core
 
     if state.managed_by in _MANAGED_MODI:
@@ -213,7 +213,8 @@ def _datenquellen_config_gesperrt(
     aktion: str = "speichern",
 ) -> None:
     """Schützt Specter komplett, StartOS/Umbrel nur ihre Bridge-Quellen."""
-    from server import ApiError, _NODE_MANAGED
+    from server import ApiError
+    from httpserver.app_state import _NODE_MANAGED
 
     if state.managed_by == "specter":
         raise ApiError(403, "Datenquellen werden von Specter verwaltet und können hier nicht geändert werden.")

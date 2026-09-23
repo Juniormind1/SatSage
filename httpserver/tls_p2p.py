@@ -15,7 +15,8 @@ def _persist_tls_auto(state: AppState, quellen: list, *, on_log=None) -> list:
     """
     from dataclasses import replace
 
-    from server import _NODE_MANAGED, source_mod
+    from httpserver.app_state import _NODE_MANAGED
+    from server import source_mod
 
     if state.managed_by in _NODE_MANAGED:
         return quellen
