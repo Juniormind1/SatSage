@@ -18,9 +18,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import analyze
 import labels
 import main
+from core import utxo_ingress_report
 from core import utxo_origin
 from core import utxo_report
 from core import xpub_cache
@@ -694,7 +694,7 @@ def trace_utxo(
     # das Anschaffungsdatum allein aus dem Ingress-Cache und weist die Zeile
     # sonst weiter als "nur Output-Datum" aus. Dieselbe Funktion benutzt das
     # CLI — die Einträge beider Wege sind damit identisch.
-    analyze.persist_utxo_ingress(
+    utxo_ingress_report.persist_utxo_ingress(
         roh,
         txid=roh.get("txid") or main._normalize_txid(txid),
         vout=int(roh.get("vout", vout) or 0),
@@ -718,9 +718,9 @@ def trace_utxo(
     steuer_ok = trace_cache.baum_ist_steuer_ausreichend(baum_probe)
     juengste = None
     if voll or steuer_ok:
-        extern = analyze._youngest_external_ingress(roh)
-        wallet_eingang = analyze._youngest_wallet_ingress(roh, wallet)
-        horizon = analyze._youngest_tax_horizon(roh)
+        extern = utxo_ingress_report._youngest_external_ingress(roh)
+        wallet_eingang = utxo_ingress_report._youngest_wallet_ingress(roh, wallet)
+        horizon = utxo_ingress_report._youngest_tax_horizon(roh)
         if extern and extern.get("time_ts"):
             juengste = int(extern["time_ts"])
         elif wallet_eingang and wallet_eingang.get("time_ts"):
