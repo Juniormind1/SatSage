@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import main
+import core.chain_sources as chain_sources
 from core import jobs as jobs_mod
 from core.jobs import Fortschritt, Job, JobRegistry
 from display import (
@@ -355,7 +356,7 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         )
 
     def test_p2p_abgeschaltet_keine_probe(self):
-        with patch.object(main, "_setup_bip158_client") as setup:
+        with patch.object(chain_sources, "_setup_bip158_client") as setup:
             self.assertIsNone(
                 main._try_bip158_backend(self.args, {"BIP158_P2P": "0"})
             )
@@ -364,7 +365,7 @@ class TestDatenquelleImJobLog(unittest.TestCase):
 
     def test_ohne_onion_eintraege_keine_onion_meldung(self):
         """Nicht konfiguriert ≠ fehlgeschlagen — sonst steht die Zeile dreimal im Log."""
-        with patch.object(main, "_setup_public_onion_rotation") as setup:
+        with patch.object(chain_sources, "_setup_public_onion_rotation") as setup:
             self.assertIsNone(main._try_public_onion_fulcrum(self.args, {}))
         setup.assert_not_called()
         self.assertFalse(
@@ -372,12 +373,12 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         )
 
     def test_kette_ohne_eigenen_node_ohne_bestaetigung_keine_oeffentlichen(self):
-        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
-            main, "_try_bip158_backend", return_value=None
+        with patch.object(chain_sources, "_try_own_fulcrum_client", return_value=None), patch.object(
+            chain_sources, "_try_bip158_backend", return_value=None
         ), patch.object(
-            main, "_try_public_onion_fulcrum"
+            chain_sources, "_try_public_onion_fulcrum"
         ) as onion, patch.object(
-            main, "_setup_public_clearnet_fulcrum"
+            chain_sources, "_setup_public_clearnet_fulcrum"
         ) as clear:
             self.assertIsNone(
                 main._try_data_source_priority_chain(
@@ -395,10 +396,10 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         pool = MagicMock()
         pool.__len__.return_value = 1
         pool.client_at.return_value = client
-        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
-            main, "_try_bip158_backend", return_value=None
+        with patch.object(chain_sources, "_try_own_fulcrum_client", return_value=None), patch.object(
+            chain_sources, "_try_bip158_backend", return_value=None
         ), patch.object(
-            main, "_try_public_onion_fulcrum", return_value=None
+            chain_sources, "_try_public_onion_fulcrum", return_value=None
         ), patch.object(
             main, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
         ):
@@ -418,10 +419,10 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         pool = MagicMock()
         pool.__len__.return_value = 1
         pool.client_at.return_value = client
-        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
-            main, "_try_bip158_backend", return_value=None
+        with patch.object(chain_sources, "_try_own_fulcrum_client", return_value=None), patch.object(
+            chain_sources, "_try_bip158_backend", return_value=None
         ), patch.object(
-            main, "_try_public_onion_fulcrum", return_value=None
+            chain_sources, "_try_public_onion_fulcrum", return_value=None
         ), patch.object(
             main, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
         ), patch("interact.prompt_yes_no", return_value=True):
@@ -458,7 +459,7 @@ class TestOnionLatenzGate(unittest.TestCase):
         main._reset_quelle_log()
         self.logs: list[str] = []
         self._log = patch.object(
-            main, "_log_quelle", side_effect=lambda t: self.logs.append(t)
+            chain_sources, "_log_quelle", side_effect=lambda t: self.logs.append(t)
         )
         self._log.start()
         self.addCleanup(self._log.stop)
@@ -483,9 +484,9 @@ class TestOnionLatenzGate(unittest.TestCase):
         pool = MagicMock()
         bip = {"client": MagicMock()}
         with patch.object(
-            main, "_measure_onion_get_history_latency", return_value=12.0
+            chain_sources, "_measure_onion_get_history_latency", return_value=12.0
         ), patch.object(
-            main, "_try_bip158_backend", return_value=bip
+            chain_sources, "_try_bip158_backend", return_value=bip
         ) as try_bip:
             gewählt = main._nach_oeffentlichem_onion_latenz(
                 pool,
@@ -503,9 +504,9 @@ class TestOnionLatenzGate(unittest.TestCase):
     def test_zu_langsam_ohne_bip158_warnt_und_behaelt_onion(self):
         pool = MagicMock()
         with patch.object(
-            main, "_measure_onion_get_history_latency", return_value=15.0
+            chain_sources, "_measure_onion_get_history_latency", return_value=15.0
         ), patch.object(
-            main, "_try_bip158_backend", return_value=None
+            chain_sources, "_try_bip158_backend", return_value=None
         ):
             gewählt = main._nach_oeffentlichem_onion_latenz(
                 pool,
@@ -523,9 +524,9 @@ class TestOnionLatenzGate(unittest.TestCase):
     def test_zu_langsam_interaktiv_abbruch(self):
         pool = MagicMock()
         with patch.object(
-            main, "_measure_onion_get_history_latency", return_value=20.0
+            chain_sources, "_measure_onion_get_history_latency", return_value=20.0
         ), patch.object(
-            main, "_try_bip158_backend", return_value=None
+            chain_sources, "_try_bip158_backend", return_value=None
         ), patch("interact.prompt_yes_no", return_value=False):
             gewählt = main._nach_oeffentlichem_onion_latenz(
                 pool,
@@ -541,7 +542,7 @@ class TestOnionLatenzGate(unittest.TestCase):
     def test_rpc_only_ueberspringt_gate(self):
         pool = MagicMock()
         with patch.object(
-            main, "_measure_onion_get_history_latency"
+            chain_sources, "_measure_onion_get_history_latency"
         ) as mess:
             gewählt = main._nach_oeffentlichem_onion_latenz(
                 pool,
@@ -556,14 +557,14 @@ class TestOnionLatenzGate(unittest.TestCase):
     def test_kette_onion_zu_langsam_landet_bei_bip158(self):
         pool = MagicMock()
         bip = {"client": MagicMock()}
-        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
-            main, "_try_bip158_backend", side_effect=[None, bip]
+        with patch.object(chain_sources, "_try_own_fulcrum_client", return_value=None), patch.object(
+            chain_sources, "_try_bip158_backend", side_effect=[None, bip]
         ), patch.object(
-            main, "_setup_public_clearnet_fulcrum", return_value=None,
+            chain_sources, "_setup_public_clearnet_fulcrum", return_value=None,
         ), patch.object(
-            main, "_try_public_onion_fulcrum", return_value=pool
+            chain_sources, "_try_public_onion_fulcrum", return_value=pool
         ), patch.object(
-            main, "_measure_onion_get_history_latency", return_value=11.0
+            chain_sources, "_measure_onion_get_history_latency", return_value=11.0
         ):
             quelle, backend, _ = main._try_data_source_priority_chain(
                 self.args, self.env, include_bip158=True
@@ -575,12 +576,12 @@ class TestOnionLatenzGate(unittest.TestCase):
     def test_kette_clearnet_vor_oeffentlichem_onion(self):
         clear = MagicMock()
         onion = MagicMock()
-        with patch.object(main, "_try_own_fulcrum_client", return_value=None), patch.object(
-            main, "_try_bip158_backend", return_value=None,
+        with patch.object(chain_sources, "_try_own_fulcrum_client", return_value=None), patch.object(
+            chain_sources, "_try_bip158_backend", return_value=None,
         ), patch.object(
-            main, "_setup_public_clearnet_fulcrum", return_value=clear,
+            chain_sources, "_setup_public_clearnet_fulcrum", return_value=clear,
         ), patch.object(
-            main, "_try_public_onion_fulcrum", return_value=onion,
+            chain_sources, "_try_public_onion_fulcrum", return_value=onion,
         ) as onion_try:
             quelle, backend, _ = main._try_data_source_priority_chain(
                 self.args, {"OEFFENTLICHE_ELECTRUM": "1"}, include_bip158=True,
@@ -592,9 +593,9 @@ class TestOnionLatenzGate(unittest.TestCase):
     def test_schnell_genug_behaelt_onion(self):
         pool = MagicMock()
         with patch.object(
-            main, "_measure_onion_get_history_latency", return_value=1.5
+            chain_sources, "_measure_onion_get_history_latency", return_value=1.5
         ), patch.object(
-            main, "_try_bip158_backend"
+            chain_sources, "_try_bip158_backend"
         ) as try_bip:
             gewählt = main._nach_oeffentlichem_onion_latenz(
                 pool,

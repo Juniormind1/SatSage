@@ -140,7 +140,7 @@ def _config_from_keys(
         use_ssl = port == 443
     proxy = None
     if host_ist_onion(host):
-        from main import _parse_tor_proxy
+        from core.chain_sources import _parse_tor_proxy
 
         proxy = _parse_tor_proxy(env)
     return CoreRpcConfig(
@@ -357,7 +357,7 @@ def _client_aus_config(
 ) -> BitcoinRpcClient | None:
     if host_ist_onion(cfg.host):
         from core.tor import stelle_tor_socks_bereit
-        from main import _parse_tor_proxy
+        from core.chain_sources import _parse_tor_proxy
 
         try:
             proxy = stelle_tor_socks_bereit(

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import main
+import core.chain_sources as chain_sources
 
 
 def _args(**kw):
@@ -29,7 +30,7 @@ class TestVerlaufPrioritaet(unittest.TestCase):
     def setUp(self):
         self.logs: list[str] = []
         self._log = patch.object(
-            main, "_log_quelle", side_effect=lambda t: self.logs.append(t)
+            chain_sources, "_log_quelle", side_effect=lambda t: self.logs.append(t)
         )
         self._log.start()
         self.addCleanup(self._log.stop)
@@ -37,14 +38,14 @@ class TestVerlaufPrioritaet(unittest.TestCase):
     def test_lan_electrs_gewinnt_ohne_bip158_oder_public(self):
         client = object()
         with patch.object(
-            main, "_resolve_own_lan_endpoint",
+            chain_sources, "_resolve_own_lan_endpoint",
             return_value=("192.168.1.10", 50001, False),
         ), patch.object(
-            main, "_try_fulcrum_endpoint", return_value=client,
+            chain_sources, "_try_fulcrum_endpoint", return_value=client,
         ) as try_ep, patch.object(
-            main, "_try_bip158_backend",
+            chain_sources, "_try_bip158_backend",
         ) as bip, patch.object(
-            main, "_try_public_onion_fulcrum",
+            chain_sources, "_try_public_onion_fulcrum",
         ) as onion:
             quelle, backend = main._try_verlauf_priority_chain(
                 _args(), {}, include_bip158=True,
@@ -60,16 +61,16 @@ class TestVerlaufPrioritaet(unittest.TestCase):
     def test_tor_electrs_wenn_lan_fehlt(self):
         client = object()
         with patch.object(
-            main, "_resolve_own_lan_endpoint", return_value=None,
+            chain_sources, "_resolve_own_lan_endpoint", return_value=None,
         ), patch.object(
-            main, "_resolve_own_tor_endpoint",
+            chain_sources, "_resolve_own_tor_endpoint",
             return_value=("abc.onion", 50001, True),
         ), patch.object(
-            main, "_require_tor_proxy", return_value=("127.0.0.1", 9050),
+            chain_sources, "_require_tor_proxy", return_value=("127.0.0.1", 9050),
         ), patch.object(
-            main, "_try_fulcrum_endpoint", return_value=client,
+            chain_sources, "_try_fulcrum_endpoint", return_value=client,
         ), patch.object(
-            main, "_try_bip158_backend",
+            chain_sources, "_try_bip158_backend",
         ) as bip:
             quelle, backend = main._try_verlauf_priority_chain(
                 _args(), {}, include_bip158=True,
@@ -82,13 +83,13 @@ class TestVerlaufPrioritaet(unittest.TestCase):
     def test_bip158_wenn_electrs_fehlt(self):
         backend = {"get_tx": lambda txid: {}, "client": MagicMock(cache_dir=None)}
         with patch.object(
-            main, "_resolve_own_lan_endpoint", return_value=None,
+            chain_sources, "_resolve_own_lan_endpoint", return_value=None,
         ), patch.object(
-            main, "_resolve_own_tor_endpoint", return_value=None,
+            chain_sources, "_resolve_own_tor_endpoint", return_value=None,
         ), patch.object(
-            main, "_try_bip158_backend", return_value=backend,
+            chain_sources, "_try_bip158_backend", return_value=backend,
         ), patch.object(
-            main, "_try_public_onion_fulcrum",
+            chain_sources, "_try_public_onion_fulcrum",
         ) as onion:
             quelle, gewählt = main._try_verlauf_priority_chain(
                 _args(), {}, include_bip158=True,
@@ -103,15 +104,15 @@ class TestVerlaufPrioritaet(unittest.TestCase):
     def test_oeffentlich_nur_mit_bestaetigung_nach_bip158(self):
         pool = object()
         with patch.object(
-            main, "_resolve_own_lan_endpoint", return_value=None,
+            chain_sources, "_resolve_own_lan_endpoint", return_value=None,
         ), patch.object(
-            main, "_resolve_own_tor_endpoint", return_value=None,
+            chain_sources, "_resolve_own_tor_endpoint", return_value=None,
         ), patch.object(
-            main, "_try_bip158_backend", return_value=None,
+            chain_sources, "_try_bip158_backend", return_value=None,
         ), patch.object(
-            main, "_try_public_onion_fulcrum", return_value=pool,
+            chain_sources, "_try_public_onion_fulcrum", return_value=pool,
         ) as onion, patch.object(
-            main, "_setup_public_clearnet_fulcrum", return_value=None,
+            chain_sources, "_setup_public_clearnet_fulcrum", return_value=None,
         ) as clear:
             self.assertIsNone(
                 main._try_verlauf_priority_chain(
@@ -134,15 +135,15 @@ class TestVerlaufPrioritaet(unittest.TestCase):
         clear_pool = object()
         onion_pool = object()
         with patch.object(
-            main, "_resolve_own_lan_endpoint", return_value=None,
+            chain_sources, "_resolve_own_lan_endpoint", return_value=None,
         ), patch.object(
-            main, "_resolve_own_tor_endpoint", return_value=None,
+            chain_sources, "_resolve_own_tor_endpoint", return_value=None,
         ), patch.object(
-            main, "_try_bip158_backend", return_value=None,
+            chain_sources, "_try_bip158_backend", return_value=None,
         ), patch.object(
-            main, "_try_public_onion_fulcrum", return_value=onion_pool,
+            chain_sources, "_try_public_onion_fulcrum", return_value=onion_pool,
         ) as onion, patch.object(
-            main, "_setup_public_clearnet_fulcrum", return_value=clear_pool,
+            chain_sources, "_setup_public_clearnet_fulcrum", return_value=clear_pool,
         ):
             quelle, backend = main._try_verlauf_priority_chain(
                 _args(), {"OEFFENTLICHE_ELECTRUM": "1"}, include_bip158=True,
@@ -153,13 +154,13 @@ class TestVerlaufPrioritaet(unittest.TestCase):
 
     def test_rpc_only_ueberspringt_bip158(self):
         with patch.object(
-            main, "_resolve_own_lan_endpoint", return_value=None,
+            chain_sources, "_resolve_own_lan_endpoint", return_value=None,
         ), patch.object(
-            main, "_resolve_own_tor_endpoint", return_value=None,
+            chain_sources, "_resolve_own_tor_endpoint", return_value=None,
         ), patch.object(
-            main, "_try_bip158_backend",
+            chain_sources, "_try_bip158_backend",
         ) as bip, patch.object(
-            main, "_try_public_electrum_fuer_verlauf", return_value=None,
+            chain_sources, "_try_public_electrum_fuer_verlauf", return_value=None,
         ):
             self.assertIsNone(
                 main._try_verlauf_priority_chain(
@@ -173,9 +174,9 @@ class TestVerlaufPrioritaet(unittest.TestCase):
     def test_setup_verlauf_explizit_bip158(self):
         backend = {"client": MagicMock()}
         with patch.object(
-            main, "_setup_bip158_client", return_value=backend,
+            chain_sources, "_setup_bip158_client", return_value=backend,
         ), patch.object(
-            main, "_load_dotenv", return_value={},
+            chain_sources, "_load_dotenv", return_value={},
         ):
             quelle, gewählt = main._setup_verlauf_client(_args(bip158=True))
         self.assertEqual(quelle, "bip158")

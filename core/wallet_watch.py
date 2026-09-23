@@ -165,6 +165,7 @@ class WalletWatchService:
 
     def _lauf(self) -> None:
         import main
+        import core.chain_sources as chain_sources
         from fulcrum import FulcrumNotifySession, address_to_scripthash
 
         state = self._state
@@ -177,7 +178,7 @@ class WalletWatchService:
                 break
             client = None
             try:
-                client = main._try_own_fulcrum_client(
+                client = chain_sources._try_own_fulcrum_client(
                     state.args_namespace(), werte,
                 )
             except Exception as exc:
@@ -640,10 +641,11 @@ class WalletWatchService:
 
 def _eigener_client_kurz(state):
     import main
+    import core.chain_sources as chain_sources
 
     werte = state.env().values()
     try:
-        return main._try_own_fulcrum_client(state.args_namespace(), werte)
+        return chain_sources._try_own_fulcrum_client(state.args_namespace(), werte)
     except Exception:
         return None
 

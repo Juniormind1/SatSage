@@ -1,7 +1,7 @@
 """
 Datenquellen: Konfiguration und Erreichbarkeit — ohne Prompts.
 
-Die automatische Priorität aus main._setup_blockchain_client ist heute
+Die automatische Priorität aus core.chain_sources._setup_blockchain_client ist heute
 implizites Verhalten. Hier wird sie beschreibbar, damit die Oberfläche zeigen
 kann, worüber gerade gefragt wird und was das für die Privatsphäre bedeutet.
 """
@@ -11,10 +11,10 @@ import random
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-import main
+import core.chain_sources as chain_sources
 from check_fulcrum_tor import ELECTRUM_SERVERS_URL, splitte_electrum_server
 
-#: Reihenfolge wie in main._setup_blockchain_client.
+#: Reihenfolge wie in core.chain_sources._setup_blockchain_client.
 PRIVACY_HIGH = "hoch"
 PRIVACY_MEDIUM = "mäßig"
 PRIVACY_LOW = "gering"
@@ -541,10 +541,10 @@ def oeffentliche_electrum_erlaubt(values: dict[str, str] | None) -> bool:
 
 def hat_oeffentliche_electrum_listen(values: dict[str, str] | None) -> bool:
     values = values or {}
-    for i in range(main.MAX_PUBLIC_ONION_SERVERS):
+    for i in range(chain_sources.MAX_PUBLIC_ONION_SERVERS):
         if values.get(f"FULCRUM_TOR_{i}", "").strip():
             return True
-    return main.ELECTRUM_SERVERS_FILE.is_file()
+    return chain_sources.ELECTRUM_SERVERS_FILE.is_file()
 
 
 def peer_aenderungen(vorher: dict | None, nachher: dict) -> list[str]:
@@ -607,9 +607,9 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     host = values.get("FULCRUM_HOST", "").strip()
     tor = values.get("FULCRUM_TOR", "").strip()
     if host:
-        host = main._normalize_fulcrum_host(host)
+        host = chain_sources._normalize_fulcrum_host(host)
     if tor:
-        tor = main._normalize_fulcrum_host(tor)
+        tor = chain_sources._normalize_fulcrum_host(tor)
     port = _int(values, "FULCRUM_PORT", 50002)
     # Anzeige: Onion nutzt FULCRUM_TOR_PORT falls gesetzt, sonst FULCRUM_PORT.
     if not host and tor:
@@ -652,7 +652,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     # --- UTXO-Set-Quelle (scantxoutset) — oft lokaler pruned Node ------------
     utxo_host = (values.get("UTXO_RPC_HOST") or "").strip()
     if utxo_host:
-        utxo_host = main._normalize_fulcrum_host(utxo_host)
+        utxo_host = chain_sources._normalize_fulcrum_host(utxo_host)
     utxo_port = _int(values, "UTXO_RPCPORT", 8332)
     utxo_user = values.get("UTXO_RPCUSER", "").strip()
     utxo_cookie = values.get("UTXO_RPC_COOKIE_FILE", "").strip()
@@ -702,7 +702,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     node = (values.get("NODE_IP") or values.get("RPCHOST")
             or values.get("BITCOIN_RPC_HOST") or "").strip()
     if node:
-        node = main._normalize_fulcrum_host(node)
+        node = chain_sources._normalize_fulcrum_host(node)
     rpc_port = _int(values, "RPCPORT", 8332)
     rpc_user = values.get("RPCUSER", "").strip()
     rpc_cookie = values.get("RPC_COOKIE_FILE", "").strip()
@@ -752,7 +752,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         ],
     ))
 
-    start = _int(values, "BIP158_START_HEIGHT", main.DEFAULT_BIP158_START_HEIGHT)
+    start = _int(values, "BIP158_START_HEIGHT", chain_sources.DEFAULT_BIP158_START_HEIGHT)
     peers = values.get("BIP158_PEERS", "").strip()
     lan_host = values.get("FULCRUM_HOST", "").strip()
     p2p_an = values.get("BIP158_P2P", "1").strip().lower() not in (
@@ -813,13 +813,13 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         felder=[],
     ))
 
-    clearnet_datei = main.ELECTRUM_SERVERS_FILE.is_file()
+    clearnet_datei = chain_sources.ELECTRUM_SERVERS_FILE.is_file()
     clearnet_anzahl = 0
     if clearnet_datei:
         try:
             from check_fulcrum_tor import load_electrum_servers
             _onions, clear = splitte_electrum_server(
-                load_electrum_servers(main.ELECTRUM_SERVERS_FILE)
+                load_electrum_servers(chain_sources.ELECTRUM_SERVERS_FILE)
             )
             clearnet_anzahl = len(clear)
         except (OSError, ValueError):
@@ -865,7 +865,7 @@ def source_needs_tor(info: SourceInfo, values: dict[str, str]) -> bool:
         roh = lan or onion
         if not roh:
             return False
-        return _host_ist_onion(main._normalize_fulcrum_host(roh))
+        return _host_ist_onion(chain_sources._normalize_fulcrum_host(roh))
     if info.key == "own_core":
         host = (
             values.get("NODE_IP")
@@ -875,7 +875,7 @@ def source_needs_tor(info: SourceInfo, values: dict[str, str]) -> bool:
         ).strip()
         if not host:
             return False
-        return _host_ist_onion(main._normalize_fulcrum_host(host))
+        return _host_ist_onion(chain_sources._normalize_fulcrum_host(host))
     if info.key == "bip158":
         lan = values.get("FULCRUM_HOST", "").strip()
         if lan and not _host_ist_onion(lan):
@@ -1030,11 +1030,11 @@ def _oeffentliche_onion_endpunkte(values: dict[str, str]) -> list[tuple[str, int
     port_default = _int(values, "FULCRUM_PORT", 50002)
     ssl_default = _flag(values, "FULCRUM_SSL", port_default != 50001)
     endpunkte: list[tuple[str, int, bool]] = []
-    for i in range(main.MAX_PUBLIC_ONION_SERVERS):
+    for i in range(chain_sources.MAX_PUBLIC_ONION_SERVERS):
         roh = values.get(f"FULCRUM_TOR_{i}", "").strip()
         if not roh:
             continue
-        host = main._normalize_fulcrum_host(roh)
+        host = chain_sources._normalize_fulcrum_host(roh)
         port = _int(values, f"FULCRUM_PORT_{i}", port_default)
         if values.get(f"FULCRUM_SSL_{i}", "").strip():
             ssl = _flag(values, f"FULCRUM_SSL_{i}", True)
@@ -1158,7 +1158,7 @@ def _pruefe_oeffentliche_electrum(
     try:
         from check_fulcrum_tor import load_electrum_servers
 
-        servers = load_electrum_servers(main.ELECTRUM_SERVERS_FILE)
+        servers = load_electrum_servers(chain_sources.ELECTRUM_SERVERS_FILE)
         _onion_liste, clear = splitte_electrum_server(servers)
     except (OSError, ValueError):
         clear = []
@@ -1390,7 +1390,7 @@ def check_reachable(
 
     log(f"Prüfe {info.name}…")
 
-    # Dieselbe Endpoint-Reihenfolge wie main._try_own_fulcrum_client
+    # Dieselbe Endpoint-Reihenfolge wie core.chain_sources._try_own_fulcrum_client
     # (LAN zuerst, dann Tor) — Tor erst starten, wenn LAN fehlt/scheitert.
     from types import SimpleNamespace
 
@@ -1401,10 +1401,10 @@ def check_reachable(
         fulcrum_no_ssl=False,
     )
     kandidaten: list[tuple[str, int, bool, tuple[str, int] | None]] = []
-    lan = main._resolve_own_lan_endpoint(args, values)
+    lan = chain_sources._resolve_own_lan_endpoint(args, values)
     if lan:
         kandidaten.append((*lan, None))
-    tor_ep = main._resolve_own_tor_endpoint(args, values)
+    tor_ep = chain_sources._resolve_own_tor_endpoint(args, values)
     # Onion-Endpoint erst einreihen, wenn kein LAN — sonst unnötiger Tor-Start.
     if tor_ep and not lan:
         host_t, port_t, ssl_t = tor_ep
@@ -1471,7 +1471,7 @@ def check_reachable(
                 tor_proxy=tor_proxy, require_listunspent=True,
             )
             # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung.
-            if not client and fehler and main.tls_should_try_opposite(fehler):
+            if not client and fehler and chain_sources.tls_should_try_opposite(fehler):
                 alt = not use_ssl
                 log(
                     f"{'TLS' if use_ssl else 'Ohne TLS'} fehlgeschlagen: "
@@ -1576,7 +1576,7 @@ def check_reachable(
     ergebnis.reachable = False
     ergebnis.error = fehler or "unbekannter Fehler"
     log(f"Verbindung fehlgeschlagen: {ergebnis.error}")
-    hinweis = main.connection_error_hint(fehler, use_ssl)
+    hinweis = chain_sources.connection_error_hint(fehler, use_ssl)
     if hinweis:
         ergebnis.note = hinweis
         log(hinweis)
