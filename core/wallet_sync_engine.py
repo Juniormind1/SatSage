@@ -147,7 +147,7 @@ def discover_wallet_scan_addresses(
     Rückgabe: (adressen, scan_end_index für Light-Rescan).
     """
     if fulcrum is not None:
-        from fulcrum import collect_used_chain_indices_fulcrum
+        from core.fulcrum_wallet import collect_used_chain_indices_fulcrum
 
         from display import is_list_abort_requested
 
@@ -247,7 +247,7 @@ def ermittle_first_seen(
             on_progress("Ermittle Wallet-Alter…")
 
     try:
-        from fulcrum import first_seen_fulcrum
+        from core.fulcrum_wallet import first_seen_fulcrum
 
         ergebnis = first_seen_fulcrum(
             fulcrum_client, sorted(addresses), on_progress=on_progress
@@ -477,7 +477,7 @@ def _mempool_pending_nach_prune(
 
 
     try:
-        from fulcrum import eigene_mempool_empfaenge, klassifiziere_utxo_spends
+        from core.fulcrum_wallet import eigene_mempool_empfaenge, klassifiziere_utxo_spends
     except Exception:
         return pruned
 

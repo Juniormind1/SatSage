@@ -165,10 +165,16 @@ class TestUtxoScan(unittest.TestCase):
             nummer = int(adresse.replace("bc1qtest", ""))
             return [{"txid": f"{nummer:064x}", "vout": 0, "value": nummer * 1000}]
 
-        self._alt = fulcrum.fetch_address_utxos_fulcrum
+        import core.fulcrum_wallet as fulcrum_wallet
+
+        self._alt = fulcrum_wallet.fetch_address_utxos_fulcrum
+        fulcrum_wallet.fetch_address_utxos_fulcrum = fake_fetch
         fulcrum.fetch_address_utxos_fulcrum = fake_fetch
         self.addCleanup(
-            lambda: setattr(fulcrum, "fetch_address_utxos_fulcrum", self._alt)
+            lambda: (
+                setattr(fulcrum_wallet, "fetch_address_utxos_fulcrum", self._alt),
+                setattr(fulcrum, "fetch_address_utxos_fulcrum", self._alt),
+            )
         )
 
     def test_gleiche_menge_mit_und_ohne_pool(self):

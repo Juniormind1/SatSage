@@ -63,7 +63,7 @@ def next_unused_receive_address_fulcrum(
     """
     if max_index is None:
         max_index = MAX_TRACE_ADDRESS_SEARCH
-    from fulcrum import collect_used_receive_indices_fulcrum
+    from core.fulcrum_wallet import collect_used_receive_indices_fulcrum
 
     used = collect_used_receive_indices_fulcrum(
         fulcrum,

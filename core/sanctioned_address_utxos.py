@@ -203,7 +203,7 @@ def _scan_sanctioned_address_utxos_parallel(
     import threading
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from fulcrum import fetch_address_utxos_fulcrum
+    from core.fulcrum_wallet import fetch_address_utxos_fulcrum
 
     addresses = sorted(sanctioned_addresses)
     if not addresses:

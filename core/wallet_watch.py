@@ -485,7 +485,7 @@ class WalletWatchService:
         addrs: list[str],
         addr_xpubs: dict[str, set[str]],
     ) -> None:
-        from fulcrum import fetch_address_utxos_fulcrum, klassifiziere_utxo_spends
+        from core.fulcrum_wallet import fetch_address_utxos_fulcrum, klassifiziere_utxo_spends
 
         client = _eigener_client_kurz(state)
         if client is None:
@@ -533,7 +533,7 @@ class WalletWatchService:
                 empfaenge: list[dict] = []
                 if pending:
                     try:
-                        from fulcrum import eigene_mempool_empfaenge
+                        from core.fulcrum_wallet import eigene_mempool_empfaenge
 
                         ctx = getattr(state, "wallet_ctx", None)
                         if ctx is not None:

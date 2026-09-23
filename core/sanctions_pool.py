@@ -393,7 +393,7 @@ def build_sanctions_fulcrum_fetchers(session) -> dict:
     (Priorität 4), unabhängig von der Wallet-Datenquelle. In beiden Fällen
     trägt der Pool den Parallel-Scan aus Menü 6.2.
     """
-    from fulcrum import fetch_address_utxos_fulcrum
+    from core.fulcrum_wallet import fetch_address_utxos_fulcrum
 
     pool, quelle, aus_cache = resolve_sanctions_preferred_pool(session.env)
     if pool is None:

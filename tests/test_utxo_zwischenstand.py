@@ -66,7 +66,7 @@ class TestGapScanMeldetUtxos(unittest.TestCase):
         gesehen = []
 
         with patch(
-            "fulcrum.fetch_address_utxos_fulcrum",
+            "core.fulcrum_wallet.fetch_address_utxos_fulcrum",
             return_value=[{"txid": txid("aa"), "vout": 0, "value": 100}],
         ):
             collect_used_chain_indices_fulcrum(
