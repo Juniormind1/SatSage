@@ -492,8 +492,9 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("starteVerlaufsscan", self.js)
         self.assertIn('id="verlauf-erheben"', self.html)
         self.assertIn("tax.historyAll", self.html)
-        # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in app.js
-        self.assertIn("tax.originAll", self.js)
+        # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in views/steuerjahr.js
+        steuer_js = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        self.assertIn("tax.originAll", steuer_js)
         self.assertIn("herkunft-alle", self.js)
         import json
         de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
