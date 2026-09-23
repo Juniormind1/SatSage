@@ -387,6 +387,7 @@ class TestOberflaeche(unittest.TestCase):
         self.html = (WEB / "index.html").read_text(encoding="utf-8")
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
         self.herkunft_js = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
+        self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
@@ -394,7 +395,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="wallet-ausgegeben"', self.html)
         self.assertIn("function zeichneAusgegeben", self.herkunft_js)
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r"if \(hatVerlauf\) \{\s*ausgegeben\.append\(zeichneAusgegeben",
         )
 
@@ -421,10 +422,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("speichereSteuerEinstellungen", self.js)
         self.assertIn("28.02.2021", self.html)
         # Folgeanalyse: ein Knopf „Herkunftslücken schließen“ (full).
-        self.assertIn('t("trace.folgeLuecken")', self.js)
-        self.assertIn('t("trace.folgeDone")', self.js)
-        self.assertIn('t("trace.folgeLueckenHint")', self.js)
-        self.assertIn('"full"', self.js)
+        self.assertIn('t("trace.folgeLuecken")', self.herkunft_js)
+        self.assertIn('t("trace.folgeDone")', self.herkunft_js)
+        self.assertIn('t("trace.folgeLueckenHint")', self.herkunft_js)
+        self.assertIn('"full"', self.herkunft_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Herkunftslücken schließen", de)
         self.assertIn("Lücken bereits geschlossen", de)
@@ -448,15 +449,15 @@ class TestOberflaeche(unittest.TestCase):
     def test_gekuerzte_werte_sind_kopierbar(self):
         self.assertIn("function macheKopierbar", self.js)
         self.assertIn("function kopiereInZwischenablage", self.js)
-        self.assertIn("macheKopierbar(kennung, utxo.key", self.js)
+        self.assertIn("macheKopierbar(kennung, utxo.key", self.wallets_js)
         self.assertIn(".kopierbar", self.css)
         self.assertIn("cursor: copy", self.css)
 
     def test_bip158_fragt_startdatum_ohne_alter(self):
         self.assertIn('id="scan-datum-dialog"', self.html)
-        self.assertIn("brauchtBip158Startdatum", self.js)
-        self.assertIn("frageScanDatum", self.js)
-        self.assertIn("2017-08-24", self.js)
+        self.assertIn("brauchtBip158Startdatum", self.wallets_js)
+        self.assertIn("frageScanDatum", self.wallets_js)
+        self.assertIn("2017-08-24", self.wallets_js)
         # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
         # konfiguriertem, aber unerreichbarem eigenem Electrum.
         self.assertIn("q.reachable === true", self.js)
@@ -598,7 +599,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"/config/wallets/cache-vorschau"', self.js)
         self.assertIn("cache_entfernte_loeschen", self.js)
         self.assertIn("window.confirm", self.js)
-        self.assertIn("Zugehörigen Analyse-Cache auch löschen", self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Zugehörigen Analyse-Cache auch löschen", de)
 
     def test_unreferenzierter_cache_steht_ueber_danger(self):
         """Aufräumen, kein Danger — nur wenn Altlasten da sind."""
@@ -609,8 +611,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertGreater(i_danger, i_unref)
         self.assertNotIn('class="speicherleiste"', html)
         self.assertNotIn('id="speichern"', html)
-        self.assertIn("function ladeUnreferenziertenCache", self.js)
-        self.assertIn('"/cache/unreferenziert"', self.js)
+        self.assertIn("function ladeUnreferenziertenCache", self.wallets_js)
+        self.assertIn('"/cache/unreferenziert"', self.wallets_js)
         self.assertIn("loescheUnreferenziertenCache", self.js)
         self.assertIn("Unreferenzierte Cachedaten löschen", self.html)
 
@@ -620,7 +622,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('t("trace.arrival"', self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Ankunft am:", de)
-        self.assertIn("ankunft-link", self.js)
+        self.assertIn("ankunft-link", self.wallets_js)
         self.assertNotIn("Herkunft →", self.js)
 
     def test_vollstaendige_herkunft_zeigt_juengste_sats(self):
@@ -649,6 +651,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("gruppeAusTraceListe", self.js)
         self.assertEqual(
             self.js.count("const juengste = juengsteSatsMarke(utxo)")
+            + self.wallets_js.count("const juengste = juengsteSatsMarke(utxo)")
             + self.herkunft_js.count("const juengste = juengsteSatsMarke(utxo)"),
             2,
             "Marke muss in Wallet-Zeile und Herkunfts-UTXO stehen",
@@ -656,7 +659,7 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_cache_startet_offen_analyse_nicht(self):
         """Oberste Ebene zu; darunter Cache offen, ungescannte Bäume zu."""
-        self.assertIn("function setzeKlapp", self.js)
+        self.assertIn("function setzeKlapp", self.wallets_js)
         self.assertIn("function ladeGespeichertenZweig", self.herkunft_js)
         self.assertIn("oeffneAusCache", self.herkunft_js)
         # Erste Ebene unter dem UTXO zeichnet zeichneZweig sofort; tiefere
@@ -667,7 +670,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertNotIn("Herkunft neu", self.herkunft_js)
         self.assertNotIn("Neu verfolgen", self.herkunft_js)
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             re.compile(
                 r"function zeichneAdressGruppe\(gruppe\).*?setzeKlapp\(kopf, klapp, inhalt, false\)",
                 re.S,
@@ -706,28 +709,30 @@ class TestOberflaeche(unittest.TestCase):
         pos_liste = html.find('id="adress-liste"')
         pos_sank = html.find('id="sanktions-karte"')
         self.assertGreater(pos_sank, pos_liste)
-        self.assertIn("platziereSanktionsKarte", self.js);
+        self.assertIn("platziereSanktionsKarte", self.wallets_js);
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r"platziereSanktionsKarte\(Boolean\(befund\.treffer",
         )
 
     def test_scan_leiste_nennt_das_gescannte_wallet(self):
         """Sonst wirkt ein laufender Scan beim Wechsel wie der des sichtbaren Wallets."""
-        self.assertIn("scanWalletId", self.js);
-        self.assertIn("aktualisiereScanAnzeige", self.js);
-        self.assertIn("nicht für dieses Wallet", self.js);
-        self.assertIn("hinweis-fremd", self.js);
+        self.assertIn("scanWalletId", self.wallets_js);
+        self.assertIn("aktualisiereScanAnzeige", self.wallets_js);
+        # Locale-String (de.json) — früher hardcoded in app.js
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("nicht für dieses Wallet", de);
+        self.assertIn("hinweis-fremd", self.wallets_js);
 
     def test_scan_schlange_ist_duenn(self):
         """Ein Klick während eines Scans stellt an, startet nicht parallel."""
-        self.assertIn("stelleScanAn", self.js)
-        self.assertIn("schonGeplant", self.js)
+        self.assertIn("stelleScanAn", self.wallets_js)
+        self.assertIn("schonGeplant", self.wallets_js)
         self.assertIn("function jobNochAktiv", self.js)
-        self.assertIn("rescan.disabled = utxoGeplant", self.js)
-        self.assertIn("starteScanFuer", self.js)
-        self.assertIn("Warteschlange", self.js)
-        self.assertIn("queue_status", self.js)
+        self.assertIn("rescan.disabled = utxoGeplant", self.wallets_js)
+        self.assertIn("starteScanFuer", self.wallets_js)
+        self.assertIn("Warteschlange", self.wallets_js)
+        self.assertIn("queue_status", self.wallets_js)
 
     def test_wallet_hinzufuegen_speichert_sofort(self):
         """Name sichtbar vor dem Klick; Hinzufügen schreibt die .env."""
@@ -735,17 +740,17 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="hinzufuegen"', self.html)
         self.assertIn("Aktualisieren", self.html)
         self.assertIn('class="name-uebernehmen"', self.html)
-        self.assertIn("function fuegeWalletHinzu", self.js)
-        self.assertIn("speichereWallets(false)", self.js)
+        self.assertIn("function fuegeWalletHinzu", self.wallets_js)
+        self.assertIn("speichereWallets(false)", self.wallets_js)
         # Sofort speichern, nicht nur in den Entwurf schieben.
         # Fenster größer als früher: Deskriptor-Umleitung im XPUB-Feld liegt dazwischen.
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r"function fuegeWalletHinzu\(\)[\s\S]{0,1600}?speichereWallets\(false\)",
         )
         self.assertIn(
             'haken.addEventListener("click", () => speichereWallets(false))',
-            self.js,
+            self.wallets_js,
         )
 
     def test_drei_schritte_werden_beschrieben(self):
