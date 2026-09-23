@@ -189,7 +189,7 @@ def _socks5_connect(
     dest_port: int,
     timeout: float,
 ) -> socket.socket:
-    from fulcrum import _socks5_connect as fulcrum_socks
+    from core.fulcrum_transport import _socks5_connect as fulcrum_socks
 
     return fulcrum_socks(proxy_host, proxy_port, dest_host, dest_port, int(timeout))
 
