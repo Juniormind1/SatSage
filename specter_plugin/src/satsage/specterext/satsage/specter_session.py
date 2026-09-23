@@ -190,9 +190,9 @@ def context_fingerprint(ctx: SatSageContext) -> str:
 def _merged_env(ctx: SatSageContext) -> dict[str, str]:
     """SatSage-.env als Basis, Specter-Node/XPUBs überschreiben."""
     ensure_satsage_on_path()
-    import main as xq_main
+    from core.env_bootstrap import ENV_FILE, _load_dotenv
 
-    env = dict(xq_main._load_dotenv(xq_main.ENV_FILE))
+    env = dict(_load_dotenv(ENV_FILE))
     # Specter-Kontext gewinnt
     env.update({k: v for k, v in ctx.env_like.items() if v})
     mapped_node_keys = {"NETWORK", "BIP158_P2P", "NODE_IP", "RPCPORT", "RPCUSER", "RPCPASSWORD", "FULCRUM_HOST", "FULCRUM_PORT", "FULCRUM_SSL"}

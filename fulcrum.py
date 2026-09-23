@@ -192,11 +192,16 @@ class FulcrumClient:
     def _outbound_values() -> dict[str, str] | None:
         """`.env` für Outbound-Allowlist (OEFFENTLICHE_ELECTRUM u. a.)."""
         try:
-            import main as main_mod
+            from core.env_bootstrap import _load_dotenv
 
-            return main_mod._load_dotenv()
+            return _load_dotenv()
         except Exception:
-            return None
+            try:
+                import main as main_mod
+
+                return main_mod._load_dotenv()
+            except Exception:
+                return None
 
     def connect(self) -> None:
         outbound_policy.ensure_resolves_to_allowed_host(

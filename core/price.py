@@ -523,16 +523,21 @@ def _outbound_values() -> dict[str, str] | None:
     """``.env`` für Outbound (MEMPOOL_URL, TLS-Policy) — Kurs braucht kein Opt-in."""
     try:
         from core.config import EnvFile
-        from core.paths import app_dir
+        from core.env_bootstrap import ENV_FILE
 
-        return EnvFile.load(app_dir() / ".env").values()
+        return EnvFile.load(ENV_FILE).values()
     except Exception:
         try:
-            import main as main_mod
+            from core.env_bootstrap import _load_dotenv
 
-            return main_mod._load_dotenv()
+            return _load_dotenv()
         except Exception:
-            return None
+            try:
+                import main as main_mod
+
+                return main_mod._load_dotenv()
+            except Exception:
+                return None
 
 
 def _ssl_context(host: str | None = None) -> ssl.SSLContext:
