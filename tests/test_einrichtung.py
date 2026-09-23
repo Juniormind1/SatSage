@@ -21,6 +21,7 @@ class TestVertragMitDerApi(unittest.TestCase):
 
     def setUp(self):
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
+        self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
 
     def test_der_electrum_schluessel_existiert_wirklich(self):
         """Die Oberfläche sucht die Quelle über ihren Schlüssel."""
@@ -30,16 +31,16 @@ class TestVertragMitDerApi(unittest.TestCase):
 
     def test_uebernehmen_loest_node_test_aus(self):
         """Sonst speichert der Benutzer neue Verbindungsdaten und sieht nicht, ob sie greifen."""
-        self.assertIn("testeEigenenNode", self.js)
-        self.assertIn('t("sources.appliedTesting")', self.js)
+        self.assertIn("testeEigenenNode", self.datenquellen_js)
+        self.assertIn('t("sources.appliedTesting")', self.datenquellen_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("teste Verbindung", de)
 
     def test_electrum_hat_einen_papierkorb(self):
         """Sonst bleibt eine Onion in der .env und der Node-Test startet Tor."""
-        self.assertIn("verwerfeQuelle", self.js)
-        self.assertIn("papierkorb", self.js)
-        self.assertIn("verwerfbar", self.js)
+        self.assertIn("verwerfeQuelle", self.datenquellen_js)
+        self.assertIn("papierkorb", self.datenquellen_js)
+        self.assertIn("verwerfbar", self.datenquellen_js)
         self.assertIn('methode: "DELETE"', self.js)
         self.assertRegex(
             self.js,
@@ -202,7 +203,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('t("header.sourceIndexer")', self.js)
         self.assertIn("nimmOwnFulcrumStand", self.js)
         self.assertIn("setzeQuellenPending", self.js)
-        self.assertIn("pending_sources", self.js)
+        self.assertIn("pending_sources", self.datenquellen_js)
         self.assertIn('t("header.sourceElectrumPublic")', self.js)
         self.assertIn('t("header.p2pPeers"', self.js)
         self.assertIn('t("privacy.pillHigh")', self.js)
@@ -228,15 +229,15 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("function uebernehmeQuellenErreichbarkeit", self.js)
         self.assertIn("behaltePositivBeiNegativ", self.js)
         self.assertIn(
-            "uebernehmeQuellenErreichbarkeit(\n    altQuellen, Zustand.config.sources",
+            "uebernehmeQuellenErreichbarkeit(\n    Zustand.config?.sources",
             self.js,
         )
-        self.assertIn("function quellePrivacyStufe", self.js)
-        self.assertIn("function quelleHochVerdraengt", self.js)
-        self.assertIn("loescheElectrumListe", self.js)
-        self.assertIn("sources.disableP2pTitle", self.js)
-        self.assertIn("feld.typ === \"checkbox\"", self.js)
-        self.assertIn("verbindeP2p", self.js)
+        self.assertIn("function quellePrivacyStufe", self.datenquellen_js)
+        self.assertIn("function quelleHochVerdraengt", self.datenquellen_js)
+        self.assertIn("loescheElectrumListe", self.datenquellen_js)
+        self.assertIn("sources.disableP2pTitle", self.datenquellen_js)
+        self.assertIn("feld.typ === \"checkbox\"", self.datenquellen_js)
+        self.assertIn("verbindeP2p", self.datenquellen_js)
         self.assertIn('"sources.reachable": "verbunden"', de)
         self.assertIn('"sources.clearListTitle"', de)
         self.assertIn('"sources.connect": "Verbinden"', de)
@@ -388,6 +389,7 @@ class TestOberflaeche(unittest.TestCase):
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
         self.herkunft_js = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
+        self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
@@ -466,8 +468,8 @@ class TestOberflaeche(unittest.TestCase):
     def test_p2p_privatsphaere_dialog_und_verbindungsaufbau(self):
         self.assertIn('id="p2p-privatsphaere-dialog"', self.html)
         self.assertIn("frageP2pPrivatsphaereKappen", self.js)
-        self.assertIn("sources.connecting", self.js)
-        self.assertIn("function quelleZeigtVerbindungsaufbau", self.js)
+        self.assertIn("sources.connecting", self.datenquellen_js)
+        self.assertIn("function quelleZeigtVerbindungsaufbau", self.datenquellen_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn('"sources.connecting": "Verbindung im Aufbau…"', de)
         self.assertIn('"dialog.p2pPrivacy.title"', de)
@@ -528,8 +530,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertTrue(w < html.find("Danger Zone!!!!") < e)
         self.assertTrue(e < html.find("Fristen und Stichtag") < d)
         self.assertTrue(d < html.find('id="quellen-liste"'))
-        self.assertIn("aktualisiereDatenquellenNav", self.js)
-        self.assertIn("DATENQUELLEN_NAV_WARNUNG", self.js)
+        self.assertIn("aktualisiereDatenquellenNav", self.datenquellen_js)
+        self.assertIn("DATENQUELLEN_NAV_WARNUNG", self.datenquellen_js)
         self.assertIn("nav-warn", (WEB / "style.css").read_text(encoding="utf-8"))
 
     def test_er_bleibt_erreichbar(self):
