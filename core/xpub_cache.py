@@ -700,7 +700,7 @@ def _scan_tip_anheben(
             tip = h
     if fulcrum is not None:
         try:
-            from fulcrum import get_chain_tip_height
+            from core.fulcrum_history import get_chain_tip_height
 
             et = int(get_chain_tip_height(fulcrum, force=True))
             if tip is None or et > int(tip):

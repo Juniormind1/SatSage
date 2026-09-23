@@ -90,7 +90,8 @@ def _mache_prefetch(pool, cache_root: Path, source: str):
     Vorladen ist eine Beschleunigung, kein Abruf — was hier ausfällt, holt
     der reguläre Weg gleich danach einzeln nach und meldet dort seinen Fehler.
     """
-    from fulcrum import fetch_tx_fulcrum, parallel_ueber_pool
+    from core.fulcrum_history import fetch_tx_fulcrum
+    from core.fulcrum_client import parallel_ueber_pool
 
     def prefetch(txids) -> None:
         fehlend = []

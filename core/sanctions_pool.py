@@ -49,7 +49,7 @@ def make_cached_fulcrum_get_tx(
     enrich_block_info: bool = False,
 ):
     """Gecachter get_tx für einen Fulcrum-Client (parallel pro Worker nutzbar)."""
-    from fulcrum import fetch_tx_fulcrum
+    from core.fulcrum_history import fetch_tx_fulcrum
 
     root = cache_root or IMMUTABLE_CACHE_DIR
     return wrap_get_tx_with_immutable_cache(

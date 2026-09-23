@@ -33,7 +33,7 @@ def estimate_block_height_for_date(date_str: str) -> int:
     Schätzt die Blockhöhe zum UTC-Tagesbeginn eines Datums.
     Annahme: konstante 10-Minuten-Blöcke ab Genesis (ohne Netzwerkabfrage).
     """
-    from fulcrum import _parse_utc_date_timestamp
+    from core.fulcrum_history import _parse_utc_date_timestamp
 
     key = date_str.strip()
     cached = _ESTIMATED_HEIGHT_CACHE.get(key)

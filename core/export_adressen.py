@@ -129,7 +129,7 @@ def _vout_eigene_adresse(
     vout: dict, own: set[str], own_spk: set[str],
 ) -> str:
     """Eigene Adresse aus vout (address-Feld oder scriptPubKey-Hex)."""
-    from fulcrum import _vout_addresses
+    from core.fulcrum_history import _vout_addresses
 
     for addr in _vout_addresses(vout):
         if addr in own:
@@ -237,7 +237,7 @@ def _prefetch_tx_map(
     Zweiter Rückgabewert: ``cache_hits``, ``electrs_n``, ``batched`` (0/1).
     """
     import main
-    from fulcrum import fetch_txs_fulcrum_batch
+    from core.fulcrum_history import fetch_txs_fulcrum_batch
 
     tx_map: dict[str, dict] = {}
     fehlend: list[str] = []

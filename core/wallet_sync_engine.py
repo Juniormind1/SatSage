@@ -1065,7 +1065,7 @@ def _scan_xpub_utxos(
         # damit späterer P2P-Lauf Tip-Nachzug machen kann.
         if fulcrum is not None and not is_list_abort_requested():
             try:
-                from fulcrum import get_chain_tip_height
+                from core.fulcrum_history import get_chain_tip_height
 
                 tip_hoehe = int(get_chain_tip_height(fulcrum, force=True))
             except Exception:

@@ -120,7 +120,7 @@ def first_seen_fulcrum(
     )
     if hoehe is None:
         return None
-    from fulcrum import _block_time_for_height
+    from core.fulcrum_history import _block_time_for_height
     return {"height": hoehe, "time_ts": _block_time_for_height(client, hoehe)}
 
 
@@ -461,7 +461,7 @@ def _utxos_from_listunspent_entries(
     client: FulcrumClient,
     entries: list[dict],
 ) -> list[dict]:
-    from fulcrum import _block_time_for_height
+    from core.fulcrum_history import _block_time_for_height
 
     utxos: list[dict] = []
     for entry in entries:
@@ -488,7 +488,7 @@ def fetch_address_utxos_fulcrum(client: FulcrumClient, address: str) -> list[dic
         entries = client.request(_LISTUNSPENT_METHOD, [sh]) or []
     except RuntimeError as exc:
         if _is_unknown_method_error(exc, _LISTUNSPENT_METHOD):
-            from fulcrum import _fetch_address_utxos_from_history
+            from core.fulcrum_history import _fetch_address_utxos_from_history
             return _fetch_address_utxos_from_history(client, address, sh)
         raise
     return _utxos_from_listunspent_entries(client, entries)
@@ -534,7 +534,7 @@ def _spender_map_fuer_outpoints(
         if not spend_txid:
             continue
         try:
-            from fulcrum import fetch_tx_fulcrum
+            from core.fulcrum_history import fetch_tx_fulcrum
             tx = fetch_tx_fulcrum(
                 client, spend_txid, enrich_block_info=(height > 0),
             )
@@ -556,7 +556,7 @@ def _spender_map_fuer_outpoints(
             status = tx.get("status") or {}
             time_ts = status.get("block_time")
             if time_ts is None and height > 0:
-                from fulcrum import _block_time_for_height
+                from core.fulcrum_history import _block_time_for_height
                 time_ts = _block_time_for_height(client, height)
             gefunden[key] = {
                 "txid": spend_txid.lower(),
@@ -684,7 +684,7 @@ def mempool_tx_hat_eigenen_output(
     if not tid or not callable(is_own_address):
         return False
     try:
-        from fulcrum import _vout_addresses, fetch_tx_fulcrum
+        from core.fulcrum_history import _vout_addresses, fetch_tx_fulcrum
         tx = fetch_tx_fulcrum(client, tid, enrich_block_info=False)
     except Exception:
         return False
@@ -724,7 +724,7 @@ def eigene_mempool_empfaenge(
 
     empfangen: list[dict] = []
     out_keys: set[str] = set()
-    from fulcrum import _vout_addresses, _vout_value_sats, fetch_tx_fulcrum
+    from core.fulcrum_history import _vout_addresses, _vout_value_sats, fetch_tx_fulcrum
 
     for tid in txids:
         try:
