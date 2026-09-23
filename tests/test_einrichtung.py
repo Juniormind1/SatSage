@@ -392,6 +392,7 @@ class TestOberflaeche(unittest.TestCase):
         self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
         self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
         self.einstellungen_js = (WEB / "views" / "einstellungen.js").read_text(encoding="utf-8")
+        self.einrichtung_js = (WEB / "views" / "einrichtung.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
@@ -509,7 +510,7 @@ class TestOberflaeche(unittest.TestCase):
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""
         self.assertIn('id="einrichtung-weiter"', self.html)
-        self.assertIn('oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets")', self.js)
+        self.assertIn('oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets")', self.einrichtung_js)
 
     def test_verwaltung_ist_aufgeteilt(self):
         """Wallets, Einstellungen und Datenquellen sind eigene Ansichten."""
@@ -542,7 +543,8 @@ class TestOberflaeche(unittest.TestCase):
         sich von Hand öffnen lassen.
         """
         self.assertIn('id="einrichtung-oeffnen"', self.html)
-        self.assertIn('$("#einrichtung-oeffnen").addEventListener', self.js)
+        self.assertIn('$("#einrichtung-oeffnen")', self.einrichtung_js)
+        self.assertIn('oeffnen.addEventListener("click", zeigeEinrichtung)', self.einrichtung_js)
 
     def test_begruessung_nennt_header_download_und_electrs(self):
         """Sonst startet der erste XPUB-Scan ohne Vorwarnung in den Header-Sync."""
@@ -558,7 +560,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"/headers"', self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("erspart den einmaligen Block-Header-Download", de)
-        self.assertIn('t("setup.step.electrumText")', self.js)
+        self.assertIn('t("setup.step.electrumText")', self.einrichtung_js)
 
     def test_alle_knoepfe_haben_einen_hilfetext(self):
         """Im Rest der Oberfläche hat jeder Knopf einen — hier auch."""
@@ -589,11 +591,11 @@ class TestOberflaeche(unittest.TestCase):
             re.search(r'id="einrichtung-onchain"(?![-a-z])', self.html),
             "alter On-Chain-Kasten im Einrichtungsdialog",
         )
-        self.assertIn("function bestaetigeOnchainHinweis", self.js)
-        self.assertIn("function zeigeOnchainHinweis", self.js)
-        self.assertIn('"/config/hinweis-onchain"', self.js)
-        self.assertIn("hinweis_onchain_bestaetigt", self.js)
-        self.assertIn("onchainHinweisSichtbar", self.js)
+        self.assertIn("function bestaetigeOnchainHinweis", self.einrichtung_js)
+        self.assertIn("function zeigeOnchainHinweis", self.einrichtung_js)
+        self.assertIn('"/config/hinweis-onchain"', self.einrichtung_js)
+        self.assertIn("hinweis_onchain_bestaetigt", self.einrichtung_js)
+        self.assertIn("onchainHinweisSichtbar", self.einrichtung_js)
         self.assertIn("max-height: calc(100dvh - 32px)", self.css)
         self.assertIn("overflow-y: auto", self.css)
 
@@ -759,7 +761,7 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_drei_schritte_werden_beschrieben(self):
         abschnitt = re.search(r"function einrichtungsSchritte\(.*?\n}",
-                              self.js, re.S).group(0)
+                              self.einrichtung_js, re.S).group(0)
         keys = re.findall(r't\("(setup\.step\.[^"]+)"', abschnitt)
         self.assertIn("setup.step.wallets", keys)
         self.assertIn("setup.step.electrum", keys)
