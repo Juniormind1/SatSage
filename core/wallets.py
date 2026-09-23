@@ -10,6 +10,11 @@ from pathlib import Path
 
 import main
 from core.config import WalletEntry
+from core.derivation import (
+    _encoders_for_xpub,
+    _hdkey_for_xpub,
+    derive_addresses,
+)
 
 #: Typen, die beim Erkennen durchprobiert werden. 'auto' ist kein Kandidat.
 PROBE_TYPES = ("segwit", "nested", "legacy", "taproot")
@@ -134,7 +139,7 @@ def _adress_basierte_id(schluessel: str, script_type: str | None = None) -> str 
         return None
     typ = script_type if script_type and script_type != "auto" else None
     try:
-        addrs = main.derive_addresses(schluessel, max_addresses=2, script_type=typ)
+        addrs = derive_addresses(schluessel, max_addresses=2, script_type=typ)
     except Exception:
         return None
     if not addrs:
@@ -347,11 +352,11 @@ def _receive_addresses(xpub: str, script_type: str, count: int) -> list[str]:
     derive_addresses liefert ein ungeordnetes Set über beide Ketten; für den
     Vergleich mit einer Wallet-Software braucht es die Reihenfolge.
     """
-    hd = main._hdkey_for_xpub(xpub)
+    hd = _hdkey_for_xpub(xpub)
     if hd is None:
         return []
 
-    encoder = main._encoders_for_xpub(xpub, script_type)[0]
+    encoder = _encoders_for_xpub(xpub, script_type)[0]
     adressen: list[str] = []
     for index in range(count):
         try:
@@ -378,7 +383,7 @@ def probe_script_types(
     Adressen die Blockchain kennt. Das ist die verlässliche Erkennung, kostet
     aber Abfragen und gibt Adressen an die Datenquelle preis.
     """
-    if main._hdkey_for_xpub(xpub) is None:
+    if _hdkey_for_xpub(xpub) is None:
         raise ValueError("Kein gültiger Extended Public Key.")
 
     ergebnisse: list[ProbeResult] = []

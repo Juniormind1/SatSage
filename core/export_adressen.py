@@ -72,7 +72,7 @@ def eigene_adressen_mengen(
     (Empfang/Change). Fürs Nachziehen brauchen wir **pro Kette** genug Tiefe
     — sonst bleiben alte Ausgaben ohne Treffer („ohne Adresse (Export)“).
     """
-    import main
+    from core.derivation import derive_addresses, derive_descriptor_addresses
 
     addrs: set[str] = set()
     basis = max(2, int(getattr(entry, "max_addresses", 50) or 50))
@@ -81,7 +81,7 @@ def eigene_adressen_mengen(
     if desc:
         try:
             # *2: Empfang+Change bei /<0;1>/* — sonst nur pro_kette/2 je Zweig.
-            for a in main.derive_descriptor_addresses(
+            for a in derive_descriptor_addresses(
                 desc, max_addresses=pro_kette * 2,
             ) or []:
                 if a:
@@ -93,7 +93,7 @@ def eigene_adressen_mengen(
         script = getattr(entry, "script_type", "auto") or "auto"
         try:
             # derive_addresses teilt intern 50/50 Empfang/Change.
-            for a in main.derive_addresses(
+            for a in derive_addresses(
                 xpub, pro_kette * 2, 0, script,
             ) or []:
                 if a:

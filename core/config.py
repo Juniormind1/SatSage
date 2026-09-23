@@ -16,9 +16,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import main
-
-DEFAULT_MAX_ADDRESSES = main.DEFAULT_MAX_ADDRESSES
-SCRIPT_TYPE_CHOICES = main.SCRIPT_TYPE_CHOICES
+from core.derivation import (
+    DEFAULT_MAX_ADDRESSES,
+    SCRIPT_TYPE_CHOICES,
+    _hdkey_for_xpub,
+    derive_address_at_index,
+    derive_descriptor_addresses,
+    derive_receive_address_at_index,
+    normalize_script_type,
+    parse_deskriptor,
+)
 
 #: Skripttypen einer Multisig-Wallet. Die Sortierung der Cosigner folgt
 #: BIP-67 (sortedmulti) und wird deshalb nicht eigens gespeichert.
@@ -420,7 +427,7 @@ def deskriptoren_aus_text(text: str) -> list[str]:
     brauchbar: list[str] = []
     for kandidat in _vereinige_bitkey_labels(text, kandidaten):
         kandidat = _ergaenze_standard_ableitung(kandidat)
-        if main.derive_descriptor_addresses(kandidat, max_addresses=2):
+        if derive_descriptor_addresses(kandidat, max_addresses=2):
             if kandidat not in brauchbar:
                 brauchbar.append(kandidat)
     return brauchbar
@@ -557,7 +564,7 @@ class WalletEntry:
                 # Single-Sig-Keys gehören nicht in die Cosigner-Liste.
                 self.xpubs = []
                 self.threshold = None
-            self.script_type = main.normalize_script_type(self.script_type)
+            self.script_type = normalize_script_type(self.script_type)
 
     def _uebernimm_aus_deskriptor(self) -> None:
         """
@@ -570,7 +577,7 @@ class WalletEntry:
         lesen, bleibt alles, wie es angegeben wurde — die Prüfung meldet ihn
         dann als ungültig.
         """
-        desc = main.parse_deskriptor(self.descriptor)
+        desc = parse_deskriptor(self.descriptor)
         if desc is None:
             return
         try:
@@ -670,14 +677,14 @@ class WalletEntry:
 
     def is_valid(self) -> bool:
         if self.descriptor:
-            return main.parse_deskriptor(self.descriptor) is not None
+            return parse_deskriptor(self.descriptor) is not None
         if not self.is_multisig:
-            return bool(self.xpub) and main._hdkey_for_xpub(self.xpub) is not None
+            return bool(self.xpub) and _hdkey_for_xpub(self.xpub) is not None
         # Über den Parser statt über Einzelprüfungen: Er akzeptiert genau das,
         # was sich anschließend auch ableiten lässt — einschließlich Taproot
         # und Miniscript, wo „M zwischen 1 und Zahl der Cosigner" gar keine
         # sinnvolle Bedingung mehr ist.
-        return main.parse_deskriptor(self.descriptor) is not None
+        return parse_deskriptor(self.descriptor) is not None
 
     @property
     def analyse_schluessel(self) -> str:
@@ -724,7 +731,7 @@ def schluessel_kennung(xpub: str) -> str | None:
     — stünden sie beide in der Liste, wäre die Wallet-Zuordnung mehrdeutig und
     Berichte wiesen Beträge dem falschen Wallet zu.
     """
-    hd = main._hdkey_for_xpub(xpub)
+    hd = _hdkey_for_xpub(xpub)
     if hd is None:
         return None
     try:
@@ -746,7 +753,7 @@ def erste_empfangsadresse(entry: WalletEntry) -> str:
     Reine Kurzform ohne Deskriptor bleibt leer, bis Cosigner fehlen.
     """
     if entry.descriptor:
-        adresse = main.derive_address_at_index(entry.descriptor, 0, 0)
+        adresse = derive_address_at_index(entry.descriptor, 0, 0)
         return adresse or ""
     if entry.is_multisig:
         return ""
@@ -754,7 +761,7 @@ def erste_empfangsadresse(entry: WalletEntry) -> str:
         return ""
     # Über derive_receive — bei xpub/auto damit bc1q, nicht Legacy-first.
     try:
-        dest = main.derive_receive_address_at_index(entry.xpub, 0)
+        dest = derive_receive_address_at_index(entry.xpub, 0)
         return dest[0] if dest else ""
     except Exception:
         return ""
@@ -790,7 +797,7 @@ def validate_wallets(entries: list[WalletEntry]) -> tuple[list[str], list[str]]:
                     "Deskriptor lässt sich nicht lesen."
                 )
                 continue
-            if not main.derive_descriptor_addresses(
+            if not derive_descriptor_addresses(
                 entry.descriptor, max_addresses=2
             ):
                 fehler.append(
@@ -904,7 +911,7 @@ def _pruefe_multisig(index: int, entry: WalletEntry) -> list[str]:
             )
             return fehler
 
-    if main.parse_deskriptor(entry.descriptor) is None:
+    if parse_deskriptor(entry.descriptor) is None:
         fehler.append(
             f"Wallet {index} („{name}“): der Deskriptor lässt sich nicht "
             "lesen. Aggregierte Taproot-Schlüssel (musig) werden nicht "
@@ -913,7 +920,7 @@ def _pruefe_multisig(index: int, entry: WalletEntry) -> list[str]:
         )
         return fehler
 
-    if not main.derive_descriptor_addresses(entry.descriptor, max_addresses=2):
+    if not derive_descriptor_addresses(entry.descriptor, max_addresses=2):
         fehler.append(
             f"Wallet {index} („{name}“): aus dem Deskriptor lässt sich keine "
             "Adresse ableiten."

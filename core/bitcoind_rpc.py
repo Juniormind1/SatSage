@@ -456,7 +456,7 @@ def descriptors_for_key(
     Range 0..max_index-1 (Core: end inklusive in manchen Versionen —
     wir nutzen [0, max_index]).
     """
-    from main import ist_deskriptor, normalize_script_type, script_type_for_xpub
+    from core.derivation import ist_deskriptor, normalize_script_type, script_type_for_xpub
 
     ende = max(0, int(max_index))
     span = [0, ende]
@@ -846,7 +846,7 @@ def try_scantxoutset_for_xpubs(
     tip = tip_scan if tip_scan is not None else tip_info
 
     # UTXOs den XPUBs zuordnen über Adresse
-    from main import derive_addresses
+    from core.derivation import derive_addresses
 
     by_xpub: dict[str, list[dict]] = {x: [] for x in xpubs}
     addr_to_xpub: dict[str, str] = {}

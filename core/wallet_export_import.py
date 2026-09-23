@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from core import config as config_mod
+from core.derivation import derive_descriptor_addresses
 
 # Wasabi: Mempool-/unbekannte Höhe in Transactions.sqlite
 _WASABI_MEMPOOL_HEIGHT = 2_147_483_646
@@ -420,7 +421,7 @@ def _deskriptor_brauchbar(desc: str) -> str | None:
     if gefunden:
         return gefunden[0]
     try:
-        if __import__("main").derive_descriptor_addresses(d, max_addresses=2):
+        if derive_descriptor_addresses(d, max_addresses=2):
             return d
     except Exception:
         pass
@@ -821,7 +822,7 @@ def _parse_wasabi_wallet_json(
     for desc, anzeige in descs:
         if config_mod.deskriptoren_aus_text(desc):
             brauchbar.append((config_mod.deskriptoren_aus_text(desc)[0], anzeige))
-        elif __import__("main").derive_descriptor_addresses(desc, max_addresses=2):
+        elif derive_descriptor_addresses(desc, max_addresses=2):
             brauchbar.append((desc, anzeige))
         else:
             hinweise.append(f"Deskriptor nicht ableitbar, übersprungen: {desc[:48]}…")
