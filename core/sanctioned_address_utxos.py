@@ -500,7 +500,7 @@ def scan_sanctioned_addresses_fulcrum_sync(
     Fulcrum-Fallback: Txs finden, in denen Adressen als Input auftreten.
     Kompatibel zu :meth:`Bip158Client.scan_addresses_sync` (ScanResult).
     """
-    from bip158_scanner import MatchedTransaction, ScanResult
+    from core.bip158_filter import MatchedTransaction, ScanResult
     from core.fulcrum_client import address_to_scripthash
 
     address_set = set(addresses)
