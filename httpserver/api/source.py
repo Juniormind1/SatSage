@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import core.wallet_sync_engine as wallet_sync_engine
+
 from typing import Any
 
 
@@ -620,7 +622,7 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
                 stand.tick(f"{len(stand_utxos)} {wort} bisher gefunden…")
 
-            gefunden = main.resolve_wallet_utxos(
+            gefunden = wallet_sync_engine.resolve_wallet_utxos(
                 [entry.analyse_schluessel],
                 fetchers["fetch_wallet_utxos"],
                 fetchers["fetch_address_utxos"],

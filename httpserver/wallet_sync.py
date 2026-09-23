@@ -10,6 +10,7 @@ import threading
 import time
 
 import main
+import core.wallet_sync_engine as wallet_sync_engine
 from core import wallets as wallets_mod
 from httpserver.empfang import (
     _merke_own_fulcrum_client,
@@ -273,7 +274,7 @@ def starte_wallet_aktualisierung(
                     f"„{name}“ aktuell"
                 )
 
-            main.sync_wallets_zum_tip(
+            wallet_sync_engine.sync_wallets_zum_tip(
                 [e.analyse_schluessel for e in eintraege],
                 fetchers["fetch_wallet_utxos"],
                 fetchers["fetch_address_utxos"],

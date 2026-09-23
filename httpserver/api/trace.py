@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import core.wallet_sync_engine as wallet_sync_engine
+
 from typing import Any
 
 
@@ -452,7 +454,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                 except TypeError:
                     return holen(adressen)
 
-            ergebnis = main.resolve_wallet_verlauf(
+            ergebnis = wallet_sync_engine.resolve_wallet_verlauf(
                 xpubs, mit_fortschritt, state.cache_dir, wallet_ctx
             )
             gesamt = sum(len(v) for v in ergebnis.values())
@@ -486,7 +488,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                     wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
                     stand.tick(f"{len(stand_utxos)} {wort} bisher…")
 
-                gefunden = main.resolve_wallet_utxos(
+                gefunden = wallet_sync_engine.resolve_wallet_utxos(
                     xpubs,
                     hol_utxo,
                     fetchers["fetch_address_utxos"],
