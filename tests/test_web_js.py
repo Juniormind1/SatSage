@@ -198,9 +198,10 @@ class TestAppJs(unittest.TestCase):
 
     def setUp(self):
         self.quelle = (WEB / "app.js").read_text(encoding="utf-8")
+        self.api = (WEB / "api.js").read_text(encoding="utf-8")
         self.chrome_nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
         self.chrome = (WEB / "chrome.js").read_text(encoding="utf-8")
-        self.shell_quellen = (self.quelle, self.chrome_nav, self.chrome)
+        self.shell_quellen = (self.api, self.quelle, self.chrome_nav, self.chrome)
 
     def test_keine_doppelten_deklarationen(self):
         """
@@ -208,6 +209,7 @@ class TestAppJs(unittest.TestCase):
         zweimal `const text` in derselben Funktion.
         """
         for name, quelle in (
+            ("api.js", self.api),
             ("app.js", self.quelle),
             ("chrome_nav.js", self.chrome_nav),
             ("chrome.js", self.chrome),
@@ -221,6 +223,7 @@ class TestAppJs(unittest.TestCase):
 
     def test_klammern_sind_ausgeglichen(self):
         for datei, quelle in (
+            ("api.js", self.api),
             ("app.js", self.quelle),
             ("chrome_nav.js", self.chrome_nav),
             ("chrome.js", self.chrome),
@@ -255,12 +258,14 @@ class TestAppJs(unittest.TestCase):
             self.assertIn(f'id="ansicht-{name}"', html, f"Ansicht {name} fehlt")
 
     def test_chrome_scripts_stehen_vor_boot(self):
-        """app.js → views → chrome_nav.js → chrome.js → boot.js."""
+        """api.js → app.js → views → chrome_nav.js → chrome.js → boot.js."""
         html = (WEB / "index.html").read_text(encoding="utf-8")
+        pos_api = html.index('<script src="/api.js"></script>')
         pos_app = html.index('<script src="/app.js"></script>')
         pos_nav = html.index('<script src="/chrome_nav.js"></script>')
         pos_chrome = html.index('<script src="/chrome.js"></script>')
         pos_boot = html.index('<script src="/boot.js"></script>')
+        self.assertLess(pos_api, pos_app)
         self.assertLess(pos_app, pos_nav)
         self.assertLess(pos_nav, pos_chrome)
         self.assertLess(pos_chrome, pos_boot)
