@@ -92,11 +92,11 @@ class WalletWatchService:
         Startet Watcher wenn Option an und eigener Electrs erreichbar.
         Rückgabe True wenn Thread läuft (oder schon lief).
         """
-        import main
+        from core.env_wallets import resolve_wallets_beim_start_aktualisieren
 
         self._on_log = on_log
         werte = state.env().values()
-        if not main.resolve_wallets_beim_start_aktualisieren(werte):
+        if not resolve_wallets_beim_start_aktualisieren(werte):
             self.stop()
             return False
 
@@ -164,8 +164,8 @@ class WalletWatchService:
             print(f"  {text}", flush=True)
 
     def _lauf(self) -> None:
-        import main
         import core.chain_sources as chain_sources
+        from core.env_wallets import resolve_wallets_beim_start_aktualisieren
         from fulcrum import FulcrumNotifySession, address_to_scripthash
 
         state = self._state
@@ -173,7 +173,7 @@ class WalletWatchService:
             return
         while not self._stop.is_set():
             werte = state.env().values()
-            if not main.resolve_wallets_beim_start_aktualisieren(werte):
+            if not resolve_wallets_beim_start_aktualisieren(werte):
                 self._log("Wallet-Watch: aus (Option deaktiviert).")
                 break
             client = None
@@ -258,8 +258,6 @@ class WalletWatchService:
 
     def _adressen_aus_caches(self, state) -> dict[str, set[str]]:
         """address → set(xpub/desc keys)."""
-        import main
-
         mapping: dict[str, set[str]] = {}
         for entry in state.analyse_entries:
             xpub = entry.analyse_schluessel
@@ -487,7 +485,6 @@ class WalletWatchService:
         addrs: list[str],
         addr_xpubs: dict[str, set[str]],
     ) -> None:
-        import main
         from fulcrum import fetch_address_utxos_fulcrum, klassifiziere_utxo_spends
 
         client = _eigener_client_kurz(state)
@@ -640,7 +637,6 @@ class WalletWatchService:
 
 
 def _eigener_client_kurz(state):
-    import main
     import core.chain_sources as chain_sources
 
     werte = state.env().values()

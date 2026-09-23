@@ -10,6 +10,10 @@ import threading
 import time
 
 import main
+from core.env_wallets import (
+    resolve_wallets_beim_start_aktualisieren,
+    resolve_wallets_nur_bekannte_utxos,
+)
 import core.wallet_sync_engine as wallet_sync_engine
 from core import wallets as wallets_mod
 from httpserver.empfang import (
@@ -111,7 +115,7 @@ def starte_wallet_aktualisierung(
     Rückgabe: Job-Dict bei Start, None wenn nichts zu tun / schon läuft.
     """
     werte = state.env().values()
-    if not erzwingen and not main.resolve_wallets_beim_start_aktualisieren(
+    if not erzwingen and not resolve_wallets_beim_start_aktualisieren(
         werte
     ):
         return None
@@ -141,7 +145,7 @@ def starte_wallet_aktualisierung(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
         try:
-            nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
+            nur_bekannte = resolve_wallets_nur_bekannte_utxos(
                 state.env().values()
             )
             extras = []

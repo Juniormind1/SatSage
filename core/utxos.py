@@ -1,8 +1,8 @@
 """
 UTXO-Rangfolge als Daten.
 
-Datenliefernde Entsprechung zu main.list_top_wallet_utxos / _print_utxo_rank_row
-(die weiterhin das CLI bedienen). Dieselben Hilfsfunktionen, dieselbe
+Datenliefernde Entsprechung zu core.utxo_report.list_top_wallet_utxos /
+_print_utxo_rank_row (die weiterhin das CLI bedienen). Dieselben Hilfsfunktionen, dieselbe
 Sortierung — nur ohne Ausgabe, damit die Zahlen in beiden Oberflächen
 garantiert übereinstimmen.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import labels
-import main
+from core import utxo_report
 from core import xpub_cache
 from core import trace_cache
 
@@ -31,7 +31,7 @@ def _zeit_ohne_block(label: str) -> str:
     """
     Entfernt das führende 'Block 857,930 · ' aus einem Zeitstempel.
 
-    main._format_tx_time setzt Blockhöhe und Zeit zusammen; die Oberfläche
+    utxo_report._format_tx_time setzt Blockhöhe und Zeit zusammen; die Oberfläche
     zeigt beides getrennt und formatiert die Höhe selbst.
     """
     if label.startswith("Block ") and " · " in label:
@@ -79,8 +79,8 @@ def utxo_as_dict(
         # Nur Datum und Uhrzeit — die Blockhöhe steht als eigenes Feld daneben
         # und würde sonst doppelt erscheinen, dazu mit englischer
         # Tausendertrennung aus der CLI-Formatierung.
-        "time_label": _zeit_ohne_block(main._format_utxo_status(utxo)),
-        "status_label": main._format_utxo_status(utxo),
+        "time_label": _zeit_ohne_block(utxo_report._format_utxo_status(utxo)),
+        "status_label": utxo_report._format_utxo_status(utxo),
         "hold_days": _hold_days(utxo),
         "youngest_sats_time": None,
         "herkunft_label": None,

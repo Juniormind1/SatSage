@@ -15,7 +15,6 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import main
 from core import xpub_cache
 from core.derivation import (
     DEFAULT_MAX_ADDRESSES,
@@ -28,6 +27,11 @@ from core.derivation import (
     parse_deskriptor,
 )
 from core.wallet_context import _default_wallet_name
+from core.env_wallets import (
+    _script_types_from_env,
+    _wallet_names_from_env,
+    _xpubs_from_env,
+)
 
 #: Skripttypen einer Multisig-Wallet. Die Sortierung der Cosigner folgt
 #: BIP-67 (sortedmulti) und wird deshalb nicht eigens gespeichert.
@@ -1494,9 +1498,9 @@ def _read_legacy_wallets(values: dict[str, str], standard: int) -> list[WalletEn
     Bleibt erhalten, damit eine bestehende .env ohne Zutun weiterläuft. Beim
     nächsten Speichern aus der Oberfläche wird sie ins Blockformat überführt.
     """
-    xpubs = main._xpubs_from_env(values) or []
-    namen = main._wallet_names_from_env(values) or []
-    typen = main._script_types_from_env(values) or []
+    xpubs = _xpubs_from_env(values) or []
+    namen = _wallet_names_from_env(values) or []
+    typen = _script_types_from_env(values) or []
 
     tiefen_roh = _split_list(values.get("MAX_ADDRESSES_PER_XPUB", ""), "|")
     standard_tiefe = values.get("MAX_ADDRESSES", "").strip()

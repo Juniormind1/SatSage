@@ -557,7 +557,8 @@ def api_rescan(state: AppState, payload: dict) -> dict:
     start_hoehe = None
     if scan_ab:
         try:
-            start_hoehe = main.estimate_block_height_for_date(scan_ab)
+            from core.utxo_report import estimate_block_height_for_date
+            start_hoehe = estimate_block_height_for_date(scan_ab)
         except ValueError as exc:
             raise ApiError(400, f"Startdatum unlesbar: {exc}") from exc
 

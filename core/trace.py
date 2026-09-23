@@ -21,6 +21,7 @@ from pathlib import Path
 import analyze
 import labels
 import main
+from core import utxo_report
 from core import xpub_cache
 from core import trace_cache
 
@@ -247,10 +248,10 @@ def _anreichere_externe_zeiten(
         tx = roh.get("tx") if isinstance(roh.get("tx"), dict) else roh
         if not isinstance(tx, dict):
             return None, ""
-        ts = main._tx_block_time(tx)
+        ts = utxo_report._tx_block_time(tx)
         if ts is None:
             return None, ""
-        return int(ts), main._format_tx_time(tx)
+        return int(ts), utxo_report._format_tx_time(tx)
 
     def _walk(knoten: dict) -> None:
         if not isinstance(knoten, dict):

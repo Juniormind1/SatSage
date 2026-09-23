@@ -47,6 +47,11 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
 
     from core.version import version as app_version
     from core import selbstanzeige as sa_mod
+    from core.env_wallets import (
+        UNLESBAR_HINWEIS,
+        resolve_wallets_beim_start_aktualisieren,
+        resolve_wallets_nur_bekannte_utxos,
+    )
 
     entries = state.entries
     zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
@@ -73,13 +78,13 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         "steuer": tax_mod.lese_steuer_einstellungen(werte),
         "person": sa_mod.lese_steuer_person(werte),
         "wallets_beim_start_aktualisieren": (
-            main.resolve_wallets_beim_start_aktualisieren(werte)
+            resolve_wallets_beim_start_aktualisieren(werte)
         ),
         "wallets_immer_aktuell": (
-            main.resolve_wallets_beim_start_aktualisieren(werte)
+            resolve_wallets_beim_start_aktualisieren(werte)
         ),
         "wallets_nur_bekannte_utxos": (
-            main.resolve_wallets_nur_bekannte_utxos(werte)
+            resolve_wallets_nur_bekannte_utxos(werte)
         ),
         "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
         # Explizit: Web-Opt-in ist sitzungsweise (nach Neustart wieder false).
@@ -94,7 +99,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         # Oberfläche sagen können, sonst fehlt ein Wallet ohne jeden Hinweis.
         "uebersprungene_bloecke": bloecke_nach_luecke(werte),
         "multisig_hinweis": (
-            main.UNLESBAR_HINWEIS.format(anzahl=len(state.unlesbare_entries))
+            UNLESBAR_HINWEIS.format(anzahl=len(state.unlesbare_entries))
             if state.unlesbare_entries else ""
         ),
         "header_job_id": state.header_job_id,
@@ -214,7 +219,8 @@ def api_save_start_sync(state: AppState, payload: dict) -> dict:
     if not an:
         nur_bekannte = False
     elif nur_bekannte is None:
-        nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
+        from core.env_wallets import resolve_wallets_nur_bekannte_utxos
+        nur_bekannte = resolve_wallets_nur_bekannte_utxos(
             state.env().values()
         )
 
