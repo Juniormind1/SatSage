@@ -93,7 +93,7 @@ def _sanctions_fulcrum_exclude_hosts(env: dict[str, str]) -> set[str]:
 
 
 def _print_sanctions_clearnet_pool(pool) -> None:
-    from fulcrum import SanctionsClearnetPool
+    from core.fulcrum_client import SanctionsClearnetPool
 
     if not isinstance(pool, SanctionsClearnetPool):
         return
@@ -118,7 +118,7 @@ def resolve_sanctions_clearnet_pool(
     """
     global _sanctions_clearnet_pool, _sanctions_clearnet_cache_key
 
-    from fulcrum import SanctionsClearnetPool
+    from core.fulcrum_client import SanctionsClearnetPool
 
     cache_key = (
         env.get("FULCRUM_SANCTIONS_HOST", "").strip(),
@@ -253,7 +253,7 @@ def _open_own_sanctions_pool(
     (Höhe 500k) entfällt hier — Regtest/Testnet und frische LAN-Nodes hätten
     sonst fälschlich Clearnet als Fallback.
     """
-    from fulcrum import SanctionsClearnetPool, connect_fulcrum
+    from core.fulcrum_client import SanctionsClearnetPool, connect_fulcrum
 
     started = time.monotonic()
     erster, _fehler = connect_fulcrum(

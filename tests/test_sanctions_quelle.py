@@ -173,7 +173,7 @@ class TestEigenerNodePool(unittest.TestCase):
                 return None, "zu viele"
             return FakeClient(), None
 
-        with mock.patch("fulcrum.connect_fulcrum", fake_connect):
+        with mock.patch("core.fulcrum_client.connect_fulcrum", fake_connect):
             return main.resolve_sanctions_preferred_pool(env)
 
     def test_eigener_node_liefert_mehrere_verbindungen(self):

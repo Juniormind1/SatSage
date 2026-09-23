@@ -501,7 +501,7 @@ def scan_sanctioned_addresses_fulcrum_sync(
     Kompatibel zu :meth:`Bip158Client.scan_addresses_sync` (ScanResult).
     """
     from bip158_scanner import MatchedTransaction, ScanResult
-    from fulcrum import address_to_scripthash
+    from core.fulcrum_client import address_to_scripthash
 
     address_set = set(addresses)
     transactions: list[MatchedTransaction] = []

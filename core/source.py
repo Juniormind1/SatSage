@@ -1067,7 +1067,7 @@ def _zaehle_electrum_endpunkte(
 ) -> list[str]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from fulcrum import connect_fulcrum
+    from core.fulcrum_client import connect_fulcrum
 
     if not endpunkte:
         return []
@@ -1409,7 +1409,7 @@ def check_reachable(
     if tor_ep and not lan:
         host_t, port_t, ssl_t = tor_ep
         from core.tor import TorFehler, stelle_tor_socks_bereit
-        from fulcrum import FULCRUM_ONION_TIMEOUT
+        from core.fulcrum_client import FULCRUM_ONION_TIMEOUT
 
         raw = (
             values.get("FULCRUM_TOR_PROXY")
@@ -1458,7 +1458,7 @@ def check_reachable(
     tor_proxy = None
 
     try:
-        from fulcrum import connect_fulcrum
+        from core.fulcrum_client import connect_fulcrum
 
         for host, port, use_ssl, tor_proxy in kandidaten:
             ssl_gewuenscht = use_ssl
@@ -1499,7 +1499,7 @@ def check_reachable(
         if not client and lan and tor_ep and all(k[3] is None for k in kandidaten):
             host_t, port_t, ssl_t = tor_ep
             from core.tor import TorFehler, stelle_tor_socks_bereit
-            from fulcrum import FULCRUM_ONION_TIMEOUT
+            from core.fulcrum_client import FULCRUM_ONION_TIMEOUT
 
             raw = (
                 values.get("FULCRUM_TOR_PROXY")

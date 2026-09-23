@@ -72,7 +72,7 @@ class TestTlsAutoProbe(unittest.TestCase):
                 return None, "WRONG_VERSION_NUMBER"
             return client, None
 
-        with mock.patch("fulcrum.connect_fulcrum", side_effect=connect):
+        with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect):
             out = check_reachable(quelle, werte, timeout=1)
         self.assertTrue(out.reachable)
         self.assertEqual(calls["n"], 2)
@@ -116,7 +116,7 @@ class TestElectrumSoftwareLabel(unittest.TestCase):
             "FULCRUM_SSL": "false",
         }
         quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
-        with mock.patch("fulcrum.connect_fulcrum", return_value=(client, None)):
+        with mock.patch("core.fulcrum_client.connect_fulcrum", return_value=(client, None)):
             out = check_reachable(quelle, werte, timeout=1)
         self.assertTrue(out.reachable)
         self.assertEqual(out.software, "libbitcoin")
@@ -194,7 +194,7 @@ class TestCheckReachable(unittest.TestCase):
         quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
         with mock.patch(
             "core.tor.stelle_tor_socks_bereit", return_value=("127.0.0.1", 9150)
-        ), mock.patch("fulcrum.connect_fulcrum", return_value=(None, "timeout")) as cf:
+        ), mock.patch("core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout")) as cf:
             check_reachable(quelle, werte, timeout=1)
         host = cf.call_args[0][0]
         self.assertFalse(host.startswith("http"))
@@ -206,7 +206,7 @@ class TestCheckReachable(unittest.TestCase):
         werte = {"FULCRUM_HOST": "192.0.2.1", "FULCRUM_PORT": "50001",
                  "FULCRUM_SSL": "false"}
         quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
-        with mock.patch("fulcrum.connect_fulcrum", return_value=(None, "timeout")):
+        with mock.patch("core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout")):
             geprueft = check_reachable(quelle, werte, timeout=1)
         text = "\n".join(geprueft.log)
         self.assertIn("Prüfe Eigener Electrum-Server", text)
@@ -226,7 +226,7 @@ class TestCheckReachable(unittest.TestCase):
         werte = {"FULCRUM_HOST": "192.0.2.1", "FULCRUM_PORT": "50001",
                  "FULCRUM_SSL": "false"}
         quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
-        with mock.patch("fulcrum.connect_fulcrum", return_value=(None, "timeout")):
+        with mock.patch("core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout")):
             geprueft = check_reachable(
                 quelle, werte, timeout=1, on_log=gesehen.append,
             )
@@ -353,7 +353,7 @@ class TestCheckReachable(unittest.TestCase):
             "FULCRUM_TOR": onion,
         }
         with mock.patch(
-            "fulcrum.connect_fulcrum", return_value=(object(), None)
+            "core.fulcrum_client.connect_fulcrum", return_value=(object(), None)
         ), mock.patch("core.tor.stelle_tor_socks_bereit") as tor, mock.patch(
             "core.p2p.zaehle_compact_filter_peers", return_value=[],
         ) as p2p:
@@ -383,7 +383,7 @@ class TestCheckReachable(unittest.TestCase):
         core_client = mock.Mock()
         core_client.cfg.host = "192.0.2.20"
         with mock.patch(
-            "fulcrum.connect_fulcrum", return_value=(object(), None)
+            "core.fulcrum_client.connect_fulcrum", return_value=(object(), None)
         ), mock.patch(
             "core.bitcoind_rpc.stelle_core_client_bereit",
             return_value=core_client,
@@ -456,7 +456,7 @@ class TestCheckReachable(unittest.TestCase):
         werte = {"FULCRUM_HOST": "192.168.1.50", "FULCRUM_PORT": "50001",
                  "FULCRUM_SSL": "false"}
         with mock.patch(
-            "fulcrum.connect_fulcrum", return_value=(None, "timeout"),
+            "core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout"),
         ), mock.patch(
             "core.p2p.zaehle_compact_filter_peers",
             return_value=["192.0.2.9:8333"],
@@ -681,7 +681,7 @@ class TestCheckReachable(unittest.TestCase):
             return []
 
         with mock.patch(
-            "fulcrum.connect_fulcrum", return_value=(None, "timeout"),
+            "core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout"),
         ), mock.patch(
             "core.p2p.zaehle_compact_filter_peers", side_effect=zaehl,
         ), mock.patch(
@@ -838,7 +838,7 @@ class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
                 return _C(), None
             return None, "timed out"
 
-        with mock.patch("fulcrum.connect_fulcrum", side_effect=fake_connect):
+        with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=fake_connect):
             with mock.patch.object(
                 source_mod.random, "sample",
                 side_effect=[list(tot), list(gut)],

@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3–4 erledigt** · **Slice 5 Adapter-Plan** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
-**Stand:** 2026-09-23 (Slice-5-Plan)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3–4 erledigt** · **Slice 5 Fulcrum 1–5 erledigt** (BIP158/Sibling offen) · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-23 (Slice-5 Fulcrum-Hälfte)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–4 erledigt, Slice-5-Plan; Push/FF nur nach OK)  
+**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–4 + Slice-5 Fulcrum 1–5; Push/FF nur nach OK)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -131,7 +131,7 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 - Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
 - **Slice 3 = `main.py`:** erledigt (siehe Abschlussmemo).
 - **Slice 4 = `analyze.py`:** erledigt (siehe Abschlussmemo); Plan unten bleibt als Inventar.
-- **Slice 5 = Adapter-Feinschnitt** (`fulcrum.py` / `bip158_scanner.py` + eng verwandte Sibling-Adapter): **Plan** unten; Implementierung noch offen.
+- **Slice 5 = Adapter-Feinschnitt** (`fulcrum.py` / `bip158_scanner.py` + Sibling): **Fulcrum-Schritte 1–5 erledigt**; BIP158 (6–9) + electrum_servers/outbound_policy (10–11) offen — Plan/Memo unten.
 
 ## Offene Punkte (Stand Memo)
 
@@ -593,7 +593,7 @@ Slice 4 ist **erledigt**: Trace-/Sanktions-Domänen liegen unter `core/*`; `anal
 
 ### Explizit nicht erledigt / als Nächstes
 
-- **Slice 5:** Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py` — **Plan** siehe Kapitel unten; Implementierung ausstehend.
+- **Slice 5:** Adapter-Feinschnitt — Fulcrum-Hälfte erledigt (siehe Abschlussmemo); BIP158/Sibling folgen.
 - Umbau `trace_engine.py` oder Merge mit `core/trace.py` (Flattening).
 - Entfernen der `analyze`-Fassade (Kompatibilität bleibt).
 - Weitere Retargets von `from analyze import …` auf Direktimport `core.*` (optional, nicht Blocker).
@@ -607,7 +607,7 @@ Slice 4 ist **erledigt**: Trace-/Sanktions-Domänen liegen unter `core/*`; `anal
 
 ## Slice 5 (fest) · Adapter-Feinschnitt — Plan 2026-09-23
 
-**Status:** **Plan** (Inventar + Reihenfolge; noch keine Code-Moves)  
+**Status:** **Fulcrum-Schritte 1–5 erledigt** (Transport/Client/Wallet/History + Fassade); BIP158 + Sibling noch offen  
 **Ist (Inventar vor Extraktion):**
 
 | Datei | Bytes | Zeilen | Top-Level-Defs |
@@ -764,4 +764,55 @@ Mindestens: `tests/test_fulcrum_retry.py`, `tests/test_fulcrum_tor_batch.py`, `t
 ### Parallel-Dev-Nutzen (Rückblick-Test)
 
 Nach Slice 5 sollten z. B. „Fulcrum-Verlauf/Tor-Batch“ und „BIP158-CFilter-Pipeline/Wallet-UTXO“ ohne gemeinsame Root-Bodies landen können — und Electrum-Serverlisten/Outbound-Policy parallel zu Client-Transport, ohne `fulcrum.py`-Hotspot.
+
+
+## Abschlussmemo 2026-09-23 · Slice 5 Fulcrum (Schritte 1–5)
+
+### Kurzfazit
+
+Die Fulcrum-Hälfte von Slice 5 ist **erledigt**: Bodies liegen unter `core/fulcrum_{transport,client,wallet,history}.py`; Root-`fulcrum.py` ist dünne Re-Export-Fassade mit Symbol-Identität. `core/*`-Importe für Fulcrum-Symbole zeigen auf `core.fulcrum_*` (kein Domänen-Zyklus Root↔core für Bodies). Blockzeit-Disk-Cache über `core.xpub_cache` (nicht mehr Late-`main`). BIP158 und Sibling (`electrum_servers` / `outbound_policy`) sind **nicht** Teil dieses Abschlusses.
+
+### Messwerte
+
+| Datei | vor Slice 5 (ADR-Inventar) | Stand Fulcrum 1–5 |
+| --- | ---: | ---: |
+| `fulcrum.py` | ~87 KB / ~2574 Z. | **~2,5 KB** / ~100 Z. (nur Re-Exports) |
+| `core/fulcrum_transport.py` | — | ~2,5 KB |
+| `core/fulcrum_client.py` | — | ~28 KB |
+| `core/fulcrum_wallet.py` | — | ~31 KB |
+| `core/fulcrum_history.py` | — | ~27 KB |
+
+### Schritte gelandet
+
+| # | Commit-Thema | Modul |
+| --- | --- | --- |
+| 1 | SOCKS/Tor-Transport | `core/fulcrum_transport.py` |
+| 2 | Client/Pools/Connect | `core/fulcrum_client.py` |
+| 3 | Gap/Indices + UTXO/Mempool | `core/fulcrum_wallet.py` |
+| 4 | Tx/Verlauf/Tip/Date→Höhe | `core/fulcrum_history.py` |
+| 5 | Fassade glätten + ADR/ISSUES + Retargets | Root-`fulcrum.py` ≪ 20 KB |
+
+### Done-Check (Fulcrum-Teil, ehrlich)
+
+| Kriterium | Lage |
+| --- | --- |
+| `fulcrum.py` ≪ 40 KB (Ideal ≪ 20 KB) | **ja** (~2,5 KB) |
+| Domänen fulcrum_transport/client/wallet/history getrennt | **ja** |
+| Extrahierte `core/fulcrum_*` importieren nicht Root-`fulcrum` | **ja** |
+| Fassade Symbol-Identität | **ja** |
+| `bip158_*` / electrum_servers / outbound_policy | **offen** (Schritte 6–11) |
+
+### Als Nächstes (Slice 5 Rest)
+
+6. `core/bip158_filter.py`  
+7. `core/bip158_scan.py`  
+8. `core/bip158_wallet.py`  
+9. `bip158_scanner.py` glätten  
+10. `core/electrum_servers.py` + `check_fulcrum_tor` Fassade  
+11. `core/outbound_policy.py` (+ Zyklus-Fix vs. `core.source`)
+
+### Merge-Lage
+
+- Arbeitscommits auf `refactor/modular-engine`; vor FF: Playwright-Userflow.  
+- Push nur nach explizitem OK; nach Merge push+continue vs. push+pause fragen.
 

@@ -1,4 +1,9 @@
-"""Fulcrum-Anbindung über das Electrum-Protokoll (TCP/SSL)."""
+"""Fulcrum-Anbindung über das Electrum-Protokoll (TCP/SSL).
+
+Dünne Re-Export-Fassade nach Slice-5-Schritten 1–5. Fachcode liegt unter
+``core/fulcrum_transport``, ``core/fulcrum_client``, ``core/fulcrum_wallet``,
+``core/fulcrum_history``. Symbol-Identität: ``fulcrum.X is core.fulcrum_*.X``.
+"""
 from __future__ import annotations
 
 from core.fulcrum_transport import (

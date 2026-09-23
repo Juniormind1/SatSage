@@ -166,7 +166,7 @@ class WalletWatchService:
     def _lauf(self) -> None:
         import core.chain_sources as chain_sources
         from core.env_wallets import resolve_wallets_beim_start_aktualisieren
-        from fulcrum import FulcrumNotifySession, address_to_scripthash
+        from core.fulcrum_client import FulcrumNotifySession, address_to_scripthash
 
         state = self._state
         if state is None:
@@ -287,7 +287,7 @@ class WalletWatchService:
         return mapping
 
     def _subscribe_alle_adressen(self, session, state) -> int:
-        from fulcrum import address_to_scripthash
+        from core.fulcrum_client import address_to_scripthash
 
         mapping = self._adressen_aus_caches(state)
         with self._lock:
@@ -310,7 +310,7 @@ class WalletWatchService:
 
     def _subscribe_extra(self, addrs: list[str], xpub: str) -> None:
         """Neue Empfangsadressen (z. B. Change aus Mempool-Tx) nachabonnieren."""
-        from fulcrum import address_to_scripthash
+        from core.fulcrum_client import address_to_scripthash
 
         session = self._session
         if session is None or not addrs:

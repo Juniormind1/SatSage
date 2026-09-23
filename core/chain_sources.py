@@ -286,7 +286,7 @@ def _probe_public_onion_endpoint(
     use_ssl: bool,
     tor_proxy: tuple[str, int],
 ) -> tuple[int, object | None, str | None]:
-    from fulcrum import FULCRUM_ONION_TIMEOUT, connect_fulcrum
+    from core.fulcrum_client import FULCRUM_ONION_TIMEOUT, connect_fulcrum
 
     client, error = connect_fulcrum(
         host,
@@ -409,7 +409,7 @@ def _try_fulcrum_endpoint(
             tor_proxy,
         )
     else:
-        from fulcrum import connect_fulcrum
+        from core.fulcrum_client import connect_fulcrum
 
         client, error = connect_fulcrum(
             host,
@@ -432,7 +432,7 @@ def _try_fulcrum_endpoint(
                 0, host, port, alt, tor_proxy,
             )
         else:
-            from fulcrum import connect_fulcrum
+            from core.fulcrum_client import connect_fulcrum
 
             client, error = connect_fulcrum(
                 host,
@@ -492,9 +492,9 @@ def _probe_clearnet_fulcrum(
     use_ssl: bool,
     timeout: int,
 ) -> tuple[object, float] | None:
-    from fulcrum import (
+    from core.fulcrum_client import connect_fulcrum
+    from core.fulcrum_history import (
         SANCTIONS_HISTORY_PROBE_HEIGHT,
-        connect_fulcrum,
         supports_historical_headers,
     )
 
@@ -557,7 +557,7 @@ def _open_scan_pool(client, workers: int = SCAN_POOL_WORKERS):
     Schlägt das Öffnen fehl, gibt es keinen Pool und der Scan läuft wie
     bisher. Ein langsamer Scan ist besser als gar keiner.
     """
-    from fulcrum import FulcrumClient, SanctionsClearnetPool, connect_fulcrum
+    from core.fulcrum_client import FulcrumClient, SanctionsClearnetPool, connect_fulcrum
 
     if not isinstance(client, FulcrumClient) or client.tor_proxy:
         return None
@@ -587,7 +587,7 @@ def _setup_public_onion_rotation(
     *,
     interactive: bool = True,
 ):
-    from fulcrum import RotatingFulcrumPool
+    from core.fulcrum_client import RotatingFulcrumPool
 
     endpoints = _load_public_onion_endpoints(args, env)
     if not endpoints:
@@ -841,7 +841,7 @@ def _measure_onion_get_history_latency(backend) -> float | None:
     Ohne Retries — das Gate soll schnell entscheiden, nicht 3×30 s hängen.
     ``None`` bei Fehler (dann gilt der Pool nicht als „zu langsam“).
     """
-    from fulcrum import _PROBE_SCRIPT_HASH
+    from core.fulcrum_client import _PROBE_SCRIPT_HASH
 
     clients = getattr(backend, "_clients", None)
     client = clients[0] if clients else backend
@@ -938,7 +938,7 @@ def _nach_oeffentlichem_onion_latenz(
 
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     """Öffentliche Fulcrum-Server über Clearnet (vor öffentlichem Onion)."""
-    from fulcrum import RotatingFulcrumPool
+    from core.fulcrum_client import RotatingFulcrumPool
 
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
     # letzte Probe, während Clearnet nur nach stdout schreibt.
@@ -1481,7 +1481,7 @@ def _setup_blockchain_client(
 
 def is_own_fulcrum_backend(fulcrum) -> bool:
     """True bei direktem FulcrumClient (eigener Node), nicht bei öffentlicher Rotation."""
-    from fulcrum import FulcrumClient, RotatingFulcrumPool
+    from core.fulcrum_client import FulcrumClient, RotatingFulcrumPool
 
     if isinstance(fulcrum, FulcrumClient):
         return True
@@ -1660,11 +1660,13 @@ def _build_blockchain_fetchers(
         }
 
     if source == "fulcrum":
-        from fulcrum import (
+        from core.fulcrum_wallet import (
             fetch_address_utxos_fulcrum,
+            fetch_wallet_utxos_fulcrum,
+        )
+        from core.fulcrum_history import (
             fetch_tx_fulcrum,
             fetch_wallet_history_fulcrum,
-            fetch_wallet_utxos_fulcrum,
         )
         from core.bitcoind_rpc import (
             fetch_tx_core_mit_rollen,
@@ -1755,7 +1757,7 @@ def _fulcrum_transport_ist_lan(fulcrum) -> bool:
     """
     if fulcrum is None:
         return False
-    from fulcrum import FulcrumClient, RotatingFulcrumPool
+    from core.fulcrum_client import FulcrumClient, RotatingFulcrumPool
 
     if isinstance(fulcrum, RotatingFulcrumPool):
         return False
