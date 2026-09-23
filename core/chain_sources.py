@@ -4,8 +4,8 @@ Chain-Quellen: Fulcrum/Electrum/Onion-Rotation, BIP-158-Setup, Fetcher-Bindung.
 Aus main.py ausgelagert (Slice 3 / ADR modular-engine). Verhalten 1:1 —
 main re-exportiert die öffentlichen Namen als Fassade.
 
-Sanktions-Pools (resolve_sanctions_*) bleiben in main bis Slice step 6;
-``_setup_public_clearnet_fulcrum`` importiert den Clearnet-Pool lazy aus main.
+Sanktions-Pools leben in ``core.sanctions_pool``; ``_setup_public_clearnet_fulcrum``
+importiert den Clearnet-Pool lazy von dort (kein Top-Level-Zyklus).
 """
 from __future__ import annotations
 
@@ -942,8 +942,8 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
     # letzte Probe, während Clearnet nur nach stdout schreibt.
     _log_quelle("Suche öffentliche Electrum-Server (Clearnet)…")
-    # Sanctions-Pool bleibt in main (Slice step 6); lazy, kein Top-Level-Import.
-    from main import resolve_sanctions_clearnet_pool
+    # Sanctions-Pool in core.sanctions_pool; lazy, kein Top-Level-Zyklus.
+    from core.sanctions_pool import resolve_sanctions_clearnet_pool
 
     pool, _from_cache = resolve_sanctions_clearnet_pool(env)
     if pool is None:

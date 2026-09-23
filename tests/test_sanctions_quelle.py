@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 
 import main
+import core.sanctions_pool as sanctions_pool
 
 
 class TestSanctionsPrioritaet(unittest.TestCase):
@@ -28,11 +29,11 @@ class TestSanctionsPrioritaet(unittest.TestCase):
         class FakePool:
             primary = object()
 
-        main._sanctions_own_pool = None
-        main._sanctions_own_cache_key = None
-        with mock.patch.object(main, "_open_own_sanctions_pool", fake_open), \
+        sanctions_pool._sanctions_own_pool = None
+        sanctions_pool._sanctions_own_cache_key = None
+        with mock.patch.object(sanctions_pool, "_open_own_sanctions_pool", fake_open), \
              mock.patch.object(
-                 main, "resolve_sanctions_clearnet_pool",
+                 sanctions_pool, "resolve_sanctions_clearnet_pool",
                  return_value=(FakePool() if pool_ok else None, False),
              ):
             return main.resolve_sanctions_preferred_client(env)
@@ -75,7 +76,7 @@ class TestSanctionsPrioritaet(unittest.TestCase):
         """Öffentlicher FULCRUM_SANCTIONS_HOST läuft über den Pool-Pfad."""
         probiert = []
         with mock.patch.object(
-            main, "resolve_sanctions_clearnet_pool",
+            sanctions_pool, "resolve_sanctions_clearnet_pool",
             return_value=(None, False),
         ):
             client, quelle = self._lauf(
@@ -126,12 +127,12 @@ class TestPortAusEnv(unittest.TestCase):
 
     def test_serverwahl_ueberlebt_leeren_port(self):
         """Der eigentliche Regressionsfall: kein Absturz in der Serverwahl."""
-        main._sanctions_own_pool = None
-        main._sanctions_own_cache_key = None
+        sanctions_pool._sanctions_own_pool = None
+        sanctions_pool._sanctions_own_cache_key = None
         with mock.patch.object(
-            main, "_open_own_sanctions_pool", return_value=(None, 0.0)
+            sanctions_pool, "_open_own_sanctions_pool", return_value=(None, 0.0)
         ), mock.patch.object(
-            main, "resolve_sanctions_clearnet_pool", return_value=(None, False)
+            sanctions_pool, "resolve_sanctions_clearnet_pool", return_value=(None, False)
         ):
             client, quelle = main.resolve_sanctions_preferred_client(
                 {"FULCRUM_HOST": "192.168.1.10", "FULCRUM_PORT": ""}
@@ -148,10 +149,10 @@ class TestEigenerNodePool(unittest.TestCase):
     """
 
     def setUp(self):
-        main._sanctions_own_pool = None
-        main._sanctions_own_cache_key = None
-        self.addCleanup(setattr, main, "_sanctions_own_pool", None)
-        self.addCleanup(setattr, main, "_sanctions_own_cache_key", None)
+        sanctions_pool._sanctions_own_pool = None
+        sanctions_pool._sanctions_own_cache_key = None
+        self.addCleanup(setattr, sanctions_pool, "_sanctions_own_pool", None)
+        self.addCleanup(setattr, sanctions_pool, "_sanctions_own_cache_key", None)
 
     def _lauf(self, env, verbindungen=99):
         """*verbindungen*: wie viele Zusatzverbindungen gelingen."""

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import main
 import core.chain_sources as chain_sources
+import core.sanctions_pool as sanctions_pool
 from core import jobs as jobs_mod
 from core.jobs import Fortschritt, Job, JobRegistry
 from display import (
@@ -321,7 +322,7 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         pool.__len__.return_value = 1
         pool.client_at.return_value = client
         with patch.object(
-            main, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
+            sanctions_pool, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
         ):
             backend = main._setup_public_clearnet_fulcrum(self.args, {})
         self.assertIsNotNone(backend)
@@ -401,7 +402,7 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         ), patch.object(
             chain_sources, "_try_public_onion_fulcrum", return_value=None
         ), patch.object(
-            main, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
+            sanctions_pool, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
         ):
             quelle, backend, _ = main._try_data_source_priority_chain(
                 self.args, {"OEFFENTLICHE_ELECTRUM": "1"}, include_bip158=True
@@ -424,7 +425,7 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         ), patch.object(
             chain_sources, "_try_public_onion_fulcrum", return_value=None
         ), patch.object(
-            main, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
+            sanctions_pool, "resolve_sanctions_clearnet_pool", return_value=(pool, False)
         ), patch("interact.prompt_yes_no", return_value=True):
             quelle, backend, _ = main._try_data_source_priority_chain(
                 self.args, {}, include_bip158=True, interactive_onion=True
