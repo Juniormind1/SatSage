@@ -20,7 +20,7 @@ from trace_engine import (
 )
 
 if TYPE_CHECKING:
-    from main import WalletContext
+    from core.wallet_context import WalletContext
 
 #: CoinJoin-Untertypen und generischer Fallback — Own-only-Walk.
 COINJOIN_KINDS = frozenset({

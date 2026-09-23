@@ -26,6 +26,7 @@ from core.derivation import (
     normalize_script_type,
     parse_deskriptor,
 )
+from core.wallet_context import _default_wallet_name
 
 #: Skripttypen einer Multisig-Wallet. Die Sortierung der Cosigner folgt
 #: BIP-67 (sortedmulti) und wird deshalb nicht eigens gespeichert.
@@ -653,7 +654,7 @@ class WalletEntry:
         if self.is_multisig:
             return f"Multisig {self.threshold or '?'}/{self.cosigner_count or '?'}"
         if self.xpub:
-            return main._default_wallet_name(self.xpub)
+            return _default_wallet_name(self.xpub)
         return "Deskriptor-Wallet"
 
     def masked_xpub(self, head: int = 6, tail: int = 4) -> str:
