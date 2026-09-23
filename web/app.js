@@ -17503,4 +17503,3 @@ async function start() {
   zeichneUiLang();
 }
 
-start();
