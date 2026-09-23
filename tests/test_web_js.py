@@ -200,11 +200,12 @@ class TestAppJs(unittest.TestCase):
         self.quelle = (WEB / "app.js").read_text(encoding="utf-8")
         self.api = (WEB / "api.js").read_text(encoding="utf-8")
         self.state = (WEB / "state.js").read_text(encoding="utf-8")
+        self.format = (WEB / "format.js").read_text(encoding="utf-8")
         self.mempool_links = (WEB / "mempool_links.js").read_text(encoding="utf-8")
         self.chrome_nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
         self.chrome = (WEB / "chrome.js").read_text(encoding="utf-8")
         self.shell_quellen = (
-            self.api, self.state, self.quelle, self.mempool_links,
+            self.api, self.state, self.format, self.quelle, self.mempool_links,
             self.chrome_nav, self.chrome,
         )
 
@@ -216,6 +217,7 @@ class TestAppJs(unittest.TestCase):
         for name, quelle in (
             ("api.js", self.api),
             ("state.js", self.state),
+            ("format.js", self.format),
             ("app.js", self.quelle),
             ("mempool_links.js", self.mempool_links),
             ("chrome_nav.js", self.chrome_nav),
@@ -232,6 +234,7 @@ class TestAppJs(unittest.TestCase):
         for datei, quelle in (
             ("api.js", self.api),
             ("state.js", self.state),
+            ("format.js", self.format),
             ("app.js", self.quelle),
             ("mempool_links.js", self.mempool_links),
             ("chrome_nav.js", self.chrome_nav),
@@ -267,17 +270,19 @@ class TestAppJs(unittest.TestCase):
             self.assertIn(f'id="ansicht-{name}"', html, f"Ansicht {name} fehlt")
 
     def test_chrome_scripts_stehen_vor_boot(self):
-        """api.js → state.js → app.js → mempool_links.js → views → chrome_nav.js → chrome.js → boot.js."""
+        """api.js → state.js → format.js → app.js → mempool_links.js → views → chrome_nav.js → chrome.js → boot.js."""
         html = (WEB / "index.html").read_text(encoding="utf-8")
         pos_api = html.index('<script src="/api.js"></script>')
         pos_state = html.index('<script src="/state.js"></script>')
+        pos_format = html.index('<script src="/format.js"></script>')
         pos_app = html.index('<script src="/app.js"></script>')
         pos_mempool = html.index('<script src="/mempool_links.js"></script>')
         pos_nav = html.index('<script src="/chrome_nav.js"></script>')
         pos_chrome = html.index('<script src="/chrome.js"></script>')
         pos_boot = html.index('<script src="/boot.js"></script>')
         self.assertLess(pos_api, pos_state)
-        self.assertLess(pos_state, pos_app)
+        self.assertLess(pos_state, pos_format)
+        self.assertLess(pos_format, pos_app)
         self.assertLess(pos_app, pos_mempool)
         self.assertLess(pos_mempool, pos_nav)
         self.assertLess(pos_nav, pos_chrome)
