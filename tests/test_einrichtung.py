@@ -22,6 +22,7 @@ class TestVertragMitDerApi(unittest.TestCase):
     def setUp(self):
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
         self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
+        self.einstellungen_js = (WEB / "views" / "einstellungen.js").read_text(encoding="utf-8")
 
     def test_der_electrum_schluessel_existiert_wirklich(self):
         """Die Oberfläche sucht die Quelle über ihren Schlüssel."""
@@ -264,7 +265,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertNotIn("/chat/completions", self.js)
         self.assertIn("zeichneLlmPille", self.js)
         self.assertIn("ladeLlmStatus", self.js)
-        self.assertIn('"/config/llm"', self.js)
+        self.assertIn('"/config/llm"', self.einstellungen_js)
         self.assertIn("macheDockSpalter", self.js)
         self.assertIn("macheEmpfangSpalter", self.js)
         self.assertIn("--dock-empfang-pct", css)
@@ -310,11 +311,11 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("Wallets immer aktuell", de)
         self.assertIn("Nur bekannte UTXOs", de)
         self.assertIn("speichereStartSync", self.js)
-        self.assertIn('"/config/start-sync"', self.js)
+        self.assertIn('"/config/start-sync"', self.einstellungen_js)
         self.assertIn("folgeWalletSyncJob", self.js)
-        self.assertIn("wallets_immer_aktuell", self.js)
-        self.assertIn("wallets_nur_bekannte_utxos", self.js)
-        self.assertIn("setzeKnownOnlySichtbarkeit", self.js)
+        self.assertIn("wallets_immer_aktuell", self.einstellungen_js)
+        self.assertIn("wallets_nur_bekannte_utxos", self.einstellungen_js)
+        self.assertIn("setzeKnownOnlySichtbarkeit", self.einstellungen_js)
 
     def test_filter_treffer_log_wird_in_place_aktualisiert(self):
         """Ergebnis überschreibt „hole Block…“, hängt keine zweite Zeile an."""
@@ -390,6 +391,7 @@ class TestOberflaeche(unittest.TestCase):
         self.herkunft_js = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
         self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
+        self.einstellungen_js = (WEB / "views" / "einstellungen.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
@@ -421,7 +423,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="steuer-stichtag"', self.html)
         self.assertIn('id="steuer-haltefrist"', self.html)
         self.assertIn('id="steuer-anschaffung"', self.html)
-        self.assertIn("speichereSteuerEinstellungen", self.js)
+        self.assertIn("speichereSteuerEinstellungen", self.einstellungen_js)
         self.assertIn("28.02.2021", self.html)
         # Folgeanalyse: ein Knopf „Herkunftslücken schließen“ (full).
         self.assertIn('t("trace.folgeLuecken")', self.herkunft_js)
