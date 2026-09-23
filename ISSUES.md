@@ -276,10 +276,10 @@ Zwei Bausteine **gemeinsam** (ein IO-Umbau):
 
 ## Architektur · Modularisierung (kleinere Module)
 
-**Stand:** 2026-09-23 · **Slice 1+2 weitgehend · Slice 3 `main.py` erledigt · Slice 4 `analyze.py` erledigt · UI/Server-Schnitte 1–6 erledigt** · Architektur  
+**Stand:** 2026-09-23 · **Slice 1+2 weitgehend · Slice 3–4 erledigt · Slice-5-Plan (Adapter) · UI/Server-Schnitte 1–6 erledigt** · Architektur  
 **ADR/Abschlussmemo:** [`doc/adr-modularisierung.md`](doc/adr-modularisierung.md)
 
-Aufwand: **sehr hoch** (viele Slices; Slice 1–4 weitgehend, Shared-Kern/CLI 1–6 erledigt)
+Aufwand: **sehr hoch** (viele Slices; Slice 1–4 erledigt, Slice-5-Plan, Shared-Kern/CLI 1–6 erledigt)
 **Prompt/Detail:** [`doc/issues/modularisiere_prompt.txt`](doc/issues/modularisiere_prompt.txt)
 
 **Hauptziel:** God-Files (`server.py`, `main.py`, `analyze.py`, `web/app.js`, …) inkrementell entkernen — Engine / core / Adapter / Surfaces, Verhalten 1:1, Tests als Netz. Kein Big-Bang.
@@ -290,7 +290,7 @@ Viele Entwickler und Assistenten arbeiten in **vielen Branches/Worktrees paralle
 
 **Done-Check je Slice (neben Tests grün):** Typische parallele Features können weitgehend **ohne dieselbe Datei** landen; ADR/Abschlussmemo sagt das explizit.
 
-**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~62 KB; Domänen unter `httpserver/api/` + Helfer/`AppState`/`wallet_sync`/`splash`/`main_cli` unter `httpserver/`. `web/app.js` ~583 KB → ~90 KB: Views + Chrome + `api.js`/`state.js`/`format.js`/`mempool_links.js`. Rest in `app.js`: Laden-Ballast (Kurs/Chat/Sync-UI). **Slice 3:** `main.py` ~250 KB → ~23 KB; Domänen unter `core/`; Fassade + dünnes `main()`. **Slice 4:** `analyze.py` ~143 KB → **~2,8 KB**; Domänen unter `core/utxo_origin`, `utxo_ingress_report`, `tx_utxo_analyze`, `sanction_hops`, `wallet_sanctions_check`, `sanctioned_address_utxos`, `sanctioned_output_trace`; Fassade + `_main`-Shim. Detail/Abschlussmemo in `doc/adr-modularisierung.md`. **Nächster Schritt (out of scope hier):** Slice 5 Adapter (`fulcrum.py` / `bip158_scanner.py`); Push/FF nur nach explizitem OK.
+**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~62 KB; Domänen unter `httpserver/api/` + Helfer/`AppState`/`wallet_sync`/`splash`/`main_cli` unter `httpserver/`. `web/app.js` ~583 KB → ~90 KB: Views + Chrome + `api.js`/`state.js`/`format.js`/`mempool_links.js`. Rest in `app.js`: Laden-Ballast (Kurs/Chat/Sync-UI). **Slice 3:** `main.py` ~250 KB → ~23 KB; Domänen unter `core/`; Fassade + dünnes `main()`. **Slice 4:** `analyze.py` ~143 KB → **~2,8 KB**; Domänen unter `core/utxo_origin` … `sanctioned_output_trace`; Fassade + `_main`-Shim. **Slice 5 (Plan):** Adapter-Feinschnitt — Inventar `fulcrum.py` (~87 KB/2574 Z./60 Defs), `bip158_scanner.py` (~84 KB/2451 Z./65 Defs), Sibling `check_fulcrum_tor.py` / `outbound_policy.py`; Split/Thin nach `core/fulcrum_*` + `core/bip158_*` (+ electrum_servers/outbound_policy); Root bleibt Fassade. Detail in `doc/adr-modularisierung.md`. **Nächster Schritt:** Slice-5-Implementierung (Code-Moves); Push/FF nur nach explizitem OK; vor FF nach `dev-juniormind` Playwright-Userflow; nach Merge push+continue vs push+pause fragen.
 
 ---
 ---

@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3 `main.py` erledigt** · **Slice 4 `analyze.py` erledigt** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
-**Stand:** 2026-09-23 (Slice-4-Abschluss)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3–4 erledigt** · **Slice 5 Adapter-Plan** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-23 (Slice-5-Plan)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–4 lokal; Push/FF nur nach OK)  
+**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–4 erledigt, Slice-5-Plan; Push/FF nur nach OK)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -131,12 +131,13 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 - Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
 - **Slice 3 = `main.py`:** erledigt (siehe Abschlussmemo).
 - **Slice 4 = `analyze.py`:** erledigt (siehe Abschlussmemo); Plan unten bleibt als Inventar.
+- **Slice 5 = Adapter-Feinschnitt** (`fulcrum.py` / `bip158_scanner.py` + eng verwandte Sibling-Adapter): **Plan** unten; Implementierung noch offen.
 
 ## Offene Punkte (Stand Memo)
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3+4 erledigt**; als Nächstes Slice 5 (Adapter).
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3+4 erledigt**; **Slice-5-Plan** (Adapter) steht — Implementierung als Nächstes.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -592,7 +593,7 @@ Slice 4 ist **erledigt**: Trace-/Sanktions-Domänen liegen unter `core/*`; `anal
 
 ### Explizit nicht erledigt / als Nächstes
 
-- **Slice 5:** Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py`.
+- **Slice 5:** Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py` — **Plan** siehe Kapitel unten; Implementierung ausstehend.
 - Umbau `trace_engine.py` oder Merge mit `core/trace.py` (Flattening).
 - Entfernen der `analyze`-Fassade (Kompatibilität bleibt).
 - Weitere Retargets von `from analyze import …` auf Direktimport `core.*` (optional, nicht Blocker).
@@ -602,4 +603,165 @@ Slice 4 ist **erledigt**: Trace-/Sanktions-Domänen liegen unter `core/*`; `anal
 - Commits auf `refactor/modular-engine` lokal ok; **Push nur nach explizitem OK**.
 - Kein Prod-`.env` / Secrets / Home-Node / Mainnet durch den Bot.
 - Refactor-Slices eigene Commits, keine Drive-bys in Feature-PRs.
+
+
+## Slice 5 (fest) · Adapter-Feinschnitt — Plan 2026-09-23
+
+**Status:** **Plan** (Inventar + Reihenfolge; noch keine Code-Moves)  
+**Ist (Inventar vor Extraktion):**
+
+| Datei | Bytes | Zeilen | Top-Level-Defs |
+| --- | ---: | ---: | ---: |
+| `fulcrum.py` | 86 623 | 2 574 | 60 (4 Klassen + 56 Funktionen) |
+| `bip158_scanner.py` | 83 511 | 2 451 | 65 (9 Klassen + 56 Funktionen) |
+| `check_fulcrum_tor.py` (Sibling) | 33 881 | 1 056 | 38 |
+| `outbound_policy.py` (Sibling) | 6 372 | 172 | 14 |
+
+**Charakter Slice 5:** **Split/Thin** (wie Slice 3/4), **kein** reiner Datei-Umzug und **kein** neues Parallel-Package `adapters/`. Root-Namen `fulcrum.py` / `bip158_scanner.py` / `check_fulcrum_tor.py` / `outbound_policy.py` bleiben **Import-Fassaden** (Packaging, Tests, Late-Imports). Bodies → **`core/*`** — analog zu bereits adapterartigen `core/p2p.py`, `core/bitcoind_rpc.py`, `core/tor.py`. ADR-Sollschicht „adapters“ = logische Rolle, nicht eigener Top-Level-Ordner in diesem Slice.
+
+### Inventar (Kurz)
+
+**Rollen heute**
+
+- **`fulcrum.py`:** Electrum/Fulcrum-Transport (SOCKS/Tor), JSON-RPC-Client + Pools/Notify, Gap/Index-Scan, UTXO/Mempool, Tx-Normalize/Batch, Adress-/Wallet-Verlauf, Tip/Date→Höhe.
+- **`bip158_scanner.py`:** Golomb/SipHash/Basic-Filter, Script/Gap-Ableitung, CFilter-Pipeline (`verteile_cfilter_chunks`), `BIP158Scanner`, Live-Peers, P2P-Tx-Fetch/Hints, Wallet-UTXO-API + CLI-`main`.
+- **`check_fulcrum_tor.py`:** Diagnose-CLI + **gemeinsame** Electrum-Serverlisten (`load_electrum_servers`, `splitte_electrum_server`, …) — von `core/source.py` / `core/sanctions_pool.py` / HTTP Source-API benutzt.
+- **`outbound_policy.py`:** Host-/URL-Allowlist + TLS-Kontext; von Fulcrum, bitcoind-RPC, Price/LLM/Mail und `server.py` genutzt.
+
+**Domänen-Cluster `fulcrum.py` (Bodies ≈ Zeilen):**
+
+| Cluster | ~Z. Bodies | Inhalt |
+| --- | ---: | --- |
+| Transport/SOCKS/Tor | ~69 | `_socks5_connect`, Proxy-Resolve |
+| Protocol/Client/Pool | ~726 | `FulcrumClient`, `FulcrumNotifySession`, Pools, `connect_fulcrum`, `parallel_ueber_pool` |
+| Gap/Indices | ~426 | `collect_used_*`, `first_seen_*`, Tor-Batch |
+| UTXO/Mempool | ~464 | `fetch_*_utxos_fulcrum`, `klassifiziere_utxo_spends`, Mempool-Empfänge |
+| Tx/Normalize | ~384 | `fetch_tx(s)_fulcrum*`, Header-Zeiten, Electrum-Tx-Normalize |
+| History/Verlauf | ~241 | `fetch_*_history_fulcrum`, Walk/Fortschritt |
+| Tip/Date-Height | ~94 | `get_chain_tip_height`, `date_to_block_height_fulcrum` |
+
+**Domänen-Cluster `bip158_scanner.py` (Bodies ≈ Zeilen):**
+
+| Cluster | ~Z. Bodies | Inhalt |
+| --- | ---: | --- |
+| Golomb/Filter-Crypto | ~215 | SipHash, BitStream, `_CoreBasicFilterMatcher`, chiabip158-Match |
+| Dataclasses | ~44 | `ScanProgress` / `Matched*` / `ScanResult` |
+| Script/Gap/Derive | ~234 | `derive_script_pubkeys_from_xpub`, Gap-Erweiterung |
+| CFilter-Pipeline | ~515 | `verteile_cfilter_chunks` (~306), Chunk-Laden, Fortschrittstexte |
+| Block Parse/Extract | ~111 | `parse_raw_block`, `extract_from_parsed_block` |
+| Live-Peers | ~36 | `melde_live_filter_peers` / `live_filter_peer_hosts` |
+| Scanner+Client | ~577 | `BIP158Scanner` (~467), `vorab_block_header`, Factory |
+| Tx-Fetch/Hints | ~243 | `fetch_tx_p2p*`, Height-Hints |
+| Wallet-UTXO-API | ~243 | `fetch_wallet_utxos_bip158`, Seed/Tip, CLI-`main` |
+
+**Kopplung — wer importiert die Adapter:**
+
+| Verbraucher | typische Symbole |
+| --- | --- |
+| `core/chain_sources.py` | Fulcrum-Connect/Client/Pool; BIP158-Client/Scan-Einstiege (Hauptverbraucher) |
+| `core/wallet_sync_engine.py` | Indices, Tip, Mempool/Spends; `take_last_scan_tip` |
+| `core/wallet_watch.py` | `FulcrumNotifySession`, UTXOs, Mempool |
+| `core/source.py` | `connect_fulcrum`, Timeouts; `live_filter_peer_hosts`; `check_fulcrum_tor` Listen |
+| `core/sanctions_pool.py` | `SanctionsClearnetPool`, `fetch_*_fulcrum`; `load_electrum_servers` |
+| `core/export_adressen.py`, `core/receive_address.py`, `core/utxo_report.py`, `core/xpub_cache.py` | Tx-Batch, Receive-Indices, Date-Parse, Tip |
+| `core/sanctioned_address_utxos.py` | Fulcrum-UTXOs; BIP158 `MatchedTransaction`/`ScanResult` |
+| `core/bitcoind_rpc.py`, `core/p2p.py` | `_socks5_connect` (Shared-Transport) |
+| `core/trace.py`, `core/tx_utxo_analyze.py` | `note_tx_height` |
+| `httpserver/empfang.py`, `httpserver/api/source.py`, `httpserver/tls_p2p.py` | Scripthash/Notify; BIP158-Peers/Serverlisten |
+| `server.py` | `vorab_block_header`; `outbound_policy` |
+| `main.py` | Late-Import nur Cache-Clear `_HEADER_TIME_CACHE`; Re-Exports aus `core.chain_sources` |
+| `menu.py` | indirekt über `main` / Fulcrum Date→Höhe |
+| `pack_release.py` | Dateien in Bundle; `fetch_electrum_servers_json` |
+| Tests | `test_fulcrum_*`, `test_bip158_scanblocks`, `test_tx_fallback`, `test_source`, `test_parallel`, `test_mempool_*`, `test_utxo_*`, `test_wallet_alter` |
+
+**Öffentliche / von außen genutzte API (Union, Auszug):**  
+`FulcrumClient`, `FulcrumNotifySession`, `RotatingFulcrumPool`, `SanctionsClearnetPool`, `connect_fulcrum`, `address_to_scripthash`, `collect_used_*_fulcrum`, `fetch_*_utxos_fulcrum`, `fetch_tx(s)_fulcrum*`, `fetch_*_history_fulcrum`, `klassifiziere_utxo_spends`, `eigene_mempool_empfaenge`, `get_chain_tip_height`, `date_to_block_height_fulcrum`, `FULCRUM_*`-Konstanten, `_socks5_connect`, `_vout_addresses`, `_HEADER_TIME_CACHE`; BIP158: `BIP158Scanner`, `Bip158Client`, `Matched*`, `ScanResult`, `verteile_cfilter_chunks`, `vorab_block_header`, `fetch_*_bip158`, `fetch_tx_p2p*`, `note_tx_height`/`take_last_scan_tip`, `live_filter_peer_hosts`, `create_bip158_client_from_env`; Tor-Check: `load_electrum_servers`, `splitte_electrum_server`, `ELECTRUM_SERVERS_URL`; Policy: `ensure_*_allowed`, `tls_context`, `OutboundPolicyError`.
+
+### Kopplung / Zyklus-Risiken
+
+| Kante | Art | Slice-5-Hinweis |
+| --- | --- | --- |
+| `fulcrum` → `main` (Late: `_load_dotenv`, `load/save_cached_block_time`, `IMMUTABLE_CACHE_DIR`) | weicher Zyklus (`main` löscht Fulcrum-Header-Cache) | Bodies auf `core.env_bootstrap` / `core.xpub_cache` (o. ä.) umbiegen; Fassade `main` behält Re-Exports |
+| `bip158_scanner` → `main` (Late: `derive_addresses`, `ist_deskriptor`, `load_xpub_*`, `bip158_*`, `merke_bip158_verlauf`) | Adapter → Engine-Fassade | Direkt auf `core.derivation` / `core.xpub_cache` / `core.chain_sources`-Helfer; **kein** neuer Import `core.*` → Root-`bip158_scanner` für Domänen-Bodies |
+| `outbound_policy` → `core.source` (`oeffentliche_electrum_session_aktiv`) | Policy hängt an Source | Beim Move nach `core/outbound_policy.py` Callback/Flag injizieren oder Helfer nach `core/source_flags` ziehen — **Importzyklus `core.source` ↔ `core.outbound_policy` vermeiden** |
+| `core.p2p` → `fulcrum._socks5_connect`; `bip158` → `core.p2p` | Shared-Transport | SOCKS nach `core/fulcrum_transport.py` (oder `core/socks5.py`); P2P/BIP158 importieren Transport, nicht Root-`fulcrum` |
+| `core.bitcoind_rpc` → `fulcrum` SOCKS + `outbound_policy` | ok Richtung Surface/Adapter | nach Transport/Policy-Modul zeigen |
+| `fulcrum`/`bip158` → `core.jobs`, `core.tor`, `display` (Abort/Zwischenstand) | Jobs/UI-Hooks | belassen (Late-OK); keine neuen Zyklen `jobs`→Root-Adapter für Bodies |
+| `analyze` ↔ Adapter | praktisch keine | Slice 4 bleibt unberührt |
+| `httpserver` / `server` → Adapter | Surface → Adapter | OK; nach Fassade oder `core.*` retargeten optional |
+
+**Schluss:** Slice 5 **zerlegt** die zwei ~84–87 KB-Adapter (+ Sibling-Listen/Policy) in Domänenmodule unter `core/`, Root bleibt dünne Fassade. Nicht „Datei nach `core/fulcrum.py` schieben und fertig“ — das wäre kosmetisch und >80 KB God-File.
+
+### Zielbild
+
+- Root-`fulcrum.py` / `bip158_scanner.py` ≪ 20 KB: Re-Exports + ggf. CLI-Shim (`bip158_scanner.main`, `check_fulcrum_tor.main`).
+- Fachcode in **`core/fulcrum_*.py`** / **`core/bip158_*.py`** (+ `core/electrum_servers.py`, `core/outbound_policy.py`); Dateien ≤ ~80–100 KB.
+- Verhalten 1:1; Symbol-Identität der Fassaden (`fulcrum.FulcrumClient is core.fulcrum_client.FulcrumClient`).
+- **Kein Domänen-Zyklus:** extrahierte `core/*` importieren nicht Root-`fulcrum`/`bip158_scanner` für ihre Bodies; Late-`main`-Abhängigkeiten → bereits extrahierte `core.*`.
+- Packaging (`pack_release.py`) behält Root-Dateinamen; neue `core/*`-Module in Bundle-Liste nachziehen.
+
+### Empfohlene Modulgrenzen
+
+| Modul (Vorschlag) | Inhalt (Beispiele) | ~KB Bodies | Entkoppelt u. a. |
+| --- | --- | ---: | --- |
+| `core/fulcrum_transport.py` | SOCKS5, Proxy-Resolve, `_recv_exact`, Timeouts-Konstanten die nur Transport brauchen | ~3 | `core.p2p`, `core.bitcoind_rpc` |
+| `core/fulcrum_client.py` | `FulcrumClient`, Notify, Pools, `connect_fulcrum`, `parallel_ueber_pool`, Software-Probe, `address_to_scripthash` | ~26 | chain_sources, sanctions_pool, wallet_watch |
+| `core/fulcrum_wallet.py` | Gap/Indices + UTXO/Mempool-Fetch/Klassifikation | ~30 | wallet_sync, receive_address, sanctioned_address_utxos |
+| `core/fulcrum_history.py` | Tx-Normalize/Batch, Adress-/Wallet-Verlauf, Tip/Date→Höhe, Header-Zeit-Caches | ~25 | export_adressen, xpub_cache, menu Date→Höhe |
+| `core/bip158_filter.py` | SipHash/Golomb/Matcher + Scan-Dataclasses | ~9 | Tests Filter-Encode; Scanner-Kern |
+| `core/bip158_scan.py` | CFilter-Pipeline, Block-Extract, Live-Peers, `BIP158Scanner`, `vorab_block_header` | ~40 | chain_sources, server vorab-Header, test_bip158_* |
+| `core/bip158_wallet.py` | Script/Gap-Derive, Tx-P2P-Fetch/Hints, Wallet-UTXO-API, Client-Factory | ~25 | wallet_sync tip, trace height-hints, httpserver |
+| `core/electrum_servers.py` | Listen-Laden/Split/URL aus `check_fulcrum_tor` (ohne CLI-Prints wo möglich) | ~8–12 | source, sanctions_pool, httpserver api/source |
+| `core/outbound_policy.py` | Move + Zyklus-Fix ggü. `core.source` | ~6 | price/llm/mail/fulcrum/server |
+| Root-Fassaden | `fulcrum.py`, `bip158_scanner.py`, `check_fulcrum_tor.py` (CLI+Re-Export), `outbound_policy.py` | ≪ 20 je | Kompatibilität |
+
+Namensnotiz: bewusst **nicht** ein einzelnes `core/fulcrum.py` / `core/bip158_scanner.py` (God-File wandert mit). `core/p2p.py` / `core/bitcoind_rpc.py` bleiben; sie retargeten nur Imports auf Transport/Policy.
+
+### Extraktions-Reihenfolge (je eigener Commit, lokal bis Abschnitt OK)
+
+1. **`core/fulcrum_transport.py`** — SOCKS zuerst (P2P/RPC entkoppelt von Root-`fulcrum`).  
+2. **`core/fulcrum_client.py`** — Client/Pools/Connect; Fassade sofort.  
+3. **`core/fulcrum_wallet.py`** — Indices + UTXO/Mempool.  
+4. **`core/fulcrum_history.py`** — Tx/Verlauf/Tip; Late-`main`-Cache → `core.*`.  
+5. **`fulcrum.py` glätten** — nur Fassade; Smoke `import fulcrum`.  
+6. **`core/bip158_filter.py`** — blattnah, wenige Importer.  
+7. **`core/bip158_scan.py`** — Scanner + CFilter + Peers + `vorab_block_header`.  
+8. **`core/bip158_wallet.py`** — Derive/Tx-Fetch/Wallet-API; Late-`main` → `core.derivation`/`xpub_cache`.  
+9. **`bip158_scanner.py` glätten** — Fassade + CLI-`main`-Shim.  
+10. **`core/electrum_servers.py`** + `check_fulcrum_tor.py` Fassade/CLI.  
+11. **`core/outbound_policy.py`** — Move inkl. Zyklus-Fix; Root-Re-Export.
+
+Zwischen jedem Commit: Characterization der berührten Domäne + Import-Smoke (`python -c "import fulcrum, bip158_scanner, outbound_policy; import core.chain_sources"`).
+
+### Charakterisierung / Tests (vor/während)
+
+Mindestens: `tests/test_fulcrum_retry.py`, `tests/test_fulcrum_tor_batch.py`, `tests/test_fulcrum_verlauf.py`, `tests/test_fulcrum_verlauf_hrp.py`, `tests/test_bip158_scanblocks.py`, `tests/test_tx_fallback.py`, `tests/test_source.py`, `tests/test_parallel.py`, `tests/test_mempool_pending_self.py`, `tests/test_utxo_scan_prioritaet.py`, `tests/test_utxo_zwischenstand.py`, `tests/test_wallet_alter.py`, `tests/test_start9_phase_s2.py` (outbound_policy); plus Import-Smoke `core.chain_sources` / `core.wallet_sync_engine` / `httpserver.api.source`.
+
+### Done-Check Slice 5
+
+- `fulcrum.py` und `bip158_scanner.py` ≪ 40 KB (Ideal: nur Fassade/CLI-Shim ≪ 20 KB).  
+- Domänen **fulcrum_transport/client/wallet/history** und **bip158_filter/scan/wallet** in getrennten Dateien unter `core/`; kein neues God-File > ~100 KB.  
+- Sibling **electrum_servers** + **outbound_policy** unter `core/` (Root-Fassade); **kein** `core.source` ↔ `core.outbound_policy`-Zyklus.  
+- Extrahierte `core/*` importieren nicht Root-`fulcrum`/`bip158_scanner` für Bodies; Late-`main` in Adaptern auf `core.*` umgestellt.  
+- Genannte Tests grün; Fassaden-Symbol-Identität.  
+- Kurzes Abschlussmemo + Merge-Einschätzung.
+
+### Merge-Ritual (wie Slice 3/4) · verbindlich
+
+- Arbeitscommits nur auf `refactor/modular-engine`; **Push nur nach explizitem OK**.  
+- **Vor jedem Fast-Forward / Merge nach `dev-juniormind`:** Playwright-**Web-GUI-Userflow** grün (`scripts/webgui_userflow.py`, siehe `doc/testprotokoll-webgui-userflow.md`).  
+- **Nach jedem Merge:** explizit nachfragen — **push+continue** vs. **push+pause**; ohne Antwort nicht pushen/weitermachen als wäre OK erteilt.  
+- Kein Prod-`.env` / Secrets / Home-Node / Mainnet durch den Bot.
+
+### Explizit nicht Slice 5
+
+- Weitere Schnitte an `server.py` / `web/app.js` / `analyze`-Fassade / `trace_engine.py`.  
+- Semantik-Änderungen an Fulcrum-/BIP158-Scan, neue Indexer-Features, Cache-Format-Migration.  
+- Big-Bang-Umbenennung nach `adapters/`-Package oder Entfernen der Root-Fassaden.  
+- Rewrite von `check_fulcrum_tor` UX; nur Listen-Kern + Fassade.  
+- Secrets / `.env`-Inhalte loggen oder ändern.
+
+### Parallel-Dev-Nutzen (Rückblick-Test)
+
+Nach Slice 5 sollten z. B. „Fulcrum-Verlauf/Tor-Batch“ und „BIP158-CFilter-Pipeline/Wallet-UTXO“ ohne gemeinsame Root-Bodies landen können — und Electrum-Serverlisten/Outbound-Policy parallel zu Client-Transport, ohne `fulcrum.py`-Hotspot.
 
