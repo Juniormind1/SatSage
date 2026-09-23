@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1+2 weitgehend · Shared-Kern/CLI-Schnitte 1–6 erledigt  
-**Stand:** 2026-09-23 (Nachzug UI 1–4 + Server 5–6)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3 `main.py` erledigt** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-23 (Slice-3-Abschluss)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (tip nach Docs-Commit; UI/Server-Schnitte 1–6)  
+**Arbeitsbranch:** `refactor/modular-engine` (lokal ahead; Slice-3-Commits; nicht gepusht)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -135,7 +135,7 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3 `main.py`:** Plan unten; danach `analyze.py`.
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3 `main.py` erledigt**; danach Slice 4 `analyze.py`.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -148,8 +148,9 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 ## Slice 3 (fest) · `main.py` — Plan 2026-09-23
 
-**Status:** geplant (Inventar erledigt, Implementierung ausstehend)  
-**Ist:** `main.py` ~250 KB / ~7487 Zeilen / ~212 Top-Level-Symbole — größter verbleibender Prod-Monolith.
+**Status:** **erledigt / akzeptiert** (2026-09-23) — siehe Abschlussmemo unten  
+**Ist (nach Extraktion):** `main.py` ~23 KB — nur `main()` + Re-Export-Fassade (+ `set_chain_network` / `MAX_TRACE_*`).  
+**Ist (Inventar vor Slice 3):** `main.py` ~250 KB / ~7487 Zeilen / ~212 Top-Level-Symbole.
 
 ### Inventar (Kurz)
 
@@ -327,7 +328,7 @@ Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` m
 
 1. Laden-Ballast in `app.js` häppchenweise (Kurs, Chat/LLM, Sync-UI) — nur mit klarer Grenze.
 2. Optional Server: `build_state`, `starte_header_vorab`, weiteren Handler-Feinschnitt.
-3. Später laut ADR: `main.py` / `analyze.py` / Adapter-Feinschnitt (Slices 3–5).
+3. Laut ADR: **Slice 3 `main.py` erledigt**; als Nächstes `analyze.py` (Slice 4) / Adapter-Feinschnitt (Slice 5).
 4. Arbeitsregeln in `AGENTS.md` nachziehen.
 
 
@@ -345,6 +346,65 @@ Je Ziffer ein Commit (lokal, später gepusht):
 | 6 | Splash / `main_cli` | `httpserver/splash.py`, `httpserver/main_cli.py` |
 
 `server.py` behält dünnen `if __name__ == "__main__"`-Einstieg und Re-Export-Fassaden.
+
+
+
+## Abschlussmemo 2026-09-23 · Slice 3 (`main.py`)
+
+### Kurzfazit
+
+Slice 3 ist **erledigt**: Engine-Domänen und restliche CLI-Helfer liegen unter `core/*`; `main.py` ist dünner CLI-Einstieg (`main()`) plus Re-Export-Fassade (Symbol-Identität für Tests/Specter/Menu). Verhalten 1:1; kein Push, kein Merge auf `dev-juniormind` in diesem Schritt.
+
+### Messwerte
+
+| Datei | vor Slice 3 (ADR-Inventar) | Stand Abschluss |
+| --- | ---: | ---: |
+| `main.py` | ~250 KB | **~23 KB** |
+
+### Module gelandet (Extraktions-Reihenfolge)
+
+| Modul | Inhalt (kurz) |
+| --- | --- |
+| `core/derivation.py` | Ableitung / Skripttypen / Deskriptoren |
+| `core/wallet_context.py` | `WalletContext`, Address-Seed / External-Cache |
+| `core/xpub_cache.py` | UTXO-/Verlauf-/Ingress-Caches, Genesis-Konstanten |
+| `core/env_bootstrap.py` | `.env`-Pfad, `_load_dotenv`, Editor |
+| `core/chain_sources.py` | Fetchers / Clients / Priority-Chains / BIP-158-Setup |
+| `core/sanctions_pool.py` | Sanktions-Pools / Clearnet-Probe |
+| `core/wallet_sync_engine.py` | Tip-Sync, Scan, `resolve_wallet_*` |
+| `core/env_wallets.py` | XPUB-/Wallet-Env-Parser, Start-Sync-Flags, `UNLESBAR_HINWEIS` |
+| `core/receive_address.py` | Gap-Limit / nächste Empfangsadresse (Fulcrum) |
+| `core/utxo_report.py` | CLI-UTXO-/Ingress-Berichte, Tx-Output-Helfer |
+| `core/launch_checks.py` | `launch_check_fulcrum_tor_external` |
+
+`main.py` behält bewusst: `main()`, Fassade, `set_chain_network` (Caches über mehrere Module + Fulcrum-Header), `MAX_TRACE_DEPTH` / `MAX_TRACE_ADDRESS_SEARCH` (Analyze-/Specter-Façade).
+
+### Done-Check Slice 3 (ehrlich)
+
+| Kriterium | Lage |
+| --- | --- |
+| `main.py` ≪ 100 KB (Ideal ≪ 40 KB) | **ja** (~23 KB) |
+| Domänen derivation / xpub_cache / chain_sources / wallet_sync_engine getrennt | **ja** |
+| `core` importiert nicht mehr `main` *für diese Domänen* | **weitgehend ja** — Env-Wallet-/UTXO-Report-Helfer retargetet; Rest siehe unten |
+| Specter / `httpserver/wallet_sync` über Fassade oder `core.*` | **ja** (Façade + Direktimports wo retargetet) |
+| Kein neues God-File > ~100 KB in `core/` | **ja** (größtes Slice-3-Modul `xpub_cache` ~60 KB) |
+| Genannte Tests | Import-Smoke + façade identity; `test_derivation`, `test_config`/`env*`, `test_start_sync`, `test_utxo_ranking`, `test_tx_formats`, `test_wallet_bloecke` grün |
+| Abschlussmemo + Merge-Einschätzung | **dieses Kapitel** |
+
+**Verbleibende CLI-Helfer in `main.py`:** nur `set_chain_network`, Trace-Konstanten, `main()` (+ Re-Exports).
+
+**`core` → `main` Leftovers** (Stand `rg`/grep nach Slice 3): u. a. `env_bootstrap` → `set_chain_network`; `trace`/`tx_classify`/`tax`/`wallets`/… noch für Fassaden-Symbole (`_normalize_txid`, …) bzw. Late-Import — **nicht** mehr für die extrahierten Env-/Receive-/UTXO-Report-Domänen. Weitere Entkopplung = Feinschliff, nicht Slice-3-Blocker.
+
+### Merge-Lage
+
+- Lokal: `refactor/modular-engine` ist **Fast-Forward von `dev-juniormind`** (gemeinsamer Tip vor Slice-3-Abschluss-Commits war `c87f8e0`); **nicht gepusht**, **nicht** nach `dev-juniormind` gemerged.
+- Parallel-Dev-Nutzen: Ableitung/Multisig vs. Tip-Sync/Cache-Prune können ohne gemeinsame `main.py`-Bodies landen (Done-Check Rückblick-Test erfüllt).
+
+### Explizit nicht erledigt / als Nächstes
+
+- **Slice 4:** `analyze.py` / Trace-Pipeline (out of scope hier).
+- Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py` (Slice 5).
+- Optional: weitere `core`→`main`-Late-Imports auf Direktimport `core.*` umbiegen; `set_chain_network` näher an `derivation` nur mit Cache-Clear-Vertrag.
 
 ### Arbeitsregeln (Branch)
 
