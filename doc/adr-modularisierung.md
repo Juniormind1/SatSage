@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3 `main.py` erledigt** · **Slice 4 `analyze.py` Plan** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
-**Stand:** 2026-09-23 (Slice-4-Plan)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3 `main.py` erledigt** · **Slice 4 `analyze.py` erledigt** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-23 (Slice-4-Abschluss)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (lokal ahead; Slice-3 erledigt; Slice-4-Plan; nicht gepusht)  
+**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–4 lokal; Push/FF nur nach OK)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -130,13 +130,13 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 - Erfolg bemisst sich an **paralleler Entwickelbarkeit** (Rückblick auf spürbare Features), nicht an Zeilenzahl allein.
 - Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
 - **Slice 3 = `main.py`:** erledigt (siehe Abschlussmemo).
-- **Slice 4 = `analyze.py`:** detaillierter Plan unten (Inventar 2026-09-23); Umsetzung nach Freigabe, Commits je Domäne.
+- **Slice 4 = `analyze.py`:** erledigt (siehe Abschlussmemo); Plan unten bleibt als Inventar.
 
 ## Offene Punkte (Stand Memo)
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3 `main.py` erledigt**; **Slice 4 `analyze.py` Plan** (Umsetzung ausstehend).
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3+4 erledigt**; als Nächstes Slice 5 (Adapter).
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -403,7 +403,7 @@ Slice 3 ist **erledigt**: Engine-Domänen und restliche CLI-Helfer liegen unter 
 
 ### Explizit nicht erledigt / als Nächstes
 
-- **Slice 4:** `analyze.py` / Trace-Pipeline — Plan unten; Umsetzung ausstehend.
+- **Slice 4:** `analyze.py` / Trace-Pipeline — **erledigt** (Abschlussmemo unten).
 - Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py` (Slice 5).
 - Optional: weitere `core`→`main`-Late-Imports auf Direktimport `core.*` umbiegen; `set_chain_network` näher an `derivation` nur mit Cache-Clear-Vertrag.
 
@@ -416,8 +416,9 @@ Slice 3 ist **erledigt**: Engine-Domänen und restliche CLI-Helfer liegen unter 
 
 ## Slice 4 (fest) · `analyze.py` — Plan 2026-09-23
 
-**Status:** Plan / bereit zur Umsetzung (noch keine Code-Moves)  
-**Ist (Inventar 2026-09-23):** `analyze.py` **142 797 B / 4 214 Zeilen / 74 Top-Level-Defs** (73 Funktionen/Klassen + `_main`).  
+**Status:** **erledigt / akzeptiert** (2026-09-23) — siehe Abschlussmemo unten  
+**Ist (Inventar vor Extraktion):** `analyze.py` **142 797 B / 4 214 Zeilen / 74 Top-Level-Defs** (73 Funktionen/Klassen + `_main`).  
+**Ist (nach Extraktion):** `analyze.py` ~2,8 KB — nur Re-Export-Fassade + `_main()`-Shim.  
 **Nachbarschaft:** Root-`trace_engine.py` (~15 KB, Walk-Primitives) bleibt; `core/trace.py` (~32 KB) flatten’t den Origin-Baum für die UI und **importiert heute `analyze`** (Zyklus-Risiko).
 
 ### Inventar (Kurz)
@@ -544,3 +545,61 @@ Mindestens: `tests/test_trace.py`, `tests/test_trace_resume_luecken.py`, `tests/
 ### Parallel-Dev-Nutzen (Rückblick-Test)
 
 Nach Slice 4 sollten z. B. „Herkunft-Lücken/Steuer-Horizont“ und „Wallet-Sanktions-Hop-Check“ ohne gemeinsame `analyze.py`-Bodies landen können — und Listen-UTXO-Scan parallel zu Entity-Output-Trace.
+
+
+## Abschlussmemo 2026-09-23 · Slice 4 (`analyze.py`)
+
+### Kurzfazit
+
+Slice 4 ist **erledigt**: Trace-/Sanktions-Domänen liegen unter `core/*`; `analyze.py` ist dünne Re-Export-Fassade (+ `_main()`-Shim). Verhalten 1:1; Symbol-Identität der Fassade geprüft. CI-Workflows nur auf `main` (Commit `cc15570`) — Feature-Branch-Pushes brauchen kein Workflow-Update.
+
+### Messwerte
+
+| Datei | vor Slice 4 (ADR-Inventar) | Stand Abschluss |
+| --- | ---: | ---: |
+| `analyze.py` | ~143 KB / 4 214 Z. | **~2,8 KB** / ~109 Z. |
+
+### Module gelandet (Extraktions-Reihenfolge)
+
+| Modul | ~Bytes | Inhalt (kurz) |
+| --- | ---: | --- |
+| `core/utxo_origin.py` | ~32 KB | Origin-Walk, Vertiefe/Lücken/Horizont, Own-Addr/Parse |
+| `core/utxo_ingress_report.py` | ~25 KB | Collect/Youngest, Persist, Followups, Contexts |
+| `core/tx_utxo_analyze.py` | ~15 KB | `analyze_tx`, `analyze_address_utxos`, `trace_known_utxos` |
+| `core/sanction_hops.py` | ~9 KB | `scan_external_sanction_hops`, CoinJoin-Helfer |
+| `core/wallet_sanctions_check.py` | ~30 KB | Live-Walk, Parallel-Check, Report |
+| `core/sanctioned_address_utxos.py` | ~20 KB | Listen-UTXO-Scan + Findings-Reports |
+| `core/sanctioned_output_trace.py` | ~15 KB | Entity-/Output-Traces + Reports |
+
+`analyze.py` behält bewusst: Re-Exports (öffentliche + bisher exportierte `_`-Namen für Specter/Tests/Menu) und `_main()`-Late-Import-Shim.
+
+### Done-Check Slice 4 (ehrlich)
+
+| Kriterium | Lage |
+| --- | --- |
+| `analyze.py` ≪ 40 KB (Ideal ≪ 20 KB) | **ja** (~2,8 KB) |
+| Domänen utxo_origin / ingress_report / tx_utxo_analyze / sanction_hops / wallet_sanctions_check getrennt | **ja** (+ listen-UTXO + entity-trace) |
+| Kein Domänen-Zyklus: extrahierte `core/*` importieren nicht `analyze` | **ja** (`core/trace` → `core.utxo_origin` / `utxo_ingress_report`) |
+| Kein neues God-File > ~100 KB in `core/` | **ja** (größtes Slice-4-Modul ~30 KB) |
+| Fassade Symbol-Identität | **ja** (`analyze.X is core.*.X` Smoke) |
+| Abschlussmemo + Merge-Einschätzung | **dieses Kapitel** |
+
+### Merge-Lage
+
+- Arbeitscommits auf `refactor/modular-engine`; vor FF nach `dev-juniormind`: Playwright-Web-GUI-Userflow.
+- **CI:** Workflows laufen laut `cc15570` nur noch auf `main` — normale PAT-Pushes der Refactor-Branches aktualisieren keine `.github/workflows`.
+- Parallel-Dev-Nutzen: Herkunft-Lücken/Steuer-Horizont vs. Wallet-Sanktions-Hop-Check bzw. Listen-UTXO-Scan vs. Entity-Output-Trace ohne gemeinsame `analyze.py`-Bodies (Rückblick-Test erfüllt).
+
+### Explizit nicht erledigt / als Nächstes
+
+- **Slice 5:** Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py`.
+- Umbau `trace_engine.py` oder Merge mit `core/trace.py` (Flattening).
+- Entfernen der `analyze`-Fassade (Kompatibilität bleibt).
+- Weitere Retargets von `from analyze import …` auf Direktimport `core.*` (optional, nicht Blocker).
+
+### Arbeitsregeln (Branch)
+
+- Commits auf `refactor/modular-engine` lokal ok; **Push nur nach explizitem OK**.
+- Kein Prod-`.env` / Secrets / Home-Node / Mainnet durch den Bot.
+- Refactor-Slices eigene Commits, keine Drive-bys in Feature-PRs.
+
