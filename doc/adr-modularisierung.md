@@ -64,24 +64,24 @@ Beispiele aus `dev-juniormind` (Sep 2026), die **gleichzeitig** hätten laufen k
 
 - `server.py` bleibt **Einstieg**: Bind (`127.0.0.1` / Managed), Token/Session, Static/Login, `main_cli`, Specter-Kompatibilität, dünne HTTP-Klasse.
 - Routing: `_verarbeite` / `_api` bleiben dünn — Delegation an Domänen-Module.
-- Handler-Logik wandert nach Domäne, z. B. unter `core/api/` oder `server/api/` (Name im Slice festlegen; Preferenz: **`core/api_*` nur wenn kein HTTP**, sonst **`server/api/<domäne>.py`** mit reinen Request→Dict-Handlern).
+- Handler-Logik wandert nach Domäne, z. B. unter `core/api/` oder `httphttpserver/api/` (Name im Slice festlegen; Preferenz: **`core/api_*` nur wenn kein HTTP**, sonst **`httpserver/api/<domäne>.py`** mit reinen Request→Dict-Handlern).
 
 Empfohlene Modulgrenzen (an bestehenden `api_*`-Namen orientiert):
 
 | Modul (Vorschlag) | Inhalt (Beispiele) | Parallele Features, die entkoppelt werden |
 | --- | --- | --- |
-| `server/api/auth_session.py` | Login/Setup/Password, unlock-env, CSRF/Host-Helfer die nur Auth betreffen | Passwort-Dialog, Env-Scramble-UI |
-| `server/api/config_ui.py` | `api_config`, UI-Lang/Theme, Lernhinweise, Status-Mail, LLM-Save | Umbrel/i18n, Settings-Kosmetik |
-| `server/api/source.py` | `api_save_source`, clear, electrum laden, source status, öffentliche Electrum, local-core accept, rescan, header-vorab | Datenquellen, Tor-Batch-Config |
-| `server/api/wallets.py` | save wallets, probe, deskriptor, sparrow/wasabi/export-import, discover-Pfade, tip-sync, empfang | Wallet-Import, lokale Suche |
-| `server/api/utxos_cache.py` | wallet/alle utxos, cache-* | Tip-Sync-Bestand, Cache löschen |
-| `server/api/trace_verlauf.py` | `api_trace*`, `api_verlauf` | Herkunft-Baum, AML-Trace |
-| `server/api/tax.py` | `api_tax`, selbstanzeige, exports/downloads | Steuerjahr, Selbstanzeige |
-| `server/api/jobs.py` | jobs/job/cancel | Job-Cancel-Reliabilität |
-| `server/api/labels_sanctions_exchange.py` | labels, sanctions, exchange-reports | Börsen-CSV, Sanktionscheck |
-| `server/api/price_llm_lab.py` | price*, llm status/chat/context, lab faucet | Kurs-Anreicherung, Assistent |
+| `httpserver/api/auth_session.py` | Login/Setup/Password, unlock-env, CSRF/Host-Helfer die nur Auth betreffen | Passwort-Dialog, Env-Scramble-UI |
+| `httpserver/api/config_ui.py` | `api_config`, UI-Lang/Theme, Lernhinweise, Status-Mail, LLM-Save | Umbrel/i18n, Settings-Kosmetik |
+| `httpserver/api/source.py` | `api_save_source`, clear, electrum laden, source status, öffentliche Electrum, local-core accept, rescan, header-vorab | Datenquellen, Tor-Batch-Config |
+| `httpserver/api/wallets.py` | save wallets, probe, deskriptor, sparrow/wasabi/export-import, discover-Pfade, tip-sync, empfang | Wallet-Import, lokale Suche |
+| `httpserver/api/utxos_cache.py` | wallet/alle utxos, cache-* | Tip-Sync-Bestand, Cache löschen |
+| `httpserver/api/trace_verlauf.py` | `api_trace*`, `api_verlauf` | Herkunft-Baum, AML-Trace |
+| `httpserver/api/tax.py` | `api_tax`, selbstanzeige, exports/downloads | Steuerjahr, Selbstanzeige |
+| `httpserver/api/jobs.py` | jobs/job/cancel | Job-Cancel-Reliabilität |
+| `httpserver/api/labels_sanctions_exchange.py` | labels, sanctions, exchange-reports | Börsen-CSV, Sanktionscheck |
+| `httpserver/api/price_llm_lab.py` | price*, llm status/chat/context, lab faucet | Kurs-Anreicherung, Assistent |
 
-Fassaden: alte Symbolnamen (`api_trace`, …) per Re-Export in `server.py` oder `server/api/__init__.py` vorhalten, bis Imports/Tests umgestellt sind.
+Fassaden: alte Symbolnamen (`api_trace`, …) per Re-Export in `server.py` oder `httpserver/api/__init__.py` vorhalten, bis Imports/Tests umgestellt sind.
 
 ### Charakterisierung / Tests (vor dem ersten Move)
 
@@ -131,5 +131,9 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 ## Offene Punkte vor Code
 
-- Exact package path: `server/api/` vs. `core/api/` — Empfehlung **`server/api/`** (HTTP-Handler), Business bleibt in `core/`.
+- Exact package path: `httphttpserver/api/` vs. `core/api/` — Empfehlung **`httphttpserver/api/`** (HTTP-Handler), Business bleibt in `core/`.
 - Ob `_api`-Dispatch als Tabelle (`ROUTES`) oder als if-Kette pro Modul — beides ok; Tabelle erleichtert spätere Specter/OpenAPI-Doku.
+
+## Nachtrag 2026-09-23 · Package-Pfad
+
+`server/api/` ist wegen Kollision mit dem Modul `server.py` **nicht** nutzbar. Slice-1-Handler liegen unter **`httpserver/api/`** (Einstieg bleibt `server.py`).
