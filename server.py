@@ -649,7 +649,6 @@ from httpserver.api.auth_session import (  # noqa: E402
 )
 
 
-
 def _env_scramble_erlaubt(state) -> bool:
     """Phase 1: kein Scramble unter Umbrel/Start9/Specter-managed."""
     return getattr(state, "managed_by", None) not in _NODE_MANAGED and (
@@ -2051,7 +2050,6 @@ def _datenquellen_config_gesperrt(
             raise ApiError(403, schluessel_text)
 
 
-
 def _ui_lang_aus_env(werte: dict) -> str:
     """``de`` oder ``en`` aus UI_LANG; Default Deutsch (CLI/Terminal)."""
     roh = str((werte or {}).get("UI_LANG") or "").strip().lower()
@@ -2076,7 +2074,6 @@ def _ui_lang_fuer_web(werte: dict, accept_language: str | None = None) -> str:
     if roh.startswith("de"):
         return "de"
     return _sprache_aus_accept_language(accept_language) or "en"
-
 
 
 def _pfad_unter(kind: Path, eltern: Path) -> bool:
@@ -2574,7 +2571,6 @@ def _payload_bool(payload: dict, *keys, default: bool | None = None) -> bool | N
     return default
 
 
-
 def _wallet_watch_status() -> dict:
     try:
         from core import wallet_watch
@@ -2582,7 +2578,6 @@ def _wallet_watch_status() -> dict:
         return wallet_watch.wallet_watch_status()
     except Exception:
         return {"running": False}
-
 
 
 def _loesche_source_stand(state: AppState, *keys: str) -> None:
@@ -3570,76 +3565,6 @@ def _seed_wallet_ctx_aus_caches(state: AppState) -> None:
         pass
 
 
-def api_sanctions(state: AppState, query: dict) -> dict:
-    """Zustand der lokalen Listen — ohne Netzzugriff."""
-    return sanctions_mod.status(state.sanctions_dir).as_dict()
-
-
-def api_sanctions_update(state: AppState, payload: dict) -> dict:
-    """Lädt die Listen neu. Läuft als Job, der Download dauert."""
-
-    def lauf(job):
-        job.progress("Lade Sanktions- und Blacklists…", log=True)
-        import sanctioned
-
-        adressen, meta = sanctioned.update_sanctioned_lists(
-            cache_dir=state.sanctions_dir
-        )
-        job.raise_if_cancelled()
-        job.message = f"{len(adressen):,} Adressen geladen.".replace(",", ".")
-        return {"adressen": len(adressen)}
-
-    job = state.jobs.start(
-        "sanctions",
-        "Sanktionslisten aktualisieren",
-        lauf,
-        meta={"art": "sanctions"},
-    )
-    return job.as_dict()
-
-
-def api_labels(state: AppState, query: dict) -> dict:
-    """Zustand des Labelbestands — ohne Netzzugriff."""
-    return labels.status(state.label_dir)
-
-
-def api_labels_update(state: AppState, payload: dict) -> dict:
-    """Lädt den Labelbestand herunter. Die volle Fassung sind 35 MB."""
-    variante = str(payload.get("variante") or "kern")
-    if variante not in labels.VARIANTEN:
-        raise ApiError(400, f"Unbekannte Variante: {variante}")
-
-    def lauf(job):
-        def fortschritt(dateiname: str, geladen: int, gesamt: int) -> None:
-            anteil = f" von {gesamt // 1024:,} KB".replace(",", ".") if gesamt else ""
-            job.progress(
-                f"{dateiname}: {geladen // 1024:,} KB{anteil}".replace(",", ".")
-            )
-
-        job.progress("Lade Adress-Labels…", log=True)
-        stand = labels.aktualisiere(
-            state.label_dir, variante=variante, fortschritt=fortschritt
-        )
-        job.raise_if_cancelled()
-        job.message = (
-            f"{stand['adressen']:,} Adressen, davon {stand['benannt']:,} benannt."
-            .replace(",", ".")
-        )
-        return stand
-
-    job = state.jobs.start(
-        "labels",
-        "Adress-Labels laden",
-        lauf,
-        meta={"art": "labels", "variante": variante},
-    )
-    return job.as_dict()
-
-
-def api_labels_verwerfen(state: AppState, query: dict) -> dict:
-    return {"entfernt": labels.verwirf(state.label_dir)}
-
-
 def _dateien_aus_import_payload(payload: dict) -> dict[str, bytes]:
     """
     Body: ``files`` = [{name, data_b64|text}, …] oder {name: data_b64}.
@@ -3708,437 +3633,6 @@ def _dateien_aus_import_payload(payload: dict) -> dict[str, bytes]:
     return ergebnis
 
 
-def api_labels_import(state: AppState, payload: dict) -> dict:
-    """Manueller Label-Import (Dateien lokal beschafft)."""
-    dateien = _dateien_aus_import_payload(payload)
-    variante = payload.get("variante")
-    try:
-        stand = labels.importiere_dateien(
-            dateien,
-            state.label_dir,
-            variante=str(variante) if variante else None,
-        )
-    except ValueError as exc:
-        raise ApiError(400, str(exc)) from exc
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    return stand
-
-
-def api_exchange_reports(state: AppState, query: dict) -> dict:
-    """Status der importierten Börsen-CSV-Reports."""
-    from core import exchange_reports as boerse
-
-    return boerse.status(state.exchange_reports_dir)
-
-
-def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
-    """
-    Börsen-Transaktionsreport (CSV) einlesen.
-
-    Body: ``name`` (Börse), ``csv`` (Text), optional ``filename``,
-    ``ersetzen`` (true = Datei der Börse neu statt mergen).
-    Nur BTC-Adressen/TxIDs — Kurse und Shitcoins werden verworfen.
-    """
-    from core import exchange_reports as boerse
-
-    if not isinstance(payload, dict):
-        raise ApiError(400, "JSON-Objekt erwartet.")
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        raise ApiError(400, "Feld „name“ (Börse) fehlt.")
-    csv_text = payload.get("csv")
-    if csv_text is None:
-        raise ApiError(400, "Feld „csv“ fehlt.")
-    if not isinstance(csv_text, str):
-        raise ApiError(400, "Feld „csv“ muss Text sein.")
-    if len(csv_text) > 40 * 1024 * 1024:
-        raise ApiError(400, "CSV zu groß (max. 40 MB).")
-    dateiname = str(payload.get("filename") or "").strip()[:200]
-    ersetzen = bool(payload.get("ersetzen"))
-    try:
-        ergebnis = boerse.importiere_csv(
-            csv_text,
-            name=name,
-            filename=dateiname,
-            cache_dir=state.exchange_reports_dir,
-            ersetzen=ersetzen,
-        )
-    except boerse.ExchangeReportError as exc:
-        raise ApiError(400, str(exc)) from exc
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    ergebnis["status"] = boerse.status(state.exchange_reports_dir)
-    return ergebnis
-
-
-def api_exchange_reports_loesche(state: AppState, query: dict) -> dict:
-    """Eine Börse oder alle Reports löschen. Query: ``slug`` oder ``all=1``."""
-    from core import exchange_reports as boerse
-
-    if str(query.get("all") or "").strip() in ("1", "true", "yes"):
-        n = 0
-        for e in boerse.liste(state.exchange_reports_dir):
-            if boerse.loesche(str(e.get("slug") or ""), state.exchange_reports_dir):
-                n += 1
-        return {"geloescht": n, "status": boerse.status(state.exchange_reports_dir)}
-    slug = str(query.get("slug") or "").strip()
-    if not slug:
-        raise ApiError(400, "Query „slug“ oder „all=1“ fehlt.")
-    ok = boerse.loesche(slug, state.exchange_reports_dir)
-    return {
-        "geloescht": 1 if ok else 0,
-        "slug": slug,
-        "status": boerse.status(state.exchange_reports_dir),
-    }
-
-
-def api_sanctions_import(state: AppState, payload: dict) -> dict:
-    """Manueller Sanktionslisten-Import (JSON/TXT/XML/ZIP)."""
-    import sanctioned as sanctioned_mod
-
-    dateien = _dateien_aus_import_payload(payload)
-    try:
-        adressen, meta = sanctioned_mod.importiere_dateien(
-            dateien, cache_dir=state.sanctions_dir
-        )
-    except ValueError as exc:
-        raise ApiError(400, str(exc)) from exc
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    return {
-        "adressen": len(adressen),
-        "meta": meta,
-        "status": sanctions_mod.status(state.sanctions_dir).as_dict(),
-    }
-
-
-def _sanctions_get_tx_pool(state: AppState):
-    """
-    (get_tx je Worker, Zahl der Verbindungen) für Sanktionsabfragen.
-
-    Nutzt den eigenen Server, wenn er privat adressiert ist (LAN/Loopback —
-    Anfragen nach gelisteten Fremdadressen bleiben im eigenen Netz); sonst
-    den öffentlichen Clearnet-Pool. Liefert ``(None, 0)``, wenn nichts
-    erreichbar ist.
-
-    Jeder Worker bekommt seinen eigenen Client: Ein Fulcrum-Client ist eine
-    einzelne Socket-Verbindung und verträgt keine parallelen Anfragen.
-    """
-    pool, _quelle, _aus_cache = main.resolve_sanctions_preferred_pool(
-        state.env().values()
-    )
-    if pool is None:
-        return None, 0
-
-    def get_tx_je_worker(worker_id: int):
-        return main.make_cached_fulcrum_get_tx(
-            pool.client_at(worker_id), state.immutable_cache_dir
-        )
-
-    return get_tx_je_worker, len(pool)
-
-
-def api_sanctions_check_ergebnis(state: AppState, query: dict) -> dict:
-    """
-    Zuletzt gespeichertes Ergebnis der Vorgeschichte-Prüfung.
-
-    Die Oberfläche zeigt es beim Öffnen der Ansicht an, statt jedes Mal
-    einen minutenlangen Lauf zu verlangen. ``vorhanden: false`` heißt
-    schlicht: noch nie geprüft.
-    """
-    daten = sanctions_mod.check_ergebnis_laden(state.sanctions_dir)
-    if not daten:
-        return {"vorhanden": False}
-    return {"vorhanden": True, **daten}
-
-
-def api_sanctions_check_verwerfen(state: AppState) -> dict:
-    """Gespeichertes Ergebnis löschen — etwa nach Wallet-Änderungen."""
-    return {"geloescht": sanctions_mod.check_ergebnis_verwerfen(state.sanctions_dir)}
-
-
-def api_sanctions_check(state: AppState, payload: dict) -> dict:
-    """
-    Prüft Wallet-UTXOs xpub-blind auf sanktionierte Adressen (CLI-Menü 6.1)
-    — Drittperspektive ohne XPUB, bis *max_hops* Prevouts — als Job.
-
-    Payload: {"wallet_id": "<kennung|leer=alle>", "max_hops": 3}
-    """
-    import analyze
-    import sanctioned
-
-    wallet_ctx = state.wallet_ctx
-    if wallet_ctx is None:
-        raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
-
-    kennung = str(payload.get("wallet_id", "")).strip()
-    if kennung:
-        ziel = wallets_mod.find_entry(state.entries, kennung)
-        if ziel is None:
-            raise ApiError(404, "Wallet nicht gefunden.")
-        ziele = [ziel]
-    else:
-        ziele = [e for e in state.entries if e.is_valid()]
-    if not ziele:
-        raise ApiError(400, "Kein gültiges Wallet konfiguriert.")
-
-    try:
-        max_hops = int(payload.get("max_hops", 3))
-    except (TypeError, ValueError):
-        max_hops = 3
-    from core.sanctions import clamp_sanktion_max_hops
-
-    max_hops = clamp_sanktion_max_hops(max_hops, default=3)
-
-    eigene = set(wallet_ctx.address_to_wallet)
-
-    def lauf(job):
-        adressen, _ = sanctioned.load_sanctioned_xbt_addresses(
-            cache_dir=state.sanctions_dir
-        )
-        if not adressen:
-            raise ApiError(
-                412,
-                "Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren.",
-            )
-
-        job.progress("Verbinde mit dem Sanktions-Server…")
-        print("Sanktionsprüfung: verbinde Datenquelle…", flush=True)
-        get_tx_je_worker, verbindungen = _sanctions_get_tx_pool(state)
-        job.raise_if_cancelled()
-        if get_tx_je_worker is None:
-            raise ApiError(
-                503,
-                "Kein Fulcrum für Sanktionsabfragen erreichbar — weder der "
-                "eigene Server noch ein Clearnet-Server.",
-            )
-        get_tx = get_tx_je_worker(0)
-        print(
-            f"Sanktionsprüfung: {verbindungen} Verbindung(en), "
-            f"{max_hops} Hop(s), {len(adressen):,} Listen-Adressen."
-            .replace(",", "."),
-            flush=True,
-        )
-
-        ergebnisse = []
-        for ziel_entry in ziele:
-            job.raise_if_cancelled()
-            name = ziel_entry.display_name
-            gecacht = utxos_mod.load_cached_utxos(
-                ziel_entry.analyse_schluessel,
-                state.cache_dir,
-                immutable_cache_dir=state.immutable_cache_dir,
-            )
-            utxos = [
-                u for u in (gecacht or [])
-                if wallet_ctx.resolve_address(u.get("address", "")) == name
-            ]
-            if not utxos:
-                ergebnisse.append({
-                    "wallet": name, "geprueft": 0, "treffer": [],
-                    "coinjoins": [],
-                    "abgebrochen": False,
-                })
-                continue
-
-            print(
-                f"Sanktionsprüfung „{name}“: {len(utxos)} UTXO(s)…",
-                flush=True,
-            )
-
-            # Parallel: Statuszeile = zuletzt meldender Worker (nicht „fertig“).
-            def fortschritt(felder):
-                if job.cancelled:
-                    return
-                job.progress(
-                    f"{name}: {felder.get('status', '')} "
-                    f"(UTXO {felder.get('wallet_utxo', '')}, "
-                    f"Hop {felder.get('hop', 0)}/{max_hops}, "
-                    f"{felder.get('addrs_checked', 0)} Adressen"
-                    + (f", {verbindungen} Verbindungen" if verbindungen > 1 else "")
-                    + ")"
-                )
-
-            gesehen: set[str] = set()
-            try:
-                treffer, geprueft, abbruch, coinjoins = (
-                    analyze.check_wallet_utxos_sanctions(
-                        get_tx,
-                        utxos,
-                        eigene,
-                        adressen,
-                        max_hops=max_hops,
-                        wallet=wallet_ctx,
-                        abort_on_hit=False,
-                        progress_cb=fortschritt,
-                        cancel_cb=lambda: job.cancelled,
-                        gesehene_adressen=gesehen,
-                        get_tx_je_worker=get_tx_je_worker,
-                        worker_count=verbindungen,
-                        immutable_cache_dir=state.immutable_cache_dir,
-                    )
-                )
-            except Exception as exc:
-                from core.jobs import Cancelled, ist_abbruch
-
-                if job.cancelled or ist_abbruch(exc) or isinstance(exc, Cancelled):
-                    treffer, geprueft, abbruch, coinjoins = [], 0, None, []
-                else:
-                    raise
-            job.raise_if_cancelled()
-            ergebnisse.append({
-                "wallet": name,
-                "geprueft": geprueft,
-                "treffer": treffer,
-                "coinjoins": coinjoins,
-                "abgebrochen": abbruch is not None or job.cancelled,
-                "adressen_geprueft": len(gesehen),
-                # Sortiert und gekappt: die Datei soll auch bei tiefen Läufen
-                # lesbar bleiben, und die Reihenfolge stabil, damit zwei
-                # Läufe vergleichbar sind.
-                "adressen": sorted(gesehen)[
-                    :sanctions_mod.CHECK_ADRESSEN_LIMIT
-                ],
-                "adressen_gekappt": (
-                    len(gesehen) > sanctions_mod.CHECK_ADRESSEN_LIMIT
-                ),
-                "utxos": sorted(
-                    f"{u.get('txid', '')}:{u.get('vout')}" for u in utxos
-                ),
-            })
-
-        gesamt_treffer = sum(len(e["treffer"]) for e in ergebnisse)
-        job.message = (
-            f"{gesamt_treffer} Treffer in {len(ergebnisse)} Wallet(s) "
-            f"({max_hops} Hop(s))."
-        )
-        ergebnis = {
-            "max_hops": max_hops,
-            "listen_adressen": len(adressen),
-            "wallets": ergebnisse,
-            "erstellt_ts": int(time.time()),
-            "erstellt": datetime.now().strftime("%d.%m.%Y %H:%M"),
-            "vollstaendig": not job.cancelled,
-            "verbindungen": verbindungen,
-        }
-        # Auch ein abgebrochener Lauf wird gespeichert — er ist als
-        # unvollständig markiert, und die bereits geprüften Wallets sind
-        # mehr wert als eine leere Ansicht.
-        ergebnis["gespeichert"] = sanctions_mod.check_ergebnis_speichern(
-            state.sanctions_dir, ergebnis
-        )
-        return ergebnis
-
-    namen = ", ".join(e.display_name for e in ziele)
-    job = state.jobs.start(
-        "sanctions-check",
-        f"Sanktionsprüfung {namen} ({max_hops} Hops)",
-        lauf,
-        meta={"art": "sanctions-check", "hops": max_hops},
-    )
-    return job.as_dict()
-
-
-def api_llm_status(state: AppState, query: dict) -> dict:
-    """
-    Assistenten-Anbindung: Banner-, Pillen- und Privacy-Felder.
-
-    ``?check=1`` löst eine kurze Erreichbarkeitsprobe aus. Ohne Check bleibt
-    die Pille grau (kein Rot-Flash vor dem ersten Versuch). Der API-Key
-    kommt nicht in die Antwort.
-    """
-    check = query.get("check", ["0"])[0] in ("1", "true", "ja")
-    return llm_mod.status_dict(state.env().values(), check=check)
-
-
-def api_price(state: AppState, query: dict) -> dict:
-    """
-    Aktueller BTC-Spotkurs (Anzeige in der Kopfzeile).
-
-    Keine Wallet-Daten — nur Fiat-Kurs über Mempool (optional eigene
-    ``MEMPOOL_URL``) mit Coinbase-Fallback. Ergebnis wird unter
-    ``immutable_cache/btc_price/`` kurz gecacht.
-    """
-    roh = (query.get("currency", ["EUR"])[0] or "EUR").strip()
-    try:
-        waehrung = price_mod.normalisiere_waehrung(roh)
-    except ValueError as exc:
-        raise ApiError(400, str(exc)) from exc
-    mempool = (state.env().values().get("MEMPOOL_URL") or "").strip() or None
-    try:
-        # Kurzes Timeout: die Kopfzeile soll den Start nicht aufhalten.
-        preis = price_mod.spot_preis(
-            waehrung,
-            immutable_cache_dir=state.immutable_cache_dir,
-            mempool_url=mempool,
-            timeout=5.0,
-        )
-    except price_mod.PriceError as exc:
-        raise ApiError(502, str(exc)) from exc
-    return preis.to_dict()
-
-
-def api_price_history(state: AppState, query: dict) -> dict:
-    """Stand der lokalen BTC-Tageskurs-Historie (EUR/USD).
-
-    ``?series=1`` liefert zusätzlich die Tag→Preis-Map (für EUR-Umrechnung
-    ausgegebener Beträge zum Ausgabedatum).
-    """
-    from core import price_history_sync as hist_sync
-
-    mit_serie = (query.get("series", ["0"])[0] or "").strip().lower() in (
-        "1", "true", "ja", "yes", "on",
-    )
-    werte = state.env().values()
-    roh = (query.get("currency", [""])[0] or "").strip()
-    if roh:
-        return {
-            "histories": [
-                price_mod.historie_status(
-                    state.immutable_cache_dir, roh, mit_serie=mit_serie,
-                ),
-            ],
-            "price_history_opt_in": True,
-        }
-    return {
-        "histories": [
-            price_mod.historie_status(
-                state.immutable_cache_dir, w, mit_serie=mit_serie,
-            )
-            for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
-        ],
-        "price_history_opt_in": True,
-    }
-
-
-def api_price_history_sync(state: AppState, payload: dict | None = None) -> dict:
-    """Manueller Historie-Nachzug (Lücken füllen — Bitstamp/CDD, sonst Mempool)."""
-    from core import price_history_sync as hist_sync
-
-    _ = payload  # früher opt_in — Nachzug braucht keine Erlaubnis mehr
-    logs: list[str] = []
-    # Manueller API-Lauf: Tages-Stamp ignorieren, immer versuchen.
-    ergebnisse = hist_sync.historie_nachziehen_alle(
-        state.immutable_cache_dir,
-        values=state.env().values(),
-        on_log=logs.append,
-        force=True,
-    )
-    for zeile in logs:
-        print(zeile, flush=True)
-    return {
-        "ok": all(e.get("ok") for e in ergebnisse),
-        "results": ergebnisse,
-        "log": logs,
-        "price_history_opt_in": True,
-        "histories": [
-            price_mod.historie_status(state.immutable_cache_dir, w)
-            for w in sorted(price_mod.HISTORIE_WAEHRUNGEN)
-        ],
-    }
-
-
 def starte_historie_nachzug_taeglich(
     state: AppState,
     *,
@@ -4174,128 +3668,6 @@ def starte_historie_nachzug_taeglich(
     threading.Thread(
         target=_lauf, name="satsage-price-history-sync", daemon=True,
     ).start()
-
-
-def api_price_import(state: AppState, payload: dict) -> dict:
-    """
-    CSV-Tageskurse (Datum/Preis) in den Kurs-Cache schreiben.
-
-    Body: ``currency`` (EUR|USD), ``csv`` (Text), optional ``filename``,
-    ``ersetzen`` (true = Serie verwerfen statt mergen).
-    """
-    if not isinstance(payload, dict):
-        raise ApiError(400, "JSON-Objekt erwartet.")
-    roh_w = str(payload.get("currency") or "EUR")
-    try:
-        waehrung = price_mod.normalisiere_historie_waehrung(roh_w)
-    except ValueError as exc:
-        raise ApiError(400, str(exc)) from exc
-    csv_text = payload.get("csv")
-    if csv_text is None:
-        raise ApiError(400, "Feld „csv“ fehlt.")
-    if not isinstance(csv_text, str):
-        raise ApiError(400, "Feld „csv“ muss Text sein.")
-    if len(csv_text) > 20 * 1024 * 1024:
-        raise ApiError(400, "CSV zu groß (max. 20 MB).")
-    dateiname = str(payload.get("filename") or "").strip()[:200]
-    ersetzen = bool(payload.get("ersetzen"))
-    try:
-        ergebnis = price_mod.importiere_kurs_csv(
-            state.immutable_cache_dir,
-            waehrung,
-            csv_text,
-            dateiname=dateiname,
-            ersetzen=ersetzen,
-        )
-    except price_mod.PriceError as exc:
-        raise ApiError(400, str(exc)) from exc
-    return ergebnis
-
-
-def api_llm_context(state: AppState, rest: list[str], query: dict) -> dict:
-    """
-    Reine Cache-Reader für Slash-Befehle.
-
-    Kein Job, kein Node, kein Chat-Completion. Unbekannte Unterpfade 404.
-    """
-    if not rest:
-        raise ApiError(404, "Welcher Kontext? luecken, wallets, steuer, export.")
-    ziel = rest[0]
-    if ziel == "luecken":
-        return llm_ctx.luecken(
-            entries=state.analyse_entries,
-            cache_dir=state.cache_dir,
-            immutable_dir=state.immutable_cache_dir,
-            jobs=state.jobs,
-        )
-    if ziel == "wallets":
-        return llm_ctx.wallets(
-            entries=state.analyse_entries,
-            cache_dir=state.cache_dir,
-            immutable_dir=state.immutable_cache_dir,
-        )
-    if ziel == "steuer":
-        return llm_ctx.steuer_kompakt(_steuer_auswertung(state, query))
-    if ziel == "export":
-        art = (query.get("art") or ["legende"])[0].strip().lower()
-        if art not in llm_ctx.EXPORT_ARTEN:
-            raise ApiError(400, "art muss legende, markdown oder brief sein.")
-        return llm_ctx.export_aus(_steuer_auswertung(state, query), art)
-    raise ApiError(404, f"Unbekannter Assistenten-Kontext: {ziel}")
-
-
-def _llm_werkzeug(state: AppState, name: str, args: dict) -> str:
-    """Cache-Reader für den Chat — dieselben Texte wie die Slash-Befehle."""
-    args = args or {}
-    if name == "luecken":
-        return llm_ctx.luecken(
-            entries=state.analyse_entries,
-            cache_dir=state.cache_dir,
-            immutable_dir=state.immutable_cache_dir,
-            jobs=state.jobs,
-        )["text"]
-    if name == "wallets":
-        return llm_ctx.wallets(
-            entries=state.analyse_entries,
-            cache_dir=state.cache_dir,
-            immutable_dir=state.immutable_cache_dir,
-        )["text"]
-    query: dict[str, list[str]] = {}
-    jahr = args.get("jahr")
-    if jahr not in (None, ""):
-        query["jahr"] = [str(jahr)]
-    if name == "steuer":
-        return llm_ctx.steuer_kompakt(_steuer_auswertung(state, query))["text"]
-    if name in ("export", "export_legende", "export_markdown", "export_brief"):
-        art = str(args.get("art") or "").strip().lower()
-        if not art:
-            art = {
-                "export_legende": "legende",
-                "export_markdown": "markdown",
-                "export_brief": "brief",
-            }.get(name, "legende")
-        return llm_ctx.export_aus(_steuer_auswertung(state, query), art)["text"]
-    return f"Werkzeug „{name}“ ist nicht erlaubt."
-
-
-def api_llm_chat(state: AppState, payload: dict) -> dict:
-    """
-    Eine Freitext-Runde. Remote nur mit Opt-in und Key aus der .env.
-
-    Der Client schickt nur user/assistant-Nachrichten. Systemprompt und
-    Werkzeuge setzt der Server. Kein Job-Start.
-    """
-    if not isinstance(payload, dict):
-        raise ApiError(400, "Ungültiger Körper.")
-    cfg = llm_mod.lese_llm_chat_einstellungen(state.env().values())
-    try:
-        return llm_chat.fuehre_chat(
-            cfg,
-            payload.get("messages"),
-            tools_fn=lambda name, args: _llm_werkzeug(state, name, args),
-        )
-    except llm_chat.LlmFehler as exc:
-        raise ApiError(exc.status, exc.message) from exc
 
 
 def _persist_tls_auto(state: AppState, quellen: list, *, on_log=None) -> list:
@@ -5047,7 +4419,6 @@ from httpserver.api.auth_session import (  # noqa: E402
 )
 
 
-
 from httpserver.api.config_ui import (  # noqa: E402
     api_config,
     api_save_hinweis_onchain,
@@ -5062,14 +4433,11 @@ from httpserver.api.config_ui import (  # noqa: E402
 )
 
 
-
 from httpserver.api.jobs import (  # noqa: E402
     api_cancel_job,
     api_job,
     api_jobs,
 )
-
-
 
 
 from httpserver.api.source import (  # noqa: E402
@@ -5083,7 +4451,6 @@ from httpserver.api.source import (  # noqa: E402
     api_save_source,
     api_source_status,
 )
-
 
 
 from httpserver.api.wallets import (  # noqa: E402
@@ -5106,7 +4473,6 @@ from httpserver.api.wallets import (  # noqa: E402
 )
 
 
-
 from httpserver.api.trace import (  # noqa: E402
     api_trace,
     api_trace_alle,
@@ -5115,12 +4481,41 @@ from httpserver.api.trace import (  # noqa: E402
 )
 
 
-
 from httpserver.api.tax import (  # noqa: E402
     api_save_steuer,
     api_save_steuer_person,
     api_selbstanzeige_kandidaten,
     api_tax,
+)
+
+
+from httpserver.api.labels_sanctions_exchange import (  # noqa: E402
+    api_exchange_reports,
+    api_exchange_reports_import,
+    api_exchange_reports_loesche,
+    api_labels,
+    api_labels_import,
+    api_labels_update,
+    api_labels_verwerfen,
+    api_sanctions,
+    api_sanctions_check,
+    api_sanctions_check_ergebnis,
+    api_sanctions_check_verwerfen,
+    api_sanctions_import,
+    api_sanctions_update,
+    _sanctions_get_tx_pool,
+)
+
+
+from httpserver.api.price_llm_lab import (  # noqa: E402
+    api_llm_chat,
+    api_llm_context,
+    api_llm_status,
+    api_price,
+    api_price_history,
+    api_price_history_sync,
+    api_price_import,
+    _llm_werkzeug,
 )
 
 
