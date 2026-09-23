@@ -1,7 +1,8 @@
-"""Tx/UTXO-Herkunftsanalyse und Trace (ohne interaktive Prompts)."""
-from __future__ import annotations
+"""Tx/UTXO-Herkunftsanalyse und Trace (ohne interaktive Prompts).
 
-from typing import TYPE_CHECKING
+Dünne Re-Export-Fassade nach Slice-4-Extraktion. Fachcode liegt unter core/*.
+"""
+from __future__ import annotations
 
 from core.utxo_origin import (
     MAX_TRACE_DEPTH,
@@ -100,10 +101,7 @@ from core.sanctioned_output_trace import (
 )
 
 
-if TYPE_CHECKING:
-    from main import WalletContext
-
-
 def _main():
+    """Late-Import-Shim: manche Callsites erwarten analyze._main() → main."""
     import main
     return main
