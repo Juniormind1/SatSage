@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1 weitgehend erledigt · Slice 2 teilweise  
-**Stand:** 2026-09-23 (Abschlussmemo)  
+**Status:** akzeptiert · Slice 1 weitgehend erledigt · Slice 2 weitgehend erledigt  
+**Stand:** 2026-09-23 (Abschlussmemo, Slice-2-Nachzug)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (tip `5965693`, lokal ahead of origin)  
+**Arbeitsbranch:** `refactor/modular-engine` (tip `b5c7f11`, lokal gleichauf mit origin nach Slice-2-Push; weitere Docs nur lokal)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -128,13 +128,13 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 - **Slice 1 = `server.py`**, Domänenschnitt wie oben.
 - Erfolg bemisst sich an **paralleler Entwickelbarkeit** (Rückblick auf spürbare Features), nicht an Zeilenzahl allein.
-- Implementierung Slice 1 + Teilschnitt Slice 2: siehe **Abschlussmemo** unten.
+- Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
 
 ## Offene Punkte (Stand Memo)
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Slice-2-Rest (`app.js`), optional Orchestrierung (`build_state`, Tip-Sync, Splash/`main_cli`), später `main.py` / `analyze.py`.
+- Verbleibend: Shared-Kern / Laden-Ballast in `app.js` (API, Format, Zustand, Mempool-Verweise, Kurs/Chat/Sync), optional Server-Orchestrierung (`build_state`, Tip-Sync, Splash/`main_cli`), später `main.py` / `analyze.py`.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -142,20 +142,20 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 ---
 
-## Abschlussmemo 2026-09-23 · Slice 1 (+ Teilschnitt Slice 2)
+## Abschlussmemo 2026-09-23 · Slice 1 + Slice 2
 
 ### Kurzfazit
 
 Slice 1 (`server.py` nach Domänen) ist **weitgehend erledigt**: alle extrahierten `api_*`-Handler liegen unter `httpserver/api/`, Domänen-Helfer und Handler-Mixins unter `httpserver/`, `AppState` ist ausgelagert. `server.py` liegt bei **~89 KB** — die Orientierung ≪ 100 KB aus dem Done-Check ist erreicht.
 
-Slice 2 (`web/app.js`) ist **teilweise** umgesetzt (Views extrahiert; Bootstrap/Einrichtung/Adress-Labels noch im Monolithen). Parallel-Dev-Nutzen ist API-seitig spürbar; UI-seitig erst vollständig, wenn der Rest von `app.js` folgt.
+Slice 2 (`web/app.js`) ist **weitgehend erledigt**: Domänen-Views, Einrichtung, Adress-Labels sowie Chrome/Nav/Bootstrap sind ausgelagert. Parallel-Dev-Nutzen ist API- und UI-seitig spürbar. In `app.js` bleiben Shared-Kern (Token/API/Format/Zustand) und Laden-Ballast (Kurs, Chat, Sync-Jobs) — kein View-Monolith mehr.
 
 ### Messwerte
 
 | Datei | vor Modularisierung (ADR-Entwurf) | Stand Memo |
 | --- | ---: | ---: |
 | `server.py` | ~389 KB | **~89 KB** |
-| `web/app.js` | ~583 KB | **~281 KB** |
+| `web/app.js` | ~583 KB | **~221 KB** |
 
 ### Package-Entscheidung (geschlossen)
 
@@ -195,10 +195,13 @@ Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` m
 
 **Muster:** Bodies im Domänenmodul; `server.py` nur Fassade; gegen Import-Zyklen Late-`from server import …` in den Modulen. Charakterisierungstests nach jedem Schnitt.
 
-### Slice 2 · Teilschnitt
+### Slice 2 · Stand (Nachzug)
 
-Unter `web/views/` bereits: `steuerjahr.js`, `herkunft.js`, `wallets.js`, `datenquellen.js`, `einstellungen.js`, `sanktionen.js` (plus `web/boot.js`).  
-**Noch in `web/app.js`:** Chrome/Bootstrap, Einrichtung-Wizard, Adress-Labels.
+**Views** unter `web/views/`: `steuerjahr.js`, `herkunft.js`, `wallets.js`, `datenquellen.js`, `einstellungen.js`, `sanktionen.js`, `einrichtung.js`, `adress_labels.js`.
+
+**Chrome / Bootstrap:** `web/chrome_nav.js` (Nav, Ansichtswechsel, Job-Leiste), `web/chrome.js` (`ladeConfig`, `start`, Fußzeile, Shell-Listener). Einstieg weiter `web/boot.js` → `start();`.
+
+**Noch in `web/app.js` (~221 KB):** Token/API, Formatierung, Zustand, Mempool-Verweise, Laden-Ballast (Kurs-Pipeline, Chat/LLM, Header-/Wallet-Sync). Das ist Shared-Kern + Orchestrierung, keine Domänen-View mehr.
 
 ### Done-Check Slice 1 (ehrlich)
 
@@ -214,15 +217,16 @@ Unter `web/views/` bereits: `steuerjahr.js`, `herkunft.js`, `wallets.js`, `daten
 ### Merge-Lage (Einschätzung)
 
 - **API:** spürbar besser — typische Features (Wallets vs. Steuer vs. Source vs. Auth) können API-seitig in getrennten Dateien landen.
-- **UI:** erst halb — `app.js` (~281 KB) bleibt Konflikt-Hotspot, bis Einrichtung/Labels/Chrome raus sind.
+- **UI:** deutlich besser — Domänen-Views und Shell (Nav/Start) sind eigene Dateien. Rest-Hotspot ist vor allem der Shared-Kern / Laden-Ballast in `app.js` (~221 KB), nicht mehr „jede Ansicht“.
 - **Klebstoff in `server.py`:** noch Orchestrierung (`build_state`, Tip-Sync / `starte_wallet_aktualisierung`, Splash/`main_cli`, Env-Utils, Header/Source/Electrs-Helfer, dünner Handler-Kern). Bewusst dünner Einstieg, kein zweites God-File — weitere Schnitte nur wenn Parallel-Dev daran hängt.
 
 ### Bewusst offen / nächste Schnitte
 
-1. Slice 2 zu Ende: Einrichtung, Adress-Labels, Chrome/Bootstrap aus `app.js`.
-2. Optional Orchestrierung: `build_state`, Tip-Sync, Splash/`main_cli` (niedrigere Merge-Priorität als Slice 2).
-3. Später laut ADR: `main.py` / `analyze.py` / Adapter-Feinschnitt (Slices 3–5).
-4. Arbeitsregeln in `AGENTS.md` nachziehen.
+1. Leichte `app.js`-Schnitte: Token/API, Zustand, Mempool-Verweise; ggf. Formatierung (größer, hoher Nutzen).
+2. Laden-Ballast häppchenweise (Kurs, Chat/LLM, Sync-Jobs) — nur mit klarer Grenze.
+3. Optional Server-Orchestrierung: `build_state`, Tip-Sync, Splash/`main_cli`.
+4. Später laut ADR: `main.py` / `analyze.py` / Adapter-Feinschnitt (Slices 3–5).
+5. Arbeitsregeln in `AGENTS.md` nachziehen.
 
 ### Arbeitsregeln (Branch)
 
