@@ -198,27 +198,40 @@ class TestAppJs(unittest.TestCase):
 
     def setUp(self):
         self.quelle = (WEB / "app.js").read_text(encoding="utf-8")
+        self.chrome_nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
+        self.chrome = (WEB / "chrome.js").read_text(encoding="utf-8")
+        self.shell_quellen = (self.quelle, self.chrome_nav, self.chrome)
 
     def test_keine_doppelten_deklarationen(self):
         """
         Der Fehler, der die Oberfläche schon einmal komplett lahmgelegt hat:
         zweimal `const text` in derselben Funktion.
         """
-        funde = doppelte_deklarationen(self.quelle)
-        self.assertEqual(
-            funde, [],
-            "Doppelte Deklaration(en) — die Datei ist dann nicht parsebar: "
-            + ", ".join(f"Zeile {z}: {n}" for z, n in funde),
-        )
+        for name, quelle in (
+            ("app.js", self.quelle),
+            ("chrome_nav.js", self.chrome_nav),
+            ("chrome.js", self.chrome),
+        ):
+            funde = doppelte_deklarationen(quelle)
+            self.assertEqual(
+                funde, [],
+                f"{name}: Doppelte Deklaration(en) — die Datei ist dann nicht parsebar: "
+                + ", ".join(f"Zeile {z}: {n}" for z, n in funde),
+            )
 
     def test_klammern_sind_ausgeglichen(self):
-        sauber = ohne_texte_und_kommentare(self.quelle)
-        for auf, zu, name in (("{", "}", "geschweift"), ("(", ")", "rund"),
-                              ("[", "]", "eckig")):
-            self.assertEqual(
-                sauber.count(auf), sauber.count(zu),
-                f"{name}e Klammern unausgeglichen",
-            )
+        for datei, quelle in (
+            ("app.js", self.quelle),
+            ("chrome_nav.js", self.chrome_nav),
+            ("chrome.js", self.chrome),
+        ):
+            sauber = ohne_texte_und_kommentare(quelle)
+            for auf, zu, name in (("{", "}", "geschweift"), ("(", ")", "rund"),
+                                  ("[", "]", "eckig")):
+                self.assertEqual(
+                    sauber.count(auf), sauber.count(zu),
+                    f"{datei}: {name}e Klammern unausgeglichen",
+                )
 
     def test_verwendete_element_kennungen_gibt_es_im_html(self):
         """
@@ -227,17 +240,30 @@ class TestAppJs(unittest.TestCase):
         """
         html = (WEB / "index.html").read_text(encoding="utf-8")
         vorhanden = set(re.findall(r'id="([^"]+)"', html))
-        benutzt = set(re.findall(r'\$\("#([A-Za-z0-9_-]+)"\)', self.quelle))
+        benutzt = set()
+        for quelle in self.shell_quellen:
+            benutzt |= set(re.findall(r'\$\("#([A-Za-z0-9_-]+)"\)', quelle))
         fehlend = sorted(benutzt - vorhanden)
         self.assertEqual(fehlend, [], f"Nicht im HTML: {fehlend}")
 
     def test_keine_verwaisten_ansichten(self):
         """Jede Ansicht in ANSICHTEN braucht ihren Abschnitt im HTML."""
         html = (WEB / "index.html").read_text(encoding="utf-8")
-        treffer = re.search(r"const ANSICHTEN = \[([^\]]+)\]", self.quelle)
-        self.assertIsNotNone(treffer)
+        treffer = re.search(r"const ANSICHTEN = \[([^\]]+)\]", self.chrome_nav)
+        self.assertIsNotNone(treffer, "ANSICHTEN fehlt in chrome_nav.js")
         for name in re.findall(r'"([^"]+)"', treffer.group(1)):
             self.assertIn(f'id="ansicht-{name}"', html, f"Ansicht {name} fehlt")
+
+    def test_chrome_scripts_stehen_vor_boot(self):
+        """app.js → views → chrome_nav.js → chrome.js → boot.js."""
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        pos_app = html.index('<script src="/app.js"></script>')
+        pos_nav = html.index('<script src="/chrome_nav.js"></script>')
+        pos_chrome = html.index('<script src="/chrome.js"></script>')
+        pos_boot = html.index('<script src="/boot.js"></script>')
+        self.assertLess(pos_app, pos_nav)
+        self.assertLess(pos_nav, pos_chrome)
+        self.assertLess(pos_chrome, pos_boot)
 
 
 class TestPrueferSelbst(unittest.TestCase):

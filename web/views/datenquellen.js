@@ -1,7 +1,7 @@
 /** Datenquellen-UI — aus app.js extrahiert (Modularisierung Slice 2).
  * Klassisches Script: nutzt Globals aus app.js (Zustand, api, t, $, …).
  * Kein import/export. Laden nach app.js; vor oder nach wallets.js ok
- * (oeffneVerwaltung bleibt in app.js und ruft zeichneDatenquellenAnsicht auf).
+ * (oeffneVerwaltung in chrome_nav.js ruft zeichneDatenquellenAnsicht auf).
  */
 
 /* --- nav-warn --- */

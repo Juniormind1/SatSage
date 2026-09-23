@@ -1,7 +1,7 @@
 /** Einrichtung-UI — aus app.js extrahiert (Modularisierung Slice 2).
  * Klassisches Script: Globals aus app.js (Zustand, api, t, $, pille, meldung, …).
  * Kein import/export. Laden nach app.js, vor boot.js.
- * Navigation nach „Weiter“ nutzt oeffneVerwaltung/brauchtDatenquellenZuerst (app.js).
+ * Navigation nach „Weiter“ nutzt oeffneVerwaltung/brauchtDatenquellenZuerst (chrome_nav.js).
  */
 
 // ---------------------------------------------------------------------------

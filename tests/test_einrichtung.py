@@ -388,6 +388,8 @@ class TestOberflaeche(unittest.TestCase):
     def setUp(self):
         self.html = (WEB / "index.html").read_text(encoding="utf-8")
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
+        self.chrome_js = (WEB / "chrome.js").read_text(encoding="utf-8")
+        self.chrome_nav_js = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
         self.herkunft_js = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
         self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
@@ -415,7 +417,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('data-i18n="common.import"', self.html)
         self.assertIn("Sparrow-JSON", de)
         self.assertIn("listdescriptors", de)
-        self.assertIn("liesDeskriptorDatei", self.js)
+        self.assertIn("liesDeskriptorDatei", self.wallets_js)
+        self.assertIn("liesDeskriptorDatei", self.chrome_js)
         css = (WEB / "style.css").read_text(encoding="utf-8")
         self.assertIn("grid-template-columns: minmax(0, 1fr) 10.5rem", css)
 
@@ -448,8 +451,8 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_fusszeile_zeigt_version(self):
         self.assertIn('id="fuss-version"', self.html)
-        self.assertIn("function zeichneFussVersion", self.js)
-        self.assertIn("Zustand.config?.version", self.js)
+        self.assertIn("function zeichneFussVersion", self.chrome_js)
+        self.assertIn("Zustand.config?.version", self.chrome_js)
 
     def test_gekuerzte_werte_sind_kopierbar(self):
         self.assertIn("function macheKopierbar", self.js)
@@ -496,13 +499,14 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('class="utxo-aktionen-praefix"', self.html)
         self.assertIn(">Bestand<", self.html)
         self.assertIn(">Herkunft<", self.html)
-        self.assertIn("starteVerlaufsscan", self.js)
+        self.assertIn("starteVerlaufsscan", self.wallets_js)
+        self.assertIn("starteVerlaufsscan", self.chrome_js)
         self.assertIn('id="verlauf-erheben"', self.html)
         self.assertIn("tax.historyAll", self.html)
         # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in views/steuerjahr.js
         steuer_js = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("tax.originAll", steuer_js)
-        self.assertIn("herkunft-alle", self.js)
+        self.assertIn("herkunft-alle", self.chrome_js)
         import json
         de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
         self.assertEqual(de.get("tax.originAll"), "klären")
@@ -619,7 +623,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertNotIn('id="speichern"', html)
         self.assertIn("function ladeUnreferenziertenCache", self.wallets_js)
         self.assertIn('"/cache/unreferenziert"', self.wallets_js)
-        self.assertIn("loescheUnreferenziertenCache", self.js)
+        self.assertIn("loescheUnreferenziertenCache", self.wallets_js)
+        self.assertIn("loescheUnreferenziertenCache", self.chrome_js)
         self.assertIn("Unreferenzierte Cachedaten löschen", self.html)
 
     def test_utxo_zeit_heisst_ankunft(self):
@@ -708,7 +713,8 @@ class TestOberflaeche(unittest.TestCase):
     def test_wallet_hat_sortierung_nach_datum(self):
         self.assertIn('id="sort-wahl"', self.html)
         self.assertIn("neueste zuerst", self.html)
-        self.assertIn("sort-wahl", self.js)
+        self.assertIn("sort-wahl", self.wallets_js)
+        self.assertIn("sort-wahl", self.chrome_js)
 
     def test_sanktionskarte_steht_unten_ausser_bei_treffer(self):
         html = self.html

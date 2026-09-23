@@ -1,7 +1,7 @@
 /** Einstellungen-UI — aus app.js extrahiert (Modularisierung Slice 2).
  * Klassisches Script: Globals aus app.js (Zustand, api, t, $, meldung, …).
  * Kein import/export. Laden nach app.js, vor datenquellen.js.
- * Header-Pillen (LLM/Kurs) und oeffneVerwaltung bleiben in app.js.
+ * Header-Pillen (LLM/Kurs) bleiben in app.js; oeffneVerwaltung in chrome_nav.js.
  */
 
 /* --- passwort-scramble --- */
