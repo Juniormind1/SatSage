@@ -386,12 +386,13 @@ class TestOberflaeche(unittest.TestCase):
     def setUp(self):
         self.html = (WEB / "index.html").read_text(encoding="utf-8")
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
+        self.herkunft_js = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
         """Zugeklappt unter den UTXOs — ohne Verlauf kein zusätzlicher Hinweis."""
         self.assertIn('id="wallet-ausgegeben"', self.html)
-        self.assertIn("zeichneAusgegeben", self.js)
+        self.assertIn("function zeichneAusgegeben", self.herkunft_js)
         self.assertRegex(
             self.js,
             r"if \(hatVerlauf\) \{\s*ausgegeben\.append\(zeichneAusgegeben",
@@ -647,7 +648,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("function aktualisiereAdressgruppenJuengste", self.js)
         self.assertIn("gruppeAusTraceListe", self.js)
         self.assertEqual(
-            self.js.count("const juengste = juengsteSatsMarke(utxo)"),
+            self.js.count("const juengste = juengsteSatsMarke(utxo)")
+            + self.herkunft_js.count("const juengste = juengsteSatsMarke(utxo)"),
             2,
             "Marke muss in Wallet-Zeile und Herkunfts-UTXO stehen",
         )
@@ -655,15 +657,15 @@ class TestOberflaeche(unittest.TestCase):
     def test_cache_startet_offen_analyse_nicht(self):
         """Oberste Ebene zu; darunter Cache offen, ungescannte Bäume zu."""
         self.assertIn("function setzeKlapp", self.js)
-        self.assertIn("function ladeGespeichertenZweig", self.js)
-        self.assertIn("oeffneAusCache", self.js)
+        self.assertIn("function ladeGespeichertenZweig", self.herkunft_js)
+        self.assertIn("oeffneAusCache", self.herkunft_js)
         # Erste Ebene unter dem UTXO zeichnet zeichneZweig sofort; tiefere
         # Ebenen starten zu (▸) und werden erst beim Aufklappen gebaut.
-        self.assertIn('knoten.expandable ? "▸" : "·"', self.js)
-        self.assertIn("kinder.dataset.gezeichnet", self.js)
-        self.assertIn("Scan neu", self.js)
-        self.assertNotIn("Herkunft neu", self.js)
-        self.assertNotIn("Neu verfolgen", self.js)
+        self.assertIn('knoten.expandable ? "▸" : "·"', self.herkunft_js)
+        self.assertIn("kinder.dataset.gezeichnet", self.herkunft_js)
+        self.assertIn("Scan neu", self.herkunft_js)
+        self.assertNotIn("Herkunft neu", self.herkunft_js)
+        self.assertNotIn("Neu verfolgen", self.herkunft_js)
         self.assertRegex(
             self.js,
             re.compile(
@@ -672,7 +674,7 @@ class TestOberflaeche(unittest.TestCase):
             ),
         )
         self.assertRegex(
-            self.js,
+            self.herkunft_js,
             re.compile(
                 r"function zeichneTraceAdressGruppe\(gruppe\).*?setzeKlapp\(kopf, klapp, inhalt, false\)",
                 re.S,
@@ -681,7 +683,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIsNotNone(
             re.search(
                 r"function zeichneKnoten\(knoten(?:,\s*elternWallet(?:,\s*elternKnoten)?)?\) \{.*?kinder\.hidden = true",
-                self.js,
+                self.herkunft_js,
                 re.S,
             ),
             "Tiefere Herkunftszweige starten lazy (hidden, DOM erst beim Aufklappen)",
