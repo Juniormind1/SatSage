@@ -1,7 +1,7 @@
 """
 Herkunftsanalyse als Daten.
 
-Wandelt den verschachtelten Baum aus analyze.trace_utxo_origin in eine flache,
+Wandelt den verschachtelten Baum aus utxo_origin.trace_utxo_origin in eine flache,
 für die Oberfläche brauchbare Form um — mit stabilen Knoten-Kennungen, damit
 sich Zweige einzeln auf- und zuklappen lassen.
 
@@ -21,6 +21,7 @@ from pathlib import Path
 import analyze
 import labels
 import main
+from core import utxo_origin
 from core import utxo_report
 from core import xpub_cache
 from core import trace_cache
@@ -574,7 +575,7 @@ def trace_utxo(
     speichern — UI zeigt dann Hinweis statt Knopf.
 
     *stop_before_ts*: Steuer-Horizont — Trace endet an Hops vor Stichtag/
-    Haltefrist-Anfang (siehe ``analyze.trace_utxo_origin``).
+    Haltefrist-Anfang (siehe ``utxo_origin.trace_utxo_origin``).
 
     *resume_origin*: gespeicherter Analyse-Rohbaum. Bei vollem Lauf werden
     Lücken nachgezogen (tax_horizon, error-Prevouts, unvollständige interne
@@ -599,20 +600,20 @@ def trace_utxo(
         and isinstance(resume_origin, dict)
         and stop_before_ts is None
         and (
-            analyze._hat_tax_horizon(resume_origin)
-            or analyze._origin_hat_luecken(resume_origin)
+            utxo_origin._hat_tax_horizon(resume_origin)
+            or utxo_origin._origin_hat_luecken(resume_origin)
         )
-        and analyze.hat_brauchbaren_teilfortschritt(resume_origin)
+        and utxo_origin.hat_brauchbaren_teilfortschritt(resume_origin)
     ):
         if progress:
             try:
-                if analyze._hat_tax_horizon(resume_origin):
+                if utxo_origin._hat_tax_horizon(resume_origin):
                     progress("Setze Steuer-Horizont bis extern/Coinbase fort…")
                 else:
                     progress("Setze unvollständige Herkunft fort (Teilbaum)…")
             except Exception:
                 pass
-        roh = analyze.vertiefe_herkunft_luecken(
+        roh = utxo_origin.vertiefe_herkunft_luecken(
             resume_origin,
             get_tx,
             own_addresses,
@@ -624,7 +625,7 @@ def trace_utxo(
             alle_eigenen_inputs=bool(resolve_bundled),
         )
     else:
-        roh = analyze.trace_utxo_origin(
+        roh = utxo_origin.trace_utxo_origin(
             get_tx,
             txid_n,
             vout_n,
@@ -785,7 +786,7 @@ def trace_utxo(
         "verfolgt_vollstaendig": voll,
         "steuer_ausreichend": steuer_ok,
         "juengste_sats_ts": juengste,
-        "max_trace_depth": analyze.MAX_TRACE_DEPTH,
+        "max_trace_depth": utxo_origin.MAX_TRACE_DEPTH,
         "tx_class": roh.get("tx_class"),
         "tx_class_label": roh.get("tx_class_label") or "",
         # Rohbaum für späteren Voll-Lauf (nur Horizont nachziehen).
@@ -831,7 +832,7 @@ def _immutable_ziel(cache_dir, immutable_cache_dir) -> Path | None:
 
 class _FortschrittsAdapter:
     """
-    analyze.trace_utxo_origin erwartet ein Objekt mit .update(text);
+    utxo_origin.trace_utxo_origin erwartet ein Objekt mit .update(text);
     core.jobs liefert eine schlichte Funktion. Dieser Adapter verbindet beide.
     """
 
