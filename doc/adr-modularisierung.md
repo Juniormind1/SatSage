@@ -1,8 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** Entwurf · **Stand:** 2026-09-23  
+**Status:** akzeptiert · Slice 1 weitgehend erledigt · Slice 2 teilweise  
+**Stand:** 2026-09-23 (Abschlussmemo)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch (vorgesehen):** `refactor/modular-engine`  
+**Arbeitsbranch:** `refactor/modular-engine` (tip `5965693`, lokal ahead of origin)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -127,13 +128,104 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 - **Slice 1 = `server.py`**, Domänenschnitt wie oben.
 - Erfolg bemisst sich an **paralleler Entwickelbarkeit** (Rückblick auf spürbare Features), nicht an Zeilenzahl allein.
-- Nächster Implementierungs-Prompt: Characterization-Tests → Extraktion wallets/source/trace/tax zuerst (höchster Hotspot laut Historie) → restliche Domänen → Memo.
+- Implementierung Slice 1 + Teilschnitt Slice 2: siehe **Abschlussmemo** unten.
 
-## Offene Punkte vor Code
+## Offene Punkte (Stand Memo)
 
-- Exact package path: `httphttpserver/api/` vs. `core/api/` — Empfehlung **`httphttpserver/api/`** (HTTP-Handler), Business bleibt in `core/`.
-- Ob `_api`-Dispatch als Tabelle (`ROUTES`) oder als if-Kette pro Modul — beides ok; Tabelle erleichtert spätere Specter/OpenAPI-Doku.
+- Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
+- `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
+- Verbleibend: Slice-2-Rest (`app.js`), optional Orchestrierung (`build_state`, Tip-Sync, Splash/`main_cli`), später `main.py` / `analyze.py`.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
 `server/api/` ist wegen Kollision mit dem Modul `server.py` **nicht** nutzbar. Slice-1-Handler liegen unter **`httpserver/api/`** (Einstieg bleibt `server.py`).
+
+---
+
+## Abschlussmemo 2026-09-23 · Slice 1 (+ Teilschnitt Slice 2)
+
+### Kurzfazit
+
+Slice 1 (`server.py` nach Domänen) ist **weitgehend erledigt**: alle extrahierten `api_*`-Handler liegen unter `httpserver/api/`, Domänen-Helfer und Handler-Mixins unter `httpserver/`, `AppState` ist ausgelagert. `server.py` liegt bei **~89 KB** — die Orientierung ≪ 100 KB aus dem Done-Check ist erreicht.
+
+Slice 2 (`web/app.js`) ist **teilweise** umgesetzt (Views extrahiert; Bootstrap/Einrichtung/Adress-Labels noch im Monolithen). Parallel-Dev-Nutzen ist API-seitig spürbar; UI-seitig erst vollständig, wenn der Rest von `app.js` folgt.
+
+### Messwerte
+
+| Datei | vor Modularisierung (ADR-Entwurf) | Stand Memo |
+| --- | ---: | ---: |
+| `server.py` | ~389 KB | **~89 KB** |
+| `web/app.js` | ~583 KB | **~281 KB** |
+
+### Package-Entscheidung (geschlossen)
+
+Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` mit Re-Export-Fassade (`from httpserver… import …`), damit Tests und Late-Imports weiter `from server import …` nutzen können. Symbol-Identität bleibt erhalten (`server.AppState is httpserver.app_state.AppState`).
+
+### Slice 1 · was gelandet ist
+
+**API-Domänen** unter `httpserver/api/`:
+
+| Modul | Domäne |
+| --- | --- |
+| `jobs.py` | Jobs / Cancel |
+| `source.py` | Datenquellen |
+| `wallets.py` | Wallets / UTXO-API |
+| `trace.py` | Herkunft / Trace |
+| `tax.py` | Steuer / Selbstanzeige |
+| `auth_session.py` | Login / Session |
+| `config_ui.py` | Config / UI |
+| `labels_sanctions_exchange.py` | Labels / Sanktionen / Börse |
+| `price_llm_lab.py` | Kurs / LLM / Lab |
+| `utxos_cache.py` | UTXO-Cache |
+| `health.py` | Health |
+
+**Helfer / Surface** unter `httpserver/`:
+
+| Modul | Inhalt |
+| --- | --- |
+| `wallet_export.py` | Export / Indexer-Warte |
+| `empfang.py` | Empfang / Mempool / Fulcrum-Clients |
+| `steuer.py` | Steuer-Grundlage / Selbstanzeige-Report |
+| `trace_helpers.py` | Trace-Orchestrierungshelfer |
+| `handler_auth.py`, `handler_static.py`, `handler_download.py`, `handler_sse.py` | Handler-Mixins |
+| `import_payload.py`, `historie_nachzug.py`, `tls_p2p.py` | Import, Historie, TLS/P2P |
+| `local_core.py` | Local-bitcoind / Managed-Hints |
+| `scramble.py` | Env-Scramble |
+| `app_state.py` | `AppState` + Managed-Konstanten |
+
+**Muster:** Bodies im Domänenmodul; `server.py` nur Fassade; gegen Import-Zyklen Late-`from server import …` in den Modulen. Charakterisierungstests nach jedem Schnitt.
+
+### Slice 2 · Teilschnitt
+
+Unter `web/views/` bereits: `steuerjahr.js`, `herkunft.js`, `wallets.js`, `datenquellen.js`, `einstellungen.js`, `sanktionen.js` (plus `web/boot.js`).  
+**Noch in `web/app.js`:** Chrome/Bootstrap, Einrichtung-Wizard, Adress-Labels.
+
+### Done-Check Slice 1 (ehrlich)
+
+| Kriterium | Lage |
+| --- | --- |
+| `server.py` ≪ 100 KB | **ja** (~89 KB) |
+| Domänen wallets / source / trace / tax getrennt | **ja** |
+| Rückblick: Sparrow-Import vs. Steuerjahr-Trace ohne gemeinsame Handler-Datei | **ja** (API) |
+| Kein neues God-File | **ja** (viele mittelgroße Module) |
+| Specter/PyInstaller / genannte Tests | Charakterisierungsläufe je Slice grün; kein Full-Suite-Gate in diesem Memo behauptet |
+| Abschlussmemo + Merge-Einschätzung | **dieses Kapitel** |
+
+### Merge-Lage (Einschätzung)
+
+- **API:** spürbar besser — typische Features (Wallets vs. Steuer vs. Source vs. Auth) können API-seitig in getrennten Dateien landen.
+- **UI:** erst halb — `app.js` (~281 KB) bleibt Konflikt-Hotspot, bis Einrichtung/Labels/Chrome raus sind.
+- **Klebstoff in `server.py`:** noch Orchestrierung (`build_state`, Tip-Sync / `starte_wallet_aktualisierung`, Splash/`main_cli`, Env-Utils, Header/Source/Electrs-Helfer, dünner Handler-Kern). Bewusst dünner Einstieg, kein zweites God-File — weitere Schnitte nur wenn Parallel-Dev daran hängt.
+
+### Bewusst offen / nächste Schnitte
+
+1. Slice 2 zu Ende: Einrichtung, Adress-Labels, Chrome/Bootstrap aus `app.js`.
+2. Optional Orchestrierung: `build_state`, Tip-Sync, Splash/`main_cli` (niedrigere Merge-Priorität als Slice 2).
+3. Später laut ADR: `main.py` / `analyze.py` / Adapter-Feinschnitt (Slices 3–5).
+4. Arbeitsregeln in `AGENTS.md` nachziehen.
+
+### Arbeitsregeln (Branch)
+
+- Commits auf `refactor/modular-engine` lokal ok; **Push nur nach explizitem OK**.
+- Kein Prod-`.env` / Secrets / Home-Node / Mainnet durch den Bot.
+- Refactor-Slices eigene Commits, keine Drive-bys in Feature-PRs.

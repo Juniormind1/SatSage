@@ -276,9 +276,10 @@ Zwei Bausteine **gemeinsam** (ein IO-Umbau):
 
 ## Architektur · Modularisierung (kleinere Module)
 
-**Stand:** 2026-09-22 · **offen** · Plan/Prompt · Architektur  
+**Stand:** 2026-09-23 · **Slice 1 weitgehend erledigt / Slice 2 teilweise** · Architektur  
+**ADR/Abschlussmemo:** [`doc/adr-modularisierung.md`](doc/adr-modularisierung.md)
 
-Aufwand: **sehr hoch** (viele Slices)
+Aufwand: **sehr hoch** (viele Slices; Slice 1 API+Helfer weitgehend, Slice 2 UI teilweise)
 **Prompt/Detail:** [`doc/issues/modularisiere_prompt.txt`](doc/issues/modularisiere_prompt.txt)
 
 **Hauptziel:** God-Files (`server.py`, `main.py`, `analyze.py`, `web/app.js`, …) inkrementell entkernen — Engine / core / Adapter / Surfaces, Verhalten 1:1, Tests als Netz. Kein Big-Bang.
@@ -288,6 +289,8 @@ Aufwand: **sehr hoch** (viele Slices)
 Viele Entwickler und Assistenten arbeiten in **vielen Branches/Worktrees parallel**. Solange Fast-alles an denselben Monolithen hängt, sind Merge-Konflikte teuer. Wenn wir modularisieren, muss sich die **Merge-Lage massiv verbessern** (Schnitte nach Änderungsdomäne). Nur umbenennen / in ein neues God-File schieben gilt als **ungenügend** → gründlicher nachschneiden.
 
 **Done-Check je Slice (neben Tests grün):** Typische parallele Features können weitgehend **ohne dieselbe Datei** landen; ADR/Abschlussmemo sagt das explizit.
+
+**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~89 KB; Domänen unter `httpserver/api/` + Helfer/`AppState` unter `httpserver/`. `web/app.js` ~583 KB → ~281 KB mit Views unter `web/views/` (Einrichtung/Labels/Chrome noch offen). Branch `refactor/modular-engine`.
 
 ---
 ---
