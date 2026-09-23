@@ -129,18 +129,121 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 - **Slice 1 = `server.py`**, Domänenschnitt wie oben.
 - Erfolg bemisst sich an **paralleler Entwickelbarkeit** (Rückblick auf spürbare Features), nicht an Zeilenzahl allein.
 - Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
+- **Slice 3 = `main.py`:** detaillierter Plan unten (Inventar 2026-09-23); Umsetzung nach Freigabe, Commits je Domäne.
 
 ## Offene Punkte (Stand Memo)
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; später `main.py` / `analyze.py`.
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3 `main.py`:** Plan unten; danach `analyze.py`.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
 `server/api/` ist wegen Kollision mit dem Modul `server.py` **nicht** nutzbar. Slice-1-Handler liegen unter **`httpserver/api/`** (Einstieg bleibt `server.py`).
 
 ---
+
+
+---
+
+## Slice 3 (fest) · `main.py` — Plan 2026-09-23
+
+**Status:** geplant (Inventar erledigt, Implementierung ausstehend)  
+**Ist:** `main.py` ~250 KB / ~7487 Zeilen / ~212 Top-Level-Symbole — größter verbleibender Prod-Monolith.
+
+### Inventar (Kurz)
+
+**Rollen heute:** Ableitung, UTXO-/Verlauf-Caches, Datenquellen-Aufbau (Fulcrum/Onion/BIP-158/bitcoind), Tip-Sync, Sanktions-Pools, `WalletContext`, plus CLI-`main()`.
+
+**Größte Brocken (Zeilen ≈):**
+
+| Symbol | ~Z. | Domäne |
+| --- | ---: | --- |
+| `main` | 381 | CLI-Einstieg |
+| `sync_xpub_zum_tip` | 280 | Sync |
+| `_build_blockchain_fetchers` | 256 | Quellen |
+| `_mempool_pending_nach_prune` | 193 | Cache/Mempool |
+| `_scan_xpub_utxos` | 178 | Sync/Scan |
+| `resolve_sanctions_clearnet_pool` | 134 | Sanktionen |
+| `open_env_file_in_editor` | 130 | CLI/Report |
+| `_setup_bip158_client` | 129 | Quellen |
+| `resolve_wallet_utxos` | 127 | Sync-Fassade |
+| … | | ~200 weitere |
+
+**Domänen-Cluster (heuristisch):** Ableitung ~2,0 kZ · Quellen ~1,6 kZ · Cache ~1,3 kZ · misc/Resolve ~1,5 kZ · Sanktionen ~0,3 kZ · CLI `main` ~0,4 kZ.
+
+**Kopplung (wer importiert `main`):**
+
+| Verbraucher | typische Symbole |
+| --- | --- |
+| `menu.py` | viele Caches/Sync/Resolve |
+| `httpserver/*` (`wallet_sync`, `api/wallets`, `app_state`, `empfang`, …) | Cache, Ableitung, `build_wallet_context`, `_setup_blockchain_client`, Fetchers |
+| `core/*` (`wallets`, `source`, `utxos`, `tax`, `trace`, …) | Ableitung, Cache-Pfade, Normalize — **Problem:** `core` hängt an Root-`main` |
+| Specter-Plugin | `_load_dotenv`, Cache save/load, `build_wallet_context`, Seed-Helfer, `_setup_blockchain_client`, Fetchers, `list_top_wallet_utxos` |
+| `analyze.py` / `trace_engine.py` | `WalletContext`, Cache-Dirs |
+| Tests | breit (API, Sync, Derivation, BIP-158, Tax, …) |
+
+**Schluss:** Slice 3 muss die **Abhängigkeitsrichtung umdrehen**: `core`/`httpserver`/Specter importieren Engine-Module — nicht länger `main`. `main.py` wird Fassade + dünner CLI-Einstieg (wie `server.py` nach Slice 1).
+
+### Zielbild
+
+- `main.py` bleibt **Einstieg**: `main()` (CLI), Re-Exports für alte `from main import …` / `import main as xq_main`.
+- Fachcode wandert nach **`core/`** (bereits Datenschicht; keine parallele `engine/`-Hierarchie ohne Not).
+- Kein neues God-File: Domänen ≤ ~80–100 KB, Funktionen weiter teilen wenn > ~80 Zeilen.
+- Verhalten 1:1; Specter-/Test-Signaturen nur über Fassade.
+
+### Empfohlene Modulgrenzen
+
+| Modul (Vorschlag) | Inhalt (Beispiele) | Entkoppelt u. a. |
+| --- | --- | --- |
+| `core/derivation.py` | `derive_addresses`, `derive_address_at_index`, `derive_descriptor_addresses`, `_hdkey_for_xpub`, `_encoders_for_xpub`, `normalize_script_type`, Gap/Max-Adress-Konstanten | Wallet-Import, Multisig, Export, Specter-Seed |
+| `core/xpub_cache.py` | `load_`/`save_xpub_utxo_cache`, Verlauf-Cache, Ingress-Cache, Pfad/Key-Helfer (`_xpub_cache_key`, Alter-Pfad), Prune/Verify, `settle_gezielte_spends_im_cache`, Immutable-Dirs | Tip-Sync, Trace, Tax, Specter-Cache |
+| `core/chain_sources.py` | `_build_blockchain_fetchers`, `_setup_blockchain_client`, Fulcrum/Electrum/Onion-Rotation, Priority-Chains, BIP-158-Setup, Latenz-Gates | Source-API, Wallet-Watch, Trace-Jobs |
+| `core/wallet_sync_engine.py` | `sync_xpub_zum_tip`, `sync_wallets_zum_tip`, `_scan_xpub_utxos`, Tip anheben, light rescan, scantxoutset-Helfer, `resolve_wallet_utxos` / `resolve_wallet_verlauf` | `httpserver/wallet_sync`, Start-Sync, Menu |
+| `core/sanctions_pool.py` | `resolve_sanctions_*_pool`, Own-Node-Pool, Clearnet-Probe-Limits | Sanktionscheck-API/Jobs |
+| `core/wallet_context.py` | `WalletContext`, `build_wallet_context`, Address-Seed aus Caches (`seed_wallet_addresses_*`, `init_external_address_cache`) | Specter-Session, Trace, Tax |
+| `core/env_bootstrap.py` (klein) | `_load_dotenv`, `ENV_FILE`, Editor-Öffnen falls eng an CLI | server/menu/Specter Env-Read |
+| `main.py` | `main()` + Re-Export-Fassade aller bisherigen öffentlichen Namen | — |
+
+Namensnotiz: `wallet_sync_engine` bewusst nicht `httpserver/wallet_sync` (HTTP-Orchestrierung bleibt getrennt).
+
+### Extraktions-Reihenfolge (je eigener Commit, lokal bis Abschnitt OK)
+
+1. **`derivation`** — blattnah, stark genutzt, wenig I/O-Orchestrierung.  
+2. **`wallet_context`** + Address-Seed — baut auf Ableitung/Caches-Schnittstellen.  
+3. **`xpub_cache`** — viele Importe; Fassade sofort.  
+4. **`env_bootstrap`** — klein, Specter/server.  
+5. **`chain_sources`** — Fetchers/Clients (höheres Risiko, Netz).  
+6. **`sanctions_pool`** — abgegrenzt.  
+7. **`wallet_sync_engine`** — größte Verhaltensfläche; zuletzt unter den Domänen.  
+8. **`main()` glätten** — nur CLI übrig, Imports aus `core.*`.
+
+Zwischen jedem Commit: Characterization-Tests der berührten Domäne + Smoke Specter-Bridge-Imports (`python -c "import main"` / Plugin-Pfad).
+
+### Charakterisierung / Tests (vor/während)
+
+Mindestens: `tests/test_ableitung.py` (o. ä.), `tests/test_start_sync.py`, `tests/test_api.py` (Wallet/Cache), `tests/test_verlauf_*`, `tests/test_bip158_*`, `tests/test_wallet_alter.py`, Tax/Trace-Caches; plus Import-Smoke Specter (`build_wallet_context`, Cache save/load, `_setup_blockchain_client`).
+
+### Done-Check Slice 3
+
+- `main.py` ≪ 100 KB (Orientierung; Ideal: nur CLI + Fassade, eher ≪ 40 KB).  
+- Domänen **derivation**, **xpub_cache**, **chain_sources**, **wallet_sync_engine** in getrennten Dateien.  
+- **`core` importiert nicht mehr `main`** für diese Domänen (Richtung umgekehrt).  
+- Specter-Plugin und `httpserver/wallet_sync` laufen über Fassade oder Direktimport `core.*` ohne Verhaltensbruch.  
+- Genannte Tests grün; kein neues God-File > ~100 KB in `core/`.  
+- Kurzes Abschlussmemo + Merge-Einschätzung.
+
+### Explizit nicht Slice 3
+
+- `analyze.py` / Trace-Pipeline (Slice 4).  
+- Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py` (Slice 5) — außer unvermeidbare Import-Umleitungen.  
+- Features, neue Sync-Strategien, Cache-Format-Migration.  
+- Secrets / `.env`-Inhalte loggen oder ändern.
+
+### Parallel-Dev-Nutzen (Rückblick-Test)
+
+Nach Slice 3 sollten z. B. „Ableitung/Multisig-Fix“ und „Tip-Sync/Cache-Prune“ ohne gemeinsame `main.py`-Datei landen können — analog Sparrow vs. Steuerjahr bei Slice 1.
+
 
 ## Abschlussmemo 2026-09-23 · Slice 1 + Slice 2
 

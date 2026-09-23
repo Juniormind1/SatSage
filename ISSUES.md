@@ -290,7 +290,7 @@ Viele Entwickler und Assistenten arbeiten in **vielen Branches/Worktrees paralle
 
 **Done-Check je Slice (neben Tests grün):** Typische parallele Features können weitgehend **ohne dieselbe Datei** landen; ADR/Abschlussmemo sagt das explizit.
 
-**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~62 KB; Domänen unter `httpserver/api/` + Helfer/`AppState`/`wallet_sync`/`splash`/`main_cli` unter `httpserver/`. `web/app.js` ~583 KB → ~90 KB: Views + Chrome + `api.js`/`state.js`/`format.js`/`mempool_links.js`. Rest in `app.js`: Laden-Ballast (Kurs/Chat/Sync-UI). Branch `refactor/modular-engine`.
+**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~62 KB; Domänen unter `httpserver/api/` + Helfer/`AppState`/`wallet_sync`/`splash`/`main_cli` unter `httpserver/`. `web/app.js` ~583 KB → ~90 KB: Views + Chrome + `api.js`/`state.js`/`format.js`/`mempool_links.js`. Rest in `app.js`: Laden-Ballast (Kurs/Chat/Sync-UI). **Nächster Epic:** Slice 3 `main.py` (Plan in `doc/adr-modularisierung.md`). Branch `refactor/modular-engine`.
 
 ---
 ---
