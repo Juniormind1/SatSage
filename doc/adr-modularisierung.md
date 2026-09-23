@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1 weitgehend erledigt · Slice 2 weitgehend erledigt  
-**Stand:** 2026-09-23 (Abschlussmemo, Slice-2-Nachzug)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-23 (Nachzug UI 1–4 + Server 5–6)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (tip `b5c7f11`, lokal gleichauf mit origin nach Slice-2-Push; weitere Docs nur lokal)  
+**Arbeitsbranch:** `refactor/modular-engine` (tip nach Docs-Commit; UI/Server-Schnitte 1–6)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -134,7 +134,7 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Shared-Kern / Laden-Ballast in `app.js` (API, Format, Zustand, Mempool-Verweise, Kurs/Chat/Sync), optional Server-Orchestrierung (`build_state`, Tip-Sync, Splash/`main_cli`), später `main.py` / `analyze.py`.
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; später `main.py` / `analyze.py`.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -146,16 +146,16 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 ### Kurzfazit
 
-Slice 1 (`server.py` nach Domänen) ist **weitgehend erledigt**: alle extrahierten `api_*`-Handler liegen unter `httpserver/api/`, Domänen-Helfer und Handler-Mixins unter `httpserver/`, `AppState` ist ausgelagert. `server.py` liegt bei **~89 KB** — die Orientierung ≪ 100 KB aus dem Done-Check ist erreicht.
+Slice 1 (`server.py` nach Domänen) ist **weitgehend erledigt**: alle extrahierten `api_*`-Handler liegen unter `httpserver/api/`, Domänen-Helfer und Handler-Mixins unter `httpserver/`, `AppState` ist ausgelagert. Nach Sync-/CLI-Extraktion liegt `server.py` bei **~62 KB** (Done-Check ≪ 100 KB weiter erfüllt).
 
-Slice 2 (`web/app.js`) ist **weitgehend erledigt**: Domänen-Views, Einrichtung, Adress-Labels sowie Chrome/Nav/Bootstrap sind ausgelagert. Parallel-Dev-Nutzen ist API- und UI-seitig spürbar. In `app.js` bleiben Shared-Kern (Token/API/Format/Zustand) und Laden-Ballast (Kurs, Chat, Sync-Jobs) — kein View-Monolith mehr.
+Slice 2 (`web/app.js`) ist **weitgehend erledigt**: Domänen-Views, Einrichtung, Adress-Labels sowie Chrome/Nav/Bootstrap sind ausgelagert. Darauf folgten UI-Schnitte 1–4 (API/State/Mempool-Links/Format) und Server 5–6 (Wallet-Sync, Splash/`main_cli`). `app.js` ~90 KB (Laden-Ballast), `server.py` ~62 KB.
 
 ### Messwerte
 
 | Datei | vor Modularisierung (ADR-Entwurf) | Stand Memo |
 | --- | ---: | ---: |
-| `server.py` | ~389 KB | **~89 KB** |
-| `web/app.js` | ~583 KB | **~221 KB** |
+| `server.py` | ~389 KB | **~62 KB** |
+| `web/app.js` | ~583 KB | **~90 KB** |
 
 ### Package-Entscheidung (geschlossen)
 
@@ -201,13 +201,13 @@ Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` m
 
 **Chrome / Bootstrap:** `web/chrome_nav.js` (Nav, Ansichtswechsel, Job-Leiste), `web/chrome.js` (`ladeConfig`, `start`, Fußzeile, Shell-Listener). Einstieg weiter `web/boot.js` → `start();`.
 
-**Noch in `web/app.js` (~221 KB):** Token/API, Formatierung, Zustand, Mempool-Verweise, Laden-Ballast (Kurs-Pipeline, Chat/LLM, Header-/Wallet-Sync). Das ist Shared-Kern + Orchestrierung, keine Domänen-View mehr.
+**Nach Slice 2 + UI 1–4:** Shared-Module `web/api.js`, `state.js`, `format.js`, `mempool_links.js`. **Noch in `web/app.js` (~90 KB):** vor allem Laden-Ballast (Kurs-Pipeline, Chat/LLM, Header-/Wallet-Sync-UI) und restliche Orchestrierung — keine Domänen-View, kein Token/API/Format/Zustand mehr.
 
 ### Done-Check Slice 1 (ehrlich)
 
 | Kriterium | Lage |
 | --- | --- |
-| `server.py` ≪ 100 KB | **ja** (~89 KB) |
+| `server.py` ≪ 100 KB | **ja** (~62 KB) |
 | Domänen wallets / source / trace / tax getrennt | **ja** |
 | Rückblick: Sparrow-Import vs. Steuerjahr-Trace ohne gemeinsame Handler-Datei | **ja** (API) |
 | Kein neues God-File | **ja** (viele mittelgroße Module) |
@@ -217,16 +217,31 @@ Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` m
 ### Merge-Lage (Einschätzung)
 
 - **API:** spürbar besser — typische Features (Wallets vs. Steuer vs. Source vs. Auth) können API-seitig in getrennten Dateien landen.
-- **UI:** deutlich besser — Domänen-Views und Shell (Nav/Start) sind eigene Dateien. Rest-Hotspot ist vor allem der Shared-Kern / Laden-Ballast in `app.js` (~221 KB), nicht mehr „jede Ansicht“.
-- **Klebstoff in `server.py`:** noch Orchestrierung (`build_state`, Tip-Sync / `starte_wallet_aktualisierung`, Splash/`main_cli`, Env-Utils, Header/Source/Electrs-Helfer, dünner Handler-Kern). Bewusst dünner Einstieg, kein zweites God-File — weitere Schnitte nur wenn Parallel-Dev daran hängt.
+- **UI:** deutlich besser — Domänen-Views, Shell (Nav/Start) und Shared-Kern (API/State/Format/Mempool-Links) sind eigene Dateien. Rest-Hotspot ~90 KB Laden-Ballast in `app.js`.
+- **Server:** Splash/`main_cli`, Wallet-/Electrs-Sync ausgelagert; `server.py` ~62 KB. Rest: `Handler`, `build_state`, eingebetteter Server, Header-Vorab, dünne Fassade.
 
 ### Bewusst offen / nächste Schnitte
 
-1. Leichte `app.js`-Schnitte: Token/API, Zustand, Mempool-Verweise; ggf. Formatierung (größer, hoher Nutzen).
-2. Laden-Ballast häppchenweise (Kurs, Chat/LLM, Sync-Jobs) — nur mit klarer Grenze.
-3. Optional Server-Orchestrierung: `build_state`, Tip-Sync, Splash/`main_cli`.
-4. Später laut ADR: `main.py` / `analyze.py` / Adapter-Feinschnitt (Slices 3–5).
-5. Arbeitsregeln in `AGENTS.md` nachziehen.
+1. Laden-Ballast in `app.js` häppchenweise (Kurs, Chat/LLM, Sync-UI) — nur mit klarer Grenze.
+2. Optional Server: `build_state`, `starte_header_vorab`, weiteren Handler-Feinschnitt.
+3. Später laut ADR: `main.py` / `analyze.py` / Adapter-Feinschnitt (Slices 3–5).
+4. Arbeitsregeln in `AGENTS.md` nachziehen.
+
+
+### Nachzug · UI 1–4 + Server 5–6 (2026-09-23)
+
+Je Ziffer ein Commit (lokal, später gepusht):
+
+| # | Commit-Thema | Modul |
+| --- | --- | --- |
+| 1 | Token/API | `web/api.js` |
+| 2 | Zustand | `web/state.js` |
+| 3 | Mempool-Verweise | `web/mempool_links.js` |
+| 4 | Formatierung | `web/format.js` |
+| 5 | Electrs-/Wallet-Sync | `httpserver/wallet_sync.py` |
+| 6 | Splash / `main_cli` | `httpserver/splash.py`, `httpserver/main_cli.py` |
+
+`server.py` behält dünnen `if __name__ == "__main__"`-Einstieg und Re-Export-Fassaden.
 
 ### Arbeitsregeln (Branch)
 
