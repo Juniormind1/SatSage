@@ -636,116 +636,18 @@ def api_health(state) -> dict:
     }
 
 
-def _auth_file(state) -> Path:
-    """Liefert die Passwortdatei, niemals einen Pfad in der .env selbst."""
-    configured = _env_setting(state, "SATSAGE_PASSWORD_FILE")
-    return Path(configured).expanduser() if configured else state.env_path.parent / ".satsage-password"
+# Auth-Helfer + Passwort-APIs: Domänenmodul (Modularisierung Slice 1).
+# Früh re-exportiert — Bootstrap/Login nutzen die Namen vor dem späten API-Fassaden-Block.
+from httpserver.api.auth_session import (  # noqa: E402
+    _auth_file,
+    _clear_password_hash,
+    _hash_password,
+    _password_hash,
+    _password_is_set,
+    _verify_password,
+    _write_password_hash,
+)
 
-
-def _password_hash(state) -> str:
-    path = _auth_file(state)
-    try:
-        value = path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError):
-        value = ""
-    # Für Tests/Bootstrap erlaubt, aber nicht empfohlen: ein bereits gehashter
-    # Wert aus der Umgebung. Niemals ein Klartext-Passwort daraus lesen.
-    return value or _env_setting(state, "SATSAGE_PASSWORD_HASH")
-
-
-def _password_is_set(state) -> bool:
-    return bool(_password_hash(state))
-
-
-def _hash_password(password: str) -> str:
-    if PasswordHasher is not None:
-        hasher = PasswordHasher(
-            time_cost=3,
-            memory_cost=64 * 1024,
-            parallelism=2,
-            type=ArgonType.ID,
-        )
-        return hasher.hash(password)
-    # Dokumentierter Fallback für Minimal-Installationen ohne argon2-cffi.
-    # scrypt ist ebenfalls ein speicherharter Passwort-KDF und wird mit
-    # zufälligem Salt gespeichert; neue Pakete sollten argon2-cffi installieren.
-    salt = secrets.token_bytes(16)
-    n, r, p = 2 ** 15, 8, 1
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=128 * 1024 * 1024)
-    return "scrypt${}${}${}${}${}".format(n, r, p, salt.hex(), digest.hex())
-
-
-def _verify_password(password: str, stored: str) -> bool:
-    if not password or not stored:
-        return False
-    if stored.startswith("$argon2") and PasswordHasher is not None:
-        try:
-            return bool(PasswordHasher().verify(stored, password))
-        except Exception:
-            return False
-    if stored.startswith("scrypt$"):
-        try:
-            _, n, r, p, salt_hex, digest_hex = stored.split("$", 5)
-            candidate = hashlib.scrypt(
-                password.encode("utf-8"),
-                salt=bytes.fromhex(salt_hex),
-                n=int(n), r=int(r), p=int(p), maxmem=128 * 1024 * 1024,
-            )
-            return hmac.compare_digest(candidate.hex(), digest_hex)
-        except (ValueError, TypeError, UnicodeError):
-            return False
-    return False
-
-
-def _write_password_hash(state, password: str) -> None:
-    """Schreibt den Login-Hash atomar (tmp + replace), ohne fd-chmod-APIs."""
-    path = _auth_file(state)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    value = (_hash_password(password) + "\n").encode("utf-8")
-    tmp = path.with_name(path.name + ".tmp")
-    if tmp.is_file() and os.name == "nt":
-        try:
-            os.chmod(tmp, 0o666)
-        except OSError:
-            pass
-    tmp.write_bytes(value)
-    try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    if path.is_file() and os.name == "nt":
-        try:
-            os.chmod(path, 0o666)
-        except OSError:
-            pass
-    try:
-        os.replace(tmp, path)
-    except PermissionError:
-        if path.is_file():
-            try:
-                os.chmod(path, 0o666)
-            except OSError:
-                pass
-            path.unlink()
-        os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-
-
-def _clear_password_hash(state) -> None:
-    """Entfernt die Passwortdatei (optionales App-Passwort). Env-Hash unberührt."""
-    path = _auth_file(state)
-    try:
-        path.unlink(missing_ok=True)
-    except TypeError:
-        # Python < 3.8 missing_ok — hier 3.10+
-        if path.is_file():
-            path.unlink()
-    except OSError:
-        if path.is_file():
-            path.unlink()
 
 
 def _env_scramble_erlaubt(state) -> bool:
@@ -2149,90 +2051,6 @@ def _datenquellen_config_gesperrt(
             raise ApiError(403, schluessel_text)
 
 
-def api_config(state: AppState, query: dict, accept_language: str | None = None) -> dict:
-    from core.version import version as app_version
-    from core import selbstanzeige as sa_mod
-
-    entries = state.entries
-    zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
-    werte = state.env().values()
-    quellen = source_mod.anreichere_live_p2p(
-        source_mod.mergere_erreichbarkeit(
-            source_mod.describe_sources(werte),
-            getattr(state, "sources_last", None),
-        )
-    )
-    return {
-        "version": app_version(),
-        "wallets": [z.as_dict() for z in zusammenfassung],
-        "sources": [q.as_dict() for q in quellen],
-        "script_types": [
-            {"value": t, "label": wallets_mod.SCRIPT_TYPE_LABELS[t]}
-            for t in main.SCRIPT_TYPE_CHOICES
-        ],
-        "sanktion_max_hops_cap": sanctions_mod.sanktion_max_hops_cap(),
-        "env_path": str(state.env_path),
-        "cache_dir": str(state.cache_dir),
-        "rpc_password_set": bool((werte.get("RPCUSER") or "").strip() and (werte.get("RPCPASSWORD") or "").strip()),
-        "mempool": mempool_info(werte.get("MEMPOOL_URL", "")),
-        "steuer": tax_mod.lese_steuer_einstellungen(werte),
-        "person": sa_mod.lese_steuer_person(werte),
-        "wallets_beim_start_aktualisieren": (
-            main.resolve_wallets_beim_start_aktualisieren(werte)
-        ),
-        "wallets_immer_aktuell": (
-            main.resolve_wallets_beim_start_aktualisieren(werte)
-        ),
-        "wallets_nur_bekannte_utxos": (
-            main.resolve_wallets_nur_bekannte_utxos(werte)
-        ),
-        "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
-        # Explizit: Web-Opt-in ist sitzungsweise (nach Neustart wieder false).
-        "oeffentliche_electrum_session": (
-            source_mod.oeffentliche_electrum_session_aktiv()
-        ),
-        "wallet_watch": _wallet_watch_status(),
-
-        "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
-        "hinweis_onchain_bestaetigt": tax_mod.hinweis_onchain_bestaetigt(werte),
-        # Wallet-Blöcke hinter einer Lücke werden nicht gelesen. Das muss die
-        # Oberfläche sagen können, sonst fehlt ein Wallet ohne jeden Hinweis.
-        "uebersprungene_bloecke": bloecke_nach_luecke(werte),
-        "multisig_hinweis": (
-            main.UNLESBAR_HINWEIS.format(anzahl=len(state.unlesbare_entries))
-            if state.unlesbare_entries else ""
-        ),
-        "header_job_id": state.header_job_id,
-        "header_tip": _header_tip(state),
-        # Nur melden, wenn der Job wirklich noch läuft (stale ID → null).
-        "wallet_sync_job_id": (
-            state.wallet_sync_job_id if tip_sync_laeuft(state) else None
-        ),
-        "live_p2p_peers": _live_p2p_peers(),
-        # Ohne Netzprobe — die Pille bleibt grau, bis /api/llm/status?check=1.
-        "llm": llm_mod.status_dict(werte, check=False),
-        "status_mail": status_mail_mod.als_dict(werte),
-        "ui_lang": _ui_lang_fuer_web(werte, accept_language),
-        # Hinter Umbrels app_proxy bindet SatSage an 0.0.0.0 — die Fußzeile
-        # darf dann nicht "nur lokal erreichbar" behaupten.
-        "local_only": _ist_local_only(state),
-        "ui_theme": _ui_theme_aus_env(werte),
-        "lernhinweise_plebs": _lernhinweise_plebs_aus_env(werte),
-        "network": (werte.get("NETWORK") or "main").strip().lower() or "main",
-        "managed_by": state.managed_by,
-        "managed_hint": _managed_hint(state, werte),
-        "electrum_indexer": (
-            _electrum_indexer(werte) if state.managed_by in _NODE_MANAGED else None
-        ),
-        "specter_labels": (
-            _specter_labels_for_api(state) if state.managed_by == "specter" else None
-        ),
-        "local_core": _local_core_status_for_api(state),
-        # App-Passwort (Hash in .satsage-password) — UI Einstellungen; Scrambling später.
-        "password_set": _password_is_set(state),
-        "env_scramble": _env_scramble_status(state),
-    }
-
 
 def _ui_lang_aus_env(werte: dict) -> str:
     """``de`` oder ``en`` aus UI_LANG; Default Deutsch (CLI/Terminal)."""
@@ -2259,134 +2077,6 @@ def _ui_lang_fuer_web(werte: dict, accept_language: str | None = None) -> str:
         return "de"
     return _sprache_aus_accept_language(accept_language) or "en"
 
-
-def _ui_theme_aus_env(werte: dict) -> str:
-    """``light`` oder ``dark`` aus UI_THEME; Default Hell."""
-    roh = str((werte or {}).get("UI_THEME") or "").strip().lower()
-    if roh in ("dark", "dunkel"):
-        return "dark"
-    return "light"
-
-
-def api_save_app_password(state: AppState, payload: dict) -> dict:
-    """
-    Einstellungen · Passwort setzen/ändern (Token-API, wie übrige Config).
-
-    Reihenfolge: zuerst Login-Hash (atomar), dann Scramble
-    (``.env`` als Cipher).
-    """
-    current = str(payload.get("current_password") or payload.get("old_password") or "")
-    password = str(payload.get("new_password") or payload.get("password") or "")
-    confirm = str(
-        payload.get("confirm") or payload.get("password_confirm") or password
-    )
-    stored = _password_hash(state)
-    if stored and not _verify_password(current, stored):
-        raise ApiError(403, "Aktuelles Passwort ist falsch.")
-    if not password or password != confirm:
-        raise ApiError(400, "Passwörter stimmen nicht überein oder sind leer.")
-    try:
-        _write_password_hash(state, password)
-    except OSError as exc:
-        raise ApiError(500, f"Passwort-Hash konnte nicht geschrieben werden: {exc}") from exc
-    except Exception as exc:
-        raise ApiError(500, f"Passwort-Hash fehlgeschlagen: {exc}") from exc
-    try:
-        from core import env_scramble as sc_mod
-
-        if stored and sc_mod.is_scramble_file_present(state.env_path):
-            _scramble_change_password(state, current, password)
-        else:
-            _scramble_enable_for_password(state, password)
-    except Exception as exc:
-        raise ApiError(400, f"env-scramble: {exc}") from exc
-    return {
-        "ok": True,
-        "password_set": True,
-        "env_scramble": _env_scramble_status(state),
-    }
-
-
-def api_delete_app_password(state: AppState, payload: dict) -> dict:
-    """Einstellungen · Passwort entfernen + Klartext-.env wiederherstellen."""
-    current = str(payload.get("current_password") or payload.get("old_password") or "")
-    if not _password_is_set(state):
-        return {
-            "ok": True,
-            "password_set": False,
-            "env_scramble": _env_scramble_status(state),
-        }
-    if not current or not _verify_password(current, _password_hash(state)):
-        raise ApiError(403, "Aktuelles Passwort ist falsch.")
-    try:
-        _scramble_disable_for_password(state, current)
-    except Exception as exc:
-        raise ApiError(400, f"env-scramble: {exc}") from exc
-    _clear_password_hash(state)
-    return {
-        "ok": True,
-        "password_set": False,
-        "env_scramble": _env_scramble_status(state),
-    }
-
-
-def api_unlock_env(state: AppState, payload: dict) -> dict:
-    """Nach Neustart: gobbledigook mit Passwort öffnen (File-Key nur RAM)."""
-    password = str(payload.get("password") or payload.get("current_password") or "")
-    if not password:
-        raise ApiError(400, "Passwort fehlt.")
-    if _password_is_set(state) and not _verify_password(password, _password_hash(state)):
-        raise ApiError(403, "Passwort ist falsch.")
-    try:
-        _scramble_unlock(state, password)
-    except Exception as exp:
-        raise ApiError(403, f"Unlock fehlgeschlagen: {exp}") from exp
-    return {"ok": True, "env_scramble": _env_scramble_status(state)}
-
-
-def api_save_ui_lang(state: AppState, payload: dict) -> dict:
-    """Speichert die UI-Sprache in der .env (``UI_LANG``)."""
-    roh = payload.get("ui_lang", payload.get("lang", "de"))
-    lang = "en" if str(roh).strip().lower().startswith("en") else "de"
-    env = state.env()
-    env.apply({"UI_LANG": lang})
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    return {"saved": True, "ui_lang": lang}
-
-
-def api_save_ui_theme(state: AppState, payload: dict) -> dict:
-    """Speichert den Farbmodus in der .env (``UI_THEME``)."""
-    roh = str(payload.get("ui_theme", payload.get("theme", "light")) or "").strip().lower()
-    theme = "dark" if roh in ("dark", "dunkel") else "light"
-    env = state.env()
-    env.apply({"UI_THEME": theme})
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    return {"saved": True, "ui_theme": theme}
-
-
-def _lernhinweise_plebs_aus_env(werte: dict) -> bool:
-    """``LERNHINWEISE_PLEBS=1`` — Experiment Neugier-Tooltips/Lern-QR; Default aus."""
-    roh = str((werte or {}).get("LERNHINWEISE_PLEBS") or "").strip().lower()
-    return roh in ("1", "true", "yes", "ja", "on")
-
-
-def api_save_lernhinweise_plebs(state: AppState, payload: dict) -> dict:
-    """Speichert das Experiment „Lernhinweise für Plebs“ in der .env."""
-    roh = payload.get("lernhinweise_plebs", payload.get("enabled", False))
-    an = roh in (True, 1, "1", "true", "yes", "ja", "on")
-    env = state.env()
-    env.apply({"LERNHINWEISE_PLEBS": "1" if an else "0"})
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-    return {"saved": True, "lernhinweise_plebs": an}
 
 
 def _pfad_unter(kind: Path, eltern: Path) -> bool:
@@ -2884,80 +2574,6 @@ def _payload_bool(payload: dict, *keys, default: bool | None = None) -> bool | N
     return default
 
 
-def api_save_start_sync(state: AppState, payload: dict) -> dict:
-    """
-    Speichert „Wallets immer aktuell halten“ (+ Unteroption) in der .env.
-
-    Bei ja: Tip-Nachzug beim Start + Electrs-Subscribe (eigener Node).
-    ``nur_bekannte_utxos``: Tip-Nachzug ohne Gap — nur bekannte UTXOs.
-    """
-    an = _payload_bool(
-        payload,
-        "enabled",
-        "wallets_immer_aktuell",
-        "wallets_beim_start_aktualisieren",
-        default=False,
-    )
-    assert an is not None
-    nur_bekannte = _payload_bool(
-        payload,
-        "nur_bekannte_utxos",
-        "known_only",
-        "wallets_nur_bekannte_utxos",
-        default=None,
-    )
-    if not an:
-        nur_bekannte = False
-    elif nur_bekannte is None:
-        nur_bekannte = main.resolve_wallets_nur_bekannte_utxos(
-            state.env().values()
-        )
-
-    env = state.env()
-    # Beide Keys: UI-Name neu, Legacy bleibt lesbar.
-    env.apply({
-        "WALLETS_IMMER_AKTUELL": "1" if an else "0",
-        "WALLETS_BEIM_START_AKTUALISIEREN": "1" if an else "0",
-        "WALLETS_NUR_BEKANNTE_UTXOS": "1" if nur_bekannte else "0",
-    })
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-
-    # Sofort wirksam — kein Server-Neustart nötig.
-    sync_job = None
-    try:
-        from core import wallet_watch
-
-        if an:
-            # Alten Gap-Lauf stoppen, damit die neue Option (z. B. nur bekannte)
-            # nicht hinter einem noch laufenden Tip-Nachzug stecken bleibt.
-            _tip_sync_abbrechen(state)
-            # 1) Tip-Nachzug jetzt (wie beim Start)
-            sync_job = starte_wallet_aktualisierung(state, erzwingen=True)
-            # 2) Electrs-Subscribe für Live-Updates
-            wallet_watch.starte_wallet_watch(
-                state, on_log=lambda t: print(f"  {t}", flush=True),
-            )
-        else:
-            _tip_sync_abbrechen(state)
-            wallet_watch.stoppe_wallet_watch()
-    except Exception:
-        pass
-
-    out = {
-        "saved": True,
-        "wallets_beim_start_aktualisieren": an,
-        "wallets_immer_aktuell": an,
-        "wallets_nur_bekannte_utxos": bool(nur_bekannte),
-        "wallet_watch": _wallet_watch_status(),
-    }
-    if isinstance(sync_job, dict) and sync_job.get("id"):
-        out["wallet_sync_job_id"] = sync_job["id"]
-        out["job"] = sync_job
-    return out
-
 
 def _wallet_watch_status() -> dict:
     try:
@@ -2967,190 +2583,6 @@ def _wallet_watch_status() -> dict:
     except Exception:
         return {"running": False}
 
-
-def api_save_hinweis_onchain(state: AppState, payload: dict) -> dict:
-    """
-    Merkt, dass der On-Chain-Hinweis auf dieser Installation bestätigt wurde.
-
-    Geschrieben wird die .env — nicht localStorage — damit derselbe Rechner
-    den Absatz nicht in jedem Browser wieder zeigt.
-    """
-    roh = payload.get("bestaetigt", payload.get("hinweis_onchain_bestaetigt"))
-    if isinstance(roh, str):
-        an = roh.strip().lower() in ("1", "true", "ja", "yes", "on")
-    else:
-        an = bool(roh)
-
-    env = state.env()
-    env.apply({
-        tax_mod.ENV_HINWEIS_ONCHAIN_BESTAETIGT: "1" if an else "0",
-    })
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-
-    return {
-        "saved": True,
-        "hinweis_onchain_bestaetigt": an,
-    }
-
-
-def api_save_llm(state: AppState, payload: dict) -> dict:
-    """
-    Speichert die Assistenten-Anbindung (URL, Modell, Anbieter, Opt-in).
-
-    Der API-Key wird nur geschrieben, wenn das Feld nicht leer ist — analog
-    zu RPC-Passwort. ``XAI_API_KEY`` wird weder gelesen noch gesetzt; ein
-    Key gehört ausschließlich nach ``LLM_API_KEY``.
-    """
-    if not isinstance(payload, dict):
-        raise ApiError(400, "Ungültiger Körper.")
-
-    base = str(payload.get("base_url") or payload.get("LLM_BASE_URL") or "").strip()
-    modell = str(payload.get("modell") or payload.get("LLM_MODELL") or "").strip()
-    anbieter = str(payload.get("anbieter") or payload.get("LLM_ANBIETER") or "").strip()
-    anbieter = anbieter.lower().replace("_", "-")
-    if anbieter == "apikey":
-        anbieter = "api-key"
-    if anbieter and anbieter not in llm_mod.ANBIETER_WERTE:
-        raise ApiError(400, f"Unbekannter Anbieter „{anbieter}“.")
-
-    roh_opt = payload.get("remote_opt_in", payload.get("LLM_REMOTE_OPT_IN"))
-    if isinstance(roh_opt, str):
-        opt_in = roh_opt.strip().lower() in ("1", "true", "yes", "ja", "on")
-    else:
-        opt_in = bool(roh_opt)
-
-    key = str(payload.get("api_key") or payload.get("LLM_API_KEY") or "").strip()
-    if payload.get("XAI_API_KEY"):
-        raise ApiError(400, "XAI_API_KEY wird hier nicht entgegengenommen.")
-
-    env = state.env()
-    updates: dict[str, str | None] = {
-        "LLM_BASE_URL": base or None,
-        "LLM_MODELL": modell or None,
-        "LLM_ANBIETER": anbieter or None,
-        "LLM_REMOTE_OPT_IN": "1" if opt_in else "0",
-    }
-    if key:
-        updates["LLM_API_KEY"] = key
-    if payload.get("api_key_clear"):
-        updates["LLM_API_KEY"] = None
-
-    env.apply(updates)
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-
-    werte = env.values()
-    return {
-        "saved": True,
-        "llm": llm_mod.status_dict(werte, check=False),
-    }
-
-
-def api_save_status_mail(state: AppState, payload: dict) -> dict:
-    """
-    Speichert Status-Mail-Opt-in und SMTP-Zugang.
-
-    Leeres Passwort-Feld behält den gesetzten Wert (wie LLM-API-Key).
-    """
-    if not isinstance(payload, dict):
-        raise ApiError(400, "Ungültiger Körper.")
-
-    to = str(payload.get("to") or payload.get("STATUS_MAIL_TO") or "").strip()
-    host = str(payload.get("smtp_host") or payload.get("SMTP_HOST") or "").strip()
-    from_addr = str(
-        payload.get("smtp_from") or payload.get("SMTP_FROM") or ""
-    ).strip()
-    user = str(payload.get("smtp_user") or payload.get("SMTP_USER") or "").strip()
-    port_roh = payload.get("smtp_port", payload.get("SMTP_PORT", 587))
-    try:
-        port = int(port_roh)
-    except (TypeError, ValueError) as exc:
-        raise ApiError(400, "SMTP-Port muss eine Zahl sein.") from exc
-    if not (1 <= port <= 65535):
-        raise ApiError(400, "SMTP-Port ungültig.")
-
-    roh_opt = payload.get("opt_in", payload.get("STATUS_MAIL_OPT_IN"))
-    if isinstance(roh_opt, str):
-        opt_in = roh_opt.strip().lower() in ("1", "true", "ja", "yes", "on")
-    else:
-        opt_in = bool(roh_opt)
-
-    roh_tls = payload.get("starttls", payload.get("SMTP_STARTTLS"))
-    if roh_tls is None:
-        starttls = True
-    elif isinstance(roh_tls, str):
-        starttls = roh_tls.strip().lower() in ("1", "true", "ja", "yes", "on")
-    else:
-        starttls = bool(roh_tls)
-
-    password = str(
-        payload.get("smtp_password") or payload.get("SMTP_PASSWORD") or ""
-    ).strip()
-    if host:
-        try:
-            outbound_policy.ensure_host_allowed(
-                host, service="smtp", values=state.env().values(),
-                opt_in=outbound_policy.public_opt_in(state.env().values(), "smtp"),
-            )
-        except outbound_policy.OutboundPolicyError as exc:
-            raise ApiError(400, str(exc)) from exc
-
-    env = state.env()
-    updates: dict[str, str | None] = {
-        status_mail_mod.ENV_OPT_IN: "1" if opt_in else "0",
-        status_mail_mod.ENV_TO: to or None,
-        status_mail_mod.ENV_HOST: host or None,
-        status_mail_mod.ENV_PORT: str(port),
-        status_mail_mod.ENV_USER: user or None,
-        status_mail_mod.ENV_FROM: from_addr or None,
-        status_mail_mod.ENV_STARTTLS: "1" if starttls else "0",
-    }
-    if password:
-        updates[status_mail_mod.ENV_PASSWORD] = password
-    if payload.get("smtp_password_clear"):
-        updates[status_mail_mod.ENV_PASSWORD] = None
-
-    env.apply(updates)
-    try:
-        env.save()
-    except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
-
-    return {
-        "saved": True,
-        "status_mail": status_mail_mod.als_dict(env.values()),
-    }
-
-
-def registriere_status_mail_hook(state: AppState) -> None:
-    """Job-Ende → neutrale Status-Mail (rescan/verlauf), wenn konfiguriert."""
-
-    def fertig(job) -> None:
-        kind = getattr(job, "kind", "") or ""
-        if kind not in status_mail_mod.STATUS_MAIL_KINDS:
-            return
-        status = getattr(job, "status", "") or ""
-        if status not in ("done", "failed", "cancelled"):
-            return
-        try:
-            werte = state.env().values()
-        except Exception:
-            return
-        if not status_mail_mod.darf_senden(werte, kind):
-            return
-        status_mail_mod.sende_status_mail_async(
-            werte,
-            kind=kind,
-            status=status,
-            finished_at=getattr(job, "finished_at", None),
-        )
-
-    setze_fertig_hook(fertig)
 
 
 def _loesche_source_stand(state: AppState, *keys: str) -> None:
@@ -5608,6 +5040,29 @@ def _wallet_name_fuer_utxo(
 
 
 # Job-API: Domänenmodul (Modularisierung Slice 1). Öffentliche Namen bleiben.
+from httpserver.api.auth_session import (  # noqa: E402
+    api_delete_app_password,
+    api_save_app_password,
+    api_unlock_env,
+)
+
+
+
+from httpserver.api.config_ui import (  # noqa: E402
+    api_config,
+    api_save_hinweis_onchain,
+    api_save_lernhinweise_plebs,
+    api_save_llm,
+    api_save_start_sync,
+    api_save_status_mail,
+    api_save_ui_lang,
+    api_save_ui_theme,
+    registriere_status_mail_hook,
+    _ui_theme_aus_env,
+)
+
+
+
 from httpserver.api.jobs import (  # noqa: E402
     api_cancel_job,
     api_job,
