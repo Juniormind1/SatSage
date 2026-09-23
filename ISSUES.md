@@ -276,10 +276,10 @@ Zwei Bausteine **gemeinsam** (ein IO-Umbau):
 
 ## Architektur · Modularisierung (kleinere Module)
 
-**Stand:** 2026-09-23 · **Slice 1+2 weitgehend · Slice 3 `main.py` erledigt · UI/Server-Schnitte 1–6 erledigt** · Architektur  
+**Stand:** 2026-09-23 · **Slice 1+2 weitgehend · Slice 3 `main.py` erledigt · Slice 4 `analyze.py` Plan · UI/Server-Schnitte 1–6 erledigt** · Architektur  
 **ADR/Abschlussmemo:** [`doc/adr-modularisierung.md`](doc/adr-modularisierung.md)
 
-Aufwand: **sehr hoch** (viele Slices; Slice 1–3 weitgehend, Shared-Kern/CLI 1–6 erledigt)
+Aufwand: **sehr hoch** (viele Slices; Slice 1–3 weitgehend, Slice-4-Plan, Shared-Kern/CLI 1–6 erledigt)
 **Prompt/Detail:** [`doc/issues/modularisiere_prompt.txt`](doc/issues/modularisiere_prompt.txt)
 
 **Hauptziel:** God-Files (`server.py`, `main.py`, `analyze.py`, `web/app.js`, …) inkrementell entkernen — Engine / core / Adapter / Surfaces, Verhalten 1:1, Tests als Netz. Kein Big-Bang.
@@ -290,7 +290,7 @@ Viele Entwickler und Assistenten arbeiten in **vielen Branches/Worktrees paralle
 
 **Done-Check je Slice (neben Tests grün):** Typische parallele Features können weitgehend **ohne dieselbe Datei** landen; ADR/Abschlussmemo sagt das explizit.
 
-**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~62 KB; Domänen unter `httpserver/api/` + Helfer/`AppState`/`wallet_sync`/`splash`/`main_cli` unter `httpserver/`. `web/app.js` ~583 KB → ~90 KB: Views + Chrome + `api.js`/`state.js`/`format.js`/`mempool_links.js`. Rest in `app.js`: Laden-Ballast (Kurs/Chat/Sync-UI). **Slice 3:** `main.py` ~250 KB → ~23 KB; Domänen unter `core/` (derivation, wallet_context, xpub_cache, env_bootstrap, chain_sources, sanctions_pool, wallet_sync_engine, env_wallets, receive_address, utxo_report, launch_checks); Fassade + dünnes `main()`. Abschlussmemo in `doc/adr-modularisierung.md`. Lokal `refactor/modular-engine` FF gegenüber `dev-juniormind`, nicht gepusht. **Nächster Epic:** Slice 4 `analyze.py`.
+**Fortschritt (2026-09-23):** `server.py` ~389 KB → ~62 KB; Domänen unter `httpserver/api/` + Helfer/`AppState`/`wallet_sync`/`splash`/`main_cli` unter `httpserver/`. `web/app.js` ~583 KB → ~90 KB: Views + Chrome + `api.js`/`state.js`/`format.js`/`mempool_links.js`. Rest in `app.js`: Laden-Ballast (Kurs/Chat/Sync-UI). **Slice 3:** `main.py` ~250 KB → ~23 KB; Domänen unter `core/`; Fassade + dünnes `main()`. **Slice 4 Plan:** `analyze.py` Inventar **~143 KB / ~4214 Z. / 74 Top-Level-Defs**; Extraktion nach `core/utxo_origin`, `utxo_ingress_report`, `tx_utxo_analyze`, `sanction_hops`, `wallet_sanctions_check`, `sanctioned_address_utxos`, `sanctioned_output_trace`; `analyze.py` bleibt Fassade. Detail in `doc/adr-modularisierung.md`. Lokal `refactor/modular-engine`, nicht gepusht. **Nächster Schritt:** Slice-4-Umsetzung (Commits je Domäne; vor FF nach `dev-juniormind` Playwright-Userflow).
 
 ---
 ---

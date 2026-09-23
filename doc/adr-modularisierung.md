@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3 `main.py` erledigt** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
-**Stand:** 2026-09-23 (Slice-3-Abschluss)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3 `main.py` erledigt** · **Slice 4 `analyze.py` Plan** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-23 (Slice-4-Plan)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (lokal ahead; Slice-3-Commits; nicht gepusht)  
+**Arbeitsbranch:** `refactor/modular-engine` (lokal ahead; Slice-3 erledigt; Slice-4-Plan; nicht gepusht)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -129,13 +129,14 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 - **Slice 1 = `server.py`**, Domänenschnitt wie oben.
 - Erfolg bemisst sich an **paralleler Entwickelbarkeit** (Rückblick auf spürbare Features), nicht an Zeilenzahl allein.
 - Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
-- **Slice 3 = `main.py`:** detaillierter Plan unten (Inventar 2026-09-23); Umsetzung nach Freigabe, Commits je Domäne.
+- **Slice 3 = `main.py`:** erledigt (siehe Abschlussmemo).
+- **Slice 4 = `analyze.py`:** detaillierter Plan unten (Inventar 2026-09-23); Umsetzung nach Freigabe, Commits je Domäne.
 
 ## Offene Punkte (Stand Memo)
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3 `main.py` erledigt**; danach Slice 4 `analyze.py`.
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3 `main.py` erledigt**; **Slice 4 `analyze.py` Plan** (Umsetzung ausstehend).
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -402,7 +403,7 @@ Slice 3 ist **erledigt**: Engine-Domänen und restliche CLI-Helfer liegen unter 
 
 ### Explizit nicht erledigt / als Nächstes
 
-- **Slice 4:** `analyze.py` / Trace-Pipeline (out of scope hier).
+- **Slice 4:** `analyze.py` / Trace-Pipeline — Plan unten; Umsetzung ausstehend.
 - Adapter-Feinschnitt `fulcrum.py` / `bip158_scanner.py` (Slice 5).
 - Optional: weitere `core`→`main`-Late-Imports auf Direktimport `core.*` umbiegen; `set_chain_network` näher an `derivation` nur mit Cache-Clear-Vertrag.
 
@@ -411,3 +412,135 @@ Slice 3 ist **erledigt**: Engine-Domänen und restliche CLI-Helfer liegen unter 
 - Commits auf `refactor/modular-engine` lokal ok; **Push nur nach explizitem OK**.
 - Kein Prod-`.env` / Secrets / Home-Node / Mainnet durch den Bot.
 - Refactor-Slices eigene Commits, keine Drive-bys in Feature-PRs.
+
+
+## Slice 4 (fest) · `analyze.py` — Plan 2026-09-23
+
+**Status:** Plan / bereit zur Umsetzung (noch keine Code-Moves)  
+**Ist (Inventar 2026-09-23):** `analyze.py` **142 797 B / 4 214 Zeilen / 74 Top-Level-Defs** (73 Funktionen/Klassen + `_main`).  
+**Nachbarschaft:** Root-`trace_engine.py` (~15 KB, Walk-Primitives) bleibt; `core/trace.py` (~32 KB) flatten’t den Origin-Baum für die UI und **importiert heute `analyze`** (Zyklus-Risiko).
+
+### Inventar (Kurz)
+
+**Rollen heute:** Fassade + Orchestrierung für Herkunfts-Walk, Vertiefung/Lücken/Steuer-Horizont, Ingress-Persistenz, CLI-Tx/UTXO-Analyse, Sanktions-Hop-Scan und Wallet-/Listen-UTXO-Sanktionsläufe (inkl. Report-`print`s). Interaktive Prompts liegen bewusst in `interact.py` / `menu.py`.
+
+**Größte Brocken (Zeilen ≈):**
+
+| Symbol | ~Z. | Domäne |
+| --- | ---: | --- |
+| `trace_utxo_origin` | 411 | Origin-Walk |
+| `_pruefe_ein_utxo` | 243 | Wallet-Sanktionscheck |
+| `vertiefe_herkunft_luecken` | 222 | Vertiefung/Lücken |
+| `analyze_tx` | 224 | CLI Tx-Analyse |
+| `scan_sanctioned_address_utxos` | 166 | Listen-UTXO-Scan |
+| `scan_external_sanction_hops` | 131 | Sanktions-Hops |
+| `_events_aus_origin_tree` / `_sammle_sanction_events_live` | 131 / 128 | Sanktions-Events |
+| `_trace_sanctioned_outputs_by_entity_parallel` | 119 | Entity-Output-Trace |
+| `check_wallet_utxos_sanctions` | 116 | Wallet-Sanktions-Orchestrierung |
+| `analyze_address_utxos` / `trace_known_utxos` | 105 / 102 | CLI UTXO-Batch |
+| … | | ~60 weitere |
+
+**Domänen-Cluster (heuristisch, Bodies):**
+
+| Cluster | ~Zeilen Bodies | ~KB Chunk | Inhalt |
+| --- | ---: | ---: | --- |
+| Prelude/Helfer | ~80 | ~3 | Contexts, Parse, Own-Addr, `_EphemeralProgress` |
+| Origin-Walk | ~410 | ~15 | `trace_utxo_origin` |
+| Vertiefe/Horizont/Lücken | ~400 | ~14 | `vertiefe_*`, `_hat_tax_horizon`, `hat_brauchbaren_teilfortschritt`, … |
+| Print/Persist/Followups | ~635 | ~23 | Ingress-Collect, `persist_utxo_ingress`, Followups |
+| CLI Tx/UTXO | ~440 | ~14 | `analyze_tx`, `analyze_address_utxos`, `trace_known_utxos` |
+| Sanction-Hops | ~250 | ~9 | `scan_external_sanction_hops` |
+| Wallet-Sanktionscheck | ~840 | ~29 | `check_wallet_utxos_sanctions` + Live-Walk |
+| Listen-UTXO + Entity-Trace | ~970 | ~33 | `scan_sanctioned_address_utxos`, `trace_sanctioned_outputs_*` |
+
+**Kopplung (wer importiert `analyze` / `analyze.*`):**
+
+| Verbraucher | typische Symbole |
+| --- | --- |
+| `core/trace.py` | `trace_utxo_origin`, `vertiefe_herkunft_luecken`, `hat_brauchbaren_teilfortschritt`, `_hat_tax_horizon`, `_origin_hat_luecken`, `_youngest_*`, `persist_utxo_ingress`, `MAX_TRACE_DEPTH` — **Problem:** `core` hängt am Root-`analyze` |
+| `httpserver/trace_helpers.py`, `httpserver/api/trace.py` | Walk/Vertiefe/Teilfortschritt, Followups |
+| `httpserver/api/labels_sanctions_exchange.py` | `check_wallet_utxos_sanctions` |
+| `interact.py`, Specter `specter_session.py` | `analyze_tx`, `analyze_address_utxos`, `trace_known_utxos`, Contexts, `_parse_utxo_ref` |
+| `menu.py` | Sanktionscheck + Listen-UTXO-Scan/Reports |
+| `server.py` | `import analyze` (Bindung/Packaging-Sichtbarkeit) |
+| `pack_release.py` | Datei in Bundle-Liste |
+| Tests | `test_trace*`, `test_sanction_hops`, `test_sanctions_quelle`, `test_jobs`, `test_tx_classify`, `test_exchange_reports` |
+| Lab | `verify_sanctions_hops`, Szenario-Generator (Hop-Semantik) |
+
+**Öffentliche / von außen genutzte API (Union):**  
+`trace_utxo_origin`, `vertiefe_herkunft_luecken`, `hat_brauchbaren_teilfortschritt`, `persist_utxo_ingress`, `_hat_tax_horizon`, `_origin_hat_luecken`, `_youngest_external_ingress`, `_youngest_tax_horizon`, `_youngest_wallet_ingress`, `_collect_internal_creator_txs`, `_run_tx_oriented_followups`, `analyze_tx`, `analyze_address_utxos`, `trace_known_utxos`, `TxFollowupContext`, `UtxoFollowupContext`, `_parse_utxo_ref`, `scan_external_sanction_hops`, `check_wallet_utxos_sanctions`, `print_sanction_check_report`, `scan_sanctioned_address_utxos`, `print_sanctioned_utxo_findings`, `print_sanctioned_utxo_scan_report`, `MAX_TRACE_DEPTH` (Re-Export aus `trace_engine`).
+
+**Fassade / Zyklen heute:**
+
+- `analyze` → `trace_engine` (Primitives); Late-`_main()` → `main` (Format/Cache/Fulcrum-Helfer); `core.trace_cache` lokal.
+- `core.trace` → **`import analyze`** (nicht umgekehrt) — Richtung nach Slice 4 umdrehen: `core.trace` → `core.utxo_origin` (o. ä.), `analyze.py` nur noch Re-Export.
+- Kein `analyze` ↔ `core.trace`-Importzyklus *im Code*, aber **logischer Zyklus-Risiko**, sobald Origin-Walk nach `core/` wandert und versehentlich wieder `core.trace` zieht.
+
+**Schluss:** Slice 4 macht `analyze.py` zur **dünnen Fassade + Orchestrierungsrest**; Domänen landen unter **`core/`** (SatSage-Namenskonvention wie Slice 3). Keine parallele `analyze_*`-Hierarchie nötig — optional nur, falls ein Cut klar CLI-only bleibt.
+
+### Zielbild
+
+- `analyze.py` bleibt **Einstieg/Fassade**: Re-Exports aller bisherigen öffentlichen Namen (`from analyze import …` / `import analyze` behalten Symbol-Identität).
+- Fachcode → **`core/*`**; `print()`-Reports analog `core/utxo_report.py` (CLI-Helfer) toleriert, nicht in HTTP-Pfade ziehen.
+- Kein neues God-File: Domänen ≤ ~80–100 KB.
+- Verhalten 1:1; Tests/Specter/Menu/HTTP weiter über Fassade oder gezielten Direktimport `core.*`.
+- **Kein Domänen-Zyklus `analyze` ↔ `core`:** Bodies in `core`; Fassade importiert `core`, nicht umgekehrt für extrahierte Domänen.
+
+### Empfohlene Modulgrenzen
+
+| Modul (Vorschlag) | Inhalt (Beispiele) | ~KB Bodies | Entkoppelt u. a. |
+| --- | --- | ---: | --- |
+| `core/utxo_origin.py` | `trace_utxo_origin`, `vertiefe_tax_horizon`, `vertiefe_herkunft_luecken`, `hat_brauchbaren_teilfortschritt`, `_hat_tax_horizon`, `_origin_hat_luecken`, `_seed_memo_*`, Own-Addr/Parse-Helfer, `_EphemeralProgress` | ~31 | `core/trace`, HTTP-Trace, Tax-Horizont-Tests |
+| `core/utxo_ingress_report.py` | Collect/Youngest/Oldest, `persist_utxo_ingress`, Print-Summaries, `_analyze_utxo_funding`, `_collect_internal_creator_txs`, `_run_tx_oriented_followups`, `TxFollowupContext` / `UtxoFollowupContext` | ~24 | Trace-Persistenz, Followups (interact/HTTP/Jobs) |
+| `core/tx_utxo_analyze.py` | `analyze_tx`, `analyze_address_utxos`, `trace_known_utxos`, Batch-Progress | ~14 | CLI `interact`, Specter-Session |
+| `core/sanction_hops.py` | `scan_external_sanction_hops`, CoinJoin-Merge-Helfer, `SanctionHitFound` | ~9 | Lab-Hop-Semantik, Wallet-Check |
+| `core/wallet_sanctions_check.py` | Live-Event-Sammlung, `_pruefe_ein_utxo`, Parallel-Check, `check_wallet_utxos_sanctions`, `print_sanction_check_report` | ~29 | Menu, HTTP Sanktionen, Lab-Verify |
+| `core/sanctioned_address_utxos.py` | `scan_sanctioned_address_utxos` (+ parallel/Fulcrum-Sync), Findings-Reports | ~18 | Menu Listen-Scan |
+| `core/sanctioned_output_trace.py` | `trace_sanctioned_outputs_since` / `_by_entity`, Entity-Reports | ~15 | Entity-Trace-Reports |
+| `analyze.py` | Re-Export-Fassade + ggf. `_main()`-Shim bis Late-Imports auf `core.*`/`main`-Fassade bereinigt | ≪ 20 | — |
+
+Namensnotiz: bewusst **nicht** `core/trace.py` erweitern (das bleibt UI-Flattening). `core/sanctions.py` bleibt Listen-Abgleich Oberfläche — Hop-/Walk-Logik heißt `sanction_hops` / `wallet_sanctions_check`, nicht in denselben Topf.
+
+### Extraktions-Reihenfolge (je eigener Commit, lokal bis Abschnitt OK)
+
+1. **`core/utxo_origin.py`** — Kern-Walk + Vertiefe; Fassade sofort; `core/trace` Ideal: Direktimport (Zyklus vermeiden).  
+2. **`core/utxo_ingress_report.py`** — Persist/Collect/Followups (hängt an Origin-Baumform).  
+3. **`core/tx_utxo_analyze.py`** — CLI/Specter-Einstiege.  
+4. **`core/sanction_hops.py`** — blattnah für Lab/Tests.  
+5. **`core/wallet_sanctions_check.py`** — nutzt Hops + Origin.  
+6. **`core/sanctioned_address_utxos.py`** — Listen-Scan.  
+7. **`core/sanctioned_output_trace.py`** — Entity-Output-Traces.  
+8. **`analyze.py` glätten** — nur Fassade/`_main`-Shim; Smoke `import analyze`.
+
+Zwischen jedem Commit: Characterization der berührten Domäne + Import-Smoke (`python -c "import analyze; import core.trace"`).
+
+### Charakterisierung / Tests (vor/während)
+
+Mindestens: `tests/test_trace.py`, `tests/test_trace_resume_luecken.py`, `tests/test_trace_steuer_horizon.py`, `tests/test_sanction_hops.py`, `tests/test_sanctions_quelle.py`, `tests/test_tx_classify.py`, `tests/test_jobs.py` (Followups), `tests/test_exchange_reports.py`; plus Import-Smoke Specter/Menu-Pfade und `httpserver.trace_helpers`.
+
+### Done-Check Slice 4
+
+- `analyze.py` ≪ 40 KB (Ideal: nur Fassade/`_main`-Shim, eher ≪ 20 KB).  
+- Domänen **utxo_origin**, **utxo_ingress_report**, **tx_utxo_analyze**, **sanction_hops**, **wallet_sanctions_check** in getrennten Dateien unter `core/`.  
+- **Kein Domänen-Zyklus:** extrahierte `core/*`-Module importieren nicht `analyze` für ihre Bodies; `core/trace` nutzt Direktimport `core.utxo_origin` (Fassade optional parallel).  
+- Kein neues God-File > ~100 KB in `core/`.  
+- Genannte Tests grün; Symbol-Identität der Fassade (`analyze.trace_utxo_origin is core.utxo_origin.trace_utxo_origin`).  
+- Kurzes Abschlussmemo + Merge-Einschätzung.
+
+### Merge-Ritual (wie Slice 3)
+
+- Arbeitscommits nur auf `refactor/modular-engine`; **Push nur nach explizitem OK**.  
+- Vor jedem Fast-Forward / Merge nach `dev-juniormind`: Playwright-**Web-GUI-Userflow** grün (`scripts/webgui_userflow.py`, siehe `doc/testprotokoll-webgui-userflow.md`).  
+- Kein Prod-`.env` / Secrets / Home-Node / Mainnet durch den Bot.
+
+### Explizit nicht Slice 4
+
+- Weitere Schnitte an `main.py` / Adapter `fulcrum.py` / `bip158_scanner.py` (Slice 5).  
+- Umbau `trace_engine.py` oder Merge mit `core/trace.py` (Flattening).  
+- Neue Trace-/Sanktions-Features, Semantik-Änderungen, Cache-Format-Migration.  
+- Entfernen der `analyze`-Fassade (Kompatibilität bleibt).  
+- Secrets / `.env`-Inhalte loggen oder ändern.
+
+### Parallel-Dev-Nutzen (Rückblick-Test)
+
+Nach Slice 4 sollten z. B. „Herkunft-Lücken/Steuer-Horizont“ und „Wallet-Sanktions-Hop-Check“ ohne gemeinsame `analyze.py`-Bodies landen können — und Listen-UTXO-Scan parallel zu Entity-Output-Trace.
