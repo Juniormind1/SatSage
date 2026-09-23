@@ -4,8 +4,7 @@ WalletContext, Adress-Seeding und externer Adress-Auflösungs-Cache.
 Aus main.py ausgelagert (Slice 3 / ADR modular-engine). Verhalten 1:1 —
 main re-exportiert die öffentlichen Namen als Fassade.
 
-xpub_cache (load_xpub_utxo_cache / Verlauf / cache_entry) ist noch in main;
-Seed-Helfer und Persistenz importieren diese lazy, um Import-Zyklen zu vermeiden.
+Cache-Loader und Disk-Gate liegen in core.xpub_cache.
 """
 from __future__ import annotations
 
@@ -165,8 +164,7 @@ def _is_known_external_address(
 def _persist_external_address_cache() -> None:
     if _external_cache_dir is None:
         return
-    # Cache-Disk-Gate und JSON-Dump leben noch in main (xpub_cache nicht extrahiert).
-    from main import _dump_cache_json, cache_disk_write_allowed
+    from core.xpub_cache import _dump_cache_json, cache_disk_write_allowed
 
     if not cache_disk_write_allowed(_external_cache_dir):
         return
@@ -514,7 +512,7 @@ def _seed_wallet_addresses_from_cache(
                 _register_wallet_address(wallet, xpub, str(addr))
         if cache_dir is None:
             continue
-        from main import load_xpub_cache_entry
+        from core.xpub_cache import load_xpub_cache_entry
 
         entry = load_xpub_cache_entry(xpub, cache_dir)
         if not entry:
@@ -534,7 +532,7 @@ def seed_wallet_addresses_from_utxo_cache(
     cache_dir: Path,
 ) -> None:
     """Lädt alle bekannten Wallet-Adressen aus dem UTXO-Flatfile-Cache."""
-    from main import load_xpub_utxo_cache
+    from core.xpub_cache import load_xpub_utxo_cache
 
     cached_by_xpub: dict[str, list[dict]] = {}
     for xpub in xpubs:
@@ -568,7 +566,7 @@ def seed_wallet_addresses_from_scan_end(
     """
     if wallet is None:
         return 0
-    from main import load_xpub_cache_entry
+    from core.xpub_cache import load_xpub_cache_entry
 
     n = 0
     for xpub in xpubs:
@@ -615,7 +613,7 @@ def seed_wallet_addresses_from_verlauf_cache(
     """
     if wallet is None:
         return 0
-    from main import load_xpub_verlauf_cache
+    from core.xpub_cache import load_xpub_verlauf_cache
 
     n = 0
     for xpub in xpubs:

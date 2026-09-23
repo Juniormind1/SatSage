@@ -566,7 +566,7 @@ def _unspent_to_utxo(u: dict) -> dict | None:
     }
     if height > 0:
         try:
-            from main import block_time_for_height
+            from core.xpub_cache import block_time_for_height
 
             ts = block_time_for_height(height)
             if ts:

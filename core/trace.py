@@ -21,6 +21,7 @@ from pathlib import Path
 import analyze
 import labels
 import main
+from core import xpub_cache
 from core import trace_cache
 
 #: Typen, die ein Knoten annehmen kann.
@@ -65,7 +66,7 @@ def _blockhoehe_fuer_utxo(
 
     key_txid = main._normalize_txid(txid)
     ziel_vout = int(vout)
-    root = _Path(cache_dir) if cache_dir else main.UTXO_CACHE_DIR
+    root = _Path(cache_dir) if cache_dir else xpub_cache.UTXO_CACHE_DIR
     if not root.is_dir():
         return None
 
@@ -73,7 +74,7 @@ def _blockhoehe_fuer_utxo(
     xpubs = list(getattr(wallet, "xpubs", None) or []) if wallet is not None else []
     for xpub in xpubs:
         try:
-            liste = main.load_xpub_utxo_cache(xpub, root)
+            liste = xpub_cache.load_xpub_utxo_cache(xpub, root)
         except Exception:
             liste = None
         if liste:
@@ -823,7 +824,7 @@ def _immutable_ziel(cache_dir, immutable_cache_dir) -> Path | None:
     if immutable_cache_dir:
         return Path(immutable_cache_dir)
     if cache_dir:
-        return main.resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
+        return xpub_cache.resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
     return None
 
 

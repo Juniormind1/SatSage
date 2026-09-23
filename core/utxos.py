@@ -12,6 +12,7 @@ from pathlib import Path
 
 import labels
 import main
+from core import xpub_cache
 from core import trace_cache
 
 
@@ -63,7 +64,7 @@ def utxo_as_dict(
 
     # scantxoutset liefert oft nur die Höhe — Zeit aus lokalem Header-Cache.
     if immutable_cache_dir is not None:
-        main.enrich_utxos_with_block_times([utxo], immutable_cache_dir)
+        xpub_cache.enrich_utxos_with_block_times([utxo], immutable_cache_dir)
 
     status = utxo.get("status") or {}
     eintrag = {
@@ -114,7 +115,7 @@ def utxo_as_dict(
     }
 
     if immutable_cache_dir:
-        ingress = main.load_utxo_ingress_cache(
+        ingress = xpub_cache.load_utxo_ingress_cache(
             eintrag["txid"], eintrag["vout"], immutable_cache_dir
         )
         if ingress:
@@ -402,16 +403,16 @@ def load_cached_utxos(
     zurückgeschrieben, damit scantxoutset-Bestände dieselbe Ankunftsanzeige
     bekommen wie BIP-158-Scans.
     """
-    eintrag = main.load_xpub_cache_entry(xpub, cache_dir)
+    eintrag = xpub_cache.load_xpub_cache_entry(xpub, cache_dir)
     if eintrag is None:
         return None
     utxos = eintrag.get("utxos") or []
     imm = immutable_cache_dir
     if imm is None:
-        imm = main.resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
-    angereichert = main.enrich_utxos_with_block_times(utxos, imm)
+        imm = xpub_cache.resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
+    angereichert = xpub_cache.enrich_utxos_with_block_times(utxos, imm)
     if angereichert and persist_times:
-        main.rewrite_utxo_cache_times(xpub, cache_dir, utxos)
+        xpub_cache.rewrite_utxo_cache_times(xpub, cache_dir, utxos)
     return utxos
 
 

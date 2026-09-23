@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import main
+from core import xpub_cache
 from core import tax
 from core import wallets as wallets_mod
 from display import format_sats
@@ -36,7 +37,7 @@ EXPORT_LEGENDE = (
 
 
 def _ingress_offen(txid: str, vout: int, immutable_dir) -> bool:
-    eintrag = main.load_utxo_ingress_cache(txid, vout, immutable_dir)
+    eintrag = xpub_cache.load_utxo_ingress_cache(txid, vout, immutable_dir)
     if not eintrag:
         return True
     return "external_time_ts" not in eintrag
@@ -47,8 +48,8 @@ def _wallet_zeilen(entries, cache_dir, immutable_dir) -> list[dict[str, Any]]:
     zeilen = []
     for z in zusammen:
         schluessel = z.entry.analyse_schluessel
-        verlauf = main.load_xpub_verlauf_cache(schluessel, cache_dir)
-        utxos = (main.load_xpub_cache_entry(schluessel, cache_dir) or {}).get(
+        verlauf = xpub_cache.load_xpub_verlauf_cache(schluessel, cache_dir)
+        utxos = (xpub_cache.load_xpub_cache_entry(schluessel, cache_dir) or {}).get(
             "utxos"
         ) or []
         ohne_herkunft = 0

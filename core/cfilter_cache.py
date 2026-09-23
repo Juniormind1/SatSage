@@ -62,7 +62,7 @@ def speichere_cfilter_blob(
     if pfad is None:
         return False
     try:
-        from main import cache_disk_write_allowed
+        from core.xpub_cache import cache_disk_write_allowed
     except Exception:
         cache_disk_write_allowed = None  # type: ignore
     if cache_disk_write_allowed is not None:

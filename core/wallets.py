@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import main
+from core import xpub_cache
 from core.config import WalletEntry
 from core.derivation import (
     _encoders_for_xpub,
@@ -111,7 +112,7 @@ def effective_script_type(entry: WalletEntry) -> str:
 
 def wallet_id(xpub: str) -> str:
     """Stabile Kennung für URLs — derselbe Schlüssel wie beim UTXO-Cache."""
-    return main._xpub_cache_key(xpub)
+    return xpub_cache._xpub_cache_key(xpub)
 
 
 def eintrag_id(entry: WalletEntry) -> str:
@@ -250,7 +251,7 @@ def _export_import_stand(
     origin = (getattr(entry, "origin", "") or "").strip()
     if origin != WALLET_ORIGIN_WALLET_EXPORT:
         return None, 0, 0
-    verlauf = main.load_xpub_verlauf_cache(entry.analyse_schluessel, cache_dir) or []
+    verlauf = xpub_cache.load_xpub_verlauf_cache(entry.analyse_schluessel, cache_dir) or []
     n = len(verlauf)
     ohne = len(adr_mod.verlauf_ohne_adresse(verlauf))
     # Nur Deskriptor ohne CSV-Verlauf: Import gilt als vollständig.
@@ -265,16 +266,16 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
     """Baut die Übersicht ausschließlich aus dem lokalen Cache."""
     zusammenfassungen: list[WalletSummary] = []
     for entry in entries:
-        eintrag = main.load_xpub_cache_entry(entry.analyse_schluessel, cache_dir)
+        eintrag = xpub_cache.load_xpub_cache_entry(entry.analyse_schluessel, cache_dir)
         utxos = (eintrag or {}).get("utxos") or []
-        verlauf = main.load_xpub_verlauf_cache(
+        verlauf = xpub_cache.load_xpub_verlauf_cache(
             entry.analyse_schluessel, cache_dir
         ) or []
-        alter = main.xpub_first_seen(entry.analyse_schluessel, cache_dir) or {}
+        alter = xpub_cache.xpub_first_seen(entry.analyse_schluessel, cache_dir) or {}
         cache_mtime = None
         scan_tip = None
         if eintrag is not None:
-            pfad = main._xpub_cache_path(entry.analyse_schluessel, cache_dir)
+            pfad = xpub_cache._xpub_cache_path(entry.analyse_schluessel, cache_dir)
             try:
                 cache_mtime = int(pfad.stat().st_mtime)
             except OSError:
@@ -291,7 +292,7 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
         elif verlauf:
             # Nur Verlauf (z. B. Wasabi-Store ohne offene UTXOs): mtime der
             # Verlaufsdatei, damit die Oberfläche „hat Daten“ erkennt.
-            vpfad = main._xpub_verlauf_cache_path(
+            vpfad = xpub_cache._xpub_verlauf_cache_path(
                 entry.analyse_schluessel, cache_dir
             )
             try:

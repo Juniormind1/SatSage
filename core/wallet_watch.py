@@ -262,13 +262,13 @@ class WalletWatchService:
         mapping: dict[str, set[str]] = {}
         for entry in state.analyse_entries:
             xpub = entry.analyse_schluessel
-            utxos = main.load_xpub_utxo_cache(xpub, state.cache_dir) or []
+            utxos = xpub_cache.load_xpub_utxo_cache(xpub, state.cache_dir) or []
             addrs: list[str] = []
             for u in utxos:
                 a = (u.get("address") or "").strip()
                 if a:
                     addrs.append(a)
-            verlauf = main.load_xpub_verlauf_cache(xpub, state.cache_dir) or []
+            verlauf = xpub_cache.load_xpub_verlauf_cache(xpub, state.cache_dir) or []
             for e in verlauf[-200:]:
                 a = (e.get("address") or "").strip()
                 if a:
@@ -513,7 +513,7 @@ class WalletWatchService:
                     xpubs_done.add(xpub)
 
             for xpub in xpubs_done:
-                cached = main.load_xpub_utxo_cache(xpub, state.cache_dir)
+                cached = xpub_cache.load_xpub_utxo_cache(xpub, state.cache_dir)
                 if cached is None:
                     continue
                 relevant = [
@@ -599,7 +599,7 @@ class WalletWatchService:
                         neue_addrs.append(a)
 
                 if confirmed or live_merge:
-                    main.settle_gezielte_spends_im_cache(
+                    xpub_cache.settle_gezielte_spends_im_cache(
                         xpub,
                         state.cache_dir,
                         confirmed_spent=confirmed,
@@ -611,7 +611,7 @@ class WalletWatchService:
                     self._subscribe_extra(neue_addrs, xpub)
                 if pending:
                     try:
-                        main.merke_bip158_verlauf(
+                        xpub_cache.merke_bip158_verlauf(
                             xpub,
                             [
                                 {

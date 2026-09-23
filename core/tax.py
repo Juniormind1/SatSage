@@ -32,6 +32,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import main
+from core import xpub_cache
 
 #: Übliche Haltefrist nach § 23 EStG (private Veräußerungsgeschäfte, DE).
 STANDARD_HALTEFRIST_JAHRE = 1
@@ -672,7 +673,7 @@ def auswerten(
         # das Entstehungsdatum des Outputs ist nur der Rückfall.
         ingress = None
         if immutable_cache_dir:
-            ingress = main.load_utxo_ingress_cache(txid, vout, immutable_cache_dir)
+            ingress = xpub_cache.load_utxo_ingress_cache(txid, vout, immutable_cache_dir)
 
         zeitpunkt, grundlage, untergrenze, offensiv_fb = _anschaffung(
             utxo, ingress, anschaffung=modus,

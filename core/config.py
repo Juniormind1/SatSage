@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import main
+from core import xpub_cache
 from core.derivation import (
     DEFAULT_MAX_ADDRESSES,
     SCRIPT_TYPE_CHOICES,
@@ -712,7 +713,7 @@ class WalletEntry:
         # sonst suchte die Oberfläche unter einer anderen Kennung als der,
         # unter der der Scan geschrieben hat. Sie ist deskriptorfähig und
         # richtet sich bei Multisig nach der ersten abgeleiteten Adresse.
-        return main._xpub_cache_key(self.analyse_schluessel)
+        return xpub_cache._xpub_cache_key(self.analyse_schluessel)
 
 
 def _maskiere(wert: str, head: int = 6, tail: int = 4) -> str:

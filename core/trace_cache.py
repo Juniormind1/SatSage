@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 import main
+from core import xpub_cache
 
 #: Unterverzeichnis im Immutable-Cache.
 UNTERVERZEICHNIS = "utxo_trace"
@@ -151,7 +152,7 @@ def sanction_walk_speichern(
     ziel = sanction_walk_pfad(txid, vout, immutable_cache_dir)
     if ziel is None:
         return None
-    if not main.cache_disk_write_allowed(ziel.parent):
+    if not xpub_cache.cache_disk_write_allowed(ziel.parent):
         return None
     nutzlast = {
         "version": SANKTION_WALK_VERSION,
@@ -263,7 +264,7 @@ def speichern(
         "baum": baum,
     }
 
-    if not main.cache_disk_write_allowed(ziel.parent):
+    if not xpub_cache.cache_disk_write_allowed(ziel.parent):
         return None
 
     try:
@@ -627,7 +628,7 @@ def kopf(
                     n_addr = int(roh.get("adressen_anzahl", 0) or 0)
                 except (OSError, ValueError, TypeError):
                     pass
-            if main.cache_disk_write_allowed(meta_ziel.parent):
+            if xpub_cache.cache_disk_write_allowed(meta_ziel.parent):
                 _schreibe_meta(
                     meta_ziel,
                     txid=txid,

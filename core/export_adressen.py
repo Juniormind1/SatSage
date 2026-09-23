@@ -248,7 +248,7 @@ def _prefetch_tx_map(
             raise_if_cancelled()
         if cache_root is not None:
             try:
-                cached = main.load_cached_tx(t, cache_root)
+                cached = xpub_cache.load_cached_tx(t, cache_root)
             except Exception:
                 cached = None
             if isinstance(cached, dict):
@@ -288,7 +288,7 @@ def _prefetch_tx_map(
             meta["electrs_n"] += 1
             if cache_root is not None:
                 try:
-                    main.save_cached_tx(t, tx, cache_root, "fulcrum_batch")
+                    xpub_cache.save_cached_tx(t, tx, cache_root, "fulcrum_batch")
                 except Exception:
                     pass
         return tx_map, meta
