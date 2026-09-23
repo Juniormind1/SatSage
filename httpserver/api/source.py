@@ -336,8 +336,9 @@ def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
         env.save()
     except OSError as exc:
         raise ApiError(500, "Interner Serverfehler.") from exc
-    global _local_core_probe_cache
-    _local_core_probe_cache = None
+    import httpserver.local_core as _local_core_mod
+
+    _local_core_mod._local_core_probe_cache = None
     state.reload()
     if already:
         print(
