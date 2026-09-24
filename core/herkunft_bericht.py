@@ -10,8 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import main
 from core import tax as tax_mod
+from core.xpub_cache import _normalize_txid
 from core import trace_cache
 
 
@@ -199,7 +199,7 @@ def hop_kette_html(
     # Kopfzeile: Ziel-UTXO
     if not (wurzel.get("txid") or wurzel.get("from_utxo")):
         wurzel = dict(wurzel)
-        wurzel.setdefault("txid", main._normalize_txid(txid))
+        wurzel.setdefault("txid", _normalize_txid(txid))
         wurzel.setdefault("vout", int(vout))
         if address:
             wurzel.setdefault("address", address)
@@ -223,7 +223,7 @@ def hop_kette_html(
     elif voll is True:
         meta_teile.append("Trace vollständig")
 
-    titel = f"{main._normalize_txid(txid)}:{int(vout)}"
+    titel = f"{_normalize_txid(txid)}:{int(vout)}"
     if wallet:
         titel = f"{wallet} · {titel}"
 

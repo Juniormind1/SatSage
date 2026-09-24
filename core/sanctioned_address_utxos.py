@@ -15,7 +15,7 @@ from display import (
     is_list_abort_requested,
 )
 
-from trace_engine import (
+from core.trace import (
     resolve_vin_prevout,
 )
 

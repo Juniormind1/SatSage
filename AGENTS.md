@@ -74,7 +74,7 @@ py main.py --txid <txid> --xpubs zpub6...
 | `menu.py` | Interaktives HauptmenÃ¼ (**Legacy/Fallback**), Einstellungen, Session-State, SanktionsmenÃ¼ |
 | `interact.py` | Prompts (`j/N`), Analyse-Orchestrierung, Top-UTXO-Auswahl |
 | `analyze.py` | Tx/UTXO-Herkunftsanalyse, Trace, Sanktions-UTXO-Checks (ohne interaktive Prompts) |
-| `trace_engine.py` | Gemeinsame Graph-Engine: RÃ¼ckwÃ¤rts-Walk Ã¼ber Tx-Inputs (`vin` â†’ `prevout`) |
+| `trace_engine.py` | Fassade. Der Rückwärts-Walk liegt in `core/trace.py` |
 | `display.py` | `format_sats`, Verbose-Modus, `cancellable_output` (q-Abbruch langer Listen) |
 | `sanctioned.py` | Multi-Source-Sanktionslisten, Cache, Ãœberblick, Online-AktualitÃ¤tsprÃ¼fung |
 | `bip158_scanner.py` | BIP-158 Ã¼ber Bitcoin-P2P (Compact Filter, TurboSync); Matcher `_CoreBasicFilterMatcher` |
@@ -234,7 +234,7 @@ Hintergrund: [`doc/adr-modularisierung.md`](doc/adr-modularisierung.md). Slice 1
 
 **Refactor und Feature**
 
-- Weiteres Entkernen (`app.js`-Ballast, `trace_engine.py`, Fassaden entfernen) ist eine eigene Aufgabe mit eigenem Commit. Ein Feature landet in der bestehenden Domänendatei und schneidet Nachbarmodule nicht mit um.
+- Weiteres Entkernen (`app.js`-Ballast, Fassaden entfernen) ist eine eigene Aufgabe mit eigenem Commit. Ein Feature landet in der bestehenden Domänendatei und schneidet Nachbarmodule nicht mit um.
 - Wenn ein Symbol das Modul wechselt, zeigen Tests auf das Modul, in dem der Name nachgeschlagen wird. Die Fassade behält die Symbol-Identität (`fulcrum.X is core.fulcrum_*.X`).
 
 ## Version

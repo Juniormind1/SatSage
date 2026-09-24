@@ -1,8 +1,9 @@
 """UTXO-Herkunfts-Walk, Vertiefung und Steuer-Horizont (Slice 4).
 
 Kern von analyze.trace_utxo_origin und den Resume-/Lücken-Helfern.
-analyze.py re-exportiert die öffentliche API; core.trace importiert hier
-direkt, damit kein Domänen-Zyklus core → analyze → core entsteht.
+analyze.py re-exportiert die öffentliche API. Der Walk liegt in
+``core.trace`` und wird hier importiert; ``core.trace`` lädt dieses Modul
+erst nach den Walk-Symbolen, damit der Zyklus beim Import hält.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from trace_engine import (
+from core.trace import (
     CoinbaseFunding,
     FundingEdge,
     MAX_TRACE_DEPTH,
@@ -269,7 +270,7 @@ def trace_utxo_origin(
     # CoinJoin-/Mix-Klassifikation: Eigentum (Verlauf-Index + Prevouts), dann Form.
     # Große Nicht-CJ-Txs nicht blind alle Prevouts fürs Label laden.
     from core.tx_classify import classify_tx, own_prevouts_for_txid
-    from trace_engine import FULL_RESOLUTION_INPUT_LIMIT
+    from core.trace import FULL_RESOLUTION_INPUT_LIMIT
 
     own_prevouts = own_prevouts_for_txid(
         creator_txid, wallet=wallet, cache_dir=cache_dir

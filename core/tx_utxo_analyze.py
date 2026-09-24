@@ -18,7 +18,7 @@ from display import (
     is_list_abort_requested,
 )
 
-from trace_engine import (
+from core.trace import (
     CoinbaseFunding,
     iter_funding_inputs,
 )

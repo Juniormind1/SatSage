@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from display import abbrev_display
 
-from trace_engine import (
+from core.trace import (
     CoinbaseFunding,
     FundingEdge,
     iter_funding_inputs,

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import main
 from core import xpub_cache
 from core import tax
 from core import wallets as wallets_mod

@@ -13,7 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
-import main
 from core import xpub_cache
 from core import tax as tax_mod
 
@@ -137,7 +136,7 @@ def _norm_txid(txid: str, *, strict: bool = False) -> str:
         if rechts.isdigit() or (rechts and rechts.lstrip("-").isdigit()):
             text = links.strip()
     try:
-        return main._normalize_txid(text)
+        return xpub_cache._normalize_txid(text)
     except ValueError:
         if strict:
             raise

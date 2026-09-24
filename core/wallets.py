@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import main
 from core import xpub_cache
 from core.config import WalletEntry
 from core.derivation import (

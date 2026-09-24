@@ -5,7 +5,7 @@ Steuerjahr: Haltefristen, Stichtage und Export.
 
 Zwei Grundlagen sind möglich, und die Auswertung sagt jeweils, welche gilt:
 
-*Mit Verlauf* (``main.resolve_wallet_verlauf``, Feld ``spent`` je Eintrag)
+*Mit Verlauf* (``core.wallet_sync_engine.resolve_wallet_verlauf``, Feld ``spent`` je Eintrag)
 sind alle je empfangenen Outputs erfasst — auch längst ausgegebene. Dann
 trennt die Auswertung, was am Stichtag noch im Bestand lag, von dem, was im
 Jahr abgegangen ist. Erst damit wird die *Veräußerung* sichtbar, und die ist
@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import main
 from core import xpub_cache
 
 #: Übliche Haltefrist nach § 23 EStG (private Veräußerungsgeschäfte, DE).
