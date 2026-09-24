@@ -1614,6 +1614,7 @@ function zeichneKopfStatus(quellen) {
   zeichneKursPille();
   zeichneLlmPille();
   aktualisiereKopfFilterFuerAnsicht();
+  if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
   if (lernhinweiseAn()) {
     wendeAlleLernTooltipsAn().catch(() => {});
   }

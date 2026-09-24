@@ -134,3 +134,12 @@ class TestToolsApi(ApiTestBasis):
         )
         self.assertEqual(status, 200)
         self.assertEqual(koerper["status"], "ungueltig")
+
+    def test_schatzsuche_ohne_core_wird_abgelehnt(self):
+        status, koerper = self.anfrage(
+            "/api/tools/schatzsuche",
+            methode="POST",
+            daten={},
+        )
+        self.assertEqual(status, 409)
+        self.assertIn("scantxoutset", koerper.get("error") or koerper.get("message") or str(koerper))

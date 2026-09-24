@@ -1673,6 +1673,9 @@ async function starteHerkunftVollstaendig() {
   const name = wallet.name || wid;
   if (!window.confirm(t("wallet.originDeepConfirm", { name }))) return;
 
+  Zustand.herkunftTiefWalletId = wid;
+  stoesseEmpfangScanPuls();
+
   const knopf = $("#herkunft-tief-knopf");
   const leiste = $("#herkunft-tief-lauf");
   const textEl = $("#herkunft-tief-text");
@@ -1689,11 +1692,15 @@ async function starteHerkunftVollstaendig() {
 
   const fertig = async (meldungText, art) => {
     clearInterval(timer);
+    Zustand.herkunftTiefWalletId = null;
+    merkeScanJobBeendet(jobId);
     if (leiste) leiste.hidden = true;
     setzeWalletScanGesperrt();
     if (meldungText) meldung(meldungText, art || "gut");
     if (Zustand.ansicht === "wallet" && Zustand.walletId === wid) {
       try { await zeigeWallet(wid); } catch (_) { /* ignore */ }
+    } else {
+      loeseEmpfangScanPuls();
     }
     await ladeJobsNav();
   };
@@ -2017,6 +2024,7 @@ async function herkunftAllerUtxos(ziele = {
     return;
   }
   Zustand.herkunftAlleLaeuft = true;
+  stoesseEmpfangScanPuls();
   if (knopf) knopf.disabled = true;
   $(ziele.lauf).hidden = false;
   setzeText($(ziele.text), "Wird vorbereitet…");
@@ -2032,6 +2040,7 @@ async function herkunftAllerUtxos(ziele = {
   const fertig = (meldung, art) => {
     clearInterval(timer);
     Zustand.herkunftAlleLaeuft = false;
+    merkeScanJobBeendet(jobId);
     if (knopf) knopf.disabled = false;
     $(ziele.lauf).hidden = true;
     if (meldung) {
@@ -2040,7 +2049,10 @@ async function herkunftAllerUtxos(ziele = {
       setzeText(kasten, meldung);
       kasten.hidden = false;
     }
-    ziele.danach();
+    Promise.resolve()
+      .then(() => (typeof ziele.danach === "function" ? ziele.danach() : null))
+      .catch(() => {})
+      .then(() => loeseEmpfangScanPuls());
   };
 
   $(ziele.abbruch).onclick = async () => {

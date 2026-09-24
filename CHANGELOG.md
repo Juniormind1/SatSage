@@ -9,7 +9,14 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Knöpfe:** Steuerjahr „Bericht“ und „HTML“, Herkunft „Herkünfte UTXOs“ und Sanktionscheck „Prüfen“ sehen aus wie die übrigen Knöpfe (kein Orange mehr).
+- **Steuerjahr:** Die Export-Knöpfe heißen „HTML“ und „CSV“.
+- **Tools:** „Jäger der verlorene Schätze“ ist klickbar. Fehlt eine Core-Quelle mit scantxoutset, sagt das der Start, nicht ein grauer Knopf.
+- **Empfang · QR:** Die Atem-Animation im QR-Feld läuft bei jedem Scan: Wallet „Aktualisieren“, „Neu scannen“, „Historie“, „Herkunft“, Steuerjahr „Historien“ sowie „Herkünfte UTXOs“ (auch klären). Danach kommt die Empfangsadresse zurück.
+- **Wallets:** Knopf „Aktualisieren“ bleibt in der Wallet-Ansicht sichtbar, auch wenn „Wallets immer aktuell halten“ an ist. Er steht vor „Neu scannen“, „Historie“ und „Herkunft“ und startet denselben leichten Tip-Nachzug wie beim Start (kein Fullscan) — für das gerade offene Wallet.
+- **Wallets:** Bestand (sats bzw. BTC und Fiat zum aktuellen Kurs) steht in Klammern neben dem Wallet-Namen, in derselben großen Schrift. Die kleine Betragsangabe darunter entfällt.
 - **Auswerten · Tools:** Neuer Bereich. Erstes Werkzeug: Bitcoin-Adresse einfügen und **ist die meine?** — SatSage nennt den Wallet-Namen oder „gehört Dir nicht“. Gilt auch ohne Guthaben, ohne Verlauf und für noch unbenutzte Adressen. Prüfung lokal aus den hinterlegten Schlüsseln, ohne Node.
+- **Auswerten · Tools:** Zweites Werkzeug **Jäger der verlorene Schätze**. Nur bei verbundener Bitcoin-Core-Quelle mit scantxoutset. Sucht UTXOs jenseits des normalen Adressfensters, sortiert sie in den Wallet-Cache, spielt bei Erfolg denselben orangen ₿ wie ein UTXO-Fund und schreibt ins Log, warum der normale Scan sie übersehen hat. Die Ergebnisliste verschwindet beim Wechsel in einen anderen Bereich.
 - **Einstellungen:** Sprache, Darstellung, Aktualität und Lernhinweise stehen nebeneinander. Ist das Fenster zu schmal, rutschen die Boxen untereinander (bei mittlerer Breite zu zweit). Assistent und Status-Mails ebenso nebeneinander, bei schmalem Fenster untereinander.
 - **Wallets:** UTXO-Knöpfe heißen „Aktualisieren“ (bisher „Bis Tip“) und „Neu scannen“ (bisher „Bestand“). „UTXO:“ steht davor, in der normalen Schriftfarbe.
 - **Steuerjahr · Filter:** Dieselbe Suche wie bei Wallet/Herkunft (Text, Betrag `>`/`<`, Datum `>`/`<`, mehrere Begriffe). Treffer bleiben im Punktdiagramm; andere Punkte nur noch mit gepunktetem Rand. Abflüsse, Was-wäre-wenn, Veräußerungen und die Haltefrist-Gruppen zeigen nur noch Treffer.

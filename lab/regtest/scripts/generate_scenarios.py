@@ -29,6 +29,12 @@ LABELS = ("alpha", "beta", "change", "gamma")
 # Beträge trennen select_near(target=0.05) von der Alters-Kohorte.
 AGE_FUND_AMOUNT = 0.049
 SPEND_FUND_AMOUNT = 0.05
+#: Zusätzliche unspent Kohorte: gleiche Stückzahl und Zeitstreuung, Volumen log-gleich
+#: von 1000 Sat bis 0,2 BTC. Liegt hinter Spend-Pool und Shape-Indizes.
+#: 1000 Sat bleibt über der Core-Dust-Grenze für natives SegWit.
+VOL_INDEX_START = 120
+VOL_MIN_SATS = 1000
+VOL_MAX_BTC = 0.2
 #: Empfangs-Indizes 0..AGE_INDEX_COUNT-1 = nur Alter (unspent).
 AGE_INDEX_COUNT = 40
 #: Indizes AGE_INDEX_COUNT .. AGE+SPEND-1 = Spend-Pool (CJ/Hop/…).
@@ -171,6 +177,15 @@ def age_window_ts(*, days_back: int = 365 * 7) -> tuple[int, int]:
     return int(start.timestamp()), int(end.timestamp())
 
 
+def volume_btc(rng: random.Random) -> float:
+    """Log-gleich zwischen 1000 Sat und 0,2 BTC, auf 1 Sat gerundet."""
+    lo = VOL_MIN_SATS / 1e8
+    span = rng.random()
+    btc = lo * ((VOL_MAX_BTC / lo) ** span)
+    sats = max(VOL_MIN_SATS, min(int(VOL_MAX_BTC * 1e8), round(btc * 1e8)))
+    return sats / 1e8
+
+
 def sorted_random_timestamps(n: int, t0: int, t1: int, rng: random.Random) -> list[int]:
     """n Zufallszeiten in [t0, t1], aufsteigend (Chain-Zeit darf nicht zurück)."""
     if n <= 0:
@@ -234,10 +249,10 @@ def new_address(rpc: Rpc, wallet: str) -> str:
     return rpc.call("getnewaddress", "", "bech32", wallet=wallet)
 
 
-#: Empfangs-Indizes, die die Szenarien maximal anfassen (Fan-out bis ~45).
+#: Empfangs-Indizes, die die Szenarien maximal anfassen (Volumen-Kohorte bis 159).
 #: SatSage teilt MAX_ADDRESSES auf Empfang+Change (//2) — deshalb ≥ 2× dieser
 #: Wert, sonst bleiben UTXOs jenseits des Scan-Fensters unsichtbar.
-LAB_RECEIVE_COUNT = 100
+LAB_RECEIVE_COUNT = 160
 LAB_MAX_ADDRESSES = 400
 
 
@@ -449,7 +464,8 @@ def run(rpc: Rpc) -> None:
     rescan_wallets(rpc, "lab-faucet", *WALLETS)
 
     # Feste Indizes — kein Keypool-Vorschub bei erneutem Lauf.
-    need = AGE_INDEX_COUNT + SPEND_INDEX_COUNT + 30  # Shape-Empfangs-Indizes
+    # Volumen-Kohorte beginnt bei VOL_INDEX_START (hinter Shape-Empfängern).
+    need = VOL_INDEX_START + AGE_INDEX_COUNT
     addresses = {
         label: receive_addresses(rpc, wallet, max(LAB_RECEIVE_COUNT, need))
         for label, wallet in zip(LABELS, WALLETS)
@@ -494,6 +510,45 @@ def run(rpc: Rpc) -> None:
     print(
         f"Phase random-age-funding: Höhe {phases[-1]['height']} — "
         f"Alters-Jahre {dict(sorted(year_hist.items()))}",
+        file=sys.stderr,
+    )
+
+    # Dieselbe Zeitstreuung, andere Beträge. Eigener Index-Block, damit
+    # CoinJoin/Fan-out die festen Alters-Indizes nicht mitausgeben.
+    vol_slots: list[tuple[int, int, float]] = []
+    vol_sats: list[int] = []
+    for i in range(AGE_INDEX_COUNT):
+        amount = volume_btc(rng)
+        vol_slots.append((rng.randint(lo, hi), VOL_INDEX_START + i, amount))
+        vol_sats.append(round(amount * 1e8))
+    vol_slots.sort(key=lambda row: (row[0], row[1]))
+    vol_dates: list[str] = []
+    for ts, index, amount in vol_slots:
+        fund_index_at(rpc, addresses, faucet, index, ts, amount=amount)
+        vol_dates.append(datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat())
+    rescan_wallets(rpc, *WALLETS, "lab-faucet")
+    vol_years = Counter(d[:4] for d in vol_dates)
+    phases.append({
+        "label": "random-volume-funding",
+        "date": f"{datetime.fromtimestamp(t0, tz=timezone.utc).date()}"
+                f" … {datetime.fromtimestamp(t1, tz=timezone.utc).date()}",
+        "mock_ts": t0,
+        "height": int(rpc.call("getblockcount")),
+        "note": (
+            f"{AGE_INDEX_COUNT}× unspent je Wallet, Index {VOL_INDEX_START}…"
+            f"{VOL_INDEX_START + AGE_INDEX_COUNT - 1}, "
+            f"log-gleich {VOL_MIN_SATS} Sat … {VOL_MAX_BTC} BTC; "
+            f"Jahre {dict(sorted(vol_years.items()))}"
+        ),
+        "volume_fund_years": dict(sorted(vol_years.items())),
+        "volume_sats_min": min(vol_sats),
+        "volume_sats_max": max(vol_sats),
+        "volume_sats_median": sorted(vol_sats)[len(vol_sats) // 2],
+    })
+    print(
+        f"Phase random-volume-funding: Höhe {phases[-1]['height']} — "
+        f"{min(vol_sats)} … {max(vol_sats)} Sat, "
+        f"Jahre {dict(sorted(vol_years.items()))}",
         file=sys.stderr,
     )
 
@@ -777,17 +832,99 @@ def run(rpc: Rpc) -> None:
         "phases": [p["label"] for p in phases],
     }))
 
+def add_volume_cohort(rpc: Rpc) -> None:
+    """
+    Hängt die Volumen-Kohorte an eine bestehende Chain.
+
+    Dieselbe Stückzahl und Zeitstreuung wie die Alters-Kohorte, Beträge
+    log-gleich von 1000 Sat bis 0,2 BTC. Bestehende UTXOs und Shape-Txs
+    bleiben liegen.
+    """
+    global _MOCK_CURSOR
+    rng = random.Random()
+    t0, t1 = age_window_ts(days_back=365 * 7)
+    for wallet in ("lab-faucet", *WALLETS):
+        load_or_create(rpc, wallet)
+    faucet = new_address(rpc, "lab-faucet")
+    tip = int(rpc.call("getblockcount"))
+    if tip < 1:
+        raise RuntimeError("Chain ist leer — zuerst generate_scenarios.py ohne --volume-only")
+    # Tip muss jünger sein als die jüngste Funding-Zeit, sonst lehnt Core ab.
+    now = int(time.time())
+    set_time(rpc, now)
+    _MOCK_CURSOR = mine_at(rpc, now, 1, faucet)
+    rescan_wallets(rpc, "lab-faucet", *WALLETS)
+    need = VOL_INDEX_START + AGE_INDEX_COUNT
+    addresses = {
+        label: receive_addresses(rpc, wallet, max(LAB_RECEIVE_COUNT, need))
+        for label, wallet in zip(LABELS, WALLETS)
+    }
+    lo, hi = t0 + 3600, t1
+    vol_slots: list[tuple[int, int, float]] = []
+    vol_sats: list[int] = []
+    for i in range(AGE_INDEX_COUNT):
+        amount = volume_btc(rng)
+        vol_slots.append((rng.randint(lo, hi), VOL_INDEX_START + i, amount))
+        vol_sats.append(round(amount * 1e8))
+    vol_slots.sort(key=lambda row: (row[0], row[1]))
+    for ts, index, amount in vol_slots:
+        fund_index_at(rpc, addresses, faucet, index, ts, amount=amount)
+    # Tip wieder auf die Wanduhr, damit Electrs nicht in IBD hängen bleibt.
+    now = int(time.time())
+    set_time(rpc, now)
+    _MOCK_CURSOR = mine_at(rpc, now, 1, faucet)
+    set_time(rpc, 0)
+    _MOCK_CURSOR = 0
+    rescan_wallets(rpc, *WALLETS, "lab-faucet")
+    report_path = HERE / ".data" / "scenario-report.json"
+    report: dict[str, Any] = {}
+    if report_path.is_file():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    phases = list(report.get("phases") or [])
+    phases.append({
+        "label": "random-volume-funding",
+        "date": f"{datetime.fromtimestamp(t0, tz=timezone.utc).date()}"
+                f" … {datetime.fromtimestamp(t1, tz=timezone.utc).date()}",
+        "height": int(rpc.call("getblockcount")),
+        "note": (
+            f"{AGE_INDEX_COUNT}× unspent je Wallet, Index {VOL_INDEX_START}…"
+            f"{VOL_INDEX_START + AGE_INDEX_COUNT - 1}, "
+            f"log-gleich {VOL_MIN_SATS} Sat … {VOL_MAX_BTC} BTC"
+        ),
+        "volume_sats_min": min(vol_sats),
+        "volume_sats_max": max(vol_sats),
+        "volume_sats_median": sorted(vol_sats)[len(vol_sats) // 2],
+    })
+    report["phases"] = phases
+    report["tip_height"] = int(rpc.call("getblockcount"))
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"Volumen-Kohorte: {AGE_INDEX_COUNT} Indizes × {len(LABELS)} Wallets, "
+        f"{min(vol_sats)} … {max(vol_sats)} Sat, Tip {report['tip_height']}",
+        file=sys.stderr,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Erzeugt SatSage-Regtest-Wallets und Szenarien.")
     parser.add_argument("--native", action="store_true", help="native bitcoin-cli statt Docker Compose verwenden")
     parser.add_argument("--dry-run", action="store_true", help="nur Backend und Pfade prüfen, keine RPC-Aufrufe")
+    parser.add_argument(
+        "--volume-only",
+        action="store_true",
+        help="nur die Volumen-Kohorte an eine bestehende Chain hängen",
+    )
     args = parser.parse_args()
     native = choose_native(args.native)
     print(f"Backend: {'native bitcoin-cli' if native else 'Docker Compose'}")
     print(f"Lokale Env-Datei: {ENV_PATH}")
     if args.dry_run:
         return 0
-    run(Rpc(native))
+    rpc = Rpc(native)
+    if args.volume_only:
+        add_volume_cohort(rpc)
+        return 0
+    run(rpc)
     return 0
 
 if __name__ == "__main__":

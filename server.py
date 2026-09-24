@@ -945,6 +945,7 @@ from httpserver.api.tax import (  # noqa: E402
 
 from httpserver.api.tools import (  # noqa: E402
     api_tools_adresse,
+    api_tools_schatzsuche,
 )
 
 
@@ -1473,6 +1474,8 @@ class Handler(
             return 200, api_llm_chat(state, self._body())
         if teile == ["tools", "adresse"] and methode == "POST":
             return 200, api_tools_adresse(state, self._body())
+        if teile == ["tools", "schatzsuche"] and methode == "POST":
+            return 202, api_tools_schatzsuche(state, self._body())
         if teile == ["tax"] and methode == "GET":
             return 200, api_tax(state, query)
         if teile == ["tax", "selbstanzeige", "kandidaten"] and methode == "GET":

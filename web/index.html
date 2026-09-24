@@ -376,7 +376,7 @@
             </label>
             <div class="utxo-aktionen" role="group" aria-label="UTXO">
               <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO:</span>
-              <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür Neu scannen." class="knopf">Aktualisieren</button>
+              <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Leichter Tip-Nachzug wie beim Start mit „Wallets immer aktuell halten“: bestehender Cache bis zum Chain-Tip (BIP-158 inkrementell oder Electrs light). Kein Fullscan — dafür Neu scannen." class="knopf">Aktualisieren</button>
               <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Neu scannen</button>
               <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Historie</button>
               <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Neu scannen." class="knopf">Herkunft</button>
@@ -442,7 +442,7 @@
           <button type="button" id="trace-start" data-i18n="trace.start" data-i18n-title="trace.startTitle" title="Verfolgt gezielt einen einzelnen Output. Eingabe als txid:vout oder als reine TxID (dann Output 0)." class="knopf">
             Gezielt tracen
           </button>
-          <button type="button" id="trace-herkunft-alle" data-i18n="trace.allOrigins" data-i18n-title="trace.allOriginsTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen — dieselbe Analyse wie im Steuerjahr. Einmal ermittelt, bleibt sie gespeichert." class="knopf knopf-primaer">
+          <button type="button" id="trace-herkunft-alle" data-i18n="trace.allOrigins" data-i18n-title="trace.allOriginsTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen — dieselbe Analyse wie im Steuerjahr. Einmal ermittelt, bleibt sie gespeichert." class="knopf">
             Herkünfte UTXOs
           </button>
         </div>
@@ -507,7 +507,7 @@
               <input type="number" id="sank-hops" min="1" max="20" value="3"
                      data-default-max="20" style="width:5em">
             </label>
-            <button type="button" id="sank-start" data-i18n="sanctions.start" data-i18n-title="sanctions.startTitle" title="Prüft die Vorgeschichte der Bestände gegen die Sanktions- und Blacklists — bis zur eingestellten Hop-Tiefe. Dauert je nach Tiefe Minuten." class="knopf knopf-primaer">
+            <button type="button" id="sank-start" data-i18n="sanctions.start" data-i18n-title="sanctions.startTitle" title="Prüft die Vorgeschichte der Bestände gegen die Sanktions- und Blacklists — bis zur eingestellten Hop-Tiefe. Dauert je nach Tiefe Minuten." class="knopf">
               Prüfen
             </button>
             <button type="button" id="sank-abbruch" data-i18n="common.cancel" data-i18n-title="sanctions.cancelTitle" title="Bricht die Prüfung ab. Ein bereits gespeichertes Ergebnis bleibt stehen." class="knopf" hidden>
@@ -578,6 +578,18 @@
                aria-live="polite" hidden></p>
           </div>
         </div>
+
+        <div class="karte">
+          <div class="tools-zeile">
+            <button type="button" id="tools-schatz" class="knopf"
+                    data-i18n="tools.treasure" data-i18n-title="tools.treasureTitle"
+                    title="Sucht mit scantxoutset UTXOs jenseits des normalen Adressfensters und sortiert sie in den Wallet-Cache.">
+              Jäger der verlorene Schätze
+            </button>
+            <p id="tools-schatz-status" class="meta" hidden></p>
+            <ul id="tools-schatz-liste" class="tools-schatz-liste" hidden></ul>
+          </div>
+        </div>
       </section>
 
       <!-- ---------- Steuerjahr ---------- -->
@@ -611,7 +623,7 @@
               Historien
             </button>
             <button type="button" id="export-csv" data-i18n="tax.csv" data-i18n-title="tax.csvTitle" title="Aufstellung als CSV für Tabellenkalkulation und Steuerberatung — mit Semikolon und Dezimalkomma, damit Excel sie ohne Nacharbeit liest." class="knopf">CSV</button>
-            <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf knopf-primaer">
+            <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf">
               Bericht
             </button>
           </div>
@@ -671,15 +683,15 @@
                     title="Neu aus dem Cache laden — z. B. nach Verlaufsscan oder mit Einzahl-TxID-Filter. Beim Öffnen der Ansicht passiert das automatisch.">
               Aktualisieren
             </button>
-            <button type="button" id="sa-html" class="knopf knopf-primaer"
+            <button type="button" id="sa-html" class="knopf"
                     data-i18n="tax.reportHtml" data-i18n-title="tax.reportHtmlTitle"
                     title="Öffnet den HTML-Report in einem neuen Tab (Druck → PDF) und speichert die Datei zusätzlich.">
-              Report HTML
+              HTML
             </button>
             <button type="button" id="sa-csv" class="knopf"
                     data-i18n="tax.reportCsv" data-i18n-title="tax.reportCsvTitle"
                     title="Dieselben Daten als CSV für Excel (Stammdaten oben, volle TxIDs/Adressen).">
-              Report CSV
+              CSV
             </button>
           </div>
           <div id="sa-liste" class="sa-liste"></div>

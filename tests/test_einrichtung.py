@@ -534,6 +534,9 @@ class TestOberflaeche(unittest.TestCase):
             self.html.find("utxo-aktionen-praefix", gruppe),
             self.html.find('id="tip-sync-knopf"', gruppe),
         )
+        # Auch bei „Wallets immer aktuell halten“ sichtbar (leichter Tip-Nachzug).
+        self.assertNotIn("tipSync.hidden = autoAktuell", self.wallets_js)
+        self.assertIn("tipSync.hidden = false", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.chrome_js)
         self.assertIn('id="verlauf-erheben"', self.html)

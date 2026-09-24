@@ -280,6 +280,8 @@ async function start() {
       zeigeAnsicht("tools");
       const feld = $("#tools-adresse");
       if (feld) feld.focus();
+      if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
+      if (typeof merkeLaufendeSchatzsuche === "function") merkeLaufendeSchatzsuche();
     });
   document
     .querySelector('[data-ansicht="sanktionen"]')

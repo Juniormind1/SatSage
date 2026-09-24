@@ -205,6 +205,7 @@ function zeichneSteuerjahr(daten) {
         knopf.addEventListener("click", () => {
           herkunftGelbUtxos().catch((fehler) => {
             Zustand.herkunftAlleLaeuft = false;
+            if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
             const k = $("#steuer-meldung");
             if (!k) return;
             k.className = "hinweis hinweis-krit";
@@ -218,6 +219,8 @@ function zeichneSteuerjahr(daten) {
         knopf.setAttribute("data-i18n-title", "");
         knopf.addEventListener("click", () => {
           Promise.resolve(herkunftAllerUtxos()).catch((fehler) => {
+            Zustand.herkunftAlleLaeuft = false;
+            if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
             const k = $("#steuer-meldung");
             if (!k) return;
             k.className = "hinweis hinweis-krit";

@@ -1716,6 +1716,12 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 .tools-ergebnis-meine { color: var(--gut); font-weight: 650; }
 .tools-ergebnis-fremd { color: var(--text); }
 .tools-ergebnis-hinweis { color: var(--warn); font-size: 0.95rem; font-weight: 500; }
+.tools-schatz-liste {
+  flex: 1 0 100%;
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+}
+.tools-schatz-liste li { margin: 0 0 6px; }
 .trace-fokus-leiste {
   display: flex;
   flex-wrap: wrap;

@@ -192,6 +192,7 @@ NUTZER_JOB_KINDS = frozenset({
     "sanctions-check",
     "wallet_sync",  # Start-Aktualisierung — Nutzer soll „wird frisch“ sehen
     "export_adressen",  # Adressen nach Wallet-Export (Electrs-Batch)
+    "schatzsuche",  # scantxoutset jenseits des Suchfensters
 })
 
 

@@ -152,7 +152,8 @@ function zeichneEmpfangReadOnly(walletName, { puls = false } = {}) {
 
 /**
  * Empfangspanel im „beschäftigt“-Zustand: QR weg, Atem an.
- * Gilt für UTXO-/Verlaufs-Scan und Tip-/Start-Sync — auch Read-only-Wallets.
+ * Gilt für UTXO-Scan, Historie, Tip-Nachzug, Herkunft und die
+ * Sammel-Jobs Historien / Herkünfte UTXOs — auch Read-only-Wallets.
  */
 function zeichneEmpfangBeschaeftigt(walletId) {
   const walletMeta = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
@@ -269,9 +270,44 @@ function tipSyncLaeuftFuer(walletId) {
   return walletSyncLaeuftFuer(walletId);
 }
 
-/** Empfang noch unsicher: UTXO-/Verlaufs-Scan oder Tip-/Start-Sync. */
+function jobIstAktiv(job) {
+  if (!job) return false;
+  return Boolean(
+    job.running
+    || job.status === "running"
+    || job.status === "queued"
+    || job.queue_status === "queued",
+  );
+}
+
+/**
+ * Scan über alle Wallets: Steuerjahr „Historien“ und Massen-Herkunft
+ * („Herkünfte UTXOs“ / klären). Atem unabhängig vom gerade offenen Wallet.
+ */
+function empfangGlobalerScanLaeuft() {
+  if (Zustand.herkunftAlleLaeuft || Zustand.verlaufAlleLaeuft) return true;
+  const jobs = Zustand.jobsNav?.jobs || [];
+  return jobs.some((job) => {
+    if (!jobIstAktiv(job) || job.meta?.still) return false;
+    if (job.kind === "trace-alle") return true;
+    return job.kind === "verlauf" && Boolean(job.meta?.alle);
+  });
+}
+
+/**
+ * Empfang noch unsicher: UTXO-Scan, Historie, Tip-Nachzug, Wallet-Herkunft
+ * oder ein globaler Scan (Historien / Herkünfte UTXOs).
+ */
 function empfangScanLaeuftFuer(walletId) {
+  if (empfangGlobalerScanLaeuft()) return true;
   if (!walletId) return false;
+  if (
+    Zustand.herkunftTiefWalletId
+    && String(Zustand.herkunftTiefWalletId) === String(walletId)
+  ) {
+    return true;
+  }
+  if (herkunftTiefLaeuftFuer(walletId)) return true;
   if (
     Zustand.rescanJob
     && Zustand.scanWalletId === walletId
@@ -280,6 +316,44 @@ function empfangScanLaeuftFuer(walletId) {
     return true;
   }
   return tipSyncLaeuftFuer(walletId);
+}
+
+/** QR-Atem an, solange für das offene Wallet (oder global) ein Scan läuft. */
+function stoesseEmpfangScanPuls() {
+  if (empfangSonderAtemLaeuft()) return;
+  const wid = Zustand.walletId || "";
+  if (!empfangScanLaeuftFuer(wid)) return;
+  zeichneEmpfangBeschaeftigt(wid);
+}
+
+/** Job in der Nav nicht mehr als laufend führen, damit der QR-Atem endet. */
+function merkeScanJobBeendet(jobId) {
+  if (!jobId) return;
+  const jobs = Zustand.jobsNav?.jobs || [];
+  for (const job of jobs) {
+    if (!job || job.id !== jobId) continue;
+    job.running = false;
+    if (job.status === "running" || job.status === "queued") job.status = "done";
+  }
+  const cur = Zustand.jobsNav?.scan_pipeline?.current;
+  if (cur && cur.job_id === jobId) {
+    Zustand.jobsNav.scan_pipeline.current = null;
+  }
+}
+
+/** Atem aus und Empfangsadresse zurück, sobald kein Scan mehr läuft. */
+function loeseEmpfangScanPuls() {
+  if (empfangSonderAtemLaeuft()) return;
+  const wid = Zustand.walletId || "";
+  if (empfangScanLaeuftFuer(wid)) return;
+  const atmet = Boolean(Zustand.empfang && Zustand.empfang.puls)
+    || (typeof EmpfangPuls !== "undefined" && EmpfangPuls.laeuft());
+  if (!atmet) return;
+  if (wid) {
+    ladeEmpfang(wid).catch(() => {});
+    return;
+  }
+  if (typeof EmpfangPuls !== "undefined") EmpfangPuls.stop();
 }
 
 async function ladeEmpfang(walletId, { still = false } = {}) {
@@ -556,6 +630,25 @@ function ladeHinweisVonQuelle(key) {
   }
 }
 
+/**
+ * Wallet-Überschrift in der großen Schrift: Name, optional
+ * (sats bzw. BTC, ≈ Fiat zum Spotkurs) in derselben Zeile.
+ * sats === undefined: nur der Name.
+ */
+function setzeWalletTitel(wallet, sats) {
+  const el = $("#wallet-titel");
+  if (!el) return;
+  const base = (wallet && wallet.name) || t("common.wallet");
+  if (sats === undefined) {
+    setzeText(el, base);
+    return;
+  }
+  const basis = formatSatsBasis(Number(sats) || 0);
+  const fiat = formatEurAusSats(Number(sats) || 0);
+  const klammer = fiat ? `${basis}, ≈ ${fiat}` : basis;
+  setzeText(el, `${base} (${klammer})`);
+}
+
 async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletId = walletId;
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
@@ -571,7 +664,7 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   }
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
-  setzeText($("#wallet-titel"), wallet ? wallet.name : t("common.wallet"));
+  setzeWalletTitel(wallet);
   // Erst Cache (schnell), Mempool-Pending danach im Hintergrund.
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
@@ -626,6 +719,7 @@ function zeichneUtxos(daten, wallet) {
       t("wallet.emptyNoCacheHint"),
     );
     setzeText($("#wallet-meta"), t("wallet.metaNeverScanned"));
+    setzeWalletTitel(wallet);
     aktualisiereKopfFilterFuerAnsicht();
     return;
   }
@@ -635,6 +729,7 @@ function zeichneUtxos(daten, wallet) {
       t("wallet.emptyNoUtxoHint"),
     );
     setzeText($("#wallet-meta"), t("wallet.metaZeroCache"));
+    setzeWalletTitel(wallet, 0);
     aktualisiereKopfFilterFuerAnsicht();
     return;
   }
@@ -642,10 +737,8 @@ function zeichneUtxos(daten, wallet) {
   const teile = [];
   if (daten.has_cache) {
     const utxoListe = daten.utxos || [];
-    teile.push(
-      `${daten.total_count} UTXO`,
-      formatSatsGemeinsam(daten.total_sats, utxoListe),
-    );
+    setzeWalletTitel(wallet, daten.total_sats);
+    teile.push(`${daten.total_count} UTXO`);
     if (daten.shown_count < daten.total_count) {
       teile.push(
         `angezeigt: ${daten.shown_count} · ${formatSatsGemeinsam(daten.shown_sats, utxoListe)}`,
@@ -1209,16 +1302,11 @@ function herkunftTiefLaeuftFuer(walletId) {
   ));
 }
 
-function setzeTipSyncSichtbarkeit(enabled = undefined) {
+/** „Aktualisieren“ bleibt sichtbar — auch bei „Wallets immer aktuell halten“. */
+function setzeTipSyncSichtbarkeit() {
   const tipSync = $("#tip-sync-knopf");
   if (!tipSync) return;
-  const autoAktuell = enabled === undefined
-    ? Boolean(
-      Zustand.config?.wallets_immer_aktuell
-      ?? Zustand.config?.wallets_beim_start_aktualisieren,
-    )
-    : Boolean(enabled);
-  tipSync.hidden = autoAktuell;
+  tipSync.hidden = false;
 }
 
 function setzeWalletScanGesperrt() {
@@ -1518,6 +1606,7 @@ async function starteTipSync() {
       Zustand.config.wallet_sync_job_id = jobId;
     }
     folgeWalletSyncJob(jobId, antwort.job || { meta: { wallet_ids: [wid] } });
+    stoesseEmpfangScanPuls();
     await ladeJobsNav();
     setzeWalletScanGesperrt();
     zeichneNav();

@@ -78,6 +78,12 @@ const Zustand = {
   lernThema: null,
   slashIndex: 0,
   traceJobs: new Map(),
+  /** Massen-Herkunft (Steuerjahr klären / „Herkünfte UTXOs“) — Empfangs-Atem. */
+  herkunftAlleLaeuft: false,
+  /** Steuerjahr „Historien“ (Verlauf aller Wallets) — Empfangs-Atem. */
+  verlaufAlleLaeuft: false,
+  /** Wallet-„Herkunft“ (trace-tief) für diese Wallet-ID — Empfangs-Atem. */
+  herkunftTiefWalletId: null,
   traceListe: null,
   /** Sprung aus Wallet: nur dieses UTXO — null = volle Herkunftsliste. */
   traceFokus: null,

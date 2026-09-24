@@ -30,6 +30,18 @@ Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools
 
 **Scan findet 0 UTXOs:** SatSage teilt `WALLET_n_MAX_ADDRESSES` auf Empfang und Change (`//2`). Lab-Default ist 400 (je 200). Liegen Coins auf höheren Indizes (mehrfaches `run_scenarios` mit altem `getnewaddress`), Limit anheben oder `.data/` neu aufbauen. Szenarien nutzen feste `deriveaddresses`-Indizes und schieben den Keypool nicht mehr.
 
+## Präsentation (macOS, vorhandene Chain)
+
+Ein Befehl startet Docker Desktop (falls nötig), das bestehende Labor (bitcoind, Electrs, Mempool) und die SatSage-GUI. Es wird nichts neu gebaut und keine Szenarien erzeugt. Die GUI nimmt Port **8731**, damit ein laufendes SatSage auf 8730 unberührt bleibt.
+
+```bash
+cd lab/regtest
+./scripts/start_praesentation.sh
+./scripts/stop_praesentation.sh
+```
+
+Die Token-URL steht danach in `.data/gui-url.txt` und öffnet sich im Browser. Explorer: `http://127.0.0.1:18080`. Fehlt die Lab-Env, einmalig `./scripts/start.sh` und `./scripts/generate_scenarios.py`.
+
 ## macOS (Grok Build)
 
 1. Docker Desktop installieren und starten. Das Repo in Grok Build öffnen.
@@ -63,6 +75,7 @@ Die Basis-Szenarien streuen **unspent UTXO-Alter zufällig** über **gestern …
 |-------|----------------|
 | bootstrap | 110 Blocks am Fensterstart (Coinbase-Reife) |
 | random-age-funding | 40× unspent @0,049 BTC (nur Alter) + 40× Spend-Pool @0,05 BTC — je Index eigene Zufallszeit |
+| random-volume-funding | noch einmal 40× unspent, gleiche Zeitstreuung, Betrag log-gleich 1000 Sat … 0,2 BTC (Index 120…159) |
 | shapes | Hop/CJ/Fan-out nur aus Spend-Pool (Alters-Kohorte bleibt liegen) |
 | tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
 

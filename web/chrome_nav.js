@@ -135,6 +135,9 @@ const ANSICHTEN = [
 
 function zeigeAnsicht(name) {
   if ((name === "wallets" && walletsManaged()) || (name === "datenquellen" && sourcesFullyManaged())) name = "einstellungen";
+  if (Zustand.ansicht === "tools" && name !== "tools" && typeof leereSchatzListe === "function") {
+    leereSchatzListe();
+  }
   Zustand.ansicht = name;
   for (const ansicht of ANSICHTEN) {
     const el = $(`#ansicht-${ansicht}`);
@@ -220,14 +223,22 @@ async function ladeJobsNav() {
     merkeWalletSyncZiele(tipJob);
     if (jobIstStillerTip(tipJob)) Zustand.walletSyncStill = true;
   }
-  // Scan-Puls ohne laufenden Scan/Sync → Empfang neu laden (stoppt hängenden Puls).
-  if (
-    Zustand.walletId
-    && Zustand.empfang
-    && Zustand.empfang.puls
-    && !empfangScanLaeuftFuer(Zustand.walletId)
-  ) {
-    ladeEmpfang(Zustand.walletId).catch(() => {});
+  // QR-Atem an jeden laufenden Scan hängen, und nach dem Ende wieder lösen.
+  // Läuft der Atem schon, nicht neu anstoßen — sonst setzt der 2s-Takt den Takt zurück.
+  if (typeof empfangScanLaeuftFuer === "function") {
+    const scanWid = Zustand.walletId || "";
+    const atmetSchon = Boolean(Zustand.empfang && Zustand.empfang.puls)
+      && typeof EmpfangPuls !== "undefined"
+      && EmpfangPuls.laeuft();
+    if (empfangScanLaeuftFuer(scanWid)) {
+      if (!atmetSchon) stoesseEmpfangScanPuls();
+    } else if (
+      Zustand.walletId
+      && Zustand.empfang
+      && Zustand.empfang.puls
+    ) {
+      ladeEmpfang(Zustand.walletId).catch(() => {});
+    }
   }
   // Nav-Marker „aktualisiere…“ nur neu zeichnen, wenn sich Tip-Sync-Lage ändert.
   const syncSig = (Zustand.jobsNav?.jobs || [])
@@ -295,6 +306,7 @@ function jobIstKlickbar(job) {
   if (kind === "labels" || kind === "sanctions" || kind === "sanctions-check") {
     return true;
   }
+  if (kind === "schatzsuche") return true;
   if (kind === "wallet_sync") {
     const ids = job.meta?.wallet_ids;
     return Array.isArray(ids) && ids.length > 0;
@@ -338,6 +350,11 @@ function springeZuJob(job) {
   }
   if (kind === "labels" || kind === "sanctions") {
     oeffneVerwaltung("datenquellen");
+    return;
+  }
+  if (kind === "schatzsuche") {
+    zeigeAnsicht("tools");
+    if (typeof merkeLaufendeSchatzsuche === "function") merkeLaufendeSchatzsuche();
     return;
   }
   if (kind === "sanctions-check") {
@@ -528,6 +545,8 @@ async function verlaufErheben() {
   knopf.disabled = true;
   $("#herkunft-lauf").hidden = false;
   setzeText($("#herkunft-text"), "Verlauf wird vorbereitet…");
+  Zustand.verlaufAlleLaeuft = true;
+  stoesseEmpfangScanPuls();
 
   let jobId = null;
   let timer = null;
@@ -535,6 +554,8 @@ async function verlaufErheben() {
 
   const fertig = async (meldung, art) => {
     clearInterval(timer);
+    Zustand.verlaufAlleLaeuft = false;
+    merkeScanJobBeendet(jobId);
     knopf.disabled = false;
     $("#herkunft-lauf").hidden = true;
     if (meldung) {
@@ -552,6 +573,7 @@ async function verlaufErheben() {
     }
     await ladeSteuerjahrMitKandidaten();
     await ladeJobsNav();
+    loeseEmpfangScanPuls();
   };
 
   logZeile(t("ui.hard.81c16e3fef"));

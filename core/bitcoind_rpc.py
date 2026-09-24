@@ -449,17 +449,22 @@ def descriptors_for_key(
     *,
     max_index: int,
     script_type: str | None = None,
+    range_start: int = 0,
 ) -> list[dict[str, Any]]:
     """
     scantxoutset-Objekte für ein XPUB oder einen Output-Deskriptor.
 
-    Range 0..max_index-1 (Core: end inklusive in manchen Versionen —
-    wir nutzen [0, max_index]).
+    Range ``range_start``..``max_index`` (Core: Ende je nach Version
+    inklusive — wir nutzen ``[start, max_index]``). Start 0 ist der
+    normale Scan. Ein späterer Start sucht nur jenseits des Fensters.
     """
     from core.derivation import ist_deskriptor, normalize_script_type, script_type_for_xpub
 
+    start = max(0, int(range_start))
     ende = max(0, int(max_index))
-    span = [0, ende]
+    if ende < start:
+        return []
+    span = [start, ende]
 
     if ist_deskriptor(schluessel):
         # Mehrpfad ``/<0;1>/*`` für scantxoutset in Empfang/Change zerlegen —
@@ -664,6 +669,7 @@ def scantxoutset_utxos(
     *,
     max_index_by_key: dict[str, int] | None = None,
     default_max_index: int = 500,
+    range_start_by_key: dict[str, int] | None = None,
     script_type_by_key: dict[str, str] | None = None,
     on_log: LogFn | None = None,
     on_progress: Callable[..., None] | None = None,
@@ -684,11 +690,16 @@ def scantxoutset_utxos(
         mx = default_max_index
         if max_index_by_key and key in max_index_by_key:
             mx = int(max_index_by_key[key])
+        start = 0
+        if range_start_by_key and key in range_start_by_key:
+            start = int(range_start_by_key[key])
         st = None
         if script_type_by_key:
             st = script_type_by_key.get(key)
         objs.extend(
-            descriptors_for_key(key, max_index=mx, script_type=st)
+            descriptors_for_key(
+                key, max_index=mx, script_type=st, range_start=start,
+            )
         )
 
     if not objs:

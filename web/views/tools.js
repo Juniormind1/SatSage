@@ -70,4 +70,160 @@ bindeTools();
 window.addEventListener("satsage:lang", () => {
   if (!toolsLetztes) return;
   zeichneToolsStatus(toolsLetztes.status, toolsLetztes.wallet);
+  zeichneSchatzListe(schatzFunde);
 });
+
+let schatzJobId = null;
+let schatzTimer = null;
+let schatzLogStand = { index: 0, knoten: [], texte: [] };
+let schatzFunde = [];
+let schatzListeAnzeigen = false;
+
+function scantxoutsetVerbunden() {
+  const qs = Zustand.config?.sources || [];
+  const utxo = qs.find((q) => q.key === "own_utxo_core");
+  const core = qs.find((q) => q.key === "own_core");
+  // Dieselbe Wahl wie der Server: eigener UTXO-Slot, sonst Lookup-Core.
+  if (utxo && utxo.configured) return utxo.reachable === true;
+  return Boolean(core && core.reachable === true);
+}
+
+function aktualisiereSchatzKnopf() {
+  const knopf = $("#tools-schatz");
+  if (!knopf) return;
+  const laeuft = Boolean(schatzJobId);
+  // Aktiv lassen: die Suche ist fertig. Ob Core scantxoutset kann, prüft
+  // der Start — ein grauer Knopf bei noch unbekannter Quelle wäre eine Sackgasse.
+  knopf.disabled = laeuft;
+  knopf.title = laeuft ? t("tools.treasureRunning") : t("tools.treasureTitle");
+}
+
+function schatzStatus(text) {
+  const el = $("#tools-schatz-status");
+  if (!el) return;
+  setzeText(el, text || "");
+  el.hidden = !text;
+}
+
+function leereSchatzListe() {
+  schatzListeAnzeigen = false;
+  schatzFunde = [];
+  const liste = $("#tools-schatz-liste");
+  if (liste) {
+    liste.replaceChildren();
+    liste.hidden = true;
+  }
+  schatzStatus("");
+}
+
+function zeichneSchatzListe(funde) {
+  const liste = $("#tools-schatz-liste");
+  if (!liste) return;
+  liste.replaceChildren();
+  if (!schatzListeAnzeigen || Zustand.ansicht !== "tools" || !funde || !funde.length) {
+    liste.hidden = true;
+    return;
+  }
+  for (const fund of funde) {
+    const li = document.createElement("li");
+    const kette = Number(fund.chain) === 0
+      ? t("tools.chainReceive")
+      : t("tools.chainChange");
+    li.textContent = t("tools.treasureItem", {
+      amount: formatSats(fund.sats),
+      wallet: fund.wallet || "",
+      chain: kette,
+      index: fund.index,
+      until: Math.max(0, Number(fund.fenster_bis) - 1),
+      address: kuerze(fund.address || ""),
+    });
+    liste.append(li);
+  }
+  liste.hidden = false;
+}
+
+function schatzPollStop() {
+  if (schatzTimer) clearInterval(schatzTimer);
+  schatzTimer = null;
+  schatzJobId = null;
+  aktualisiereSchatzKnopf();
+}
+
+async function pruefeSchatzJob() {
+  if (!schatzJobId) return;
+  try {
+    const job = await api("/jobs/" + schatzJobId);
+    nimmLogZeilen(job, schatzLogStand);
+    if (job.running) {
+      schatzStatus(job.message || t("tools.treasureRunning"));
+      return;
+    }
+    const funde = (job.result && job.result.funde) || [];
+    if (job.status === "done" && funde.length) {
+      const sats = Math.max(
+        500,
+        Number(job.result && job.result.sats) || 0,
+      );
+      if (typeof EmpfangPuls !== "undefined" && EmpfangPuls.flashOrangeB) {
+        EmpfangPuls.flashOrangeB(sats);
+      }
+    }
+    if (schatzListeAnzeigen && Zustand.ansicht === "tools" && job.status === "done") {
+      schatzFunde = funde;
+      zeichneSchatzListe(funde);
+      schatzStatus(funde.length ? "" : t("tools.treasureEmpty"));
+    } else if (Zustand.ansicht === "tools" && job.status !== "done") {
+      schatzStatus(job.error || job.message || t("tools.treasureEmpty"));
+    } else {
+      schatzStatus("");
+    }
+    schatzPollStop();
+  } catch (fehler) {
+    schatzStatus((fehler && fehler.message) || t("common.netError"));
+    schatzPollStop();
+  }
+}
+
+function bindeSchatzJob(id) {
+  schatzJobId = id;
+  schatzLogStand = { index: 0, knoten: [], texte: [] };
+  aktualisiereSchatzKnopf();
+  if (schatzTimer) clearInterval(schatzTimer);
+  schatzTimer = setInterval(pruefeSchatzJob, 1000);
+  pruefeSchatzJob();
+}
+
+async function starteSchatzsuche() {
+  const knopf = $("#tools-schatz");
+  if (!knopf || knopf.disabled) return;
+  schatzListeAnzeigen = true;
+  schatzFunde = [];
+  zeichneSchatzListe([]);
+  schatzStatus(t("tools.treasureRunning"));
+  knopf.disabled = true;
+  try {
+    const job = await api("/tools/schatzsuche", { methode: "POST", daten: {} });
+    bindeSchatzJob(job.id);
+  } catch (fehler) {
+    schatzStatus((fehler && fehler.message) || t("common.netError"));
+    schatzPollStop();
+  }
+}
+
+function merkeLaufendeSchatzsuche() {
+  const jobs = Zustand.jobsNav?.jobs || [];
+  const laufend = jobs.find((j) => j.kind === "schatzsuche" && j.running);
+  if (!laufend || !laufend.id || schatzJobId) return;
+  schatzListeAnzeigen = false;
+  bindeSchatzJob(laufend.id);
+}
+
+function bindeSchatzKnopf() {
+  const knopf = $("#tools-schatz");
+  if (!knopf || knopf.dataset.gebunden) return;
+  knopf.dataset.gebunden = "1";
+  knopf.addEventListener("click", starteSchatzsuche);
+  aktualisiereSchatzKnopf();
+}
+
+bindeSchatzKnopf();
