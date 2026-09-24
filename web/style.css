@@ -1703,6 +1703,19 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 /* ---------- Herkunftsbaum ---------- */
 
 .suchleiste { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
+.tools-zeile {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 12px 13px;
+}
+.tools-ergebnis {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+  line-height: 1.35;
+}
+.tools-ergebnis-meine { color: var(--gut); font-weight: 650; }
+.tools-ergebnis-fremd { color: var(--text); }
+.tools-ergebnis-hinweis { color: var(--warn); font-size: 0.95rem; font-weight: 500; }
 .trace-fokus-leiste {
   display: flex;
   flex-wrap: wrap;

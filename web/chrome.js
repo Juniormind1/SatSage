@@ -275,6 +275,13 @@ async function start() {
       ladeSteuerjahrMitKandidaten();
     });
   document
+    .querySelector('[data-ansicht="tools"]')
+    .addEventListener("click", () => {
+      zeigeAnsicht("tools");
+      const feld = $("#tools-adresse");
+      if (feld) feld.focus();
+    });
+  document
     .querySelector('[data-ansicht="sanktionen"]')
     .addEventListener("click", async () => {
       zeigeAnsicht("sanktionen");

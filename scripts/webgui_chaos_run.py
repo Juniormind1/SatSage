@@ -107,6 +107,9 @@ def _playwright_run(
 
     harness_src = HARNESS.read_text(encoding="utf-8")
     with sync_playwright() as p:
+        # macOS/Linux: gebündeltes Chromium, kein channel.
+        # Windows: channel="chrome" (Fernsteuer-Zustimmung). Diesen Default
+        # nicht auf das andere System umschreiben. doc/gui-test-protokoll.md
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)

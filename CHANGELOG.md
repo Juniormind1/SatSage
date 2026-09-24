@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Auswerten · Tools:** Neuer Bereich. Erstes Werkzeug: Bitcoin-Adresse einfügen und **ist die meine?** — SatSage nennt den Wallet-Namen oder „gehört Dir nicht“. Gilt auch ohne Guthaben, ohne Verlauf und für noch unbenutzte Adressen. Prüfung lokal aus den hinterlegten Schlüsseln, ohne Node.
 - **Einstellungen:** Sprache, Darstellung, Aktualität und Lernhinweise stehen nebeneinander. Ist das Fenster zu schmal, rutschen die Boxen untereinander (bei mittlerer Breite zu zweit). Assistent und Status-Mails ebenso nebeneinander, bei schmalem Fenster untereinander.
 - **Wallets:** UTXO-Knöpfe heißen „Aktualisieren“ (bisher „Bis Tip“) und „Neu scannen“ (bisher „Bestand“). „UTXO:“ steht davor, in der normalen Schriftfarbe.
 - **Steuerjahr · Filter:** Dieselbe Suche wie bei Wallet/Herkunft (Text, Betrag `>`/`<`, Datum `>`/`<`, mehrere Begriffe). Treffer bleiben im Punktdiagramm; andere Punkte nur noch mit gepunktetem Rand. Abflüsse, Was-wäre-wenn, Veräußerungen und die Haltefrist-Gruppen zeigen nur noch Treffer.

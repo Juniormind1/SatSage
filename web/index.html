@@ -321,6 +321,11 @@
                 title="Verfolgt xpub-blind so viele Hops wie gewünscht">
           Sanktionscheck
         </button>
+        <button type="button" class="nav-eintrag" data-ansicht="tools"
+                data-i18n="nav.tools" data-i18n-title="nav.toolsTitle"
+                title="Prüft, ob eine Adresse zu einem deiner Wallets gehört">
+          Tools
+        </button>
       </div>
       <div class="nav-titel" data-i18n="nav.sectionAdmin">Verwaltung</div>
       <div class="nav-liste">
@@ -540,6 +545,37 @@
               darin nicht geprüft. Nach Wallet-Änderungen neu prüfen oder
               verwerfen.
             </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- Tools ---------- -->
+      <section id="ansicht-tools" hidden>
+        <div class="bereich-kopf">
+          <div>
+            <h1 data-i18n="tools.heading">Tools</h1>
+            <p class="meta" data-i18n="tools.meta">
+              Leitet aus den hinterlegten Wallets ab, ob die Adresse dazu
+              gehört. Ohne Guthaben, ohne Verlauf, auch noch unbenutzt.
+            </p>
+          </div>
+        </div>
+
+        <div class="karte">
+          <div class="tools-zeile">
+            <input type="text" id="tools-adresse" class="feld-breit mono"
+                   data-i18n-placeholder="tools.addressPlaceholder"
+                   data-i18n-aria-label="tools.addressAria"
+                   placeholder="Bitcoin-Adresse"
+                   aria-label="Bitcoin-Adresse"
+                   autocomplete="off" spellcheck="false">
+            <button type="button" id="tools-meine" class="knopf"
+                    data-i18n="tools.isMine" data-i18n-title="tools.isMineTitle"
+                    title="Prüft lokal an den Schlüsseln der Wallets — ohne Node und ohne dass je sats darauf lagen.">
+              ist die meine?
+            </button>
+            <p id="tools-meine-ergebnis" class="tools-ergebnis" role="status"
+               aria-live="polite" hidden></p>
           </div>
         </div>
       </section>
@@ -1719,6 +1755,7 @@
 <script src="/views/wallets.js"></script>
 <script src="/views/herkunft.js"></script>
 <script src="/views/steuerjahr.js"></script>
+<script src="/views/tools.js"></script>
 <script src="/chrome_nav.js"></script>
 <script src="/chrome.js"></script>
 <script src="/boot.js"></script>

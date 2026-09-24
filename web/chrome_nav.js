@@ -116,7 +116,7 @@ function zeichneNav() {
   }
 
   for (const name of [
-    "steuerjahr", "trace", "sanktionen",
+    "steuerjahr", "trace", "sanktionen", "tools",
     "wallets", "einstellungen", "datenquellen",
   ]) {
     const knopf = document.querySelector(`[data-ansicht="${name}"]`);
@@ -128,7 +128,7 @@ function zeichneNav() {
 }
 
 const ANSICHTEN = [
-  "wallet", "steuerjahr", "trace", "sanktionen",
+  "wallet", "steuerjahr", "trace", "sanktionen", "tools",
   "wallets", "einstellungen", "datenquellen",
 ];
 

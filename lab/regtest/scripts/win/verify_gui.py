@@ -75,7 +75,10 @@ def main() -> int:
     page_errors: list[str] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not args.headed)
+        # Windows-Lab: installiertes Chrome. Gebündeltes Playwright-Chromium
+        # hängt an der Fernsteuer-Zustimmung. macOS/Linux diesen channel
+        # nicht übernehmen. doc/gui-test-protokoll.md
+        browser = p.chromium.launch(headless=not args.headed, channel="chrome")
         context = browser.new_context(viewport={"width": 1400, "height": 900})
         page = context.new_page()
         page.on("console", lambda msg: console_errors.append(f"{msg.type}: {msg.text}") if msg.type == "error" else None)

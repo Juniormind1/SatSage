@@ -39,6 +39,7 @@ NAV_SCHRITTE = (
     ("trace", "ansicht-trace", ("#trace-liste",)),
     ("steuerjahr", "ansicht-steuerjahr", ("#steuer-kennzahlen", "#sa-liste", "#jahr-wahl")),
     ("sanktionen", "ansicht-sanktionen", ("#sanktions-status", "#ansicht-sanktionen")),
+    ("tools", "ansicht-tools", ("#tools-adresse", "#tools-meine")),
     ("wallets", "ansicht-wallets", ("#wallet-zeilen", "#ansicht-wallets")),
     ("einstellungen", "ansicht-einstellungen", ("#ui-lang", "#ansicht-einstellungen")),
     ("datenquellen", "ansicht-datenquellen", ("#ansicht-datenquellen",)),
@@ -220,8 +221,11 @@ def run_userflow(
     with sync_playwright() as p:
         launch_kwargs: dict = {"headless": headless}
         if channel:
-            # Installiertes Chrome (Windows: Fernsteuer-Zustimmung), nicht
-            # das mitgelieferte Playwright-Chromium.
+            # Nur Windows: installiertes Chrome (channel="chrome").
+            # Fernsteuer-Zustimmung — das mitgelieferte Playwright-Chromium
+            # ist dort nicht der Weg. macOS und Linux lassen channel leer
+            # und starten das gebündelte Chromium. Siehe
+            # doc/gui-test-protokoll.md.
             launch_kwargs["channel"] = channel
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1280, "height": 900})

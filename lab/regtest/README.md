@@ -21,7 +21,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\start_lab.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 ```
 
-`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Optional Playwright-Verify (`verify_gui.py`, braucht `pip install playwright` + `playwright install chromium`).
+`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf macOS und Linux, nicht hier.
 
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 

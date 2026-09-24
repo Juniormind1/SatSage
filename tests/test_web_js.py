@@ -204,9 +204,10 @@ class TestAppJs(unittest.TestCase):
         self.mempool_links = (WEB / "mempool_links.js").read_text(encoding="utf-8")
         self.chrome_nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
         self.chrome = (WEB / "chrome.js").read_text(encoding="utf-8")
+        self.tools = (WEB / "views" / "tools.js").read_text(encoding="utf-8")
         self.shell_quellen = (
             self.api, self.state, self.format, self.quelle, self.mempool_links,
-            self.chrome_nav, self.chrome,
+            self.chrome_nav, self.chrome, self.tools,
         )
 
     def test_keine_doppelten_deklarationen(self):
@@ -222,6 +223,7 @@ class TestAppJs(unittest.TestCase):
             ("mempool_links.js", self.mempool_links),
             ("chrome_nav.js", self.chrome_nav),
             ("chrome.js", self.chrome),
+            ("views/tools.js", self.tools),
         ):
             funde = doppelte_deklarationen(quelle)
             self.assertEqual(
@@ -239,6 +241,7 @@ class TestAppJs(unittest.TestCase):
             ("mempool_links.js", self.mempool_links),
             ("chrome_nav.js", self.chrome_nav),
             ("chrome.js", self.chrome),
+            ("views/tools.js", self.tools),
         ):
             sauber = ohne_texte_und_kommentare(quelle)
             for auf, zu, name in (("{", "}", "geschweift"), ("(", ")", "rund"),

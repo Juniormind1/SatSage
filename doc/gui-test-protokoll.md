@@ -49,6 +49,27 @@ Modul: `core/gui_session.py`.
 
 ---
 
+## Playwright · eine Strategie pro Betriebssystem
+
+Vor jedem Playwright-Lauf das OS prüfen (`sys.platform` oder `uname`). Nur die Zeile dieser Umgebung verwenden. Hakt der Start, nicht auf die Strategie des anderen Rechners ausweichen.
+
+| Umgebung | `sys.platform` | Interpreter | Browser-Start | Userflow |
+|----------|----------------|-------------|---------------|----------|
+| macOS | `darwin` | `.venv/bin/python` | mitgeliefertes Chromium, headless, **ohne** `channel`: `p.chromium.launch(headless=True)` | `.venv/bin/python scripts/webgui_userflow.py --spawn` |
+| Linux | `linux` | `.venv/bin/python` | wie macOS | wie macOS |
+| Windows | `win32` | `py -3` | installiertes Chrome: `p.chromium.launch(headless=True, channel="chrome")` | `py -3 scripts/webgui_userflow.py --spawn --channel chrome` |
+
+Grund Windows: Fernsteuer-Zustimmung. Das von Playwright mitgelieferte Chromium ist dort nicht der Weg (`scripts/webgui_userflow.py`, `--channel`). Einmalig auf macOS/Linux: `.venv/bin/python -m playwright install chromium`. Auf Windows reicht das Paket `playwright`; der Browser ist das bereits installierte Chrome.
+
+Nicht verwenden:
+
+- `--channel chrome`, `msedge` oder `firefox` auf macOS und Linux
+- Launch ohne `channel` auf Windows
+- `.venv/bin/python` auf Windows, `py` auf macOS/Linux
+- die Lab-Reihenfolge Edge → Chrome → Firefox (`start_lab.ps1`) als Playwright-Start — das öffnet nur ein Fenster für einen Menschen
+
+`scripts/webgui_chaos_run.py` ruft noch `p.chromium.launch` ohne Kanal auf. Auf Windows den Aufruf mit `channel="chrome"` ergänzen. Den Windows-Kanal nicht in die macOS-/Linux-Defaults zurückschreiben. `lab/regtest/scripts/win/verify_gui.py` ist nur Windows und startet bereits mit `channel="chrome"`.
+
 ## Assistenten-Ablauf (kurz)
 
 ### A · Isolierter Test (empfohlen)
