@@ -211,6 +211,32 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 - **Changelog:** CHANGELOG.md bei nennenswerten Änderungen nachziehen — spätestens zusammen mit dem Commit. Neue Punkte unter [Unveröffentlicht]. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
 - **Release Notes:** Nicht bei jedem Push auf dev-juniormind. Nur bei **Version-Bump** / Merge nach **main** / **Git-Tag** (…, StartOS-Tag): Abschnitt [Unveröffentlicht] als datierten Block setzen und leeren; optional GitHub-Release-Body = dieser Abschnitt (Inhalt = Changelog seit dem letzten Release). StartOS: wie doc/START9-packaging.md + publish_startos_release.
 
+### Modulgrenzen
+
+Hintergrund: [`doc/adr-modularisierung.md`](doc/adr-modularisierung.md). Slice 1–5 sind geschnitten; diese Regeln gelten für neue Arbeit.
+
+**Wohin neue Logik kommt**
+
+- HTTP-Handler nach `httpserver/api/<domäne>.py` oder in den passenden Helfer unter `httpserver/`. `server.py` bleibt Bind, Sitzung, Static, dünner Dispatch und Re-Export.
+- Oberfläche nach `web/views/<domäne>.js` oder in die bestehende View. `web/app.js` nur anfassen, solange der Rest-Ballast (Kurs, Chat, Sync) noch dort liegt.
+- Fachlogik nach `core/<domäne>.py`. `main.py` und `analyze.py` bleiben Einstieg plus Re-Export-Fassade.
+- Fulcrum, BIP158, Electrum-Liste und Outbound-Policy in den bestehenden `core/fulcrum_*`, `core/bip158_*`, `core/electrum_servers.py`, `core/outbound_policy.py`. Die Root-Dateien `fulcrum.py`, `bip158_scanner.py`, `outbound_policy.py` und `check_fulcrum_tor.py` bleiben Fassade bzw. Diagnose-CLI.
+
+**Imports**
+
+- Neuer Code in `core/` und `httpserver/` importiert `core.*` direkt. Root-Fassaden bleiben für Tests, Specter und Packaging. Eine Fassade in einem Feature-Commit nicht löschen.
+- `core` importiert für Fachcode nicht `main`, `server`, `analyze`, `fulcrum`, `bip158_scanner`, `outbound_policy` oder `check_fulcrum_tor`. Brauchen sich zwei `core`-Module gegenseitig, liegt der gemeinsame Zustand im unteren Modul, der Aufruf darüber als später Import in der Funktion.
+
+**Größe**
+
+- Eine Datei über etwa 80–100 KB ist ein Split nach Domäne, kein Umzug in eine neue große Datei.
+- Eine Funktion über etwa 80 Zeilen ist ein Split-Kandidat nur in dem Change, der sie ohnehin anfasst. Kein Aufräumen langer Funktionen nebenbei.
+
+**Refactor und Feature**
+
+- Weiteres Entkernen (`app.js`-Ballast, `trace_engine.py`, Fassaden entfernen) ist eine eigene Aufgabe mit eigenem Commit. Ein Feature landet in der bestehenden Domänendatei und schneidet Nachbarmodule nicht mit um.
+- Wenn ein Symbol das Modul wechselt, zeigen Tests auf das Modul, in dem der Name nachgeschlagen wird. Die Fassade behält die Symbol-Identität (`fulcrum.X is core.fulcrum_*.X`).
+
 ## Version
 
 - **Datei:** `VERSION` im Repo-Root (aktuell `0.9.2`) â€” einzige Quelle
@@ -405,11 +431,11 @@ Scripts: `unit_bridge.py` (offline), `probe_api.py` (REST JWT). Daten: `specter_
 ## Typische Aufgaben
 
 - **Bei unklarer Benutzervorgabe** Die Unklarheit prÃ¤zise beschreiben und durch gezielte Fragen an den Benutzer klarstellen lassen
-- **Neue Analyse-Funktion:** Logik in `analyze.py`, Prompts in `interact.py`, MenÃ¼punkt in `menu.py`; Web: Route in `server.py` + `web/app.js`; im Plugin optional `specter_session.run_*` + Route/Template in `controller.py`
-- **Neues Backend:** Fetcher in Backend-Modul, Anbindung in `main._setup_blockchain_client()` und `_build_blockchain_fetchers()`
-- **BIP-158:** P2P in `core/p2p.py` + `bip158_scanner.py`; kein Core-RPC. Turbo-PÃ¤sse in `plane_filter_passes`
-- **Steuerjahr:** `core/tax.py`; Einstellungen `STEUER_HALTEFRIST_JAHRE` / `STEUER_STICHTAG`; Web-Ansicht in `web/app.js`
-- **Fulcrum/Tor:** `fulcrum.py`, `check_fulcrum_tor.py`, `.env`-Variablen, `electrum_servers.json`
+- **Neue Analyse-Funktion:** Logik in `core/` (z. B. `tx_utxo_analyze`, `utxo_origin`), Prompts in `interact.py`, MenÃ¼punkt in `menu.py`; Web: Route in `httpserver/api/` + View in `web/views/`; `analyze.py` und `server.py` nur Fassade/Dispatch. Im Plugin optional `specter_session.run_*` + Route/Template in `controller.py`
+- **Neues Backend:** Fetcher in Backend-Modul, Anbindung in `core.chain_sources` (`_setup_blockchain_client` / `_build_blockchain_fetchers`, über die `main`-Fassade erreichbar)
+- **BIP-158:** P2P in `core/p2p.py`, Scan in `core/bip158_scan.py`, Wallet-API in `core/bip158_wallet.py`; `bip158_scanner.py` bleibt Fassade. Kein Core-RPC. Turbo-PÃ¤sse in `plane_filter_passes`
+- **Steuerjahr:** `core/tax.py`; Einstellungen `STEUER_HALTEFRIST_JAHRE` / `STEUER_STICHTAG`; Web-Ansicht in `web/views/`
+- **Fulcrum/Tor:** Fachcode in `core/fulcrum_*` und `core/electrum_servers.py`; `fulcrum.py` und `check_fulcrum_tor.py` bleiben Fassade bzw. Diagnose-CLI. `.env`-Variablen, `electrum_servers.json`
 - **Adress-AuflÃ¶sung:** `WalletContext`, `external_addresses.json` in `main.py`
 - **Sanktionslisten:** `sanctioned.py` (Quellen, Parser, `update_sanctioned_lists`), MenÃ¼ in `menu.py` (Punkt 6); Ãœberblick mit `print_sanctions_overview`, danach `check_sanctions_source_updates` + j/N-Aktualisierung
 - **Specter-Plugin:** Bridge (`bridge.py`) fÃ¼r neuen Specter-Kontext; Session (`specter_session.py`) fÃ¼r Runtime; UI in `controller.py` + Jinja; Core-API stabil halten (`build_wallet_context`, `_setup_blockchain_client`, `analyze_*`)

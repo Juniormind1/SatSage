@@ -116,13 +116,9 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 `sanctioned.py` / `menu.py` sind kleiner — nachziehen bei Bedarf, nicht als eigener Epic.
 
-## Arbeitsregeln (in `AGENTS.md` nachziehen, sobald Slice 1 landet)
+## Arbeitsregeln
 
-- Neue Logik nicht an Root-God-Files anhängen.
-- `server.py` / `main.py` bleiben dünne Einstiege.
-- Datei > ~80–100 KB oder Funktion > ~80 Zeilen → Split-Kandidat.
-- Refactor-Slices sind eigene Aufgaben, keine Drive-bys in Feature-PRs.
-- Modularisierungs-Branch: kurze Lebensdauer, oft auf `dev-juniormind` rebasen.
+Stehen in [`AGENTS.md`](../AGENTS.md) · Modulgrenzen (2026-09-24). Die 80-Zeilen-Grenze gilt weich: nur im Change, der die Funktion ohnehin anfasst.
 
 ## Entscheidung
 
@@ -331,7 +327,7 @@ Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` m
 1. Laden-Ballast in `app.js` häppchenweise (Kurs, Chat/LLM, Sync-UI) — nur mit klarer Grenze.
 2. Optional Server: `build_state`, `starte_header_vorab`, weiteren Handler-Feinschnitt.
 3. Laut ADR: **Slice 3 `main.py` erledigt**; als Nächstes `analyze.py` (Slice 4) / Adapter-Feinschnitt (Slice 5).
-4. Arbeitsregeln in `AGENTS.md` nachziehen.
+4. Arbeitsregeln in `AGENTS.md` · Modulgrenzen — **nachgezogen** (2026-09-24).
 
 
 ### Nachzug · UI 1–4 + Server 5–6 (2026-09-23)
