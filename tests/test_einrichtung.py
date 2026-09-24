@@ -779,8 +779,9 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_explorer_pfeil_faerbt_nach_netz(self):
         """Grün im eigenen Netz, Gelb bei öffentlichem/fremdem Explorer."""
-        self.assertIn("extern-link-lokal", self.js)
-        self.assertIn("extern-link-fremd", self.js)
+        js = (WEB / "mempool_links.js").read_text(encoding="utf-8")
+        self.assertIn("extern-link-lokal", js)
+        self.assertIn("extern-link-fremd", js)
         self.assertIn(".extern-link-lokal", self.css)
         self.assertIn(".extern-link-fremd", self.css)
         self.assertLess(
@@ -788,12 +789,12 @@ class TestOberflaeche(unittest.TestCase):
             self.css.index(".extern-link-lokal:hover"),
             "lokale Hover-Farbe muss die allgemeine überschreiben",
         )
-        self.assertIn('t("sources.mempool.openPrivate")', self.js)
-        self.assertIn('t("sources.mempool.openPublic")', self.js)
+        self.assertIn('t("sources.mempool.openPrivate")', js)
+        self.assertIn('t("sources.mempool.openPublic")', js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Privaten Blockexplorer öffnen", de)
         self.assertIn("Öffentlichen Blockexplorer öffnen", de)
-        self.assertNotIn("in der eigenen Instanz öffnen", self.js)
+        self.assertNotIn("in der eigenen Instanz öffnen", js)
 
 
 if __name__ == "__main__":

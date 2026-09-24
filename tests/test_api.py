@@ -1253,7 +1253,9 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
     def test_clearnet_liste_laesst_sich_loeschen(self):
         ziel = Path(self._tmp.name) / "electrum_servers.json"
         ziel.write_text('{"s1.example": {"t": "50001"}}', encoding="utf-8")
-        with mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+        with mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel), mock.patch(
+            "core.chain_sources.ELECTRUM_SERVERS_FILE", ziel,
+        ):
             self.assertTrue(ziel.is_file())
             status, körper = self.anfrage(
                 "/api/config/source/clearnet", methode="DELETE",
@@ -1654,7 +1656,10 @@ class TestSanktionsCheckCache(ApiTestBasis):
 
             return je_worker, 4
 
-        with mock.patch.object(server, "_sanctions_get_tx_pool", side_effect=pool):
+        with mock.patch(
+            "httpserver.api.labels_sanctions_exchange._sanctions_get_tx_pool",
+            side_effect=pool,
+        ):
             status, körper = self.anfrage(
                 "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
             )
