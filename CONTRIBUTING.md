@@ -31,6 +31,23 @@ Windows: `py -m unittest discover -s tests -t .`
 
 GitHub startet dieselbe Suite bei jedem Push und jedem Pull Request nach `dev-juniormind` und nach `main`. Grün heißt: der Lauf kam ohne Node und ohne persönliche `.env` durch. Der Browser-Klicklauf (`scripts/webgui_userflow.py`) bleibt lokal. Er braucht eine Oberfläche und ist nicht Teil dieser Suite.
 
+## Regtest vor `main`
+
+Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. GitHub startet dafür den Workflow `Regtest-Labor`: Bitcoin Core und Electrs in Docker, Lab-Szenarien, dann `verify_tx_classify.py` und `verify_sanctions_hops.py`. Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main` und bei einem Push nach `main`, nicht bei jedem Push nach `dev-juniormind`.
+
+Lokal derselbe Kern, ohne den Mempool-Explorer:
+
+```bash
+cd lab/regtest
+SATSAGE_LAB_SKIP_MEMPOOL=1 ./scripts/start.sh
+python3 scripts/generate_scenarios.py
+python3 scripts/generate_sanctions_scenarios.py
+python3 scripts/verify_tx_classify.py
+python3 scripts/verify_sanctions_hops.py
+```
+
+Windows bleibt bei `scripts/win/start_lab.ps1` (siehe [`lab/regtest/README.md`](lab/regtest/README.md)).
+
 Regtest mit Docker steht in [`lab/regtest/README.md`](lab/regtest/README.md). Das ist extra und nicht die Voraussetzung für einen Pull Request.
 
 ## Branches und Pull Requests

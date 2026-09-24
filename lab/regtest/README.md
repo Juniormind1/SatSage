@@ -1,5 +1,7 @@
 # SatSage-Regtest-Labor
 
+Vor einem Merge nach `main` muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`).
+
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
 Die Arbeitsregeln stehen in [`../../GROK_BOT.md`](../../GROK_BOT.md). Für die Lab-Anbindung: `NETWORK=regtest` in der generierten `.regtest.env` setzt das Adressnetz (`bcrt1…`); SatSage startet mit `py server.py --env lab/regtest/.data/.regtest.env`. Lab-Caches getrennt von Mainnet halten (`--cache-dir` / `--immutable-cache-dir`).

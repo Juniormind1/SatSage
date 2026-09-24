@@ -58,6 +58,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | Q1 | **`tests/`-Suite rot** auf CI (Ubuntu `unittest discover`) | Hart |
+| Q6 | **Regtest-Labor rot** vor Merge nach `main` (Core + Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`) | Hart |
 | Q2 | Suite „grün“ nur durch **unbegründete skips** / Aushebeln von Checks | Hart+Review |
 | Q3 | **Scope-Monster**: UI + Core-Scan + Packaging + Plugin in einem PR ohne Trennung | Weich |
 | Q4 | Neue Nutzertexte **nur Englisch / hart in `app.js`** statt Locales | Weich |
@@ -86,7 +87,8 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 5. T6 / T7 — kein Remote-Code / Download+Exec  
 6. T11 — kein stiller Public-Electrum/Remote-LLM-Default  
 7. S2 — Juniormind1 nur für Maintainer/Agent (Hooks)  
-8. Q1 — Unittests grün  
+8. Q1 — Unittests grün
+9. Q6 — Regtest-Labor grün vor Merge nach `main`  
 
 ---
 
