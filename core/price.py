@@ -16,7 +16,7 @@ import json
 import os
 import re
 import ssl
-from outbound_policy import ensure_url_allowed, tls_context
+from core.outbound_policy import ensure_url_allowed, tls_context
 import time
 import urllib.error
 import urllib.request

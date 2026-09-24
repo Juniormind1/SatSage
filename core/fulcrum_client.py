@@ -11,7 +11,7 @@ from typing import Any
 
 from embit.script import address_to_scriptpubkey
 
-import outbound_policy
+import core.outbound_policy as outbound_policy
 
 from core.fulcrum_transport import _socks5_connect
 

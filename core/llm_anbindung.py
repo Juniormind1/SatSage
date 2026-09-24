@@ -15,7 +15,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
-from outbound_policy import OutboundPolicyError, ensure_url_allowed
+from core.outbound_policy import OutboundPolicyError, ensure_url_allowed
 
 #: Bekannte Cloud-Hosts → klar „remote“, Label für Banner.
 CLOUD_HOSTS = frozenset({

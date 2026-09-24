@@ -1,9 +1,9 @@
 # ADR · Modularisierung SatSage
 
-**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3–4 erledigt** · **Slice 5 Fulcrum 1–5 erledigt** (BIP158/Sibling offen) · Shared-Kern/CLI-Schnitte 1–6 erledigt  
-**Stand:** 2026-09-23 (Slice-5 Fulcrum-Hälfte)  
+**Status:** akzeptiert · Slice 1+2 weitgehend · **Slice 3–5 erledigt** · Shared-Kern/CLI-Schnitte 1–6 erledigt  
+**Stand:** 2026-09-24 (Slice 5 vollständig)  
 **Branch-Basis:** `dev-juniormind` @ `6dc7174` (letzter Commit vor Modularisierungs-Refaktorierung)  
-**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–4 + Slice-5 Fulcrum 1–5; Push/FF nur nach OK)  
+**Arbeitsbranch:** `refactor/modular-engine` (Slice 1–5; Push/FF nur nach OK)  
 **Bezug:** [`ISSUES.md` · Architektur · Modularisierung](../ISSUES.md), [`doc/issues/modularisiere_prompt.txt`](issues/modularisiere_prompt.txt)
 
 ## Kontext
@@ -131,13 +131,13 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 - Implementierung Slice 1 + Slice 2: siehe **Abschlussmemo** unten.
 - **Slice 3 = `main.py`:** erledigt (siehe Abschlussmemo).
 - **Slice 4 = `analyze.py`:** erledigt (siehe Abschlussmemo); Plan unten bleibt als Inventar.
-- **Slice 5 = Adapter-Feinschnitt** (`fulcrum.py` / `bip158_scanner.py` + Sibling): **Fulcrum-Schritte 1–5 erledigt**; BIP158 (6–9) + electrum_servers/outbound_policy (10–11) offen — Plan/Memo unten.
+- **Slice 5 = Adapter-Feinschnitt** (`fulcrum.py` / `bip158_scanner.py` + Sibling): **erledigt** (Fulcrum 1–5, BIP158 6–9, Electrum-Liste 10, Outbound-Policy 11) — Plan/Memos unten.
 
 ## Offene Punkte (Stand Memo)
 
 - Package-Pfad: **geschlossen** → `httpserver/api/` (HTTP-Handler), Business in `core/`. `server/api/` unbrauchbar (Kollision mit `server.py`).
 - `_api`-Dispatch: weiter if-/Fassade in `server.py`; Tabellen-`ROUTES` optional später (Specter/OpenAPI).
-- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3+4 erledigt**; **Slice-5-Plan** (Adapter) steht — Implementierung als Nächstes.
+- Verbleibend: Laden-Ballast in `app.js` (Kurs/Chat/Sync-UI); optional `build_state` / Header-Vorab / Handler-Feinschnitt; **Slice 3–5 erledigt**.
 
 ## Nachtrag 2026-09-23 · Package-Pfad
 
@@ -607,7 +607,7 @@ Slice 4 ist **erledigt**: Trace-/Sanktions-Domänen liegen unter `core/*`; `anal
 
 ## Slice 5 (fest) · Adapter-Feinschnitt — Plan 2026-09-23
 
-**Status:** **Fulcrum-Schritte 1–5 erledigt** (Transport/Client/Wallet/History + Fassade); BIP158 + Sibling noch offen  
+**Status:** **erledigt** (2026-09-24) — Fulcrum 1–5, BIP158 6–9, Electrum-Liste 10, Outbound-Policy 11; siehe Abschlussmemos  
 **Ist (Inventar vor Extraktion):**
 
 | Datei | Bytes | Zeilen | Top-Level-Defs |
@@ -800,19 +800,70 @@ Die Fulcrum-Hälfte von Slice 5 ist **erledigt**: Bodies liegen unter `core/fulc
 | Domänen fulcrum_transport/client/wallet/history getrennt | **ja** |
 | Extrahierte `core/fulcrum_*` importieren nicht Root-`fulcrum` | **ja** |
 | Fassade Symbol-Identität | **ja** |
-| `bip158_*` / electrum_servers / outbound_policy | **offen** (Schritte 6–11) |
+| `bip158_*` / electrum_servers / outbound_policy | **ja** (Schritte 6–11, Memo unten) |
 
-### Als Nächstes (Slice 5 Rest)
+### Als Nächstes (Stand nach Fulcrum 1–5, inzwischen erledigt)
 
-6. `core/bip158_filter.py`  
+6. `core/bip158_filter.py` — gelandet vor diesem Abschluss  
 7. `core/bip158_scan.py`  
 8. `core/bip158_wallet.py`  
 9. `bip158_scanner.py` glätten  
 10. `core/electrum_servers.py` + `check_fulcrum_tor` Fassade  
 11. `core/outbound_policy.py` (+ Zyklus-Fix vs. `core.source`)
 
+Abschluss der Schritte 6–11: Memo unten.
+
 ### Merge-Lage
 
 - Arbeitscommits auf `refactor/modular-engine`; vor FF: Playwright-Userflow.  
 - Push nur nach explizitem OK; nach Merge push+continue vs. push+pause fragen.
+
+
+## Abschlussmemo 2026-09-24 · Slice 5 Rest (Schritte 6–11)
+
+### Kurzfazit
+
+Slice 5 ist **vollständig**. BIP158-Bodies liegen unter `core/bip158_{filter,scan,wallet}.py`; Root-`bip158_scanner.py` ist Re-Export-Fassade plus CLI-Shim. Die Electrum-Serverliste liegt in `core/electrum_servers.py` (`check_fulcrum_tor.py` bleibt Diagnose-CLI und re-exportiert). `core/outbound_policy.py` hält die Allowlist und die Sitzungs-Freigabe für öffentliche Electrum; `core.source` liest dieselbe Flag, ohne dass die Policy `core.source` importiert.
+
+### Messwerte
+
+| Datei | vor Slice 5 | Stand Schritte 6–11 |
+| --- | ---: | ---: |
+| `bip158_scanner.py` | ~84 KB | **~3,6 KB** (Fassade + CLI-Shim) |
+| `core/bip158_filter.py` | — | ~10 KB |
+| `core/bip158_scan.py` | — | ~48 KB |
+| `core/bip158_wallet.py` | — | ~26 KB |
+| `check_fulcrum_tor.py` | ~34 KB | ~29 KB (CLI bleibt; Listen-Kern ausgelagert) |
+| `core/electrum_servers.py` | — | ~5,5 KB |
+| `outbound_policy.py` | ~6 KB | **< 1 KB** Fassade |
+| `core/outbound_policy.py` | — | ~7 KB |
+
+### Schritte gelandet
+
+| # | Commit-Thema | Modul |
+| --- | --- | --- |
+| 6 | SipHash/Golomb/Matcher | `core/bip158_filter.py` (vor diesem Abschluss) |
+| 7 | CFilter-Pipeline, Scanner, Header-Vorab | `core/bip158_scan.py` |
+| 8 | Ableitung, Tx-Fetch, UTXO-API; Late-`main` → `core.derivation` / `core.xpub_cache` | `core/bip158_wallet.py` |
+| 9 | Fassade + Core-Retargets | Root-`bip158_scanner.py` |
+| 10 | Listen-Kern | `core/electrum_servers.py` |
+| 11 | Policy-Move + Sitzungs-Flag ohne `source`-Import | `core/outbound_policy.py` |
+
+### Done-Check (ehrlich)
+
+| Kriterium | Lage |
+| --- | --- |
+| `fulcrum.py` und `bip158_scanner.py` ≪ 20 KB | **ja** (~2,5 KB / ~3,6 KB) |
+| Domänen fulcrum_* und bip158_filter/scan/wallet getrennt, keine Datei > ~100 KB | **ja** (größte: `bip158_scan` ~48 KB) |
+| electrum_servers + outbound_policy unter `core/`, Root-Fassade | **ja** |
+| kein Importzyklus `core.source` ↔ `core.outbound_policy` | **ja** (Flag lebt in der Policy; Source re-exportiert) |
+| extrahierte `core/*` importieren nicht Root-`fulcrum` / `bip158_scanner` für Bodies | **ja** |
+| `check_fulcrum_tor.py` als Diagnose-CLI noch ~29 KB | **bewusst** — UX-Umbau war nicht Teil von Slice 5 |
+| Fassaden-Symbol-Identität | **ja** (Stichproben) |
+| Charakterisierung | BIP158-/Tx-/Job-/Source-/Start9-Policy-Tests grün; kein Full-Suite-Gate in diesem Memo |
+
+### Merge-Lage
+
+- Parallel-Dev: Fulcrum-Verlauf und BIP158-Scan ohne gemeinsame Root-Bodies; Electrum-Liste und Outbound-Policy ohne `fulcrum.py`-Hotspot.
+- Vor FF nach `dev-juniormind`: Playwright-Web-GUI-Userflow. Push nur nach explizitem OK; danach push+continue vs. push+pause fragen.
 

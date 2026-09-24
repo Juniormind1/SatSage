@@ -14,7 +14,7 @@ import urllib.request
 from typing import Any, Callable
 
 from core import llm_anbindung as llm
-from outbound_policy import OutboundPolicyError, ensure_url_allowed
+from core.outbound_policy import OutboundPolicyError, ensure_url_allowed
 
 CHAT_TIMEOUT_S = 90
 MAX_TOOL_RUNDEN = 4

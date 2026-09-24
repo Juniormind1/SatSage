@@ -13,6 +13,10 @@ from datetime import datetime
 
 import core.chain_sources as chain_sources
 from core.electrum_servers import ELECTRUM_SERVERS_URL, splitte_electrum_server
+from core.outbound_policy import (
+    oeffentliche_electrum_session_aktiv,
+    setze_oeffentliche_electrum_session,
+)
 
 #: Reihenfolge wie in core.chain_sources._setup_blockchain_client.
 PRIVACY_HIGH = "hoch"
@@ -505,27 +509,6 @@ def peer_status(
     return stand
 
 
-#: Sitzungs-Opt-in für öffentliche Electrum-Server (Web-GUI).
-#: Gilt nur für den laufenden Prozess — nach Server-Neustart wieder aus,
-#: damit bei geringer Privatsphäre jedes Mal nachgefragt wird.
-_SESSION_OEFFENTLICHE_ELECTRUM = False
-
-
-def oeffentliche_electrum_session_aktiv() -> bool:
-    """True wenn diese Prozess-Sitzung öffentliche Electrum freigegeben hat."""
-    return bool(_SESSION_OEFFENTLICHE_ELECTRUM)
-
-
-def setze_oeffentliche_electrum_session(erlaubt: bool) -> None:
-    """
-    Sitzungs-Freigabe setzen (kein Schreiben in die .env).
-
-    Outbound-Allowlist liest denselben Prozess-Status über diese Flag-API.
-    """
-    global _SESSION_OEFFENTLICHE_ELECTRUM
-    _SESSION_OEFFENTLICHE_ELECTRUM = bool(erlaubt)
-
-
 def oeffentliche_electrum_erlaubt(values: dict[str, str] | None) -> bool:
     """
     Öffentliche Electrum-Server (Onion/Clearnet) nur nach Bestätigung.
@@ -534,7 +517,7 @@ def oeffentliche_electrum_erlaubt(values: dict[str, str] | None) -> bool:
     * **``.env`` / CLI** (``OEFFENTLICHE_ELECTRUM=1``, ``--oeffentliche-electrum``):
       für Headless/Tests; die Web-GUI speichert das Flag nicht mehr dauerhaft.
     """
-    if _SESSION_OEFFENTLICHE_ELECTRUM:
+    if oeffentliche_electrum_session_aktiv():
         return True
     return _flag(values or {}, "OEFFENTLICHE_ELECTRUM", False)
 

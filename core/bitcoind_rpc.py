@@ -12,7 +12,7 @@ import ssl
 import struct
 import threading
 import time
-import outbound_policy
+import core.outbound_policy as outbound_policy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
