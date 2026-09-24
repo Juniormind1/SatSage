@@ -1,8 +1,8 @@
 """BIP-158 Compact-Filter-Scan über Bitcoin-P2P.
 
 CFilter-Pipeline, Block-Extract, Live-Peers, ``BIP158Scanner`` und
-Header-Vorab. Root-``bip158_scanner`` re-exportiert die Symbole
-(Slice 5 Schritt 7).
+Header-Vorab. Ableitung und UTXO-API: ``core.bip158_wallet`` (Late-Import).
+Root-``bip158_scanner`` re-exportiert die Symbole.
 """
 from __future__ import annotations
 

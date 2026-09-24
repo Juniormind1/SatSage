@@ -333,9 +333,9 @@ class TestDatenquelleImJobLog(unittest.TestCase):
 
     def test_probe_p2p_ist_keine_datenquelle_wenn_unerreichbar(self):
         with patch(
-            "bip158_scanner.create_bip158_client_from_env", return_value=MagicMock()
+            "core.bip158_wallet.create_bip158_client_from_env", return_value=MagicMock()
         ), patch(
-            "bip158_scanner.verify_p2p_filters",
+            "core.bip158_scan.verify_p2p_filters",
             side_effect=RuntimeError("kein Peer"),
         ):
             with self.assertRaises(RuntimeError):
@@ -347,8 +347,8 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         client = MagicMock()
         client.scanner._tor_proxy = None
         with patch(
-            "bip158_scanner.create_bip158_client_from_env", return_value=client
-        ), patch("bip158_scanner.verify_p2p_filters", return_value=900_000):
+            "core.bip158_wallet.create_bip158_client_from_env", return_value=client
+        ), patch("core.bip158_scan.verify_p2p_filters", return_value=900_000):
             main._setup_bip158_client(self.args, {}, raise_on_error=False)
         self.assertTrue(any("Prüfe P2P-BIP-158" in z for z in self.zeilen()))
         self.assertEqual(

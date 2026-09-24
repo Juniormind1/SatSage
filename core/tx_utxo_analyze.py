@@ -333,7 +333,7 @@ def analyze_address_utxos(
         vout = utxo["vout"]
         value = utxo["value"]
         try:
-            from bip158_scanner import note_tx_height
+            from core.bip158_wallet import note_tx_height
 
             status = utxo.get("status") or {}
             note_tx_height(txid, status.get("block_height") or utxo.get("height"))

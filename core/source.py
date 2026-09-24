@@ -216,7 +216,7 @@ def anreichere_live_p2p(quellen: list) -> list:
     Quelle nach Papierkorb/Schalter-Aus grau und ohne „verbunden“.
     """
     try:
-        from bip158_scanner import live_filter_peer_hosts
+        from core.bip158_scan import live_filter_peer_hosts
 
         live = live_filter_peer_hosts()
     except Exception:

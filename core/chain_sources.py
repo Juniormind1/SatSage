@@ -1290,13 +1290,13 @@ def _wants_fulcrum(args, env: dict[str, str]) -> bool:
 
 
 def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = True):
-    from bip158_scanner import (
+    from core.bip158_scan import verify_p2p_filters
+    from core.bip158_wallet import (
         create_bip158_client_from_env,
         fetch_address_utxos_bip158,
         fetch_addresses_utxos_bip158,
         fetch_tx_p2p_mit_fallback,
         fetch_wallet_utxos_bip158,
-        verify_p2p_filters,
     )
     from core.bitcoind_rpc import stelle_tx_lookup_rollen
 

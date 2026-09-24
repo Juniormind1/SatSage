@@ -589,7 +589,7 @@ def trace_utxo(
     hoehe = _blockhoehe_fuer_utxo(txid_n, vout_n, cache_dir, wallet)
     if hoehe:
         try:
-            from bip158_scanner import note_tx_height
+            from core.bip158_wallet import note_tx_height
 
             note_tx_height(txid_n, hoehe)
         except Exception:

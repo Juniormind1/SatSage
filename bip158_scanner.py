@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
-"""
-BIP-158-Scanner über Bitcoin-P2P (BIP 157 Compact Filter).
+"""BIP-158-Scanner über Bitcoin-P2P (BIP 157 Compact Filter).
 
-Filter und Blöcke kommen von Peers mit NODE_COMPACT_FILTERS, nicht von
-Bitcoin-Core-RPC. Abgleich lokal. Ungenutzte Keys nur gegen das Turbo-Fenster
-(Wasabi-TurboSync), damit False-Positive-Downloads in der Historie entfallen.
-
-chiabip158 nur für Self-Tests. Produktions-Filter: _CoreBasicFilterMatcher.
-
-Scan-Pipeline und ``BIP158Scanner`` liegen in ``core.bip158_scan``,
-Ableitung, Tx-Fetch und UTXO-API in ``core.bip158_wallet``. Beides wird
-hier re-exportiert (Slice 5 Schritte 7–8).
+Dünne Re-Export-Fassade nach Slice-5-Schritten 6–9 plus CLI-Shim
+(``--self-test``). Fachcode liegt unter ``core.bip158_filter``,
+``core.bip158_scan`` und ``core.bip158_wallet``.
+Symbol-Identität: ``bip158_scanner.X is core.bip158_*.X``.
 """
 
 from __future__ import annotations

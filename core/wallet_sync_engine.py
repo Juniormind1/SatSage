@@ -1050,7 +1050,7 @@ def _scan_xpub_utxos(
             utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
         scan_end_index = scan_cap
         try:
-            from bip158_scanner import take_last_scan_tip
+            from core.bip158_wallet import take_last_scan_tip
 
             tip_hoehe = take_last_scan_tip(xpub)
         except Exception:
