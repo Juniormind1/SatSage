@@ -59,7 +59,7 @@ class TestFallbackKette(unittest.TestCase):
         erwartet = {"txid": "ab" * 32, "vin": [], "vout": [], "status": {"block_height": 1}}
 
         with patch("core.bitcoind_rpc.fetch_tx_core", return_value=erwartet) as mock_core:
-            with patch("bip158_scanner.fetch_tx_p2p") as mock_p2p:
+            with patch("core.bip158_wallet.fetch_tx_p2p") as mock_p2p:
                 out = fetch_tx_p2p_mit_fallback(
                     client, "ab" * 32, core_client=core,
                 )
@@ -77,7 +77,7 @@ class TestFallbackKette(unittest.TestCase):
         with patch(
             "core.bitcoind_rpc.fetch_tx_core_mit_rollen", return_value=erwartet,
         ) as mock_rollen:
-            with patch("bip158_scanner.fetch_tx_p2p") as mock_p2p:
+            with patch("core.bip158_wallet.fetch_tx_p2p") as mock_p2p:
                 out = fetch_tx_p2p_mit_fallback(
                     client,
                     "ab" * 32,
@@ -99,11 +99,11 @@ class TestFallbackKette(unittest.TestCase):
         block_tx = {"txid": txid, "vin": [], "vout": [], "status": {"block_height": 962_859}}
 
         with patch(
-            "bip158_scanner.fetch_tx_p2p",
+            "core.bip158_wallet.fetch_tx_p2p",
             side_effect=ConnectionError("Peer hat die Transaktion nicht"),
         ):
             with patch(
-                "bip158_scanner.fetch_tx_from_block_p2p",
+                "core.bip158_wallet.fetch_tx_from_block_p2p",
                 return_value=block_tx,
             ) as mock_block:
                 out = fetch_tx_p2p_mit_fallback(client, txid, core_client=None)
@@ -114,7 +114,7 @@ class TestFallbackKette(unittest.TestCase):
     def test_ohne_hoehe_klarer_fehler(self):
         client = MagicMock()
         with patch(
-            "bip158_scanner.fetch_tx_p2p",
+            "core.bip158_wallet.fetch_tx_p2p",
             side_effect=ConnectionError("Peer hat die Transaktion nicht"),
         ):
             with self.assertRaises(ConnectionError) as ctx:

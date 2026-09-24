@@ -97,7 +97,7 @@ class TestTurboPasses(unittest.TestCase):
                 bip158_fullscan_ok=True,
             )
             with patch(
-                "bip158_scanner.addresses_to_script_pubkeys",
+                "core.bip158_wallet.addresses_to_script_pubkeys",
                 return_value={b"\x01\x02": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"},
             ):
                 self.assertEqual(_used_scripts_aus_cache(xpub, cache), {b"\x01\x02"})

@@ -13,11 +13,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
-
-from embit import script
-from embit.bip32 import HDKey
-from embit.script import address_to_scriptpubkey
+from typing import Any, Sequence
 
 from core.bip158_filter import (
     MatchedOutput,
@@ -35,117 +31,6 @@ DEFAULT_MAX_INDEX = 500
 DEFAULT_MAX_ADDRESSES = 50
 #: ~14 Tage. Ungenutzte Keys nur in diesem Fenster — Historie wäre nur FP.
 TURBO_WINDOW = 2_016
-# XPUB derivation (self-contained, embit only)
-# ---------------------------------------------------------------------------
-
-
-def _encoders_for_xpub(xpub: str, script_type: str | None = None) -> list[Callable]:
-    """
-    Delegiert an main._encoders_for_xpub, damit der konfigurierte Skripttyp
-    auch beim BIP-158-Scan gilt. Der Import erfolgt verzögert; main lädt dieses
-    Modul seinerseits erst zur Laufzeit, ein Zirkelbezug entsteht nicht.
-
-    Der Fallback hält das Modul eigenständig lauffähig — dann allerdings ohne
-    Skripttyp-Konfiguration, weshalb 'xpub' dort alle Typen probiert.
-    """
-    try:
-        import main
-
-        return main._encoders_for_xpub(xpub, script_type)
-    except Exception:
-        pass
-
-    pubkey = lambda pk: script.p2pkh(pk)
-    nested = lambda pk: script.p2sh(script.p2wpkh(pk))
-    segwit = lambda pk: script.p2wpkh(pk)
-    taproot = lambda pk: script.p2tr(pk)
-    mapping = {
-        "ypub": [nested],
-        "zpub": [segwit],
-        "upub": [nested],
-        "vpub": [segwit],
-    }
-    return mapping.get(xpub[:4].lower(), [pubkey, nested, segwit, taproot])
-
-
-def derive_script_pubkeys_from_xpub(
-    xpub: str,
-    *,
-    max_index: int = DEFAULT_MAX_INDEX,
-    include_change: bool = True,
-) -> dict[bytes, str | None]:
-    """
-    Derive receive (+ optional change) scriptPubKeys from an XPUB
-    **or Output-Deskriptor** (Multisig ``wsh(sortedmulti…)`` u. a.).
-
-    Returns ``script_pubkey_bytes -> address`` (address may be None if encoding fails).
-    """
-    # Multisig/Deskriptor: embit HDKey versteht den String nicht — main.derive_*.
-    try:
-        import main as main_mod
-
-        if main_mod.ist_deskriptor(xpub):
-            # max_index ≈ pro Chain; Deskriptor-Pfad teilt max_addresses auf Zweige.
-            zweige = 2 if include_change else 1
-            max_addr = max(2, int(max_index) * zweige)
-            addrs = main_mod.derive_addresses(
-                xpub, max_addresses=max_addr, start_index=0,
-            )
-            result: dict[bytes, str | None] = {}
-            for addr in addrs or []:
-                if not addr:
-                    continue
-                try:
-                    spk = bytes(address_to_scriptpubkey(addr).data)
-                except Exception:
-                    continue
-                result[spk] = addr
-            if not result:
-                raise ValueError(
-                    f"Deskriptor liefert keine Adressen: {xpub[:40]}…"
-                )
-            return result
-    except ValueError:
-        raise
-    except Exception:
-        pass
-
-    try:
-        hd = HDKey.from_string(xpub)
-    except Exception as exc:
-        raise ValueError(f"invalid xpub: {exc}") from exc
-
-    result = {}
-    chains = (0, 1) if include_change else (0,)
-    for encoder in _encoders_for_xpub(xpub):
-        for change in chains:
-            for index in range(max_index):
-                try:
-                    child = hd.derive([change, index])
-                    sc = encoder(child.key)
-                    spk = bytes(sc.data)
-                    try:
-                        addr = sc.address()
-                    except Exception:
-                        addr = None
-                    result[spk] = addr
-                except Exception:
-                    break
-    return result
-
-
-def addresses_to_script_pubkeys(addresses: Sequence[str]) -> dict[bytes, str]:
-    """Convert base58/bech32 addresses to scriptPubKey bytes."""
-    mapping: dict[bytes, str] = {}
-    for address in addresses:
-        if not address:
-            continue
-        try:
-            spk = bytes(address_to_scriptpubkey(address).data)
-        except Exception:
-            continue
-        mapping[spk] = address
-    return mapping
 
 
 # ---------------------------------------------------------------------------
@@ -196,101 +81,6 @@ def plane_filter_passes(
         )
     passe.append(("turbo", turbo_from, tip, scripts_all))
     return passe
-
-
-def gap_scripts_anfang(
-    xpub: str,
-    *,
-    gap_limit: int = DEFAULT_GAP_LIMIT,
-    include_change: bool = True,
-) -> set[bytes]:
-    """Erste gap_limit Indizes (Receive + optional Change) — Historie-Seed."""
-    return set(
-        derive_script_pubkeys_from_xpub(
-            xpub, max_index=max(1, int(gap_limit)), include_change=include_change,
-        ).keys()
-    )
-
-
-def scripts_mit_gap_um_treffer(
-    xpub: str,
-    hit_scripts: set[bytes],
-    *,
-    gap_limit: int = DEFAULT_GAP_LIMIT,
-    max_index: int = DEFAULT_MAX_INDEX,
-    include_change: bool = True,
-) -> set[bytes]:
-    """
-    Getroffene Scripts plus lokale Gap (nächste gap_limit Indizes je Chain).
-
-    Pro Receive/Change-Zweig: höchster getroffener Index, dann +gap_limit.
-    """
-    gap_limit = max(1, int(gap_limit))
-    max_index = max(gap_limit, int(max_index))
-    hits = set(hit_scripts or ())
-    # Deskriptor: keine Index-Matrix — Hits + Anfangs-Gap.
-    try:
-        import main as main_mod
-
-        if main_mod.ist_deskriptor(xpub):
-            out = set(hits)
-            out |= gap_scripts_anfang(
-                xpub, gap_limit=gap_limit, include_change=include_change,
-            )
-            return out
-    except Exception:
-        pass
-
-    try:
-        hd = HDKey.from_string(xpub)
-    except Exception:
-        out = set(hits)
-        out |= gap_scripts_anfang(
-            xpub, gap_limit=gap_limit, include_change=include_change,
-        )
-        return out
-
-    chains = (0, 1) if include_change else (0,)
-    # script → (change, index) für alle Encoder (wie derive).
-    index_von: dict[bytes, tuple[int, int]] = {}
-    for encoder in _encoders_for_xpub(xpub):
-        for change in chains:
-            for index in range(max_index):
-                try:
-                    child = hd.derive([change, index])
-                    spk = bytes(encoder(child.key).data)
-                except Exception:
-                    break
-                index_von.setdefault(spk, (change, index))
-
-    max_je_chain: dict[int, int] = {}
-    out = set(hits)
-    for spk in hits:
-        wo = index_von.get(spk)
-        if wo is None:
-            continue
-        change, index = wo
-        prev = max_je_chain.get(change, -1)
-        if index > prev:
-            max_je_chain[change] = index
-
-    for change in chains:
-        basis = max_je_chain.get(change, -1)
-        # Kein Hit auf dem Zweig: Gap ab 0; sonst ab höchstem Hit.
-        start_i = 0 if basis < 0 else basis
-        ende = min(max_index, start_i + gap_limit + (0 if basis < 0 else 1))
-        for encoder in _encoders_for_xpub(xpub):
-            for index in range(start_i, ende):
-                try:
-                    child = hd.derive([change, index])
-                    out.add(bytes(encoder(child.key).data))
-                except Exception:
-                    break
-    if not out:
-        out = gap_scripts_anfang(
-            xpub, gap_limit=gap_limit, include_change=include_change,
-        )
-    return out
 
 
 def _cfilter_chunks(
@@ -1157,6 +947,8 @@ class BIP158Scanner:
         stop_height: int | None = None,
         used_addresses: Sequence[str] = (),
     ) -> ScanResult:
+        from core.bip158_wallet import addresses_to_script_pubkeys
+
         watched = addresses_to_script_pubkeys(addresses)
         used = set(addresses_to_script_pubkeys(used_addresses).keys())
         return self._scan_script_map(
@@ -1180,6 +972,8 @@ class BIP158Scanner:
         seed_verlauf: dict[str, dict[str, Any]] | None = None,
         on_utxos_update=None,
     ) -> ScanResult:
+        from core.bip158_wallet import derive_script_pubkeys_from_xpub
+
         index_limit = max(gap_limit, max_index)
         watched = derive_script_pubkeys_from_xpub(
             xpub, max_index=index_limit, include_change=include_change,
@@ -1225,6 +1019,11 @@ class BIP158Scanner:
         max_index: int = DEFAULT_MAX_INDEX,
         include_change: bool = True,
     ) -> ScanResult:
+        from core.bip158_wallet import (
+            _matched_output_to_utxo,
+            gap_scripts_anfang,
+            scripts_mit_gap_um_treffer,
+        )
         from core.p2p import GETCFILTERS_MAX, hash_to_hex, hole_header
 
         if not watched:
@@ -1481,38 +1280,6 @@ class Bip158Client:
     cache_dir: Path | None = None
 
 
-def create_bip158_client_from_env(
-    env: dict[str, str],
-    *,
-    start_height: int = 0,
-    progress_callback: ProgressCallback | None = None,
-    verbose: bool = True,
-    cache_dir: Path | None = None,
-    immutable_dir: Path | None = None,
-) -> Bip158Client:
-    """P2P-Client: Clearnet zuerst, bei Fehlschlag Tor wie beim eigenen Node."""
-    from core.p2p import SEGWIT_HEIGHT, p2p_headers_path, p2p_peers_from_env
-    from core.paths import app_dir
-
-    peers = p2p_peers_from_env(env)
-    if immutable_dir is not None:
-        header_path = p2p_headers_path(immutable_dir)
-    elif cache_dir is not None:
-        header_path = Path(cache_dir).parent / "immutable_cache" / "p2p_headers.bin"
-    else:
-        header_path = app_dir() / "immutable_cache" / "p2p_headers.bin"
-    scanner = BIP158Scanner(
-        peers=peers,
-        header_path=header_path,
-        progress_callback=progress_callback,
-        env=env,
-    )
-    hoehe = start_height if start_height else SEGWIT_HEIGHT
-    return Bip158Client(
-        scanner=scanner, start_height=hoehe, verbose=verbose, cache_dir=cache_dir,
-    )
-
-
 def vorab_block_header(
     env: dict[str, str],
     *,
@@ -1528,6 +1295,7 @@ def vorab_block_header(
 
     Ist der Cache schon weit, nur Tip-Nachzug (keine „ab SegWit“-Meldung).
     """
+    from core.bip158_wallet import create_bip158_client_from_env
     from core.p2p import SEGWIT_HEIGHT, header_datei_tip, hole_header
 
     def _log(text: str) -> None:
@@ -1590,16 +1358,3 @@ def verify_p2p_filters(client: Bip158Client) -> int:
     """Handshake mit einem Compact-Filter-Peer; Rückgabe: dessen Höhe."""
     live = client.scanner._ensure_peer()
     return int(live.start_height)
-
-
-def _matched_output_to_utxo(output: MatchedOutput) -> dict[str, Any]:
-    return {
-        "txid": output.txid,
-        "vout": output.vout,
-        "value": output.value_sats,
-        "address": output.address,
-        "status": {
-            "confirmed": output.block_height > 0,
-            "block_height": output.block_height,
-        },
-    }
