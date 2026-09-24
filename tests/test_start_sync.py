@@ -316,7 +316,7 @@ class TestWalletsBeimStart(unittest.TestCase):
                 return [dict(alt)] if addr == alt["address"] else []
 
             with mock.patch(
-                "fulcrum.get_chain_tip_height", return_value=912_345
+                "core.fulcrum_history.get_chain_tip_height", return_value=912_345
             ) as tip_fn, mock.patch(
                 "core.p2p.header_datei_tip", return_value=900_100
             ), mock.patch(
