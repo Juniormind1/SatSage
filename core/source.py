@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import core.chain_sources as chain_sources
-from check_fulcrum_tor import ELECTRUM_SERVERS_URL, splitte_electrum_server
+from core.electrum_servers import ELECTRUM_SERVERS_URL, splitte_electrum_server
 
 #: Reihenfolge wie in core.chain_sources._setup_blockchain_client.
 PRIVACY_HIGH = "hoch"
@@ -817,7 +817,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     clearnet_anzahl = 0
     if clearnet_datei:
         try:
-            from check_fulcrum_tor import load_electrum_servers
+            from core.electrum_servers import load_electrum_servers
             _onions, clear = splitte_electrum_server(
                 load_electrum_servers(chain_sources.ELECTRUM_SERVERS_FILE)
             )
@@ -1156,7 +1156,7 @@ def _pruefe_oeffentliche_electrum(
     log("Prüfe öffentliche Electrum-Server…")
     clear_hosts: list[str] = []
     try:
-        from check_fulcrum_tor import load_electrum_servers
+        from core.electrum_servers import load_electrum_servers
 
         servers = load_electrum_servers(chain_sources.ELECTRUM_SERVERS_FILE)
         _onion_liste, clear = splitte_electrum_server(servers)

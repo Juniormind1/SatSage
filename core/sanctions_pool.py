@@ -166,7 +166,7 @@ def resolve_sanctions_clearnet_pool(
             flush=True,
         )
 
-    from check_fulcrum_tor import load_electrum_servers
+    from core.electrum_servers import load_electrum_servers
 
     try:
         servers = load_electrum_servers(ELECTRUM_SERVERS_FILE)

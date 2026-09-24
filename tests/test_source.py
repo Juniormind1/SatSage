@@ -791,7 +791,7 @@ class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
             source_mod, "splitte_electrum_server",
             return_value=([], [("1.2.3.4", 50002, True)] * 3),
         ), mock.patch(
-            "check_fulcrum_tor.load_electrum_servers", return_value={},
+            "core.electrum_servers.load_electrum_servers", return_value={},
         ), mock.patch.object(
             source_mod, "_loese_oeffentliches_onion_tor",
         ) as loese:
