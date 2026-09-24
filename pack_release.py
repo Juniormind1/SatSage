@@ -44,6 +44,8 @@ ESSENTIAL_FILES = (
     "display.py",
     "sanctioned.py",
     "bip158_scanner.py",
+    "core/bip158_filter.py",
+    "core/bip158_scan.py",
     "fulcrum.py",
     "check_fulcrum_tor.py",
     "consolidate.py",
