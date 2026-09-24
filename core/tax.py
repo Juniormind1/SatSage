@@ -1016,6 +1016,7 @@ def zeitstrahl(
             "value_sats": sats,
             "aeltere_sats": aeltere,
             "datum": eintrag.zeitpunkt.strftime("%d.%m.%Y"),
+            "time_ts": int(eintrag.zeitpunkt.timestamp()),
             "wallet": eintrag.wallet,
             "address": eintrag.address or "",
             "txid": eintrag.txid,

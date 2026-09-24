@@ -403,6 +403,23 @@ class TestOberflaeche(unittest.TestCase):
         self.einrichtung_js = (WEB / "views" / "einrichtung.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
 
+    def test_steuerjahr_nutzt_denselben_kopf_filter(self):
+        """Text, Betrag und Datum — Treffer in den Listen, Rest im Plot nur Kontur."""
+        self.assertIn(
+            'ansicht === "steuerjahr"',
+            self.js,
+        )
+        self.assertIn("function wendeKopfFilterSteuerjahrAn", self.js)
+        self.assertIn("filter-daneben", self.css)
+        self.assertIn("border-style: dotted", self.css)
+        steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        self.assertIn("_setzeSteuerGruppe", steuer)
+        self.assertIn("_saFilterNachladen", steuer)
+        self.assertIn("dataset.filterAus", steuer)
+        import json
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertIn("Steuerjahr", de["header.filterTitleActive"])
+
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
         """Zugeklappt unter den UTXOs — ohne Verlauf kein zusätzlicher Hinweis."""
         self.assertIn('id="wallet-ausgegeben"', self.html)
@@ -503,8 +520,20 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="verlauf-knopf"', self.html)
         self.assertIn("Historie", self.html)
         self.assertIn('class="utxo-aktionen-praefix"', self.html)
-        self.assertIn(">Bestand<", self.html)
+        self.assertIn(">UTXO:</span>", self.html)
+        self.assertIn(">Aktualisieren<", self.html)
+        self.assertIn(">Neu scannen<", self.html)
         self.assertIn(">Herkunft<", self.html)
+        gruppe = self.html.find('class="utxo-aktionen"')
+        self.assertLess(gruppe, self.html.find('id="tip-sync-knopf"', gruppe))
+        self.assertLess(
+            self.html.find('id="tip-sync-knopf"', gruppe),
+            self.html.find('id="rescan-knopf"', gruppe),
+        )
+        self.assertLess(
+            self.html.find("utxo-aktionen-praefix", gruppe),
+            self.html.find('id="tip-sync-knopf"', gruppe),
+        )
         self.assertIn("starteVerlaufsscan", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.chrome_js)
         self.assertIn('id="verlauf-erheben"', self.html)

@@ -244,6 +244,11 @@ function zeichneSteuerjahr(daten) {
 
   setzeText($("#steuer-vorbehalt"), (daten.hinweise || []).join(" "));
   $("#steuer-meldung").hidden = true;
+  if (typeof wendeKopfFilterSteuerjahrAn === "function") {
+    wendeKopfFilterSteuerjahrAn(
+      typeof steuerKopfFilter === "function" ? steuerKopfFilter() : null,
+    );
+  }
 }
 
 /** UTXO-Schlüssel in der Steuerjahr-Tabelle (Trace-Sprung, Meta). */
@@ -270,6 +275,16 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
   if (eintrag.value_sats != null) {
     zeile.dataset.valueSats = String(eintrag.value_sats);
   }
+  zeile.dataset.timeLabel = [eintrag.datum, eintrag.frist_ende]
+    .filter(Boolean).join(" ");
+  if (eintrag.time_ts) zeile.dataset.eventTs = String(eintrag.time_ts);
+  zeile.dataset.filterLabels = [
+    eintrag.wallet,
+    eintrag.herkunft,
+    eintrag.grundlage_label,
+    eintrag.txid,
+    haltefristBeschriftung(eintrag, Boolean(daten && daten.stichtag_regel)),
+  ].filter(Boolean).join(" ");
 
   const datum = document.createElement("td");
   datum.className = "zahl";
@@ -408,6 +423,7 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten }) {
   const meta = document.createElement("span");
   meta.className = "steuer-gruppe-meta zart";
   meta.textContent = `${anzahlText} · ${formatSatsGemeinsam(sats, eintraege)}`;
+  meta.dataset.voll = meta.textContent;
 
   kopf.append(klapp, name, meta);
   kopfZelle.append(kopf);
@@ -418,10 +434,13 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten }) {
   );
 
   const setzeGruppe = (auf) => {
-    for (const z of datenZeilen) z.hidden = !auf;
+    for (const z of datenZeilen) {
+      z.hidden = z.dataset.filterAus === "1" || !auf;
+    }
     klapp.textContent = auf ? "▾" : "▸";
     kopf.setAttribute("aria-expanded", String(auf));
   };
+  tbody._setzeSteuerGruppe = setzeGruppe;
   setzeGruppe(false);
 
   kopf.addEventListener("click", () => {
@@ -847,6 +866,17 @@ function zeichneZeitstrahl(daten, optionen = {}) {
       farbe = "ungeprueft";
     }
     punkt.className = `achse-punkt ${eintrag.groesse} ${farbe}`;
+    if (key) punkt.dataset.key = key;
+    if (eintrag.value_sats != null) {
+      punkt.dataset.valueSats = String(eintrag.value_sats);
+    }
+    if (eintrag.address) punkt.dataset.address = eintrag.address;
+    punkt.dataset.timeLabel = eintrag.datum || "";
+    const punktTs = Number(eintrag.time_ts || 0) || tsAusDeDatumMittag(eintrag.datum);
+    if (punktTs) punkt.dataset.eventTs = String(punktTs);
+    punkt.dataset.filterLabels = [
+      eintrag.wallet, eintrag.txid, lage,
+    ].filter(Boolean).join(" ");
     if (key) {
       punkt.classList.add("klickbar");
       punkt.title =
@@ -900,6 +930,11 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     zusatz.push(t("ui.hard.915044225f"));
   }
   setzeText($("#zeitstrahl-zusatz"), zusatz.join(" · "));
+  if (typeof wendeKopfFilterSteuerPunkte === "function") {
+    wendeKopfFilterSteuerPunkte(
+      typeof steuerKopfFilter === "function" ? steuerKopfFilter() : null,
+    );
+  }
 }
 
 /**
@@ -949,6 +984,8 @@ function zeichneAbgaenge(daten) {
           ? ` · davon ${k.abgang_steuerpflichtig_count} innerhalb der Frist`
           : " · alle nach Ablauf der Frist")
   );
+  const abZusatz = $("#abgaenge-zusatz");
+  if (abZusatz) abZusatz.dataset.voll = abZusatz.textContent;
 
   const liste = $("#abgaenge-liste");
   liste.replaceChildren();
@@ -962,6 +999,25 @@ function zeichneAbgaenge(daten) {
   for (const abgang of abgaenge) {
     const zeile = document.createElement("div");
     zeile.className = "abgang-zeile";
+    const abKey = abgang.txid != null && abgang.vout != null
+      ? `${abgang.txid}:${abgang.vout}`
+      : (abgang.abgang_txid || abgang.txid || "");
+    if (abKey) zeile.dataset.key = abKey;
+    if (abgang.address) zeile.dataset.address = abgang.address;
+    if (abgang.value_sats != null) {
+      zeile.dataset.valueSats = String(abgang.value_sats);
+    }
+    zeile.dataset.timeLabel = [abgang.datum, abgang.abgang_datum]
+      .filter(Boolean).join(" ");
+    const abTs = Number(abgang.abgang_time_ts || abgang.time_ts || 0);
+    if (abTs > 0) zeile.dataset.eventTs = String(abTs);
+    zeile.dataset.filterLabels = [
+      abgang.wallet, abgang.abgang_txid, abgang.txid,
+      haltefristBeschriftung(
+        { erfuellt: abgang.frist_erfuellt, neuvermoegen: abgang.neuvermoegen },
+        Boolean(daten.stichtag_regel),
+      ),
+    ].filter(Boolean).join(" ");
 
     const marke = pille(
       abgang.frist_erfuellt ? "gut" : "krit",
@@ -1146,6 +1202,13 @@ function saAbschnitt(titel, zusatz, {
 function zeichneSaAbflussZeile(k) {
   const zeile = document.createElement("label");
   zeile.className = "sa-zeile" + (k.eigenuebertrag ? " eigen" : "");
+  zeile.dataset.key = k.txid || k.id || "";
+  if (k.netto_sats != null) zeile.dataset.valueSats = String(k.netto_sats);
+  zeile.dataset.timeLabel = [k.abgang_datum, k.abgang_zeit].filter(Boolean).join(" ");
+  if (k.abgang_ts) zeile.dataset.eventTs = String(k.abgang_ts);
+  const abflussAdressen = (k.inputs || []).map((i) => i.address).filter(Boolean);
+  if (abflussAdressen.length) zeile.dataset.address = abflussAdressen.join(" ");
+  zeile.dataset.filterLabels = [...(k.wallets || []), k.txid].filter(Boolean).join(" ");
   const box = document.createElement("input");
   box.type = "checkbox";
   box.value = k.id || k.txid;
@@ -1192,6 +1255,18 @@ function zeichneSaAbflussZeile(k) {
 function zeichneSaUtxoZeile(u) {
   const zeile = document.createElement("label");
   zeile.className = "sa-zeile";
+  const utxoKey = u.txid != null && u.vout != null
+    ? `${u.txid}:${u.vout}`
+    : (u.id || "");
+  if (utxoKey) zeile.dataset.key = utxoKey;
+  if (u.address) zeile.dataset.address = u.address;
+  if (u.value_sats != null) zeile.dataset.valueSats = String(u.value_sats);
+  zeile.dataset.timeLabel = [u.anschaffung_datum, u.stichtag].filter(Boolean).join(" ");
+  const anschaffungTs = tsAusDeDatumMittag(u.anschaffung_datum);
+  if (anschaffungTs) zeile.dataset.eventTs = String(anschaffungTs);
+  zeile.dataset.filterLabels = [
+    u.wallet, u.external_address, u.grundlage, u.txid,
+  ].filter(Boolean).join(" ");
   const box = document.createElement("input");
   box.type = "checkbox";
   box.value = u.id || `utxo:${u.txid}:${u.vout}`;
@@ -1344,6 +1419,7 @@ function zeichneSelbstanzeigeKandidaten() {
       for (const el of ut.innen.querySelectorAll(
         "input[type=checkbox][data-art=utxo]",
       )) {
+        if (el.closest(".sa-zeile")?.hidden) continue;
         el.checked = true;
       }
     });
@@ -1357,6 +1433,7 @@ function zeichneSelbstanzeigeKandidaten() {
       for (const el of ut.innen.querySelectorAll(
         "input[type=checkbox][data-art=utxo]",
       )) {
+        if (el.closest(".sa-zeile")?.hidden) continue;
         el.checked = false;
       }
     });
@@ -1375,11 +1452,35 @@ function zeichneSelbstanzeigeKandidaten() {
   mehr.className = "knopf knopf-klein sa-mehr";
   mehr.hidden = true;
 
+  let gefiltertVoll = false;
+
+  function saChecksLesen() {
+    const gesehen = new Set();
+    const an = new Set();
+    for (const el of liste.querySelectorAll("input[type=checkbox]")) {
+      const id = `${el.dataset.art}:${el.value}`;
+      gesehen.add(id);
+      if (el.checked) an.add(id);
+    }
+    return { gesehen, an };
+  }
+
+  function zeichneSaUtxoMitCheck(u) {
+    const zeile = zeichneSaUtxoZeile(u);
+    const box = zeile.querySelector("input[type=checkbox]");
+    const stand = Zustand._saChecks;
+    if (box && stand) {
+      const id = `${box.dataset.art}:${box.value}`;
+      if (stand.gesehen.has(id)) box.checked = stand.an.has(id);
+    }
+    return zeile;
+  }
+
   function haengeUtxoChunk() {
     const frag = document.createDocumentFragment();
     const ende = Math.min(gezeigt + SA_UTXO_CHUNK, utxos.length);
     for (; gezeigt < ende; gezeigt++) {
-      frag.append(zeichneSaUtxoZeile(utxos[gezeigt]));
+      frag.append(zeichneSaUtxoMitCheck(utxos[gezeigt]));
     }
     host.append(frag);
     if (gezeigt < utxos.length) {
@@ -1389,6 +1490,41 @@ function zeichneSelbstanzeigeKandidaten() {
       mehr.hidden = true;
     }
   }
+
+  // Filter: alle passenden UTXOs zeichnen (nicht nur den ersten Chunk).
+  // Zurück auf leer: wieder stückweise, Häkchen bleiben.
+  liste._saFilterNachladen = () => {
+    const roh = ($("#kopf-filter")?.value || "").trim();
+    if (gefiltertVoll && liste.dataset.saFilterRoh === roh) return;
+    const f = typeof kopfFilterGelesen === "function"
+      ? kopfFilterGelesen()
+      : null;
+    if (!f || f.leer || typeof _kopfFilterLeafOk !== "function") return;
+    Zustand._saChecks = saChecksLesen();
+    host.replaceChildren();
+    const frag = document.createDocumentFragment();
+    for (const u of utxos) {
+      const zeile = zeichneSaUtxoMitCheck(u);
+      if (!_kopfFilterLeafOk(zeile, f)) continue;
+      frag.append(zeile);
+    }
+    host.append(frag);
+    gezeigt = utxos.length;
+    gefiltertVoll = true;
+    liste.dataset.saFilterRoh = roh;
+    mehr.hidden = true;
+    Zustand._saChecks = null;
+  };
+  liste._saFilterZurueck = () => {
+    if (!gefiltertVoll) return;
+    Zustand._saChecks = saChecksLesen();
+    host.replaceChildren();
+    gezeigt = 0;
+    gefiltertVoll = false;
+    liste.dataset.saFilterRoh = "";
+    haengeUtxoChunk();
+    Zustand._saChecks = null;
+  };
   mehr.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1419,6 +1555,17 @@ function zeichneSelbstanzeigeKandidaten() {
     });
     liste.append(vl.details);
   }
+  if (typeof wendeKopfFilterSteuerjahrAn === "function") {
+    wendeKopfFilterSteuerjahrAn(
+      typeof steuerKopfFilter === "function" ? steuerKopfFilter() : null,
+    );
+  }
+}
+
+/** TT.MM.JJJJ (Mittag, lokal) → Unix-Sekunden, sonst 0. */
+function tsAusDeDatumMittag(text) {
+  const d = parseDeDatum(text);
+  return d ? Math.floor(d.getTime() / 1000) : 0;
 }
 
 /** TxID aus Filterfeld — Outpoint ``txid:vout`` → nur Tx-Teil. */

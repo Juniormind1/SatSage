@@ -130,7 +130,7 @@ def resolve_wallets_nur_bekannte_utxos(
     Unteroption zu „Wallets immer aktuell halten“.
 
     Env: ``WALLETS_NUR_BEKANNTE_UTXOS``. Bei ja: Tip-Nachzug (Start / Block /
-    „Bis Tip“) prüft nur bekannte UTXOs/Adressen — kein Gap-Scan. Neue
+    „Aktualisieren“) prüft nur bekannte UTXOs/Adressen — kein Gap-Scan. Neue
     Empfangsadressen nur per manuellem UTXO-Scan. Vorgabe aus.
     """
     raw = env.get("WALLETS_NUR_BEKANNTE_UTXOS")

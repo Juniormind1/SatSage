@@ -1649,7 +1649,21 @@ function setzeKopfFilterAktiv(aktiv) {
 
 /** Welche Ansichten den Kopf-Filter nutzen (weitere folgen schrittweise). */
 function kopfFilterAnsichtAktiv(ansicht) {
-  return ansicht === "wallet" || ansicht === "trace";
+  return ansicht === "wallet" || ansicht === "trace" || ansicht === "steuerjahr";
+}
+
+function kopfFilterLeer() {
+  return {
+    leer: true, terms: [], minSats: null, maxSats: null,
+    afterTs: null, beforeTs: null,
+  };
+}
+
+/** Aktueller Feldinhalt, oder leer wenn das Feld aus ist. */
+function kopfFilterGelesen() {
+  const feld = $("#kopf-filter");
+  if (!feld || feld.disabled) return kopfFilterLeer();
+  return parseKopfFilter(feld.value);
 }
 
 function aktualisiereKopfFilterFuerAnsicht() {
@@ -1959,26 +1973,154 @@ function wendeKopfFilterTraceAn(f) {
   _kopfFilterAusgegebenAnwenden(ausBlock, f);
 }
 
+/** Feldinhalt nur, solange die Steuerjahr-Ansicht den Filter wirklich nutzt. */
+function steuerKopfFilter() {
+  if (Zustand.ansicht !== "steuerjahr") return kopfFilterLeer();
+  return kopfFilterGelesen();
+}
+
+/** Punktdiagramm: Treffer gefüllt, sonst nur gepunkteter Rand. */
+function wendeKopfFilterSteuerPunkte(f) {
+  const spur = $("#achse-spur");
+  if (!spur) return;
+  const filter = f && !f.leer ? f : kopfFilterLeer();
+  for (const punkt of spur.querySelectorAll(".achse-punkt")) {
+    if (filter.leer || punkt.classList.contains("geister")) {
+      punkt.classList.toggle("filter-daneben", !filter.leer);
+      continue;
+    }
+    punkt.classList.toggle("filter-daneben", !_kopfFilterLeafOk(punkt, filter));
+  }
+}
+
+/**
+ * Steuerjahr: Punkte mit Treffer bleiben gefüllt, der Rest wird zum
+ * gepunkteten Ring. Listen zeigen nur Treffer.
+ */
+function wendeKopfFilterSteuerjahrAn(f) {
+  const root = $("#ansicht-steuerjahr");
+  if (!root) return;
+  const filter = f && !f.leer ? f : kopfFilterLeer();
+  wendeKopfFilterSteuerPunkte(filter);
+
+  for (const tbody of root.querySelectorAll("tbody.steuer-gruppe")) {
+    const zeilen = [...tbody.querySelectorAll(":scope > tr.steuer-utxo-zeile")];
+    const meta = tbody.querySelector(".steuer-gruppe-meta");
+    if (meta && filter.leer && meta.dataset.voll) {
+      meta.textContent = meta.dataset.voll;
+    }
+    let n = 0;
+    let sats = 0;
+    for (const z of zeilen) {
+      const ok = filter.leer || _kopfFilterLeafOk(z, filter);
+      if (ok) {
+        delete z.dataset.filterAus;
+        n += 1;
+        sats += Number(z.dataset.valueSats) || 0;
+      } else {
+        z.dataset.filterAus = "1";
+      }
+    }
+    if (filter.leer) {
+      tbody.hidden = false;
+      if (typeof tbody._setzeSteuerGruppe === "function") {
+        tbody._setzeSteuerGruppe(false);
+      }
+      continue;
+    }
+    if (n === 0) {
+      tbody.hidden = true;
+      continue;
+    }
+    tbody.hidden = false;
+    if (meta) {
+      const anzahl = n === 1 ? "1 UTXO" : `${n} UTXOs`;
+      meta.textContent = `${anzahl} · ${formatSatsBasis(sats)}`;
+    }
+    if (typeof tbody._setzeSteuerGruppe === "function") {
+      tbody._setzeSteuerGruppe(true);
+    }
+  }
+
+  const abListe = $("#abgaenge-liste");
+  const abZusatz = $("#abgaenge-zusatz");
+  if (abListe) {
+    const zeilen = [...abListe.querySelectorAll(":scope > .abgang-zeile")];
+    let n = 0;
+    let sats = 0;
+    for (const z of zeilen) {
+      const ok = filter.leer || _kopfFilterLeafOk(z, filter);
+      z.hidden = !ok;
+      if (ok) {
+        n += 1;
+        sats += Number(z.dataset.valueSats) || 0;
+      }
+    }
+    if (abZusatz && zeilen.length) {
+      if (!abZusatz.dataset.voll) abZusatz.dataset.voll = abZusatz.textContent;
+      abZusatz.textContent = filter.leer
+        ? (abZusatz.dataset.voll || abZusatz.textContent)
+        : (n
+          ? `${t("header.filterMatchCount", { n })} · ${formatSatsBasis(sats)}`
+          : t("header.filterNone"));
+    }
+  }
+
+  const sa = $("#sa-liste");
+  if (sa && !filter.leer && typeof sa._saFilterNachladen === "function") {
+    sa._saFilterNachladen();
+  }
+  if (sa && filter.leer && typeof sa._saFilterZurueck === "function") {
+    sa._saFilterZurueck();
+  }
+  if (sa) {
+    for (const abschnitt of sa.querySelectorAll(".sa-abschnitt")) {
+      const zeilen = [...abschnitt.querySelectorAll(".sa-zeile")];
+      if (!zeilen.length) continue;
+      let n = 0;
+      for (const z of zeilen) {
+        const ok = filter.leer || _kopfFilterLeafOk(z, filter);
+        z.hidden = !ok;
+        if (ok) n += 1;
+      }
+      const meta = abschnitt.querySelector(".sa-summary-meta");
+      if (meta && !meta.dataset.voll) meta.dataset.voll = meta.textContent;
+      if (filter.leer) {
+        if (meta && meta.dataset.voll) meta.textContent = meta.dataset.voll;
+      } else if (meta) {
+        meta.textContent = n
+          ? t("header.filterMatchCount", { n })
+          : t("header.filterNone");
+        if (n > 0 && abschnitt.tagName === "DETAILS") abschnitt.open = true;
+      }
+    }
+  }
+}
+
 function wendeKopfFilterAn() {
-  const feld = $("#kopf-filter");
-  const f = parseKopfFilter(feld && !feld.disabled ? feld.value : "");
+  const f = kopfFilterGelesen();
+  const leer = kopfFilterLeer();
   if (Zustand.ansicht === "wallet") {
     wendeKopfFilterWalletAn(f);
-    // Trace-DOM zurücksetzen, falls zuvor gefiltert
     _kopfFilterRootLeeren($("#ansicht-trace"));
+    wendeKopfFilterSteuerjahrAn(leer);
     return;
   }
   if (Zustand.ansicht === "trace") {
     wendeKopfFilterTraceAn(f);
     _kopfFilterRootLeeren($("#ansicht-wallet"));
+    wendeKopfFilterSteuerjahrAn(leer);
     return;
   }
-  const leer = {
-    leer: true, terms: [], minSats: null, maxSats: null,
-    afterTs: null, beforeTs: null,
-  };
+  if (Zustand.ansicht === "steuerjahr") {
+    wendeKopfFilterSteuerjahrAn(f);
+    _kopfFilterRootLeeren($("#ansicht-wallet"));
+    _kopfFilterRootLeeren($("#ansicht-trace"));
+    return;
+  }
   wendeKopfFilterWalletAn(leer);
   wendeKopfFilterTraceAn(leer);
+  wendeKopfFilterSteuerjahrAn(leer);
 }
 
 let _kopfFilterTimer = null;

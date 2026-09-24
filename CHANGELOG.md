@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Einstellungen:** Sprache, Darstellung, Aktualität und Lernhinweise stehen nebeneinander. Ist das Fenster zu schmal, rutschen die Boxen untereinander (bei mittlerer Breite zu zweit). Assistent und Status-Mails ebenso nebeneinander, bei schmalem Fenster untereinander.
+- **Wallets:** UTXO-Knöpfe heißen „Aktualisieren“ (bisher „Bis Tip“) und „Neu scannen“ (bisher „Bestand“). „UTXO:“ steht davor, in der normalen Schriftfarbe.
+- **Steuerjahr · Filter:** Dieselbe Suche wie bei Wallet/Herkunft (Text, Betrag `>`/`<`, Datum `>`/`<`, mehrere Begriffe). Treffer bleiben im Punktdiagramm; andere Punkte nur noch mit gepunktetem Rand. Abflüsse, Was-wäre-wenn, Veräußerungen und die Haltefrist-Gruppen zeigen nur noch Treffer.
 - **Login · Dialog:** Falsches Passwort bleibt im Anmelde-Dialog („Passwort falsch.“) — keine rohe JSON-/Fehlerseite mehr. Nach korrektem Passwort Fortschritt „Passwort korrekt — Entschlüsselung läuft…“ (Auth und Unlock getrennt; spürbar v. a. im PyInstaller-Build).
 - **UI · Englisch:** Hardcodierte Production-GUI-Texte (Steuerjahr, Herkunft, Scans, Cache, Wallets, Datenquellen, Importe, Assistent, QR-Atem-Witze u. a.) über Locales `de.json`/`en.json` und `t()` verdrahtet — inkl. fehlender Trace-Sort-Keys und „Lokalen Core übernehmen“.
 - **Tests · .env-Scramble:** Unittests schreiben/lesen mit festem Passwort `tralala123` (scramble + descramble); kein Roh-`read_text` mehr auf Cipher-`.env`. `main._load_dotenv` liest scrambled Dateien mit Session-Key.

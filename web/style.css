@@ -954,9 +954,13 @@ button, input, select { font: inherit; color: inherit; }
 .utxo-aktionen-praefix {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--blass);
+  /* Hell: volle Schriftfarbe. Dunkel: weiß, nicht das graue --blass. */
+  color: var(--text);
   letter-spacing: 0.02em;
   user-select: none;
+}
+html[data-theme="dark"] .utxo-aktionen-praefix {
+  color: #fff;
 }
 .meta { margin: 2px 0 0; color: var(--blass); font-size: 12px; }
 
@@ -1409,6 +1413,93 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 .zahl { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* ---------- Karten (Einstellungen) ---------- */
+
+/* Sprache, Darstellung, Aktualität, Lernhinweise: eine Reihe, die umbricht. */
+.einstellungen-kurz {
+  container-type: inline-size;
+  container-name: einstellungen-kurz;
+  margin-bottom: 16px;
+}
+.einstellungen-kurzreihe {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@container einstellungen-kurz (min-width: 36rem) {
+  .einstellungen-kurzreihe {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container einstellungen-kurz (min-width: 58rem) {
+  .einstellungen-kurzreihe {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.einstellungen-kurzreihe > .karte {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.einstellungen-kurzreihe > .karte > .karte-fuss {
+  flex: 0 0 auto;
+}
+.einstellungen-kurzreihe > .karte > .steuer-einstellungen-hinweis {
+  flex: 1 1 auto;
+}
+.einstellungen-kurzreihe .steuer-einstellungen .feld {
+  min-width: 0;
+  width: 100%;
+}
+.einstellungen-kurzreihe .check-zeile {
+  min-width: 0;
+  align-items: flex-start;
+}
+.einstellungen-kurzreihe .check-zeile > span {
+  min-width: 0;
+}
+
+/* Assistent und Status-Mails: nebeneinander, bei schmalem Fenster untereinander. */
+.einstellungen-paar {
+  container-type: inline-size;
+  container-name: einstellungen-paar;
+  margin-bottom: 16px;
+}
+.einstellungen-paarreih {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@container einstellungen-paar (min-width: 42rem) {
+  .einstellungen-paarreih {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.einstellungen-paarreih > .karte {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.einstellungen-paarreih > .karte > .karte-fuss {
+  flex: 0 0 auto;
+}
+.einstellungen-paarreih > .karte > .steuer-einstellungen-hinweis {
+  flex: 1 1 auto;
+}
+.einstellungen-paarreih .llm-einstellungen > .feld,
+.einstellungen-paarreih .llm-einstellungen > .feld.feld-breit {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 12rem;
+}
+.einstellungen-paarreih .check-zeile {
+  min-width: 0;
+  align-items: flex-start;
+}
+.einstellungen-paarreih .check-zeile > span {
+  min-width: 0;
+}
 
 .karte {
   border: 1px solid var(--linie); border-radius: 4px;
@@ -2324,6 +2415,20 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 /* Innerhalb Haltefrist + ohne Herkunft: grau statt gelb.
    Außerhalb der Frist bleibt .erfuellt (grün), auch ohne Trace. */
 .achse-punkt.ungeprueft { background: var(--achse-ungeprueft); }
+/* Filter-Nichttreffer: Umriss bleibt in der Haltefrist-Farbe, ohne Füllung. */
+.achse-punkt.filter-daneben,
+.achse-punkt.filter-daneben.erfuellt,
+.achse-punkt.filter-daneben.offen,
+.achse-punkt.filter-daneben.ungeprueft,
+.achse-punkt.filter-daneben.geister {
+  background: transparent;
+  border-style: dotted;
+  border-width: 2px;
+}
+.achse-punkt.filter-daneben.erfuellt,
+.achse-punkt.filter-daneben.geister { border-color: var(--gut); }
+.achse-punkt.filter-daneben.offen { border-color: var(--warn); }
+.achse-punkt.filter-daneben.ungeprueft { border-color: var(--achse-ungeprueft); }
 /* Geister-Saldo: Ring auf der X-Achse (y=0), Größe per Inline-width/height. */
 .achse-punkt.geister {
   background: transparent;
