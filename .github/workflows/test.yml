@@ -4,9 +4,9 @@ name: Tests
 # Entspricht Blind-Spot #1 in ISSUES.md.
 on:
   push:
-    branches: [main]
+    branches: [main, dev-juniormind]
   pull_request:
-    branches: [main]
+    branches: [main, dev-juniormind]
   workflow_dispatch:
 
 permissions:
