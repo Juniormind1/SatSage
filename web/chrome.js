@@ -112,23 +112,22 @@ async function ladeConfig() {
 }
 
 async function start() {
-  // Auth: Session-Cookie und/oder Bootstrap-Token. Mit gesetztem Passwort
-  // reicht ?t= nicht — Login ist Pflicht (auch Loopback / nach Server-Neustart).
-  let auth = null;
-  try {
-    const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
-    if (antwort.ok) auth = await antwort.json();
-  } catch (_) {
-    auth = null;
-  }
-  if (auth && auth.password_set && !auth.authenticated) {
-    location.href = "/login?next=/";
-    return;
-  }
+  // Wie 0.9.7: Konsolen-Token oder Passwort-Sitzung. Hinter StartOS gibt es
+  // kein ?t=; ohne Token zuerst den Status fragen, sonst „Token fehlt“.
   if (!Token) {
+    let auth = null;
+    try {
+      const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
+      if (antwort.ok) auth = await antwort.json();
+    } catch (_) {
+      auth = null;
+    }
     if (auth && auth.authenticated) {
-      // Session-Cookie reicht — kein ?t= nötig.
+      // Session-Cookie oder StartOS-Proxy reicht — kein ?t= nötig.
     } else if (auth && auth.password_set) {
+      location.href = "/login?next=/";
+      return;
+    } else if (auth && (auth.managed_by === "start9" || auth.managed_by === "umbrel")) {
       location.href = "/login?next=/";
       return;
     } else {

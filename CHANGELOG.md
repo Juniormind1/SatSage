@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **StartOS · Image:** Das Container-Image hat nach dem Refactor `httpserver/` nicht mitkopiert, `server.py` endete mit `ModuleNotFoundError`. Der Image-Bau kopiert den Kontext und bricht ab, wenn ein lokales Modul fehlt — eine neue Handliste entfällt. Der Health-Check prüft den Port im Container, nicht `127.0.0.1` auf dem StartOS-Host.
+- **StartOS · Paketversion:** Das Sideload-Paket hängt an der App-`VERSION` (`0.9.8:0`), nicht mehr am Scaffold `0.1.0:0`. Der Build bricht ab, wenn `packaging/startos/versions/current.ts` davon abweicht.
+- **StartOS · Oberfläche nach Basic Auth:** Der Konsolen-Token gilt dort nicht. Ein Inline-Skript vor den Modulen fragt den Anmeldestatus und blendet „Token fehlt“ aus, auch wenn Firefox ein altes `chrome.js` aus dem Cache hält. Die Skripte hängen an `?v=0.9.8`. Mit `SATSAGE_TRUST_PROXY=1` gilt die Anfrage als schon angemeldet, weil der Proxy `X-Forwarded-User` nicht ins Container-Netz reicht.
 - **Regtest-Labor:** Der Start legt das Electrs-Cookie im Container an und gibt dem Bitcoin-Image die Benutzerkennung des Hosts mit. Auf dem GitHub-Runner gehörte das Datenverzeichnis sonst UID 101, und der Start brach mit „Permission denied“ ab, bevor Szenarien und Prüfung liefen. Ein Release (Tag, Container-Image, Linux-Binary, StartOS-Paket) setzt ein grünes Labor auf diesem Commit voraus. Der Montagslauf startet nur, wenn seit dem letzten grünen Lauf etwas an Klassifikation, Sanktions-Hops oder dem Labor selbst lag.
 
 ## [0.9.8] — 2026-09-25

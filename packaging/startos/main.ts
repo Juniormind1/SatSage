@@ -67,15 +67,13 @@ export const main = sdk.setupMain(async ({ effects }) => {
     ready: {
       display: i18n('SatSage API'),
       gracePeriod: 30000,
+      // Port im Container, nicht fetch auf 127.0.0.1: der Health-Daemon läuft
+      // im StartOS-Host und erreicht die Container-Loopback nicht.
       fn: () =>
-        sdk.healthCheck.checkWebUrl(
-          effects,
-          `http://127.0.0.1:${appPort}/api/health`,
-          {
-            successMessage: i18n('SatSage is ready'),
-            errorMessage: i18n('SatSage is not ready'),
-          },
-        ),
+        sdk.healthCheck.checkPortListening(effects, appPort, {
+          successMessage: i18n('SatSage is ready'),
+          errorMessage: i18n('SatSage is not ready'),
+        }),
     },
     requires: [],
   })

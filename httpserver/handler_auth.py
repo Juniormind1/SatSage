@@ -110,8 +110,13 @@ class HandlerAuthMixin:
 
     def _secure_cookie(self) -> bool:
         _ensure_server_names()
+        # The request URL inside the container is plain HTTP. A Secure cookie
+        # is only stored when the browser itself saw HTTPS. StartOS terminates
+        # TLS and should set X-Forwarded-Proto; if that header is missing the
+        # cookie must still stick, otherwise the UI falls through to „Token fehlt“.
         if _env_setting(self.state, "SATSAGE_TRUST_PROXY") == "1":
-            return (self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower() == "https"
+            proto = (self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
+            return proto == "https"
         return (urlparse(self.path).scheme or "").lower() == "https"
 
     def _set_session_cookie(self, value: str, *, delete: bool = False) -> None:
@@ -321,6 +326,7 @@ class HandlerAuthMixin:
             "password_set": _password_is_set(self.state),
             "authenticated": authenticated,
             "setup_required": not _password_is_set(self.state),
+            "managed_by": self.state.managed_by,
         }
 
     def _auth_api(self, methode: str, pfad: str) -> bool:

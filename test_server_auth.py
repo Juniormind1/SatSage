@@ -22,9 +22,8 @@ class Start9ProxyAuthTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"SATSAGE_TRUST_PROXY": "1"}):
                 headers = {"X-Forwarded-Proto": "https", "X-Forwarded-User": "admin"}
                 self.assertTrue(_start9_proxy_authenticated(state, headers))
-                self.assertFalse(_start9_proxy_authenticated(state, {"X-Forwarded-Proto": "https"}))
-                self.assertFalse(_start9_proxy_authenticated(state, {"X-Forwarded-Proto": "https", "X-Forwarded-User": ""}))
-                self.assertFalse(_start9_proxy_authenticated(state, {"X-Forwarded-User": "admin"}))
+                # StartOS reicht die Proxy-Header nicht ins Container-Netz.
+                self.assertTrue(_start9_proxy_authenticated(state, {}))
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ Fertiges x86_64-Beispiel: GitHub-Release-Asset `satsage_x86_64-tls11.s9pk` (sieh
 |------|--------|
 | `packaging/` | StartOS-**Package-Root** (wie `hello-world-startos/`) |
 | `packaging/startos/` | SDK 0.4: Manifest, Daemon, Interfaces, Deps, Backup, Passwort-Action |
-| `packaging/Dockerfile` | Python-Image; Build-Kontext ist das **Repo-Root** |
+| `packaging/Dockerfile` | Python-Image; Build-Kontext ist das **Repo-Root**. Kopiert den Kontext (kein Modul-Handliste); `.dockerignore` hält Secrets, Caches und die StartOS-Toolchain draußen. Der Build bricht ab, wenn `server.py` ein lokales Modul importiert, das nicht im Image liegt. |
 | `packaging/docker_entrypoint.sh` | `server.py` mit Volume `/data` |
 | `scripts/build_startos_s9pk` | `make x86` inkl. Tool-Check |
 | `scripts/publish_startos_release` | `gh release` mit `.s9pk` + SHA-256 |
@@ -69,7 +69,7 @@ Erstes `make x86` zieht das Python-Image und kann mehrere Minuten dauern. ARM: M
 
 ### Version
 
-StartOS-Version steht in `packaging/startos/versions/current.ts` (`0.1.0:0` = upstream:revision). App-`VERSION` (0.9) ist unabhÃ¤ngig. Vor einem Update-Sideload die Package-Version anheben und alte Versionen in `versions/` behalten, sonst scheitert die Migration auf GerÃ¤ten mit dem vorherigen Paket.
+StartOS-Version steht in `packaging/startos/versions/current.ts` und folgt dem App-Release: `VERSION` + `:0` (jetzt `0.9.8:0`). `scripts/build_startos_s9pk` bricht ab, wenn die beiden auseinanderlaufen. Vor einem Update-Sideload die alte Version in `versions/` behalten, sonst scheitert die Migration auf Geräten mit dem vorherigen Paket.
 
 ---
 

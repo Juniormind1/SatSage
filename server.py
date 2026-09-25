@@ -621,20 +621,38 @@ def _client_ip(handler) -> str:
         return "unknown"
 
 
+def _basic_authorization(headers) -> tuple[str, str] | None:
+    """``Authorization: Basic …`` → ``(user, password)``, sonst ``None``."""
+    raw = str(headers.get("Authorization") or "").strip()
+    scheme, _, token = raw.partition(" ")
+    if scheme.lower() != "basic" or not token.strip():
+        return None
+    import base64
+
+    try:
+        decoded = base64.b64decode(token.strip(), validate=True).decode("utf-8")
+    except (ValueError, UnicodeError):
+        return None
+    user, sep, password = decoded.partition(":")
+    if not sep:
+        return None
+    return user, password
+
+
 def _start9_proxy_authenticated(state, headers) -> bool:
-    """Return whether StartOS Basic Auth already authenticated this request."""
-    if (
-        state.managed_by != "start9"
-        or _env_setting(state, "SATSAGE_TRUST_PROXY") != "1"
-        or not _password_is_set(state)
-    ):
-        return False
-    proto = str(headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
-    user = str(headers.get("X-Forwarded-User") or "").split(",", 1)[0].strip()
-    # StartOS sets this only after its Basic Auth middleware has accepted the
-    # request.  It does not forward X-Forwarded-Host, so the user header is
-    # the authoritative proof that the outer login already happened.
-    return proto == "https" and bool(user)
+    """StartOS hat diese Anfrage schon per Basic Auth durchgelassen.
+
+    0.9.7 verlangte ``X-Forwarded-Proto: https`` und ``X-Forwarded-User``.
+    Der Proxy reicht beides nicht ins Container-Netz. Mit
+    ``SATSAGE_TRUST_PROXY=1`` ist der StartOS-Proxy die einzige Tür: wer die
+    Oberfläche erreicht, hat ``admin`` und das StartOS-Passwort schon
+    eingegeben. Ohne den Schalter bleibt die Sitzung zu.
+    """
+    return (
+        state.managed_by == "start9"
+        and _env_setting(state, "SATSAGE_TRUST_PROXY") == "1"
+        and _password_is_set(state)
+    )
 
 
 
@@ -1209,6 +1227,7 @@ class Handler(
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cache-Control", "no-store")
             if getattr(self, "_pending_cookie", None):
                 self.send_header("Set-Cookie", self._pending_cookie)
             self.send_header(

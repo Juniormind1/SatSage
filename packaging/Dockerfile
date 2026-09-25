@@ -20,15 +20,64 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=wheels /install /usr/local
 WORKDIR /opt/satsage
-COPY analyze.py bip158_scanner.py check_fulcrum_tor.py consolidate.py \
-     diagnose.py display.py fulcrum.py interact.py labels.py main.py menu.py \
-     outbound_policy.py sanctioned.py server.py trace_engine.py \
-     requirements.txt VERSION LICENSE NOTICE ./
-COPY core ./core
-COPY web ./web
-COPY doc ./doc
-COPY data ./data
+# Keine Handliste: ein neues Paket neben core/ und httpserver/ kommt mit,
+# solange .dockerignore es nicht ausschließt. Der Build bricht ab, wenn
+# server.py ein lokales Modul importiert, das nicht im Image liegt.
+COPY . .
 COPY packaging/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+RUN python3 - <<'PY'
+import ast
+import sys
+from pathlib import Path
+
+root = Path("/opt/satsage")
+stdlib = set(sys.stdlib_module_names)
+third = {"embit", "chiabip158", "argon2", "cryptography", "PIL", "pyi_splash"}
+seen: set[Path] = set()
+missing: set[str] = set()
+
+def present(mod: str) -> Path | None:
+    parts = mod.split(".")
+    file = root.joinpath(*parts).with_suffix(".py")
+    pkg = root.joinpath(*parts)
+    if file.is_file():
+        return file
+    init = pkg / "__init__.py"
+    if pkg.is_dir():
+        return init if init.is_file() else pkg
+    top = root / f"{parts[0]}.py"
+    if len(parts) > 1 and top.is_file():
+        return top
+    return None
+
+def walk(path: Path) -> None:
+    if path in seen or not path.is_file():
+        return
+    seen.add(path)
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    mods: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            mods.append(node.module)
+    for mod in mods:
+        top = mod.split(".", 1)[0]
+        if top in stdlib or top in third:
+            continue
+        found = present(mod)
+        if found is None:
+            missing.add(mod)
+            continue
+        if found.is_file():
+            walk(found)
+
+walk(root / "server.py")
+if missing:
+    print("Image fehlt lokale Module:", ", ".join(sorted(missing)), file=sys.stderr)
+    raise SystemExit(1)
+print(f"image import check ok ({len(seen)} files)")
+PY
 # Umbrel runs the service as 1000:1000; keep /data writable for that case as
 # well as for the root default used by StartOS.
 RUN chmod a+x /usr/local/bin/docker_entrypoint.sh \

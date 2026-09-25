@@ -1751,25 +1751,46 @@
   </div>
 </template>
 
-<script src="/vendor/qr-min.js"></script>
-<script src="/i18n.js"></script>
-<script src="/log_i18n.js"></script>
-<script src="/api.js"></script>
-<script src="/state.js"></script>
-<script src="/format.js"></script>
-<script src="/app.js"></script>
-<script src="/mempool_links.js"></script>
-<script src="/views/einstellungen.js"></script>
-<script src="/views/datenquellen.js"></script>
-<script src="/views/sanktionen.js"></script>
-<script src="/views/einrichtung.js"></script>
-<script src="/views/adress_labels.js"></script>
-<script src="/views/wallets.js"></script>
-<script src="/views/herkunft.js"></script>
-<script src="/views/steuerjahr.js"></script>
-<script src="/views/tools.js"></script>
-<script src="/chrome_nav.js"></script>
-<script src="/chrome.js"></script>
-<script src="/boot.js"></script>
+<script>
+  // Vor den Modulen: StartOS/Umbrel hat kein Konsolen-Token. Ein gecachtes
+  // chrome.js darf „Token fehlt“ nicht zeigen, bevor der Anmeldestatus da ist.
+  (function () {
+    var kasten = document.getElementById("token-fehlt");
+    if (!kasten) return;
+    fetch("/api/auth/status", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (auth) {
+        if (!auth) return;
+        var plattform = auth.managed_by === "start9" || auth.managed_by === "umbrel";
+        if (auth.authenticated || auth.password_set || plattform) {
+          kasten.hidden = true;
+        }
+        if (plattform && !auth.authenticated) {
+          location.replace("/login?next=/");
+        }
+      })
+      .catch(function () {});
+  })();
+</script>
+<script src="/vendor/qr-min.js?v=0.9.8"></script>
+<script src="/i18n.js?v=0.9.8"></script>
+<script src="/log_i18n.js?v=0.9.8"></script>
+<script src="/api.js?v=0.9.8"></script>
+<script src="/state.js?v=0.9.8"></script>
+<script src="/format.js?v=0.9.8"></script>
+<script src="/app.js?v=0.9.8"></script>
+<script src="/mempool_links.js?v=0.9.8"></script>
+<script src="/views/einstellungen.js?v=0.9.8"></script>
+<script src="/views/datenquellen.js?v=0.9.8"></script>
+<script src="/views/sanktionen.js?v=0.9.8"></script>
+<script src="/views/einrichtung.js?v=0.9.8"></script>
+<script src="/views/adress_labels.js?v=0.9.8"></script>
+<script src="/views/wallets.js?v=0.9.8"></script>
+<script src="/views/herkunft.js?v=0.9.8"></script>
+<script src="/views/steuerjahr.js?v=0.9.8"></script>
+<script src="/views/tools.js?v=0.9.8"></script>
+<script src="/chrome_nav.js?v=0.9.8"></script>
+<script src="/chrome.js?v=0.9.8"></script>
+<script src="/boot.js?v=0.9.8"></script>
 </body>
 </html>

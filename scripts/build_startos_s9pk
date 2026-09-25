@@ -58,13 +58,22 @@ if [ -z "${SKIP_BTC_PRICE_REFRESH:-}" ]; then
   fi
 fi
 
+APP_VER="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+PKG_VER="${APP_VER}:0"
+CURRENT_TS="$PKG/startos/versions/current.ts"
+if ! grep -q "version: '${PKG_VER}'" "$CURRENT_TS"; then
+  echo "StartOS package version in $CURRENT_TS is not ${PKG_VER}." >&2
+  echo "Set packaging/startos/versions/current.ts to the VERSION file before building." >&2
+  exit 1
+fi
+
 cd "$PKG"
 if [ ! -d node_modules/@start9labs/start-sdk ]; then
   echo "npm ci in packaging/"
   npm ci
 fi
 
-echo "make x86"
+echo "make x86 (${PKG_VER})"
 make x86
 
 S9PK="$(ls -1t "$PKG"/satsage_x86_64*.s9pk 2>/dev/null | head -n 1 || true)"

@@ -3,6 +3,38 @@
 Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst).
 Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalten).
 
+## Firefox · „Token fehlt“ hinter StartOS
+
+**Stand:** 2026-09-25 · **offen** · nicht weiterverfolgen, bis jemand den Client isoliert
+
+Aufwand: **gering**, sobald reproduzierbar ohne StartOS-Gerät
+
+Safari auf dem MacBook öffnet dieselbe StartOS-Oberfläche (`https://<lan-ip>:<port>/`). Firefox auf dem MacBook und Firefox auf dem StartOS-Gerät zeigen den Dialog „Token fehlt“ (`http://127.0.0.1:8730/?t=…`). Der Konsolen-Token ist hinter StartOS nicht der Zugang; Basic Auth der Plattform ist es. Server-Log zeigt den Prozess als bereit, keinen Auth-Fehler.
+
+Lokal gegen das Image: `GET /api/auth/status` mit `Host: 192.168.2.168:57289` und `SATSAGE_MANAGED_BY=start9` liefert `authenticated: true`. Der Dialog entsteht im Client, nicht weil der Dienst nicht läuft.
+
+**Nicht angefasst lassen**, bis ein Firefox-Lauf ohne Sideload den Unterschied zu Safari zeigt (Cookie, Cache, Host-Header).
+
+---
+
+## Firefish · Collateral
+
+**Stand:** 2026-09-25 · **offen** · künftige Implementation, noch ungetestet
+
+Aufwand: **unbekannt** — erst prüfen, ob der bestehende Multisig-Deskriptor-Import reicht
+
+Firefish-Collateral (Multisig-Hinterlegung) soll auswertbar sein: Adressen, UTXOs, Herkunft wie bei den anderen Wallets. Möglicherweise deckt das schon der Deskriptor-Import für Multisigs (`WALLET_n_DESC`, `embit.descriptor`, wsh/sh-wsh). Das ist nicht gegen ein echtes Firefish-Collateral geprüft. Kein Seed, kein xprv.
+
+**Nächster Schritt:** Output-Deskriptor eines Firefish-Collaterals importieren und Empfang, Change und UTXO-Bestand gegen den Dienst halten. Erst wenn das scheitert, eigenen Import bauen.
+
+**Implementation, wenn es soweit ist**
+
+1. **Recovery-Tx importieren.** Die Transaktion, mit der der Nutzer die hinterlegten Sats zurückholen kann, kommt als Import (nicht als Seed/xprv).
+2. **Markierung im Funding-Wallet.** Die pledged Sats bleiben im Funding-xpub bzw. -Wallet sichtbar und werden dort als „Firefish Collateral“ markiert.
+3. **Besitz.** Sie gelten weiter als juristisch im Besitz des Nutzers — nicht als Ausgabe, nicht als verlorener Bestand. Haltefrist und Stichtag laufen auf diesem Bestand weiter.
+
+---
+
 ## Specter-Plugin · manuelle Abnahme
 
 **Stand:** 2026-09-09 · **Kern umgesetzt** · Abnahme in Specter-UI offen

@@ -1,4 +1,6 @@
 # Docker context for packaging/Dockerfile is the repo root.
+# The image copies the context wholesale (no hand-listed modules). Anything
+# that must not ship — secrets, caches, the StartOS toolchain — stays here.
 .git
 .github
 .grok
@@ -8,11 +10,17 @@
 **/__pycache__
 **/*.pyc
 **/*.s9pk
+**/*.pem
+**/*.key
 node_modules
 packaging/node_modules
 packaging/javascript
 packaging/docker-images
 packaging/.startos
+packaging/assets
+packaging/icon.png
+packaging/satsage-splash.png
+packaging/satsage-splash.meta.json
 .startos
 utxo_cache
 immutable_cache
@@ -28,7 +36,11 @@ terminals
 mcps
 build
 dist
+deploy
+scripts
+githooks
 *.egg-info
 .env
-.env.bak
-.env.tmp
+.env.*
+.satsage-password
+.satsage-password.*
