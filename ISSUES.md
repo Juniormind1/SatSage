@@ -17,6 +17,19 @@ Lokal gegen das Image: `GET /api/auth/status` mit `Host: 192.168.2.168:57289` un
 
 ---
 
+## StartOS · Passwort anzeigen und bei laufendem Dienst rotieren
+
+**Stand:** 2026-09-25 · **offen** · Wunsch, noch nicht angefasst
+
+Aufwand: **gering**
+
+Heute liegt das Basic-Auth-Passwort nur in `store.json` (`uiPassword`). Anzeigen und kopieren geht nur als Nebenprodukt der Action *Rotate Web UI Password*, und die ist `only-stopped`.
+
+1. **Aktuelles Passwort anzeigen.** Eigene Action, auch bei laufendem Dienst: maskiert, ins Clipboard kopierbar, Benutzer `admin`. Kein neues Passwort erzeugen.
+2. **Rotation bei laufendem Dienst.** *Rotate Web UI Password* darf laufen, während SatSage läuft. Das neue Passwort muss sofort für Basic Auth und für die App gelten — nicht erst nach Stopp und Neustart. Der laufende Prozess liest `SATSAGE_BOOTSTRAP_PASSWORD` nur beim Start; der Hash in `/data/.satsage-password` muss mitgezogen werden, sonst bleibt das alte Passwort in der App gültig.
+
+---
+
 ## Firefish · Collateral
 
 **Stand:** 2026-09-25 · **offen** · künftige Implementation, noch ungetestet
