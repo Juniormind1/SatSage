@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.8] — 2026-09-25
+
+- **Version:** 0.9.8 — Werkzeuge „ist die meine?“ und „Jäger der verlorene Schätze“, einheitliche Sprache von Oberfläche und Servertexten, Umbrel-Paket auf dem Stand von 0.9.7.
+
 - **Web · Sprache von Client und Server einheitlich:** Stand die Sprachwahl nur im Browser (`localStorage`), nicht aber als `UI_LANG` in der `.env`, war die Oberfläche englisch, Haftungsabsatz und Steuerhinweise vom Server aber deutsch. Auf Umbrel leicht erreichbar, weil der Browserspeicher Updates und Neuinstallationen der App überdauert. Der Client schickt seine gespeicherte Wahl jetzt als `X-Satsage-Lang` mit; `api_config` und `api_tax` richten sich danach. Ohne gespeicherte Wahl entscheidet beim ersten Laden weiter der Server.
 - **Knöpfe:** Steuerjahr „Bericht“ und „HTML“, Herkunft „Herkünfte UTXOs“ und Sanktionscheck „Prüfen“ sehen aus wie die übrigen Knöpfe (kein Orange mehr).
 - **Steuerjahr:** Die Export-Knöpfe heißen „HTML“ und „CSV“.
