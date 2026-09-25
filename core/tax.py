@@ -735,6 +735,8 @@ def auswerten(
                     # Mehrere unserer Outputs in derselben Transaktion: Der
                     # Nettoabfluss gilt für sie gemeinsam, nicht je Stück.
                     continue
+                from core.utxos import exchange_spends_fuer
+
                 _frist, erfuellt_ab, neu_ab = haltefrist_entscheidung(
                     zeitpunkt, abgang, haltefrist_jahre, stichtag
                 )
@@ -751,6 +753,11 @@ def auswerten(
                     "abgang_datum": abgang.strftime("%d.%m.%Y"),
                     "abgang_time_ts": int(abgang.timestamp()),
                     "abgang_txid": utxo.get("spent_txid") or "",
+                    "exchange_spends": exchange_spends_fuer(
+                        utxo,
+                        wallet=wallet,
+                        immutable_cache_dir=immutable_cache_dir,
+                    ),
                     "haltedauer_tage": max(0, (abgang - zeitpunkt).days),
                     "frist_erfuellt": erfuellt_ab,
                     "neuvermoegen": neu_ab,

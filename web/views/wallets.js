@@ -1086,6 +1086,11 @@ function kopfFilterLabelText(utxoOderGruppe) {
   for (const n of boerse || []) {
     if (n) teile.push(String(n));
   }
+  // „davon … an Kraken“: Ziele der Ausgabetransaktion, nicht die Herkunft.
+  for (const ziel of utxoOderGruppe.exchange_spends || []) {
+    const name = ziel && String(ziel.name || "").trim();
+    if (name) teile.push(name);
+  }
   // Einzel-Label-Objekte (falls am Root)
   const ein = boerseNameAusKnoten(utxoOderGruppe);
   if (ein) teile.push(ein);

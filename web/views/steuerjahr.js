@@ -1016,12 +1016,16 @@ function zeichneAbgaenge(daten) {
     if (abTs > 0) zeile.dataset.eventTs = String(abTs);
     zeile.dataset.filterLabels = [
       abgang.wallet, abgang.abgang_txid, abgang.txid,
+      ...(abgang.exchange_spends || []).map((z) => z && z.name),
       haltefristBeschriftung(
         { erfuellt: abgang.frist_erfuellt, neuvermoegen: abgang.neuvermoegen },
         Boolean(daten.stichtag_regel),
       ),
     ].filter(Boolean).join(" ");
 
+    const boerseAn = typeof formatAusgegebenAnBoerse === "function"
+      ? formatAusgegebenAnBoerse({ exchange_spends: abgang.exchange_spends })
+      : "";
     const marke = pille(
       abgang.frist_erfuellt ? "gut" : "krit",
       haltefristBeschriftung(
@@ -1044,7 +1048,8 @@ function zeichneAbgaenge(daten) {
     zeitraum.className = "zart";
     zeitraum.textContent =
       `${abgang.datum} → ${abgang.abgang_datum} · ` +
-      `${formatHaltedauer(abgang.haltedauer_tage)} gehalten`;
+      `${formatHaltedauer(abgang.haltedauer_tage)} gehalten` +
+      (boerseAn ? ` · ${boerseAn}` : "");
 
     const wer = document.createElement("span");
     wer.className = "zart";
