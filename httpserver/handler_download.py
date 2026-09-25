@@ -151,7 +151,7 @@ class HandlerDownloadMixin:
         if pfad.endswith(".csv"):
             inhalt = sa.als_csv(report)
             typ = "text/csv; charset=utf-8"
-            name = f"satsage-sat-geschichte-{jahr}.csv"
+            name = f"satsage-trace-{jahr}.csv"
             # CSV immer als Download — im Tab wäre es nur Rohtext.
             disposition = f'attachment; filename="{name}"'
         else:
@@ -161,7 +161,7 @@ class HandlerDownloadMixin:
                 theme=theme,
             )
             typ = "text/html; charset=utf-8"
-            name = f"satsage-sat-geschichte-{jahr}.html"
+            name = f"satsage-trace-{jahr}.html"
             # inline: Tab zeigt den Report (Druck → PDF). Die Oberfläche
             # löst parallel noch einen Datei-Download aus.
             disposition = f'inline; filename="{name}"'

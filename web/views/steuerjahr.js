@@ -1706,7 +1706,7 @@ function ladeSelbstanzeigeExport(art, auswahl = null) {
       // Zusätzlich speichern
       const link = document.createElement("a");
       link.href = url;
-      link.download = `satsage-selbstanzeige-${jahr}.html`;
+      link.download = `satsage-trace-${jahr}.html`;
       document.body.append(link);
       link.click();
       link.remove();
