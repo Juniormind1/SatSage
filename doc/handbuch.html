@@ -963,7 +963,14 @@ Treffer, nicht nur der Pfeil.</p>
 <p>Unter dem aktuellen Bestand steht zugeklappt <strong>„Bereits
 ausgegeben"</strong>. Dort liegen alle Outputs, die das Wallet je empfangen
 und inzwischen wieder abgegeben hat — mit Abgangsdatum, und genauso
-aufklappbar und verfolgbar wie ein aktuelles UTXO.</p>
+aufklappbar und verfolgbar wie ein aktuelles UTXO. Ging in derselben
+Ausgabetransaktion ein Betrag an eine bekannte Börsenadresse, steht hinter
+dem Datum <strong>„davon … an Kraken“</strong> (mehrere Börsen mit Komma).
+Gezählt wird nur dieser Output, nicht Gebühr, Wechselgeld oder eine
+unbekannte Gegenpartei. In einem CoinJoin entfällt die Adress-Zuordnung.
+Kennt nur der importierte Börsen-Report die Transaktion, steht „davon an
+Kraken“ ohne Betrag. Liegt die Ausgabetransaktion noch nicht im Verlauf,
+bleibt der Satz beim Datum — der nächste Verlaufsscan trägt die Ziele nach.</p>
 
 <p>Das ist der Weg für die häufige Frage: <em>Woher kamen eigentlich die Sats,
 die neulich abgeflossen sind?</em> Aus dem UTXO-Cache sind sie verschwunden,

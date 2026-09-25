@@ -435,6 +435,20 @@ class TestFilterParallel(unittest.TestCase):
         self.assertEqual(verlauf[key]["spent_txid"], "cc" * 32)
         self.assertEqual(verlauf[key]["spent_height"], 800_100)
         self.assertEqual(verlauf[key]["spent_time_ts"], 1_700_100_000)
+        # Dict-Form (Block-Walk): Zieladressen der Ausgabetransaktion.
+        _uebernehme_block_verlauf(
+            verlauf, {}, {key: {
+                "txid": "dd" * 32,
+                "outputs": [{"addresses": ["bc1qkraken"], "sats": 90_000}],
+                "coinjoin": False,
+            }},
+            hoehe=800_200, block_time=1_700_200_000,
+        )
+        self.assertEqual(verlauf[key]["spent_txid"], "dd" * 32)
+        self.assertEqual(
+            verlauf[key]["spent_outputs"],
+            [{"addresses": ["bc1qkraken"], "sats": 90_000}],
+        )
 
     def test_merke_bip158_verlauf_mischt_ohne_unspend(self):
         import tempfile

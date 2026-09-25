@@ -838,6 +838,39 @@ function formatJuengsteSats(utxo) {
   return formatVollerZeitpunkt(utxo.juengste_sats_ts);
 }
 
+/**
+ * Börsenanteil der Ausgabetransaktion: „davon 0,15 BTC an Kraken“.
+ *
+ * Mehrere Börsen mit Komma. Ohne Satoshis (nur Report-TxID): „davon an Kraken“.
+ */
+function formatAusgegebenAnBoerse(utxo) {
+  const ziele = (utxo && utxo.exchange_spends) || [];
+  if (!ziele.length) return "";
+  const teile = [];
+  for (const ziel of ziele) {
+    const name = String(ziel.name || "").trim();
+    if (!name) continue;
+    const sats = Number(ziel.sats);
+    if (Number.isFinite(sats) && sats > 0) {
+      teile.push(t("trace.spentToExchange", {
+        betrag: formatSatsBasis(sats),
+        name,
+      }));
+    } else {
+      teile.push(t("trace.spentToExchangeUnknown", { name }));
+    }
+  }
+  return teile.join(", ");
+}
+
+/** Ausgabezeit plus Börsenanteil, falls die Zieladresse bekannt ist. */
+function formatAusgegebenSatz(utxo) {
+  const wann = formatAusgegebenWann(utxo);
+  const an = formatAusgegebenAnBoerse(utxo);
+  if (wann && an) return `${wann} · ${an}`;
+  return wann || an;
+}
+
 /** Ausgabezeit; bei älteren Cache-Einträgen bestmöglichen Zeitstempel nehmen. */
 function formatAusgegebenWann(utxo) {
   if (!utxo) return "";
@@ -872,9 +905,15 @@ function gruppeAusgegebenZusatz(gruppe) {
     const wann = formatAusgegebenWann(u);
     if (!wann) continue;
     const ts = Number(u.spent_time_ts || u.spent_block_time || 0);
-    if (!best || ts >= best.ts) best = { wann, ts };
+    if (!best || ts >= best.ts) best = { wann, ts, utxo: u };
   }
-  return best ? t("trace.spentWhen", { wann: best.wann }) : "";
+  if (!best) return "";
+  const basis = t("trace.spentWhen", { wann: best.wann });
+  // Nur bei genau einem Abgang — sonst verdeckt das Ziel des jüngsten
+  // die übrigen.
+  if (spent.length !== 1) return basis;
+  const an = formatAusgegebenAnBoerse(best.utxo);
+  return an ? `${basis} · ${an}` : basis;
 }
 
 function juengsteSatsMarke(utxo) {

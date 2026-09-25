@@ -582,10 +582,19 @@ function zeichneTraceWurzel(utxo) {
       marke.title = t("trace.spentPendingTitle");
     } else {
       const wann = formatAusgegebenWann(utxo);
-      marke.textContent = wann
-        ? t("trace.spentWhen", { wann })
-        : t("trace.spent");
-      marke.title = t("trace.spentTitle");
+      const an = formatAusgegebenAnBoerse(utxo);
+      marke.title = an
+        ? t("trace.spentToExchangeTitle")
+        : t("trace.spentTitle");
+      if (wann && an) {
+        marke.append(document.createTextNode(`${wann} · `));
+        const ziel = document.createElement("span");
+        ziel.className = "label-boerse label-boerse-out";
+        ziel.textContent = an;
+        marke.append(ziel);
+      } else {
+        marke.textContent = wann || an || t("trace.spent");
+      }
     }
     if (utxo.spent_txid) {
       macheKopierbar(marke, utxo.spent_txid, "Ausgaben-TxID");

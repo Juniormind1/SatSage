@@ -1088,6 +1088,13 @@ def _merge_verlauf_eintraege(
             for feld in ("spent", "spent_txid", "spent_height", "spent_time_ts"):
                 if feld in eintrag:
                     bisher[feld] = eintrag[feld]
+            # Zieladressen nur überschreiben, wenn der neue Lauf welche
+            # mitbringt — ein älterer Eintrag ohne Outputs löscht nichts.
+            ziele = eintrag.get("spent_outputs")
+            if ziele:
+                bisher["spent_outputs"] = ziele
+            if "spent_coinjoin" in eintrag:
+                bisher["spent_coinjoin"] = bool(eintrag.get("spent_coinjoin"))
         if not bisher.get("address") and eintrag.get("address"):
             bisher["address"] = eintrag["address"]
         status = bisher.setdefault("status", {})

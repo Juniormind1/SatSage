@@ -536,6 +536,8 @@ def _mempool_pending_nach_prune(
                         "spent_txid": c.get("spent_txid") or "",
                         "spent_height": int(c.get("spent_height") or 0),
                         "spent_time_ts": c.get("spent_time_ts"),
+                        "spent_outputs": c.get("spent_outputs") or [],
+                        "spent_coinjoin": bool(c.get("spent_coinjoin")),
                         "status": c.get("status") or {},
                     }
                     for c in confirmed
@@ -599,6 +601,8 @@ def _mempool_pending_nach_prune(
                         "spent_pending": True,
                         "spent_txid": p.get("spent_txid") or "",
                         "spent_height": 0,
+                        "spent_outputs": p.get("spent_outputs") or [],
+                        "spent_coinjoin": bool(p.get("spent_coinjoin")),
                         "status": p.get("status") or {},
                     }
                     for p in pending

@@ -641,6 +641,43 @@ def _header_unixzeit(header: bytes) -> int:
     return int.from_bytes(header[68:72], "little")
 
 
+def _ausgaben_ziele(tx) -> list[dict]:
+    """Fremde Outputs der ausgebenden Tx — für „davon … an Kraken“."""
+    ziele: list[dict] = []
+    for vout in getattr(tx, "vout", None) or []:
+        try:
+            sats = int(vout.value)
+        except (TypeError, ValueError):
+            continue
+        if sats <= 0:
+            continue
+        try:
+            addr = vout.script_pubkey.address()
+        except Exception:
+            addr = None
+        if not addr:
+            continue
+        ziele.append({"addresses": [str(addr)], "sats": sats})
+    return ziele
+
+
+def _ausgaben_ist_coinjoin(tx) -> bool:
+    """Formheuristik auf der schon geparsten Tx — kein Extra-Download."""
+    try:
+        from core.tx_classify import COINJOIN_KINDS, _form_coinjoin_kind
+
+        values = []
+        for vout in getattr(tx, "vout", None) or []:
+            try:
+                values.append(int(vout.value))
+            except (TypeError, ValueError):
+                values.append(0)
+        n_in = len(getattr(tx, "vin", None) or [])
+        return _form_coinjoin_kind(n_in, len(values), values) in COINJOIN_KINDS
+    except Exception:
+        return False
+
+
 def _verlauf_eintrag(output: MatchedOutput, block_time: int) -> dict[str, Any]:
     """Ein Verlaufs-Datensatz wie Fulcrum: Empfang, optional später spent."""
     return {
@@ -661,7 +698,7 @@ def _verlauf_eintrag(output: MatchedOutput, block_time: int) -> dict[str, Any]:
 def _uebernehme_block_verlauf(
     verlauf: dict[str, dict[str, Any]],
     neu: dict[str, MatchedOutput],
-    spent_ours: dict[str, str],
+    spent_ours: dict[str, str | dict],
     *,
     hoehe: int,
     block_time: int,
@@ -669,13 +706,26 @@ def _uebernehme_block_verlauf(
     """Schreibt Empfänge und Abgänge dieses Blocks in den Verlauf."""
     for key, output in neu.items():
         verlauf.setdefault(key, _verlauf_eintrag(output, block_time))
-    for key, spend_txid in spent_ours.items():
+    for key, info in spent_ours.items():
         eintrag = verlauf.get(key)
         if eintrag is None:
             continue
+        if isinstance(info, dict):
+            spend_txid = str(info.get("txid") or "")
+            ziele = info.get("outputs") or []
+            coinjoin = bool(info.get("coinjoin"))
+        else:
+            spend_txid = str(info)
+            ziele = []
+            coinjoin = False
         eintrag["spent"] = True
         eintrag["spent_txid"] = spend_txid
         eintrag["spent_height"] = hoehe
+        if ziele:
+            eintrag["spent_outputs"] = ziele
+        # Auch False schreiben, damit eine korrigierte Form den Zusatz
+        # nicht dauerhaft unterdrückt.
+        eintrag["spent_coinjoin"] = coinjoin
         if block_time:
             eintrag["spent_time_ts"] = block_time
 
@@ -695,20 +745,26 @@ def extract_from_parsed_block(
     block_hash = hash_to_hex(header_hash(header))
     matches: list[MatchedTransaction] = []
     neu: dict[str, MatchedOutput] = {}
-    spent_by: dict[str, str] = {}
+    spent_by: dict[str, dict] = {}
     null_txid = b"\x00" * 32
 
     for tx in txs:
         txid = tx.txid().hex()
         matched_outputs: list[MatchedOutput] = []
         matched_inputs: list[dict[str, Any]] = []
+        ziele = _ausgaben_ziele(tx)
+        coinjoin = _ausgaben_ist_coinjoin(tx)
 
         for vin in tx.vin:
             prev_txid = bytes(vin.txid)
             if prev_txid == null_txid:
                 continue
             prev = f"{prev_txid.hex()}:{int(vin.vout)}"
-            spent_by[prev] = txid
+            spent_by[prev] = {
+                "txid": txid,
+                "outputs": ziele,
+                "coinjoin": coinjoin,
+            }
             matched_inputs.append({"txid": prev_txid.hex(), "vout": int(vin.vout)})
 
         for n, vout in enumerate(tx.vout):
@@ -1124,7 +1180,7 @@ class BIP158Scanner:
                     hit_scripts.add(bytes.fromhex(spk_hex))
                 except ValueError:
                     pass
-            gesehen = set(bestaende) | set(neu)
+            gesehen = set(bestaende) | set(neu) | set(verlauf)
             spent_ours = {
                 key: spent_by[key] for key in spent_by if key in gesehen
             }
@@ -1168,7 +1224,7 @@ class BIP158Scanner:
                 treffer, neu, spent_by = extract_from_parsed_block(
                     header, txs, watched, h,
                 )
-                gesehen = set(bestaende) | set(neu)
+                gesehen = set(bestaende) | set(neu) | set(verlauf)
                 spent_ours = {
                     key: spent_by[key] for key in spent_by if key in gesehen
                 }

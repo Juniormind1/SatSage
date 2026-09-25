@@ -100,6 +100,11 @@ class VerlaufTest(unittest.TestCase):
         self.assertTrue(ausgegeben["spent"])
         self.assertEqual(ausgegeben["spent_txid"], TXID_AUSGABE.lower())
         self.assertEqual(ausgegeben["value"], 200_000)
+        self.assertEqual(
+            ausgegeben["spent_outputs"],
+            [{"addresses": [EXTERN_B], "sats": 190_000}],
+        )
+        self.assertFalse(ausgegeben["spent_coinjoin"])
 
     def test_unspent_output_hat_kein_spent_txid(self):
         eintraege = fetch_address_history_fulcrum(

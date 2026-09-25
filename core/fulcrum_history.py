@@ -427,6 +427,49 @@ def fetch_txs_fulcrum_batch(
     return ergebnis
 
 
+def _tx_ist_coinjoin(tx: dict) -> bool:
+    try:
+        from core.exchange_spend import ist_coinjoin_tx
+
+        return ist_coinjoin_tx(tx)
+    except Exception:
+        return False
+
+
+def _fremde_outputs(tx: dict) -> list[dict]:
+    """
+    Outputs der ausgebenden Tx: Adresse und Satoshis.
+
+    Eigenes Wechselgeld filtert die Anzeige später über den Wallet-Kontext.
+    Hier bleibt jede Output-Adresse, damit der Verlauf die Tx nicht erneut
+    laden muss.
+    """
+    from core.utxo_report import _extract_addresses, _extract_value_sats
+
+    ziele: list[dict] = []
+    for vout in tx.get("vout") or []:
+        if not isinstance(vout, dict):
+            continue
+        addrs = [a for a in _extract_addresses(vout) if a]
+        if not addrs:
+            addrs = _vout_addresses(vout)
+        if not addrs:
+            continue
+        try:
+            sats = int(_extract_value_sats(vout))
+        except (TypeError, ValueError):
+            sats = _vout_value_sats(vout)
+        if sats <= 0:
+            continue
+        # Eine Zeile je Output. Flach je Adresse würde ein Multisig den
+        # Betrag doppelt zählen.
+        ziele.append({
+            "addresses": [str(a) for a in addrs],
+            "sats": sats,
+        })
+    return ziele
+
+
 def _vout_value_sats(vout: dict) -> int:
     value = vout.get("value", 0)
     if isinstance(value, float):
@@ -445,7 +488,8 @@ def _walk_address_history(
     Geht die Historie einer Adresse durch.
 
     Liefert *(received, spent_by)*: alle je auf dieser Adresse empfangenen
-    Outputs, und zu jedem verbrauchten die TxID, die ihn ausgegeben hat.
+    Outputs, und zu jedem verbrauchten die TxID plus fremde Zieladressen
+    der ausgebenden Tx (für „davon … an Kraken“).
 
     Gemeinsame Grundlage für zwei Sichten — die unverbrauchte Teilmenge
     (UTXO-Fallback für Server ohne listunspent) und den vollständigen Verlauf.
@@ -496,6 +540,10 @@ def _walk_address_history(
                 spent_by[(prev_txid, int(vin.get("vout", 0)))] = {
                     "txid": txid_key,
                     "height": height,
+                    "outputs": _fremde_outputs(tx),
+                    # Diese Tx gibt aus. CoinJoin: eine Börsenadresse darin
+                    # ist nicht das eigene Ziel.
+                    "coinjoin": _tx_ist_coinjoin(tx),
                 }
 
     return received, spent_by
@@ -547,6 +595,12 @@ def fetch_address_history_fulcrum(
             "spent": abgang is not None,
             "spent_txid": abgang["txid"] if abgang else None,
         }
+        if abgang:
+            # Zieladressen der Ausgabetransaktion — ohne erneuten Tx-Abruf
+            # beschriftbar („davon … an Kraken“). CoinJoin: Adresse ist nicht
+            # das eigene Ziel, nur eine Report-TxID darf dann benennen.
+            eintrag["spent_outputs"] = list(abgang.get("outputs") or [])
+            eintrag["spent_coinjoin"] = bool(abgang.get("coinjoin"))
         if abgang and abgang["height"] > 0:
             eintrag["spent_height"] = abgang["height"]
             abgangszeit = _block_time_for_height(client, abgang["height"])

@@ -621,6 +621,8 @@ class WalletWatchService:
                                     "spent_pending": True,
                                     "spent_txid": p.get("spent_txid") or "",
                                     "spent_height": 0,
+                                    "spent_outputs": p.get("spent_outputs") or [],
+                                    "spent_coinjoin": bool(p.get("spent_coinjoin")),
                                     "status": p.get("status") or {},
                                 }
                                 for p in pending

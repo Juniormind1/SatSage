@@ -558,11 +558,15 @@ def _spender_map_fuer_outpoints(
             if time_ts is None and height > 0:
                 from core.fulcrum_history import _block_time_for_height
                 time_ts = _block_time_for_height(client, height)
+            from core.fulcrum_history import _fremde_outputs, _tx_ist_coinjoin
+
             gefunden[key] = {
                 "txid": spend_txid.lower(),
                 "height": height,
                 "pending": height <= 0,
                 "time_ts": int(time_ts) if time_ts else None,
+                "outputs": _fremde_outputs(tx),
+                "coinjoin": _tx_ist_coinjoin(tx),
             }
             offen.discard(key)
     return gefunden
@@ -655,6 +659,10 @@ def klassifiziere_utxo_spends(
             eintrag["spent_txid"] = info["txid"]
             eintrag["spent_height"] = int(info.get("height") or 0)
             eintrag["spent_time_ts"] = info.get("time_ts")
+            if info.get("outputs"):
+                eintrag["spent_outputs"] = info["outputs"]
+            if "coinjoin" in info:
+                eintrag["spent_coinjoin"] = bool(info.get("coinjoin"))
             if info.get("pending"):
                 eintrag["spent_pending"] = True
                 pending.append(eintrag)

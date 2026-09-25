@@ -2724,6 +2724,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .ausgegeben-inhalt { border-left: 2px solid var(--linie-zart); margin-left: 4px; }
 .verfolgt-marke.ausgegeben {
   background: var(--flaeche-3); color: var(--gedaempft);
+  white-space: normal;
 }
 .verfolgt-marke.ausgegeben.pending,
 .verfolgt-marke.spending-pending,

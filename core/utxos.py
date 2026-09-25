@@ -234,6 +234,84 @@ def rank_wallet_utxos(
     }
 
 
+def _output_adressen(eintrag: dict) -> list[str]:
+    addrs = eintrag.get("addresses")
+    if isinstance(addrs, list) and addrs:
+        return [str(a) for a in addrs if a]
+    einzeln = str(eintrag.get("address") or "")
+    return [einzeln] if einzeln else []
+
+
+def _ist_eigene_adresse(adresse: str, *, wallet=None, own_addresses=None) -> bool:
+    """Wechselgeld bleibt ohne Börsenmarke. Nur O(1)-Lookups, keine HD-Suche."""
+    if not adresse:
+        return False
+    if own_addresses and adresse in own_addresses:
+        return True
+    if wallet is None:
+        return False
+    label = getattr(wallet, "own_label", None)
+    if callable(label) and label(adresse):
+        return True
+    mapping = getattr(wallet, "address_to_wallet", None)
+    return isinstance(mapping, dict) and adresse in mapping
+
+
+def exchange_spends_fuer(
+    eintrag: dict,
+    *,
+    wallet=None,
+    own_addresses=None,
+    immutable_cache_dir: Path | None = None,
+) -> list[dict]:
+    """
+    Börsenanteil der Ausgabetransaktion.
+
+    Aus ``spent_outputs`` (Verlauf) oder, falls der Lauf die Ziele noch nicht
+    mitgeschrieben hat, aus der lokal gecachten Ausgabetransaktion. Ohne beides
+    bleibt nur ein TxID-Treffer aus dem eigenen Börsen-Report, ohne Betrag.
+    CoinJoin: keine Adress-Treffer, Report-TxID bleibt.
+    """
+    from core.exchange_spend import ist_coinjoin_tx, ziele_aus_outputs, ziele_aus_tx, ziele_aus_txid
+
+    if not eintrag.get("spent") and not eintrag.get("spent_txid"):
+        return []
+    txid = str(eintrag.get("spent_txid") or "")
+    coinjoin = bool(eintrag.get("spent_coinjoin"))
+
+    roh = eintrag.get("spent_outputs")
+    if isinstance(roh, list) and roh and not coinjoin:
+        fremd = []
+        for o in roh:
+            if not isinstance(o, dict):
+                continue
+            addrs = _output_adressen(o)
+            if not addrs:
+                continue
+            if any(
+                _ist_eigene_adresse(a, wallet=wallet, own_addresses=own_addresses)
+                for a in addrs
+            ):
+                continue
+            fremd.append(o)
+        ziele = ziele_aus_outputs(fremd)
+        if ziele:
+            return ziele
+
+    tx = None
+    if immutable_cache_dir is not None and txid:
+        try:
+            tx = xpub_cache.load_cached_tx(txid, immutable_cache_dir)
+        except (OSError, ValueError):
+            tx = None
+    if tx is not None:
+        if coinjoin or ist_coinjoin_tx(tx):
+            return ziele_aus_txid(txid)
+        return ziele_aus_tx(tx) or ziele_aus_txid(txid)
+
+    return ziele_aus_txid(txid)
+
+
 def historische_eintraege(
     verlauf: list[dict],
     *,
@@ -275,6 +353,13 @@ def historische_eintraege(
         angereichert["spent_time_ts"] = eintrag.get("spent_time_ts")
         angereichert["spent_height"] = eintrag.get("spent_height")
         angereichert["spent_pending"] = bool(eintrag.get("spent_pending"))
+        # „davon … an Kraken“: nur der Börsenanteil der Ausgabetransaktion.
+        angereichert["exchange_spends"] = exchange_spends_fuer(
+            eintrag,
+            wallet=wallet,
+            own_addresses=own_addresses,
+            immutable_cache_dir=immutable_cache_dir,
+        )
         eintraege.append(angereichert)
 
     return {
