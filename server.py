@@ -763,16 +763,31 @@ def _ui_lang_aus_env(werte: dict) -> str:
     return "de"
 
 
-def _ui_lang_fuer_web(werte: dict, accept_language: str | None = None) -> str:
+def _ui_lang_fuer_web(
+    werte: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
+) -> str:
     """``de`` oder ``en`` für die Weboberfläche.
 
-    Eine ausdrückliche Wahl (``UI_LANG``) gewinnt immer. Ohne sie entscheidet
+    Schickt der Browser seine angezeigte Sprache mit (``X-Satsage-Lang``),
+    gilt diese: Servertexte wie Haftungsabsatz und Steuerhinweise müssen zur
+    Oberfläche passen, und die Wahl im Browser (``localStorage``) kann von
+    ``UI_LANG`` abweichen — etwa nach einer Neuinstallation, die die
+    ``.env`` ersetzt, den Browserspeicher aber nicht.
+
+    Sonst gewinnt eine ausdrückliche Wahl (``UI_LANG``). Ohne sie entscheidet
     der Browser über ``Accept-Language`` — umbrelOS reicht seine eigene
     Spracheinstellung nicht an Apps durch, das ist also das einzige Signal.
     Gibt auch der nichts her, ist Englisch die Vorgabe: die Web-GUI hat im
     App Store internationales Publikum. CLI und Terminal-Menü bleiben davon
     unberührt und antworten weiter auf Deutsch.
     """
+    from core import i18n
+
+    client = i18n.client_lang(client_lang)
+    if client:
+        return client
     roh = str((werte or {}).get("UI_LANG") or "").strip().lower()
     if roh.startswith("en"):
         return "en"
@@ -1353,10 +1368,21 @@ class Handler(
     def _api(self, methode: str, pfad: str, query: dict) -> tuple[int, dict]:
         state = self.state
         teile = [t for t in pfad.split("/") if t][1:]  # ohne 'api'
+        # Nur ein mitgeschickter Header zählt. Ein fehlender Header ist kein
+        # leerer String — sonst würde die deutsche Vorgabe für Aufrufer ohne
+        # Sprachkontext (Export, Tests) auf die englische Web-Vorgabe kippen.
+        accept_language = (
+            self.headers.get("Accept-Language")
+            if "Accept-Language" in self.headers else None
+        )
+        client_lang = (
+            self.headers.get("X-Satsage-Lang")
+            if "X-Satsage-Lang" in self.headers else None
+        )
 
         if teile == ["config"] and methode == "GET":
             return 200, api_config(
-                state, query, self.headers.get("Accept-Language")
+                state, query, accept_language, client_lang,
             )
         if teile == ["config", "wallets"] and methode == "PUT":
             return 200, api_save_wallets(state, self._body())
@@ -1477,7 +1503,9 @@ class Handler(
         if teile == ["tools", "schatzsuche"] and methode == "POST":
             return 202, api_tools_schatzsuche(state, self._body())
         if teile == ["tax"] and methode == "GET":
-            return 200, api_tax(state, query)
+            return 200, api_tax(
+                state, query, accept_language, client_lang,
+            )
         if teile == ["tax", "selbstanzeige", "kandidaten"] and methode == "GET":
             return 200, api_selbstanzeige_kandidaten(state, query)
         if teile == ["trace", "alle"] and methode == "POST":

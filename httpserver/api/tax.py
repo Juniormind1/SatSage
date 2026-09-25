@@ -120,10 +120,24 @@ def api_save_steuer_person(state: AppState, payload: dict) -> dict:
     return {"saved": True, "person": sa_mod.lese_steuer_person(env.values())}
 
 
-def api_tax(state: AppState, query: dict) -> dict:
-    from server import _steuer_auswertung
+def api_tax(
+    state: AppState,
+    query: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
+) -> dict:
+    from server import _steuer_auswertung, _ui_lang_fuer_web
 
-    auswertung = _steuer_auswertung(state, query)
+    # Ohne jeden Header (Export, LLM, Tests) bleibt der deutsche Wortlaut.
+    # Die englische Web-Vorgabe gilt nur, wenn ein Browser Accept-Language
+    # schickt und keine Wahl mitgibt.
+    if client_lang is None and accept_language is None:
+        sprache = "de"
+    else:
+        sprache = _ui_lang_fuer_web(
+            state.env().values(), accept_language, client_lang
+        )
+    auswertung = _steuer_auswertung(state, query, lang=sprache)
     auswertung.pop("_objekte", None)
     return auswertung
 

@@ -19,7 +19,12 @@ def _lernhinweise_plebs_aus_env(werte: dict) -> bool:
     return roh in ("1", "true", "yes", "ja", "on")
 
 
-def api_config(state: AppState, query: dict, accept_language: str | None = None) -> dict:
+def api_config(
+    state: AppState,
+    query: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
+) -> dict:
     from server import (
         _NODE_MANAGED,
         _electrum_indexer,
@@ -56,6 +61,12 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
     entries = state.entries
     zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
     werte = state.env().values()
+    # Haftungsabsatz: ohne Header deutsch (Export/Tests). Die Oberfläche
+    # bekommt denselben Code wie ui_lang, sobald ein Browser fragt.
+    hinweis_lang = (
+        "de" if client_lang is None and accept_language is None
+        else _ui_lang_fuer_web(werte, accept_language, client_lang)
+    )
     quellen = source_mod.anreichere_live_p2p(
         source_mod.mergere_erreichbarkeit(
             source_mod.describe_sources(werte),
@@ -93,7 +104,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         ),
         "wallet_watch": _wallet_watch_status(),
 
-        "hinweis_onchain": tax_mod.HINWEIS_ONCHAIN,
+        "hinweis_onchain": tax_mod.hinweis_onchain(hinweis_lang),
         "hinweis_onchain_bestaetigt": tax_mod.hinweis_onchain_bestaetigt(werte),
         # Wallet-Blöcke hinter einer Lücke werden nicht gelesen. Das muss die
         # Oberfläche sagen können, sonst fehlt ein Wallet ohne jeden Hinweis.
@@ -112,7 +123,7 @@ def api_config(state: AppState, query: dict, accept_language: str | None = None)
         # Ohne Netzprobe — die Pille bleibt grau, bis /api/llm/status?check=1.
         "llm": llm_mod.status_dict(werte, check=False),
         "status_mail": status_mail_mod.als_dict(werte),
-        "ui_lang": _ui_lang_fuer_web(werte, accept_language),
+        "ui_lang": _ui_lang_fuer_web(werte, accept_language, client_lang),
         # Hinter Umbrels app_proxy bindet SatSage an 0.0.0.0 — die Fußzeile
         # darf dann nicht "nur lokal erreichbar" behaupten.
         "local_only": _ist_local_only(state),

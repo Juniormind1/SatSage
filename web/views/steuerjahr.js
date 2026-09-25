@@ -1671,7 +1671,7 @@ function ladeSelbstanzeigeExport(art, auswahl = null) {
   (async () => {
     try {
       const antwort = await fetch(`/api/tax/selbstanzeige/${datei}?${query}`, {
-        headers: { "X-Satsage-Token": Token },
+        headers: { "X-Satsage-Token": Token, ...sprachKopf() },
         credentials: "same-origin",
       });
       const roh = await antwort.arrayBuffer();

@@ -59,18 +59,39 @@ STANDARD_ANSCHAFFUNG = ANSCHAFFUNG_JUENGSTE
 ENV_HINWEIS_ONCHAIN_BESTAETIGT = "HINWEIS_ONCHAIN_BESTAETIGT"
 
 # Der eine Absatz. UI, Exporte, Handbuch und README zitieren denselben Wortlaut.
-HINWEIS_ONCHAIN = (
-    "SatSage rekonstruiert aus der Blockchain, wann Sats diese "
-    "Wallet-Adressen erreicht oder verlassen haben. Das ist ein "
-    "On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. "
-    "Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen "
-    "ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder "
-    "eine Haltefrist greift, prüft nicht dieses Programm."
-)
+#: Schlüssel im gemeinsamen Katalog (``web/locales/``), den auch die
+#: Weboberfläche für diesen Absatz verwendet.
+SCHLUESSEL_HINWEIS_ONCHAIN = "dialog.onchain.body"
+SCHLUESSEL_KEINE_BERATUNG = "tax.notAdvice"
 
-HINWEIS_KEINE_BERATUNG = (
-    "Diese Aufstellung ist keine Steuerberatung. " + HINWEIS_ONCHAIN
-)
+
+def hinweis_onchain(lang: str | None = None) -> str:
+    """Der On-Chain-Absatz in der gewünschten Sprache (Vorgabe Deutsch).
+
+    Oberfläche, Exporte und LLM-Kontext zitieren denselben Wortlaut; er darf
+    deshalb nicht an einer Stelle deutsch und an der anderen übersetzt sein.
+    """
+    from core import i18n
+
+    return i18n.t_lang(lang or "de", SCHLUESSEL_HINWEIS_ONCHAIN)
+
+
+def hinweis_keine_beratung(lang: str | None = None) -> str:
+    """Haftungsvorbehalt plus On-Chain-Absatz, in derselben Sprache."""
+    from core import i18n
+
+    return (
+        i18n.t_lang(lang or "de", SCHLUESSEL_KEINE_BERATUNG)
+        + " "
+        + hinweis_onchain(lang)
+    )
+
+
+#: Deutsche Fassungen als Konstanten — Aufrufer ohne Sprachkontext (Handbuch,
+#: Doku, bestehende Tests, Exporte) bleiben damit unverändert gültig.
+HINWEIS_ONCHAIN = hinweis_onchain("de")
+
+HINWEIS_KEINE_BERATUNG = hinweis_keine_beratung("de")
 
 
 def hinweis_onchain_bestaetigt(werte: dict[str, str] | None) -> bool:
@@ -633,6 +654,7 @@ def auswerten(
     wallet=None,
     immutable_cache_dir: Path | None = None,
     jetzt: datetime | None = None,
+    lang: str | None = None,
 ) -> dict:
     """
     Wertet die Eingänge bis zum Bezugsdatum des Steuerjahres aus.
@@ -781,40 +803,37 @@ def auswerten(
     ]
     offensiv_fallbacks = [e for e in eintraege if e.offensiv_fallback]
 
+    from core import i18n
+
+    def _h(key: str, **vars) -> str:
+        return i18n.t_lang(lang, key, **vars)
+
     hinweise = [
-        HINWEIS_MIT_VERLAUF if mit_verlauf else HINWEIS_UMFANG,
-        HINWEIS_KEINE_BERATUNG,
+        _h("tax.hintScopeWithHistory") if mit_verlauf else _h("tax.hintScope"),
+        hinweis_keine_beratung(lang),
     ]
     if ungeprueft:
-        hinweise.insert(0, HINWEIS_UNGEPRUEFT)
+        hinweise.insert(0, _h("tax.hintUnchecked"))
     if wallet_eingaenge:
-        hinweise.insert(0, HINWEIS_WALLET_EINGANG)
+        hinweise.insert(0, _h("tax.hintWalletEntry"))
     if untergrenzen:
-        hinweise.insert(0, HINWEIS_UNTERGRENZE)
+        hinweise.insert(0, _h("tax.hintLowerBound"))
     if modus == ANSCHAFFUNG_AELTESTE:
-        hinweise.insert(0, HINWEIS_OFFENSIV)
+        hinweise.insert(0, _h("tax.hintOffensive"))
     if offensiv_fallbacks:
-        hinweise.insert(0, HINWEIS_OFFENSIV_OHNE_AELTESTE)
+        hinweise.insert(0, _h("tax.hintOffensiveNoOldest"))
     if eigenuebertraege:
-        hinweise.insert(0, HINWEIS_EIGENUEBERTRAG.format(
-            anzahl=len(eigenuebertraege)
+        hinweise.insert(0, _h(
+            "tax.hintSelfTransfer", anzahl=len(eigenuebertraege)
         ))
     if spent_ohne_abgang:
-        hinweise.insert(0, HINWEIS_SPENT_OHNE_ABGANGSDATUM.format(
-            anzahl=spent_ohne_abgang
-        ))
+        hinweise.insert(0, _h("tax.hintSpentNoDate", anzahl=spent_ohne_abgang))
     if stichtag:
-        hinweise.insert(0, (
-            f"Stichtagsregel: Anschaffungen nach dem {format_stichtag(stichtag)} "
-            "werden nicht durch Halten steuerfrei (österr. Neuvermögen)."
-        ))
+        hinweise.insert(
+            0, _h("tax.hintCutoffRule", datum=format_stichtag(stichtag))
+        )
     if laufend:
-        hinweise.insert(0, (
-            f"Das Steuerjahr {jahr} läuft noch. Fristen sind deshalb gegen "
-            f"den heutigen Tag gerechnet, nicht gegen den 31.12.{jahr} — "
-            "sonst gälten Beträge als fristerfüllt, deren Jahr erst später "
-            "abläuft."
-        ))
+        hinweise.insert(0, _h("tax.hintRunningYear", jahr=jahr))
 
     return {
         "jahr": jahr,

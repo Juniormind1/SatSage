@@ -158,7 +158,9 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
     return eintraege, ohne_verlauf
 
 
-def _steuer_auswertung(state: AppState, query: dict) -> dict:
+def _steuer_auswertung(
+    state: AppState, query: dict, lang: str | None = None,
+) -> dict:
     from server import (
         ApiError,
         tax_mod,
@@ -200,27 +202,31 @@ def _steuer_auswertung(state: AppState, query: dict) -> dict:
         anschaffung=anschaffung,
         wallet=state.wallet_ctx,
         immutable_cache_dir=state.immutable_cache_dir,
+        lang=lang,
     )
     auswertung["verfuegbare_jahre"] = jahre
     auswertung["ohne_verlauf"] = ohne_verlauf
     phantome = int(getattr(state, "_steuer_phantome", 0) or 0)
     auswertung["phantom_unspent_count"] = phantome
+    from core import i18n
+
+    def _h(key: str, **vars) -> str:
+        return i18n.t_lang(lang, key, **vars)
+
     if phantome:
-        auswertung["hinweise"].insert(0, (
-            f"{phantome} Verlaufs-Einträge wirkten unspent, fehlen aber im "
-            "aktuellen UTXO-Bestand (Phantom) — für „Bestand gesamt“ ignoriert. "
-            "Verlaufsscan erneut aktualisiert spent-Flags."
-        ))
+        auswertung["hinweise"].insert(0, _h("tax.hintPhantom", anzahl=phantome))
     if ohne_verlauf:
         # Eine gemischte Grundlage muss auffallen: Für die einen Wallets sind
         # Veräußerungen erfasst, für die anderen nur der heutige Bestand.
-        auswertung["hinweise"].insert(0, (
-            "Für " + ", ".join(f"„{name}“" for name in ohne_verlauf)
-            + (" liegt" if len(ohne_verlauf) == 1 else " liegen")
-            + " kein Verlauf vor — dort zählt nur der heutige Bestand, "
-            "bereits ausgegebene Beträge fehlen. „Verlaufsscan“ in der "
-            "Wallet-Ansicht oder „Verlauf aller Wallets“ schließt die Lücke."
-        ))
+        namen = ", ".join(
+            _h("common.quoteOpen") + name + _h("common.quoteClose")
+            for name in ohne_verlauf
+        )
+        schluessel = (
+            "tax.hintNoHistoryOne" if len(ohne_verlauf) == 1
+            else "tax.hintNoHistoryMany"
+        )
+        auswertung["hinweise"].insert(0, _h(schluessel, wallets=namen))
     return auswertung
 
 

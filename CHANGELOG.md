@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Web · Sprache von Client und Server einheitlich:** Stand die Sprachwahl nur im Browser (`localStorage`), nicht aber als `UI_LANG` in der `.env`, war die Oberfläche englisch, Haftungsabsatz und Steuerhinweise vom Server aber deutsch. Auf Umbrel leicht erreichbar, weil der Browserspeicher Updates und Neuinstallationen der App überdauert. Der Client schickt seine gespeicherte Wahl jetzt als `X-Satsage-Lang` mit; `api_config` und `api_tax` richten sich danach. Ohne gespeicherte Wahl entscheidet beim ersten Laden weiter der Server.
 - **Knöpfe:** Steuerjahr „Bericht“ und „HTML“, Herkunft „Herkünfte UTXOs“ und Sanktionscheck „Prüfen“ sehen aus wie die übrigen Knöpfe (kein Orange mehr).
 - **Steuerjahr:** Die Export-Knöpfe heißen „HTML“ und „CSV“.
 - **Tools:** „Jäger der verlorene Schätze“ ist klickbar. Fehlt eine Core-Quelle mit scantxoutset, sagt das der Start, nicht ein grauer Knopf.
@@ -59,6 +60,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **Bereits ausgegeben · Export-Verlauf:** Wallet-Name aus Cache-Kontext, wenn Sparrow-Tx-CSV keine Adresse hat (nicht mehr „unbekanntes Wallet“); leere Adresszeile als „ohne Adresse (Export)“.
 - **Log · Release-Zeile:** Beim Start steht die laufende SatSage-Version (`SatSage v…`) als erste Zeile im Log-Bereich.
 - **Wallets · Export-Import (Sparrow / Wasabi):** Unter Multisig: **Suchen** in Standardordnern, Liste mit Checkboxen (Schloss = nicht direkt lesbar: Passwort **oder** native Sparrow-DB), orangener **Import** der Auswahl; manuell **Datei wählen…**. Format-Auto-Erkennung; Herkunft `WALLET_n_ORIGIN` (`xpub` / `descriptor` / `wallet_export`) — schon vorhandene entfallen in der Suche. Wasabi-JSON View-only/HW importierbar; Sparrow-`.mv.db` nur nach Descriptor-Export. Kein Passwort-Dialog. Multisig-**Import** orange wie „Hinzufügen“.
+
+## [0.9.7] — 2026-09-19
+
+- **Version:** 0.9.7 — englische Oberfläche vollständig für die Steuerjahr-Ansicht; Vorbereitung der Einreichung im Umbrel App Store.
+- **Web · Steuerjahr englisch:** Kacheln, Zeitstrahl-Zusatz, Was-wäre-wenn-Zeilen, Abgänge und Verlaufsüberblick laufen über `t()`. Bei englischer Oberfläche sank die Zahl deutscher Reste über alle Ansichten von 82 auf 1 (Datenquellen, folgt).
+- **Web · Sortier-Menü:** Die vier Schlüssel `trace.sort*` fehlten in beiden Katalogen — das Menü der Herkunftsansicht zeigte deshalb in **beiden** Sprachen den rohen Schlüssel `trace.sortVolumeDesc`. Neuer Test `tests/test_web_locales.py` verlangt jeden verwendeten Schlüssel in beiden Katalogen.
+- **On-Chain-Hinweis sprachfähig:** Der Haftungsabsatz war eine deutsche Konstante in `core/tax.py`, die die Oberfläche über ihre eigene Übersetzung stempelte. `core/i18n.t_lang()` liest eine bestimmte Sprache ohne globalen Zustand (der Webserver antwortet nebenläufig in wechselnden Sprachen); `api_config` und `api_tax` liefern Absatz und die elf Steuerhinweise in der Anfragesprache. Exporte und LLM-Kontext bleiben vorerst deutsch — dort steht der Absatz zwischen weiteren deutschen Texten.
 
 ## [0.9.6] — 2026-09-17
 
