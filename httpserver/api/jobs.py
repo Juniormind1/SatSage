@@ -56,10 +56,26 @@ def api_jobs(state: Any, query: dict) -> dict:
             block_event = {"seq": seq, "height": int(hoehe)}
     except (TypeError, ValueError):
         block_event = None
+    if not state.context_bereit():
+        jobs.insert(0, {
+            "id": "wallet-context",
+            "kind": "wallet_context",
+            "label": "Wallets werden vorbereitet",
+            "status": "running",
+            "message": "Adressen und Cache werden gelesen…",
+            "log": [],
+            "running": True,
+            "elapsed_s": 0,
+            "error": None,
+            "meta": {"still": True},
+            "started_at": None,
+            "finished_at": None,
+        })
     return {
         "jobs": jobs,
         "scan_pipeline": state.scan_queue.snapshot(),
         "block_event": block_event,
+        "context_bereit": state.context_bereit(),
     }
 
 

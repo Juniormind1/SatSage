@@ -838,6 +838,7 @@
   "tools.meta": "Derives from the wallets on file whether the address belongs to one of them. No balance, no history, including an address that has never been used.",
   "tools.noWallets": "No wallets set up.",
   "tools.notMine": "does not belong to you",
+  "tools.preparing": "Wallets are still being prepared. One moment.",
   "tools.chainChange": "change",
   "tools.chainReceive": "receive",
   "tools.treasure": "Hunter of the lost treasures",

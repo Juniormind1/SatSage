@@ -285,6 +285,7 @@ function jobIstAktiv(job) {
  * („Herkünfte UTXOs“ / klären). Atem unabhängig vom gerade offenen Wallet.
  */
 function empfangGlobalerScanLaeuft() {
+  if (Zustand.contextBereit === false) return true;
   if (Zustand.herkunftAlleLaeuft || Zustand.verlaufAlleLaeuft) return true;
   const jobs = Zustand.jobsNav?.jobs || [];
   return jobs.some((job) => {
@@ -357,6 +358,10 @@ function loeseEmpfangScanPuls() {
 }
 
 async function ladeEmpfang(walletId, { still = false } = {}) {
+  if (Zustand.contextBereit === false) {
+    zeichneEmpfangLeer(t("dock.empfangPuls"), { puls: true });
+    return null;
+  }
   if (!walletId) {
     zeichneEmpfangLeer();
     return null;

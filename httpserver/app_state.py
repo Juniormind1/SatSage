@@ -120,6 +120,9 @@ class AppState:
         self._lock = threading.Lock()
         self._wallet_ctx = None
         self._entries: list[WalletEntry] = []
+        # Login zeigt die GUI, bevor Adressen und Cache-Seed fertig sind.
+        self._context_bereit = threading.Event()
+        self._context_bereit.set()
         # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
         self.empfang_cache: dict[str, dict] = {}
         # Wiederverwendeter Electrs-Client nur für Empfangs-QR (eigen oder öffentlich).
@@ -219,46 +222,88 @@ class AppState:
             _apply_local_core_runtime(env)
         return env
 
-    def reload(self) -> None:
-        """Liest die .env neu und baut den WalletContext auf."""
+    def reload(self, *, hintergrund: bool = False) -> None:
+        """Liest die .env neu und baut den WalletContext auf.
+
+        *hintergrund*: Wallets sofort, Adressableitung und Cache-Seed
+        im Thread. Die GUI darf dann schon offen sein; Empfang, Scan und
+        „ist die meine?“ warten auf den fertigen Kontext.
+        """
         with self._lock:
             env = self.env()
             main.set_chain_network(env.values().get("NETWORK"))
             self._entries = read_wallets(env)
-            self._wallet_ctx = self._build_context(self._entries)
-            # UTXO-/Resolution-Cache → Mapping: sonst resolve_address je
-            # ungeseedeter Adresse MAX_TRACE_ADDRESS_SEARCH Ableitungen
-            # (Herkunftsliste mit 30+ UTXOs: Sekunden).
-            if self._wallet_ctx is not None:
-                schluessel = [
-                    e.analyse_schluessel for e in self._entries if e.is_valid()
-                ]
-                try:
-                    main.seed_wallet_addresses_from_utxo_cache(
-                        self._wallet_ctx, schluessel, self.cache_dir,
-                    )
-                except Exception:
-                    pass
-                try:
-                    main.seed_wallet_addresses_from_resolution_cache(
-                        self._wallet_ctx, schluessel,
-                    )
-                except Exception:
-                    pass
-            # Empfangs-QR neu ableiten (Indizes/Adressen können sich geändert haben).
-            self.empfang_cache.clear()
-            with getattr(self, "_empfang_fulcrum_lock", threading.Lock()):
-                alt = getattr(self, "_empfang_fulcrum", None)
-                alt_pub = getattr(self, "_empfang_public_fulcrum", None)
-                self._empfang_fulcrum = None
-                self._empfang_public_fulcrum = None
-            for client in (alt, alt_pub):
-                if client is None:
-                    continue
-                try:
-                    client.close()
-                except Exception:
-                    pass
+            if not hintergrund:
+                self._wallet_ctx = self._build_context(self._entries)
+                self._seed_wallet_context_unlocked()
+                self._context_bereit.set()
+            else:
+                self._wallet_ctx = None
+                self._context_bereit.clear()
+            self._verwerfe_empfang_clients_unlocked()
+        if hintergrund:
+            threading.Thread(
+                target=self._context_im_hintergrund,
+                name="satsage-wallet-context",
+                daemon=True,
+            ).start()
+
+    def _context_im_hintergrund(self) -> None:
+        try:
+            with self._lock:
+                ctx = self._build_context(self._entries)
+                self._wallet_ctx = ctx
+                self._seed_wallet_context_unlocked()
+        except Exception:
+            LOGGER.exception("Wallet-Kontext im Hintergrund fehlgeschlagen")
+        finally:
+            self._context_bereit.set()
+
+    def _seed_wallet_context_unlocked(self) -> None:
+        """UTXO- und Resolution-Cache ins Mapping. Aufrufer hält ``_lock``."""
+        if self._wallet_ctx is None:
+            return
+        schluessel = [
+            e.analyse_schluessel for e in self._entries if e.is_valid()
+        ]
+        # Sonst resolve_address je ungeseedeter Adresse
+        # MAX_TRACE_ADDRESS_SEARCH Ableitungen (Herkunft mit 30+ UTXOs:
+        # Sekunden).
+        try:
+            main.seed_wallet_addresses_from_utxo_cache(
+                self._wallet_ctx, schluessel, self.cache_dir,
+            )
+        except Exception:
+            LOGGER.exception("UTXO-Cache-Seed fehlgeschlagen")
+        try:
+            main.seed_wallet_addresses_from_resolution_cache(
+                self._wallet_ctx, schluessel,
+            )
+        except Exception:
+            LOGGER.exception("Resolution-Cache-Seed fehlgeschlagen")
+
+    def _verwerfe_empfang_clients_unlocked(self) -> None:
+        """Empfangs-QR neu ableiten. Aufrufer hält ``_lock``."""
+        self.empfang_cache.clear()
+        with getattr(self, "_empfang_fulcrum_lock", threading.Lock()):
+            alt = getattr(self, "_empfang_fulcrum", None)
+            alt_pub = getattr(self, "_empfang_public_fulcrum", None)
+            self._empfang_fulcrum = None
+            self._empfang_public_fulcrum = None
+        for client in (alt, alt_pub):
+            if client is None:
+                continue
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def context_bereit(self) -> bool:
+        return self._context_bereit.is_set()
+
+    def warte_auf_context(self, timeout: float | None = None) -> bool:
+        """Blockiert, bis Ableitung und Cache-Seed fertig sind."""
+        return self._context_bereit.wait(timeout)
 
     @staticmethod
     def _build_context(entries: list[WalletEntry]):
@@ -304,6 +349,7 @@ class AppState:
 
     @property
     def wallet_ctx(self):
+        self.warte_auf_context()
         with self._lock:
             return self._wallet_ctx
 

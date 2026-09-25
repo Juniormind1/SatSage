@@ -75,6 +75,7 @@ def api_config(
     )
     return {
         "version": app_version(),
+        "context_bereit": state.context_bereit(),
         "wallets": [z.as_dict() for z in zusammenfassung],
         "sources": [q.as_dict() for q in quellen],
         "script_types": [

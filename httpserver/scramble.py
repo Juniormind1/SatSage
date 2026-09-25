@@ -155,7 +155,8 @@ def _scramble_unlock(state, password: str) -> None:
         return
     sc.unlock_with_password(state.env_path, password)
     state.env_scramble_unlocked = True
-    state.reload()
+    # GUI sofort. Ableitung und Cache-Seed laufen danach; Empfang wartet.
+    state.reload(hintergrund=True)
 
 
 def _pending_password_path(state) -> Path:

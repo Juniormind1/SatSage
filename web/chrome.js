@@ -99,7 +99,9 @@ async function ladeConfig() {
   if (Zustand.config?.lernhinweise_plebs) {
     wendeAlleLernTooltipsAn().catch(() => {});
   }
-  if (Zustand.walletId) {
+  if (Zustand.contextBereit === false) {
+    zeichneEmpfangLeer(t("dock.empfangPuls"), { puls: true });
+  } else if (Zustand.walletId) {
     ladeEmpfang(Zustand.walletId).catch(() => {});
   } else {
     zeichneEmpfangLeer();
@@ -140,6 +142,11 @@ async function start() {
     }
   }
   $("#app").hidden = false;
+  // Vor /api/config: Login kann die GUI öffnen, während Adressen noch
+  // abgeleitet werden. Kein QR, bis der Kontext steht.
+  if (typeof zeichneEmpfangLeer === "function") {
+    zeichneEmpfangLeer(t("dock.empfangPuls"), { puls: true });
+  }
   // DE/EN sofort klickbar — nicht erst nach Jobs/Header-Sync am Ende von start().
   bindeSprachUmschalter();
   const logKnopf = $("#log-anzeige");
@@ -161,6 +168,10 @@ async function start() {
 
   try {
     await ladeConfig();
+    Zustand.contextBereit = Zustand.config?.context_bereit !== false;
+    if (Zustand.contextBereit && typeof EmpfangPuls !== "undefined") {
+      EmpfangPuls.stop();
+    }
     if (window.SatSageI18n) {
       await window.SatSageI18n.initI18n({
         configLang: Zustand.config?.ui_lang,
@@ -579,7 +590,10 @@ async function start() {
   // Einstieg: mit Wallets → erstes Wallet. Ohne Wallets und ohne echte
   // Datenquelle (P2P „eh da“ zählt nicht) → Datenquellen; sonst Wallets.
   if ((Zustand.config.wallets || []).length > 0) {
-    zeigeWallet(Zustand.config.wallets[0].id);
+    // Kontext noch im Aufbau: Wallet zeigen, Empfangsadresse nicht.
+    zeigeWallet(Zustand.config.wallets[0].id, {
+      ohneEmpfang: Zustand.contextBereit === false,
+    });
   } else if (walletsManaged()) {
     oeffneVerwaltung("einstellungen");
   } else if (brauchtDatenquellenZuerst()) {

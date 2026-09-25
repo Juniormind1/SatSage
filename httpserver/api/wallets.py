@@ -878,6 +878,11 @@ def api_wallet_empfang(state: AppState, kennung: str) -> dict:
         wallets_mod,
     )
 
+    if not state.context_bereit():
+        raise ApiError(
+            409,
+            "Wallets werden noch vorbereitet. Einen Moment.",
+        )
     entry = wallets_mod.find_entry(state.entries, kennung)
     if entry is None:
         raise ApiError(404, "Wallet nicht gefunden.")

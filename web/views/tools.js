@@ -13,13 +13,15 @@ function toolsErgebnis(text, art) {
 
 function zeichneToolsStatus(status, wallet) {
   const bekannt = status === "meine" || status === "fremd"
-    || status === "keine_wallets" || status === "checking" || status === "ungueltig";
+    || status === "keine_wallets" || status === "checking"
+    || status === "preparing" || status === "ungueltig";
   const effektiv = bekannt ? status : (status ? "ungueltig" : "");
   toolsLetztes = effektiv ? { status: effektiv, wallet: wallet || "" } : null;
   if (effektiv === "meine") toolsErgebnis(wallet || "", "meine");
   else if (effektiv === "fremd") toolsErgebnis(t("tools.notMine"), "fremd");
   else if (effektiv === "keine_wallets") toolsErgebnis(t("tools.noWallets"), "hinweis");
   else if (effektiv === "checking") toolsErgebnis(t("tools.checking"), "hinweis");
+  else if (effektiv === "preparing") toolsErgebnis(t("tools.preparing"), "hinweis");
   else if (effektiv === "ungueltig") toolsErgebnis(t("tools.invalid"), "hinweis");
   else toolsErgebnis("", "");
 }
@@ -36,6 +38,11 @@ async function pruefeIstDieMeine() {
     return;
   }
   knopf.disabled = true;
+  if (Zustand.contextBereit === false) {
+    zeichneToolsStatus("preparing");
+    knopf.disabled = false;
+    return;
+  }
   zeichneToolsStatus("checking");
   try {
     const daten = await api("/tools/adresse", {
@@ -46,6 +53,11 @@ async function pruefeIstDieMeine() {
     zeichneToolsStatus(daten.status, daten.wallet);
   } catch (fehler) {
     if (lauf !== toolsPruefLauf) return;
+    const status = fehler && fehler.status;
+    if (status === 409) {
+      zeichneToolsStatus("preparing");
+      return;
+    }
     toolsLetztes = null;
     toolsErgebnis((fehler && fehler.message) || t("common.netError"), "hinweis");
   } finally {

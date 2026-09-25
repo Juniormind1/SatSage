@@ -838,6 +838,7 @@
   "tools.meta": "Leitet aus den hinterlegten Wallets ab, ob die Adresse dazu gehört. Ohne Guthaben, ohne Verlauf, auch noch unbenutzt.",
   "tools.noWallets": "Keine Wallets eingerichtet.",
   "tools.notMine": "gehört Dir nicht",
+  "tools.preparing": "Wallets werden noch vorbereitet. Einen Moment.",
   "tools.chainChange": "Wechselgeld",
   "tools.chainReceive": "Empfang",
   "tools.treasure": "Jäger der verlorene Schätze",

@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Anmeldung:** Nach „Passwort korrekt“ öffnet sich die Oberfläche, sobald die Konfiguration entschlüsselt ist. Adressen und Cache werden danach gelesen. Solange atmet der Empfangs-QR, und es erscheint keine Empfangsadresse. „Ist die meine?“ wartet denselben Moment.
 - **Bericht Sat-Geschichte:** Die Datei heißt `satsage-trace-<Jahr>.html` bzw. `.csv`.
 - **Filter:** „Kraken“ findet auch die Zeile „davon … an Kraken“. Bisher kannte die Suche nur Herkunftslabels (Auszahlung von der Börse), nicht das Ziel der Ausgabetransaktion. Gilt in Wallet, Herkunft und in den Abgängen des Steuerjahrs.
 - **Bereits ausgegeben:** Hinter „ausgegeben am …“ steht „davon … an Kraken“, wenn in der Ausgabetransaktion ein Betrag an eine bekannte Börsenadresse ging. Gebühr, Wechselgeld und unbekannte Ziele zählen nicht mit. In einem CoinJoin entfällt die Adress-Zuordnung. Kennt nur der Börsen-Report die Transaktion, steht der Name ohne Betrag. Verlaufsscan, Compact-Filter-Lauf und der leichte Tip-Nachzug schreiben die Ziele mit. Liegt die Ausgabetransaktion schon lokal im Cache, erscheint der Zusatz auch ohne neuen Scan. Sonst bleibt der Satz beim Datum.

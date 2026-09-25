@@ -183,6 +183,14 @@ function nimmBlockEvent(daten) {
 async function ladeJobsNav() {
   try {
     const daten = await api("/jobs?recent_s=3");
+    if (typeof daten.context_bereit === "boolean") {
+      const war = Zustand.contextBereit;
+      Zustand.contextBereit = daten.context_bereit;
+      if (war === false && daten.context_bereit) {
+        if (Zustand.walletId) ladeEmpfang(Zustand.walletId).catch(() => {});
+        else zeichneEmpfangLeer();
+      }
+    }
     Zustand.jobsNav = {
       jobs: daten.jobs || [],
       scan_pipeline: daten.scan_pipeline || { current: null, queued: [] },

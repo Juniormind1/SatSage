@@ -234,6 +234,63 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertTrue(payload2.get("unlocked") or payload2.get("ok"))
         scramble = payload2.get("env_scramble") or {}
         self.assertFalse(scramble.get("locked", False))
+        # Ableitung darf noch laufen; der Kontext kommt danach.
+        self.assertTrue(self.state.warte_auf_context(timeout=30))
+        self.assertIsNotNone(self.state.wallet_ctx)
+
+    def test_unlock_antwortet_bevor_der_kontext_fertig_ist(self):
+        """Die GUI darf aufgehen, während Adressen noch abgeleitet werden."""
+        import threading
+        from unittest import mock
+
+        self.setup_password()
+        try:
+            from core import env_scramble as sc_mod
+            sc_mod.clear_session_key()
+        except Exception:
+            pass
+        self.state.env_scramble_unlocked = False
+        with self.state._auth_lock:
+            self.state.sessions.clear()
+        status, payload, headers = self.request(
+            "/api/auth/login", method="POST",
+            data={"password": "tralala123", "phase": "auth"},
+        )
+        self.assertEqual(status, 200, payload)
+        cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
+        tor = threading.Barrier(2)
+
+        def haengt(*_args, **_kwargs):
+            tor.wait(timeout=5)
+            tor.wait(timeout=5)
+            return None
+
+        with mock.patch.object(server.AppState, "_build_context", haengt):
+            ergebnis = {}
+
+            def rufe():
+                ergebnis["paar"] = self.request(
+                    "/api/auth/login", method="POST",
+                    cookie=cookie,
+                    data={"password": "tralala123", "phase": "unlock"},
+                )
+
+            thread = threading.Thread(target=rufe)
+            thread.start()
+            tor.wait(timeout=5)
+            self.assertTrue(thread.is_alive())
+            status_jobs, jobs, _ = self.request(
+                "/api/jobs?recent_s=3", cookie=cookie,
+            )
+            tor.wait(timeout=5)
+            thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(ergebnis["paar"][0], 200, ergebnis["paar"][1])
+        self.assertEqual(status_jobs, 200, jobs)
+        arten = [j.get("kind") for j in (jobs.get("jobs") or [])]
+        self.assertIn("wallet_context", arten)
+        self.assertFalse(jobs.get("context_bereit"))
+        self.assertTrue(self.state.warte_auf_context(timeout=5))
 
     def test_start9_drop_ueberschreibt_kein_nutzerpasswort(self):
         """Ein alter Action-Drop ist kein neues Passwort."""

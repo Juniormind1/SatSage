@@ -8,6 +8,13 @@ from typing import Any
 def api_tools_adresse(state: Any, payload: dict | None) -> dict:
     """Gehört die Adresse zu einem hinterlegten Wallet? Auch unbenutzt."""
     from core.adresse_werkzeug import pruefe_eigene_adresse
+    from server import ApiError
+
+    if not state.context_bereit():
+        raise ApiError(
+            409,
+            "Wallets werden noch vorbereitet. Einen Moment.",
+        )
 
     koerper = payload or {}
     return pruefe_eigene_adresse(
