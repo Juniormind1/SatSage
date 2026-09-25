@@ -35,6 +35,7 @@ _SERVER_NAMES = (
     '_password_hash',
     '_password_is_set',
     '_scramble_change_password',
+    '_scramble_discard_locked',
     '_scramble_disable_for_password',
     '_scramble_enable_for_password',
     '_scramble_unlock',
@@ -157,16 +158,30 @@ class HandlerAuthMixin:
                 return False
         return True
 
+    def _presented_token(self) -> str:
+        _ensure_server_names()
+        # Ein leerer Header ist kein Token. Der Client schickt ihn nicht mehr
+        # mit; alte Seiten (Safari-Rest, Firefox-Cache) tun es noch. Hinter
+        # dem StartOS-Proxy ist die Anmeldung schon erfolgt — der leere Wert
+        # darf diese Tür nicht zumachen.
+        if "X-Satsage-Token" not in self.headers:
+            return ""
+        return (self.headers.get("X-Satsage-Token") or "").strip()
+
     def _has_valid_token_header(self) -> bool:
         _ensure_server_names()
-        value = self.headers.get("X-Satsage-Token", "")
-        return bool(value) and secrets.compare_digest(value, self.state.token)
+        value = self._presented_token()
+        if not value or _start9_proxy_authenticated(self.state, self.headers):
+            return False
+        return secrets.compare_digest(value, self.state.token)
 
     def _token_ok(self, query: dict) -> bool:
         _ensure_server_names()
-        # Passwort gesetzt → nur Login-Session (Cookie). Weder ?t= noch
-        # X-Satsage-Token ersetzen die Passwort-Abfrage — auch nicht auf
-        # Loopback (sonst öffnet server.py die GUI ohne Login).
+        # Passwort gesetzt → nur Login-Session (Cookie) oder der StartOS-Proxy.
+        # Weder ?t= noch X-Satsage-Token ersetzen die Passwort-Abfrage — auch
+        # nicht auf Loopback (sonst öffnet server.py die GUI ohne Login).
+        # Ein leerer oder fremder Token-Header fällt hier durch, statt die
+        # Proxy-Anmeldung in _auth_ok zu blockieren.
         if _password_is_set(self.state):
             return False
         if self._has_valid_token_header():
@@ -180,14 +195,16 @@ class HandlerAuthMixin:
 
     def _auth_ok(self, query: dict) -> bool:
         _ensure_server_names()
+        # StartOS-Proxy vor dem Token: nach Basic Auth gibt es kein
+        # sessionStorage und kein ?t=. Ein mitgeschickter leerer oder
+        # veralteter X-Satsage-Token darf diese Anmeldung nicht überstimmen.
+        if _start9_proxy_authenticated(self.state, self.headers):
+            if not self._session_ok():
+                self._new_session()
+            return True
         if self._session_ok():
             return True
         if self._token_ok(query):
-            return True
-        if _start9_proxy_authenticated(self.state, self.headers):
-            # StartOS Basic Auth already checked uiPassword; persist that
-            # result in the same session form as the SatSage login.
-            self._new_session()
             return True
         return False
 
@@ -211,6 +228,10 @@ class HandlerAuthMixin:
             return True
         if self._has_valid_token_header():
             return True
+        # Proxy-Anmeldung hat keinen Token-Header als CSRF-Beweis. Dieselbe
+        # Origin-Prüfung wie bei der Passwort-Session.
+        if _start9_proxy_authenticated(self.state, self.headers):
+            return self._origin_ok()
         if not _password_is_set(self.state) and _env_setting(self.state, "SATSAGE_TRUST_PROXY") != "1":
             return True
         return self._origin_ok()
@@ -279,6 +300,16 @@ class HandlerAuthMixin:
                 '<input id="password" name="password" type="password" '
                 'autocomplete="current-password" required autofocus>'
                 f'<button type="submit">{t["anmelden"]}</button></form>'
+                f'<button type="button" class="vergessen" id="passwort-vergessen">'
+                f'{t["passwort_vergessen"]}</button>'
+                f'<div id="vergessen-folge" class="folge" hidden>'
+                f'<h2>{t["vergessen_titel"]}</h2>'
+                f'<p>{t["vergessen_text"]}</p>'
+                '<div class="folge-knopf">'
+                f'<button type="button" id="vergessen-von-vorn">{t["von_vorn"]}</button>'
+                f'<button type="button" class="still" id="vergessen-nochmal">'
+                f'{t["nochmal"]}</button>'
+                '</div></div>'
             )
         else:
             inhalt = (
@@ -432,6 +463,33 @@ class HandlerAuthMixin:
                     "authenticated": True,
                     "env_scramble": _env_scramble_status(self.state),
                 })
+            return True
+        if pfad == "/api/auth/forgot" and methode == "POST":
+            # Ohne Passwort ist der Inhalt nicht lesbar. Die Bestätigung sitzt
+            # im Folgedialog; der Server verlangt dasselbe Wort, damit ein
+            # versehentlicher POST die .env nicht leert.
+            if not _password_is_set(self.state):
+                self._json(200, {"ok": True, "password_set": False})
+                return True
+            try:
+                body = self._body()
+            except ApiError as exc:
+                self._fehler(exc.status, exc.message)
+                return True
+            if str(body.get("confirm") or "") != "start-over":
+                self._fehler(400, "Bestätigung fehlt.")
+                return True
+            try:
+                _scramble_discard_locked(self.state)
+            except Exception as exc:
+                self._fehler(400, f"Neu anfangen fehlgeschlagen: {exc}")
+                return True
+            self._login_succeeded()
+            self._json(200, {
+                "ok": True,
+                "password_set": False,
+                "authenticated": True,
+            })
             return True
         if pfad == "/api/auth/logout" and methode in ("POST", "DELETE"):
             sid = self._session_id()

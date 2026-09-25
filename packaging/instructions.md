@@ -23,14 +23,11 @@ service.
 1. Start Bitcoin and your chosen indexer (Electrs or Fulcrum); wait until healthy.
 2. In SatSage, run **Select Indexer** if you want Fulcrum instead of Electrs.
 3. Start SatSage.
-4. Open **Web UI**. StartOS asks for HTTP Basic auth:
-   - username: `admin`
-   - password: the generated service password (StartOS → SatSage →
-     Properties / the rotate-password action)
-5. The same password is the SatSage login (no second password prompt).
-
-If you rotate the password, stop SatSage first, run **Rotate Web UI
-Password**, then start it again.
+4. Open **Web UI**. There is no StartOS password and no username `admin`.
+   The address printed in the service log is inside the container; do not
+   paste it into a browser.
+5. SatSage opens without a password. A password exists only if you set one
+   in SatSage → Settings. That password is optional and encrypts `.env`.
 
 ## Data
 

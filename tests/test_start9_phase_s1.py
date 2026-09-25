@@ -235,6 +235,156 @@ class TestStart9PhaseS1(ApiTestBasis):
         scramble = payload2.get("env_scramble") or {}
         self.assertFalse(scramble.get("locked", False))
 
+    def test_start9_drop_ueberschreibt_kein_nutzerpasswort(self):
+        """Ein alter Action-Drop ist kein neues Passwort."""
+        import os
+        from unittest import mock
+
+        self.setup_password()
+        self.state.managed_by = "start9"
+        drop = self.env_pfad.parent / ".satsage-password.pending"
+        drop.write_text("startos-erfunden\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"SATSAGE_BOOTSTRAP_PASSWORD": "auch-erfunden"}):
+            server._seed_managed_password(self.state)
+        self.assertFalse(drop.exists())
+        self.assertTrue(server._verify_password("tralala123", server._password_hash(self.state)))
+        self.assertFalse(server._verify_password("startos-erfunden", server._password_hash(self.state)))
+
+    def test_start9_klartext_env_ist_kein_passwort(self):
+        """Ein von StartOS erfundener Hash ohne Scramble sperrt die Oberfläche nicht."""
+        import os
+        from unittest import mock
+
+        from core import env_scramble as sc
+        from tests.env_scramble_helpers import read_env_plaintext
+
+        self.state.managed_by = "start9"
+        # setUp hat die .env scrambled. Zurück auf Klartext, Hash trotzdem da.
+        text = read_env_plaintext(self.env_pfad)
+        sc.clear_session_key()
+        self.env_pfad.write_text(text, encoding="utf-8")
+        server._write_password_hash(self.state, "startos-erfunden")
+        self.assertFalse(server._password_is_set(self.state))
+        with mock.patch.dict(os.environ, {"SATSAGE_TRUST_PROXY": "1"}):
+            status, payload, _ = self.request("/api/auth/status", host="remote.example")
+        self.assertEqual(status, 200, payload)
+        self.assertFalse(payload.get("password_set"))
+        # Kein ?t= in der Web-UI, kein Passwort: die API gilt als angemeldet.
+        self.assertTrue(payload.get("authenticated"))
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/",
+            method="GET",
+        )
+        request.add_header("Host", "remote.example")
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(request, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIsNone(response.headers.get("Location"))
+            self.assertIn(b"<html", response.read()[:400].lower())
+
+    def test_passwort_vergessen_leert_env_und_oeffnet(self):
+        import os
+        from unittest import mock
+
+        self.setup_password()
+        self.state.managed_by = "start9"
+        self._trust = mock.patch.dict(
+            os.environ,
+            {
+                "SATSAGE_TRUST_PROXY": "1",
+                "SATSAGE_HOST_ALLOWLIST": "remote.example",
+            },
+        )
+        self._trust.start()
+        self.addCleanup(self._trust.stop)
+        from core import env_scramble as sc
+
+        # Nach einem Neustart liegt der Schlüssel nicht mehr im Speicher.
+        sc.clear_session_key()
+        status, payload, _ = self.request(
+            "/api/auth/forgot",
+            method="POST",
+            host="remote.example",
+            headers={"Content-Type": "application/json"},
+            data={"confirm": ""},
+        )
+        self.assertEqual(status, 400, payload)
+        self.assertTrue(server._password_is_set(self.state))
+        status, payload, headers = self.request(
+            "/api/auth/forgot",
+            method="POST",
+            host="remote.example",
+            data={"confirm": "start-over"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertFalse(server._password_is_set(self.state))
+        self.assertIn("satsage_session=", headers.get("Set-Cookie", ""))
+        text = self.env_pfad.read_text(encoding="utf-8")
+        self.assertNotIn("WALLET_", text)
+        # Die Allowlist stand in der verworfenen .env. Danach gilt Loopback,
+        # so wie die Oberfläche nach dem Neustart ohne fremden Host.
+        cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
+        status, payload, _ = self.request("/api/config", cookie=cookie)
+        self.assertEqual(status, 200, payload)
+
+    def test_start9_ignoriert_bootstrap_und_loescht_resthash(self):
+        """StartOS schickt kein Passwort. Ein alter Hash ohne Scramble stirbt."""
+        import os
+        from unittest import mock
+
+        from core import env_scramble as sc
+        from tests.env_scramble_helpers import read_env_plaintext
+
+        self.state.managed_by = "start9"
+        text = read_env_plaintext(self.env_pfad)
+        sc.clear_session_key()
+        self.env_pfad.write_text(text, encoding="utf-8")
+        server._write_password_hash(self.state, "altes-startos-passwort")
+        with mock.patch.dict(os.environ, {"SATSAGE_BOOTSTRAP_PASSWORD": "startos-erfunden"}):
+            server._seed_managed_password(self.state)
+        self.assertFalse((self.env_pfad.parent / ".satsage-password").is_file())
+        self.assertNotIn("SATSAGE_BOOTSTRAP_PASSWORD", os.environ)
+        self.assertFalse(server._password_is_set(self.state))
+
+    def test_start9_seed_scramble_nicht_bei_klartext(self):
+        import os
+        from unittest import mock
+
+        from core import env_scramble as sc
+        from tests.env_scramble_helpers import read_env_plaintext
+
+        self.state.managed_by = "start9"
+        text = read_env_plaintext(self.env_pfad)
+        sc.clear_session_key()
+        self.env_pfad.write_text(text, encoding="utf-8")
+        with mock.patch.dict(os.environ, {"SATSAGE_BOOTSTRAP_PASSWORD": "startos-erfunden"}):
+            server._seed_managed_password(self.state)
+        self.assertFalse((self.env_pfad.parent / ".satsage-password").is_file())
+        self.assertFalse(sc.is_scramble_file_present(self.env_pfad))
+        self.assertFalse(server._password_is_set(self.state))
+
+    def test_start9_ohne_proxy_login_verlangt_app_passwort(self):
+        """Kein Proxy-Basic-Auth mehr. Ohne App-Login bleibt die API zu.
+
+        Ein leerer Token-Header (Firefox-Cache) darf daraus keine 200 machen
+        und darf die Login-Seite nicht in „Token fehlt“ kippen.
+        """
+        import os
+        from unittest import mock
+
+        self.setup_password()
+        self.state.managed_by = "start9"
+        with mock.patch.dict(os.environ, {"SATSAGE_TRUST_PROXY": "1"}):
+            status, payload, _ = self.request(
+                "/api/config",
+                host="remote.example",
+                headers={"X-Satsage-Token": ""},
+            )
+            self.assertEqual(status, 403, payload)
+            status, payload, headers = self.request("/", host="remote.example")
+            self.assertEqual(status, 303)
+            self.assertTrue(headers.get("Location", "").startswith("/login"))
+
     def test_login_public_assets_ohne_auth(self):
         self.setup_password()
         self.state.managed_by = "start9"

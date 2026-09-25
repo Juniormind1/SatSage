@@ -39,7 +39,17 @@ def _password_hash(state) -> str:
 
 
 def _password_is_set(state) -> bool:
-    return bool(_password_hash(state))
+    """Passwort gibt es nur zusammen mit einer scrambled ``.env``.
+
+    Ein Hash in ``.satsage-password`` allein sperrt nichts. StartOS legt
+    keinen Hash an; ein Rest aus einem älteren Paket zählt nicht, solange
+    die ``.env`` im Klartext liegt.
+    """
+    if not _password_hash(state):
+        return False
+    from core import env_scramble as sc
+
+    return sc.is_scramble_file_present(state.env_path)
 
 
 def _hash_password(password: str) -> str:

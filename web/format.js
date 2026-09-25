@@ -3226,9 +3226,9 @@ async function apiSourceCheck(optionen = {}) {
   const url = still
     ? "/api/source/status?check=1&still=1"
     : "/api/source/status?check=1";
-  const kopf = { "X-Satsage-Token": Token };
+  const kopf = { ...tokenKopf() };
   if (!still) kopf.Accept = "application/x-ndjson";
-  const antwort = await fetch(url, { headers: kopf });
+  const antwort = await fetch(url, { headers: kopf, credentials: "same-origin" });
   if (!antwort.ok) {
     let koerper = {};
     try {

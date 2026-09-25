@@ -344,8 +344,14 @@ def main_cli(argv=None) -> int:
     print(t("cli.term.sanctions", path=state.sanctions_dir))
     print(t("cli.term.wallets", n=len(state.entries)))
     print()
-    print("  Im Browser öffnen (Token ist enthalten):")
-    print(f"    {adresse}")
+    if getattr(state, "managed_by", None) == "start9":
+        # 127.0.0.1 ist die Adresse im Container. Auf dem Client erreicht
+        # sie nichts; StartOS öffnet die Oberfläche über „Web UI“.
+        print("  StartOS: Oberfläche über „Web UI“ öffnen, nicht über diese Adresse.")
+        print("  Kein StartOS-Passwort. Optional nur das Passwort aus den SatSage-Einstellungen.")
+    else:
+        print("  Im Browser öffnen (Token ist enthalten):")
+        print(f"    {adresse}")
     if session_pfad is not None:
         print(f"  Session-Datei : {session_pfad}")
     print()

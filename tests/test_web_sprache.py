@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import server
+from tests.env_scramble_helpers import write_env_scrambled
 
 
 class TestAcceptLanguage(unittest.TestCase):
@@ -135,8 +136,10 @@ class TestLoginSeiteGerendert(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
-            env_path.write_text("", encoding="utf-8")
-            prozess = {"SATSAGE_BOOTSTRAP_PASSWORD": "geheim"}
+            write_env_scrambled(env_path, "", password="geheim")
+            prozess = {}
+            if managed_by == "umbrel":
+                prozess["SATSAGE_BOOTSTRAP_PASSWORD"] = "geheim"
             if managed_by:
                 prozess["SATSAGE_MANAGED_BY"] = managed_by
             with mock.patch.dict("os.environ", prozess, clear=False):
@@ -145,7 +148,10 @@ class TestLoginSeiteGerendert(unittest.TestCase):
                     cache_dir=Path(tmp) / "cache",
                     immutable_cache_dir=Path(tmp) / "immutable",
                 )
-                server._seed_managed_password(state)
+                if managed_by == "umbrel":
+                    server._seed_managed_password(state)
+                else:
+                    server._write_password_hash(state, "geheim")
 
                 handler = server.Handler.__new__(server.Handler)
                 handler.state = state

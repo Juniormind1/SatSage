@@ -20,10 +20,13 @@ class Start9ProxyAuthTest(unittest.TestCase):
                 env_path=Path(directory) / ".env",
             )
             with mock.patch.dict(os.environ, {"SATSAGE_TRUST_PROXY": "1"}):
-                headers = {"X-Forwarded-Proto": "https", "X-Forwarded-User": "admin"}
-                self.assertTrue(_start9_proxy_authenticated(state, headers))
-                # StartOS reicht die Proxy-Header nicht ins Container-Netz.
+                # Klartext-.env: Hash ohne Scramble ist kein Passwort.
+                # Die Web-UI hat kein ?t= — der Proxy reicht als Anmeldung.
                 self.assertTrue(_start9_proxy_authenticated(state, {}))
+            password_file.write_text("hash\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"SATSAGE_TRUST_PROXY": "1"}):
+                with mock.patch("server._password_is_set", return_value=True):
+                    self.assertFalse(_start9_proxy_authenticated(state, {}))
 
 
 if __name__ == "__main__":

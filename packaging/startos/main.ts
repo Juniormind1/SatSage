@@ -1,15 +1,9 @@
 import { manifest as bitcoinManifest } from 'bitcoin-core-startos/startos/manifest'
 import { i18n } from './i18n'
-import { storeJson } from './fileModels/store.json'
 import { sdk } from './sdk'
 import { appPort, getBridgeHosts } from './utils'
 
 export const main = sdk.setupMain(async ({ effects }) => {
-  const password = await storeJson.read((s) => s.uiPassword).const(effects)
-  if (!password) {
-    throw new Error('SatSage uiPassword is not available yet')
-  }
-
   const bridges = await getBridgeHosts(effects)
   if (!bridges.bitcoind || !bridges.electrum) {
     throw new Error(
@@ -43,8 +37,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
       command: sdk.useEntrypoint(),
       env: {
         SATSAGE_MANAGED_BY: 'start9',
-        // StartOS-managed bootstrap only; server.py seeds the durable hash once.
-        SATSAGE_BOOTSTRAP_PASSWORD: password,
+        // Kein StartOS-Passwort. Ein optionales SatSage-Passwort setzt nur
+        // der Nutzer in den Einstellungen. Ohne dieses Passwort öffnet die
+        // Web-UI ohne Token — die 127.0.0.1-Zeile im Log ist der Container.
         SATSAGE_TRUST_PROXY: '1',
         SATSAGE_HOST_ALLOWLIST:
           '*.local,.onion,192.168.*.*,10.*.*.*,172.16.*.*',

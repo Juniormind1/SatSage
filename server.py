@@ -183,6 +183,18 @@ button:disabled{opacity:.65;cursor:wait;filter:none}
 .fuss{margin-top:18px;font-size:12px}
 .fuss a{color:var(--akzent);text-decoration:none}
 .fuss a:hover{text-decoration:underline}
+.vergessen{
+  margin:14px 0 0;padding:0;border:0;background:none;color:var(--gedaempft);
+  font:inherit;font-size:12px;text-decoration:underline;cursor:pointer;
+}
+.vergessen:hover{color:var(--text)}
+.folge{margin-top:16px;padding-top:14px;border-top:1px solid var(--linie)}
+.folge p{color:var(--text)}
+.folge-knopf{display:flex;gap:8px;margin-top:12px}
+.folge-knopf button{margin-top:0;flex:1}
+.folge-knopf .still{
+  background:var(--flaeche-2);color:var(--text);border-color:var(--linie);
+}
 """.strip()
 
 # Login ohne app.js: Form per fetch, Fehler im Dialog, Fortschritt bei Unlock.
@@ -280,6 +292,43 @@ LOGIN_PAGE_JS = r"""
         });
     });
   }
+  function bindVergessen() {
+    var oeffnen = $("#passwort-vergessen");
+    var folge = $("#vergessen-folge");
+    var nochmal = $("#vergessen-nochmal");
+    var vonVorn = $("#vergessen-von-vorn");
+    if (!oeffnen || !folge) return;
+    var msg = $("#login-meldung");
+    oeffnen.addEventListener("click", function () {
+      folge.hidden = false;
+      oeffnen.hidden = true;
+      setMsg(msg, "", "");
+    });
+    if (nochmal) {
+      nochmal.addEventListener("click", function () {
+        folge.hidden = true;
+        oeffnen.hidden = false;
+        var pw = $("#password");
+        if (pw) pw.focus();
+      });
+    }
+    if (!vonVorn) return;
+    vonVorn.addEventListener("click", function () {
+      vonVorn.disabled = true;
+      if (nochmal) nochmal.disabled = true;
+      setMsg(msg, T.vergessen_laeuft, "warn");
+      postJson("/api/auth/forgot", { confirm: "start-over" })
+        .then(function () {
+          setMsg(msg, T.vergessen_fertig, "gut");
+          location.href = "/";
+        })
+        .catch(function (err) {
+          setMsg(msg, mapError(err && err.message), "krit");
+          vonVorn.disabled = false;
+          if (nochmal) nochmal.disabled = false;
+        });
+    });
+  }
   function bindSetup(form) {
     if (!form) return;
     var msg = $("#login-meldung");
@@ -309,6 +358,7 @@ LOGIN_PAGE_JS = r"""
   }
   bindLogin($("#login-form"));
   bindSetup($("#setup-form"));
+  bindVergessen();
 })();
 """.strip()
 
@@ -443,10 +493,18 @@ _LOGIN_TEXTE = {
         "wiederholen": "Wiederholen",
         "passwort_setzen": "Passwort setzen",
         "status_pruefen": "Status prüfen",
+        "passwort_vergessen": "Passwort vergessen",
+        "vergessen_titel": "Passwort vergessen",
+        "vergessen_text": (
+            "Du wirst alles ganz von vorne einrichten müssen, "
+            "wenn es dir nicht mehr einfällt. Wallets, Knoten und "
+            "die verschlüsselte Konfiguration sind dann weg."
+        ),
+        "von_vorn": "Von vorn anfangen",
+        "nochmal": "Ich denk nochmal nach",
         "hinweis_start9": (
-            "StartOS: Benutzername <strong>admin</strong>. Bei gestopptem Dienst "
-            "finden oder rotieren Sie das Passwort unter "
-            "<strong>Actions &amp; Config</strong>."
+            "Das ist das Passwort aus den SatSage-Einstellungen, "
+            "nicht ein StartOS-Passwort."
         ),
         "hinweis_umbrel": "Umbrel zeigt dieses Passwort in den App-Details von SatSage an.",
         # Client-JS (Login-Dialog, kein app.js)
@@ -458,6 +516,8 @@ _LOGIN_TEXTE = {
         "zu_viele": "Zu viele Fehlversuche. Später erneut versuchen.",
         "mismatch": "Passwörter stimmen nicht überein oder sind leer.",
         "fehler": "Anmeldung fehlgeschlagen.",
+        "vergessen_laeuft": "Konfiguration wird verworfen…",
+        "vergessen_fertig": "Neu anfangen — öffne SatSage…",
     },
     "en": {
         "titel": "SatSage – Sign in",
@@ -475,10 +535,17 @@ _LOGIN_TEXTE = {
         "wiederholen": "Repeat",
         "passwort_setzen": "Set password",
         "status_pruefen": "Check status",
+        "passwort_vergessen": "Forgot password",
+        "vergessen_titel": "Forgot password",
+        "vergessen_text": (
+            "You will have to set everything up from scratch "
+            "if you cannot remember it. Wallets, node, and the "
+            "encrypted configuration will be gone."
+        ),
+        "von_vorn": "Start over",
+        "nochmal": "Let me think again",
         "hinweis_start9": (
-            "StartOS: username <strong>admin</strong>. While the service is "
-            "stopped you can find or rotate the password under "
-            "<strong>Actions &amp; Config</strong>."
+            "This is the password from SatSage settings, not a StartOS password."
         ),
         "hinweis_umbrel": "Umbrel shows this password in the SatSage app details.",
         "passwort_falsch": "Wrong password.",
@@ -489,6 +556,8 @@ _LOGIN_TEXTE = {
         "zu_viele": "Too many failed attempts. Try again later.",
         "mismatch": "Passwords do not match or are empty.",
         "fehler": "Sign-in failed.",
+        "vergessen_laeuft": "Discarding configuration…",
+        "vergessen_fertig": "Starting over — opening SatSage…",
     },
 }
 
@@ -504,6 +573,8 @@ def _login_js_texte(t: dict) -> dict:
         "zu_viele",
         "mismatch",
         "fehler",
+        "vergessen_laeuft",
+        "vergessen_fertig",
     )
     return {k: t[k] for k in keys if k in t}
 
@@ -581,9 +652,15 @@ def _host_allowlist(state) -> list[str]:
     if process_value is not None:
         values.append(process_value)
     if state is not None:
+        # Eine verschlüsselte .env ohne Schlüssel darf den Host-Check nicht
+        # umwerfen. Sonst kommt weder Login noch „Passwort vergessen“ an.
+        # StartOS trägt die Allowlist ohnehin in der Daemon-Umgebung.
         try:
-            values.append(state.env().values().get("SATSAGE_HOST_ALLOWLIST", ""))
-        except (OSError, AttributeError):
+            from core import env_scramble as sc
+
+            if not sc.is_env_scrambled(state.env_path) or sc.get_session_key() is not None:
+                values.append(state.env().values().get("SATSAGE_HOST_ALLOWLIST", ""))
+        except (OSError, AttributeError, Exception):
             pass
     return [item.strip() for value in values for item in str(value or "").split(",") if item.strip()]
 
@@ -606,10 +683,12 @@ from httpserver.scramble import (  # noqa: E402
     _env_scramble_erlaubt,
     _env_scramble_status,
     _scramble_change_password,
+    _scramble_discard_locked,
     _scramble_disable_for_password,
     _scramble_enable_for_password,
     _scramble_unlock,
     _seed_managed_password,
+    starte_passwort_drop_wache,
     _unlock_needed_after_auth,
 )
 
@@ -640,19 +719,19 @@ def _basic_authorization(headers) -> tuple[str, str] | None:
 
 
 def _start9_proxy_authenticated(state, headers) -> bool:
-    """StartOS hat diese Anfrage schon per Basic Auth durchgelassen.
+    """StartOS-Web-UI ohne Konsolen-Token.
 
-    0.9.7 verlangte ``X-Forwarded-Proto: https`` und ``X-Forwarded-User``.
-    Der Proxy reicht beides nicht ins Container-Netz. Mit
-    ``SATSAGE_TRUST_PROXY=1`` ist der StartOS-Proxy die einzige Tür: wer die
-    Oberfläche erreicht, hat ``admin`` und das StartOS-Passwort schon
-    eingegeben. Ohne den Schalter bleibt die Sitzung zu.
+    Die Adresse im Log ist ``127.0.0.1`` im Container. Der Browser kommt über
+    den Proxy und hat kein ``?t=``. Solange die ``.env`` im Klartext liegt,
+    gibt es kein Passwort — die Oberfläche bleibt offen. Ist sie scrambled,
+    zählt nur das App-Passwort, nicht der Proxy.
     """
-    return (
-        state.managed_by == "start9"
-        and _env_setting(state, "SATSAGE_TRUST_PROXY") == "1"
-        and _password_is_set(state)
-    )
+    del headers
+    if getattr(state, "managed_by", None) != "start9":
+        return False
+    if _env_setting(state, "SATSAGE_TRUST_PROXY") != "1":
+        return False
+    return not _password_is_set(state)
 
 
 
@@ -1329,7 +1408,7 @@ class Handler(
         try:
             if pfad.startswith("/api/"):
                 if not auth_ok:
-                    self._fehler(403, "Anmeldung oder gültiger Token erforderlich.")
+                    self._fehler(403, "Anmeldung erforderlich.")
                     return
                 if pfad in ("/api/tax/export.csv", "/api/tax/bericht.html"):
                     self._download(pfad, query)

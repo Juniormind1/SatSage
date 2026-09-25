@@ -574,6 +574,22 @@ def enable_scramble(env_path: Path | str, plaintext: str, password: str) -> None
     scramble_all_env_backups(env_path, password)
 
 
+def discard_locked_env(env_path: Path | str) -> None:
+    """Passwort vergessen: verschlüsselte ``.env`` und Backups weg, ohne Klartext.
+
+    Es bleibt eine leere Klartext-``.env``. Der alte Inhalt ist ohne Passwort
+    nicht lesbar und wird nicht in ein Backup gerettet, das denselben Schlüssel
+    bräuchte.
+    """
+    path = env_path_of(env_path)
+    for extra in (legacy_gobbledigook_path(path), gobbledigook_path(path)):
+        _unlink_quiet(extra)
+    for backup in iter_env_backup_paths(path):
+        _unlink_quiet(backup)
+    _write_text_atomic(path, "")
+    clear_session_key()
+
+
 def disable_scramble(env_path: Path | str, password: str) -> str:
     """Passwort gelöscht: ``.env`` + alle ``.env.backup*`` → Klartext."""
     path = env_path_of(env_path)

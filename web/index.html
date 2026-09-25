@@ -1752,8 +1752,8 @@
 </template>
 
 <script>
-  // Vor den Modulen: StartOS/Umbrel hat kein Konsolen-Token. Ein gecachtes
-  // chrome.js darf „Token fehlt“ nicht zeigen, bevor der Anmeldestatus da ist.
+  // Vor den Modulen: StartOS hat kein Konsolen-Token und kein eigenes
+  // Passwort. Der Kasten bleibt zu, bis der Status etwas anderes sagt.
   (function () {
     var kasten = document.getElementById("token-fehlt");
     if (!kasten) return;
@@ -1761,11 +1761,12 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (auth) {
         if (!auth) return;
-        var plattform = auth.managed_by === "start9" || auth.managed_by === "umbrel";
-        if (auth.authenticated || auth.password_set || plattform) {
+        var umbrel = auth.managed_by === "umbrel";
+        var start9 = auth.managed_by === "start9";
+        if (auth.authenticated || auth.password_set || umbrel || start9) {
           kasten.hidden = true;
         }
-        if (plattform && !auth.authenticated) {
+        if ((auth.password_set || umbrel) && !auth.authenticated) {
           location.replace("/login?next=/");
         }
       })

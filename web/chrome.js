@@ -112,8 +112,9 @@ async function ladeConfig() {
 }
 
 async function start() {
-  // Wie 0.9.7: Konsolen-Token oder Passwort-Sitzung. Hinter StartOS gibt es
-  // kein ?t=; ohne Token zuerst den Status fragen, sonst „Token fehlt“.
+  // Konsolen-Token oder Passwort-Sitzung. Hinter StartOS gibt es kein ?t=
+  // und kein sessionStorage; die API läuft über den Proxy, nicht über den
+  // Token-Header. Ohne Token zuerst den Status fragen, sonst „Token fehlt“.
   if (!Token) {
     let auth = null;
     try {
@@ -123,13 +124,16 @@ async function start() {
       auth = null;
     }
     if (auth && auth.authenticated) {
-      // Session-Cookie oder StartOS-Proxy reicht — kein ?t= nötig.
+      // Session, oder StartOS ohne Passwort: die Web-UI hat kein ?t=.
     } else if (auth && auth.password_set) {
       location.href = "/login?next=/";
       return;
-    } else if (auth && (auth.managed_by === "start9" || auth.managed_by === "umbrel")) {
+    } else if (auth && auth.managed_by === "umbrel") {
       location.href = "/login?next=/";
       return;
+    } else if (auth && auth.managed_by === "start9") {
+      // Kein Konsolen-Token, kein StartOS-Passwort. Oberfläche offen,
+      // bis der Nutzer in den Einstellungen selbst eines setzt.
     } else {
       $("#token-fehlt").hidden = false;
       return;

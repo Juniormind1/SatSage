@@ -51,6 +51,15 @@ function sprachKopf() {
   return gewaehlt ? { "X-Satsage-Lang": gewaehlt } : {};
 }
 
+/**
+ * Nur ein echtes Sitzungs-Token mitschicken. Ein leerer Header ist hinter
+ * StartOS ein Fehl-Token: der Proxy hat schon authentifiziert, sessionStorage
+ * ist dort leer, und der Server darf die Anfrage nicht deshalb ablehnen.
+ */
+function tokenKopf() {
+  return Token ? { "X-Satsage-Token": Token } : {};
+}
+
 async function api(pfad, { methode = "GET", daten, timeoutMs } = {}) {
   const ctrl = timeoutMs ? new AbortController() : null;
   const timer = ctrl
@@ -62,7 +71,7 @@ async function api(pfad, { methode = "GET", daten, timeoutMs } = {}) {
       method: methode,
       credentials: "same-origin",
       headers: {
-        "X-Satsage-Token": Token,
+        ...tokenKopf(),
         ...sprachKopf(),
         ...(daten !== undefined ? { "Content-Type": "application/json" } : {}),
       },
