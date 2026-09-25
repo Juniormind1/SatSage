@@ -1,0 +1,19 @@
+name: Regtest-Labor
+
+# Pflicht vor einem Merge nach main und vor jedem Release (Tag v*).
+# Nicht bei jedem Push auf dev-juniormind. Der Montagslauf steht in
+# regtest-lab-weekly.yml und startet nur bei Delta am Prüfpfad.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  labor:
+    uses: ./.github/workflows/regtest-lab.yml

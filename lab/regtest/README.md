@@ -1,6 +1,6 @@
 # SatSage-Regtest-Labor
 
-Vor einem Merge nach `main` muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`).
+Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
 
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
@@ -85,7 +85,7 @@ In der GUI: viele unterschiedliche `hold_days` (nicht nur 1 T / 377 T).
 
 **Mocktime + Descriptor-Wallets:** `createwallet` setzt die Birthtime auf die Host-Uhr; Blöcke mit `setmocktime` (2022–2025) erscheinen erst nach `rescanblockchain 0` in `listunspent`. `generate_scenarios.py` rescanned Faucet und Lab-Wallets automatisch. `mine_at` ruft `mine` direkt (keine Rekursion über `mine_next`).
 
-**Electrs im Docker:** bitcoind muss P2P im Compose-Netz lauschen (`-bind=0.0.0.0 -port=18444 -whitelist=0.0.0.0/0`). Cookie für electrs: `regtest/.cookie` als `bitcoin:secret` (siehe `start.sh`). Nach Chain-Wipe electrs-DB mitlöschen (`.data/electrs/`).
+**Electrs im Docker:** bitcoind muss P2P im Compose-Netz lauschen (`-bind=0.0.0.0 -port=18444 -whitelist=0.0.0.0/0`). Cookie für electrs: `regtest/.cookie` als `bitcoin:secret`. `start.sh` schreibt die Datei im Container (User `bitcoin`) und gibt dem Image die Host-UID/GID mit, damit der Datadir nicht auf UID 101 (Mode 700) liegen bleibt. Nach Chain-Wipe electrs-DB mitlöschen (`.data/electrs/`).
 
 **GUI mit Lab-Env:** Immer `--env lab/regtest/.data/.regtest.env` (und eigene Cache-Dirs). `main._load_dotenv()` folgt zur Laufzeit `ENV_FILE` (nicht Import-Default) — sonst überschreibt die Root-`.env` (`NETWORK=main`) Regtest-Adressen (`bcrt1` → fälschlich `bc1`).
 

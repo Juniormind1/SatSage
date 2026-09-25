@@ -16,7 +16,11 @@ permissions:
   contents: write
 
 jobs:
+  labor:
+    uses: ./.github/workflows/regtest-lab.yml
+
   linux-x86_64:
+    needs: labor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

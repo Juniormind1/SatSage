@@ -1,0 +1,86 @@
+name: Regtest-Labor Woche
+
+# Montags auf dev-juniormind, aber nur wenn seit dem letzten erfolgreichen
+# Labor-Lauf etwas am Prüfpfad lag. Ein stiller Dev-Zweig startet nichts.
+# Pfade = das, was verify_tx_classify.py und verify_sanctions_hops.py anfassen
+# (Lab, Klassifikation, Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  pruefen:
+    runs-on: ubuntu-latest
+    outputs:
+      laufen: ${{ steps.delta.outputs.laufen }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev-juniormind
+          fetch-depth: 0
+
+      - name: Delta seit letztem grünen Labor
+        id: delta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pfade=(
+            lab/regtest
+            .github/workflows/regtest-lab.yml
+            .github/workflows/regtest-lab-dispatch.yml
+            .github/workflows/regtest-lab-weekly.yml
+            requirements.txt
+            main.py
+            analyze.py
+            sanctioned.py
+            core/tx_classify.py
+            core/wallet_sanctions_check.py
+            core/sanction_hops.py
+            core/sanctions_pool.py
+            core/wallet_context.py
+            core/derivation.py
+            core/config.py
+            core/chain_sources.py
+            core/fulcrum_client.py
+            core/fulcrum_protocol.py
+          )
+          # Jüngster erfolgreicher Lauf auf diesem Branch, egal ob Merge-Labor
+          # oder Wochenlauf. Ein roter Lauf zählt nicht als Basis.
+          basis="$(
+            {
+              gh run list --workflow "Regtest-Labor" --branch dev-juniormind \
+                --status success --limit 5 --json headSha,createdAt
+              gh run list --workflow "Regtest-Labor Woche" --branch dev-juniormind \
+                --status success --limit 5 --json headSha,createdAt
+            } | jq -s '[.[][]] | sort_by(.createdAt) | reverse | .[0].headSha // empty'
+          )"
+          if [ -z "$basis" ]; then
+            echo "Kein grüner Labor-Lauf. Prüfpfad wird einmal ausgeführt."
+            echo "laufen=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Basis: $basis"
+          if ! git cat-file -e "${basis}^{commit}" 2>/dev/null; then
+            echo "Basis nicht im Checkout. Prüfpfad wird ausgeführt."
+            echo "laufen=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$basis" HEAD -- "${pfade[@]}" | grep -q .; then
+            echo "Prüfpfad seit $basis geändert:"
+            git diff --name-only "$basis" HEAD -- "${pfade[@]}"
+            echo "laufen=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Prüfpfad seit $basis unverändert. Kein Labor."
+            echo "laufen=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  labor:
+    needs: pruefen
+    if: needs.pruefen.outputs.laufen == 'true'
+    uses: ./.github/workflows/regtest-lab.yml

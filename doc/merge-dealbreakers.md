@@ -58,7 +58,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | Q1 | **`tests/`-Suite rot** auf CI (Ubuntu `unittest discover`) | Hart |
-| Q6 | **Regtest-Labor rot** vor Merge nach `main` (Core + Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`) | Hart |
+| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py` | Hart |
 | Q2 | Suite „grün“ nur durch **unbegründete skips** / Aushebeln von Checks | Hart+Review |
 | Q3 | **Scope-Monster**: UI + Core-Scan + Packaging + Plugin in einem PR ohne Trennung | Weich |
 | Q4 | Neue Nutzertexte **nur Englisch / hart in `app.js`** statt Locales | Weich |

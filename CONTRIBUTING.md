@@ -33,7 +33,7 @@ GitHub startet dieselbe Suite bei jedem Push und jedem Pull Request nach `dev-ju
 
 ## Regtest vor `main`
 
-Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. GitHub startet dafür den Workflow `Regtest-Labor`: Bitcoin Core und Electrs in Docker, Lab-Szenarien, dann `verify_tx_classify.py` und `verify_sanctions_hops.py`. Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main` und bei einem Push nach `main`, nicht bei jedem Push nach `dev-juniormind`.
+Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. Dasselbe gilt für einen Release-Wechsel: Tag `v*`, Container-Image, Linux-Binary und StartOS-Paket laufen erst, wenn `Regtest-Labor` auf diesem Commit grün ist. GitHub startet dafür Bitcoin Core und Electrs in Docker, Lab-Szenarien, dann `verify_tx_classify.py` und `verify_sanctions_hops.py`. Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main`, bei einem Push nach `main` und bei einem Tag `v*`, nicht bei jedem Push nach `dev-juniormind`. Montags schaut `Regtest-Labor Woche` auf `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag (Lab, Klassifikation, Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
 
 Lokal derselbe Kern, ohne den Mempool-Explorer:
 

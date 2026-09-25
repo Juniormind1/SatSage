@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Regtest-Labor:** Der Start legt das Electrs-Cookie im Container an und gibt dem Bitcoin-Image die Benutzerkennung des Hosts mit. Auf dem GitHub-Runner gehörte das Datenverzeichnis sonst UID 101, und der Start brach mit „Permission denied“ ab, bevor Szenarien und Prüfung liefen. Ein Release (Tag, Container-Image, Linux-Binary, StartOS-Paket) setzt ein grünes Labor auf diesem Commit voraus. Der Montagslauf startet nur, wenn seit dem letzten grünen Lauf etwas an Klassifikation, Sanktions-Hops oder dem Labor selbst lag.
+
 ## [0.9.8] — 2026-09-25
 
 - **Version:** 0.9.8 — Werkzeuge „ist die meine?“ und „Jäger der verlorene Schätze“, einheitliche Sprache von Oberfläche und Servertexten, Umbrel-Paket auf dem Stand von 0.9.7.

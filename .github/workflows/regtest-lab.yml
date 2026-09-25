@@ -1,15 +1,11 @@
 name: Regtest-Labor
 
-# Pflicht vor einem Merge nach main. Nicht bei jedem Push auf dev-juniormind:
-# Core und Electrs hochfahren, Lab-Szenarien erzeugen, Klassifikation und
-# Sanktions-Hops prüfen. Der Explorer (mempool) bleibt aus — die Prüfungen
-# sprechen mit Core und Electrs.
+# Wiederverwendbar. Auslöser: regtest-lab-dispatch.yml (Merge, Tag v*,
+# manuell), regtest-lab-weekly.yml (Montag, nur bei Delta am Prüfpfad),
+# Image-, Linux- und StartOS-Build. Core und Electrs, Szenarien,
+# Klassifikation und Sanktions-Hops. Der Explorer (mempool) bleibt aus.
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

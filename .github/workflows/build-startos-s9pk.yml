@@ -15,7 +15,11 @@ permissions:
   contents: read
 
 jobs:
+  labor:
+    uses: ./.github/workflows/regtest-lab.yml
+
   s9pk:
+    needs: labor
     runs-on: ubuntu-latest
     defaults:
       run:

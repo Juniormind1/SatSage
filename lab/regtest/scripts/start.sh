@@ -13,23 +13,37 @@ MSG
   exit 2
 fi
 mkdir -p "$ROOT/.data/bitcoin" "$ROOT/.data/electrs"
+# bitcoin/bitcoin chownt den Bind-Mount auf den Container-User. Ohne passende
+# UID/GID gehört .data/bitcoin danach UID 101 (Mode 700) und der Host darf
+# dort nichts mehr anlegen — auf GitHub-Runnern sofort, lokal oft unsichtbar.
+export SATSAGE_LAB_UID="${SATSAGE_LAB_UID:-$(id -u)}"
+export SATSAGE_LAB_GID="${SATSAGE_LAB_GID:-$(id -g)}"
 # bitcoind mit -rpcuser/-rpcpassword legt kein .cookie an — electrs braucht
 # aber CookieFile. Gleiche Credentials als Cookie schreiben, bevor electrs startet.
 "${COMPOSE[@]}" up -d bitcoind
 echo "Warte auf bitcoind…"
+bereit=0
 for _ in $(seq 1 60); do
   if "${COMPOSE[@]}" exec -T bitcoind bitcoin-cli -regtest \
       -rpcuser="$RPCUSER" -rpcpassword="$RPCPASSWORD" getblockchaininfo \
       >/dev/null 2>&1; then
+    bereit=1
     break
   fi
   sleep 1
 done
-COOKIE_DIR="$ROOT/.data/bitcoin/regtest"
-mkdir -p "$COOKIE_DIR"
+if [[ "$bereit" != 1 ]]; then
+  echo "bitcoind antwortet nicht." >&2
+  "${COMPOSE[@]}" logs --tail 40 bitcoind >&2 || true
+  exit 1
+fi
+# Cookie im Container schreiben. Der Entrypoint chownt den Datadir nach dem
+# ersten Start; ein Host-mkdir in .data/bitcoin/regtest scheitert dann, wenn
+# UID/GID nicht gegriffen haben (CI: Permission denied).
 # Ohne Newline — sonst 401 bei manchen electrs-Versionen.
-printf '%s' "${RPCUSER}:${RPCPASSWORD}" > "$COOKIE_DIR/.cookie"
-chmod 644 "$COOKIE_DIR/.cookie"
+"${COMPOSE[@]}" exec -T -u bitcoin bitcoind \
+  sh -c 'mkdir -p "$BITCOIN_DATA/regtest" && printf "%s" "$1" > "$BITCOIN_DATA/regtest/.cookie"' \
+  sh "${RPCUSER}:${RPCPASSWORD}"
 if [[ "${SATSAGE_LAB_SKIP_MEMPOOL:-}" == "1" ]]; then
   "${COMPOSE[@]}" up -d electrs
 else
