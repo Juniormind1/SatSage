@@ -56,6 +56,11 @@ hidden = [
     "core.splash_ui",
     "core.single_instance",
     "core.gui_session",
+    "core.env_scramble",
+    "argon2",
+    "argon2.low_level",
+    "cryptography",
+    "cryptography.hazmat.primitives.ciphers.aead",
     "tkinter",
 ]
 if SPLASH_OK:

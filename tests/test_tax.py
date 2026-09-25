@@ -748,6 +748,7 @@ class TestZeitstrahl(unittest.TestCase):
         self.assertEqual(strahl["bis"], "31.12.2026")
         self.assertGreater(strahl["events"][0]["pos"], 0.0)
         self.assertLess(strahl["events"][0]["pos"], 100.0)
+        self.assertGreater(strahl["events"][0]["time_ts"], 0)
 
     def test_eingang_genau_am_stichtag_ergibt_trotzdem_eine_spanne(self):
         """

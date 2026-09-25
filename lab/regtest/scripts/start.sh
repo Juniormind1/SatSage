@@ -30,8 +30,14 @@ mkdir -p "$COOKIE_DIR"
 # Ohne Newline — sonst 401 bei manchen electrs-Versionen.
 printf '%s' "${RPCUSER}:${RPCPASSWORD}" > "$COOKIE_DIR/.cookie"
 chmod 644 "$COOKIE_DIR/.cookie"
-"${COMPOSE[@]}" up -d electrs mempool-db mempool-api mempool-web
+if [[ "${SATSAGE_LAB_SKIP_MEMPOOL:-}" == "1" ]]; then
+  "${COMPOSE[@]}" up -d electrs
+else
+  "${COMPOSE[@]}" up -d electrs mempool-db mempool-api mempool-web
+fi
 echo "Regtest gestartet:"
 echo "  RPC       127.0.0.1:18443"
 echo "  Electrum  127.0.0.1:50001"
-echo "  Mempool   http://127.0.0.1:18080  (Explorer; Index braucht kurz)"
+if [[ "${SATSAGE_LAB_SKIP_MEMPOOL:-}" != "1" ]]; then
+  echo "  Mempool   http://127.0.0.1:18080  (Explorer; Index braucht kurz)"
+fi

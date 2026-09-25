@@ -108,13 +108,13 @@ class TestOberflaeche(unittest.TestCase):
 
     def setUp(self):
         web = Path(__file__).resolve().parent.parent / "web"
-        self.js = (web / "app.js").read_text(encoding="utf-8")
+        self.js = (web / "views" / "adress_labels.js").read_text(encoding="utf-8")
         self.html = (web / "index.html").read_text(encoding="utf-8")
 
     def test_erwaehnung_wird_anders_formuliert_als_ein_dienst(self):
         # labelMarke + Hilfsfunktionen davor (istBoersenLabel/boerseRichtung).
         start = self.js.index("function istBoersenLabel")
-        ende = self.js.index("\nfunction meldungListen", start)
+        ende = self.js.index("\nfunction bindeAdressLabelsUi", start)
         marke = self.js[start:ende]
         self.assertIn('label.art === "erwaehnung"', marke)
         self.assertIn('t("labels.mentionedOn"', marke)
@@ -127,7 +127,7 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_datenstand_steht_im_hilfetext(self):
         start = self.js.index("function labelMarke")
-        ende = self.js.index("\nfunction meldungListen", start)
+        ende = self.js.index("\nfunction bindeAdressLabelsUi", start)
         marke = self.js[start:ende]
         self.assertIn('t("labels.dataHint")', marke)
 

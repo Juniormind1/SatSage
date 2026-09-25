@@ -4,7 +4,7 @@ Anzeigeformate.
 Die Web-Oberfläche formatiert Beträge in JavaScript nach, weil sie sonst für
 jede Zahl den Server fragen müsste. Damit CLI und Oberfläche nicht
 auseinanderlaufen, hält dieser Test die Regeln fest — inklusive der Schwelle,
-die in web/app.js noch einmal steht.
+die in web/format.js noch einmal steht.
 """
 import re
 import unittest
@@ -13,7 +13,7 @@ from pathlib import Path
 import display
 from core.utxos import _zeit_ohne_block
 
-APP_JS = Path(__file__).resolve().parent.parent / "web" / "app.js"
+FORMAT_JS = Path(__file__).resolve().parent.parent / "web" / "format.js"
 
 
 class TestBetragsSchwelle(unittest.TestCase):
@@ -23,16 +23,16 @@ class TestBetragsSchwelle(unittest.TestCase):
 
     def test_javascript_kennt_dieselbe_schwelle(self):
         """
-        Ändert jemand die Schwelle in display.py, muss web/app.js nachgezogen
+        Ändert jemand die Schwelle in display.py, muss web/format.js nachgezogen
         werden — sonst zeigt die Oberfläche andere Beträge als das CLI.
         """
-        quelle = APP_JS.read_text(encoding="utf-8")
+        quelle = FORMAT_JS.read_text(encoding="utf-8")
         treffer = re.search(r"SATS_BTC_MIN_DISPLAY\s*=\s*(\d+)", quelle)
-        self.assertIsNotNone(treffer, "SATS_BTC_MIN_DISPLAY fehlt in web/app.js")
+        self.assertIsNotNone(treffer, "SATS_BTC_MIN_DISPLAY fehlt in web/format.js")
         self.assertEqual(
             int(treffer.group(1)),
             display.SATS_BTC_MIN_DISPLAY,
-            "web/app.js und display.py verwenden verschiedene Schwellen",
+            "web/format.js und display.py verwenden verschiedene Schwellen",
         )
 
     def test_kleine_betraege_bleiben_sats(self):

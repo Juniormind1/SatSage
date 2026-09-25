@@ -58,6 +58,22 @@ class TestUiLangFuerWeb(unittest.TestCase):
         self.assertEqual(server._ui_lang_fuer_web({}, None), "en")
         self.assertEqual(server._ui_lang_fuer_web({}, "fr-FR"), "en")
 
+    def test_client_sprache_schlaegt_alles(self):
+        """Wahl im Browser (X-Satsage-Lang) vor UI_LANG und Accept-Language."""
+        self.assertEqual(
+            server._ui_lang_fuer_web({"UI_LANG": "de"}, "de-DE", "en"), "en"
+        )
+        self.assertEqual(
+            server._ui_lang_fuer_web({"UI_LANG": "en"}, "en-US", "de"), "de"
+        )
+
+    def test_unbrauchbare_client_sprache_wird_ignoriert(self):
+        for roh in (None, "", "fr", "xx", "  "):
+            with self.subTest(roh=roh):
+                self.assertEqual(
+                    server._ui_lang_fuer_web({}, "de-DE,de;q=0.9", roh), "de"
+                )
+
 
 class TestLoginTexte(unittest.TestCase):
     def test_beide_sprachen_decken_dieselben_schluessel(self):
@@ -165,7 +181,7 @@ class TestLoginSeiteGerendert(unittest.TestCase):
         )
 
 
-class TestClientSpracheHatVorrang(unittest.TestCase):
+class TestClientSpracheInDerAntwort(unittest.TestCase):
     """Die Sprache, die der Browser anzeigt, bestimmt auch die Servertexte.
 
     Client und Server lösten die Sprache getrennt auf: der Client aus
@@ -174,21 +190,6 @@ class TestClientSpracheHatVorrang(unittest.TestCase):
     Steuerhinweise aber deutsch. Der Client schickt seine Wahl deshalb als
     ``X-Satsage-Lang`` mit.
     """
-
-    def test_client_sprache_schlaegt_alles(self):
-        self.assertEqual(
-            server._ui_lang_fuer_web({"UI_LANG": "de"}, "de-DE", "en"), "en"
-        )
-        self.assertEqual(
-            server._ui_lang_fuer_web({"UI_LANG": "en"}, "en-US", "de"), "de"
-        )
-
-    def test_unbrauchbare_client_sprache_wird_ignoriert(self):
-        for roh in (None, "", "fr", "xx", "  "):
-            with self.subTest(roh=roh):
-                self.assertEqual(
-                    server._ui_lang_fuer_web({}, "de-DE,de;q=0.9", roh), "de"
-                )
 
     def _state(self, tmp):
         (Path(tmp) / ".env").write_text("", encoding="utf-8")
@@ -201,9 +202,12 @@ class TestClientSpracheHatVorrang(unittest.TestCase):
     def test_config_folgt_der_client_sprache(self):
         """Weg A: EN nur im Browser, deutscher Browser, kein UI_LANG."""
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = server.api_config(self._state(tmp), {}, "de-DE,de;q=0.9", "en")
+            cfg = server.api_config(
+                self._state(tmp), {}, "de-DE,de;q=0.9", "en"
+            )
             self.assertEqual(cfg["ui_lang"], "en")
             self.assertIn("reconstructs", cfg["hinweis_onchain"])
+            self.assertNotIn("rekonstruiert", cfg["hinweis_onchain"])
 
     def test_steuerhinweise_folgen_der_client_sprache(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -213,3 +217,22 @@ class TestClientSpracheHatVorrang(unittest.TestCase):
             text = " ".join(daten.get("hinweise") or [])
             self.assertIn("This statement is not tax advice", text)
             self.assertNotIn("keine Steuerberatung", text)
+
+    def test_ohne_client_sprache_bleibt_der_absatz_deutsch(self):
+        """Kein Header: Accept-Language de, Konstanten-Wortlaut wie bisher."""
+        from core import tax
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = server.api_config(self._state(tmp), {}, "de-DE", None)
+            self.assertEqual(cfg["hinweis_onchain"], tax.HINWEIS_ONCHAIN)
+
+    def test_ohne_jeden_header_bleibt_der_absatz_deutsch(self):
+        """Export und Tests rufen ohne Header auf — deutscher Wortlaut.
+
+        ``ui_lang`` bleibt dabei die Web-Vorgabe Englisch: die Login-Seite
+        nutzt denselben Fallback, der Haftungsabsatz nicht.
+        """
+        from core import tax
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = server.api_config(self._state(tmp), {}, None, None)
+            self.assertEqual(cfg["ui_lang"], "en")
+            self.assertEqual(cfg["hinweis_onchain"], tax.HINWEIS_ONCHAIN)

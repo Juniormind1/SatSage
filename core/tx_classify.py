@@ -12,7 +12,7 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from trace_engine import (
+from core.trace import (
     ProgressCallback,
     match_own_address,
     resolve_vin_prevout,
@@ -20,7 +20,7 @@ from trace_engine import (
 )
 
 if TYPE_CHECKING:
-    from main import WalletContext
+    from core.wallet_context import WalletContext
 
 #: CoinJoin-Untertypen und generischer Fallback — Own-only-Walk.
 COINJOIN_KINDS = frozenset({

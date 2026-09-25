@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import main
+import core.wallet_sync_engine as wallet_sync_engine
 from tests.fixtures import BIP84_RECEIVE_0, BIP84_ZPUB, txid
 
 
@@ -154,7 +155,7 @@ class TestWalletsBeimStart(unittest.TestCase):
                 pass
 
             with mock.patch.object(
-                main, "discover_wallet_scan_addresses",
+                wallet_sync_engine, "discover_wallet_scan_addresses",
                 side_effect=AssertionError("Gap darf nicht laufen"),
             ):
                 out = main.sync_xpub_zum_tip(
@@ -206,7 +207,7 @@ class TestWalletsBeimStart(unittest.TestCase):
             self.assertEqual(entry["raw"].get("scan_tip_height"), 900_000)
 
             frisch = [_utxo(777, "b")]
-            with mock.patch.object(main, "_scan_xpub_utxos", return_value=frisch) as scan:
+            with mock.patch.object(wallet_sync_engine, "_scan_xpub_utxos", return_value=frisch) as scan:
                 out = main.sync_xpub_zum_tip(
                     BIP84_ZPUB,
                     lambda *_a, **_k: [],
@@ -238,7 +239,7 @@ class TestWalletsBeimStart(unittest.TestCase):
                 return frisch
 
             with mock.patch.object(
-                main, "_scan_xpub_utxos", return_value=frisch
+                wallet_sync_engine, "_scan_xpub_utxos", return_value=frisch
             ) as scan:
                 out = main.sync_xpub_zum_tip(
                     BIP84_ZPUB,
@@ -272,7 +273,7 @@ class TestWalletsBeimStart(unittest.TestCase):
                 return [dict(alt)] if addr == alt["address"] else []
 
             with mock.patch.object(
-                main, "_try_scantxoutset_xpub", return_value=[_utxo(999, "x")]
+                wallet_sync_engine, "_try_scantxoutset_xpub", return_value=[_utxo(999, "x")]
             ) as core:
                 out = main.sync_xpub_zum_tip(
                     BIP84_ZPUB,
@@ -315,11 +316,11 @@ class TestWalletsBeimStart(unittest.TestCase):
                 return [dict(alt)] if addr == alt["address"] else []
 
             with mock.patch(
-                "fulcrum.get_chain_tip_height", return_value=912_345
+                "core.fulcrum_history.get_chain_tip_height", return_value=912_345
             ) as tip_fn, mock.patch(
                 "core.p2p.header_datei_tip", return_value=900_100
             ), mock.patch(
-                "main.discover_wallet_scan_addresses",
+                "core.wallet_sync_engine.discover_wallet_scan_addresses",
                 return_value=(set(), 2),
             ):
                 out = main.sync_xpub_zum_tip(

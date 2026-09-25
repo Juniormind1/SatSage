@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
-import main
+from core import xpub_cache
 from core import tax as tax_mod
 
 #: Default-Platzhalter (Entenhausen), bis der Nutzer eigene Daten speichert.
@@ -136,7 +136,7 @@ def _norm_txid(txid: str, *, strict: bool = False) -> str:
         if rechts.isdigit() or (rechts and rechts.lstrip("-").isdigit()):
             text = links.strip()
     try:
-        return main._normalize_txid(text)
+        return xpub_cache._normalize_txid(text)
     except ValueError:
         if strict:
             raise
@@ -161,7 +161,7 @@ def _anschaffung_los(
     """(zeit, grundlage, untergrenze, externe_adresse_oder_leer)."""
     ingress = None
     if immutable_cache_dir:
-        ingress = main.load_utxo_ingress_cache(
+        ingress = xpub_cache.load_utxo_ingress_cache(
             utxo.get("txid", ""), int(utxo.get("vout", 0)), immutable_cache_dir
         )
     zeit, grundlage, untergrenze, _fb = tax_mod._anschaffung(

@@ -1,8 +1,8 @@
 """
 UTXO-Rangfolge als Daten.
 
-Datenliefernde Entsprechung zu main.list_top_wallet_utxos / _print_utxo_rank_row
-(die weiterhin das CLI bedienen). Dieselben Hilfsfunktionen, dieselbe
+Datenliefernde Entsprechung zu core.utxo_report.list_top_wallet_utxos /
+_print_utxo_rank_row (die weiterhin das CLI bedienen). Dieselben Hilfsfunktionen, dieselbe
 Sortierung — nur ohne Ausgabe, damit die Zahlen in beiden Oberflächen
 garantiert übereinstimmen.
 """
@@ -11,7 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import labels
-import main
+from core import utxo_report
+from core import xpub_cache
 from core import trace_cache
 
 
@@ -30,7 +31,7 @@ def _zeit_ohne_block(label: str) -> str:
     """
     Entfernt das führende 'Block 857,930 · ' aus einem Zeitstempel.
 
-    main._format_tx_time setzt Blockhöhe und Zeit zusammen; die Oberfläche
+    utxo_report._format_tx_time setzt Blockhöhe und Zeit zusammen; die Oberfläche
     zeigt beides getrennt und formatiert die Höhe selbst.
     """
     if label.startswith("Block ") and " · " in label:
@@ -52,11 +53,18 @@ def utxo_as_dict(
     bei der Anzeige, damit unterwegs nichts durch float verloren geht.
     """
     address = utxo.get("address", "")
-    label = wallet.resolve_address(address) if wallet else None
+    label = wallet.resolve_address(address) if wallet and address else None
+    # Verlauf aus Wallet-Export (z. B. Sparrow-Tx-CSV) hat oft keine Adresse —
+    # resolve_address schlägt fehl. Der Cache gehört aber zu einem bekannten
+    # Wallet: Fallback-Name vom Ladevorgang (``_wallet_fallback``).
+    if not label:
+        fallback = utxo.get("_wallet_fallback") or utxo.get("wallet")
+        if isinstance(fallback, str) and fallback.strip():
+            label = fallback.strip()
 
     # scantxoutset liefert oft nur die Höhe — Zeit aus lokalem Header-Cache.
     if immutable_cache_dir is not None:
-        main.enrich_utxos_with_block_times([utxo], immutable_cache_dir)
+        xpub_cache.enrich_utxos_with_block_times([utxo], immutable_cache_dir)
 
     status = utxo.get("status") or {}
     eintrag = {
@@ -71,8 +79,8 @@ def utxo_as_dict(
         # Nur Datum und Uhrzeit — die Blockhöhe steht als eigenes Feld daneben
         # und würde sonst doppelt erscheinen, dazu mit englischer
         # Tausendertrennung aus der CLI-Formatierung.
-        "time_label": _zeit_ohne_block(main._format_utxo_status(utxo)),
-        "status_label": main._format_utxo_status(utxo),
+        "time_label": _zeit_ohne_block(utxo_report._format_utxo_status(utxo)),
+        "status_label": utxo_report._format_utxo_status(utxo),
         "hold_days": _hold_days(utxo),
         "youngest_sats_time": None,
         "herkunft_label": None,
@@ -107,7 +115,7 @@ def utxo_as_dict(
     }
 
     if immutable_cache_dir:
-        ingress = main.load_utxo_ingress_cache(
+        ingress = xpub_cache.load_utxo_ingress_cache(
             eintrag["txid"], eintrag["vout"], immutable_cache_dir
         )
         if ingress:
@@ -395,16 +403,16 @@ def load_cached_utxos(
     zurückgeschrieben, damit scantxoutset-Bestände dieselbe Ankunftsanzeige
     bekommen wie BIP-158-Scans.
     """
-    eintrag = main.load_xpub_cache_entry(xpub, cache_dir)
+    eintrag = xpub_cache.load_xpub_cache_entry(xpub, cache_dir)
     if eintrag is None:
         return None
     utxos = eintrag.get("utxos") or []
     imm = immutable_cache_dir
     if imm is None:
-        imm = main.resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
-    angereichert = main.enrich_utxos_with_block_times(utxos, imm)
+        imm = xpub_cache.resolve_immutable_cache_dir(utxo_cache_dir=cache_dir)
+    angereichert = xpub_cache.enrich_utxos_with_block_times(utxos, imm)
     if angereichert and persist_times:
-        main.rewrite_utxo_cache_times(xpub, cache_dir, utxos)
+        xpub_cache.rewrite_utxo_cache_times(xpub, cache_dir, utxos)
     return utxos
 
 

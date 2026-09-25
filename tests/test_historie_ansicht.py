@@ -39,6 +39,19 @@ class TestAuswahl(unittest.TestCase):
         self.assertEqual(ergebnis["total_count"], 1)
         self.assertEqual(ergebnis["utxos"][0]["value_sats"], 200_000)
 
+    def test_wallet_fallback_ohne_adresse(self):
+        """Sparrow-Tx-CSV: kein address → resolve_address leer, Fallback-Name gilt."""
+        from core.utxos import utxo_as_dict
+        roh = {
+            "txid": txid("e1"), "vout": 0, "value": 12_000,
+            "spent": True, "spent_txid": txid("ff"),
+            "status": {"confirmed": True},
+            "_wallet_fallback": "CC24w",
+        }
+        out = utxo_as_dict(roh)
+        self.assertEqual(out["wallet"], "CC24w")
+        self.assertEqual(out["address"], "")
+
     def test_leerer_verlauf(self):
         ergebnis = historische_eintraege([])
         self.assertEqual(ergebnis["total_count"], 0)

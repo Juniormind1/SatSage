@@ -165,10 +165,16 @@ class TestUtxoScan(unittest.TestCase):
             nummer = int(adresse.replace("bc1qtest", ""))
             return [{"txid": f"{nummer:064x}", "vout": 0, "value": nummer * 1000}]
 
-        self._alt = fulcrum.fetch_address_utxos_fulcrum
+        import core.fulcrum_wallet as fulcrum_wallet
+
+        self._alt = fulcrum_wallet.fetch_address_utxos_fulcrum
+        fulcrum_wallet.fetch_address_utxos_fulcrum = fake_fetch
         fulcrum.fetch_address_utxos_fulcrum = fake_fetch
         self.addCleanup(
-            lambda: setattr(fulcrum, "fetch_address_utxos_fulcrum", self._alt)
+            lambda: (
+                setattr(fulcrum_wallet, "fetch_address_utxos_fulcrum", self._alt),
+                setattr(fulcrum, "fetch_address_utxos_fulcrum", self._alt),
+            )
         )
 
     def test_gleiche_menge_mit_und_ohne_pool(self):
@@ -267,24 +273,24 @@ class TestOpenScanPool(unittest.TestCase):
 
     def test_rotating_pool_ohne_crash(self):
         pool = fulcrum.RotatingFulcrumPool([self._client()])
-        with mock.patch("fulcrum.connect_fulcrum") as connect:
+        with mock.patch("core.fulcrum_client.connect_fulcrum") as connect:
             self.assertIsNone(main._open_scan_pool(pool))
         connect.assert_not_called()
 
     def test_clearnet_pool_ohne_crash(self):
         pool = fulcrum.SanctionsClearnetPool([self._client()])
-        with mock.patch("fulcrum.connect_fulcrum") as connect:
+        with mock.patch("core.fulcrum_client.connect_fulcrum") as connect:
             self.assertIsNone(main._open_scan_pool(pool))
         connect.assert_not_called()
 
     def test_tor_client_bekommt_keine_extra_sockets(self):
-        with mock.patch("fulcrum.connect_fulcrum") as connect:
+        with mock.patch("core.fulcrum_client.connect_fulcrum") as connect:
             self.assertIsNone(main._open_scan_pool(self._client(tor=True)))
         connect.assert_not_called()
 
     def test_none_und_zu_wenig_worker(self):
         self.assertIsNone(main._open_scan_pool(None))
-        with mock.patch("fulcrum.connect_fulcrum") as connect:
+        with mock.patch("core.fulcrum_client.connect_fulcrum") as connect:
             self.assertIsNone(main._open_scan_pool(self._client(), workers=1))
         connect.assert_not_called()
 
@@ -292,7 +298,7 @@ class TestOpenScanPool(unittest.TestCase):
         erster = self._client()
         extra = self._client()
         with mock.patch(
-            "fulcrum.connect_fulcrum", return_value=(extra, None)
+            "core.fulcrum_client.connect_fulcrum", return_value=(extra, None)
         ) as connect:
             pool = main._open_scan_pool(erster, workers=3)
         self.assertIsInstance(pool, fulcrum.SanctionsClearnetPool)
@@ -302,7 +308,7 @@ class TestOpenScanPool(unittest.TestCase):
 
     def test_fehlende_extra_verbindung_ist_kein_pool(self):
         with mock.patch(
-            "fulcrum.connect_fulcrum", return_value=(None, "timeout")
+            "core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout")
         ):
             self.assertIsNone(main._open_scan_pool(self._client()))
 

@@ -215,6 +215,7 @@
         <li><a href="#walletansicht">Wallet-Ansicht</a></li>
         <li><a href="#explorer">Block-Explorer</a></li>
         <li><a href="#assistent">Assistent</a></li>
+        <li><a href="#tools">Tools</a></li>
       </ol>
     </li>
     <li><a href="#herkunft">Herkunft und Steuerjahr</a>
@@ -288,6 +289,8 @@ benutzen:</p>
       PDF-tauglicher Bericht</li>
   <li><strong>Sanktions- und Blacklists</strong> — OFAC, OpenSanctions,
       Scam-Listen; Wallet-Check und Scan über Listenadressen</li>
+  <li><strong>Tools</strong> — prüfen, ob eine Bitcoin-Adresse zu einem
+      hinterlegten Wallet gehört (auch unbenutzt)</li>
   <li><strong>UTXO-Konsolidierung</strong> — Dust zusammenführen, PSBT erzeugen</li>
   <li><strong>Vier Datenquellen</strong> mit ausgewiesenem Privatsphäre-Niveau</li>
   <li><strong>Assistent</strong> — Fragen in Alltagssprache über den lokalen
@@ -908,6 +911,24 @@ volle Breite der unteren Leiste. Die Höhe lässt sich am oberen Rand ziehen.</p
   ähnliche Befehle sind gesperrt. Fehlt der Cache: Knopf drücken, Kaffee
   holen, danach erneut fragen.</p>
 </div>
+
+<h3 id="tools">3.7 Tools</h3>
+
+<p>Unter <strong>Auswerten → Tools</strong> liegen kleine Prüfungen an den
+hinterlegten Wallets. Das erste Werkzeug: eine Bitcoin-Adresse einfügen und
+<strong>ist die meine?</strong> drücken. SatSage nennt den Wallet-Namen —
+oder „gehört Dir nicht“.</p>
+
+<p>Dafür braucht es keinen Bestand und keinen Verlauf. Eine Adresse zählt
+auch, wenn noch nie etwas darauf lag. Die Prüfung bleibt lokal; es geht
+keine Anfrage an einen Node.</p>
+
+<p>Darunter <strong>Jäger der verlorene Schätze</strong>. Der Knopf ist nur
+aktiv, wenn eine Bitcoin-Core-Quelle mit <code>scantxoutset</code> verbunden
+ist. Der Lauf dauert: der Node sucht UTXOs jenseits des normalen
+Adressfensters. Gefundene Beträge landen im Wallet-Cache. Im Log steht,
+warum der normale Scan sie übersehen hat. Die Liste unter dem Knopf gilt
+nur, solange dieser Bereich offen bleibt.</p>
 
 <a class="zurueck" href="#">↑ nach oben</a>
 </section>
@@ -1775,6 +1796,14 @@ Schreibvorgänge pausiert (Warnung einmalig).</p>
       An die Cloud gehen höchstens Aggregate, keine XPUBs.</li>
 </ul>
 
+<div class="hinweis">
+  <div class="kopf">.env-Scramble und Platte</div>
+  <p><code>.env</code> ist mit Passwort at rest verschlüsselt. Caches und
+  Exporte sind Klartext — wer die mit schützen will, legt das
+  SatSage-Verzeichnis auf eine verschlüsselte Volume (System-FDE und/oder
+  VeraCrypt) und beendet SatSage, bevor die Volume wieder zu geht.</p>
+</div>
+
 <a class="zurueck" href="#">↑ nach oben</a>
 </section>
 
@@ -1901,6 +1930,7 @@ Header mitschicken kann.</p>
     <tr><td><code>POST /api/config/deskriptor</code></td>
         <td>Deskriptor oder Wallet-Export prüfen; liefert Skripttyp, Schlüssel und erste Adresse</td></tr>
     <tr><td><code>POST /api/trace/alle</code></td><td>Herkunft aller offenen UTXOs (Job)</td></tr>
+    <tr><td><code>POST /api/tools/adresse</code></td><td>Gehört die Adresse zu einem Wallet? (<code>address</code>) — lokal, auch unbenutzt</td></tr>
     <tr><td><code>GET /api/tax</code></td><td>Steuerjahr-Auswertung (<code>?jahr=2026&amp;frist=1</code>)</td></tr>
     <tr><td><code>GET /api/tax/export.csv</code></td><td>CSV-Download</td></tr>
     <tr><td><code>GET /api/tax/bericht.html</code></td><td>Druckbarer Bericht</td></tr>

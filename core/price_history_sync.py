@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from outbound_policy import ensure_url_allowed
+from core.outbound_policy import ensure_url_allowed
 
 from core import price as price_mod
 

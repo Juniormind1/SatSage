@@ -214,12 +214,17 @@ Halbautomatik für Wiederholung und Regression.
 
 ### 3.3 Playwright optional
 
+Browser-Start nach Betriebssystem, nicht übertragbar. macOS und Linux: mitgeliefertes Chromium ohne `channel`. Windows: `channel="chrome"` (installiertes Chrome, Fernsteuer-Zustimmung). Tabelle: `doc/gui-test-protokoll.md`.
+
 ```bash
-.venv/bin/pip install playwright
-.venv/bin/playwright install chromium
+# macOS und Linux
+.venv/bin/python -m playwright install chromium
+
+# Windows: Paket playwright, Browser ist das installierte Chrome (channel="chrome")
+py -3 -m pip install playwright
 ```
 
-Ohne Playwright: Report-Schema und manuelle Injektion bleiben nutzbar (Browser-Konsole: Harness laden).
+Ohne Playwright: Report-Schema und manuelle Injektion bleiben nutzbar (Browser-Konsole: Harness laden). Der Runner selbst startet heute noch ohne Kanal — auf Windows `channel="chrome"` setzen, auf macOS/Linux den Default lassen.
 
 ---
 

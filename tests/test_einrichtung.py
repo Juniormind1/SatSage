@@ -21,6 +21,11 @@ class TestVertragMitDerApi(unittest.TestCase):
 
     def setUp(self):
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
+        self.format_js = (WEB / "format.js").read_text(encoding="utf-8")
+        self.chrome_js = (WEB / "chrome.js").read_text(encoding="utf-8")
+        self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
+        self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
+        self.einstellungen_js = (WEB / "views" / "einstellungen.js").read_text(encoding="utf-8")
 
     def test_der_electrum_schluessel_existiert_wirklich(self):
         """Die Oberfläche sucht die Quelle über ihren Schlüssel."""
@@ -30,16 +35,16 @@ class TestVertragMitDerApi(unittest.TestCase):
 
     def test_uebernehmen_loest_node_test_aus(self):
         """Sonst speichert der Benutzer neue Verbindungsdaten und sieht nicht, ob sie greifen."""
-        self.assertIn("testeEigenenNode", self.js)
-        self.assertIn('t("sources.appliedTesting")', self.js)
+        self.assertIn("testeEigenenNode", self.datenquellen_js)
+        self.assertIn('t("sources.appliedTesting")', self.datenquellen_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("teste Verbindung", de)
 
     def test_electrum_hat_einen_papierkorb(self):
         """Sonst bleibt eine Onion in der .env und der Node-Test startet Tor."""
-        self.assertIn("verwerfeQuelle", self.js)
-        self.assertIn("papierkorb", self.js)
-        self.assertIn("verwerfbar", self.js)
+        self.assertIn("verwerfeQuelle", self.datenquellen_js)
+        self.assertIn("papierkorb", self.datenquellen_js)
+        self.assertIn("verwerfbar", self.datenquellen_js)
         self.assertIn('methode: "DELETE"', self.js)
         self.assertRegex(
             self.js,
@@ -54,12 +59,12 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("log-knopf", html)
         self.assertNotIn("Zeige Log", html)
         self.assertIn('id="log-text"', html)
-        self.assertIn("logZeile", self.js)
-        self.assertIn("logZeitstempel", self.js)
-        self.assertIn("logIstWichtig", self.js)
-        self.assertIn("log-wichtig", self.js)
+        self.assertIn("logZeile", self.format_js)
+        self.assertIn("logZeitstempel", self.format_js)
+        self.assertIn("logIstWichtig", self.format_js)
+        self.assertIn("log-wichtig", self.format_js)
         self.assertIn('id="log-zieher"', html)
-        self.assertIn("macheLogZiehbar", self.js)
+        self.assertIn("macheLogZiehbar", self.format_js)
 
     def test_log_flaeche_waechst_nicht_mit_dem_inhalt(self):
         """Sonst schiebt das Log die übrige Oberfläche weg."""
@@ -83,7 +88,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertRegex(css, r"\.log-wichtig\s*\{[^}]*font-weight:\s*700")
         gefunden = re.search(
             r"function logIstWichtig\(text\) \{.*?return (/.*?/)\.test",
-            self.js,
+            self.format_js,
             re.S,
         )
         self.assertIsNotNone(gefunden, "logIstWichtig braucht ein Regex-Muster")
@@ -142,30 +147,32 @@ class TestVertragMitDerApi(unittest.TestCase):
 
     def test_verbindungstest_loggt_sofort_und_liest_den_strom(self):
         """Sonst bleibt das Log leer, bis Tor und Node fertig sind."""
-        self.assertIn('logZeile("Starte Verbindungstest…")', self.js)
-        self.assertIn("apiSourceCheck", self.js)
-        self.assertIn("leseSourceCheckStream", self.js)
-        self.assertIn("application/x-ndjson", self.js)
+        self.assertIn('logZeile(t("ui.hard.7c5b3235d4"))', self.datenquellen_js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Starte Verbindungstest…", de)
+        self.assertIn("apiSourceCheck", self.format_js)
+        self.assertIn("leseSourceCheckStream", self.format_js)
+        self.assertIn("application/x-ndjson", self.format_js)
 
     def test_log_zeile_wallet_nur_bei_walletspezifischer_aktion(self):
         """Nach dem Timestamp der Wallet-Name — Verbindungstest bleibt ohne."""
         self.assertRegex(
-            self.js,
+            self.format_js,
             r"function logZeile\(text, wichtig, wallet\)",
         )
-        self.assertIn("log-wallet", self.js)
-        self.assertIn("log-zeit", self.js)
-        self.assertIn('logZeile("Starte Verbindungstest…")', self.js)
-        self.assertIn("function scanWalletName()", self.js)
-        self.assertIn("undefined, wallet", self.js)
+        self.assertIn("log-wallet", self.format_js)
+        self.assertIn("log-zeit", self.format_js)
+        self.assertIn('logZeile(t("ui.hard.7c5b3235d4"))', self.datenquellen_js)
+        self.assertIn("function scanWalletName()", self.wallets_js)
+        self.assertIn("undefined, wallet", self.format_js)
         # Wallet-Name nur bei Scan/Herkunft — Verbindungstest ohne dritten Arg.
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r'logZeile\(\s*`Starte \$\{scanArtName',
         )
 
     def test_wallet_nav_zeigt_cache_datum(self):
-        self.assertIn('t("wallet.cacheFrom"', self.js)
+        self.assertIn('t("wallet.cacheFrom"', self.format_js)
         self.assertIn("cacheHinweis", self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Cache vom", de)
@@ -189,12 +196,12 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("formatKursLabel", self.js)
         self.assertIn("KURS_TAKT_MS", self.js)
         self.assertIn("kurs-pille", self.js)
-        self.assertIn("ladeKursHistorie", self.js)
-        self.assertIn("starteKursImport", self.js)
-        self.assertIn("liesKursCsvDatei", self.js)
-        self.assertIn("formatEurAusSats", self.js)
+        self.assertIn("ladeKursHistorie", self.chrome_js)
+        self.assertIn("starteKursImport", self.chrome_js)
+        self.assertIn("liesKursCsvDatei", self.chrome_js)
+        self.assertIn("formatEurAusSats", self.format_js)
         self.assertIn("aktualisiereFiatAnzeigen", self.js)
-        self.assertIn("(≈ ${info.text})", self.js)
+        self.assertIn("(≈ ${info.text})", self.format_js)
         self.assertIn("PEER_TAKT_RUHE_MS", self.js)
         self.assertIn("eigeneNodesBeideErreichbar", self.js)
         self.assertIn("setzePeerTakt", self.js)
@@ -202,14 +209,14 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('t("header.sourceIndexer")', self.js)
         self.assertIn("nimmOwnFulcrumStand", self.js)
         self.assertIn("setzeQuellenPending", self.js)
-        self.assertIn("pending_sources", self.js)
+        self.assertIn("pending_sources", self.datenquellen_js)
         self.assertIn('t("header.sourceElectrumPublic")', self.js)
         self.assertIn('t("header.p2pPeers"', self.js)
         self.assertIn('t("privacy.pillHigh")', self.js)
         self.assertIn('t("privacy.pillMedium")', self.js)
         self.assertIn('t("privacy.pillNone")', self.js)
         self.assertIn('t("privacy.pillUnclear")', self.js)
-        self.assertIn("T_FALLBACK", self.js)
+        self.assertIn("T_FALLBACK", self.format_js)
         self.assertIn("pruefePeersLeise()", self.js)
         self.assertIn("setzeStatus: false", self.js)
         self.assertIn("const altStand = Zustand.peerStatus", self.js)
@@ -228,15 +235,15 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("function uebernehmeQuellenErreichbarkeit", self.js)
         self.assertIn("behaltePositivBeiNegativ", self.js)
         self.assertIn(
-            "uebernehmeQuellenErreichbarkeit(\n    altQuellen, Zustand.config.sources",
+            "uebernehmeQuellenErreichbarkeit(\n    Zustand.config?.sources",
             self.js,
         )
-        self.assertIn("function quellePrivacyStufe", self.js)
-        self.assertIn("function quelleHochVerdraengt", self.js)
-        self.assertIn("loescheElectrumListe", self.js)
-        self.assertIn("sources.disableP2pTitle", self.js)
-        self.assertIn("feld.typ === \"checkbox\"", self.js)
-        self.assertIn("verbindeP2p", self.js)
+        self.assertIn("function quellePrivacyStufe", self.datenquellen_js)
+        self.assertIn("function quelleHochVerdraengt", self.datenquellen_js)
+        self.assertIn("loescheElectrumListe", self.datenquellen_js)
+        self.assertIn("sources.disableP2pTitle", self.datenquellen_js)
+        self.assertIn("feld.typ === \"checkbox\"", self.datenquellen_js)
+        self.assertIn("verbindeP2p", self.datenquellen_js)
         self.assertIn('"sources.reachable": "verbunden"', de)
         self.assertIn('"sources.clearListTitle"', de)
         self.assertIn('"sources.connect": "Verbinden"', de)
@@ -262,10 +269,10 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('id="chat-feld"', html)
         self.assertNotIn("/chat/completions", self.js)
         self.assertIn("zeichneLlmPille", self.js)
-        self.assertIn("ladeLlmStatus", self.js)
-        self.assertIn('"/config/llm"', self.js)
-        self.assertIn("macheDockSpalter", self.js)
-        self.assertIn("macheEmpfangSpalter", self.js)
+        self.assertIn("ladeLlmStatus", self.chrome_js)
+        self.assertIn('"/config/llm"', self.einstellungen_js)
+        self.assertIn("macheDockSpalter", self.chrome_js)
+        self.assertIn("macheEmpfangSpalter", self.chrome_js)
         self.assertIn("--dock-empfang-pct", css)
         self.assertIn(".dock-spalten", css)
         self.assertIn(".chat-pane", css)
@@ -308,18 +315,18 @@ class TestVertragMitDerApi(unittest.TestCase):
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Wallets immer aktuell", de)
         self.assertIn("Nur bekannte UTXOs", de)
-        self.assertIn("speichereStartSync", self.js)
-        self.assertIn('"/config/start-sync"', self.js)
+        self.assertIn("speichereStartSync", self.einstellungen_js)
+        self.assertIn('"/config/start-sync"', self.einstellungen_js)
         self.assertIn("folgeWalletSyncJob", self.js)
-        self.assertIn("wallets_immer_aktuell", self.js)
-        self.assertIn("wallets_nur_bekannte_utxos", self.js)
-        self.assertIn("setzeKnownOnlySichtbarkeit", self.js)
+        self.assertIn("wallets_immer_aktuell", self.einstellungen_js)
+        self.assertIn("wallets_nur_bekannte_utxos", self.einstellungen_js)
+        self.assertIn("setzeKnownOnlySichtbarkeit", self.einstellungen_js)
 
     def test_filter_treffer_log_wird_in_place_aktualisiert(self):
         """Ergebnis überschreibt „hole Block…“, hängt keine zweite Zeile an."""
-        self.assertIn("nimmLogZeilen", self.js)
-        self.assertIn("aktualisiereLogZeile", self.js)
-        self.assertIn("stand.knoten", self.js)
+        self.assertIn("nimmLogZeilen", self.format_js)
+        self.assertIn("aktualisiereLogZeile", self.format_js)
+        self.assertIn("stand.knoten", self.format_js)
 
     def test_oeffentliche_electrum_erst_nach_bestaetigung(self):
         """BIP-158 ist der Fallback — öffentliche Electrs nur nach Klick."""
@@ -333,10 +340,10 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("braucht_oeffentliche", self.js)
         self.assertIn('"/source/oeffentlich"', self.js)
         self.assertIn(
-            '$("#oeffentliche-electrum-nein").addEventListener', self.js
+            '$("#oeffentliche-electrum-nein").addEventListener', self.chrome_js
         )
         self.assertIn(
-            '$("#oeffentliche-electrum-ja").addEventListener', self.js
+            '$("#oeffentliche-electrum-ja").addEventListener', self.chrome_js
         )
 
     def test_erster_xpub_ohne_node_braucht_warnung(self):
@@ -386,14 +393,39 @@ class TestOberflaeche(unittest.TestCase):
     def setUp(self):
         self.html = (WEB / "index.html").read_text(encoding="utf-8")
         self.js = (WEB / "app.js").read_text(encoding="utf-8")
+        self.format_js = (WEB / "format.js").read_text(encoding="utf-8")
+        self.chrome_js = (WEB / "chrome.js").read_text(encoding="utf-8")
+        self.chrome_nav_js = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
+        self.herkunft_js = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
+        self.wallets_js = (WEB / "views" / "wallets.js").read_text(encoding="utf-8")
+        self.datenquellen_js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
+        self.einstellungen_js = (WEB / "views" / "einstellungen.js").read_text(encoding="utf-8")
+        self.einrichtung_js = (WEB / "views" / "einrichtung.js").read_text(encoding="utf-8")
         self.css = (WEB / "style.css").read_text(encoding="utf-8")
+
+    def test_steuerjahr_nutzt_denselben_kopf_filter(self):
+        """Text, Betrag und Datum — Treffer in den Listen, Rest im Plot nur Kontur."""
+        self.assertIn(
+            'ansicht === "steuerjahr"',
+            self.js,
+        )
+        self.assertIn("function wendeKopfFilterSteuerjahrAn", self.js)
+        self.assertIn("filter-daneben", self.css)
+        self.assertIn("border-style: dotted", self.css)
+        steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        self.assertIn("_setzeSteuerGruppe", steuer)
+        self.assertIn("_saFilterNachladen", steuer)
+        self.assertIn("dataset.filterAus", steuer)
+        import json
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertIn("Steuerjahr", de["header.filterTitleActive"])
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
         """Zugeklappt unter den UTXOs — ohne Verlauf kein zusätzlicher Hinweis."""
         self.assertIn('id="wallet-ausgegeben"', self.html)
-        self.assertIn("zeichneAusgegeben", self.js)
+        self.assertIn("function zeichneAusgegeben", self.herkunft_js)
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r"if \(hatVerlauf\) \{\s*ausgegeben\.append\(zeichneAusgegeben",
         )
 
@@ -408,7 +440,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('data-i18n="common.import"', self.html)
         self.assertIn("Sparrow-JSON", de)
         self.assertIn("listdescriptors", de)
-        self.assertIn("liesDeskriptorDatei", self.js)
+        self.assertIn("liesDeskriptorDatei", self.wallets_js)
+        self.assertIn("liesDeskriptorDatei", self.chrome_js)
         css = (WEB / "style.css").read_text(encoding="utf-8")
         self.assertIn("grid-template-columns: minmax(0, 1fr) 10.5rem", css)
 
@@ -417,13 +450,13 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="steuer-stichtag"', self.html)
         self.assertIn('id="steuer-haltefrist"', self.html)
         self.assertIn('id="steuer-anschaffung"', self.html)
-        self.assertIn("speichereSteuerEinstellungen", self.js)
+        self.assertIn("speichereSteuerEinstellungen", self.einstellungen_js)
         self.assertIn("28.02.2021", self.html)
         # Folgeanalyse: ein Knopf „Herkunftslücken schließen“ (full).
-        self.assertIn('t("trace.folgeLuecken")', self.js)
-        self.assertIn('t("trace.folgeDone")', self.js)
-        self.assertIn('t("trace.folgeLueckenHint")', self.js)
-        self.assertIn('"full"', self.js)
+        self.assertIn('t("trace.folgeLuecken")', self.herkunft_js)
+        self.assertIn('t("trace.folgeDone")', self.herkunft_js)
+        self.assertIn('t("trace.folgeLueckenHint")', self.herkunft_js)
+        self.assertIn('"full"', self.herkunft_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Herkunftslücken schließen", de)
         self.assertIn("Lücken bereits geschlossen", de)
@@ -441,21 +474,21 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_fusszeile_zeigt_version(self):
         self.assertIn('id="fuss-version"', self.html)
-        self.assertIn("function zeichneFussVersion", self.js)
-        self.assertIn("Zustand.config?.version", self.js)
+        self.assertIn("function zeichneFussVersion", self.chrome_js)
+        self.assertIn("Zustand.config?.version", self.chrome_js)
 
     def test_gekuerzte_werte_sind_kopierbar(self):
-        self.assertIn("function macheKopierbar", self.js)
-        self.assertIn("function kopiereInZwischenablage", self.js)
-        self.assertIn("macheKopierbar(kennung, utxo.key", self.js)
+        self.assertIn("function macheKopierbar", self.format_js)
+        self.assertIn("function kopiereInZwischenablage", self.format_js)
+        self.assertIn("macheKopierbar(kennung, utxo.key", self.wallets_js)
         self.assertIn(".kopierbar", self.css)
         self.assertIn("cursor: copy", self.css)
 
     def test_bip158_fragt_startdatum_ohne_alter(self):
         self.assertIn('id="scan-datum-dialog"', self.html)
-        self.assertIn("brauchtBip158Startdatum", self.js)
-        self.assertIn("frageScanDatum", self.js)
-        self.assertIn("2017-08-24", self.js)
+        self.assertIn("brauchtBip158Startdatum", self.wallets_js)
+        self.assertIn("frageScanDatum", self.wallets_js)
+        self.assertIn("2017-08-24", self.wallets_js)
         # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
         # konfiguriertem, aber unerreichbarem eigenem Electrum.
         self.assertIn("q.reachable === true", self.js)
@@ -464,8 +497,8 @@ class TestOberflaeche(unittest.TestCase):
     def test_p2p_privatsphaere_dialog_und_verbindungsaufbau(self):
         self.assertIn('id="p2p-privatsphaere-dialog"', self.html)
         self.assertIn("frageP2pPrivatsphaereKappen", self.js)
-        self.assertIn("sources.connecting", self.js)
-        self.assertIn("function quelleZeigtVerbindungsaufbau", self.js)
+        self.assertIn("sources.connecting", self.datenquellen_js)
+        self.assertIn("function quelleZeigtVerbindungsaufbau", self.datenquellen_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn('"sources.connecting": "Verbindung im Aufbau…"', de)
         self.assertIn('"dialog.p2pPrivacy.title"', de)
@@ -487,14 +520,31 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="verlauf-knopf"', self.html)
         self.assertIn("Historie", self.html)
         self.assertIn('class="utxo-aktionen-praefix"', self.html)
-        self.assertIn(">Bestand<", self.html)
+        self.assertIn(">UTXO:</span>", self.html)
+        self.assertIn(">Aktualisieren<", self.html)
+        self.assertIn(">Neu scannen<", self.html)
         self.assertIn(">Herkunft<", self.html)
-        self.assertIn("starteVerlaufsscan", self.js)
+        gruppe = self.html.find('class="utxo-aktionen"')
+        self.assertLess(gruppe, self.html.find('id="tip-sync-knopf"', gruppe))
+        self.assertLess(
+            self.html.find('id="tip-sync-knopf"', gruppe),
+            self.html.find('id="rescan-knopf"', gruppe),
+        )
+        self.assertLess(
+            self.html.find("utxo-aktionen-praefix", gruppe),
+            self.html.find('id="tip-sync-knopf"', gruppe),
+        )
+        # Auch bei „Wallets immer aktuell halten“ sichtbar (leichter Tip-Nachzug).
+        self.assertNotIn("tipSync.hidden = autoAktuell", self.wallets_js)
+        self.assertIn("tipSync.hidden = false", self.wallets_js)
+        self.assertIn("starteVerlaufsscan", self.wallets_js)
+        self.assertIn("starteVerlaufsscan", self.chrome_js)
         self.assertIn('id="verlauf-erheben"', self.html)
         self.assertIn("tax.historyAll", self.html)
-        # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in app.js
-        self.assertIn("tax.originAll", self.js)
-        self.assertIn("herkunft-alle", self.js)
+        # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in views/steuerjahr.js
+        steuer_js = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        self.assertIn("tax.originAll", steuer_js)
+        self.assertIn("herkunft-alle", self.chrome_js)
         import json
         de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
         self.assertEqual(de.get("tax.originAll"), "klären")
@@ -502,7 +552,7 @@ class TestOberflaeche(unittest.TestCase):
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""
         self.assertIn('id="einrichtung-weiter"', self.html)
-        self.assertIn('oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets")', self.js)
+        self.assertIn('oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets")', self.einrichtung_js)
 
     def test_verwaltung_ist_aufgeteilt(self):
         """Wallets, Einstellungen und Datenquellen sind eigene Ansichten."""
@@ -525,8 +575,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertTrue(w < html.find("Danger Zone!!!!") < e)
         self.assertTrue(e < html.find("Fristen und Stichtag") < d)
         self.assertTrue(d < html.find('id="quellen-liste"'))
-        self.assertIn("aktualisiereDatenquellenNav", self.js)
-        self.assertIn("DATENQUELLEN_NAV_WARNUNG", self.js)
+        self.assertIn("aktualisiereDatenquellenNav", self.datenquellen_js)
+        self.assertIn("DATENQUELLEN_NAV_WARNUNG", self.datenquellen_js)
         self.assertIn("nav-warn", (WEB / "style.css").read_text(encoding="utf-8"))
 
     def test_er_bleibt_erreichbar(self):
@@ -535,7 +585,8 @@ class TestOberflaeche(unittest.TestCase):
         sich von Hand öffnen lassen.
         """
         self.assertIn('id="einrichtung-oeffnen"', self.html)
-        self.assertIn('$("#einrichtung-oeffnen").addEventListener', self.js)
+        self.assertIn('$("#einrichtung-oeffnen")', self.einrichtung_js)
+        self.assertIn('oeffnen.addEventListener("click", zeigeEinrichtung)', self.einrichtung_js)
 
     def test_begruessung_nennt_header_download_und_electrs(self):
         """Sonst startet der erste XPUB-Scan ohne Vorwarnung in den Header-Sync."""
@@ -551,7 +602,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"/headers"', self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("erspart den einmaligen Block-Header-Download", de)
-        self.assertIn('t("setup.step.electrumText")', self.js)
+        self.assertIn('t("setup.step.electrumText")', self.einrichtung_js)
 
     def test_alle_knoepfe_haben_einen_hilfetext(self):
         """Im Rest der Oberfläche hat jeder Knopf einen — hier auch."""
@@ -582,11 +633,11 @@ class TestOberflaeche(unittest.TestCase):
             re.search(r'id="einrichtung-onchain"(?![-a-z])', self.html),
             "alter On-Chain-Kasten im Einrichtungsdialog",
         )
-        self.assertIn("function bestaetigeOnchainHinweis", self.js)
-        self.assertIn("function zeigeOnchainHinweis", self.js)
-        self.assertIn('"/config/hinweis-onchain"', self.js)
-        self.assertIn("hinweis_onchain_bestaetigt", self.js)
-        self.assertIn("onchainHinweisSichtbar", self.js)
+        self.assertIn("function bestaetigeOnchainHinweis", self.einrichtung_js)
+        self.assertIn("function zeigeOnchainHinweis", self.einrichtung_js)
+        self.assertIn('"/config/hinweis-onchain"', self.einrichtung_js)
+        self.assertIn("hinweis_onchain_bestaetigt", self.einrichtung_js)
+        self.assertIn("onchainHinweisSichtbar", self.einrichtung_js)
         self.assertIn("max-height: calc(100dvh - 32px)", self.css)
         self.assertIn("overflow-y: auto", self.css)
 
@@ -596,7 +647,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"/config/wallets/cache-vorschau"', self.js)
         self.assertIn("cache_entfernte_loeschen", self.js)
         self.assertIn("window.confirm", self.js)
-        self.assertIn("Zugehörigen Analyse-Cache auch löschen", self.js)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("Zugehörigen Analyse-Cache auch löschen", de)
 
     def test_unreferenzierter_cache_steht_ueber_danger(self):
         """Aufräumen, kein Danger — nur wenn Altlasten da sind."""
@@ -607,71 +659,74 @@ class TestOberflaeche(unittest.TestCase):
         self.assertGreater(i_danger, i_unref)
         self.assertNotIn('class="speicherleiste"', html)
         self.assertNotIn('id="speichern"', html)
-        self.assertIn("function ladeUnreferenziertenCache", self.js)
-        self.assertIn('"/cache/unreferenziert"', self.js)
-        self.assertIn("loescheUnreferenziertenCache", self.js)
+        self.assertIn("function ladeUnreferenziertenCache", self.wallets_js)
+        self.assertIn('"/cache/unreferenziert"', self.wallets_js)
+        self.assertIn("loescheUnreferenziertenCache", self.wallets_js)
+        self.assertIn("loescheUnreferenziertenCache", self.chrome_js)
         self.assertIn("Unreferenzierte Cachedaten löschen", self.html)
 
     def test_utxo_zeit_heisst_ankunft(self):
         """Sonst liest man die Output-Zeit als Eingang beim Vor-Dienst."""
-        self.assertIn("function formatAnkunft", self.js)
-        self.assertIn('t("trace.arrival"', self.js)
+        self.assertIn("function formatAnkunft", self.format_js)
+        self.assertIn('t("trace.arrival"', self.format_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Ankunft am:", de)
-        self.assertIn("ankunft-link", self.js)
+        self.assertIn("ankunft-link", self.wallets_js)
         self.assertNotIn("Herkunft →", self.js)
 
     def test_vollstaendige_herkunft_zeigt_juengste_sats(self):
-        self.assertIn("function formatJuengsteSats", self.js)
-        self.assertIn("function juengsteSatsMarke", self.js)
-        self.assertIn("function juengsteSatsDerGruppe", self.js)
-        self.assertIn("function merkeTraceAmUtxo", self.js)
-        self.assertIn("function setzeVerfolgtMarke", self.js)
+        self.assertIn("function formatJuengsteSats", self.format_js)
+        self.assertIn("function juengsteSatsMarke", self.format_js)
+        self.assertIn("function juengsteSatsDerGruppe", self.format_js)
+        self.assertIn("function merkeTraceAmUtxo", self.format_js)
+        self.assertIn("function setzeVerfolgtMarke", self.format_js)
         # Frischer Trace darf das alte Stand-Datum nicht behalten.
         self.assertIn(
-            "utxo.verfolgt_ts = Math.floor(Date.now() / 1000)", self.js
+            "utxo.verfolgt_ts = Math.floor(Date.now() / 1000)", self.format_js
         )
         self.assertNotIn(
-            "utxo.verfolgt_ts = utxo.verfolgt_ts ||", self.js
+            "utxo.verfolgt_ts = utxo.verfolgt_ts ||", self.format_js
         )
-        self.assertIn('t("trace.youngestSats"', self.js)
+        self.assertIn('t("trace.youngestSats"', self.format_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("jüngste sats vom", de)
-        self.assertIn("verfolgt_vollstaendig", self.js)
+        self.assertIn("verfolgt_vollstaendig", self.format_js)
         # Adressgruppe: jüngste sats nur für voll verfolgte UTXOs — Vorbehalt.
-        self.assertIn("function gruppeOhneHerkunftstraceMarke", self.js)
-        self.assertIn("ohne-herkunft-marke", self.js)
+        self.assertIn("function gruppeOhneHerkunftstraceMarke", self.format_js)
+        self.assertIn("ohne-herkunft-marke", self.format_js)
         self.assertIn("ohne Herkunftstrace", de)
-        self.assertIn("haengeGruppenJuengsteAn", self.js)
-        self.assertIn("function aktualisiereAdressgruppenJuengste", self.js)
-        self.assertIn("gruppeAusTraceListe", self.js)
+        self.assertIn("function haengeGruppenJuengsteAn", self.format_js)
+        self.assertIn("function aktualisiereAdressgruppenJuengste", self.format_js)
+        self.assertIn("function gruppeAusTraceListe", self.format_js)
         self.assertEqual(
-            self.js.count("const juengste = juengsteSatsMarke(utxo)"),
+            self.js.count("const juengste = juengsteSatsMarke(utxo)")
+            + self.wallets_js.count("const juengste = juengsteSatsMarke(utxo)")
+            + self.herkunft_js.count("const juengste = juengsteSatsMarke(utxo)"),
             2,
             "Marke muss in Wallet-Zeile und Herkunfts-UTXO stehen",
         )
 
     def test_cache_startet_offen_analyse_nicht(self):
         """Oberste Ebene zu; darunter Cache offen, ungescannte Bäume zu."""
-        self.assertIn("function setzeKlapp", self.js)
-        self.assertIn("function ladeGespeichertenZweig", self.js)
-        self.assertIn("oeffneAusCache", self.js)
+        self.assertIn("function setzeKlapp", self.wallets_js)
+        self.assertIn("function ladeGespeichertenZweig", self.herkunft_js)
+        self.assertIn("oeffneAusCache", self.herkunft_js)
         # Erste Ebene unter dem UTXO zeichnet zeichneZweig sofort; tiefere
         # Ebenen starten zu (▸) und werden erst beim Aufklappen gebaut.
-        self.assertIn('knoten.expandable ? "▸" : "·"', self.js)
-        self.assertIn("kinder.dataset.gezeichnet", self.js)
-        self.assertIn("Scan neu", self.js)
-        self.assertNotIn("Herkunft neu", self.js)
-        self.assertNotIn("Neu verfolgen", self.js)
+        self.assertIn('knoten.expandable ? "▸" : "·"', self.herkunft_js)
+        self.assertIn("kinder.dataset.gezeichnet", self.herkunft_js)
+        self.assertIn("Scan neu", self.herkunft_js)
+        self.assertNotIn("Herkunft neu", self.herkunft_js)
+        self.assertNotIn("Neu verfolgen", self.herkunft_js)
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             re.compile(
                 r"function zeichneAdressGruppe\(gruppe\).*?setzeKlapp\(kopf, klapp, inhalt, false\)",
                 re.S,
             ),
         )
         self.assertRegex(
-            self.js,
+            self.herkunft_js,
             re.compile(
                 r"function zeichneTraceAdressGruppe\(gruppe\).*?setzeKlapp\(kopf, klapp, inhalt, false\)",
                 re.S,
@@ -680,7 +735,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIsNotNone(
             re.search(
                 r"function zeichneKnoten\(knoten(?:,\s*elternWallet(?:,\s*elternKnoten)?)?\) \{.*?kinder\.hidden = true",
-                self.js,
+                self.herkunft_js,
                 re.S,
             ),
             "Tiefere Herkunftszweige starten lazy (hidden, DOM erst beim Aufklappen)",
@@ -696,35 +751,38 @@ class TestOberflaeche(unittest.TestCase):
     def test_wallet_hat_sortierung_nach_datum(self):
         self.assertIn('id="sort-wahl"', self.html)
         self.assertIn("neueste zuerst", self.html)
-        self.assertIn("sort-wahl", self.js)
+        self.assertIn("sort-wahl", self.wallets_js)
+        self.assertIn("sort-wahl", self.chrome_js)
 
     def test_sanktionskarte_steht_unten_ausser_bei_treffer(self):
         html = self.html
         pos_liste = html.find('id="adress-liste"')
         pos_sank = html.find('id="sanktions-karte"')
         self.assertGreater(pos_sank, pos_liste)
-        self.assertIn("platziereSanktionsKarte", self.js);
+        self.assertIn("platziereSanktionsKarte", self.wallets_js);
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r"platziereSanktionsKarte\(Boolean\(befund\.treffer",
         )
 
     def test_scan_leiste_nennt_das_gescannte_wallet(self):
         """Sonst wirkt ein laufender Scan beim Wechsel wie der des sichtbaren Wallets."""
-        self.assertIn("scanWalletId", self.js);
-        self.assertIn("aktualisiereScanAnzeige", self.js);
-        self.assertIn("nicht für dieses Wallet", self.js);
-        self.assertIn("hinweis-fremd", self.js);
+        self.assertIn("scanWalletId", self.wallets_js);
+        self.assertIn("aktualisiereScanAnzeige", self.wallets_js);
+        # Locale-String (de.json) — früher hardcoded in app.js
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("nicht für dieses Wallet", de);
+        self.assertIn("hinweis-fremd", self.wallets_js);
 
     def test_scan_schlange_ist_duenn(self):
         """Ein Klick während eines Scans stellt an, startet nicht parallel."""
-        self.assertIn("stelleScanAn", self.js)
-        self.assertIn("schonGeplant", self.js)
-        self.assertIn("function jobNochAktiv", self.js)
-        self.assertIn("rescan.disabled = utxoGeplant", self.js)
-        self.assertIn("starteScanFuer", self.js)
-        self.assertIn("Warteschlange", self.js)
-        self.assertIn("queue_status", self.js)
+        self.assertIn("stelleScanAn", self.wallets_js)
+        self.assertIn("schonGeplant", self.wallets_js)
+        self.assertIn("function jobNochAktiv", self.format_js)
+        self.assertIn("rescan.disabled = utxoGeplant", self.wallets_js)
+        self.assertIn("starteScanFuer", self.wallets_js)
+        self.assertIn("Warteschlange", self.wallets_js)
+        self.assertIn("queue_status", self.wallets_js)
 
     def test_wallet_hinzufuegen_speichert_sofort(self):
         """Name sichtbar vor dem Klick; Hinzufügen schreibt die .env."""
@@ -732,22 +790,22 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="hinzufuegen"', self.html)
         self.assertIn("Aktualisieren", self.html)
         self.assertIn('class="name-uebernehmen"', self.html)
-        self.assertIn("function fuegeWalletHinzu", self.js)
-        self.assertIn("speichereWallets(false)", self.js)
+        self.assertIn("function fuegeWalletHinzu", self.wallets_js)
+        self.assertIn("speichereWallets(false)", self.wallets_js)
         # Sofort speichern, nicht nur in den Entwurf schieben.
         # Fenster größer als früher: Deskriptor-Umleitung im XPUB-Feld liegt dazwischen.
         self.assertRegex(
-            self.js,
+            self.wallets_js,
             r"function fuegeWalletHinzu\(\)[\s\S]{0,1600}?speichereWallets\(false\)",
         )
         self.assertIn(
             'haken.addEventListener("click", () => speichereWallets(false))',
-            self.js,
+            self.wallets_js,
         )
 
     def test_drei_schritte_werden_beschrieben(self):
         abschnitt = re.search(r"function einrichtungsSchritte\(.*?\n}",
-                              self.js, re.S).group(0)
+                              self.einrichtung_js, re.S).group(0)
         keys = re.findall(r't\("(setup\.step\.[^"]+)"', abschnitt)
         self.assertIn("setup.step.wallets", keys)
         self.assertIn("setup.step.electrum", keys)
@@ -759,8 +817,9 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_explorer_pfeil_faerbt_nach_netz(self):
         """Grün im eigenen Netz, Gelb bei öffentlichem/fremdem Explorer."""
-        self.assertIn("extern-link-lokal", self.js)
-        self.assertIn("extern-link-fremd", self.js)
+        js = (WEB / "mempool_links.js").read_text(encoding="utf-8")
+        self.assertIn("extern-link-lokal", js)
+        self.assertIn("extern-link-fremd", js)
         self.assertIn(".extern-link-lokal", self.css)
         self.assertIn(".extern-link-fremd", self.css)
         self.assertLess(
@@ -768,12 +827,12 @@ class TestOberflaeche(unittest.TestCase):
             self.css.index(".extern-link-lokal:hover"),
             "lokale Hover-Farbe muss die allgemeine überschreiben",
         )
-        self.assertIn('t("sources.mempool.openPrivate")', self.js)
-        self.assertIn('t("sources.mempool.openPublic")', self.js)
+        self.assertIn('t("sources.mempool.openPrivate")', js)
+        self.assertIn('t("sources.mempool.openPublic")', js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Privaten Blockexplorer öffnen", de)
         self.assertIn("Öffentlichen Blockexplorer öffnen", de)
-        self.assertNotIn("in der eigenen Instanz öffnen", self.js)
+        self.assertNotIn("in der eigenen Instanz öffnen", js)
 
 
 if __name__ == "__main__":

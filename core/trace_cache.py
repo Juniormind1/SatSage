@@ -30,7 +30,7 @@ import json
 import time
 from pathlib import Path
 
-import main
+from core import xpub_cache
 
 #: Unterverzeichnis im Immutable-Cache.
 UNTERVERZEICHNIS = "utxo_trace"
@@ -64,7 +64,7 @@ def pfad(txid: str, vout: int, immutable_cache_dir: Path | str | None) -> Path |
     ordner = verzeichnis(immutable_cache_dir)
     if ordner is None:
         return None
-    return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.json"
+    return ordner / f"{xpub_cache._normalize_txid(txid)}_{int(vout)}.json"
 
 
 def meta_pfad(
@@ -74,7 +74,7 @@ def meta_pfad(
     ordner = verzeichnis(immutable_cache_dir)
     if ordner is None:
         return None
-    return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.meta.json"
+    return ordner / f"{xpub_cache._normalize_txid(txid)}_{int(vout)}.meta.json"
 
 
 #: Sanktions-Hop-Walk (xpub-blind) — Graph/Adressen; Liste wird neu gematcht.
@@ -89,7 +89,7 @@ def sanction_walk_pfad(
     ordner = verzeichnis(immutable_cache_dir)
     if ordner is None:
         return None
-    return ordner / f"{main._normalize_txid(txid)}_{int(vout)}.sanction_walk.json"
+    return ordner / f"{xpub_cache._normalize_txid(txid)}_{int(vout)}.sanction_walk.json"
 
 
 def sanction_walk_laden(
@@ -113,7 +113,7 @@ def sanction_walk_laden(
         return None
     if not isinstance(daten, dict) or daten.get("version") != SANKTION_WALK_VERSION:
         return None
-    if daten.get("txid") != main._normalize_txid(txid):
+    if daten.get("txid") != xpub_cache._normalize_txid(txid):
         return None
     if int(daten.get("vout", -1)) != int(vout):
         return None
@@ -151,11 +151,11 @@ def sanction_walk_speichern(
     ziel = sanction_walk_pfad(txid, vout, immutable_cache_dir)
     if ziel is None:
         return None
-    if not main.cache_disk_write_allowed(ziel.parent):
+    if not xpub_cache.cache_disk_write_allowed(ziel.parent):
         return None
     nutzlast = {
         "version": SANKTION_WALK_VERSION,
-        "txid": main._normalize_txid(txid),
+        "txid": xpub_cache._normalize_txid(txid),
         "vout": int(vout),
         "erstellt_ts": int(time.time()),
         "max_hops": int(max_hops),
@@ -213,7 +213,7 @@ def _schreibe_meta(
     """Sidecar mit Listenkopf — kopf() liest nur diese Datei."""
     nutzlast = {
         "version": VERSION,
-        "txid": main._normalize_txid(txid),
+        "txid": xpub_cache._normalize_txid(txid),
         "vout": int(vout),
         "erstellt_ts": int(erstellt_ts),
         "adressen_fingerprint": adressen_fingerprint or "",
@@ -255,7 +255,7 @@ def speichern(
     erstellt = int(time.time())
     nutzlast = {
         "version": VERSION,
-        "txid": main._normalize_txid(txid),
+        "txid": xpub_cache._normalize_txid(txid),
         "vout": int(vout),
         "erstellt_ts": erstellt,
         "adressen_fingerprint": fp,
@@ -263,7 +263,7 @@ def speichern(
         "baum": baum,
     }
 
-    if not main.cache_disk_write_allowed(ziel.parent):
+    if not xpub_cache.cache_disk_write_allowed(ziel.parent):
         return None
 
     try:
@@ -319,7 +319,7 @@ def laden(
         return None
     if not isinstance(daten, dict) or daten.get("version") != VERSION:
         return None
-    if daten.get("txid") != main._normalize_txid(txid):
+    if daten.get("txid") != xpub_cache._normalize_txid(txid):
         return None
     if int(daten.get("vout", -1)) != int(vout):
         return None
@@ -573,7 +573,7 @@ def kopf(
         if (
             isinstance(daten, dict)
             and daten.get("version") == VERSION
-            and daten.get("txid") == main._normalize_txid(txid)
+            and daten.get("txid") == xpub_cache._normalize_txid(txid)
             and int(daten.get("vout", -1)) == int(vout)
             and "vollstaendig" in daten
         ):
@@ -627,7 +627,7 @@ def kopf(
                     n_addr = int(roh.get("adressen_anzahl", 0) or 0)
                 except (OSError, ValueError, TypeError):
                     pass
-            if main.cache_disk_write_allowed(meta_ziel.parent):
+            if xpub_cache.cache_disk_write_allowed(meta_ziel.parent):
                 _schreibe_meta(
                     meta_ziel,
                     txid=txid,

@@ -15,10 +15,23 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import main
-
-DEFAULT_MAX_ADDRESSES = main.DEFAULT_MAX_ADDRESSES
-SCRIPT_TYPE_CHOICES = main.SCRIPT_TYPE_CHOICES
+from core import xpub_cache
+from core.derivation import (
+    DEFAULT_MAX_ADDRESSES,
+    SCRIPT_TYPE_CHOICES,
+    _hdkey_for_xpub,
+    derive_address_at_index,
+    derive_descriptor_addresses,
+    derive_receive_address_at_index,
+    normalize_script_type,
+    parse_deskriptor,
+)
+from core.wallet_context import _default_wallet_name
+from core.env_wallets import (
+    _script_types_from_env,
+    _wallet_names_from_env,
+    _xpubs_from_env,
+)
 
 #: Skripttypen einer Multisig-Wallet. Die Sortierung der Cosigner folgt
 #: BIP-67 (sortedmulti) und wird deshalb nicht eigens gespeichert.
@@ -420,7 +433,7 @@ def deskriptoren_aus_text(text: str) -> list[str]:
     brauchbar: list[str] = []
     for kandidat in _vereinige_bitkey_labels(text, kandidaten):
         kandidat = _ergaenze_standard_ableitung(kandidat)
-        if main.derive_descriptor_addresses(kandidat, max_addresses=2):
+        if derive_descriptor_addresses(kandidat, max_addresses=2):
             if kandidat not in brauchbar:
                 brauchbar.append(kandidat)
     return brauchbar
@@ -506,6 +519,8 @@ class WalletEntry:
     script_typ_wirksam: str = ""
     #: Nur beobachten — kein Empfangs-QR (z. B. fremdes/archiviertes Wallet).
     read_only: bool = False
+    #: Herkunft der Anlage: ``xpub`` | ``descriptor`` | ``wallet_export``.
+    origin: str = ""
 
     def __post_init__(self):
         self.xpub = (self.xpub or "").strip()
@@ -514,6 +529,8 @@ class WalletEntry:
         self.xpubs = [x.strip() for x in (self.xpubs or []) if x and x.strip()]
         self.max_addresses = max(2, int(self.max_addresses))
         self.read_only = bool(self.read_only)
+        origin = (self.origin or "").strip().lower()
+        self.origin = origin if origin in WALLET_ORIGINS else ""
 
         # Aus dem Deskriptor ergänzen, was nicht ausdrücklich angegeben ist.
         # Er ist die knappere Schreibweise, nicht die schwächere.
@@ -553,7 +570,7 @@ class WalletEntry:
                 # Single-Sig-Keys gehören nicht in die Cosigner-Liste.
                 self.xpubs = []
                 self.threshold = None
-            self.script_type = main.normalize_script_type(self.script_type)
+            self.script_type = normalize_script_type(self.script_type)
 
     def _uebernimm_aus_deskriptor(self) -> None:
         """
@@ -566,7 +583,7 @@ class WalletEntry:
         lesen, bleibt alles, wie es angegeben wurde — die Prüfung meldet ihn
         dann als ungültig.
         """
-        desc = main.parse_deskriptor(self.descriptor)
+        desc = parse_deskriptor(self.descriptor)
         if desc is None:
             return
         try:
@@ -642,7 +659,7 @@ class WalletEntry:
         if self.is_multisig:
             return f"Multisig {self.threshold or '?'}/{self.cosigner_count or '?'}"
         if self.xpub:
-            return main._default_wallet_name(self.xpub)
+            return _default_wallet_name(self.xpub)
         return "Deskriptor-Wallet"
 
     def masked_xpub(self, head: int = 6, tail: int = 4) -> str:
@@ -666,14 +683,14 @@ class WalletEntry:
 
     def is_valid(self) -> bool:
         if self.descriptor:
-            return main.parse_deskriptor(self.descriptor) is not None
+            return parse_deskriptor(self.descriptor) is not None
         if not self.is_multisig:
-            return bool(self.xpub) and main._hdkey_for_xpub(self.xpub) is not None
+            return bool(self.xpub) and _hdkey_for_xpub(self.xpub) is not None
         # Über den Parser statt über Einzelprüfungen: Er akzeptiert genau das,
         # was sich anschließend auch ableiten lässt — einschließlich Taproot
         # und Miniscript, wo „M zwischen 1 und Zahl der Cosigner" gar keine
         # sinnvolle Bedingung mehr ist.
-        return main.parse_deskriptor(self.descriptor) is not None
+        return parse_deskriptor(self.descriptor) is not None
 
     @property
     def analyse_schluessel(self) -> str:
@@ -700,7 +717,7 @@ class WalletEntry:
         # sonst suchte die Oberfläche unter einer anderen Kennung als der,
         # unter der der Scan geschrieben hat. Sie ist deskriptorfähig und
         # richtet sich bei Multisig nach der ersten abgeleiteten Adresse.
-        return main._xpub_cache_key(self.analyse_schluessel)
+        return xpub_cache._xpub_cache_key(self.analyse_schluessel)
 
 
 def _maskiere(wert: str, head: int = 6, tail: int = 4) -> str:
@@ -720,7 +737,7 @@ def schluessel_kennung(xpub: str) -> str | None:
     — stünden sie beide in der Liste, wäre die Wallet-Zuordnung mehrdeutig und
     Berichte wiesen Beträge dem falschen Wallet zu.
     """
-    hd = main._hdkey_for_xpub(xpub)
+    hd = _hdkey_for_xpub(xpub)
     if hd is None:
         return None
     try:
@@ -742,7 +759,7 @@ def erste_empfangsadresse(entry: WalletEntry) -> str:
     Reine Kurzform ohne Deskriptor bleibt leer, bis Cosigner fehlen.
     """
     if entry.descriptor:
-        adresse = main.derive_address_at_index(entry.descriptor, 0, 0)
+        adresse = derive_address_at_index(entry.descriptor, 0, 0)
         return adresse or ""
     if entry.is_multisig:
         return ""
@@ -750,7 +767,7 @@ def erste_empfangsadresse(entry: WalletEntry) -> str:
         return ""
     # Über derive_receive — bei xpub/auto damit bc1q, nicht Legacy-first.
     try:
-        dest = main.derive_receive_address_at_index(entry.xpub, 0)
+        dest = derive_receive_address_at_index(entry.xpub, 0)
         return dest[0] if dest else ""
     except Exception:
         return ""
@@ -786,7 +803,7 @@ def validate_wallets(entries: list[WalletEntry]) -> tuple[list[str], list[str]]:
                     "Deskriptor lässt sich nicht lesen."
                 )
                 continue
-            if not main.derive_descriptor_addresses(
+            if not derive_descriptor_addresses(
                 entry.descriptor, max_addresses=2
             ):
                 fehler.append(
@@ -900,7 +917,7 @@ def _pruefe_multisig(index: int, entry: WalletEntry) -> list[str]:
             )
             return fehler
 
-    if main.parse_deskriptor(entry.descriptor) is None:
+    if parse_deskriptor(entry.descriptor) is None:
         fehler.append(
             f"Wallet {index} („{name}“): der Deskriptor lässt sich nicht "
             "lesen. Aggregierte Taproot-Schlüssel (musig) werden nicht "
@@ -909,7 +926,7 @@ def _pruefe_multisig(index: int, entry: WalletEntry) -> list[str]:
         )
         return fehler
 
-    if not main.derive_descriptor_addresses(entry.descriptor, max_addresses=2):
+    if not derive_descriptor_addresses(entry.descriptor, max_addresses=2):
         fehler.append(
             f"Wallet {index} („{name}“): aus dem Deskriptor lässt sich keine "
             "Adresse ableiten."
@@ -1187,16 +1204,40 @@ class EnvFile:
     path: Path
     lines: list[str] = field(default_factory=list)
     runtime_values: dict[str, str] = field(default_factory=dict)
+    #: True: nur Cipher auf Platte, Session-Key fehlt — Unlock nötig.
+    scramble_locked: bool = False
 
     @classmethod
     def load(cls, path: Path | str) -> "EnvFile":
+        """
+        Read-Hook: scrambled ``.env`` (+ Session-Key) → RAM; sonst Klartext.
+
+        Siehe ``core.env_scramble``. Scrambled ohne Key → leere Datei
+        (``scramble_locked``); Caller/Login füllt nach.
+        """
         path = Path(path)
-        if path.is_file():
-            text = path.read_text(encoding="utf-8")
-            lines = text.splitlines()
-        else:
-            lines = []
-        return cls(path=path, lines=lines)
+        text = ""
+        locked = False
+        try:
+            from core import env_scramble as scramble_mod
+
+            try:
+                text = scramble_mod.load_plaintext_or_scramble(path)
+            except scramble_mod.ScrambleLocked:
+                locked = True
+                text = ""
+            except scramble_mod.ScrambleError:
+                if scramble_mod.is_env_scrambled(path) or scramble_mod.is_scramble_file_present(path):
+                    raise
+                if path.is_file():
+                    text = path.read_text(encoding="utf-8")
+                else:
+                    raise
+        except ImportError:
+            if path.is_file():
+                text = path.read_text(encoding="utf-8")
+        lines = text.splitlines() if text else []
+        return cls(path=path, lines=lines, scramble_locked=locked)
 
     # -- lesen --------------------------------------------------------------
 
@@ -1288,12 +1329,20 @@ class EnvFile:
 
     def save(self, *, backup: bool = False) -> Path | None:
         """
-        Schreibt atomar (temporäre Datei + os.replace).
+        Write-Hook: mit Session-Key scrambled ``.env``; sonst Klartext-``.env``
+        (``core.env_scramble``).
 
         ``backup`` ist veraltet und wird ignoriert: Rotierende Sicherungen
         entstehen nur beim Serverstart (``rotate_env_backups_at_start``), nicht
         bei jedem Speichern während der Laufzeit. Rückgabe bleibt ``None``.
         """
+        try:
+            from core import env_scramble as scramble_mod
+
+            scramble_mod.save_plaintext_or_scramble(self.path, self.render())
+            return None
+        except ImportError:
+            pass
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_name(self.path.name + ".tmp")
         temp.write_text(self.render(), encoding="utf-8")
@@ -1315,7 +1364,20 @@ def _split_list(raw: str, trenner: str) -> list[str]:
 
 
 #: Felder eines Wallet-Blocks.
-_BLOCK_FELDER = ("NAME", "XPUB", "XPUBS", "DESC", "M", "SCRIPT", "MAX_ADDRESSES")
+_BLOCK_FELDER = (
+    "NAME", "XPUB", "XPUBS", "DESC", "M", "SCRIPT", "MAX_ADDRESSES",
+    "READ_ONLY", "ORIGIN",
+)
+
+#: Wie das Wallet in SatSage ankam — steuert u. a. die Such-Liste.
+WALLET_ORIGIN_XPUB = "xpub"
+WALLET_ORIGIN_DESCRIPTOR = "descriptor"
+WALLET_ORIGIN_WALLET_EXPORT = "wallet_export"
+WALLET_ORIGINS = (
+    WALLET_ORIGIN_XPUB,
+    WALLET_ORIGIN_DESCRIPTOR,
+    WALLET_ORIGIN_WALLET_EXPORT,
+)
 
 _BLOCK_RE = re.compile(r"^WALLET_(\d+)_([A-Z_]+)$")
 
@@ -1385,6 +1447,7 @@ def _block_eintrag(values: dict[str, str], nummer: int, standard: int) -> Wallet
         threshold=schwelle,
         descriptor=feld("DESC"),
         read_only=read_only,
+        origin=feld("ORIGIN"),
     )
 
 
@@ -1435,9 +1498,9 @@ def _read_legacy_wallets(values: dict[str, str], standard: int) -> list[WalletEn
     Bleibt erhalten, damit eine bestehende .env ohne Zutun weiterläuft. Beim
     nächsten Speichern aus der Oberfläche wird sie ins Blockformat überführt.
     """
-    xpubs = main._xpubs_from_env(values) or []
-    namen = main._wallet_names_from_env(values) or []
-    typen = main._script_types_from_env(values) or []
+    xpubs = _xpubs_from_env(values) or []
+    namen = _wallet_names_from_env(values) or []
+    typen = _script_types_from_env(values) or []
 
     tiefen_roh = _split_list(values.get("MAX_ADDRESSES_PER_XPUB", ""), "|")
     standard_tiefe = values.get("MAX_ADDRESSES", "").strip()
@@ -1529,6 +1592,10 @@ def wallet_updates(
             updates[f"{praefix}_SCRIPT"] = eintrag.script_type
         updates[f"{praefix}_MAX_ADDRESSES"] = str(eintrag.max_addresses)
         updates[f"{praefix}_READ_ONLY"] = "1" if eintrag.read_only else "0"
+        # Herkunft nur schreiben wenn gesetzt — alte .env ohne ORIGIN bleibt leer.
+        updates[f"{praefix}_ORIGIN"] = (
+            eintrag.origin if eintrag.origin in WALLET_ORIGINS else None
+        )
 
     return updates
 

@@ -44,10 +44,12 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
-| S1 | **`.env`**, Cookies, RPC-Passwörter, Klartext-XPUBs/Keys **im Git-Diff/Commit** | Hart |
+| S1 | **Niemals Geheimnisse pushen oder persönliche Daten doxxen.** Im Git-Diff/Commit/Push/PR/Issue: `.env` (+ Backups/Scramble), `.satsage-password`, Cookies, RPC-/API-Keys, Passwort-Hashes, Session-Token, Seed/xprv/WIF, volle XPUBs/Deskriptoren, persönliche Wallet-Namen, reale Nutzer-Mainnet-Adressen/TxIDs, Klarnamen/Kontaktdaten zum Doxxing. Gilt auch für Agent-Chat-Output und Logs. | Hart |
 | S2 | **Maintainer-/Agent-Clones:** nur `Juniormind1 <juniormind@proton.me>`. **Fremde Contributor-Commits/PRs:** eigene Autor-IDs erlaubt. CI prüft nicht „jeder Commit = Juniormind1“. | Hart lokal (Hooks) für Maintainer/Agent |
 | S3 | **`githooks/`** oder CI-Workflows sabotieren/entfernen ohne Maintainer-Freigabe | Hart+Review |
 | S4 | Merge nach **`main`** ohne Prüfung (Prozess/Ruleset) | Hart (Ruleset/Prozess) |
+
+**S1 — Agent-Pflicht:** Vor Commit/Push staged Diff lesen. Treffer → abbrechen. Versehentlich remote → History-Bereinigung + Secret rotieren. Siehe **HART · Geheimnisse und Doxxing** in [`AGENTS.md`](../AGENTS.md); Hook `githooks/pre-commit` blockiert bekannte Secret-Pfade zusätzlich.
 
 ---
 
@@ -56,6 +58,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | Q1 | **`tests/`-Suite rot** auf CI (Ubuntu `unittest discover`) | Hart |
+| Q6 | **Regtest-Labor rot** vor Merge nach `main` (Core + Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`) | Hart |
 | Q2 | Suite „grün“ nur durch **unbegründete skips** / Aushebeln von Checks | Hart+Review |
 | Q3 | **Scope-Monster**: UI + Core-Scan + Packaging + Plugin in einem PR ohne Trennung | Weich |
 | Q4 | Neue Nutzertexte **nur Englisch / hart in `app.js`** statt Locales | Weich |
@@ -76,14 +79,16 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 
 ## Starter-Set (CI zuerst)
 
-1. T1 — keine Seed/xprv/WIF-Eingabe  
-2. T3 — kein XPUB/Deskriptor-Leak an Fremde  
+1. S1 — keine Secrets/persönlichen Daten in Commit/Push (Agent: AGENTS.md HART; Hook: Secret-Pfade)
+2. T1 — keine Seed/xprv/WIF-Eingabe  
+3. T3 — kein XPUB/Deskriptor-Leak an Fremde  
 3. T4 / S1 — keine Secrets im Diff oder Exfil  
 4. T5 — kein Bind/Auth-Aufweichen  
 5. T6 / T7 — kein Remote-Code / Download+Exec  
 6. T11 — kein stiller Public-Electrum/Remote-LLM-Default  
 7. S2 — Juniormind1 nur für Maintainer/Agent (Hooks)  
-8. Q1 — Unittests grün  
+8. Q1 — Unittests grün
+9. Q6 — Regtest-Labor grün vor Merge nach `main`  
 
 ---
 

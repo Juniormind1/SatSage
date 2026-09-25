@@ -5,6 +5,13 @@
 .env.backup[0-9]
 .env.tmp
 .env.*.bak
+# Passwort-Scramble von .env (nie committen)
+# Legacy (wird nach .env migriert und gelöscht)
+.env.gobbledigook
+.env.gobbledigook.tmp
+# App-Login-Hash (Argon2id/scrypt) — nie committen
+.satsage-password
+.satsage-password.tmp
 
 __pycache__/
 *.pyc
@@ -67,6 +74,10 @@ tmp/live-timing-*.json
 price_cache/
 satsage-webgui.exe
 satsage-webgui.exe.sha256
+
+# Lokale Tcl/Tk-Entpackung (python3-tk ohne Root) — nie committen
+.local-tk/
+python3-tk_*.deb
 
 .grok-local-notes.txt
 

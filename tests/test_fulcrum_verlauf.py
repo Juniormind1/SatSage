@@ -174,7 +174,7 @@ class TestGapScanNenntUtxos(unittest.TestCase):
             gesehen.append((text, sofort))
 
         with patch(
-            "fulcrum.fetch_address_utxos_fulcrum",
+            "core.fulcrum_wallet.fetch_address_utxos_fulcrum",
             return_value=[{"txid": "aa"}, {"txid": "bb"}],
         ):
             used, _ = collect_used_chain_indices_fulcrum(

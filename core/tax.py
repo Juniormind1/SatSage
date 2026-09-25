@@ -5,7 +5,7 @@ Steuerjahr: Haltefristen, Stichtage und Export.
 
 Zwei Grundlagen sind möglich, und die Auswertung sagt jeweils, welche gilt:
 
-*Mit Verlauf* (``main.resolve_wallet_verlauf``, Feld ``spent`` je Eintrag)
+*Mit Verlauf* (``core.wallet_sync_engine.resolve_wallet_verlauf``, Feld ``spent`` je Eintrag)
 sind alle je empfangenen Outputs erfasst — auch längst ausgegebene. Dann
 trennt die Auswertung, was am Stichtag noch im Bestand lag, von dem, was im
 Jahr abgegangen ist. Erst damit wird die *Veräußerung* sichtbar, und die ist
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import main
+from core import xpub_cache
 
 #: Übliche Haltefrist nach § 23 EStG (private Veräußerungsgeschäfte, DE).
 STANDARD_HALTEFRIST_JAHRE = 1
@@ -88,7 +88,7 @@ def hinweis_keine_beratung(lang: str | None = None) -> str:
 
 
 #: Deutsche Fassungen als Konstanten — Aufrufer ohne Sprachkontext (Handbuch,
-#: Doku, bestehende Tests) bleiben damit unverändert gültig.
+#: Doku, bestehende Tests, Exporte) bleiben damit unverändert gültig.
 HINWEIS_ONCHAIN = hinweis_onchain("de")
 
 HINWEIS_KEINE_BERATUNG = hinweis_keine_beratung("de")
@@ -616,6 +616,8 @@ class Eingang:
             "value_sats": self.value_sats,
             "datum": self.zeitpunkt.strftime("%d.%m.%Y"),
             "zeit": self.zeitpunkt.strftime("%H:%M:%S"),
+            # Unix für GUI-Fiat am Anschaffungstag (nur bei einheitlichem Saldo-Datum).
+            "time_ts": int(self.zeitpunkt.timestamp()),
             "frist_ende": self.frist_ende.strftime("%d.%m.%Y") if self.frist_ende else "",
             "erfuellt": self.erfuellt,
             "haltedauer_tage": self.haltedauer_tage,
@@ -692,7 +694,7 @@ def auswerten(
         # das Entstehungsdatum des Outputs ist nur der Rückfall.
         ingress = None
         if immutable_cache_dir:
-            ingress = main.load_utxo_ingress_cache(txid, vout, immutable_cache_dir)
+            ingress = xpub_cache.load_utxo_ingress_cache(txid, vout, immutable_cache_dir)
 
         zeitpunkt, grundlage, untergrenze, offensiv_fb = _anschaffung(
             utxo, ingress, anschaffung=modus,
@@ -745,7 +747,9 @@ def auswerten(
                     ) or "unbekannt",
                     "value_sats": netto,
                     "datum": zeitpunkt.strftime("%d.%m.%Y"),
+                    "time_ts": int(zeitpunkt.timestamp()),
                     "abgang_datum": abgang.strftime("%d.%m.%Y"),
+                    "abgang_time_ts": int(abgang.timestamp()),
                     "abgang_txid": utxo.get("spent_txid") or "",
                     "haltedauer_tage": max(0, (abgang - zeitpunkt).days),
                     "frist_erfuellt": erfuellt_ab,
@@ -819,7 +823,9 @@ def auswerten(
     if offensiv_fallbacks:
         hinweise.insert(0, _h("tax.hintOffensiveNoOldest"))
     if eigenuebertraege:
-        hinweise.insert(0, _h("tax.hintSelfTransfer", anzahl=len(eigenuebertraege)))
+        hinweise.insert(0, _h(
+            "tax.hintSelfTransfer", anzahl=len(eigenuebertraege)
+        ))
     if spent_ohne_abgang:
         hinweise.insert(0, _h("tax.hintSpentNoDate", anzahl=spent_ohne_abgang))
     if stichtag:
@@ -1029,6 +1035,7 @@ def zeitstrahl(
             "value_sats": sats,
             "aeltere_sats": aeltere,
             "datum": eintrag.zeitpunkt.strftime("%d.%m.%Y"),
+            "time_ts": int(eintrag.zeitpunkt.timestamp()),
             "wallet": eintrag.wallet,
             "address": eintrag.address or "",
             "txid": eintrag.txid,

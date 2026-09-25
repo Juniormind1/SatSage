@@ -266,8 +266,23 @@
       </div>
     </div>
     <div id="quelle-status" class="quelle" aria-live="polite">
-      <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
-      <span id="llm-pille" class="pille pille-neutral">LLM</span>
+      <!-- Globaler Listen-Filter (MVP: immer inaktiv; Aktivierung schrittweise). -->
+      <label class="kopf-filter-wrap" for="kopf-filter">
+        <span class="visually-hidden" data-i18n="header.filterAria">Listen filtern</span>
+        <input type="search" id="kopf-filter" class="kopf-filter"
+               disabled
+               autocomplete="off" spellcheck="false"
+               data-i18n-placeholder="header.filterPlaceholder"
+               data-i18n-title="header.filterTitleDisabled"
+               placeholder="Filtern…"
+               title="Filter noch nicht aktiv — kommt schrittweise für filterbare Ansichten."
+               aria-disabled="true">
+      </label>
+      <div id="quelle-pillen" class="quelle-pillen" role="group"
+           data-i18n-aria-label="header.pillsAria" aria-label="Status">
+        <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
+        <span id="llm-pille" class="pille pille-neutral">LLM</span>
+      </div>
     </div>
     <div class="kopf-lang">
       <button type="button" id="log-anzeige" class="lang-knopf log-knopf aktiv"
@@ -305,6 +320,11 @@
                 data-i18n="nav.sanctions" data-i18n-title="nav.sanctionsTitle"
                 title="Verfolgt xpub-blind so viele Hops wie gewünscht">
           Sanktionscheck
+        </button>
+        <button type="button" class="nav-eintrag" data-ansicht="tools"
+                data-i18n="nav.tools" data-i18n-title="nav.toolsTitle"
+                title="Prüft, ob eine Adresse zu einem deiner Wallets gehört">
+          Tools
         </button>
       </div>
       <div class="nav-titel" data-i18n="nav.sectionAdmin">Verwaltung</div>
@@ -354,19 +374,19 @@
                 <option value="datum" data-i18n="wallet.sortDate">neueste zuerst</option>
               </select>
             </label>
-            <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Zieht den bestehenden UTXO-Cache bis zum Chain-Tip nach (BIP-158 inkrementell oder Electrs light). Kein Fullscan ab Index 0 — dafür Bestand." class="knopf">Bis Tip</button>
             <div class="utxo-aktionen" role="group" aria-label="UTXO">
-              <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO</span>
-              <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Bestand</button>
+              <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO:</span>
+              <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Leichter Tip-Nachzug wie beim Start mit „Wallets immer aktuell halten“: bestehender Cache bis zum Chain-Tip (BIP-158 inkrementell oder Electrs light). Kein Fullscan — dafür Neu scannen." class="knopf">Aktualisieren</button>
+              <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Neu scannen</button>
               <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Historie</button>
-              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Bestand." class="knopf">Herkunft</button>
+              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Neu scannen." class="knopf">Herkunft</button>
             </div>
           </div>
         </div>
 
         <div id="rescan-lauf" class="hinweis hinweis-lauf" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span id="rescan-text" data-i18n="wallet.scanRunning">Bestand läuft…</span>
+          <span id="rescan-text" data-i18n="wallet.scanRunning">Neu scannen läuft…</span>
           <button type="button" id="rescan-abbruch" data-i18n="common.cancel" data-i18n-title="wallet.scanCancelTitle" title="Bricht nur den laufenden Scan ab. Angestellte Scans laufen danach weiter." class="knopf knopf-klein">
             Abbrechen
           </button>
@@ -422,7 +442,7 @@
           <button type="button" id="trace-start" data-i18n="trace.start" data-i18n-title="trace.startTitle" title="Verfolgt gezielt einen einzelnen Output. Eingabe als txid:vout oder als reine TxID (dann Output 0)." class="knopf">
             Gezielt tracen
           </button>
-          <button type="button" id="trace-herkunft-alle" data-i18n="trace.allOrigins" data-i18n-title="trace.allOriginsTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen — dieselbe Analyse wie im Steuerjahr. Einmal ermittelt, bleibt sie gespeichert." class="knopf knopf-primaer">
+          <button type="button" id="trace-herkunft-alle" data-i18n="trace.allOrigins" data-i18n-title="trace.allOriginsTitle" title="Verfolgt für jedes noch offene UTXO rückwärts, woher die Sats kamen — dieselbe Analyse wie im Steuerjahr. Einmal ermittelt, bleibt sie gespeichert." class="knopf">
             Herkünfte UTXOs
           </button>
         </div>
@@ -487,7 +507,7 @@
               <input type="number" id="sank-hops" min="1" max="20" value="3"
                      data-default-max="20" style="width:5em">
             </label>
-            <button type="button" id="sank-start" data-i18n="sanctions.start" data-i18n-title="sanctions.startTitle" title="Prüft die Vorgeschichte der Bestände gegen die Sanktions- und Blacklists — bis zur eingestellten Hop-Tiefe. Dauert je nach Tiefe Minuten." class="knopf knopf-primaer">
+            <button type="button" id="sank-start" data-i18n="sanctions.start" data-i18n-title="sanctions.startTitle" title="Prüft die Vorgeschichte der Bestände gegen die Sanktions- und Blacklists — bis zur eingestellten Hop-Tiefe. Dauert je nach Tiefe Minuten." class="knopf">
               Prüfen
             </button>
             <button type="button" id="sank-abbruch" data-i18n="common.cancel" data-i18n-title="sanctions.cancelTitle" title="Bricht die Prüfung ab. Ein bereits gespeichertes Ergebnis bleibt stehen." class="knopf" hidden>
@@ -529,6 +549,49 @@
         </div>
       </section>
 
+      <!-- ---------- Tools ---------- -->
+      <section id="ansicht-tools" hidden>
+        <div class="bereich-kopf">
+          <div>
+            <h1 data-i18n="tools.heading">Tools</h1>
+            <p class="meta" data-i18n="tools.meta">
+              Leitet aus den hinterlegten Wallets ab, ob die Adresse dazu
+              gehört. Ohne Guthaben, ohne Verlauf, auch noch unbenutzt.
+            </p>
+          </div>
+        </div>
+
+        <div class="karte">
+          <div class="tools-zeile">
+            <input type="text" id="tools-adresse" class="feld-breit mono"
+                   data-i18n-placeholder="tools.addressPlaceholder"
+                   data-i18n-aria-label="tools.addressAria"
+                   placeholder="Bitcoin-Adresse"
+                   aria-label="Bitcoin-Adresse"
+                   autocomplete="off" spellcheck="false">
+            <button type="button" id="tools-meine" class="knopf"
+                    data-i18n="tools.isMine" data-i18n-title="tools.isMineTitle"
+                    title="Prüft lokal an den Schlüsseln der Wallets — ohne Node und ohne dass je sats darauf lagen.">
+              ist die meine?
+            </button>
+            <p id="tools-meine-ergebnis" class="tools-ergebnis" role="status"
+               aria-live="polite" hidden></p>
+          </div>
+        </div>
+
+        <div class="karte">
+          <div class="tools-zeile">
+            <button type="button" id="tools-schatz" class="knopf"
+                    data-i18n="tools.treasure" data-i18n-title="tools.treasureTitle"
+                    title="Sucht mit scantxoutset UTXOs jenseits des normalen Adressfensters und sortiert sie in den Wallet-Cache.">
+              Jäger der verlorene Schätze
+            </button>
+            <p id="tools-schatz-status" class="meta" hidden></p>
+            <ul id="tools-schatz-liste" class="tools-schatz-liste" hidden></ul>
+          </div>
+        </div>
+      </section>
+
       <!-- ---------- Steuerjahr ---------- -->
       <section id="ansicht-steuerjahr" hidden>
         <div class="bereich-kopf">
@@ -560,7 +623,7 @@
               Historien
             </button>
             <button type="button" id="export-csv" data-i18n="tax.csv" data-i18n-title="tax.csvTitle" title="Aufstellung als CSV für Tabellenkalkulation und Steuerberatung — mit Semikolon und Dezimalkomma, damit Excel sie ohne Nacharbeit liest." class="knopf">CSV</button>
-            <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf knopf-primaer">
+            <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf">
               Bericht
             </button>
           </div>
@@ -620,15 +683,15 @@
                     title="Neu aus dem Cache laden — z. B. nach Verlaufsscan oder mit Einzahl-TxID-Filter. Beim Öffnen der Ansicht passiert das automatisch.">
               Aktualisieren
             </button>
-            <button type="button" id="sa-html" class="knopf knopf-primaer"
+            <button type="button" id="sa-html" class="knopf"
                     data-i18n="tax.reportHtml" data-i18n-title="tax.reportHtmlTitle"
                     title="Öffnet den HTML-Report in einem neuen Tab (Druck → PDF) und speichert die Datei zusätzlich.">
-              Report HTML
+              HTML
             </button>
             <button type="button" id="sa-csv" class="knopf"
                     data-i18n="tax.reportCsv" data-i18n-title="tax.reportCsvTitle"
                     title="Dieselben Daten als CSV für Excel (Stammdaten oben, volle TxIDs/Adressen).">
-              Report CSV
+              CSV
             </button>
           </div>
           <div id="sa-liste" class="sa-liste"></div>
@@ -734,13 +797,47 @@
               </p>
               <input type="file" id="deskriptor-datei" hidden
                      accept=".json,.txt,.desc,application/json,text/plain">
-              <button type="button" id="deskriptor-import" class="knopf"
+              <button type="button" id="deskriptor-import" class="knopf knopf-primaer"
                       data-i18n="common.import" data-i18n-title="wallets.importTitle"
                       title="Liest eine Exportdatei und prüft sie wie eingefügter Text. Verstanden werden: nackter Output-Deskriptor (auch mit Prüfsumme), Sparrow-JSON, Specter-JSON und Bitcoin Core listdescriptors — Empfang und Change werden zusammengeführt. Taproot multi_a und Miniscript, sofern sich Adressen ableiten lassen. Nicht: Electrum-Walletdatei, Caravan, Coldcard-Cosigner, BSMS, UR/BBQr und nichts mit privaten Schlüsseln.">
                 Import
               </button>
             </div>
             <div id="deskriptor-befund" class="deskriptor-befund" hidden></div>
+          </div>
+
+          <div class="karte-fuss wallet-einfuegen sparrow-fuss">
+            <span class="feld-titel" data-i18n="wallets.exportLabel">Wallet-Export · Sparrow / Wasabi</span>
+            <p class="meta sparrow-anleitung" data-i18n-html="wallets.exportHelpHtml">
+              <strong>Suchen</strong> scannt Sparrow, Wasabi, Specter, Electrum
+              und fragt angeschlossenes Bitcoin Core (Descriptor-Wallets).
+              Passwortgeschützte Dateien mit Schloss — ohne Passwort-Dialog.
+              Schon vorhandene entfallen. Herkunft rechts in der Liste.
+              Sparrow-<span class="mono">.mv.db</span> braucht Descriptor-Export.
+              Optional Dateien manuell wählen.
+            </p>
+            <div class="export-suche-zeile">
+              <button type="button" id="wallet-export-suchen" class="knopf"
+                      data-i18n="wallets.exportSearch"
+                      data-i18n-title="wallets.exportSearchTitle"
+                      title="Durchsucht die Standardordner von Sparrow und Wasabi auf diesem Rechner.">
+                Suchen
+              </button>
+            </div>
+            <div class="export-fund-zeile" id="wallet-export-fund" hidden>
+              <div id="wallet-export-liste" class="export-liste" role="list"></div>
+            </div>
+            <div class="sparrow-neben export-datei-zeile">
+              <input type="file" id="sparrow-dateien" hidden multiple
+                     accept=".txt,.csv,.json,.desc,text/plain,text/csv,application/json">
+              <button type="button" id="sparrow-import" class="knopf knopf-primaer"
+                      data-i18n="wallets.exportImportFile"
+                      data-i18n-title="wallets.exportImportTitle"
+                      title="Exportdateien manuell wählen — oder angehakte Wallets aus der Suche importieren.">
+                Datei(en) importieren
+              </button>
+            </div>
+            <div id="sparrow-befund" class="deskriptor-befund" hidden></div>
           </div>
         </div>
 
@@ -828,6 +925,9 @@
           </button>
         </div>
 
+        <div class="einstellungen-kurz">
+          <div class="einstellungen-kurzreihe">
+
         <div class="karte">
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="settings.language.title">Sprache</span>
@@ -886,28 +986,6 @@
 
         <div class="karte">
           <div class="karte-kopf">
-            <span class="karte-titel" data-i18n="settings.lernhinweise.title">Lernhinweise für Plebs</span>
-            <span class="karte-zusatz" data-i18n="settings.lernhinweise.zusatz">
-              Experiment · Neugier
-            </span>
-          </div>
-          <div class="karte-fuss">
-            <label class="check-zeile"
-                   data-i18n-title="settings.lernhinweise.titleAttr"
-                   title="Aus = unveränderte UI, Empfangs-QR nur Adressen. An = Tooltips mit Kaninchenbau-Link; Lern-QR im Empfangs-Bereich möglich (Bitcoin-only).">
-              <input type="checkbox" id="lernhinweise-plebs">
-              <span data-i18n="settings.lernhinweise.enable">Lernhinweise für Plebs</span>
-            </label>
-          </div>
-          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.lernhinweise.hint">
-            Für Neugierige: Tooltips nennen eine geeignete Quelle für den Einstieg
-            in diesen Kaninchenbau (DE u. a. Aprycot, Blocktrainer, Einundzwanzig).
-            Lern-QR: Klick kopiert und öffnet die URL. Eilige: Einstellung aus lassen.
-          </p>
-        </div>
-
-        <div class="karte">
-          <div class="karte-kopf">
             <span class="karte-titel" data-i18n="settings.start.title">Beim Start</span>
             <span class="karte-zusatz" data-i18n="settings.start.zusatz">
               Electrs-Subscribe + Tip-Nachzug
@@ -936,6 +1014,91 @@
           </p>
         </div>
 
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.lernhinweise.title">Lernhinweise für Plebs</span>
+            <span class="karte-zusatz" data-i18n="settings.lernhinweise.zusatz">
+              Experiment · Neugier
+            </span>
+          </div>
+          <div class="karte-fuss">
+            <label class="check-zeile"
+                   data-i18n-title="settings.lernhinweise.titleAttr"
+                   title="Aus = unveränderte UI, Empfangs-QR nur Adressen. An = Tooltips mit Kaninchenbau-Link; Lern-QR im Empfangs-Bereich möglich (Bitcoin-only).">
+              <input type="checkbox" id="lernhinweise-plebs">
+              <span data-i18n="settings.lernhinweise.enable">Lernhinweise für Plebs</span>
+            </label>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.lernhinweise.hint">
+            Für Neugierige: Tooltips nennen eine geeignete Quelle für den Einstieg
+            in diesen Kaninchenbau (DE u. a. Aprycot, Blocktrainer, Einundzwanzig).
+            Lern-QR: Klick kopiert und öffnet die URL. Eilige: Einstellung aus lassen.
+          </p>
+        </div>
+          </div>
+        </div>
+
+        <div class="karte" id="karte-app-passwort">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.password.title">Passwort</span>
+            <span class="karte-zusatz" id="app-passwort-zusatz"
+                  data-i18n="settings.password.zusatzOff">optional · nicht gesetzt</span>
+          </div>
+          <div class="karte-fuss steuer-einstellungen app-passwort-fuss">
+            <div class="feld app-passwort-aktuell-zeile">
+              <span class="feld-titel" data-i18n="settings.password.current">Aktuelles Passwort</span>
+              <div class="app-passwort-aktuell-reihe">
+                <input type="password" id="app-passwort-aktuell" class="feld-breit"
+                       autocomplete="current-password" spellcheck="false"
+                       disabled
+                       data-i18n-placeholder="settings.password.currentPh"
+                       placeholder="—">
+                <button type="button" id="app-passwort-entfernen" class="knopf knopf-klein knopf-icon"
+                        disabled
+                        data-i18n-title="settings.password.removeTitle"
+                        title="Aktuelles Passwort eingeben und hier klicken entfernt das Passwort."
+                        aria-label="Passwort entfernen">
+                  🗑
+                </button>
+              </div>
+            </div>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.password.new">Neues Passwort</span>
+              <input type="password" id="app-passwort-neu" class="feld-breit"
+                     autocomplete="new-password" spellcheck="false"
+                     data-i18n-placeholder="settings.password.newPh"
+                     placeholder="neues Passwort">
+            </label>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.password.repeat">Neues Passwort (Wiederholung)</span>
+              <div class="app-passwort-repeat-reihe">
+                <input type="password" id="app-passwort-neu2" class="feld-breit"
+                       autocomplete="new-password" spellcheck="false"
+                       data-i18n-placeholder="settings.password.repeatPh"
+                       placeholder="neues Passwort wiederholen">
+                <span id="app-passwort-match" class="app-passwort-match"
+                      aria-live="polite" title="">—</span>
+              </div>
+            </label>
+            <div class="knopf-zeile">
+              <button type="button" id="app-passwort-setzen" class="knopf"
+                      data-i18n="settings.password.save"
+                      data-i18n-title="settings.password.saveTitle"
+                      title="Speichert nur, wenn beide neuen Passwörter übereinstimmen."
+                      onclick="typeof speichereAppPasswort==='function'&&speichereAppPasswort();return false;">
+                Passwort setzen
+              </button>
+            </div>
+            <p id="app-passwort-meldung" class="hinweis app-passwort-meldung" hidden></p>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.password.hint">
+            Optional. Schützt die .env (scrambled auf der Platte).
+            Ohne Passwort nach Verlust: neu konfigurieren oder Backup. Caches noch unverschlüsselt.
+          </p>
+        </div>
+
+        
+        
         <div id="specter-mempool-karte" class="karte" hidden>
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="sources.explorer">Block-Explorer</span>
@@ -1083,6 +1246,9 @@
           </p>
         </div>
 
+        <div class="einstellungen-paar">
+          <div class="einstellungen-paarreih">
+
         <div class="karte">
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="settings.llm.title">Assistent</span>
@@ -1216,6 +1382,9 @@
             Sinnvoll, wenn der Browser schon zu ist und der Server im Terminal weiterläuft.
           </p>
         </div>
+
+          </div>
+        </div>
       </section>
 
       <!-- ---------- Datenquellen ---------- -->
@@ -1230,7 +1399,8 @@
             <p id="sources-managed-hinweis" class="meta" hidden></p>
             <div id="local-core-hinweis" class="hinweis hinweis-warn" hidden>
               <p id="local-core-hinweis-text" class="meta"></p>
-              <button type="button" id="local-core-uebernehmen" class="knopf knopf-klein">
+              <button type="button" id="local-core-uebernehmen" class="knopf knopf-klein"
+                      data-i18n="sources.localCore.adopt">
                 Lokalen Core übernehmen
               </button>
             </div>
@@ -1584,6 +1754,22 @@
 <script src="/vendor/qr-min.js"></script>
 <script src="/i18n.js"></script>
 <script src="/log_i18n.js"></script>
+<script src="/api.js"></script>
+<script src="/state.js"></script>
+<script src="/format.js"></script>
 <script src="/app.js"></script>
+<script src="/mempool_links.js"></script>
+<script src="/views/einstellungen.js"></script>
+<script src="/views/datenquellen.js"></script>
+<script src="/views/sanktionen.js"></script>
+<script src="/views/einrichtung.js"></script>
+<script src="/views/adress_labels.js"></script>
+<script src="/views/wallets.js"></script>
+<script src="/views/herkunft.js"></script>
+<script src="/views/steuerjahr.js"></script>
+<script src="/views/tools.js"></script>
+<script src="/chrome_nav.js"></script>
+<script src="/chrome.js"></script>
+<script src="/boot.js"></script>
 </body>
 </html>

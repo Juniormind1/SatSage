@@ -1,5 +1,7 @@
 # SatSage-Regtest-Labor
 
+Vor einem Merge nach `main` muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`).
+
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
 Die Arbeitsregeln stehen in [`../../GROK_BOT.md`](../../GROK_BOT.md). Für die Lab-Anbindung: `NETWORK=regtest` in der generierten `.regtest.env` setzt das Adressnetz (`bcrt1…`); SatSage startet mit `py server.py --env lab/regtest/.data/.regtest.env`. Lab-Caches getrennt von Mainnet halten (`--cache-dir` / `--immutable-cache-dir`).
@@ -19,7 +21,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\start_lab.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 ```
 
-`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Optional Playwright-Verify (`verify_gui.py`, braucht `pip install playwright` + `playwright install chromium`).
+`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf macOS und Linux, nicht hier.
 
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 
@@ -27,6 +29,18 @@ Endpunkte nur Loopback: RPC `127.0.0.1:18443` (user/pass `bitcoin`/`secret`), El
 Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools/` kann bleiben), erneut `start_lab.ps1`.
 
 **Scan findet 0 UTXOs:** SatSage teilt `WALLET_n_MAX_ADDRESSES` auf Empfang und Change (`//2`). Lab-Default ist 400 (je 200). Liegen Coins auf höheren Indizes (mehrfaches `run_scenarios` mit altem `getnewaddress`), Limit anheben oder `.data/` neu aufbauen. Szenarien nutzen feste `deriveaddresses`-Indizes und schieben den Keypool nicht mehr.
+
+## Präsentation (macOS, vorhandene Chain)
+
+Ein Befehl startet Docker Desktop (falls nötig), das bestehende Labor (bitcoind, Electrs, Mempool) und die SatSage-GUI. Es wird nichts neu gebaut und keine Szenarien erzeugt. Die GUI nimmt Port **8731**, damit ein laufendes SatSage auf 8730 unberührt bleibt.
+
+```bash
+cd lab/regtest
+./scripts/start_praesentation.sh
+./scripts/stop_praesentation.sh
+```
+
+Die Token-URL steht danach in `.data/gui-url.txt` und öffnet sich im Browser. Explorer: `http://127.0.0.1:18080`. Fehlt die Lab-Env, einmalig `./scripts/start.sh` und `./scripts/generate_scenarios.py`.
 
 ## macOS (Grok Build)
 
@@ -61,6 +75,7 @@ Die Basis-Szenarien streuen **unspent UTXO-Alter zufällig** über **gestern …
 |-------|----------------|
 | bootstrap | 110 Blocks am Fensterstart (Coinbase-Reife) |
 | random-age-funding | 40× unspent @0,049 BTC (nur Alter) + 40× Spend-Pool @0,05 BTC — je Index eigene Zufallszeit |
+| random-volume-funding | noch einmal 40× unspent, gleiche Zeitstreuung, Betrag log-gleich 1000 Sat … 0,2 BTC (Index 120…159) |
 | shapes | Hop/CJ/Fan-out nur aus Spend-Pool (Alters-Kohorte bleibt liegen) |
 | tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
 

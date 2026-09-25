@@ -27,22 +27,18 @@
 
 ## Aufruf
 
+Strategie nach Betriebssystem, eine pro Umgebung. Details und die verbotenen Alternativen: `doc/gui-test-protokoll.md` (Abschnitt „Playwright · eine Strategie pro Betriebssystem“).
+
 ```bash
-# Isoliert (Temp-Wallets) — CI / Assistent ohne Prod-.env
+# macOS und Linux — mitgeliefertes Chromium, ohne --channel
+.venv/bin/python -m playwright install chromium
 .venv/bin/python scripts/webgui_userflow.py --spawn
-
-# Laufender Dev-Server (tmp/satsage-gui-session.json)
 .venv/bin/python scripts/webgui_userflow.py --attach
-
-# Explizit
 .venv/bin/python scripts/webgui_userflow.py --url 'http://127.0.0.1:8730/?t=…'
-```
 
-Voraussetzung: Playwright
-
-```bash
-.venv/bin/pip install playwright
-.venv/bin/playwright install chromium
+# Windows — installiertes Chrome (Fernsteuer-Zustimmung)
+py -3 scripts/webgui_userflow.py --spawn --channel chrome
+py -3 scripts/webgui_userflow.py --attach --channel chrome
 ```
 
 ## Report

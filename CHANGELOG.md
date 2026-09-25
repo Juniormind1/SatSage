@@ -9,7 +9,61 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [0.9.8] — 2026-09-25
+
+- **Version:** 0.9.8 — Werkzeuge „ist die meine?“ und „Jäger der verlorene Schätze“, einheitliche Sprache von Oberfläche und Servertexten, Umbrel-Paket auf dem Stand von 0.9.7.
+
 - **Web · Sprache von Client und Server einheitlich:** Stand die Sprachwahl nur im Browser (`localStorage`), nicht aber als `UI_LANG` in der `.env`, war die Oberfläche englisch, Haftungsabsatz und Steuerhinweise vom Server aber deutsch. Auf Umbrel leicht erreichbar, weil der Browserspeicher Updates und Neuinstallationen der App überdauert. Der Client schickt seine gespeicherte Wahl jetzt als `X-Satsage-Lang` mit; `api_config` und `api_tax` richten sich danach. Ohne gespeicherte Wahl entscheidet beim ersten Laden weiter der Server.
+- **Knöpfe:** Steuerjahr „Bericht“ und „HTML“, Herkunft „Herkünfte UTXOs“ und Sanktionscheck „Prüfen“ sehen aus wie die übrigen Knöpfe (kein Orange mehr).
+- **Steuerjahr:** Die Export-Knöpfe heißen „HTML“ und „CSV“.
+- **Tools:** „Jäger der verlorene Schätze“ ist klickbar. Fehlt eine Core-Quelle mit scantxoutset, sagt das der Start, nicht ein grauer Knopf.
+- **Empfang · QR:** Die Atem-Animation im QR-Feld läuft bei jedem Scan: Wallet „Aktualisieren“, „Neu scannen“, „Historie“, „Herkunft“, Steuerjahr „Historien“ sowie „Herkünfte UTXOs“ (auch klären). Danach kommt die Empfangsadresse zurück.
+- **Wallets:** Knopf „Aktualisieren“ bleibt in der Wallet-Ansicht sichtbar, auch wenn „Wallets immer aktuell halten“ an ist. Er steht vor „Neu scannen“, „Historie“ und „Herkunft“ und startet denselben leichten Tip-Nachzug wie beim Start (kein Fullscan) — für das gerade offene Wallet.
+- **Wallets:** Bestand (sats bzw. BTC und Fiat zum aktuellen Kurs) steht in Klammern neben dem Wallet-Namen, in derselben großen Schrift. Die kleine Betragsangabe darunter entfällt.
+- **Auswerten · Tools:** Neuer Bereich. Erstes Werkzeug: Bitcoin-Adresse einfügen und **ist die meine?** — SatSage nennt den Wallet-Namen oder „gehört Dir nicht“. Gilt auch ohne Guthaben, ohne Verlauf und für noch unbenutzte Adressen. Prüfung lokal aus den hinterlegten Schlüsseln, ohne Node.
+- **Auswerten · Tools:** Zweites Werkzeug **Jäger der verlorene Schätze**. Nur bei verbundener Bitcoin-Core-Quelle mit scantxoutset. Sucht UTXOs jenseits des normalen Adressfensters, sortiert sie in den Wallet-Cache, spielt bei Erfolg denselben orangen ₿ wie ein UTXO-Fund und schreibt ins Log, warum der normale Scan sie übersehen hat. Die Ergebnisliste verschwindet beim Wechsel in einen anderen Bereich.
+- **Einstellungen:** Sprache, Darstellung, Aktualität und Lernhinweise stehen nebeneinander. Ist das Fenster zu schmal, rutschen die Boxen untereinander (bei mittlerer Breite zu zweit). Assistent und Status-Mails ebenso nebeneinander, bei schmalem Fenster untereinander.
+- **Wallets:** UTXO-Knöpfe heißen „Aktualisieren“ (bisher „Bis Tip“) und „Neu scannen“ (bisher „Bestand“). „UTXO:“ steht davor, in der normalen Schriftfarbe.
+- **Steuerjahr · Filter:** Dieselbe Suche wie bei Wallet/Herkunft (Text, Betrag `>`/`<`, Datum `>`/`<`, mehrere Begriffe). Treffer bleiben im Punktdiagramm; andere Punkte nur noch mit gepunktetem Rand. Abflüsse, Was-wäre-wenn, Veräußerungen und die Haltefrist-Gruppen zeigen nur noch Treffer.
+- **Login · Dialog:** Falsches Passwort bleibt im Anmelde-Dialog („Passwort falsch.“) — keine rohe JSON-/Fehlerseite mehr. Nach korrektem Passwort Fortschritt „Passwort korrekt — Entschlüsselung läuft…“ (Auth und Unlock getrennt; spürbar v. a. im PyInstaller-Build).
+- **UI · Englisch:** Hardcodierte Production-GUI-Texte (Steuerjahr, Herkunft, Scans, Cache, Wallets, Datenquellen, Importe, Assistent, QR-Atem-Witze u. a.) über Locales `de.json`/`en.json` und `t()` verdrahtet — inkl. fehlender Trace-Sort-Keys und „Lokalen Core übernehmen“.
+- **Tests · .env-Scramble:** Unittests schreiben/lesen mit festem Passwort `tralala123` (scramble + descramble); kein Roh-`read_text` mehr auf Cipher-`.env`. `main._load_dotenv` liest scrambled Dateien mit Session-Key.
+- **Sicherheit · `.satsage-password`:** aus dem Git-Index entfernt und in `.gitignore` — Login-Hash gehört nie ins Repo.
+- **Agents · HART:** Grundregel „niemals Geheimnisse pushen oder persönliche Daten doxxen“ prominent in `AGENTS.md`, Dealbreaker **S1**, `githooks/pre-commit` blockiert Secret-Pfade.
+- **.env-Scramble:** Eine Datei **`.env`** — mit Passwort scrambled (Magic `SSGB1`), ohne Passwort Klartext. **`.env.backup0`…`9`** werden mitgesetzt (scramble bei Passwort, unscramble bei Löschen, Umschlüsselung bei Änderung). Kein `.env.gobbledigook` mehr; Legacy wird migriert. Login = Hash + File-Key. CLI/Specter/Umbrel/Start9 ausgenommen. Doku (Handbuch §11, README): `.env` at rest mit Passwort; Caches/Exporte Klartext — Schutz über verschlüsselte Volume (FDE/VeraCrypt), SatSage vor dem Schließen beenden.
+- **Login · Passwort bei GUI-Start:** Ist ein App-Passwort gesetzt, reicht ``?t=``/Token auch auf Loopback nicht mehr — Login-Seite nach Serverstart. Session-Cookie nach Anmeldung wie bisher.
+- **Einstellungen · Passwort (Windows):** Login-Hash ohne ``os.fchmod`` (fehlte → ``AttributeError`` → Browser-NetworkError). Löschen per **POST** statt DELETE+Body. Aktuelles Passwort wird bei Entfernen eingefordert (Fokus aufs Feld).
+- **UI · Fiat-Historie an Summen:**
+ Steuerjahr (Kennzahlen, Gruppen, Abgänge), Meta-Zeilen und Trace-Knoten/`atTs` — **nur** wenn alle saldierten Zeilen denselben Kalendertag haben; sonst nur sats/BTC (kein Spot-Mix).
+- **Cache · Tageskurs EUR+USD:** Neue UTXO-/Verlaufs-/Ingress-/First-seen-/Blockzeit-Einträge speichern bei Datum den **BTC-Tageskurs EUR und USD** sowie bei Sat-Volumen die **Fiat-Gegenwerte** (`btc_eur`/`btc_usd`/`value_eur`/…, bei Ausgaben `spent_*`). Nur lokal aus Historie, kein Backfill-Job, bestehende Felder bleiben.
+- **UI · Listen-Filter:** Wallet + Herkunft — Adresse/TxID, Börse/CJ-Label (`Kraken`, `Wasabi`, …), Betrag `>n`/`<n`, Datum. Andere Ansichten ausgegraut.
+- **Start · .env-Modus:** Unter Windows keine Dauer-Warnung mehr „Modus … 0666 → 0600“ — ``chmod`` greift dort nicht; Prüfung nur noch auf POSIX.
+- **Wallets · Löschen:** Log **„Lösche …“** / **„Löschen beendet“** (Timestamps), bei vielen Cache-Dateien Zwischenstand. Langsam v. a. durch Walk über UTXO-/Verlauf → je Tx Herkunfts-/Ingress-Dateien (Import-Wallets).
+- **Wallets · Adressen nachziehen:** Nach Export-Import wartet der Job bis ~2 min auf den Indexer (Tor-Bootstrap), statt still abzubrechen. Log: **„Adressen nachziehen braucht Indexer…“** / Warte-Zeilen; ohne Konfiguration klare Meldung, Adressen bleiben unzugeordnet sichtbar.
+- **Wallets · Suche:** Schon bekannte Schlüssel (z. B. zpub „Cash & Carry“) blenden Specter-/Wasabi-Treffer mit anderem Namen („Cash+Carry“) aus — Abgleich über Adress-ID und Schlüsselkennung, nicht nur rohe zpub-String-ID. Import legt solche Duplikate nicht erneut an.
+- **Log · Tor-SOCKS:** Kein Heartbeat mehr („Prüfe Tor-SOCKS… / erreichbar“) bei Routine-Recheck mitten im Scan. Log nur noch bei **echter Wiederherstellung** nach Ausfall bzw. Tor-Autostart.
+- **Empfang · QR:** QR-Bereich bleibt nach Dock-/Spalten-Resize **quadratisch** (größtes 1:1 in der Pane-Fläche); Maske und Konfetti am Quadrat.
+- **Log · UTXO-Scan:** „BIP-158 ab Wallet-Beginn …“ / „BIP-158 nicht vor …“ nur noch, wenn der Scan wirklich über BIP-158 läuft — nicht mehr vor der Quellenwahl (z. B. Fulcrum).
+- **Wallets · Suche-Log:** Beim Suchen erscheinen im GUI-Log nacheinander **Suche Sparrow…** / **Wasabi…** / **Specter…** / **Electrum…** / **Bitcoin Core…** (live); Log-Zeilen nicht mehr doppelt; Abschluss **Suche X… n gefunden**.
+- **Wallets · Suche:** „Load failed“ behoben — Antwort wieder normales JSON mit `logs[]` (NDJSON-Stream unter WebKit unzuverlässig); Log-Reihenfolge inkl. „n gefunden“ bleibt.
+- **Wallets · Wasabi-Suche:** Ordnersuche liest den BitcoinStore **nicht** mehr mit (nur Deskriptor) — vorher ~15 s Pause vor Electrum; Store-Verlauf weiter beim **Import**.
+- **Wallets · Specter:** Lokale Specter-Desktop-JSON (`recv_descriptor`/`change_descriptor`, gleiches Layout wie Plugin-Bridge) such- und importierbar.
+- **Wallets · Electrum:** Unverschlüsselte Wallet-Dateien (nur xpub/Öffentliches; xprv/seed verworfen); verschlüsselte mit Schloss.
+- **Wallets · Bitcoin Core:** Angeschlossener Node per RPC (`listwallets`/`listdescriptors`) — Descriptor-Wallets importierbar.
+- **Wallets · Suchliste:** Herkunft **rechtsbündig** (Wasabi / Specter / Electrum / Bitcoin Core / …).
+- **Wallets · Wasabi-Suche:** Wallet-JSON mit UTF-8-BOM (Wasabi-Standard) gilt wieder als importierbar — vorher fälschlich „Kein JSON“.
+- **Wallets · Export-Suche:** Gefundene importierbare Wallets standardmäßig **unchecked** — Nutzer wählt ausdrücklich. Liste: zuerst importierbar, dann gesperrt; jeweils A–Z.
+- **Wallets · Export-Knopf:** Ein Knopf **Datei(en) importieren** / bei Auswahl **Wallet(s) importieren** (separater Import-Knopf entfernt). Nach Import Wechsel zum Wallet (bei mehreren: alphabetisch erstes).
+- **Wallets · Import-Pille:** Nach Export-Import grün **importiert** auch ohne offene UTXOs (leerer UTXO-Cache + Verlauf zählt); `ORIGIN=wallet_export` wird bei Re-Import nachgezogen.
+- **Wallets · Wasabi-Hot:** Passwortgeschützte Wallets (`EncryptedSecret`) nicht mehr importierbar (nur gelistet mit Schloss); kein automatisches Anlegen von SegWit/Taproot aus dem Hot-Secret.
+- **Wallets · Wasabi-Import:** Adressen aus `HdPubKeys` (PubKey→Adresse); UTXOs und **bereits ausgegeben** aus lokalem `BitcoinStore`/`Transactions.sqlite`, soweit vorhanden.
+- **Wallets · Cache löschen:** Listet auch **nicht konfigurierte** (verwaiste) Cache-Kennungen — einzeln löschbar, ohne Gesamtlöschung.
+- **Wallets · Import-Pille:** Nach Sparrow/Wasabi-Export grün **importiert** (alle Verlaufsadressen) bzw. gelb **importiert** (noch Lücken); aktualisiert sich nach Adressen-Nachziehen.
+- **Wallet-Export · Adressen nachziehen:** Electrs-Job mit Batch; Fortschritt im **GUI-Log** (nicht nur stdio). Ableitung mind. 500/Kette (Gap); Spends ohne Wert-Match am Prevout. Knopf **Datei(en) importieren** orange.
+- **Wallet-Export-Import · Stabilität:** Descriptor+CSV per Klartext (kein Base64-Freeze), Timeout, Sofort-Log, Fehler beenden „Export wird gelesen…“; CSV immer als Tabelle; Server-Text-Upload und Größenlimit.
+- **Bereits ausgegeben · Export-Verlauf:** Wallet-Name aus Cache-Kontext, wenn Sparrow-Tx-CSV keine Adresse hat (nicht mehr „unbekanntes Wallet“); leere Adresszeile als „ohne Adresse (Export)“.
+- **Log · Release-Zeile:** Beim Start steht die laufende SatSage-Version (`SatSage v…`) als erste Zeile im Log-Bereich.
+- **Wallets · Export-Import (Sparrow / Wasabi):** Unter Multisig: **Suchen** in Standardordnern, Liste mit Checkboxen (Schloss = nicht direkt lesbar: Passwort **oder** native Sparrow-DB), orangener **Import** der Auswahl; manuell **Datei wählen…**. Format-Auto-Erkennung; Herkunft `WALLET_n_ORIGIN` (`xpub` / `descriptor` / `wallet_export`) — schon vorhandene entfallen in der Suche. Wasabi-JSON View-only/HW importierbar; Sparrow-`.mv.db` nur nach Descriptor-Export. Kein Passwort-Dialog. Multisig-**Import** orange wie „Hinzufügen“.
 
 ## [0.9.7] — 2026-09-19
 

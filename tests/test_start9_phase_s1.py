@@ -41,10 +41,16 @@ class TestStart9PhaseS1(ApiTestBasis):
 
     def setUp(self):
         super().setUp()
-        with self.env_pfad.open("a", encoding="utf-8") as env_file:
-            env_file.write("SATSAGE_HOST_ALLOWLIST=remote.example\n")
+        from tests.env_scramble_helpers import read_env_plaintext, write_env_scrambled
 
-    def setup_password(self, password="test-passwort"):
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad)
+            + "SATSAGE_HOST_ALLOWLIST=remote.example\n",
+        )
+
+    def setup_password(self, password="tralala123"):
+        """Festes Scramble-/Login-Passwort wie in der Unittest-Suite."""
         return self.request(
             "/api/auth/setup", method="POST",
             data={"password": password, "confirm": password},
@@ -75,7 +81,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertTrue(password_file.is_file())
         if sys.platform != "win32":
             self.assertEqual(stat.S_IMODE(password_file.stat().st_mode), 0o600)
-        self.assertNotIn("test-passwort", password_file.read_text())
+        self.assertNotIn("tralala123", password_file.read_text())
 
         status, _, _ = self.request("/api/config", host="remote.example")
         self.assertEqual(status, 403)
@@ -84,11 +90,44 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertTrue(payload["ok"])
         self.assertIn("satsage_session=", headers.get("Set-Cookie", ""))
 
+    def test_passwort_gesetzt_loopback_token_reicht_nicht(self):
+        """Mit Passwort: ?t=/Header öffnen die GUI nicht ohne Login — auch lokal."""
+        self.setup_password()
+        # API mit Token-Header
+        status, _, _ = self.request(
+            "/api/config", headers={"X-Satsage-Token": self.state.token},
+        )
+        self.assertEqual(status, 403)
+        # HTML-Start mit Query-Token → Login
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/?t={self.state.token}"
+        )
+        request.add_header("Host", f"127.0.0.1:{self.port}")
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            with opener.open(request, timeout=10) as response:
+                status = response.status
+                location = response.headers.get("Location", "")
+        except urllib.error.HTTPError as error:
+            status = error.code
+            location = error.headers.get("Location", "")
+        self.assertEqual(status, 303)
+        self.assertTrue(location.startswith("/login"), location)
+        # Nach Login: Session erlaubt Config
+        st, _, headers = self.request(
+            "/api/auth/login", method="POST",
+            data={"password": "tralala123"},
+        )
+        self.assertEqual(st, 200)
+        cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
+        st, _, _ = self.request("/api/config", cookie=cookie)
+        self.assertEqual(st, 200)
+
     def test_login_setzt_cookie_und_erlaubt_config(self):
         self.setup_password()
         status, _, headers = self.request(
             "/api/auth/login", method="POST", host="remote.example",
-            data={"password": "test-passwort"},
+            data={"password": "tralala123"},
         )
         self.assertEqual(status, 200)
         cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
@@ -114,7 +153,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.setup_password()
         _, _, headers = self.request(
             "/api/auth/login", method="POST", host="remote.example",
-            data={"password": "test-passwort"},
+            data={"password": "tralala123"},
         )
         cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
         status, _, _ = self.request(
@@ -144,7 +183,62 @@ class TestStart9PhaseS1(ApiTestBasis):
         self.assertIn("StartOS", html)
         self.assertIn("Actions &amp; Config", html)
         self.assertIn('class="karte"', html)
+        # AJAX-Login: Fehler und Fortschritt bleiben im Dialog.
+        self.assertIn('id="login-form"', html)
+        self.assertIn('id="login-meldung"', html)
+        self.assertIn("/api/auth/login", html)
+        self.assertIn("phase", html)
 
+    def test_login_falsches_passwort_bleibt_json(self):
+        """Kein HTML-Fehlerdokument — Dialog kann die Meldung inline zeigen."""
+        self.setup_password()
+        status, body, _ = self.request(
+            "/api/auth/login", method="POST", host="remote.example",
+            data={"password": "voellig-falsch"},
+        )
+        self.assertEqual(status, 403)
+        self.assertIsInstance(body, dict)
+        self.assertIn("error", body)
+        self.assertIn("falsch", body["error"].lower())
+
+    def test_login_phase_auth_dann_unlock(self):
+        """Zwei Schritte: Session sofort, Unlock danach (Fortschrittsmeldung)."""
+        self.setup_password()
+        # Server-Neustart simulieren: File-Key weg, Session weg.
+        try:
+            from core import env_scramble as sc_mod
+            sc_mod.clear_session_key()
+        except Exception:
+            pass
+        self.state.env_scramble_unlocked = False
+        with self.state._auth_lock:
+            self.state.sessions.clear()
+        # Loopback: Allowlist steckt in der noch gesperrten .env.
+        status, payload, headers = self.request(
+            "/api/auth/login", method="POST",
+            data={"password": "tralala123", "phase": "auth"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload.get("ok"))
+        self.assertTrue(payload.get("authenticated"))
+        cookie = headers.get("Set-Cookie", "").split(";", 1)[0]
+        self.assertTrue(cookie.startswith("satsage_session="))
+        # Scramble aktiv → Unlock noch nötig
+        self.assertTrue(payload.get("unlock_needed"), payload)
+        status2, payload2, _ = self.request(
+            "/api/auth/login", method="POST",
+            cookie=cookie,
+            data={"password": "tralala123", "phase": "unlock"},
+        )
+        self.assertEqual(status2, 200, payload2)
+        self.assertTrue(payload2.get("unlocked") or payload2.get("ok"))
+        scramble = payload2.get("env_scramble") or {}
+        self.assertFalse(scramble.get("locked", False))
+
+    def test_login_public_assets_ohne_auth(self):
+        self.setup_password()
+        self.state.managed_by = "start9"
+        opener = urllib.request.build_opener(_NoRedirect)
         logo = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/img/sat-logo.png",
             method="GET",

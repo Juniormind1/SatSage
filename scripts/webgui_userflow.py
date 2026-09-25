@@ -39,6 +39,7 @@ NAV_SCHRITTE = (
     ("trace", "ansicht-trace", ("#trace-liste",)),
     ("steuerjahr", "ansicht-steuerjahr", ("#steuer-kennzahlen", "#sa-liste", "#jahr-wahl")),
     ("sanktionen", "ansicht-sanktionen", ("#sanktions-status", "#ansicht-sanktionen")),
+    ("tools", "ansicht-tools", ("#tools-adresse", "#tools-meine")),
     ("wallets", "ansicht-wallets", ("#wallet-zeilen", "#ansicht-wallets")),
     ("einstellungen", "ansicht-einstellungen", ("#ui-lang", "#ansicht-einstellungen")),
     ("datenquellen", "ansicht-datenquellen", ("#ansicht-datenquellen",)),
@@ -196,7 +197,13 @@ def _console_collector(page) -> list[str]:
     return errors
 
 
-def run_userflow(url: str, *, headless: bool = True, timeout_s: float = 90.0) -> dict:
+def run_userflow(
+    url: str,
+    *,
+    headless: bool = True,
+    timeout_s: float = 90.0,
+    channel: str | None = None,
+) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -212,7 +219,15 @@ def run_userflow(url: str, *, headless: bool = True, timeout_s: float = 90.0) ->
     start = time.time()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        launch_kwargs: dict = {"headless": headless}
+        if channel:
+            # Nur Windows: installiertes Chrome (channel="chrome").
+            # Fernsteuer-Zustimmung — das mitgelieferte Playwright-Chromium
+            # ist dort nicht der Weg. macOS und Linux lassen channel leer
+            # und starten das gebündelte Chromium. Siehe
+            # doc/gui-test-protokoll.md.
+            launch_kwargs["channel"] = channel
+        browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()
         console_errors = _console_collector(page)
@@ -427,6 +442,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spawn", action="store_true", help="Isolierter Temp-Server")
     parser.add_argument("--attach", action="store_true", help="Laufende Session-Datei")
     parser.add_argument("--headed", action="store_true", help="Browser sichtbar")
+    parser.add_argument(
+        "--channel",
+        default="",
+        help="Playwright-Browserkanal, z. B. chrome (installiertes Chrome)",
+    )
     parser.add_argument("--timeout", type=float, default=120.0, help="Gesamt-Timeout s")
     parser.add_argument(
         "--report",
@@ -455,7 +475,12 @@ def main(argv: list[str] | None = None) -> int:
 
     assert url
     print("Userflow start…", flush=True)
-    report = run_userflow(url, headless=not args.headed, timeout_s=args.timeout)
+    report = run_userflow(
+        url,
+        headless=not args.headed,
+        timeout_s=args.timeout,
+        channel=args.channel or None,
+    )
 
     out = args.report or (ROOT / "tmp" / "webgui-userflow-report.json")
     out.parent.mkdir(parents=True, exist_ok=True)

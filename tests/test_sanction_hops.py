@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from analyze import scan_external_sanction_hops
+from core.sanction_hops import scan_external_sanction_hops
 from tests.fixtures import (
     BIP84_RECEIVE_0,
     EXTERN_A,

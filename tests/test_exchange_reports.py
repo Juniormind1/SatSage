@@ -118,7 +118,7 @@ class TestBoerseNamenImBaum(unittest.TestCase):
 
     def test_oberflaeche_boerse_nur_name_mit_farbe(self):
         js = (
-            Path(__file__).resolve().parent.parent / "web" / "app.js"
+            Path(__file__).resolve().parent.parent / "web" / "views" / "adress_labels.js"
         ).read_text(encoding="utf-8")
         self.assertIn("function istBoersenLabel", js)
         self.assertIn("label-boerse-in", js)

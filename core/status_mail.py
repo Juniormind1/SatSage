@@ -12,7 +12,7 @@ import threading
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Any
-from outbound_policy import OutboundPolicyError, ensure_host_allowed, public_opt_in
+from core.outbound_policy import OutboundPolicyError, ensure_host_allowed, public_opt_in
 
 #: Job-Arten, für die v1 Mails vorgesehen sind.
 STATUS_MAIL_KINDS = frozenset({"rescan", "verlauf"})

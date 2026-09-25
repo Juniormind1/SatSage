@@ -66,7 +66,7 @@ class TestGapScanMeldetUtxos(unittest.TestCase):
         gesehen = []
 
         with patch(
-            "fulcrum.fetch_address_utxos_fulcrum",
+            "core.fulcrum_wallet.fetch_address_utxos_fulcrum",
             return_value=[{"txid": txid("aa"), "vout": 0, "value": 100}],
         ):
             collect_used_chain_indices_fulcrum(
@@ -127,8 +127,8 @@ class TestScanXpubZwischenstand(unittest.TestCase):
             def fake_fetch(addrs, **kw):
                 return [_utxo("final")]
 
-            with patch("main.discover_wallet_scan_addresses", side_effect=fake_discover), \
-                 patch("main._try_scantxoutset_xpub", return_value=None):
+            with patch("core.wallet_sync_engine.discover_wallet_scan_addresses", side_effect=fake_discover), \
+                 patch("core.wallet_sync_engine._try_scantxoutset_xpub", return_value=None):
                 out = main._scan_xpub_utxos(
                     BIP84_ZPUB,
                     fake_fetch,

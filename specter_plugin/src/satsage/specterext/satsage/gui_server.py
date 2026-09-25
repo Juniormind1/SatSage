@@ -48,8 +48,8 @@ def _gui_env_path() -> Path:
 def _schreibe_specter_env(ctx: SatSageContext, specter: Any | None = None) -> Path:
     """Spiegelt Specter-Kontext in die Plugin-.env, nicht in die Desktop-.env."""
     ensure_satsage_on_path()
-    import main as xq_main
     from core.config import EnvFile, write_wallets
+    from core.env_bootstrap import ENV_FILE, _load_dotenv
 
     pfad = _gui_env_path()
     if not pfad.is_file():
@@ -60,7 +60,7 @@ def _schreibe_specter_env(ctx: SatSageContext, specter: Any | None = None) -> Pa
             encoding="utf-8",
         )
 
-    basis = dict(xq_main._load_dotenv(xq_main.ENV_FILE))
+    basis = dict(_load_dotenv(ENV_FILE))
     wallet_keys = {
         "XPUBS", "WALLET_NAMES", "SCRIPT_TYPES", "MAX_ADDRESSES_PER_XPUB",
         *{f"XPUB_{i}" for i in range(10)},

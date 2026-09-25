@@ -2,6 +2,34 @@
 
 Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diesem Repository arbeiten.
 
+## HART · Geheimnisse und Doxxing (nie brechen)
+
+**Niemals Geheimnisse pushen oder persönliche Daten doxxen.**
+
+Gilt für **Commit, Push, PR, Issue, Changelog, Log-Ausgabe, Screenshot, Chat-Antwort und Tool-Output** — ohne Ausnahme, ohne „nur kurz / Test / Worktree / schon lokal“. Diese Regel steht über Bequemlichkeit und Task-Tempo.
+
+**Geheimnisse** (Beispiele, nicht abschließend):
+
+- `.env`, `.env.backup*`, scrambled `.env`, `.satsage-password` (+ `.tmp`)
+- RPC-/API-Keys, App-Passwörter **und** Passwort-Hashes, Session-Token, SMTP/LLM-Keys
+- Seed / Mnemonic / xprv / WIF; volle XPUBs/Deskriptoren in Commits oder öffentlichem Text
+- Heim-Node-Credentials, Tor-Control-Passwörter, private Onion-URLs mit Auth
+
+**Persönliche Daten / Doxxing** (Beispiele):
+
+- Klarnamen, Anschrift, Telefon, private E-Mails (außer der freigegebenen Maintainer-Git-ID)
+- Persönliche Wallet-Namen, reale Mainnet-Adressen/TxIDs des Nutzers in Issues, PRs, Doku, Changelogs
+- Screenshots oder Logs, die Obiges erkennbar machen
+
+**Pflicht vor jedem Commit und vor jedem Push:**
+
+1. `git status` und den staged Diff lesen.
+2. Trifft ein Pfad oder Diff-Inhalt die Listen oben → **abbrechen**, nicht committen/pushen.
+3. Versehentlich gestaged: `git rm --cached -- <pfad>`, Eintrag in `.gitignore`, Commit nur der Bereinigung.
+4. Versehentlich remote: History bereinigen (filter) + Force-Push nur mit Auftrag; betroffene Secrets **rotieren**.
+
+Technische Riegel: `.gitignore`, `githooks/pre-commit` (Secret-Pfade), Dealbreaker **S1** in [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Hooks ersetzen diese Prüfung nicht — Agents prüfen den Diff selbst.
+
 ## Zweck
 
 **SatSage â€“ know your sats** (frÃ¼her xPubQuery) ist ein Multi-XPUB- und Taproot-Analyzer fÃ¼r Wasabi- und Standard-Wallets. Das Tool analysiert Transaktionen und unspent UTXOs und zeigt, **woher die Sats wann kamen** â€” insbesondere wann sie ein xPub-Wallet betraten oder es wieder verlieÃŸen. Typischer Anwendungsfall: Nachweise fÃ¼r die SteuererklÃ¤rung (Haltedauer, Stichtage). Anzeigename, Logo und technische IDs (`satsage`, Binary `satsage-webgui`, Specter-Package) sind vereinheitlicht.
@@ -23,6 +51,7 @@ Kontext fÃ¼r KI-Assistenten (Cursor, Grok, Claude Code, â€¦), die an diese
 - **Web-GUI-StabilitÃ¤t (Rumgeklicke):** Protokoll `doc/testprotokoll-webgui-stabilitaet.md`; halbautomatisch `scripts/webgui_chaos_run.py` + `scripts/webgui_chaos_harness.js` (optional Playwright)
 - **Datenquellen-Wechsel waehrend Scan:** Protokoll `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md` — P2P vs Electrum, Job-Snapshot, Cache-Flags, Queue
 - **GUI-Tests Â· Token:** Nie Token aus Logs greppen. Session-JSON `tmp/satsage-gui-session.json` bzw. Zeile `SATSAGE_SESSION {â€¦}`; Helfer `scripts/webgui_test_ready.py spawn|attach|url`; Protokoll `doc/gui-test-protokoll.md`. Chaos: `--spawn`.
+- **Playwright · Betriebssystem:** Nur die Strategie der laufenden Umgebung. macOS und Linux: `.venv/bin/python`, mitgeliefertes Chromium, `p.chromium.launch(headless=True)` **ohne** `channel` (Userflow: `scripts/webgui_userflow.py --spawn`). Windows: `py -3` und installiertes Chrome, `channel="chrome"` bzw. `--channel chrome` — das mitgelieferte Playwright-Chromium scheitert dort an der Fernsteuer-Zustimmung. Edge/Firefox sind nur der menschliche Lab-Browser (`start_lab.ps1`), kein Playwright-Kanal. `lab/regtest/scripts/win/verify_gui.py` startet schon mit `channel="chrome"` (nur dieses Windows-Skript). `webgui_chaos_run.py` startet noch ohne Kanal — auf Windows `channel="chrome"` ergänzen, den macOS-/Linux-Default nicht umschreiben. Tabelle: `doc/gui-test-protokoll.md`.
 - **StartOS-Sideload (`.s9pk`):** Wrapper liegt in **`packaging/`** auf Branch `main` â€” nicht auf `master`, nicht in einem Sibling-Repo. Bau-Anleitung fÃ¼r Bots: [`doc/START9-packaging.md`](doc/START9-packaging.md). Kurz: `./scripts/build_startos_s9pk` (x86_64). Vorhandenes Release: Tag `startos-tls11`.
 - **Umbrel-App (App Store):** Paket liegt in **`packaging/umbrel/`** (Manifest, Compose, `exports.sh`), Quelle der Wahrheit; der Store bekommt nur Kopien. Anleitung: [`doc/UMBREL-packaging.md`](doc/UMBREL-packaging.md). Modus `SATSAGE_MANAGED_BY=umbrel`; Image via Workflow `build-docker-image.yml` nach `ghcr.io` (amd64 + arm64).
 
@@ -46,7 +75,7 @@ py main.py --txid <txid> --xpubs zpub6...
 | `menu.py` | Interaktives HauptmenÃ¼ (**Legacy/Fallback**), Einstellungen, Session-State, SanktionsmenÃ¼ |
 | `interact.py` | Prompts (`j/N`), Analyse-Orchestrierung, Top-UTXO-Auswahl |
 | `analyze.py` | Tx/UTXO-Herkunftsanalyse, Trace, Sanktions-UTXO-Checks (ohne interaktive Prompts) |
-| `trace_engine.py` | Gemeinsame Graph-Engine: RÃ¼ckwÃ¤rts-Walk Ã¼ber Tx-Inputs (`vin` â†’ `prevout`) |
+| `trace_engine.py` | Fassade. Der Rückwärts-Walk liegt in `core/trace.py` |
 | `display.py` | `format_sats`, Verbose-Modus, `cancellable_output` (q-Abbruch langer Listen) |
 | `sanctioned.py` | Multi-Source-Sanktionslisten, Cache, Ãœberblick, Online-AktualitÃ¤tsprÃ¼fung |
 | `bip158_scanner.py` | BIP-158 Ã¼ber Bitcoin-P2P (Compact Filter, TurboSync); Matcher `_CoreBasicFilterMatcher` |
@@ -177,11 +206,37 @@ FULCRUM_SANCTIONS_HOST=...   # optional; sonst electrum_servers.json
 - **Python:** 3.10+, Standardbibliothek bevorzugen; AbhÃ¤ngigkeiten: `embit`, `chiabip158` (nur Self-Tests)
 - **Stil:** Bestehenden Code-Stil beibehalten â€” gleiche Namensgebung, Import-Stil, Docstring-Niveau
 - **Scope:** Nur Ã¤ndern, was die Aufgabe erfordert; keine Drive-by-Refactors
-- **Secrets:** `.env`, XPUBs, RPC-PasswÃ¶rter, persÃ¶nliche Wallet-Namen nie committen oder in Ausgaben wiederholen
+- **Secrets / Doxxing:** siehe **HART · Geheimnisse und Doxxing** oben — nie pushen, nie in Ausgaben wiederholen
 - **Tests:** `py` statt `python` auf Windows; bei Netzwerk-Tests `.env` laden via `_load_dotenv()`
 - **TemporÃ¤re Skripte:** `_patch_*.py`, `_test_*.py`, `_profile_*.py` sind Entwicklungs-Hilfen â€” nicht committen
 - **Changelog:** CHANGELOG.md bei nennenswerten Änderungen nachziehen — spätestens zusammen mit dem Commit. Neue Punkte unter [Unveröffentlicht]. Sprache Deutsch, Nutzerwirkung vor Implementierungsdetail.
 - **Release Notes:** Nicht bei jedem Push auf dev-juniormind. Nur bei **Version-Bump** / Merge nach **main** / **Git-Tag** (…, StartOS-Tag): Abschnitt [Unveröffentlicht] als datierten Block setzen und leeren; optional GitHub-Release-Body = dieser Abschnitt (Inhalt = Changelog seit dem letzten Release). StartOS: wie doc/START9-packaging.md + publish_startos_release.
+
+### Modulgrenzen
+
+Hintergrund: [`doc/adr-modularisierung.md`](doc/adr-modularisierung.md). Slice 1–5 sind geschnitten; diese Regeln gelten für neue Arbeit.
+
+**Wohin neue Logik kommt**
+
+- HTTP-Handler nach `httpserver/api/<domäne>.py` oder in den passenden Helfer unter `httpserver/`. `server.py` bleibt Bind, Sitzung, Static, dünner Dispatch und Re-Export.
+- Oberfläche nach `web/views/<domäne>.js` oder in die bestehende View. `web/app.js` nur anfassen, solange der Rest-Ballast (Kurs, Chat, Sync) noch dort liegt.
+- Fachlogik nach `core/<domäne>.py`. `main.py` und `analyze.py` bleiben Einstieg plus Re-Export-Fassade.
+- Fulcrum, BIP158, Electrum-Liste und Outbound-Policy in den bestehenden `core/fulcrum_*`, `core/bip158_*`, `core/electrum_servers.py`, `core/outbound_policy.py`. Die Root-Dateien `fulcrum.py`, `bip158_scanner.py`, `outbound_policy.py` und `check_fulcrum_tor.py` bleiben Fassade bzw. Diagnose-CLI.
+
+**Imports**
+
+- Neuer Code in `core/` und `httpserver/` importiert `core.*` direkt. Root-Fassaden bleiben für Tests, Specter und Packaging. Eine Fassade in einem Feature-Commit nicht löschen.
+- `core` importiert für Fachcode nicht `main`, `server`, `analyze`, `fulcrum`, `bip158_scanner`, `outbound_policy` oder `check_fulcrum_tor`. Brauchen sich zwei `core`-Module gegenseitig, liegt der gemeinsame Zustand im unteren Modul, der Aufruf darüber als später Import in der Funktion.
+
+**Größe**
+
+- Eine Datei über etwa 80–100 KB ist ein Split nach Domäne, kein Umzug in eine neue große Datei.
+- Eine Funktion über etwa 80 Zeilen ist ein Split-Kandidat nur in dem Change, der sie ohnehin anfasst. Kein Aufräumen langer Funktionen nebenbei.
+
+**Refactor und Feature**
+
+- Weiteres Entkernen (`app.js`-Ballast, Fassaden entfernen) ist eine eigene Aufgabe mit eigenem Commit. Ein Feature landet in der bestehenden Domänendatei und schneidet Nachbarmodule nicht mit um.
+- Wenn ein Symbol das Modul wechselt, zeigen Tests auf das Modul, in dem der Name nachgeschlagen wird. Die Fassade behält die Symbol-Identität (`fulcrum.X is core.fulcrum_*.X`).
 
 ## Version
 
@@ -208,7 +263,7 @@ Assets (`web/`, `data/`, `doc/`) Ã¼ber `resource_dir()`; `.env` und Caches neb
 
 ### Branches
 
-- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung.
+- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung. Vor dem Merge: Unittests grün und Regtest-Labor grün (Workflow `Regtest-Labor`, Core + Electrs, `verify_tx_classify.py` und `verify_sanctions_hops.py`).
 - dev-juniormind — laufende Entwicklung von Juniormind1; hier committen/pushen für Work-in-Progress.
 - Andere Contributor-Branches/PRs: nach Review in main mergen, wenn stabil; nicht ungeprüft aus dev-* übernehmen.
 
@@ -229,7 +284,7 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten.
 
 **Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
@@ -238,6 +293,7 @@ Assistenten sollen:
 - Änderungen vorstellen und testen, aber **nicht** automatisch committen oder pushen
 - Nicht nach jedem Task „Soll ich committen/pushen?“ fragen
 - Auf ausdrückliche Anweisung des Benutzers warten (`commit`, `push`, o. ä.)
+- Vor Commit/Push: **HART · Geheimnisse und Doxxing** am staged Diff prüfen; bei Treffer abbrechen
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 - Für Commit/Push ohne Token-Verbrauch die Maintainer-Skripte vorschlagen (`scripts/commit.*`, `scripts/push.*`)
 
@@ -275,6 +331,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 
 ## Sicherheit & Datenschutz
 
+- **HART:** Niemals Geheimnisse pushen oder persönliche Daten doxxen — Abschnitt oben; Dealbreaker **S1**
 - XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
 - Lern-URLs / Kaninchenbau: nur Bitcoin-only-Content für Plebs (Mechanismen, keine SatSage-Internals); Shitcoins/Eth im Zweifel warnen (Dealbreaker T13)
 - Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen
@@ -375,11 +432,11 @@ Scripts: `unit_bridge.py` (offline), `probe_api.py` (REST JWT). Daten: `specter_
 ## Typische Aufgaben
 
 - **Bei unklarer Benutzervorgabe** Die Unklarheit prÃ¤zise beschreiben und durch gezielte Fragen an den Benutzer klarstellen lassen
-- **Neue Analyse-Funktion:** Logik in `analyze.py`, Prompts in `interact.py`, MenÃ¼punkt in `menu.py`; Web: Route in `server.py` + `web/app.js`; im Plugin optional `specter_session.run_*` + Route/Template in `controller.py`
-- **Neues Backend:** Fetcher in Backend-Modul, Anbindung in `main._setup_blockchain_client()` und `_build_blockchain_fetchers()`
-- **BIP-158:** P2P in `core/p2p.py` + `bip158_scanner.py`; kein Core-RPC. Turbo-PÃ¤sse in `plane_filter_passes`
-- **Steuerjahr:** `core/tax.py`; Einstellungen `STEUER_HALTEFRIST_JAHRE` / `STEUER_STICHTAG`; Web-Ansicht in `web/app.js`
-- **Fulcrum/Tor:** `fulcrum.py`, `check_fulcrum_tor.py`, `.env`-Variablen, `electrum_servers.json`
+- **Neue Analyse-Funktion:** Logik in `core/` (z. B. `tx_utxo_analyze`, `utxo_origin`), Prompts in `interact.py`, MenÃ¼punkt in `menu.py`; Web: Route in `httpserver/api/` + View in `web/views/`; `analyze.py` und `server.py` nur Fassade/Dispatch. Im Plugin optional `specter_session.run_*` + Route/Template in `controller.py`
+- **Neues Backend:** Fetcher in Backend-Modul, Anbindung in `core.chain_sources` (`_setup_blockchain_client` / `_build_blockchain_fetchers`, über die `main`-Fassade erreichbar)
+- **BIP-158:** P2P in `core/p2p.py`, Scan in `core/bip158_scan.py`, Wallet-API in `core/bip158_wallet.py`; `bip158_scanner.py` bleibt Fassade. Kein Core-RPC. Turbo-PÃ¤sse in `plane_filter_passes`
+- **Steuerjahr:** `core/tax.py`; Einstellungen `STEUER_HALTEFRIST_JAHRE` / `STEUER_STICHTAG`; Web-Ansicht in `web/views/`
+- **Fulcrum/Tor:** Fachcode in `core/fulcrum_*` und `core/electrum_servers.py`; `fulcrum.py` und `check_fulcrum_tor.py` bleiben Fassade bzw. Diagnose-CLI. `.env`-Variablen, `electrum_servers.json`
 - **Adress-AuflÃ¶sung:** `WalletContext`, `external_addresses.json` in `main.py`
 - **Sanktionslisten:** `sanctioned.py` (Quellen, Parser, `update_sanctioned_lists`), MenÃ¼ in `menu.py` (Punkt 6); Ãœberblick mit `print_sanctions_overview`, danach `check_sanctions_source_updates` + j/N-Aktualisierung
 - **Specter-Plugin:** Bridge (`bridge.py`) fÃ¼r neuen Specter-Kontext; Session (`specter_session.py`) fÃ¼r Runtime; UI in `controller.py` + Jinja; Core-API stabil halten (`build_wallet_context`, `_setup_blockchain_client`, `analyze_*`)

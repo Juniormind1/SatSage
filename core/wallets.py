@@ -8,8 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import main
+from core import xpub_cache
 from core.config import WalletEntry
+from core.derivation import (
+    _encoders_for_xpub,
+    _hdkey_for_xpub,
+    derive_addresses,
+)
 
 #: Typen, die beim Erkennen durchprobiert werden. 'auto' ist kein Kandidat.
 PROBE_TYPES = ("segwit", "nested", "legacy", "taproot")
@@ -44,6 +49,12 @@ class WalletSummary:
     cache_mtime: int | None = None
     #: Letzte bekannte Chain-Höhe des UTXO-Scans (v. a. BIP-158), sonst None.
     scan_tip_height: int | None = None
+    #: Sparrow/Wasabi-Import: complete | partial | None (kein Export-Import).
+    export_import: str | None = None
+    #: Verlaufseinträge ohne Adresse (Export-Lücke).
+    export_ohne_adresse: int = 0
+    #: Verlaufseinträge gesamt (für Tooltip).
+    export_verlauf_n: int = 0
 
     def as_dict(self) -> dict:
         typ = self.entry.script_type
@@ -64,6 +75,7 @@ class WalletSummary:
             "script_type_effective": effective_script_type(self.entry),
             "max_addresses": self.entry.max_addresses,
             "read_only": bool(self.entry.read_only),
+            "origin": getattr(self.entry, "origin", "") or "",
             "has_cache": self.has_cache,
             "utxo_count": self.utxo_count,
             "total_sats": self.total_sats,
@@ -72,6 +84,9 @@ class WalletSummary:
             "first_seen_height": self.first_seen_height,
             "cache_mtime": self.cache_mtime,
             "scan_tip_height": self.scan_tip_height,
+            "export_import": self.export_import,
+            "export_ohne_adresse": self.export_ohne_adresse,
+            "export_verlauf_n": self.export_verlauf_n,
         }
 
 
@@ -96,7 +111,7 @@ def effective_script_type(entry: WalletEntry) -> str:
 
 def wallet_id(xpub: str) -> str:
     """Stabile Kennung für URLs — derselbe Schlüssel wie beim UTXO-Cache."""
-    return main._xpub_cache_key(xpub)
+    return xpub_cache._xpub_cache_key(xpub)
 
 
 def eintrag_id(entry: WalletEntry) -> str:
@@ -110,24 +125,156 @@ def eintrag_id(entry: WalletEntry) -> str:
     return entry.wallet_id()
 
 
+def _adress_basierte_id(schluessel: str, script_type: str | None = None) -> str | None:
+    """
+    Dieselbe ID-Basis wie Deskriptor-``wallet_id``: SHA256 der lexikografisch
+    ersten abgeleiteten Adresse (``derive_addresses`` / max 2).
+
+    Reiner zpub und ``wpkh(…xpub…)`` treffen sich hier — der Cache-Key aus dem
+    zpub-String allein tut das nicht.
+    """
+    import hashlib
+
+    if not schluessel:
+        return None
+    typ = script_type if script_type and script_type != "auto" else None
+    try:
+        addrs = derive_addresses(schluessel, max_addresses=2, script_type=typ)
+    except Exception:
+        return None
+    if not addrs:
+        return None
+    grundlage = sorted(addrs)[0]
+    return hashlib.sha256(grundlage.encode("utf-8")).hexdigest()[:16]
+
+
+def abgleich_ids_fuer_eintrag(entry: WalletEntry) -> set[str]:
+    """
+    Alle IDs, unter denen dieser Eintrag als „schon bekannt“ gelten soll.
+
+    Enthält die normale ``wallet_id`` und die adressbasierte Form — damit
+    zpub in der .env und Specter-/Wasabi-Deskriptor denselben Treffer treffen.
+    """
+    ids = {eintrag_id(entry)}
+    key = (entry.analyse_schluessel or "").strip()
+    if not key:
+        return ids
+    adr = _adress_basierte_id(key, entry.script_type)
+    if adr:
+        ids.add(adr)
+    return ids
+
+
+def singlesig_schluessel_kennungen(entry: WalletEntry) -> set[str]:
+    """
+    Schlüsselmaterial-Kennungen nur für Single-Sig.
+
+    Multisig-Cosigner absichtlich ausgelassen — sonst würde ein gefundenes
+    Einzel-Wallet ausgeblendet, nur weil sein XPUB in einer Multisig steckt
+    (oder umgekehrt eine Multisig, deren Cosigner schon einzeln da sind).
+    """
+    if entry.is_multisig:
+        return set()
+    from core.config import extract_xpubs_from_text, schluessel_kennung
+
+    out: set[str] = set()
+    if entry.xpub:
+        k = schluessel_kennung(entry.xpub)
+        if k:
+            out.add(k)
+    if entry.descriptor:
+        for x in extract_xpubs_from_text(entry.descriptor):
+            k = schluessel_kennung(x)
+            if k:
+                out.add(k)
+    return out
+
+
+def vorhandene_abgleich(
+    entries: list[WalletEntry],
+) -> tuple[set[str], set[str]]:
+    """``(wallet_ids inkl. Adress-Form, singlesig-Schlüsselkennungen)``."""
+    ids: set[str] = set()
+    kennungen: set[str] = set()
+    for entry in entries:
+        ids |= abgleich_ids_fuer_eintrag(entry)
+        kennungen |= singlesig_schluessel_kennungen(entry)
+    return ids, kennungen
+
+
+def finde_gleichwertigen_eintrag(
+    entries: list[WalletEntry],
+    neu: WalletEntry,
+) -> WalletEntry | None:
+    """
+    Vorhandener Eintrag mit demselben Schlüsselmaterial wie *neu*.
+
+    zpub „Cash & Carry“ und Deskriptor „Cash+Carry“ → Treffer.
+    """
+    neu_ids = abgleich_ids_fuer_eintrag(neu)
+    neu_kenn = singlesig_schluessel_kennungen(neu)
+    for entry in entries:
+        if abgleich_ids_fuer_eintrag(entry) & neu_ids:
+            return entry
+        alt_kenn = singlesig_schluessel_kennungen(entry)
+        if neu_kenn and alt_kenn and neu_kenn == alt_kenn:
+            return entry
+    return None
+
+
 def find_entry(entries: list[WalletEntry], kennung: str) -> WalletEntry | None:
     for entry in entries:
         if eintrag_id(entry) == kennung:
             return entry
+    # Deskriptor-ID vs. zpub-ID: Adress-Form mitprüfen.
+    for entry in entries:
+        if kennung in abgleich_ids_fuer_eintrag(entry):
+            return entry
     return None
+
+
+def _export_import_stand(
+    entry: WalletEntry, cache_dir: Path,
+) -> tuple[str | None, int, int]:
+    """
+    Status nach Sparrow/Wasabi-Export-Import.
+
+    Rückgabe ``(status, ohne_adresse, verlauf_n)``:
+    * ``complete`` — importiert, alle Verlaufs-Adressen zugeordnet (grün)
+    * ``partial`` — importiert, einige ohne Adresse (gelb)
+    * ``None`` — kein Wallet-Export-Ursprung
+    """
+    from core.config import WALLET_ORIGIN_WALLET_EXPORT
+    from core import export_adressen as adr_mod
+
+    origin = (getattr(entry, "origin", "") or "").strip()
+    if origin != WALLET_ORIGIN_WALLET_EXPORT:
+        return None, 0, 0
+    verlauf = xpub_cache.load_xpub_verlauf_cache(entry.analyse_schluessel, cache_dir) or []
+    n = len(verlauf)
+    ohne = len(adr_mod.verlauf_ohne_adresse(verlauf))
+    # Nur Deskriptor ohne CSV-Verlauf: Import gilt als vollständig.
+    if n == 0:
+        return "complete", 0, 0
+    if ohne > 0:
+        return "partial", ohne, n
+    return "complete", 0, n
 
 
 def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary]:
     """Baut die Übersicht ausschließlich aus dem lokalen Cache."""
     zusammenfassungen: list[WalletSummary] = []
     for entry in entries:
-        eintrag = main.load_xpub_cache_entry(entry.analyse_schluessel, cache_dir)
+        eintrag = xpub_cache.load_xpub_cache_entry(entry.analyse_schluessel, cache_dir)
         utxos = (eintrag or {}).get("utxos") or []
-        alter = main.xpub_first_seen(entry.analyse_schluessel, cache_dir) or {}
+        verlauf = xpub_cache.load_xpub_verlauf_cache(
+            entry.analyse_schluessel, cache_dir
+        ) or []
+        alter = xpub_cache.xpub_first_seen(entry.analyse_schluessel, cache_dir) or {}
         cache_mtime = None
         scan_tip = None
         if eintrag is not None:
-            pfad = main._xpub_cache_path(entry.analyse_schluessel, cache_dir)
+            pfad = xpub_cache._xpub_cache_path(entry.analyse_schluessel, cache_dir)
             try:
                 cache_mtime = int(pfad.stat().st_mtime)
             except OSError:
@@ -141,10 +288,22 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
                     scan_tip = int(tip_roh)
                 except (TypeError, ValueError):
                     scan_tip = None
+        elif verlauf:
+            # Nur Verlauf (z. B. Wasabi-Store ohne offene UTXOs): mtime der
+            # Verlaufsdatei, damit die Oberfläche „hat Daten“ erkennt.
+            vpfad = xpub_cache._xpub_verlauf_cache_path(
+                entry.analyse_schluessel, cache_dir
+            )
+            try:
+                cache_mtime = int(vpfad.stat().st_mtime)
+            except OSError:
+                cache_mtime = None
+        exp_status, exp_ohne, exp_n = _export_import_stand(entry, cache_dir)
         zusammenfassungen.append(
             WalletSummary(
                 entry=entry,
-                has_cache=eintrag is not None,
+                # UTXO-Datei oder Verlauf zählt als Cache (Import-Pille / Nav).
+                has_cache=eintrag is not None or bool(verlauf),
                 utxo_count=len(utxos),
                 total_sats=sum(int(u.get("value", 0)) for u in utxos),
                 scan_end_index=(eintrag or {}).get("scan_end_index"),
@@ -152,6 +311,9 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
                 first_seen_height=alter.get("height"),
                 cache_mtime=cache_mtime,
                 scan_tip_height=scan_tip,
+                export_import=exp_status,
+                export_ohne_adresse=exp_ohne,
+                export_verlauf_n=exp_n,
             )
         )
     return zusammenfassungen
@@ -190,11 +352,11 @@ def _receive_addresses(xpub: str, script_type: str, count: int) -> list[str]:
     derive_addresses liefert ein ungeordnetes Set über beide Ketten; für den
     Vergleich mit einer Wallet-Software braucht es die Reihenfolge.
     """
-    hd = main._hdkey_for_xpub(xpub)
+    hd = _hdkey_for_xpub(xpub)
     if hd is None:
         return []
 
-    encoder = main._encoders_for_xpub(xpub, script_type)[0]
+    encoder = _encoders_for_xpub(xpub, script_type)[0]
     adressen: list[str] = []
     for index in range(count):
         try:
@@ -221,7 +383,7 @@ def probe_script_types(
     Adressen die Blockchain kennt. Das ist die verlässliche Erkennung, kostet
     aber Abfragen und gibt Adressen an die Datenquelle preis.
     """
-    if main._hdkey_for_xpub(xpub) is None:
+    if _hdkey_for_xpub(xpub) is None:
         raise ValueError("Kein gültiger Extended Public Key.")
 
     ergebnisse: list[ProbeResult] = []

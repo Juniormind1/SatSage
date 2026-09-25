@@ -1,0 +1,71 @@
+name: Regtest-Labor
+
+# Pflicht vor einem Merge nach main. Nicht bei jedem Push auf dev-juniormind:
+# Core und Electrs hochfahren, Lab-Szenarien erzeugen, Klassifikation und
+# Sanktions-Hops prüfen. Der Explorer (mempool) bleibt aus — die Prüfungen
+# sprechen mit Core und Electrs.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  labor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhängigkeiten
+        run: pip install -r requirements.txt
+
+      - name: Core und Electrs starten
+        working-directory: lab/regtest
+        env:
+          SATSAGE_LAB_SKIP_MEMPOOL: "1"
+        run: |
+          chmod +x scripts/start.sh
+          ./scripts/start.sh
+
+      - name: Szenarien erzeugen
+        working-directory: lab/regtest
+        run: |
+          python3 scripts/generate_scenarios.py
+          python3 scripts/generate_sanctions_scenarios.py
+
+      - name: Klassifikation und Sanktions-Hops
+        env:
+          TOR_AUTOSTART: "0"
+          NETWORK: regtest
+          SATSAGE_ANSI_MENU: "0"
+          SATSAGE_TERMINAL_MENU: "0"
+          SATSAGE_SPLASH: "0"
+        run: |
+          set -euo pipefail
+          ok=0
+          for versuch in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            echo "Prüfung, Versuch ${versuch}…"
+            if python3 lab/regtest/scripts/verify_tx_classify.py \
+              && python3 lab/regtest/scripts/verify_sanctions_hops.py; then
+              ok=1
+              break
+            fi
+            echo "Electrs-Index noch nicht soweit."
+            sleep 20
+          done
+          test "$ok" = 1
+
+      - name: Labor stoppen
+        if: always()
+        working-directory: lab/regtest
+        run: docker compose -f docker-compose.yml down -v

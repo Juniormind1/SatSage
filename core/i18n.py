@@ -120,11 +120,14 @@ def t_lang(code: str | None, key: str, **vars: Any) -> str:
     Der Webserver beantwortet Anfragen nebenläufig und in wechselnden
     Sprachen — ``set_lang`` wäre dort ein geteilter Zustand und damit ein
     Wettlauf. Diese Funktion liest nur, ohne die globale Sprache zu ändern.
-    Fehlende Einträge fallen wie gewohnt auf Deutsch zurück.
+    Fehlende Einträge fallen wie gewohnt auf Deutsch zurück. Unbekannte
+    Sprachcodes zählen als Deutsch, damit ein leerer Header denselben
+    Wortlaut liefert wie die bisherigen Konstanten.
     """
     if not key:
         return ""
     ziel = normalize_lang(code)
+    text = ""
     for c in (ziel, "de"):
         if c not in _lang_catalogs:
             _lang_catalogs[c] = _load_json(c)
@@ -139,6 +142,21 @@ def t_lang(code: str | None, key: str, **vars: Any) -> str:
         for name, wert in vars.items():
             text = text.replace("{" + name + "}", str(wert))
     return text
+
+
+def client_lang(roh: str | None) -> str | None:
+    """``de`` oder ``en`` aus ``X-Satsage-Lang``, sonst ``None``.
+
+    Anders als :func:`normalize_lang` wird ein leerer oder unbekannter Wert
+    nicht zu Deutsch. Der Aufrufer fällt dann auf ``UI_LANG`` und
+    ``Accept-Language`` zurück.
+    """
+    w = str(roh or "").strip().lower()
+    if w == "en" or w.startswith("en-"):
+        return "en"
+    if w == "de" or w.startswith("de-"):
+        return "de"
+    return None
 
 
 def ja_nein(wert: bool) -> str:

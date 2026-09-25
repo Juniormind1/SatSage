@@ -355,7 +355,7 @@ def _oeffne_socket(
     tor_proxy: tuple[str, int] | None,
 ) -> socket.socket:
     if tor_proxy and not host_ist_lan(host):
-        from fulcrum import _socks5_connect
+        from core.fulcrum_transport import _socks5_connect
 
         return _socks5_connect(tor_proxy[0], tor_proxy[1], host, port, int(timeout))
     return socket.create_connection((host, port), timeout=timeout)

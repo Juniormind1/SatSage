@@ -231,8 +231,68 @@ button, input, select { font: inherit; color: inherit; }
   font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
   text-transform: lowercase; color: var(--blass);
 }
-.quelle { margin-left: auto; display: flex; align-items: center; gap: 10px;
-          font-family: var(--mono); font-size: 11px; color: var(--gedaempft); }
+.quelle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--gedaempft);
+  min-width: 0;
+}
+/* Abstand Suchfeld ↔ Pillen: funktionale Abgrenzung. */
+.kopf-filter-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-right: 18px;
+  padding-right: 14px;
+  border-right: 1px solid var(--linie);
+}
+.kopf-filter {
+  width: min(11rem, 28vw);
+  max-width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid var(--rahmen);
+  border-radius: 4px;
+  background: var(--flaeche);
+  color: var(--text);
+  outline: none;
+}
+.kopf-filter::placeholder {
+  color: var(--blass);
+  opacity: 0.9;
+}
+.kopf-filter:disabled,
+.kopf-filter[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--blass);
+  background: var(--flaeche-2);
+}
+.quelle-pillen {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .kopf-lang {
   display: flex; align-items: center; gap: 2px; flex-shrink: 0;
   margin-left: 8px;
@@ -321,28 +381,55 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; flex-direction: column; gap: 6px;
 }
 .empfang-qr-wrap {
+  /* Verbleibende Pane-Fläche; QR darin immer 1:1 (auch nach Spalten-Resize). */
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  container-type: size;
+  container-name: empfang-qr;
+}
+.empfang-qr {
+  /* Größtes Quadrat in der Wrap-Box — nicht auf volle Rechteck-Fläche strecken. */
+  --empfang-qr-seite: min(100cqw, 100cqh);
+  grid-area: 1 / 1;
+  width: var(--empfang-qr-seite);
+  height: var(--empfang-qr-seite);
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.empfang-qr {
-  flex: 1 1 auto;
-  min-height: 0;
+.empfang-qr svg,
+.empfang-qr img,
+.empfang-qr .empfang-puls-canvas {
   width: 100%;
   height: 100%;
-  display: flex; align-items: center; justify-content: center;
-}
-.empfang-qr svg {
-  width: 100%; height: 100%;
-  max-width: 100%; max-height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   aspect-ratio: 1 / 1;
+  object-fit: contain;
+  display: block;
 }
 .empfang-qr-maske {
-  position: absolute;
-  inset: 12%;
+  /* Gleiches Quadrat wie der QR (Grid-Stack), Glyph per padding eingerückt. */
+  grid-area: 1 / 1;
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  padding: 12%;
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -534,10 +621,13 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 1.2em;
 }
 .empfang-konfetti {
+  /* Sitzt auf dem QR-Quadrat (Host = #empfang-qr), nicht der Rechteck-Wrap-Box. */
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   pointer-events: none;
   z-index: 20;
 }
@@ -864,9 +954,13 @@ button, input, select { font: inherit; color: inherit; }
 .utxo-aktionen-praefix {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--blass);
+  /* Hell: volle Schriftfarbe. Dunkel: weiß, nicht das graue --blass. */
+  color: var(--text);
   letter-spacing: 0.02em;
   user-select: none;
+}
+html[data-theme="dark"] .utxo-aktionen-praefix {
+  color: #fff;
 }
 .meta { margin: 2px 0 0; color: var(--blass); font-size: 12px; }
 
@@ -942,6 +1036,79 @@ select,
 input[type="date"] { font-family: var(--mono); font-size: 11px; }
 /* In Zeilen: horizontal dehnen. In .feld-Spalte: Input nicht mit flex hochziehen. */
 .feld-breit { flex: 1; min-width: 200px; font-size: 12px; }
+/* Passwort-Karte: linksbündig. */
+.karte-fuss.steuer-einstellungen.app-passwort-fuss {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  align-content: flex-start;
+  justify-content: flex-start;
+}
+.app-passwort-fuss .feld {
+  width: 100%;
+  max-width: 28rem;
+  min-width: 0;
+  align-items: flex-start;
+}
+.app-passwort-fuss .feld-titel {
+  text-align: left;
+  width: 100%;
+}
+.app-passwort-aktuell-reihe,
+.app-passwort-repeat-reihe {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.app-passwort-aktuell-reihe .feld-breit,
+.app-passwort-repeat-reihe .feld-breit {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.app-passwort-match {
+  flex-shrink: 0;
+  width: 1.6rem;
+  text-align: center;
+  font-size: 1.15rem;
+  line-height: 1;
+  user-select: none;
+  font-weight: 700;
+}
+.app-passwort-match.match-ok {
+  color: var(--gut, #1a7f37);
+}
+.app-passwort-match.match-bad {
+  color: var(--krit, #c62828);
+}
+.app-passwort-match.match-leer {
+  color: var(--blass, #999);
+}
+.app-passwort-fuss .knopf-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 28rem;
+}
+.app-passwort-meldung {
+  max-width: 28rem;
+  width: 100%;
+  margin: 0;
+  text-align: left;
+}
+.knopf-icon {
+  flex-shrink: 0;
+  min-width: 2.2rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  line-height: 1.2;
+}
 .feld > input,
 .feld > select,
 .feld input.feld-breit,
@@ -1247,6 +1414,93 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 
 /* ---------- Karten (Einstellungen) ---------- */
 
+/* Sprache, Darstellung, Aktualität, Lernhinweise: eine Reihe, die umbricht. */
+.einstellungen-kurz {
+  container-type: inline-size;
+  container-name: einstellungen-kurz;
+  margin-bottom: 16px;
+}
+.einstellungen-kurzreihe {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@container einstellungen-kurz (min-width: 36rem) {
+  .einstellungen-kurzreihe {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container einstellungen-kurz (min-width: 58rem) {
+  .einstellungen-kurzreihe {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.einstellungen-kurzreihe > .karte {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.einstellungen-kurzreihe > .karte > .karte-fuss {
+  flex: 0 0 auto;
+}
+.einstellungen-kurzreihe > .karte > .steuer-einstellungen-hinweis {
+  flex: 1 1 auto;
+}
+.einstellungen-kurzreihe .steuer-einstellungen .feld {
+  min-width: 0;
+  width: 100%;
+}
+.einstellungen-kurzreihe .check-zeile {
+  min-width: 0;
+  align-items: flex-start;
+}
+.einstellungen-kurzreihe .check-zeile > span {
+  min-width: 0;
+}
+
+/* Assistent und Status-Mails: nebeneinander, bei schmalem Fenster untereinander. */
+.einstellungen-paar {
+  container-type: inline-size;
+  container-name: einstellungen-paar;
+  margin-bottom: 16px;
+}
+.einstellungen-paarreih {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@container einstellungen-paar (min-width: 42rem) {
+  .einstellungen-paarreih {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.einstellungen-paarreih > .karte {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.einstellungen-paarreih > .karte > .karte-fuss {
+  flex: 0 0 auto;
+}
+.einstellungen-paarreih > .karte > .steuer-einstellungen-hinweis {
+  flex: 1 1 auto;
+}
+.einstellungen-paarreih .llm-einstellungen > .feld,
+.einstellungen-paarreih .llm-einstellungen > .feld.feld-breit {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 12rem;
+}
+.einstellungen-paarreih .check-zeile {
+  min-width: 0;
+  align-items: flex-start;
+}
+.einstellungen-paarreih .check-zeile > span {
+  min-width: 0;
+}
+
 .karte {
   border: 1px solid var(--linie); border-radius: 4px;
   background: var(--flaeche); margin-bottom: 16px; overflow: hidden;
@@ -1449,6 +1703,25 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 /* ---------- Herkunftsbaum ---------- */
 
 .suchleiste { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
+.tools-zeile {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 12px 13px;
+}
+.tools-ergebnis {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+  line-height: 1.35;
+}
+.tools-ergebnis-meine { color: var(--gut); font-weight: 650; }
+.tools-ergebnis-fremd { color: var(--text); }
+.tools-ergebnis-hinweis { color: var(--warn); font-size: 0.95rem; font-weight: 500; }
+.tools-schatz-liste {
+  flex: 1 0 100%;
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+}
+.tools-schatz-liste li { margin: 0 0 6px; }
 .trace-fokus-leiste {
   display: flex;
   flex-wrap: wrap;
@@ -2161,6 +2434,20 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 /* Innerhalb Haltefrist + ohne Herkunft: grau statt gelb.
    Außerhalb der Frist bleibt .erfuellt (grün), auch ohne Trace. */
 .achse-punkt.ungeprueft { background: var(--achse-ungeprueft); }
+/* Filter-Nichttreffer: Umriss bleibt in der Haltefrist-Farbe, ohne Füllung. */
+.achse-punkt.filter-daneben,
+.achse-punkt.filter-daneben.erfuellt,
+.achse-punkt.filter-daneben.offen,
+.achse-punkt.filter-daneben.ungeprueft,
+.achse-punkt.filter-daneben.geister {
+  background: transparent;
+  border-style: dotted;
+  border-width: 2px;
+}
+.achse-punkt.filter-daneben.erfuellt,
+.achse-punkt.filter-daneben.geister { border-color: var(--gut); }
+.achse-punkt.filter-daneben.offen { border-color: var(--warn); }
+.achse-punkt.filter-daneben.ungeprueft { border-color: var(--achse-ungeprueft); }
 /* Geister-Saldo: Ring auf der X-Achse (y=0), Größe per Inline-width/height. */
 .achse-punkt.geister {
   background: transparent;
@@ -2313,6 +2600,110 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   cursor: help;
 }
 #deskriptor-import { width: 100%; }
+.sparrow-fuss .feld-titel { grid-column: 1 / -1; }
+.sparrow-fuss .sparrow-anleitung {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.45;
+  max-width: 42rem;
+}
+.sparrow-fuss .export-suche-zeile {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-start;
+}
+.sparrow-fuss .export-fund-zeile {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.sparrow-fuss .export-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--linie);
+  border-radius: var(--r);
+  background: var(--flaeche-2);
+}
+.sparrow-fuss .export-zeile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.sparrow-fuss .export-zeile label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  cursor: pointer;
+}
+.sparrow-fuss .export-zeile.export-gesperrt label,
+.sparrow-fuss .export-zeile.export-blockiert label {
+  cursor: default;
+  opacity: 0.75;
+}
+.sparrow-fuss .export-app {
+  color: var(--blass);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.sparrow-fuss .export-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sparrow-fuss .export-schloss {
+  flex-shrink: 0;
+  color: var(--gedaempft);
+  font-size: 13px;
+  line-height: 1;
+}
+.sparrow-fuss .export-grund {
+  color: var(--blass);
+  font-size: 11px;
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sparrow-fuss .export-herkunft {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--blass);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  text-align: right;
+  white-space: nowrap;
+}
+.sparrow-fuss #wallet-export-import-wahl {
+  align-self: start;
+  min-width: 6.5rem;
+}
+.sparrow-fuss .export-datei-zeile,
+.sparrow-fuss .sparrow-neben {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 18rem;
+}
+.sparrow-fuss #sparrow-import { width: 100%; }
+.sparrow-fuss #sparrow-befund { grid-column: 1 / -1; }
 .feld-voll { width: 100%; }
 #neuer-deskriptor {
   resize: vertical; font-size: 11px; line-height: 1.45;

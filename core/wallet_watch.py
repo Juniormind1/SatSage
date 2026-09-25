@@ -92,11 +92,11 @@ class WalletWatchService:
         Startet Watcher wenn Option an und eigener Electrs erreichbar.
         Rückgabe True wenn Thread läuft (oder schon lief).
         """
-        import main
+        from core.env_wallets import resolve_wallets_beim_start_aktualisieren
 
         self._on_log = on_log
         werte = state.env().values()
-        if not main.resolve_wallets_beim_start_aktualisieren(werte):
+        if not resolve_wallets_beim_start_aktualisieren(werte):
             self.stop()
             return False
 
@@ -164,20 +164,21 @@ class WalletWatchService:
             print(f"  {text}", flush=True)
 
     def _lauf(self) -> None:
-        import main
-        from fulcrum import FulcrumNotifySession, address_to_scripthash
+        import core.chain_sources as chain_sources
+        from core.env_wallets import resolve_wallets_beim_start_aktualisieren
+        from core.fulcrum_client import FulcrumNotifySession, address_to_scripthash
 
         state = self._state
         if state is None:
             return
         while not self._stop.is_set():
             werte = state.env().values()
-            if not main.resolve_wallets_beim_start_aktualisieren(werte):
+            if not resolve_wallets_beim_start_aktualisieren(werte):
                 self._log("Wallet-Watch: aus (Option deaktiviert).")
                 break
             client = None
             try:
-                client = main._try_own_fulcrum_client(
+                client = chain_sources._try_own_fulcrum_client(
                     state.args_namespace(), werte,
                 )
             except Exception as exc:
@@ -257,18 +258,16 @@ class WalletWatchService:
 
     def _adressen_aus_caches(self, state) -> dict[str, set[str]]:
         """address → set(xpub/desc keys)."""
-        import main
-
         mapping: dict[str, set[str]] = {}
         for entry in state.analyse_entries:
             xpub = entry.analyse_schluessel
-            utxos = main.load_xpub_utxo_cache(xpub, state.cache_dir) or []
+            utxos = xpub_cache.load_xpub_utxo_cache(xpub, state.cache_dir) or []
             addrs: list[str] = []
             for u in utxos:
                 a = (u.get("address") or "").strip()
                 if a:
                     addrs.append(a)
-            verlauf = main.load_xpub_verlauf_cache(xpub, state.cache_dir) or []
+            verlauf = xpub_cache.load_xpub_verlauf_cache(xpub, state.cache_dir) or []
             for e in verlauf[-200:]:
                 a = (e.get("address") or "").strip()
                 if a:
@@ -288,7 +287,7 @@ class WalletWatchService:
         return mapping
 
     def _subscribe_alle_adressen(self, session, state) -> int:
-        from fulcrum import address_to_scripthash
+        from core.fulcrum_client import address_to_scripthash
 
         mapping = self._adressen_aus_caches(state)
         with self._lock:
@@ -311,7 +310,7 @@ class WalletWatchService:
 
     def _subscribe_extra(self, addrs: list[str], xpub: str) -> None:
         """Neue Empfangsadressen (z. B. Change aus Mempool-Tx) nachabonnieren."""
-        from fulcrum import address_to_scripthash
+        from core.fulcrum_client import address_to_scripthash
 
         session = self._session
         if session is None or not addrs:
@@ -486,8 +485,7 @@ class WalletWatchService:
         addrs: list[str],
         addr_xpubs: dict[str, set[str]],
     ) -> None:
-        import main
-        from fulcrum import fetch_address_utxos_fulcrum, klassifiziere_utxo_spends
+        from core.fulcrum_wallet import fetch_address_utxos_fulcrum, klassifiziere_utxo_spends
 
         client = _eigener_client_kurz(state)
         if client is None:
@@ -513,7 +511,7 @@ class WalletWatchService:
                     xpubs_done.add(xpub)
 
             for xpub in xpubs_done:
-                cached = main.load_xpub_utxo_cache(xpub, state.cache_dir)
+                cached = xpub_cache.load_xpub_utxo_cache(xpub, state.cache_dir)
                 if cached is None:
                     continue
                 relevant = [
@@ -535,7 +533,7 @@ class WalletWatchService:
                 empfaenge: list[dict] = []
                 if pending:
                     try:
-                        from fulcrum import eigene_mempool_empfaenge
+                        from core.fulcrum_wallet import eigene_mempool_empfaenge
 
                         ctx = getattr(state, "wallet_ctx", None)
                         if ctx is not None:
@@ -599,7 +597,7 @@ class WalletWatchService:
                         neue_addrs.append(a)
 
                 if confirmed or live_merge:
-                    main.settle_gezielte_spends_im_cache(
+                    xpub_cache.settle_gezielte_spends_im_cache(
                         xpub,
                         state.cache_dir,
                         confirmed_spent=confirmed,
@@ -611,7 +609,7 @@ class WalletWatchService:
                     self._subscribe_extra(neue_addrs, xpub)
                 if pending:
                     try:
-                        main.merke_bip158_verlauf(
+                        xpub_cache.merke_bip158_verlauf(
                             xpub,
                             [
                                 {
@@ -639,11 +637,11 @@ class WalletWatchService:
 
 
 def _eigener_client_kurz(state):
-    import main
+    import core.chain_sources as chain_sources
 
     werte = state.env().values()
     try:
-        return main._try_own_fulcrum_client(state.args_namespace(), werte)
+        return chain_sources._try_own_fulcrum_client(state.args_namespace(), werte)
     except Exception:
         return None
 

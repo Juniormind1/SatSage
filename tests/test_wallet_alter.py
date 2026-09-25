@@ -163,7 +163,7 @@ class TestAlsZeitpunkt(unittest.TestCase):
             {A: [{"tx_hash": "aa", "height": hoehe}]},
             zeiten={hoehe: 1_690_000_000},
         )
-        with mock.patch("main.load_cached_block_time", return_value=None):
+        with mock.patch("core.xpub_cache.load_cached_block_time", return_value=None):
             ergebnis = fulcrum.first_seen_fulcrum(client, [A])
         self.assertEqual(ergebnis["height"], hoehe)
         self.assertEqual(ergebnis["time_ts"], 1_690_000_000)

@@ -97,7 +97,7 @@ class TestTurboPasses(unittest.TestCase):
                 bip158_fullscan_ok=True,
             )
             with patch(
-                "bip158_scanner.addresses_to_script_pubkeys",
+                "core.bip158_wallet.addresses_to_script_pubkeys",
                 return_value={b"\x01\x02": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"},
             ):
                 self.assertEqual(_used_scripts_aus_cache(xpub, cache), {b"\x01\x02"})
@@ -250,7 +250,7 @@ class TestFilterParallel(unittest.TestCase):
                 raise AssertionError("async: kein Sync-Fetch im Filter-Worker")
 
         peer = FakePeer()
-        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
             matcher.return_value.match_any.return_value = True
             zeilen = _lade_cfilter_chunk(
                 peer, 850_123, 850_123, b"\x22" * 32,
@@ -283,7 +283,7 @@ class TestFilterParallel(unittest.TestCase):
                 return b"\x00" * 80
 
         peer = FakePeer()
-        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
             matcher.return_value.match_any.return_value = True
             zeilen = _lade_cfilter_chunk(
                 peer, 850_123, 850_123, b"\x22" * 32,
@@ -322,7 +322,7 @@ class TestFilterParallel(unittest.TestCase):
             speichere_cfilter_blob(root, hoehe, bhash, blob)
             peer = FakePeer()
             stats = {"geholt": 0, "gecacht": 0}
-            with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+            with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
                 matcher.return_value.match_any.return_value = False
                 zeilen = _lade_cfilter_chunk(
                     peer, hoehe, hoehe, bhash,
@@ -359,7 +359,7 @@ class TestFilterParallel(unittest.TestCase):
                 return b"\x00" * 80
 
         peer = FakePeer()
-        with patch("bip158_scanner._CoreBasicFilterMatcher") as matcher:
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
             matcher.return_value.match_any.return_value = True
             out = list(verteile_cfilter_chunks(
                 [peer],

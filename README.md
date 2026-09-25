@@ -72,6 +72,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Mitmachen, Tests ohne Node und Pull Requests: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 Kopiere `.env.example` nach `.env` und passe Werte an. Wallets stehen dort als Block je Wallet (`WALLET_0_NAME`, `WALLET_0_XPUB`, …, fortlaufend ab 0) — dann reicht `py server.py` ohne `--xpubs`. Die alte Schreibweise (`XPUBS`, `WALLET_NAMES`) wird weiter gelesen und beim nächsten Speichern aus der Oberfläche umgewandelt. `.env` ist in `.gitignore` — **niemals** RPC-Passwörter, XPUBs oder persönliche Wallet-Namen committen.
 
 ---
@@ -397,6 +399,7 @@ Production-Binaries von Specter laden fremde Extensions **nicht** aus dem CWD; d
 
 - **XPUBs** erlauben das Ableiten aller Wallet-Adressen — behandle sie wie sensible Daten.
 - **Wallet-Namen** in `.env`, `utxo_cache/` und `immutable_cache/` können persönliche Bezeichnungen enthalten — nicht committen oder in Screenshots zeigen.
+- **`.env`-Scramble:** `.env` ist mit Passwort at rest verschlüsselt. Caches und Exporte sind Klartext — wer die mit schützen will, legt das SatSage-Verzeichnis auf eine verschlüsselte Volume (System-FDE und/oder VeraCrypt) und beendet SatSage, bevor die Volume wieder zu geht.
 - Nutze das Tool lokal; teile keine XPUBs in Issues oder Screenshots.
 - **Fulcrum (öffentliche Onions/Clearnet):** Rotation mildert Einzelserver-Risiko — Privatsphäre „mäßig“.
 - **Eigener Node (BIP-158 / eigener Fulcrum):** beste Option — Privatsphäre „hoch“.

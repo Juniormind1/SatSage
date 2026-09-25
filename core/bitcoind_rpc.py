@@ -12,7 +12,7 @@ import ssl
 import struct
 import threading
 import time
-import outbound_policy
+import core.outbound_policy as outbound_policy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -140,7 +140,7 @@ def _config_from_keys(
         use_ssl = port == 443
     proxy = None
     if host_ist_onion(host):
-        from main import _parse_tor_proxy
+        from core.chain_sources import _parse_tor_proxy
 
         proxy = _parse_tor_proxy(env)
     return CoreRpcConfig(
@@ -189,7 +189,7 @@ def _socks5_connect(
     dest_port: int,
     timeout: float,
 ) -> socket.socket:
-    from fulcrum import _socks5_connect as fulcrum_socks
+    from core.fulcrum_transport import _socks5_connect as fulcrum_socks
 
     return fulcrum_socks(proxy_host, proxy_port, dest_host, dest_port, int(timeout))
 
@@ -357,7 +357,7 @@ def _client_aus_config(
 ) -> BitcoinRpcClient | None:
     if host_ist_onion(cfg.host):
         from core.tor import stelle_tor_socks_bereit
-        from main import _parse_tor_proxy
+        from core.chain_sources import _parse_tor_proxy
 
         try:
             proxy = stelle_tor_socks_bereit(
@@ -449,17 +449,22 @@ def descriptors_for_key(
     *,
     max_index: int,
     script_type: str | None = None,
+    range_start: int = 0,
 ) -> list[dict[str, Any]]:
     """
     scantxoutset-Objekte für ein XPUB oder einen Output-Deskriptor.
 
-    Range 0..max_index-1 (Core: end inklusive in manchen Versionen —
-    wir nutzen [0, max_index]).
+    Range ``range_start``..``max_index`` (Core: Ende je nach Version
+    inklusive — wir nutzen ``[start, max_index]``). Start 0 ist der
+    normale Scan. Ein späterer Start sucht nur jenseits des Fensters.
     """
-    from main import ist_deskriptor, normalize_script_type, script_type_for_xpub
+    from core.derivation import ist_deskriptor, normalize_script_type, script_type_for_xpub
 
+    start = max(0, int(range_start))
     ende = max(0, int(max_index))
-    span = [0, ende]
+    if ende < start:
+        return []
+    span = [start, ende]
 
     if ist_deskriptor(schluessel):
         # Mehrpfad ``/<0;1>/*`` für scantxoutset in Empfang/Change zerlegen —
@@ -566,7 +571,7 @@ def _unspent_to_utxo(u: dict) -> dict | None:
     }
     if height > 0:
         try:
-            from main import block_time_for_height
+            from core.xpub_cache import block_time_for_height
 
             ts = block_time_for_height(height)
             if ts:
@@ -664,6 +669,7 @@ def scantxoutset_utxos(
     *,
     max_index_by_key: dict[str, int] | None = None,
     default_max_index: int = 500,
+    range_start_by_key: dict[str, int] | None = None,
     script_type_by_key: dict[str, str] | None = None,
     on_log: LogFn | None = None,
     on_progress: Callable[..., None] | None = None,
@@ -684,11 +690,16 @@ def scantxoutset_utxos(
         mx = default_max_index
         if max_index_by_key and key in max_index_by_key:
             mx = int(max_index_by_key[key])
+        start = 0
+        if range_start_by_key and key in range_start_by_key:
+            start = int(range_start_by_key[key])
         st = None
         if script_type_by_key:
             st = script_type_by_key.get(key)
         objs.extend(
-            descriptors_for_key(key, max_index=mx, script_type=st)
+            descriptors_for_key(
+                key, max_index=mx, script_type=st, range_start=start,
+            )
         )
 
     if not objs:
@@ -846,7 +857,7 @@ def try_scantxoutset_for_xpubs(
     tip = tip_scan if tip_scan is not None else tip_info
 
     # UTXOs den XPUBs zuordnen über Adresse
-    from main import derive_addresses
+    from core.derivation import derive_addresses
 
     by_xpub: dict[str, list[dict]] = {x: [] for x in xpubs}
     addr_to_xpub: dict[str, str] = {}
