@@ -1,7 +1,43 @@
 # Offene Punkte
 
-Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst).
+Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst), sofern keine Priorität genannt ist.
 Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalten).
+
+**Priorität (bis auf Widerruf):** 1. GUI-Start · Sprachstrings. 2. Umfangreiche Wallets · seitenweise.
+
+## GUI-Start · Sprachstrings vor Cache und Verbindungen
+
+**Stand:** 2026-09-26 · **offen** · **Priorität 1**
+
+Aufwand: **gering** — Reihenfolge im Start, kein neues Feature
+
+Beim schnellen Aufbau der Oberfläche stehen noch die technischen Bezeichner (`dock.empfangPuls`, `receive.breath.0`), nicht die übersetzten Sätze. Die Sprachdatei ist zu dem Zeitpunkt noch nicht eingelesen.
+
+**Reihenfolge**
+
+1. Oberfläche aufbauen.
+2. Sprachstrings einbauen.
+3. Erst dann Cache lesen, Verbindungen aufbauen und die Oberfläche vervollständigen (Wallet-Kontext, Empfangsadresse, Quellen).
+
+Solange Schritt 2 nicht fertig ist, keinen lesbaren Text aus den technischen Schlüsseln zeigen.
+
+---
+
+## Umfangreiche Wallets · Bäume seitenweise, nicht alles im Speicher
+
+**Stand:** 2026-09-26 · **offen** · **Priorität 2**
+
+Aufwand: **hoch** — Speicher und Aufbau, nicht nur die Anzeige
+
+Umfangreiche Wallets lähmen SatSage, weil Herkunftsbäume und lange Listen immer komplett im Speicher aufgebaut werden.
+
+Betrifft **Bereits ausgegeben**, **Herkunft** und die entsprechend langen Teile von **Steuerjahr**.
+
+- Lange und tiefe Bäume in **20er-Schritten** aufbauen, davon nur **10** zeigen.
+- Unter der jeweiligen Anzeige die übliche Seitenleiste: `(1–10)` `(11–20)` `(21–30)` … `(höchster−10 – höchster)`, plus Dropdown **10, 20, 50, 100** zur Feinsteuerung.
+- Immer den **nächsten Schritt der gewählten Darstellung** vorladen. Steht `(11–20)`, werden `(21–30)` schon aufgebaut, während `(11–20)` aus dem Speicher gezeichnet werden.
+
+---
 
 ## Firefox · „Token fehlt“ hinter StartOS
 
