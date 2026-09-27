@@ -113,12 +113,36 @@ async function ladeConfig() {
   }
 }
 
+/**
+ * Sprachdatei laden, bevor Cache und Verbindungen angefasst werden.
+ * Die Sprache des Servers kommt aus /api/auth/status (ohne Cache-Zugriff),
+ * nicht erst aus /api/config. Ohne Antwort entscheidet die Browsersprache;
+ * ladeConfig gleicht danach mit config.ui_lang ab.
+ */
+async function ladeSprachstringsVorStart(auth) {
+  if (!window.SatSageI18n) return;
+  let configLang = auth?.ui_lang || null;
+  if (!configLang && !window.SatSageI18n.storedLang()) {
+    try {
+      const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
+      if (antwort.ok) configLang = (await antwort.json())?.ui_lang || null;
+    } catch (_) {
+      configLang = null;
+    }
+  }
+  try {
+    await window.SatSageI18n.initI18n({ configLang });
+  } catch (_) {
+    /* Sprachdatei fehlt — t() bleibt leer statt Roh-Keys; ladeConfig meldet den Fehler */
+  }
+}
+
 async function start() {
   // Konsolen-Token oder Passwort-Sitzung. Hinter StartOS gibt es kein ?t=
   // und kein sessionStorage; die API läuft über den Proxy, nicht über den
   // Token-Header. Ohne Token zuerst den Status fragen, sonst „Token fehlt“.
+  let auth = null;
   if (!Token) {
-    let auth = null;
     try {
       const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
       if (antwort.ok) auth = await antwort.json();
@@ -141,12 +165,10 @@ async function start() {
       return;
     }
   }
+  // Reihenfolge: 1. Oberfläche (Gerüst), 2. Sprachstrings, 3. Cache,
+  // Verbindungen und der Rest (Wallet-Kontext, Empfangsadresse, Quellen).
+  // Bis 2. fertig ist, zeigt nichts einen technischen Schlüssel.
   $("#app").hidden = false;
-  // Vor /api/config: Login kann die GUI öffnen, während Adressen noch
-  // abgeleitet werden. Kein QR, bis der Kontext steht.
-  if (typeof zeichneEmpfangLeer === "function") {
-    zeichneEmpfangLeer(t("dock.empfangPuls"), { puls: true });
-  }
   // DE/EN sofort klickbar — nicht erst nach Jobs/Header-Sync am Ende von start().
   bindeSprachUmschalter();
   const logKnopf = $("#log-anzeige");
@@ -161,10 +183,20 @@ async function start() {
   macheLogZiehbar();
   macheDockSpalter();
   macheEmpfangSpalter();
-  setzeEmpfangPoll();
   setzeLernhinweiseDelegates();
   setzeEmpfangAnimDebug();
   setzeEmpfangLabSenden();
+
+  await ladeSprachstringsVorStart(auth);
+
+  // Vor /api/config: Login kann die GUI öffnen, während Adressen noch
+  // abgeleitet werden. Kein QR, bis der Kontext steht. Atem und Titel erst
+  // jetzt — vorher stünden „receive.breath.0“ / „dock.empfangPuls“ da.
+  if (typeof zeichneEmpfangLeer === "function") {
+    zeichneEmpfangLeer(t("dock.empfangPuls"), { puls: true });
+  }
+  setzeEmpfangPoll();
+  if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
 
   try {
     await ladeConfig();
@@ -173,13 +205,13 @@ async function start() {
       EmpfangPuls.stop();
     }
     if (window.SatSageI18n) {
+      // Catalog steht schon (ladeSprachstringsVorStart) — lädt nicht neu,
+      // setzt nur data-i18n über das, was ladeConfig gezeichnet hat.
       await window.SatSageI18n.initI18n({
         configLang: Zustand.config?.ui_lang,
       });
       zeichneUiLang();
-      // Haltefrist-Optionen wurden in ladeConfig vor dem Catalog befüllt (Roh-Keys).
       zeichneSteuerEinstellungen();
-      // Kopf nach Catalog nochmal — ladeConfig kann vor initI18n gelaufen sein.
       zeichneKopfStatus(Zustand.config?.sources || []);
     }
     // Select-Listener falls #ui-lang erst jetzt im DOM wäre (idempotent).

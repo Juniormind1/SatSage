@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Start der Oberfläche:** Beim Hochfahren stehen keine technischen Bezeichner mehr im Empfangsfeld, im Kopf oder in Tooltips (`dock.empfangPuls`, `receive.breath.0`, `nav.jobsTitle` …). Die Oberfläche lädt zuerst ihre Sprachdatei und liest erst danach Cache und Verbindungen (Wallet-Kontext, Empfangsadresse, Quellen). Bis dahin bleibt der Text leer bzw. der Vorgabetext der Seite stehen. Die Sprache des Servers kommt dafür schon aus `/api/auth/status`.
 - **Regtest-Labor · macOS:** Der Präsentationsstart bricht nicht mehr ab, wenn die Benutzergruppe GID 20 hat. Im Bitcoin-Image gehört diese Nummer schon `dialout`; der Container startet `bitcoind` jetzt trotzdem unter der Host-Kennung.
 - **Anmeldung:** Nach „Passwort korrekt“ öffnet sich die Oberfläche, sobald die Konfiguration entschlüsselt ist. Adressen und Cache werden danach gelesen. Solange atmet der Empfangs-QR, und es erscheint keine Empfangsadresse. „Ist die meine?“ wartet denselben Moment.
 - **Bericht Sat-Geschichte:** Die Datei heißt `satsage-trace-<Jahr>.html` bzw. `.csv`.

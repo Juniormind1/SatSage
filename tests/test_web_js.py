@@ -292,6 +292,99 @@ class TestAppJs(unittest.TestCase):
         self.assertLess(pos_chrome, pos_boot)
 
 
+
+def _funktionsrumpf(quelle: str, kopf: str, roh: bool = False) -> str:
+    """
+    Rumpf einer Top-Level-Funktion (ab ``kopf`` bis zur schließenden Klammer).
+
+    Standard ohne Texte und Kommentare; ``roh=True`` liefert denselben
+    Ausschnitt aus der Originalquelle (die Bereinigung erhält die Länge).
+    """
+    sauber = ohne_texte_und_kommentare(quelle)
+    start = sauber.index(kopf)
+    auf = sauber.index("{", start)
+    tiefe = 0
+    for i in range(auf, len(sauber)):
+        if sauber[i] == "{":
+            tiefe += 1
+        elif sauber[i] == "}":
+            tiefe -= 1
+            if tiefe == 0:
+                return (quelle if roh else sauber)[auf:i + 1]
+    raise AssertionError(f"{kopf}: Rumpf nicht geschlossen")
+
+
+class TestSprachstringsVorStart(unittest.TestCase):
+    """
+    GUI-Start: 1. Oberfläche, 2. Sprachstrings, 3. Cache und Verbindungen.
+
+    Anlass: Beim schnellen Aufbau standen ``dock.empfangPuls`` und
+    ``receive.breath.0`` im Empfangsfeld, weil ``start()`` den Atem vor dem
+    Catalog zeichnete und ``/api/config`` vor ``initI18n`` lief.
+    """
+
+    def setUp(self):
+        self.i18n = (WEB / "i18n.js").read_text(encoding="utf-8")
+        self.chrome = (WEB / "chrome.js").read_text(encoding="utf-8")
+
+    def test_i18n_js_ist_parsebar(self):
+        self.assertEqual(doppelte_deklarationen(self.i18n), [])
+        sauber = ohne_texte_und_kommentare(self.i18n)
+        for auf, zu in (("{", "}"), ("(", ")"), ("[", "]")):
+            self.assertEqual(sauber.count(auf), sauber.count(zu))
+
+    def test_ohne_catalog_kein_roh_key(self):
+        """lookup() liefert vor dem ersten Catalog "" statt des Schlüssels."""
+        treffer = re.search(
+            r"function lookup\(key\) \{(.*?)\n  \}", self.i18n, re.S,
+        )
+        self.assertIsNotNone(treffer, "lookup() fehlt in i18n.js")
+        rumpf = treffer.group(1)
+        self.assertIn('if (!bereit) return "";', rumpf)
+        self.assertLess(
+            rumpf.index("if (!bereit)"), rumpf.index("return key;"),
+            "Bereit-Prüfung muss vor dem Schlüssel-Fallback stehen",
+        )
+
+    def test_apply_dom_wartet_auf_catalog(self):
+        treffer = re.search(
+            r"function applyDom\(root\) \{(.*?)\n  \}", self.i18n, re.S,
+        )
+        self.assertIsNotNone(treffer, "applyDom() fehlt in i18n.js")
+        self.assertIn("if (!bereit) return;", treffer.group(1))
+        self.assertIn("bereit = true;", self.i18n)
+
+    def test_start_laedt_sprache_vor_cache_und_verbindungen(self):
+        rumpf = _funktionsrumpf(self.chrome, "async function start()")
+        sprache = rumpf.index("await ladeSprachstringsVorStart(")
+        for spaeter in (
+            "await ladeConfig()",
+            "zeichneEmpfangLeer(",
+            "setzeEmpfangPoll()",
+            "ladeJobsNav(",
+            "ladeSpotkurs(",
+        ):
+            self.assertIn(spaeter, rumpf, spaeter)
+            self.assertLess(
+                sprache, rumpf.index(spaeter),
+                f"{spaeter} läuft vor den Sprachstrings",
+            )
+        roh = _funktionsrumpf(self.chrome, "async function start()", roh=True)
+        self.assertLess(
+            roh.index('$("#app").hidden = false'),
+            roh.index("await ladeSprachstringsVorStart("),
+            "Gerüst zuerst, dann Sprachstrings",
+        )
+
+    def test_sprachwahl_ohne_config(self):
+        """Die Sprache kommt aus /api/auth/status, nicht aus /api/config."""
+        rumpf = _funktionsrumpf(self.chrome, "async function ladeSprachstringsVorStart(")
+        self.assertNotIn("ladeConfig", rumpf)
+        self.assertNotIn("api(", rumpf)
+        self.assertIn("initI18n", rumpf)
+        self.assertIn("/api/auth/status", self.chrome)
+
+
 class TestPrueferSelbst(unittest.TestCase):
     """Der Prüfer muss den Fehler finden — und darf nicht überall Alarm schlagen."""
 

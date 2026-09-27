@@ -792,14 +792,16 @@ const T_FALLBACK = {
   "privacy.pillMedium": "Privatsphäre mittel",
   "privacy.pillNone": "keine Privatsphäre",
   "privacy.pillUnclear": "Privatsphäre unklar",
+  // Start scheitert, bevor die Sprachdatei da ist — sonst leere Überschrift.
+  "common.noConnection": "Keine Verbindung",
 };
 
 function t(key, vars) {
   let text;
   if (window.SatSageI18n && typeof window.SatSageI18n.t === "function") {
     text = window.SatSageI18n.t(key, vars);
-    // Catalog noch leer / Key fehlt → Roh-Key vermeiden.
-    if (text === key && T_FALLBACK[key]) text = T_FALLBACK[key];
+    // Catalog noch leer ("") / Key fehlt → Roh-Key vermeiden.
+    if ((text === key || text === "") && T_FALLBACK[key]) text = T_FALLBACK[key];
   } else {
     text = T_FALLBACK[key] || key;
   }

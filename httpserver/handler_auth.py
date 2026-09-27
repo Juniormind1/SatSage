@@ -353,11 +353,22 @@ class HandlerAuthMixin:
         _ensure_server_names()
         # The status endpoint must establish the same session as initial HTML.
         authenticated = self._auth_ok({})
+        # Sprache vor /api/config: die Oberfläche lädt ihre Sprachdatei, bevor
+        # sie Cache und Verbindungen anfasst (sonst Roh-Keys beim Start).
+        try:
+            ui_lang = _ui_lang_fuer_web(
+                self.state.env().values(),
+                self.headers.get("Accept-Language"),
+                self.headers.get("X-Satsage-Lang"),
+            )
+        except Exception:
+            ui_lang = None
         return {
             "password_set": _password_is_set(self.state),
             "authenticated": authenticated,
             "setup_required": not _password_is_set(self.state),
             "managed_by": self.state.managed_by,
+            "ui_lang": ui_lang,
         }
 
     def _auth_api(self, methode: str, pfad: str) -> bool:

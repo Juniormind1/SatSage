@@ -3,25 +3,7 @@
 Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst), sofern keine Priorität genannt ist.
 Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalten).
 
-**Priorität (bis auf Widerruf):** 1. GUI-Start · Sprachstrings. 2. Umfangreiche Wallets · seitenweise.
-
-## GUI-Start · Sprachstrings vor Cache und Verbindungen
-
-**Stand:** 2026-09-26 · **offen** · **Priorität 1**
-
-Aufwand: **gering** — Reihenfolge im Start, kein neues Feature
-
-Beim schnellen Aufbau der Oberfläche stehen noch die technischen Bezeichner (`dock.empfangPuls`, `receive.breath.0`), nicht die übersetzten Sätze. Die Sprachdatei ist zu dem Zeitpunkt noch nicht eingelesen.
-
-**Reihenfolge**
-
-1. Oberfläche aufbauen.
-2. Sprachstrings einbauen.
-3. Erst dann Cache lesen, Verbindungen aufbauen und die Oberfläche vervollständigen (Wallet-Kontext, Empfangsadresse, Quellen).
-
-Solange Schritt 2 nicht fertig ist, keinen lesbaren Text aus den technischen Schlüsseln zeigen.
-
----
+**Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. Umfangreiche Wallets · seitenweise.
 
 ## Umfangreiche Wallets · Bäume seitenweise, nicht alles im Speicher
 
@@ -414,6 +396,31 @@ Aufwand: **unbekannt/hoch** · hängt an libbitcoin
 ---
 
 # Historie / Langtexte
+
+## Erledigt: GUI-Start · Sprachstrings vor Cache und Verbindungen
+
+**Stand:** 2026-09-27 · **erledigt** · Maintainer-Abnahme offen
+
+**Ursache:** `start()` in `web/chrome.js` zeichnete den Empfangs-Atem (`t("dock.empfangPuls")`, `receive.breath.*`) vor dem Catalog und lief `ladeConfig()` (`/api/config`, Wallet-Cache) vor `initI18n`. `i18n.js` gab ohne Catalog den Schlüssel zurück, `applyDom()` überschrieb die HTML-Vorgabetexte mit Schlüsseln.
+
+**Jetzt:** 1. Gerüst sichtbar, 2. `ladeSprachstringsVorStart()` (Sprache aus `/api/auth/status` → `ui_lang`, Catalog laden), 3. Atem, Empfangs-Poll, `ladeConfig()`, Jobs, Kurs. Vor dem ersten Catalog liefert `t()` einen Leerstring und `applyDom()` lässt das HTML stehen. Test: `tests/test_web_js.py` (`TestSprachstringsVorStart`), `tests/test_web_sprache.py` (`TestSpracheImAuthStatus`).
+
+
+**Stand:** 2026-09-26 · **offen** · **Priorität 1**
+
+Aufwand: **gering** — Reihenfolge im Start, kein neues Feature
+
+Beim schnellen Aufbau der Oberfläche stehen noch die technischen Bezeichner (`dock.empfangPuls`, `receive.breath.0`), nicht die übersetzten Sätze. Die Sprachdatei ist zu dem Zeitpunkt noch nicht eingelesen.
+
+**Reihenfolge**
+
+1. Oberfläche aufbauen.
+2. Sprachstrings einbauen.
+3. Erst dann Cache lesen, Verbindungen aufbauen und die Oberfläche vervollständigen (Wallet-Kontext, Empfangsadresse, Quellen).
+
+Solange Schritt 2 nicht fertig ist, keinen lesbaren Text aus den technischen Schlüsseln zeigen.
+
+---
 
 ## Erledigt: Empfang · Ka-Ching mit libbitcoin
 

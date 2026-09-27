@@ -1,9 +1,13 @@
 /**
  * SatSage UI-Sprache: Catalogs unter /locales/{lang}.json.
  *
- * Laden: localStorage["satsage-ui-lang"] → config.ui_lang (Server: UI_LANG,
+ * Laden: localStorage["satsage-ui-lang"] → ui_lang aus /api/auth/status bzw.
+ * /api/config (Server: UI_LANG,
  * sonst Accept-Language, sonst Englisch) → Browsersprache.
  * Fehlende EN-Keys fallen auf DE zurück. Kein Build-Schritt.
+ *
+ * Bis der erste Catalog geladen ist, liefert t() einen Leerstring und
+ * applyDom() lässt den Text im HTML stehen — nie den technischen Schlüssel.
  */
 (() => {
   const STORAGE_KEY = "satsage-ui-lang";
@@ -12,6 +16,8 @@
   let lang = "de";
   let catalog = {};
   let fallbackCatalog = {};
+  /** Erst true, wenn ein Catalog eingelesen ist — vorher keine Roh-Keys. */
+  let bereit = false;
   /** Steigt bei jedem setLang — ältere parallele Läufe verwerfen ihr Ergebnis. */
   let langEpoch = 0;
 
@@ -54,6 +60,8 @@
 
   function lookup(key) {
     if (!key) return "";
+    // Sprachdatei noch nicht da: leer statt „dock.empfangPuls“.
+    if (!bereit) return "";
     if (Object.prototype.hasOwnProperty.call(catalog, key) && catalog[key] !== "") {
       return catalog[key];
     }
@@ -89,6 +97,8 @@
   }
 
   function applyDom(root) {
+    // Ohne Catalog würde jeder data-i18n-Text zum Schlüssel — HTML-Text behalten.
+    if (!bereit) return;
     const basis = root || document;
     basis.querySelectorAll("[data-i18n]").forEach((el) => {
       applyAttr(el, "text", el.getAttribute("data-i18n"));
@@ -130,6 +140,7 @@
       }
     }
     lang = code;
+    bereit = true;
     return code;
   }
 

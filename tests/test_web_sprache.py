@@ -242,3 +242,47 @@ class TestClientSpracheInDerAntwort(unittest.TestCase):
             cfg = server.api_config(self._state(tmp), {}, None, None)
             self.assertEqual(cfg["ui_lang"], "en")
             self.assertEqual(cfg["hinweis_onchain"], tax.HINWEIS_ONCHAIN)
+
+
+class TestSpracheImAuthStatus(unittest.TestCase):
+    """Die Oberfläche lädt ihre Sprachdatei vor /api/config.
+
+    /api/config liest den Wallet-Cache. Damit beim Start keine Roh-Keys
+    (``dock.empfangPuls``) stehen, holt der Client die Serversprache aus
+    /api/auth/status — dieselbe Auflösung wie ``api_config``.
+    """
+
+    def _status(self, env_text, headers):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(env_text, encoding="utf-8")
+            state = server.AppState(
+                env_path=env_path,
+                cache_dir=Path(tmp) / "cache",
+                immutable_cache_dir=Path(tmp) / "imm",
+            )
+            handler = server.Handler.__new__(server.Handler)
+            handler.state = state
+            handler.headers = headers
+            handler._auth_ok = lambda query: False
+            return handler._auth_status()
+
+    def test_ui_lang_aus_der_env(self):
+        status = self._status("UI_LANG=de\n", {"Accept-Language": "en-US"})
+        self.assertEqual(status["ui_lang"], "de")
+
+    def test_ohne_ui_lang_entscheidet_der_browser(self):
+        status = self._status("", {"Accept-Language": "de-DE,de;q=0.9"})
+        self.assertEqual(status["ui_lang"], "de")
+
+    def test_client_sprache_schlaegt_alles(self):
+        status = self._status(
+            "UI_LANG=de\n",
+            {"Accept-Language": "de-DE", "X-Satsage-Lang": "en"},
+        )
+        self.assertEqual(status["ui_lang"], "en")
+
+    def test_bisherige_felder_bleiben(self):
+        status = self._status("", {})
+        for feld in ("password_set", "authenticated", "setup_required", "managed_by"):
+            self.assertIn(feld, status)
