@@ -92,6 +92,8 @@ def utxo_as_dict(
         "verfolgt_ts": None,
         "verfolgt_veraltet": False,
         "verfolgt_vollstaendig": False,
+        # Steuerjahr reicht auch ein Baum bis zum Horizont (Stichtag/Frist).
+        "steuer_ausreichend": False,
         "unvollstaendig": False,
         "juengste_sats_ts": None,
         # Mix-Formen / Börsen aus gespeichertem Herkunftsbaum (Gruppen-Kopf).
@@ -142,6 +144,9 @@ def utxo_as_dict(
             if ingress and ingress.get("external_untergrenze"):
                 voll = False
             eintrag["verfolgt_vollstaendig"] = voll
+            eintrag["steuer_ausreichend"] = bool(
+                gespeichert.get("steuer_ausreichend")
+            )
             # Abbruch / Lücken / fehlende Prevouts — Liste zeigt rot „unvollständig“.
             eintrag["unvollstaendig"] = bool(eintrag["verfolgt"]) and not voll
             if voll and ingress:

@@ -43,10 +43,16 @@ def api_jobs(state: Any, query: dict) -> dict:
             meta["wallet_name"] = name
             eintrag["meta"] = meta
     # Teil-Ergebnis an hanging result für rescan
+    from httpserver.api.trace import trace_meta
+
     for daten in jobs:
         job = state.jobs.get(daten["id"])
         if job is not None and job.result is not None:
-            daten["result"] = job.result
+            # Die Nav-Liste braucht keinen Herkunftsbaum; den holt die
+            # Herkunftsansicht beim Aufklappen einzeln (/api/jobs/<id>, /api/trace).
+            daten["result"] = (
+                trace_meta(job.result) if job.kind == "trace" else job.result
+            )
     watch = _wallet_watch_status()
     block_event = None
     try:

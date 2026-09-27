@@ -19,6 +19,31 @@ Betrifft **Bereits ausgegeben**, **Herkunft** und die entsprechend langen Teile 
 - Unter der jeweiligen Anzeige die übliche Seitenleiste: `(1–10)` `(11–20)` `(21–30)` … `(höchster−10 – höchster)`, plus Dropdown **10, 20, 50, 100** zur Feinsteuerung.
 - Immer den **nächsten Schritt der gewählten Darstellung** vorladen. Steht `(11–20)`, werden `(21–30)` schon aufgebaut, während `(11–20)` aus dem Speicher gezeichnet werden.
 
+**Fortschritt (2026-09-27):** Schritt 1 (`origin_tree` nicht mehr ausgeliefert) umgesetzt, Rest offen. Trace-Antworten an die Oberfläche (`GET /api/trace?target=…`, Cache-Treffer von `POST /api/trace`, Job-Ergebnis) enthalten den Rohbaum nicht mehr; im Herkunfts-Cache bleibt er für das Fortsetzen. Offen: Blättern in der Oberfläche, `offset`/`limit` auf dem Server, Kinder eines Knotens seitenweise nachladen, schrittweiser Aufbau, Filter auf dem Server. Gemessen an Test-Bäumen (JSON der Antwort): einfache Kette 1 859 → 1 344 B (−28 %), 15 Eingänge × 3 Hops 52 376 → 27 750 B (−47 %), 19 × 6 Hops 117 205 → 60 245 B (−49 %).
+
+### Unterpunkt: Herkunftsbäume lazy laden (vereinbarte Spezifikation, 2026-09-27)
+
+**Invariante:** Client und Server halten höchstens **einen** vollen Herkunftsbaum im Speicher — den gerade aufgeklappten. Listen (Herkunft, Bereits ausgegeben, Steuerjahr) liefern nur Meta (`txid:vout`, Betrag, Datum, Labels, Cache-Flag), nie den Baum.
+
+- `GET /api/trace` und alle Listen-APIs lassen `origin_tree`/Baum standardmäßig weg. Der Baum wird nur beim ausdrücklichen Aufklappen eines UTXO geladen; der vorherige wird verworfen (Client: Referenzen und DOM freigeben; Server: nicht im Speicher halten, keine Zwischenspeicher voller Bäume). Ein gespeicherter Baum klappt nicht mehr automatisch voll auf.
+- **(a)** Beim Aufklappen nur die erste Ebene sofort zeichnen; tiefere Ebenen beim Weiterklappen aus dem schon geladenen Baum nachzeichnen (keine neue Anfrage).
+- **(b)** Das Cache-Flag in Listen trägt auch Vollständigkeit und Steuer-Status (`verfolgt_vollstaendig`, `steuer_ausreichend` bzw. was die Oberfläche heute für Marken und Hinweise braucht), damit die bestehenden Hinweise ohne Baum weiter funktionieren.
+- **(c)** Suche/Filter: prüfen, ob der globale Stichwortfilter heute in Baumknoten sucht, und das Verhalten 1:1 erhalten (Meta-Felder oder serverseitig aus dem Cache je Treffer). Geht 1:1 nicht ohne großen Umbau: nicht ändern, sondern dokumentieren.
+- **(d)** Berichte/Exporte (HTML/CSV) laden Bäume serverseitig nacheinander einzeln, nicht alle gleichzeitig.
+- **(e)** Zwischenspeicher: bewusst **keiner** — höchstens ein Baum.
+- **Grenzen:** keine zweite Chain, kein SQLite, Trace-Semantik unverändert, Oberfläche sonst 1:1.
+
+**Fortschritt (2026-09-27):** umgesetzt, noch nicht als erledigt markiert (Abnahme offen).
+
+- Bestandsaufnahme: Die Listen (`/api/utxos`, `/api/wallets/<id>/utxos`, Bereits ausgegeben, Steuerjahr) lasen schon nur die kleine `.meta.json` (`trace_cache.kopf`), nie den Baum. Volle Bäume hielten nur die fertigen Einzel-Trace-Jobs im Job-Speicher (bis zu 20) und die Nav-Abfrage `/api/jobs` schickte sie bei jedem Poll mit; im Browser blieb jeder einmal aufgeklappte Baum im DOM, bis die Liste neu gezeichnet wurde.
+- Server: Fertige Einzel-Trace-Jobs behalten nur Meta (`baum_im_cache`), wenn der Baum in diesem Lauf im Herkunfts-Cache gelandet ist; ohne Cache-Datei bleibt der Baum (ohne Rohbaum) im Ergebnis, sonst gäbe es nichts zu zeigen. `/api/jobs` schickt für Trace-Jobs nur Meta.
+- **(a)** war schon so: erste Ebene sofort, tiefere Ebenen aus den geladenen Knotendaten (`WeakMap`) beim Weiterklappen; „Alles aufklappen“ nur per Knopf. Der ungenutzte Auto-Aufklapp-Code für gespeicherte Bäume (`oeffneAusCache`) ist entfernt.
+- Client: Beim Zeichnen eines Baums wird der zuvor offene verworfen (DOM leeren, UTXO zuklappen). Läuft dort gerade eine Analyse, bleibt sie stehen; wird sie fertig, gewinnt der zuletzt gezeichnete Baum.
+- **(b)** Listen-Einträge tragen zusätzlich `steuer_ausreichend` (neben `verfolgt`, `verfolgt_vollstaendig`, `unvollstaendig`, `juengste_sats_ts`, `mix_arten`, `boerse_namen`, `tx_class`). Die Oberfläche nutzt das neue Feld noch nicht; ihre Marken kamen schon aus der Meta.
+- **(c)** Der Stichwortfilter sucht nicht in Baumknoten, nur in Gruppen-/UTXO-Zeilen (Schlüssel, Adresse, Zeit, Labels aus `mix_arten`/`boerse_namen`/`tx_class`). Die Labels kommen aus der Meta bzw. bleiben am UTXO-Objekt, auch wenn der Baum verworfen wird — Verhalten unverändert, kein Umbau nötig.
+- **(d)** Steuer- und Selbstanzeige-Bericht laden die Hop-Ketten schon einzeln nacheinander und behalten nur das HTML; CSV-Exporte brauchen keine Bäume. Jetzt per Test abgesichert.
+- Nicht geändert (außerhalb des Rahmens): Die Sanktionsprüfung lädt `origin_tree` je UTXO parallel in einem Thread-Pool, also kurzzeitig mehrere Bäume. `_wallet_name_fuer_utxo` lädt für den Wallet-Namen laufender Trace-Jobs einmal den vollen Baum und verwirft ihn sofort.
+
 ---
 
 ## Firefox · „Token fehlt“ hinter StartOS

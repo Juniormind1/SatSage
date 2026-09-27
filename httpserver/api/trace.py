@@ -7,6 +7,72 @@ import core.wallet_sync_engine as wallet_sync_engine
 from typing import Any
 
 
+def _fuer_oberflaeche(baum: dict) -> dict:
+    """
+    Baum ohne ``origin_tree`` — der Rohbaum bleibt im Herkunfts-Cache.
+
+    Die Oberfläche liest ihn nie; er dient nur dem Fortsetzen (Resume,
+    Steuer-Horizont) auf dem Server und verdoppelt sonst die Antwort.
+    """
+    if not isinstance(baum, dict) or "origin_tree" not in baum:
+        return baum
+    return {k: v for k, v in baum.items() if k != "origin_tree"}
+
+
+#: Meta eines fertigen Trace-Ergebnisses — genug für Marken und Hinweise.
+_TRACE_META_FELDER = (
+    "found",
+    "error",
+    "source",
+    "followup",
+    "verfolgt_vollstaendig",
+    "steuer_ausreichend",
+    "juengste_sats_ts",
+    "baum_im_cache",
+    "target",
+)
+
+
+def trace_meta(ergebnis: dict) -> dict:
+    """Trace-Ergebnis ohne Baum (``root``/``children``/``origin_tree``)."""
+    if not isinstance(ergebnis, dict):
+        return ergebnis
+    return {k: ergebnis[k] for k in _TRACE_META_FELDER if k in ergebnis}
+
+
+def _job_ergebnis(
+    ergebnis: dict,
+    txid: str,
+    vout: int,
+    immutable_cache_dir,
+    seit_ts: float = 0,
+) -> dict:
+    """
+    Fertiger Einzel-Trace für ``job.result``.
+
+    Der Job-Speicher behält die letzten Vorgänge — mit Baum wären das bis zu
+    zwanzig volle Bäume im RAM. Liegt der Baum (seit *seit_ts*) im
+    Herkunfts-Cache, bleibt im Job nur Meta; die Oberfläche lädt ihn beim
+    Aufklappen über ``GET /api/trace``. Ohne Cache-Datei (kein Ordner,
+    Schreiben gesperrt, nichts gefunden) bleibt der Baum ohne Rohbaum drin —
+    sonst gäbe es nichts zu zeigen.
+    """
+    from server import trace_cache
+
+    if not isinstance(ergebnis, dict) or not ergebnis.get("found"):
+        return _fuer_oberflaeche(ergebnis)
+    try:
+        kopf = trace_cache.kopf(txid, vout, immutable_cache_dir)
+    except Exception:
+        kopf = None
+    if not kopf or int(kopf.get("erstellt_ts") or 0) < int(seit_ts or 0):
+        return _fuer_oberflaeche(ergebnis)
+    meta = trace_meta(ergebnis)
+    meta["baum_im_cache"] = True
+    meta["target"] = f"{txid}:{int(vout)}"
+    return meta
+
+
 def api_trace_alle(state: AppState, payload: dict) -> dict:
     """
     Verfolgt die Herkunft von UTXOs.
@@ -608,7 +674,7 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
         "erstellt_ts": gespeichert["erstellt_ts"],
         "veraltet": gespeichert["veraltet"],
         "adressen_seither": gespeichert["adressen_seither"],
-        "ergebnis": baum,
+        "ergebnis": _fuer_oberflaeche(baum),
     }
 
 
@@ -729,7 +795,9 @@ def api_trace(state: AppState, payload: dict) -> dict:
                         pass
                     baum["source"] = "cache"
                     job.message = "Aus Herkunfts-Cache."
-                    return baum
+                    return _job_ergebnis(
+                        baum, txid, vout, state.immutable_cache_dir,
+                    )
 
         stand = Fortschritt(job)
         halt = threading.Event()
@@ -824,7 +892,12 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 f"{ergebnis['summary'].get('node_count', 0)} Zuflüsse ermittelt."
                 if ergebnis.get("found") else "Keine Herkunft ermittelbar."
             )
-            return ergebnis
+            # Gespeichert ist schon (trace_utxo, samt Rohbaum) — im Job
+            # bleibt dann nur Meta, den Baum lädt die Oberfläche beim Aufklappen.
+            return _job_ergebnis(
+                ergebnis, txid, vout, state.immutable_cache_dir,
+                seit_ts=job.started_at or 0,
+            )
         finally:
             halt.set()
             stand.close()
@@ -886,7 +959,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     },
                     "started_at": treffer.get("erstellt_ts") or 0,
                     "finished_at": treffer.get("erstellt_ts") or 0,
-                    "result": baum,
+                    "result": _fuer_oberflaeche(baum),
                     "from_cache": True,
                     "erstellt_ts": treffer.get("erstellt_ts"),
                     "veraltet": treffer.get("veraltet"),

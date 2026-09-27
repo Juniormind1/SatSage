@@ -177,5 +177,41 @@ class TestHopKetteHtml(unittest.TestCase):
         self.assertIn(t, html)
 
 
+    def test_abschnitt_laedt_baeume_nacheinander(self):
+        """
+        Lazy (ISSUES P2): Der Bericht hält höchstens einen vollen Baum —
+        der vorige ist freigegeben, bevor der nächste geladen wird.
+        """
+        import gc
+        import weakref
+        from unittest import mock
+
+        class _Baum(dict):
+            pass
+
+        marker = ("a1", "c3", "d4")
+        for m in marker:
+            self._speichere_mini_baum(m)
+        echt = trace_cache.laden
+        lebend: list = []
+
+        def laden_spion(*args, **kwargs):
+            gc.collect()
+            self.assertEqual([r for r in lebend if r() is not None], [])
+            geladen = echt(*args, **kwargs)
+            geladen["baum"] = _Baum(geladen["baum"])
+            lebend.append(weakref.ref(geladen["baum"]))
+            return geladen
+
+        with mock.patch.object(trace_cache, "laden", side_effect=laden_spion):
+            html = hb.abschnitt_hop_ketten(
+                [{"txid": txid(m), "vout": 0} for m in marker],
+                immutable_cache_dir=self.cache,
+            )
+        self.assertEqual(len(lebend), 3)
+        for m in marker:
+            self.assertIn(txid(m), html)
+
+
 if __name__ == "__main__":
     unittest.main()

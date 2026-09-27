@@ -2325,6 +2325,196 @@ class TestGespeicherterBaum(ApiTestBasis):
         self.assertEqual(körper["result"]["root"]["txid"], self.ZIEL)
 
 
+class TestBaumOhneRohbaum(TestGespeicherterBaum):
+    """
+    ``origin_tree`` bleibt im Herkunfts-Cache, geht aber nicht an den Browser.
+
+    Die Oberfläche liest den Rohbaum nie; er dient nur dem Fortsetzen auf dem
+    Server und verdoppelte bei großen Bäumen die Antwort.
+    """
+
+    BAUM = dict(
+        TestGespeicherterBaum.BAUM,
+        origin_tree={"type": "internal", "utxo": "a1" * 32 + ":0", "sources": []},
+    )
+
+    def test_get_ohne_origin_tree(self):
+        self.ablegen()
+        _, körper = self.anfrage(f"/api/trace?target={self.ZIEL}:0")
+        self.assertTrue(körper["vorhanden"])
+        self.assertNotIn("origin_tree", körper["ergebnis"])
+        self.assertEqual(körper["ergebnis"]["root"]["txid"], self.ZIEL)
+
+    def test_post_cache_treffer_ohne_origin_tree(self):
+        self.ablegen()
+        _, körper = self.anfrage(
+            "/api/trace", methode="POST", daten={"target": f"{self.ZIEL}:0"},
+        )
+        self.assertTrue(körper["result"]["found"])
+        self.assertNotIn("origin_tree", körper["result"])
+
+    def test_cache_behaelt_origin_tree(self):
+        from core import trace_cache
+
+        self.ablegen()
+        geladen = trace_cache.laden(self.ZIEL, 0, self.immutable)
+        self.assertIn("origin_tree", geladen["baum"])
+
+    def test_helfer_laesst_eingabe_unveraendert(self):
+        from httpserver.api.trace import _fuer_oberflaeche
+
+        baum = {"found": True, "origin_tree": {"x": 1}, "children": []}
+        aus = _fuer_oberflaeche(baum)
+        self.assertNotIn("origin_tree", aus)
+        self.assertIn("origin_tree", baum)
+        self.assertEqual(aus["children"], [])
+        ohne = {"found": False}
+        self.assertIs(_fuer_oberflaeche(ohne), ohne)
+
+
+def _baum_schluessel(daten, gefunden=None):
+    """Alle Schlüssel, die nach einem Herkunftsbaum aussehen (rekursiv)."""
+    gefunden = set() if gefunden is None else gefunden
+    if isinstance(daten, dict):
+        for k, v in daten.items():
+            if k in ("origin_tree", "baum", "children", "root", "ergebnis"):
+                gefunden.add(k)
+            _baum_schluessel(v, gefunden)
+    elif isinstance(daten, list):
+        for v in daten:
+            _baum_schluessel(v, gefunden)
+    return gefunden
+
+
+class TestListenOhneBaum(ApiTestBasis):
+    """
+    Lazy (ISSUES P2): Listen liefern nur Meta samt Cache-Flag, nie den Baum.
+    Den holt die Oberfläche erst beim Aufklappen über GET /api/trace.
+    """
+
+    BAUM = dict(
+        TestGespeicherterBaum.BAUM,
+        root={"id": "0", "txid": txid("a1"), "vout": 0, "amount_sats": 500},
+        origin_tree={"type": "internal", "utxo": txid("a1") + ":0", "sources": []},
+        verfolgt_vollstaendig=True,
+    )
+
+    def setUp(self):
+        from core import trace_cache
+
+        super().setUp()
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB, [utxo(84_000_000, marker="a1")], self.cache, 6
+        )
+        trace_cache.speichern(
+            txid("a1"), 0, self.BAUM, self.immutable, {BIP84_RECEIVE_0},
+        )
+
+    def test_alle_utxos_nur_meta_mit_cache_flag(self):
+        _, körper = self.anfrage("/api/utxos")
+        eintrag = körper["utxos"][0]
+        self.assertTrue(eintrag["verfolgt"])
+        self.assertTrue(eintrag["verfolgt_vollstaendig"])
+        self.assertTrue(eintrag["steuer_ausreichend"])
+        self.assertFalse(eintrag["unvollstaendig"])
+        self.assertEqual(_baum_schluessel(körper), set())
+
+    def test_ohne_baum_flags_falsch(self):
+        from core import trace_cache
+
+        trace_cache.loeschen(txid("a1"), 0, self.immutable)
+        _, körper = self.anfrage("/api/utxos")
+        eintrag = körper["utxos"][0]
+        self.assertFalse(eintrag["verfolgt"])
+        self.assertFalse(eintrag["steuer_ausreichend"])
+
+    def test_wallet_utxos_nur_meta(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        status, körper = self.anfrage(f"/api/wallets/{kennung}/utxos")
+        self.assertEqual(status, 200)
+        self.assertEqual(körper["total_count"], 1)
+        self.assertEqual(_baum_schluessel(körper), set())
+
+    def test_baum_nur_auf_anfrage(self):
+        """Der Baum kommt einzeln über GET /api/trace — ohne Rohbaum."""
+        _, körper = self.anfrage(f"/api/trace?target={txid('a1')}:0")
+        self.assertTrue(körper["vorhanden"])
+        self.assertEqual(körper["ergebnis"]["root"]["txid"], txid("a1"))
+        self.assertNotIn("origin_tree", körper["ergebnis"])
+
+
+class TestTraceJobOhneBaum(ApiTestBasis):
+    """Fertige Trace-Jobs halten den Baum nicht, wenn er im Cache liegt."""
+
+    BAUM = TestListenOhneBaum.BAUM
+
+    def test_job_ergebnis_stub_wenn_gespeichert(self):
+        from core import trace_cache
+        from httpserver.api.trace import _job_ergebnis
+
+        trace_cache.speichern(txid("a1"), 0, dict(self.BAUM), self.immutable)
+        baum = dict(self.BAUM, source="electrs", followup="")
+        aus = _job_ergebnis(baum, txid("a1"), 0, self.immutable)
+        self.assertTrue(aus["baum_im_cache"])
+        self.assertEqual(aus["target"], f"{txid('a1')}:0")
+        self.assertEqual(aus["source"], "electrs")
+        self.assertTrue(aus["found"])
+        self.assertTrue(aus["verfolgt_vollstaendig"])
+        self.assertEqual(_baum_schluessel(aus), set())
+
+    def test_job_ergebnis_behaelt_baum_ohne_cache(self):
+        from httpserver.api.trace import _job_ergebnis
+
+        aus = _job_ergebnis(dict(self.BAUM), txid("a1"), 0, self.immutable)
+        self.assertNotIn("baum_im_cache", aus)
+        self.assertIn("children", aus)
+        self.assertNotIn("origin_tree", aus)
+
+    def test_job_ergebnis_alter_cache_zaehlt_nicht(self):
+        """Nur ein in *diesem* Lauf gespeicherter Baum ersetzt das Ergebnis."""
+        from core import trace_cache
+        from httpserver.api.trace import _job_ergebnis
+
+        trace_cache.speichern(txid("a1"), 0, dict(self.BAUM), self.immutable)
+        aus = _job_ergebnis(
+            dict(self.BAUM), txid("a1"), 0, self.immutable,
+            seit_ts=time.time() + 3600,
+        )
+        self.assertIn("children", aus)
+
+    def test_job_ergebnis_nicht_gefunden_unveraendert(self):
+        from httpserver.api.trace import _job_ergebnis
+
+        ohne = {"found": False, "error": "x"}
+        self.assertIs(_job_ergebnis(ohne, txid("a1"), 0, self.immutable), ohne)
+
+    def test_nav_liste_ohne_baum(self):
+        job = self.state.jobs.start(
+            "trace", "Herkunft Test", lambda _job: dict(self.BAUM),
+            meta={"art": "trace", "target": f"{txid('a1')}:0"},
+        )
+        for _ in range(200):
+            if job.status != "running":
+                break
+            time.sleep(0.01)
+        self.assertEqual(job.status, "done")
+        _, körper = self.anfrage("/api/jobs?recent_s=60")
+        eintrag = next(j for j in körper["jobs"] if j["id"] == job.id)
+        self.assertTrue(eintrag["result"]["found"])
+        self.assertEqual(_baum_schluessel(eintrag["result"]), set())
+
+
+class TestWebNutztKeinenRohbaum(unittest.TestCase):
+    """Wer ``origin_tree`` in web/ braucht, muss die API wieder erweitern."""
+
+    def test_web_liest_origin_tree_nicht(self):
+        web = Path(__file__).resolve().parent.parent / "web"
+        for datei in list(web.glob("*.js")) + list(web.glob("views/*.js")):
+            self.assertNotIn(
+                "origin_tree", datei.read_text(encoding="utf-8"), datei.name,
+            )
+
+
 class TestCacheLeeren(ApiTestBasis):
 
     def test_loescht_analyse_cache_nicht_sanktionen(self):

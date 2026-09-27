@@ -706,11 +706,46 @@ class TestOberflaeche(unittest.TestCase):
             "Marke muss in Wallet-Zeile und Herkunfts-UTXO stehen",
         )
 
+    def test_herkunftsbaum_lazy_hoechstens_einer(self):
+        """
+        Lazy (ISSUES P2): Nur der aufgeklappte Baum liegt im Client —
+        der vorige wird beim Zeichnen des nächsten verworfen (DOM + Daten).
+        """
+        js = self.herkunft_js
+        zeichne = js[js.index("function zeichneZweig("):]
+        zeichne = zeichne[:zeichne.index("\n}\n")]
+        self.assertIn("gebeAnderenBaumFrei(zweig);", zeichne)
+        frei = js[js.index("function gebeAnderenBaumFrei("):]
+        frei = frei[:frei.index("\n}\n")]
+        self.assertIn("alt.replaceChildren();", frei)
+        self.assertIn("delete alt.dataset.teilbaum;", frei)
+        self.assertIn('alt.dataset.geladen = "";', frei)
+        # Knotendaten nur schwach am DOM — mit dem DOM ist der Baum frei.
+        self.assertIn("const BAUM_KNOTEN_DATEN = new WeakMap();", js)
+        # „Alles aufklappen“ nur über den Knopf, nie automatisch.
+        self.assertEqual(js.count("expandiereBaumAlles(zweig);"), 1)
+
+    def test_fertiger_job_laedt_baum_einzeln(self):
+        """Job-Ergebnis ohne Baum (baum_im_cache) → GET /api/trace beim Aufklappen."""
+        js = self.herkunft_js
+        self.assertEqual(js.count("result?.baum_im_cache"), 2)
+        self.assertIn(
+            "ladeGespeichertenZweig(utxo, zweig, klapp, job.result)", js,
+        )
+        self.assertIn(
+            "ladeGespeichertenZweig(utxo, zweig, klapp, bestehend.result)", js,
+        )
+        lade = js[js.index("async function ladeGespeichertenZweig("):]
+        lade = lade[:lade.index("\n}\n")]
+        self.assertIn("/trace?target=", lade)
+
     def test_cache_startet_offen_analyse_nicht(self):
-        """Oberste Ebene zu; darunter Cache offen, ungescannte Bäume zu."""
+        """Oberste Ebene zu; gespeicherte Bäume erst auf Klick, ungescannte zu."""
         self.assertIn("function setzeKlapp", self.wallets_js)
         self.assertIn("function ladeGespeichertenZweig", self.herkunft_js)
-        self.assertIn("oeffneAusCache", self.herkunft_js)
+        # Lazy (ISSUES P2): gespeicherte Bäume öffnen nicht mehr von selbst,
+        # erst der Klick auf das einzelne UTXO lädt genau diesen Baum.
+        self.assertNotIn("oeffneAusCache", self.herkunft_js)
         # Erste Ebene unter dem UTXO zeichnet zeichneZweig sofort; tiefere
         # Ebenen starten zu (▸) und werden erst beim Aufklappen gebaut.
         self.assertIn('knoten.expandable ? "▸" : "·"', self.herkunft_js)

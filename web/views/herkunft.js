@@ -301,8 +301,8 @@ function fuelleTraceSortiert(behaelter, addresses, sortMode) {
  * Bereits ausgegebene Outputs — Abschnitt bleibt zu, Inhalt ist Cache.
  *
  * Dieselbe Datei wie Steuerjahr. Der Kasten selbst bleibt zu, weil das
- * schnell hunderte Vorgänge sind; öffnet man ihn, stehen die Gruppen und
- * gespeicherten Bäume darin genauso offen wie beim aktuellen Bestand.
+ * schnell hunderte Vorgänge sind; öffnet man ihn, verhalten sich Gruppen und
+ * Bäume darin wie beim aktuellen Bestand.
  */
 function zeichneAusgegeben(daten) {
   const block = document.createElement("div");
@@ -387,8 +387,8 @@ function zeichneAusgegeben(daten) {
 /**
  * Eine Adresse mit ihren UTXOs.
  *
- * Die Gruppe ist die oberste Ebene und startet zu. Beim Öffnen stehen
- * gespeicherte Bäume offen; ohne Baum bleibt das UTXO zu.
+ * Die Gruppe ist die oberste Ebene und startet zu. Die UTXOs darin bleiben
+ * zu, auch mit gespeichertem Baum — geladen wird erst auf Klick.
  */
 function zeichneTraceAdressGruppe(gruppe) {
   const block = document.createElement("div");
@@ -645,20 +645,9 @@ function zeichneTraceWurzel(utxo) {
 
   block.append(kopfzeile, zweig);
 
-  // Startet zu. Die Adressgruppe ruft oeffneAusCache, sobald sie selbst
-  // aufgeht — dann nur, wenn der Baum im Cache liegt. Sonst würde jeder
-  // sichtbare Eintrag den Node fragen.
+  // Startet zu — auch mit gespeichertem Baum. Geladen wird er erst beim
+  // Klick auf genau dieses UTXO (höchstens ein Baum im Speicher).
   setzeKlapp(zeile, klapp, zweig, false);
-
-  function oeffneAusCache() {
-    if (!utxo.verfolgt) return;
-    setzeKlapp(zeile, klapp, zweig, true);
-    if (zweig.dataset.geladen === "ja" || zweig.dataset.geladen === "laeuft") return;
-    ladeGespeichertenZweig(utxo, zweig, klapp).then((ok) => {
-      if (!ok) setzeKlapp(zeile, klapp, zweig, false);
-    });
-  }
-  block.oeffneAusCache = oeffneAusCache;
 
   zeile.addEventListener("click", (ereignis) => {
     // Der zweite Klick eines Doppelklicks würde sonst gleich wieder
@@ -680,14 +669,20 @@ function zeichneTraceWurzel(utxo) {
   return block;
 }
 
-/** Liest nur den gespeicherten Baum. Kein Node, kein Job. */
-async function ladeGespeichertenZweig(utxo, zweig, klapp) {
+/**
+ * Liest nur den gespeicherten Baum. Kein Node, kein Job.
+ * *ausJob*: Meta eines fertigen Trace-Jobs (``baum_im_cache``) — der Server
+ * hält den Baum nicht im Job; ``source`` kommt von dort für die Fußzeile.
+ */
+async function ladeGespeichertenZweig(utxo, zweig, klapp, ausJob = null) {
   if (!utxo || !utxo.key || !zweig) return false;
   zweig.dataset.geladen = "laeuft";
   zweig.replaceChildren(hinweisZeile(t("common.looking")));
   try {
-    const gespeichert = await api(`/trace?target=${encodeURIComponent(utxo.key)}`);
+    const ziel = (ausJob && ausJob.target) || utxo.key;
+    const gespeichert = await api(`/trace?target=${encodeURIComponent(ziel)}`);
     if (gespeichert && gespeichert.vorhanden && gespeichert.ergebnis) {
+      if (ausJob && ausJob.source) gespeichert.ergebnis.source = ausJob.source;
       zweig.dataset.geladen = "ja";
       try {
         zeichneZweig(gespeichert.ergebnis, zweig, utxo, klapp);
@@ -887,6 +882,12 @@ async function starteZweigTrace(
         if (!bestehend || (!bestehend.running && bestehend.status !== "done")) {
           jobId = null;
           Zustand.traceJobs.delete(utxo.key);
+        } else if (bestehend.status === "done" && bestehend.result?.baum_im_cache) {
+          aufraeumen();
+          if (!await ladeGespeichertenZweig(utxo, zweig, klapp, bestehend.result)) {
+            fehlschlag(t("trace.analyseFailShort"));
+          }
+          return;
         } else if (bestehend.status === "done" && bestehend.result) {
           aufraeumen();
           zweig.dataset.geladen = "ja";
@@ -969,7 +970,13 @@ async function starteZweigTrace(
 
   const fertigAusJob = (job) => {
     aufraeumen();
-    if (job.status === "done" && job.result) {
+    if (job.status === "done" && job.result?.baum_im_cache) {
+      // Fertig und gespeichert: Baum einzeln aus dem Cache holen.
+      delete zweig.dataset.teilbaum;
+      ladeGespeichertenZweig(utxo, zweig, klapp, job.result).then((ok) => {
+        if (!ok) fehlschlag(t("trace.analyseFailShort"));
+      });
+    } else if (job.status === "done" && job.result) {
       zweig.dataset.geladen = "ja";
       delete zweig.dataset.teilbaum;
       zeichneZweig(job.result, zweig, utxo, klapp);
@@ -1097,7 +1104,27 @@ function setzeWurzelTxClass(zweig, ergebnis, utxo = null) {
   });
 }
 
+/**
+ * Der Zweig mit dem gerade geladenen Baum. Höchstens einer: Wer einen
+ * neuen Baum zeichnet, gibt den vorigen frei (DOM + Knoten-Daten).
+ */
+let _offenerBaumZweig = null;
+
+function gebeAnderenBaumFrei(zweig) {
+  const alt = _offenerBaumZweig;
+  _offenerBaumZweig = zweig;
+  if (!alt || alt === zweig) return;
+  // Dort läuft gerade eine Analyse/ein Laden — Spinner und Job stehen lassen.
+  if (alt.dataset.geladen === "laeuft") return;
+  alt.replaceChildren();
+  alt.dataset.geladen = "";
+  delete alt.dataset.teilbaum;
+  const kopf = alt.closest(".utxo-wurzel")?.querySelector(".utxo-kopf");
+  setzeKlapp(kopf, kopf && kopf.querySelector(".klapp"), alt, false);
+}
+
 function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
+  gebeAnderenBaumFrei(zweig);
   zweig.replaceChildren();
 
   if (!ergebnis.found) {
