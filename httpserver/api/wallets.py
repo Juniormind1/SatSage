@@ -803,12 +803,29 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     mempool = _query_flag(query, "mempool", default=True)
 
     _seed_wallet_ctx_aus_caches(state)
-    anhang = _verlaufs_anhang(state, [entry], limit=limit, sort=sort)
+    from httpserver.api.listen_fenster import fenster_antwort, ist_fenster
+
+    fenster = ist_fenster(query)
+    # Fenster-Modus: Verlauf erst in fenster_antwort, nur fürs Fenster angereichert.
+    anhang = {} if fenster else _verlaufs_anhang(state, [entry], limit=limit, sort=sort)
     gecacht = utxos_mod.load_cached_utxos(
         entry.analyse_schluessel,
         state.cache_dir,
         immutable_cache_dir=state.immutable_cache_dir,
     )
+    if fenster:
+        ergebnis = fenster_antwort(
+            state, entries=[entry], gesammelt=gecacht or [], query=query,
+            mempool=bool(mempool and gecacht is not None),
+            xpub=entry.analyse_schluessel,
+        )
+        ergebnis.update({
+            "wallet": entry.display_name,
+            "wallet_id": kennung,
+            "has_cache": gecacht is not None,
+            "mempool_checked": bool(mempool and gecacht is not None),
+        })
+        return ergebnis
     if gecacht is None:
         return {
             "wallet": entry.display_name,
@@ -1063,6 +1080,17 @@ def api_alle_utxos(state: AppState, query: dict) -> dict:
     mempool_an = str((query.get("mempool") or ["1"])[0]).strip().lower() not in (
         "0", "false", "no", "nein", "off",
     )
+
+    from httpserver.api.listen_fenster import fenster_antwort, ist_fenster
+
+    if ist_fenster(query):
+        ergebnis = fenster_antwort(
+            state, entries=state.analyse_entries, gesammelt=gesammelt,
+            query=query, mempool=mempool_an,
+        )
+        ergebnis["wallets_ohne_cache"] = ohne_cache
+        ergebnis["wallet_count"] = len(state.entries)
+        return ergebnis
 
     anhang = _verlaufs_anhang(
         state, state.analyse_entries, limit=limit, sort=sort,

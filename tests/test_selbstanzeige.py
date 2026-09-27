@@ -137,5 +137,27 @@ class TestFifo(unittest.TestCase):
         self.assertIn("Börsenhistorien", csv_text)
 
 
+class TestSpenderIndex(unittest.TestCase):
+    """Kandidatenliste mit Index je spent_txid: gleiche Antworten, linear."""
+
+    def test_index_liefert_dasselbe(self):
+        t = lambda i: f"{i:064x}"
+        utxos = []
+        for i in range(60):
+            spender = t(1000 + i % 7)
+            addr = "bc1qa" if i % 2 else "bc1qb"
+            utxos.append(_spent(t(i), i % 3, 1000 + i, 1_600_000_000 + i,
+                                spender.upper() if i % 5 == 0 else spender,
+                                1_700_000_000 + (i * 37) % 11, address=addr))
+        utxos.append(_recv(t(999), 0, 5, 1_600_000_000))
+        index = sa._nach_spender(utxos)
+        w = FakeWallet()
+        for k in range(1000, 1008):
+            self.assertEqual(sa._abfluss_zeit(utxos, t(k)),
+                             sa._abfluss_zeit(utxos, t(k), index))
+            self.assertEqual(sa._inputs_fuer_txid(utxos, t(k), w),
+                             sa._inputs_fuer_txid(utxos, t(k), w, index))
+
+
 if __name__ == "__main__":
     unittest.main()

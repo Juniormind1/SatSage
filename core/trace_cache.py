@@ -37,7 +37,151 @@ UNTERVERZEICHNIS = "utxo_trace"
 
 #: Format der Dateien. Fremde Stände werden verworfen statt halb gelesen —
 #: ein falsch interpretierter Herkunftsbaum wäre schlimmer als gar keiner.
+#: ``VERSION`` gilt für die ``.meta.json`` und alte Baumdateien (Baum als
+#: verschachteltes JSON); neue Baumdateien schreiben ``VERSION_KNOTEN``.
 VERSION = 1
+
+#: Baumdatei als Knotentabelle (ISSUES P2, Schritt 6). Jeder Teilbaum steht
+#: nur einmal in der Datei — Rauten (derselbe Vorgänger über mehrere Wege)
+#: werden zu Verweisen, der Baum wird auf der Platte zum DAG. ``id`` und
+#: ``depth`` der Anzeigeknoten folgen aus der Position und werden beim Lesen
+#: neu gesetzt; sonst unterschiede sich jede Raute schon darin. Gelesen wird
+#: wieder der vollständige, verschachtelte Baum — Trace-Semantik unverändert.
+#: Alte Dateien (``VERSION``) bleiben lesbar und werden beim nächsten
+#: Schreiben ersetzt.
+VERSION_KNOTEN = 2
+
+
+def _anzeige_ohne_position(kinder: list, eltern_id: str, tiefe: int) -> list:
+    """Kinderliste ohne ``id``/``depth``, wo beide aus der Position folgen."""
+    aus: list = []
+    for i, knoten in enumerate(kinder):
+        if not isinstance(knoten, dict):
+            aus.append(knoten)
+            continue
+        kid = f"{eltern_id}.{i}"
+        neu = {}
+        for k, v in knoten.items():
+            if k == "id" and v == kid and isinstance(v, str):
+                continue
+            if k == "depth" and v == tiefe and type(v) is int:
+                continue
+            if k == "children" and isinstance(v, list):
+                v = _anzeige_ohne_position(v, kid, tiefe + 1)
+            neu[k] = v
+        aus.append(neu)
+    return aus
+
+
+def _anzeige_mit_position(kinder: list, eltern_id: str, tiefe: int) -> list:
+    """Umkehrung von :func:`_anzeige_ohne_position` (Reihenfolge wie bisher)."""
+    aus: list = []
+    for i, knoten in enumerate(kinder):
+        if not isinstance(knoten, dict):
+            aus.append(knoten)
+            continue
+        kid = f"{eltern_id}.{i}"
+        neu = {} if "id" in knoten else {"id": kid}
+        for k, v in knoten.items():
+            if k == "children" and isinstance(v, list):
+                v = _anzeige_mit_position(v, kid, tiefe + 1)
+            neu[k] = v
+            if k == "type" and "depth" not in knoten:
+                neu["depth"] = tiefe
+        if "depth" not in neu:
+            neu["depth"] = tiefe
+        aus.append(neu)
+    return aus
+
+
+def _baum_ohne_position(baum: dict) -> dict:
+    kinder = baum.get("children")
+    if not isinstance(kinder, list):
+        return baum
+    wurzel = baum.get("root") if isinstance(baum.get("root"), dict) else {}
+    return {
+        **baum,
+        "children": _anzeige_ohne_position(kinder, str(wurzel.get("id", 0)), 1),
+    }
+
+
+def _baum_mit_position(baum: dict) -> dict:
+    kinder = baum.get("children")
+    if not isinstance(kinder, list):
+        return baum
+    wurzel = baum.get("root") if isinstance(baum.get("root"), dict) else {}
+    baum["children"] = _anzeige_mit_position(
+        kinder, str(wurzel.get("id", 0)), 1,
+    )
+    return baum
+
+
+def knoten_tabelle(wert) -> tuple[list, list]:
+    """
+    Hash-Consing: jede nicht leere Liste/jedes nicht leere Objekt einmal.
+
+    Rückgabe ``(tabelle, verweis)``. In Tabelleneinträgen steht ein
+    verschachtelter Container nie direkt, sondern als Verweis ``[index]``;
+    leere Container bleiben inline (``[]``/``{}``). Gleiche Teilbäume
+    (gleicher Inhalt, gleiche Kinder) bekommen denselben Index.
+    """
+    tabelle: list = []
+    index: dict[str, int] = {}
+
+    def intern(v):
+        if isinstance(v, dict):
+            if not v:
+                return {}
+            eintrag = {k: intern(x) for k, x in v.items()}
+        elif isinstance(v, list):
+            if not v:
+                return []
+            eintrag = [intern(x) for x in v]
+        else:
+            return v
+        schluessel = json.dumps(
+            eintrag, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        )
+        nr = index.get(schluessel)
+        if nr is None:
+            nr = len(tabelle)
+            index[schluessel] = nr
+            tabelle.append(eintrag)
+        return [nr]
+
+    return tabelle, intern(wert)
+
+
+def aus_knoten_tabelle(tabelle: list, verweis):
+    """Baut den verschachtelten Wert neu — jede Stelle als eigenes Objekt."""
+
+    def aus(v):
+        if isinstance(v, list):
+            if not v:
+                return []
+            eintrag = tabelle[v[0]]
+            if isinstance(eintrag, dict):
+                return {k: aus(x) if isinstance(x, (list, dict)) else x
+                        for k, x in eintrag.items()}
+            return [aus(x) if isinstance(x, (list, dict)) else x
+                    for x in eintrag]
+        if isinstance(v, dict):
+            return {}
+        return v
+
+    return aus(verweis)
+
+
+def _baum_als_knoten(baum: dict) -> dict | None:
+    """Knotentabelle für die Datei — None, wenn der Rückweg nicht exakt ist."""
+    tabelle, verweis = knoten_tabelle(_baum_ohne_position(baum))
+    try:
+        zurueck = _baum_mit_position(aus_knoten_tabelle(tabelle, verweis))
+    except (IndexError, KeyError, TypeError):
+        return None
+    if zurueck != baum:
+        return None
+    return {"knoten": tabelle, "baum": verweis}
 
 
 def fingerabdruck(adressen) -> str:
@@ -262,6 +406,12 @@ def speichern(
         "adressen_anzahl": n_addr,
         "baum": baum,
     }
+    # Knotentabelle (DAG); nur wenn der Rückweg exakt denselben Baum ergibt,
+    # sonst bleibt es beim alten Format — lieber groß als falsch.
+    tabelle = _baum_als_knoten(baum)
+    if tabelle is not None:
+        nutzlast["version"] = VERSION_KNOTEN
+        nutzlast.update(tabelle)
 
     if not xpub_cache.cache_disk_write_allowed(ziel.parent):
         return None
@@ -317,13 +467,27 @@ def laden(
         daten = json.loads(quelle.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(daten, dict) or daten.get("version") != VERSION:
+    if not isinstance(daten, dict) or daten.get("version") not in (
+        VERSION, VERSION_KNOTEN,
+    ):
         return None
     if daten.get("txid") != xpub_cache._normalize_txid(txid):
         return None
     if int(daten.get("vout", -1)) != int(vout):
         return None
     baum = daten.get("baum")
+    if daten.get("version") == VERSION_KNOTEN:
+        tabelle = daten.pop("knoten", None)
+        if not isinstance(tabelle, list):
+            return None
+        try:
+            baum = aus_knoten_tabelle(tabelle, baum)
+        except (IndexError, KeyError, TypeError, RecursionError):
+            return None
+        del tabelle
+        if not isinstance(baum, dict):
+            return None
+        baum = _baum_mit_position(baum)
     if not isinstance(baum, dict):
         return None
 

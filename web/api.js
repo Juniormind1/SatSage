@@ -295,13 +295,25 @@ function _merkeTxClassIcon(gesehen, kind) {
   if (k && TX_CLASS_ICON[k]) gesehen.add(k);
 }
 
+/**
+ * Startstapel für die Baum-Durchläufe unten: Wurzel + Kinder. Seitenweise
+ * geladene Bäume (ISSUES P2) haben nur die erste Ebene; dort liefert der
+ * Server ``baum_marken`` — alle Knoten mit Form-/Börsenbezug in genau der
+ * Reihenfolge, in der dieser Stapel sie besuchen würde.
+ */
+function baumStapel(ergebnis) {
+  if (Array.isArray(ergebnis.baum_marken)) return [...ergebnis.baum_marken].reverse();
+  const stapel = [];
+  if (ergebnis.root) stapel.push(ergebnis.root);
+  for (const k of ergebnis.children || []) stapel.push(k);
+  return stapel;
+}
+
 /** Mix-/Form-Arten aus einem Trace-Ergebnis (Root + Kinder), ohne Extra-Netzwerk. */
 function mixArtenAusErgebnis(ergebnis) {
   const gesehen = new Set();
   if (!ergebnis || !ergebnis.found) return [];
-  const stapel = [];
-  if (ergebnis.root) stapel.push(ergebnis.root);
-  for (const k of ergebnis.children || []) stapel.push(k);
+  const stapel = baumStapel(ergebnis);
   _merkeTxClassIcon(gesehen, ergebnis.tx_class);
   while (stapel.length) {
     const knoten = stapel.pop();
@@ -393,9 +405,7 @@ function boerseNamenAusErgebnis(ergebnis) {
   if (!ergebnis || !ergebnis.found) {
     return { namen: [], richtungen };
   }
-  const stapel = [];
-  if (ergebnis.root) stapel.push(ergebnis.root);
-  for (const k of ergebnis.children || []) stapel.push(k);
+  const stapel = baumStapel(ergebnis);
   while (stapel.length) {
     const knoten = stapel.pop();
     if (!knoten || typeof knoten !== "object") continue;

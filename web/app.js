@@ -302,6 +302,7 @@ async function leereWalletCache(wallet) {
       methode: "DELETE",
     });
     Zustand.traceListe = null;
+    pagerCachesVerwerfen();
     Zustand.steuer = null;
     const n = (ergebnis.utxo_eintraege || 0)
       + (ergebnis.verlauf_eintraege || 0)
@@ -346,6 +347,7 @@ async function leereGesamtenCache() {
   try {
     const ergebnis = await api("/cache", { methode: "DELETE" });
     Zustand.traceListe = null;
+    pagerCachesVerwerfen();
     Zustand.steuer = null;
     setzeCacheLeerenBestaetigung(false);
     const n = (ergebnis.utxo_eintraege || 0) + (ergebnis.immutable_eintraege || 0);
@@ -1753,6 +1755,22 @@ function parseKopfFilter(roh) {
   return { leer: false, terms, minSats, maxSats, afterTs, beforeTs };
 }
 
+/**
+ * Kopf-Filter für den Server (``?q=``): seitenweise Listen filtern dort über
+ * alle Seiten. Datumsgrenzen in der Zeitzone des Browsers mitschicken.
+ */
+function kopfFilterParameter() {
+  const p = new URLSearchParams();
+  const feld = $("#kopf-filter");
+  const roh = feld && !feld.disabled ? feld.value.trim() : "";
+  if (!roh) return p;
+  const f = parseKopfFilter(roh);
+  p.set("q", roh);
+  if (f.afterTs != null) p.set("q_nach", String(f.afterTs));
+  if (f.beforeTs != null) p.set("q_vor", String(f.beforeTs));
+  return p;
+}
+
 function _kopfFilterBetragOk(sats, f) {
   if (f.minSats != null) {
     if (!Number.isFinite(sats) || !(sats > f.minSats)) return false;
@@ -1863,6 +1881,11 @@ function _kopfFilterStelleAusgegebenBereit(container, daten) {
   if (!container) return null;
   const block = container.querySelector(".ausgegeben-block");
   if (!block) return null;
+  // Seitenweise: Server filtert, erste Seite laden und aufklappen.
+  if (typeof block.oeffneAusgegeben === "function") {
+    block.oeffneAusgegeben();
+    return block;
+  }
   const inhalt = block.querySelector(".ausgegeben-inhalt");
   const kopf = block.querySelector(".adress-kopf");
   if (!inhalt || !kopf) return block;
@@ -1886,6 +1909,8 @@ function _kopfFilterStelleAusgegebenBereit(container, daten) {
 
 function _kopfFilterAusgegebenAnwenden(ausBlock, f) {
   if (!ausBlock) return;
+  // Seite lädt noch — nicht vorschnell als „keine Treffer“ ausblenden.
+  if (!f.leer && ausBlock.querySelector(".ausgegeben-inhalt > .zweig-status")) return;
   if (f.leer) {
     ausBlock.hidden = false;
     for (const el of ausBlock.querySelectorAll(
@@ -1998,6 +2023,13 @@ function wendeKopfFilterSteuerPunkte(f) {
  * Steuerjahr: Punkte mit Treffer bleiben gefüllt, der Rest wird zum
  * gepunkteten Ring. Listen zeigen nur Treffer.
  */
+/** Server-Treffer einer seitenweisen Steuerliste, falls zum aktuellen Filter. */
+function _steuerFensterTreffer(el) {
+  const treffer = el && el._fensterTreffer;
+  if (!treffer || Zustand.ansicht !== "steuerjahr") return null;
+  return treffer.q === kopfFilterParameter().toString() ? treffer : null;
+}
+
 function wendeKopfFilterSteuerjahrAn(f) {
   const root = $("#ansicht-steuerjahr");
   if (!root) return;
@@ -2029,6 +2061,12 @@ function wendeKopfFilterSteuerjahrAn(f) {
       }
       continue;
     }
+    // Seitenweise: Treffer über alle Seiten zählt der Server.
+    const treffer = _steuerFensterTreffer(tbody);
+    if (treffer) {
+      n = treffer.total;
+      sats = treffer.sats;
+    }
     if (n === 0) {
       tbody.hidden = true;
       continue;
@@ -2057,7 +2095,12 @@ function wendeKopfFilterSteuerjahrAn(f) {
         sats += Number(z.dataset.valueSats) || 0;
       }
     }
-    if (abZusatz && zeilen.length) {
+    const treffer = _steuerFensterTreffer(abListe);
+    if (treffer) {
+      n = treffer.total;
+      sats = treffer.sats;
+    }
+    if (abZusatz && (zeilen.length || treffer)) {
       if (!abZusatz.dataset.voll) abZusatz.dataset.voll = abZusatz.textContent;
       abZusatz.textContent = filter.leer
         ? (abZusatz.dataset.voll || abZusatz.textContent)
@@ -2124,12 +2167,31 @@ function wendeKopfFilterAn() {
   wendeKopfFilterSteuerjahrAn(leer);
 }
 
+/**
+ * Filter angewendet: DOM der gezeichneten Seite sofort, seitenweise Listen
+ * zusätzlich vom Server neu (Seite 1), sobald sich der Filter gegenüber
+ * dem der geladenen Seite (``quelle.q``) ändert.
+ */
+function kopfFilterGeaendert() {
+  wendeKopfFilterAn();
+  const q = kopfFilterParameter().toString();
+  if (Zustand.ansicht === "wallet" && typeof ladeWalletSeitenNeu === "function") {
+    if (Zustand.walletQuelle && Zustand.walletQuelle.q !== q) ladeWalletSeitenNeu();
+  } else if (Zustand.ansicht === "trace" && typeof ladeTraceSeitenNeu === "function") {
+    if (Zustand.traceQuelle && Zustand.traceQuelle.q !== q) ladeTraceSeitenNeu();
+  } else if (Zustand.ansicht === "steuerjahr" && typeof ladeSteuerSeitenNeu === "function") {
+    if (Zustand.steuer && Zustand.steuer.seitenweise && Zustand.steuer._q !== q) {
+      ladeSteuerSeitenNeu().catch(() => {});
+    }
+  }
+}
+
 let _kopfFilterTimer = null;
 function planeKopfFilter() {
   if (_kopfFilterTimer) clearTimeout(_kopfFilterTimer);
   _kopfFilterTimer = setTimeout(() => {
     _kopfFilterTimer = null;
-    wendeKopfFilterAn();
+    kopfFilterGeaendert();
   }, 150);
 }
 
@@ -2142,7 +2204,7 @@ function bindeKopfFilter() {
   feld.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       feld.value = "";
-      wendeKopfFilterAn();
+      kopfFilterGeaendert();
       feld.blur();
     }
   });

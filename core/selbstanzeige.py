@@ -234,10 +234,26 @@ def _netto_und_eigen(
     return netto, zurueck, eingesetzt
 
 
-def _inputs_fuer_txid(utxos: list[dict], txid: str, wallet) -> list[dict]:
+def _nach_spender(utxos: list[dict]) -> dict[str, list[dict]]:
+    """
+    Einträge je ausgebender Tx (normalisierte ``spent_txid``), Reihenfolge
+    wie in *utxos*. Die Kandidatenliste fragt je Abfluss nach seinen Inputs;
+    ohne Index ist das Abflüsse × Einträge (bei ~20 000 Verlaufszeilen
+    Minuten statt Sekunden).
+    """
+    index: dict[str, list[dict]] = {}
+    for utxo in utxos:
+        index.setdefault(_norm_txid(utxo.get("spent_txid", "")), []).append(utxo)
+    return index
+
+
+def _inputs_fuer_txid(
+    utxos: list[dict], txid: str, wallet,
+    index: dict[str, list[dict]] | None = None,
+) -> list[dict]:
     ziel = _norm_txid(txid)
     inputs = []
-    for utxo in utxos:
+    for utxo in (utxos if index is None else index.get(ziel, [])):
         if not utxo.get("spent"):
             continue
         if _norm_txid(utxo.get("spent_txid", "")) != ziel:
@@ -254,10 +270,13 @@ def _inputs_fuer_txid(utxos: list[dict], txid: str, wallet) -> list[dict]:
     return inputs
 
 
-def _abfluss_zeit(utxos: list[dict], spender: str) -> datetime | None:
+def _abfluss_zeit(
+    utxos: list[dict], spender: str,
+    index: dict[str, list[dict]] | None = None,
+) -> datetime | None:
     stempel = None
     ziel = _norm_txid(spender)
-    for utxo in utxos:
+    for utxo in (utxos if index is None else index.get(ziel, [])):
         if _norm_txid(utxo.get("spent_txid", "")) != ziel:
             continue
         ts = utxo.get("spent_time_ts")
@@ -415,8 +434,9 @@ def kandidaten(
         hinweis_txid = _norm_txid(str(txid).strip(), strict=True)
 
     liste = []
+    je_spender = _nach_spender(utxos)
     for spender, betrag in sorted(netto.items(), key=lambda kv: kv[0]):
-        wann = _abfluss_zeit(utxos, spender)
+        wann = _abfluss_zeit(utxos, spender, je_spender)
         if wann is None or not (jahresbeginn <= wann <= jahresende):
             continue
         eigen = tax_mod._ist_eigenuebertrag(
@@ -424,7 +444,7 @@ def kandidaten(
         )
         if betrag <= 0 and not eigen:
             continue
-        inputs = _inputs_fuer_txid(utxos, spender, wallet)
+        inputs = _inputs_fuer_txid(utxos, spender, wallet, je_spender)
         wallets = sorted({i["wallet"] for i in inputs})
         ausgewaehlt = bool(hinweis_txid and spender == hinweis_txid)
         liste.append({

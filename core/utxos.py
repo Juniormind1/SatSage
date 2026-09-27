@@ -317,6 +317,35 @@ def exchange_spends_fuer(
     return ziele_aus_txid(txid)
 
 
+def verlauf_eintrag_als_dict(
+    eintrag: dict,
+    *,
+    wallet=None,
+    immutable_cache_dir: Path | None = None,
+    own_addresses=None,
+) -> dict:
+    """Ein ausgegebener Output in UTXO-Form (Einzelschritt von ``historische_eintraege``)."""
+    angereichert = utxo_as_dict(
+        eintrag,
+        wallet=wallet,
+        immutable_cache_dir=immutable_cache_dir,
+        own_addresses=own_addresses,
+    )
+    angereichert["spent"] = True
+    angereichert["spent_txid"] = eintrag.get("spent_txid") or ""
+    angereichert["spent_time_ts"] = eintrag.get("spent_time_ts")
+    angereichert["spent_height"] = eintrag.get("spent_height")
+    angereichert["spent_pending"] = bool(eintrag.get("spent_pending"))
+    # „davon … an Kraken“: nur der Börsenanteil der Ausgabetransaktion.
+    angereichert["exchange_spends"] = exchange_spends_fuer(
+        eintrag,
+        wallet=wallet,
+        own_addresses=own_addresses,
+        immutable_cache_dir=immutable_cache_dir,
+    )
+    return angereichert
+
+
 def historische_eintraege(
     verlauf: list[dict],
     *,
@@ -345,27 +374,15 @@ def historische_eintraege(
         ausgegeben.sort(key=lambda e: e.get("spent_time_ts") or 0, reverse=True)
 
     ausschnitt = ausgegeben if limit is None else ausgegeben[:limit]
-    eintraege = []
-    for eintrag in ausschnitt:
-        angereichert = utxo_as_dict(
+    eintraege = [
+        verlauf_eintrag_als_dict(
             eintrag,
             wallet=wallet,
             immutable_cache_dir=immutable_cache_dir,
             own_addresses=own_addresses,
         )
-        angereichert["spent"] = True
-        angereichert["spent_txid"] = eintrag.get("spent_txid") or ""
-        angereichert["spent_time_ts"] = eintrag.get("spent_time_ts")
-        angereichert["spent_height"] = eintrag.get("spent_height")
-        angereichert["spent_pending"] = bool(eintrag.get("spent_pending"))
-        # „davon … an Kraken“: nur der Börsenanteil der Ausgabetransaktion.
-        angereichert["exchange_spends"] = exchange_spends_fuer(
-            eintrag,
-            wallet=wallet,
-            own_addresses=own_addresses,
-            immutable_cache_dir=immutable_cache_dir,
-        )
-        eintraege.append(angereichert)
+        for eintrag in ausschnitt
+    ]
 
     return {
         "total_count": len(ausgegeben),

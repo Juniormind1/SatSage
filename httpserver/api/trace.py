@@ -617,38 +617,58 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
     return job.as_dict()
 
 
-def api_trace_gespeichert(state: AppState, query: dict) -> dict:
-    """
-    Liefert einen bereits verfolgten Baum — ohne Job, ohne Node-Verbindung.
+#: Zuletzt gelesener Baum (höchstens einer — ISSUES P2: ein Baum im RAM).
+#: Schlüssel: Datei (mtime/Größe) und eigene Adressmenge. Aufklappen und
+#: Blättern im selben Baum lesen die Datei so nicht jedes Mal neu.
+_baum_fenster: dict = {"schluessel": None, "wert": None}
+_baum_fenster_sperre = __import__("threading").Lock()
 
-    Die Vorgeschichte eines bestätigten Outputs ändert sich nicht, ein einmal
-    gebauter Baum bleibt also gültig. Liegt keiner vor, sagt die Antwort das
-    schlicht; die Oberfläche startet dann den regulären Lauf.
+
+def _gespeicherter_baum(
+    state: AppState, txid: str, vout: int, *, mit_veraltet: bool = True,
+) -> dict | None:
+    """
+    ``trace_cache.laden`` samt Aufbereitung für die Oberfläche (gecacht).
+
+    *mit_veraltet* False (Knoten nachladen): Die Adressmenge zählt nicht —
+    der Baum hängt nur an der Datei, das teure Einlesen der Wallet-Caches
+    für den Fingerprint entfällt.
     """
     from server import (
-        ApiError,
         _seed_wallet_ctx_aus_caches,
         trace_cache,
         trace_mod,
     )
 
-    ziel = trace_mod.parse_ziel(str((query.get("target") or [""])[0]))
-    if ziel is None:
-        raise ApiError(
-            400,
-            "Bitte eine TxID oder ein UTXO in der Form txid:vout angeben.",
-        )
-    txid, vout = ziel
-
-    wallet_ctx = state.wallet_ctx
-    # Vor Fingerprint/veraltet: Mapping bis scan_end (Change jenseits max_addresses)
-    if wallet_ctx is not None:
-        _seed_wallet_ctx_aus_caches(state)
-    eigene = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
+    datei = trace_cache.pfad(txid, vout, state.immutable_cache_dir)
+    try:
+        st = datei.stat() if datei is not None else None
+    except OSError:
+        st = None
+    if st is None:
+        return None
+    datei_schluessel = (str(datei), st.st_mtime_ns, st.st_size)
+    if not mit_veraltet:
+        with _baum_fenster_sperre:
+            if (_baum_fenster["schluessel"] or ())[:3] == datei_schluessel:
+                return _baum_fenster["wert"]
+        eigene = None
+    else:
+        wallet_ctx = state.wallet_ctx
+        # Vor Fingerprint/veraltet: Mapping bis scan_end (Change jenseits max_addresses)
+        if wallet_ctx is not None:
+            _seed_wallet_ctx_aus_caches(state)
+        eigene = set(wallet_ctx.address_to_wallet) if wallet_ctx else None
+    schluessel = datei_schluessel + (
+        trace_cache.fingerabdruck(eigene) if eigene else "",
+    )
+    with _baum_fenster_sperre:
+        if _baum_fenster["schluessel"] == schluessel:
+            return _baum_fenster["wert"]
 
     gespeichert = trace_cache.laden(txid, vout, state.immutable_cache_dir, eigene)
     if gespeichert is None:
-        return {"vorhanden": False}
+        return None
 
     baum = gespeichert["baum"] or {}
     if isinstance(baum, dict):
@@ -668,13 +688,87 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
         # ggf. veralteten Cache-Flag vertrauen (ältere Läufe markierten
         # Bäume mit leeren grünen Blättern fälschlich als fertig).
         baum.update(trace_mod.folge_meta(baum))
+        baum = _fuer_oberflaeche(baum)
+    wert = dict(gespeichert, baum=baum)
+    with _baum_fenster_sperre:
+        _baum_fenster["schluessel"] = schluessel
+        _baum_fenster["wert"] = wert
+    return wert
 
+
+def _ziel_aus_query(query: dict) -> tuple[str, int]:
+    from server import ApiError, trace_mod
+
+    ziel = trace_mod.parse_ziel(str((query.get("target") or [""])[0]))
+    if ziel is None:
+        raise ApiError(
+            400,
+            "Bitte eine TxID oder ein UTXO in der Form txid:vout angeben.",
+        )
+    return ziel
+
+
+def api_trace_gespeichert(state: AppState, query: dict) -> dict:
+    """
+    Liefert einen bereits verfolgten Baum — ohne Job, ohne Node-Verbindung.
+
+    Die Vorgeschichte eines bestätigten Outputs ändert sich nicht, ein einmal
+    gebauter Baum bleibt also gültig. Liegt keiner vor, sagt die Antwort das
+    schlicht; die Oberfläche startet dann den regulären Lauf.
+
+    ``seite=1`` (ISSUES P2): nur Wurzel und erste Kinderseite (``limit``);
+    tiefer über ``GET /api/trace/knoten``.
+    """
+    from core import listen_fenster as lf
+    from core import trace_knoten
+
+    txid, vout = _ziel_aus_query(query)
+    gespeichert = _gespeicherter_baum(state, txid, vout)
+    if gespeichert is None:
+        return {"vorhanden": False}
+    ergebnis = gespeichert["baum"]
+    if lf.query_text(query, "seite") == "1":
+        ergebnis = trace_knoten.seitenweise(ergebnis, lf.query_int(query, "limit", 10))
     return {
         "vorhanden": True,
         "erstellt_ts": gespeichert["erstellt_ts"],
         "veraltet": gespeichert["veraltet"],
         "adressen_seither": gespeichert["adressen_seither"],
-        "ergebnis": _fuer_oberflaeche(baum),
+        "ergebnis": ergebnis,
+    }
+
+
+def api_trace_knoten(state: AppState, query: dict) -> dict:
+    """
+    Kinder eines Knotens im gespeicherten Baum, seitenweise.
+
+    ``pfad``: Kindindizes ab der obersten Ebene (``"0.3"``; leer = oberste
+    Ebene), ``offset``/``limit`` wie bei den Listen. Jedes Kind kommt ohne
+    Unterbaum, mit ``pfad`` und ``kinder_count``.
+    """
+    from server import ApiError
+
+    from core import listen_fenster as lf
+    from core import trace_knoten
+
+    txid, vout = _ziel_aus_query(query)
+    teile = trace_knoten.pfad_teile(lf.query_text(query, "pfad"))
+    if teile is None:
+        raise ApiError(400, "Ungültiger Knotenpfad.")
+    gespeichert = _gespeicherter_baum(state, txid, vout, mit_veraltet=False)
+    if gespeichert is None:
+        return {"vorhanden": False}
+    kinder = trace_knoten.kinder_an(gespeichert["baum"], teile)
+    if kinder is None:
+        raise ApiError(404, "Knoten nicht im gespeicherten Baum.")
+    return {
+        "vorhanden": True,
+        "target": f"{txid}:{int(vout)}",
+        "pfad": ".".join(str(i) for i in teile),
+        **trace_knoten.seite(
+            kinder, teile,
+            lf.query_int(query, "offset", 0), lf.query_int(query, "limit", 10),
+        ),
     }
 
 

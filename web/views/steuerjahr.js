@@ -106,9 +106,19 @@ async function ladeSteuerjahr() {
   const abfrage =
     `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
     `&stichtag=${encodeURIComponent(stichtag)}`;
+  // Seitenweise (ISSUES P2): Summen, Kennzahlen und Zeitstrahl über alles,
+  // Zeilen nur im Fenster — die erste Anfrage bringt je Liste zwei Seiten.
+  const filter = steuerFilterParameter();
+  const p = new URLSearchParams(filter);
+  p.set("seite", "1");
+  p.set("limit", String(2 * pagerGroesse("steuerjahr")));
+  p.set("limit_abgaenge", String(2 * pagerGroesse("abgaenge")));
+  p.set("lang", uiSprache());
 
   try {
-    const daten = await api(`/tax${abfrage}`);
+    const daten = await api(`/tax${abfrage}&${p}`);
+    daten._abfrage = abfrage;
+    daten._q = filter.toString();
     Zustand.steuer = daten;
     zeichneSteuerjahr(daten);
   } catch (fehler) {
@@ -116,6 +126,56 @@ async function ladeSteuerjahr() {
     kasten.className = "hinweis hinweis-krit";
     setzeText(kasten, t("tax.hard.f8c6a72307", { msg: fehler.message }));
     kasten.hidden = false;
+  }
+}
+
+/** Kopf-Filter für die Steuerzeilen (nur in der Steuerjahr-Ansicht). */
+function steuerFilterParameter() {
+  if (Zustand.ansicht !== "steuerjahr" || typeof kopfFilterParameter !== "function") {
+    return new URLSearchParams();
+  }
+  return kopfFilterParameter();
+}
+
+function steuerSeitenParameter(teil, offset, limit, filter) {
+  const p = new URLSearchParams(filter || "");
+  p.set("seite", "1");
+  p.set("teil", teil);
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  p.set("limit_abgaenge", String(limit));
+  p.set("lang", uiSprache());
+  return p.toString();
+}
+
+/** Betrag mit Fiat nur bei einheitlichem Bewertungstag (Server: gemeinsam_ts). */
+function steuerSatsGemeinsam(sats, ts) {
+  return ts ? formatSats(sats, { atTs: ts }) : formatSatsBasis(sats);
+}
+
+/** Neuer Kopf-Filter: nur die Zeilenfenster neu holen, Rest bleibt stehen. */
+async function ladeSteuerSeitenNeu() {
+  const daten = Zustand.steuer;
+  if (!daten || !daten.seitenweise) return;
+  const filter = steuerFilterParameter();
+  const q = filter.toString();
+  const lauf = (Zustand.steuerZeilenLauf || 0) + 1;
+  Zustand.steuerZeilenLauf = lauf;
+  const p = new URLSearchParams(filter);
+  p.set("seite", "1");
+  p.set("teil", "zeilen");
+  p.set("limit", String(2 * pagerGroesse("steuerjahr")));
+  p.set("limit_abgaenge", String(2 * pagerGroesse("abgaenge")));
+  p.set("lang", uiSprache());
+  const neu = await api(`/tax${daten._abfrage}&${p}`);
+  if (lauf !== Zustand.steuerZeilenLauf || Zustand.steuer !== daten) return;
+  daten.steuer_gruppen = neu.steuer_gruppen;
+  daten.abgaenge_fenster = neu.abgaenge_fenster;
+  daten._q = q;
+  zeichneAbgaenge(daten);
+  zeichneSteuerUtxoGruppen(daten);
+  if (typeof wendeKopfFilterSteuerjahrAn === "function") {
+    wendeKopfFilterSteuerjahrAn(steuerKopfFilter());
   }
 }
 
@@ -150,20 +210,25 @@ function zeichneSteuerjahr(daten) {
   const erfuelltE = alleE.filter((e) => e.erfuellt);
   const offenE = alleE.filter((e) => !e.erfuellt);
   const ungeprueftE = alleE.filter((e) => !e.geprueft);
-  const fiatE = (sats, liste) => formatSatsGemeinsam(sats, liste);
+  // Seitenweise liegt nur ein Fenster vor: Der Server nennt den gemeinsamen
+  // Bewertungstag je Menge (sonst null → kein Fiat, wie bisher).
+  const kts = daten.seitenweise ? (daten.kennzahlen_ts || {}) : null;
+  const fiatE = (sats, liste, name) => (kts
+    ? steuerSatsGemeinsam(sats, kts[name])
+    : formatSatsGemeinsam(sats, liste));
 
   const kennzahlen = [
-    [t("tax.hard.ee18fac200"), fiatE(k.gesamt_sats, alleE), `${k.gesamt_count} UTXOs`, ""],
-    [t("tax.hard.91a2ea86bd"), fiatE(k.erfuellt_sats, erfuelltE),
+    [t("tax.hard.ee18fac200"), fiatE(k.gesamt_sats, alleE, "gesamt"), `${k.gesamt_count} UTXOs`, ""],
+    [t("tax.hard.91a2ea86bd"), fiatE(k.erfuellt_sats, erfuelltE, "erfuellt"),
      `${k.erfuellt_count} UTXOs`, "gut"],
-    [t("tax.hard.innerhalbHaltefrist"), fiatE(k.offen_sats, offenE),
+    [t("tax.hard.innerhalbHaltefrist"), fiatE(k.offen_sats, offenE, "offen"),
      k.naechste_frist ? t("tax.hard.ed098d09aa", { naechste_frist: k.naechste_frist }) : `${k.offen_count} UTXOs`,
      "warn",
      true], // separater „klären“ nur für gelbe UTXOs
   ];
   if (k.ungeprueft_count > 0) {
     kennzahlen.push([
-      "Ohne Herkunftsanalyse", fiatE(k.ungeprueft_sats, ungeprueftE),
+      "Ohne Herkunftsanalyse", fiatE(k.ungeprueft_sats, ungeprueftE, "ungeprueft"),
       `${k.ungeprueft_count} UTXOs — Frist evtl. länger`, "ungeprueft",
       true, // Aktion „klären“ nur für graue UTXOs
     ]);
@@ -393,16 +458,18 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
 /**
  * Klappbare Haltefrist-Gruppe in der UTXO-Tabelle.
  * Startet zugeklappt — lange Listen sonst erdrücken die Ansicht.
+ *
+ * *fenster* (seitenweise): Zeilen kommen seitenweise vom Server, Anzahl und
+ * Summe im Kopf gelten trotzdem für die ganze Gruppe.
  */
-function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten }) {
+function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten, fenster = null }) {
   const tbody = document.createElement("tbody");
   tbody.className = `steuer-gruppe${art ? ` ${art}` : ""}`;
 
-  const sats = eintraege.reduce(
-    (summe, e) => summe + (Number(e.value_sats) || 0),
-    0,
-  );
-  const anzahl = eintraege.length;
+  const sats = fenster
+    ? Number(fenster.voll_sats) || 0
+    : eintraege.reduce((summe, e) => summe + (Number(e.value_sats) || 0), 0);
+  const anzahl = fenster ? Number(fenster.voll_count) || 0 : eintraege.length;
   const anzahlText = anzahl === 1 ? "1 UTXO" : `${anzahl} UTXOs`;
 
   const kopfZeile = document.createElement("tr");
@@ -425,33 +492,101 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten }) {
 
   const meta = document.createElement("span");
   meta.className = "steuer-gruppe-meta zart";
-  meta.textContent = `${anzahlText} · ${formatSatsGemeinsam(sats, eintraege)}`;
+  meta.textContent = `${anzahlText} · ${fenster
+    ? steuerSatsGemeinsam(sats, fenster.gemeinsam_ts)
+    : formatSatsGemeinsam(sats, eintraege)}`;
   meta.dataset.voll = meta.textContent;
 
   kopf.append(klapp, name, meta);
   kopfZelle.append(kopf);
   kopfZeile.append(kopfZelle);
 
-  const datenZeilen = eintraege.map((eintrag) =>
-    zeichneSteuerUtxoZeile(eintrag, daten, { versteckt: true })
-  );
+  let datenZeilen = [];
+  let auf = false;
+  let pagerZeile = null;
 
-  const setzeGruppe = (auf) => {
+  const setzeGruppe = (neuAuf) => {
+    auf = neuAuf;
     for (const z of datenZeilen) {
       z.hidden = z.dataset.filterAus === "1" || !auf;
     }
+    if (pagerZeile) pagerZeile.hidden = !auf;
     klapp.textContent = auf ? "▾" : "▸";
     kopf.setAttribute("aria-expanded", String(auf));
   };
   tbody._setzeSteuerGruppe = setzeGruppe;
+
+  const setzeZeilen = (liste) => {
+    for (const z of datenZeilen) z.remove();
+    datenZeilen = liste.map((eintrag) =>
+      zeichneSteuerUtxoZeile(eintrag, daten, { versteckt: !auf })
+    );
+    if (pagerZeile) pagerZeile.before(...datenZeilen);
+    else tbody.append(...datenZeilen);
+  };
+
+  tbody.append(kopfZeile);
+  if (!fenster) {
+    setzeZeilen(eintraege);
+  } else {
+    tbody.dataset.seitenweise = "1";
+    pagerZeile = document.createElement("tr");
+    pagerZeile.className = "steuer-pager-zeile";
+    const pagerZelle = document.createElement("td");
+    pagerZelle.colSpan = 7;
+    pagerZeile.append(pagerZelle);
+    tbody.append(pagerZeile);
+    const teil = art;
+    const auszug = (antwort) => {
+      const f = (antwort.steuer_gruppen || {})[teil] || {};
+      return { items: f.items || [], total: Number(f.total) || 0, sats: Number(f.sats) || 0 };
+    };
+    const neueQuelle = (vorab) => neueSeitenQuelle({
+      groesse: pagerGroesse("steuerjahr"),
+      laden: (o, l) => api(`/tax${daten._abfrage}&${steuerSeitenParameter(teil, o, l, daten._q)}`),
+      auszug,
+      vorab,
+    });
+    let quelle = neueQuelle({ steuer_gruppen: { [teil]: fenster } });
+    const zeigeSeite = (seite, q) => {
+      setzeZeilen(seite.items);
+      tbody._fensterTreffer = { q: daten._q, total: seite.total, sats: auszug(seite.antwort).sats };
+      pagerZelle.replaceChildren(zeichnePager({
+        total: seite.total,
+        offset: seite.offset,
+        groesse: q.groesse,
+        ansicht: "steuerjahr",
+        onSeite: (o) => {
+          q.seite(o).then((s2) => { if (q === quelle) zeigeSeite(s2, q); }).catch(() => {});
+        },
+        onGroesse: () => {
+          quelle = neueQuelle(null);
+          const q2 = quelle;
+          q2.seite(0).then((s2) => { if (q2 === quelle) zeigeSeite(s2, q2); }).catch(() => {});
+        },
+      }));
+      setzeGruppe(auf);
+    };
+    // Erste Seite sofort aus der Gesamtantwort (kein Warten auf einen Tick).
+    const g = quelle.groesse;
+    zeigeSeite({
+      antwort: { steuer_gruppen: { [teil]: fenster } },
+      items: (fenster.items || []).slice(0, g),
+      total: Number(fenster.total) || 0,
+      offset: 0,
+    }, quelle);
+  }
   setzeGruppe(false);
 
   kopf.addEventListener("click", () => {
+    if (fenster) {
+      setzeGruppe(!auf);
+      return;
+    }
     const istZu = datenZeilen.every((z) => z.hidden);
     setzeGruppe(istZu);
   });
 
-  tbody.append(kopfZeile, ...datenZeilen);
   return tbody;
 }
 
@@ -465,8 +600,12 @@ function zeichneSteuerUtxoGruppen(daten) {
     alt.remove();
   }
 
+  const fenster = daten.seitenweise ? (daten.steuer_gruppen || {}) : null;
   const liste = daten.eintraege || [];
-  if (liste.length === 0) {
+  const leer = fenster
+    ? !(Number(fenster.erfuellt?.voll_count) || Number(fenster.offen?.voll_count))
+    : liste.length === 0;
+  if (leer) {
     const koerper = document.createElement("tbody");
     koerper.id = "steuer-koerper";
     const zeile = document.createElement("tr");
@@ -481,10 +620,19 @@ function zeichneSteuerUtxoGruppen(daten) {
     return;
   }
 
+  // Reihenfolge wie Scorecard: außerhalb (grün), dann innerhalb (gelb).
+  if (fenster) {
+    for (const [teil, titel] of [["erfuellt", "tax.haltefristOut"], ["offen", "tax.haltefristIn"]]) {
+      const f = fenster[teil];
+      if (!f || !Number(f.voll_count)) continue;
+      tabelle.append(zeichneSteuerUtxoGruppe(t(titel), [], { art: teil, daten, fenster: f }));
+    }
+    return;
+  }
+
   const erfuellt = liste.filter((e) => e.erfuellt);
   const offen = liste.filter((e) => !e.erfuellt);
 
-  // Reihenfolge wie Scorecard: außerhalb (grün), dann innerhalb (gelb).
   if (erfuellt.length) {
     tabelle.append(zeichneSteuerUtxoGruppe(
       t("tax.haltefristOut"),
@@ -965,7 +1113,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
  */
 function zeichneAbgaenge(daten) {
   const karte = $("#abgaenge-karte");
-  const abgaenge = daten.abgaenge || [];
+  const fenster = daten.seitenweise ? (daten.abgaenge_fenster || {}) : null;
+  const abgaenge = fenster ? (fenster.items || []) : (daten.abgaenge || []);
+  const anzahl = fenster ? Number(fenster.voll_count) || 0 : abgaenge.length;
 
   if (!daten.hat_verlauf) {
     karte.hidden = true;
@@ -976,13 +1126,15 @@ function zeichneAbgaenge(daten) {
   const k = daten.kennzahlen;
   setzeText(
     $("#abgaenge-zusatz"),
-    abgaenge.length === 0
+    anzahl === 0
       ? t("ui.hard.c2b3477341")
-      : `${abgaenge.length} · ${formatSatsGemeinsam(
-        k.abgang_sats,
-        abgaenge,
-        (a) => Number(a.abgang_time_ts || 0) || tsAusBewertungsObjekt(a),
-      )}` +
+      : `${anzahl} · ${fenster
+        ? steuerSatsGemeinsam(k.abgang_sats, fenster.gemeinsam_ts)
+        : formatSatsGemeinsam(
+          k.abgang_sats,
+          abgaenge,
+          (a) => Number(a.abgang_time_ts || 0) || tsAusBewertungsObjekt(a),
+        )}` +
         (k.abgang_steuerpflichtig_count
           ? ` · davon ${k.abgang_steuerpflichtig_count} innerhalb der Frist`
           : " · alle nach Ablauf der Frist")
@@ -992,78 +1144,122 @@ function zeichneAbgaenge(daten) {
 
   const liste = $("#abgaenge-liste");
   liste.replaceChildren();
-  if (abgaenge.length === 0) {
+  liste._fensterTreffer = null;
+  if (anzahl === 0) {
     liste.append(hinweisZeile(
       "In diesem Jahr wurde nichts ausgegeben."
     ));
     return;
   }
 
-  for (const abgang of abgaenge) {
-    const zeile = document.createElement("div");
-    zeile.className = "abgang-zeile";
-    const abKey = abgang.txid != null && abgang.vout != null
-      ? `${abgang.txid}:${abgang.vout}`
-      : (abgang.abgang_txid || abgang.txid || "");
-    if (abKey) zeile.dataset.key = abKey;
-    if (abgang.address) zeile.dataset.address = abgang.address;
-    if (abgang.value_sats != null) {
-      zeile.dataset.valueSats = String(abgang.value_sats);
-    }
-    zeile.dataset.timeLabel = [abgang.datum, abgang.abgang_datum]
-      .filter(Boolean).join(" ");
-    const abTs = Number(abgang.abgang_time_ts || abgang.time_ts || 0);
-    if (abTs > 0) zeile.dataset.eventTs = String(abTs);
-    zeile.dataset.filterLabels = [
-      abgang.wallet, abgang.abgang_txid, abgang.txid,
-      ...(abgang.exchange_spends || []).map((z) => z && z.name),
-      haltefristBeschriftung(
-        { erfuellt: abgang.frist_erfuellt, neuvermoegen: abgang.neuvermoegen },
-        Boolean(daten.stichtag_regel),
-      ),
-    ].filter(Boolean).join(" ");
-
-    const boerseAn = typeof formatAusgegebenAnBoerse === "function"
-      ? formatAusgegebenAnBoerse({ exchange_spends: abgang.exchange_spends })
-      : "";
-    const marke = pille(
-      abgang.frist_erfuellt ? "gut" : "krit",
-      haltefristBeschriftung(
-        { erfuellt: abgang.frist_erfuellt, neuvermoegen: abgang.neuvermoegen },
-        Boolean(daten.stichtag_regel),
-      )
-    );
-
-    const betrag = document.createElement("span");
-    betrag.className = "mono";
-    {
-      // Fiat am Abgangstag (Veräußerung), nicht Anschaffung.
-      const atTs = Number(abgang.abgang_time_ts || 0)
-        || tsAusBewertungsObjekt({ datum: abgang.abgang_datum });
-      if (atTs) betrag.textContent = formatSats(abgang.value_sats, { atTs });
-      else betrag.textContent = formatSatsBasis(abgang.value_sats);
-    }
-
-    const zeitraum = document.createElement("span");
-    zeitraum.className = "zart";
-    zeitraum.textContent =
-      `${abgang.datum} → ${abgang.abgang_datum} · ` +
-      `${formatHaltedauer(abgang.haltedauer_tage)} gehalten` +
-      (boerseAn ? ` · ${boerseAn}` : "");
-
-    const wer = document.createElement("span");
-    wer.className = "zart";
-    wer.textContent = abgang.wallet || "";
-
-    zeile.append(marke, betrag, zeitraum, wer);
-    // Abgangs-Tx (Spend) bevorzugen; sonst der UTXO-Erzeuger.
-    const extern = mempoolVerweis(
-      "tx",
-      abgang.abgang_txid || abgang.txid,
-    );
-    if (extern) zeile.append(extern);
-    liste.append(zeile);
+  if (!fenster) {
+    for (const abgang of abgaenge) liste.append(zeichneAbgangZeile(abgang, daten));
+    return;
   }
+
+  // Seitenweise: Zeilen im Fenster, Leiste darunter.
+  const auszug = (antwort) => {
+    const f = antwort.abgaenge_fenster || {};
+    return { items: f.items || [], total: Number(f.total) || 0, sats: Number(f.sats) || 0 };
+  };
+  const neueQuelle = (vorab) => neueSeitenQuelle({
+    groesse: pagerGroesse("abgaenge"),
+    laden: (o, l) => api(`/tax${daten._abfrage}&${steuerSeitenParameter("abgaenge", o, l, daten._q)}`),
+    auszug,
+    vorab,
+  });
+  let quelle = neueQuelle({ abgaenge_fenster: fenster });
+  const zeigeSeite = (seite, q) => {
+    liste.replaceChildren(...seite.items.map((a) => zeichneAbgangZeile(a, daten)));
+    liste._fensterTreffer = { q: daten._q, total: seite.total, sats: auszug(seite.antwort).sats };
+    liste.append(zeichnePager({
+      total: seite.total,
+      offset: seite.offset,
+      groesse: q.groesse,
+      ansicht: "abgaenge",
+      onSeite: (o) => {
+        q.seite(o).then((s2) => { if (q === quelle) zeigeSeite(s2, q); }).catch(() => {});
+      },
+      onGroesse: () => {
+        quelle = neueQuelle(null);
+        const q2 = quelle;
+        q2.seite(0).then((s2) => { if (q2 === quelle) zeigeSeite(s2, q2); }).catch(() => {});
+      },
+    }));
+  };
+  zeigeSeite({
+    antwort: { abgaenge_fenster: fenster },
+    items: abgaenge.slice(0, quelle.groesse),
+    total: Number(fenster.total) || 0,
+    offset: 0,
+  }, quelle);
+}
+
+/** Eine Zeile der Veräußerungen. */
+function zeichneAbgangZeile(abgang, daten) {
+  const zeile = document.createElement("div");
+  zeile.className = "abgang-zeile";
+  const abKey = abgang.txid != null && abgang.vout != null
+    ? `${abgang.txid}:${abgang.vout}`
+    : (abgang.abgang_txid || abgang.txid || "");
+  if (abKey) zeile.dataset.key = abKey;
+  if (abgang.address) zeile.dataset.address = abgang.address;
+  if (abgang.value_sats != null) {
+    zeile.dataset.valueSats = String(abgang.value_sats);
+  }
+  zeile.dataset.timeLabel = [abgang.datum, abgang.abgang_datum]
+    .filter(Boolean).join(" ");
+  const abTs = Number(abgang.abgang_time_ts || abgang.time_ts || 0);
+  if (abTs > 0) zeile.dataset.eventTs = String(abTs);
+  zeile.dataset.filterLabels = [
+    abgang.wallet, abgang.abgang_txid, abgang.txid,
+    ...(abgang.exchange_spends || []).map((z) => z && z.name),
+    haltefristBeschriftung(
+      { erfuellt: abgang.frist_erfuellt, neuvermoegen: abgang.neuvermoegen },
+      Boolean(daten.stichtag_regel),
+    ),
+  ].filter(Boolean).join(" ");
+
+  const boerseAn = typeof formatAusgegebenAnBoerse === "function"
+    ? formatAusgegebenAnBoerse({ exchange_spends: abgang.exchange_spends })
+    : "";
+  const marke = pille(
+    abgang.frist_erfuellt ? "gut" : "krit",
+    haltefristBeschriftung(
+      { erfuellt: abgang.frist_erfuellt, neuvermoegen: abgang.neuvermoegen },
+      Boolean(daten.stichtag_regel),
+    )
+  );
+
+  const betrag = document.createElement("span");
+  betrag.className = "mono";
+  {
+    // Fiat am Abgangstag (Veräußerung), nicht Anschaffung.
+    const atTs = Number(abgang.abgang_time_ts || 0)
+      || tsAusBewertungsObjekt({ datum: abgang.abgang_datum });
+    if (atTs) betrag.textContent = formatSats(abgang.value_sats, { atTs });
+    else betrag.textContent = formatSatsBasis(abgang.value_sats);
+  }
+
+  const zeitraum = document.createElement("span");
+  zeitraum.className = "zart";
+  zeitraum.textContent =
+    `${abgang.datum} → ${abgang.abgang_datum} · ` +
+    `${formatHaltedauer(abgang.haltedauer_tage)} gehalten` +
+    (boerseAn ? ` · ${boerseAn}` : "");
+
+  const wer = document.createElement("span");
+  wer.className = "zart";
+  wer.textContent = abgang.wallet || "";
+
+  zeile.append(marke, betrag, zeitraum, wer);
+  // Abgangs-Tx (Spend) bevorzugen; sonst der UTXO-Erzeuger.
+  const extern = mempoolVerweis(
+    "tx",
+    abgang.abgang_txid || abgang.txid,
+  );
+  if (extern) zeile.append(extern);
+  return zeile;
 }
 
 /** Aktueller GUI-Farbmodus für HTML-Berichte (data-theme / UI_THEME). */

@@ -1188,6 +1188,8 @@
   "wallet.scanCancelTitle": "Bricht nur den laufenden Scan ab. Angestellte Scans laufen danach weiter.",
   "wallet.scanRunning": "Neu scannen läuft…",
   "wallet.show": "Anzeigen",
+  "pager.perPage": "je Seite",
+  "pager.pageTitle": "Einträge {von}–{bis} von {total}",
   "wallet.sort": "Sortierung",
   "wallet.sortAmount": "größte zuerst",
   "wallet.sortDate": "neueste zuerst",

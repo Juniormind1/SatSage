@@ -1114,6 +1114,7 @@ async function speichereMempool() {
     zeichneMempoolStatus();
     zeichneKopfStatus(Zustand.config?.quellen || []);
     Zustand.traceListe = null;
+    pagerCachesVerwerfen();
     verwerfeGezeichneteVerweise();
     meldung(t("sources.explorerSaved"), "gut");
   } catch (fehler) {

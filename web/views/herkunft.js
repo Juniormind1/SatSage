@@ -25,7 +25,7 @@ const PUNKT_KLASSE = {
  *
  * *erzwingen*: auch im Fokus-Modus die volle Liste (Nav „Herkunft tracen“).
  */
-async function ladeTraceListe({ erzwingen = false } = {}) {
+async function ladeTraceListe({ erzwingen = false, still = false } = {}) {
   if (Zustand.traceFokus && !erzwingen) {
     await zeichneTraceFokusAnsicht(Zustand.traceFokus);
     return;
@@ -34,16 +34,119 @@ async function ladeTraceListe({ erzwingen = false } = {}) {
   setzeTraceFokusUi(false);
   const liste = $("#trace-liste");
   // /api/utxos ist Cache — Quellen-Hinweis gehört nur in die Scan-Leiste.
-  liste.replaceChildren(hinweisZeile(t("common.loadingFromCache")));
+  // still: Filter/Sortierung — alte Seite stehen lassen, bis die neue da ist.
+  if (!still) liste.replaceChildren(hinweisZeile(t("common.loadingFromCache")));
 
   try {
-    // mempool=0: Herkunftsliste braucht keinen Electrs-Rundlauf über alle Wallets.
-    const daten = await api("/utxos?mempool=0");
-    Zustand.traceListe = daten;
-    zeichneTraceListe(daten);
+    // Seitenweise (ISSUES P2): nur die gezeigte Seite kommt angereichert.
+    const quelle = traceSeitenQuelle("bestand");
+    Zustand.traceQuelle = quelle;
+    const seite = await quelle.seite(0);
+    if (Zustand.traceQuelle !== quelle) return;
+    zeichneTraceListe(seite.antwort, seite);
   } catch (fehler) {
     liste.replaceChildren(hinweisZeile(t("common.couldNotLoad", { msg: fehler.message })));
   }
+}
+
+/** Filter oder Seitengröße geändert: Liste neu vom Server (Seite 1). */
+function ladeTraceSeitenNeu() {
+  if (Zustand.ansicht !== "trace" || Zustand.traceFokus) return;
+  ladeTraceListe({ still: true });
+}
+
+/**
+ * Anfrage-Parameter der Herkunftsliste: Sortiermodus, Seite, Kopf-Filter.
+ * mempool=0: Herkunftsliste braucht keinen Electrs-Rundlauf über alle Wallets.
+ */
+function traceListenParameter(teil, offset, limit, filter = "") {
+  const p = new URLSearchParams(filter);
+  p.set("mempool", "0");
+  p.set("seite", "1");
+  p.set("teil", teil);
+  p.set("modus", Zustand.traceSort || "volume-desc");
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  p.set("lang", uiSprache());
+  return p.toString();
+}
+
+/** Seitenquelle für Bestand bzw. „Bereits ausgegeben“ (``teil``). */
+function traceSeitenQuelle(teil) {
+  // Filter beim Anlegen festhalten — Vorladen gehört zu genau diesem Filter.
+  const filter = kopfFilterParameter().toString();
+  const quelle = neueSeitenQuelle({
+    groesse: pagerGroesse(teil === "verlauf" ? "ausgegeben" : "trace"),
+    laden: (o, l) => api(`/utxos?${traceListenParameter(teil, o, l, filter)}`),
+    auszug: teil === "verlauf" ? verlaufSeitenAuszug : bestandSeitenAuszug,
+  });
+  quelle.q = filter;
+  return quelle;
+}
+
+function bestandSeitenAuszug(antwort) {
+  const f = (antwort && antwort.fenster) || {};
+  return {
+    art: f.art || "gruppen",
+    items: (f.art === "utxos" ? antwort.utxos : antwort.addresses) || [],
+    total: Number(f.total) || 0,
+  };
+}
+
+function verlaufSeitenAuszug(antwort) {
+  return bestandSeitenAuszug((antwort && antwort.verlauf) || {});
+}
+
+/** Seiteneinträge zeichnen: Adressgruppen (Volumen) oder flache UTXOs (Alter). */
+function fuelleTraceSeite(behaelter, seite) {
+  if (seite.art === "utxos") {
+    for (const utxo of seite.items) {
+      const block = zeichneTraceWurzel(utxo);
+      if (utxo.address) block.dataset.address = utxo.address;
+      behaelter.append(block);
+    }
+    return;
+  }
+  for (const gruppe of seite.items) {
+    behaelter.append(zeichneTraceAdressGruppe(gruppe));
+  }
+}
+
+/** Gruppen der Seite für findeTraceUtxo/gruppeAusTraceListe. */
+function seitenGruppen(seite) {
+  if (seite.art !== "utxos") return seite.items;
+  return seite.items.map((u) => ({ address: u.address, utxos: [u] }));
+}
+
+/** Bestand: andere Seite zeigen, „Bereits ausgegeben“ bleibt stehen. */
+async function zeigeTraceSeite(offset) {
+  const quelle = Zustand.traceQuelle;
+  if (!quelle) return;
+  const seite = await quelle.seite(offset);
+  if (Zustand.traceQuelle !== quelle) return;
+  const liste = $("#trace-liste");
+  for (const el of liste.querySelectorAll(
+    ":scope > .adress-gruppe, :scope > .utxo-wurzel, :scope > .pager",
+  )) {
+    el.remove();
+  }
+  const teil = document.createDocumentFragment();
+  fuelleTraceSeite(teil, seite);
+  teil.append(traceBestandPager(seite));
+  liste.insertBefore(teil, liste.querySelector(":scope > .ausgegeben-block"));
+  if (Zustand.traceListe) Zustand.traceListe.addresses = seitenGruppen(seite);
+  wendeKopfFilterAn();
+}
+
+function traceBestandPager(seite) {
+  return zeichnePager({
+    total: seite.total,
+    offset: seite.offset,
+    groesse: Zustand.traceQuelle ? Zustand.traceQuelle.groesse : pagerGroesse("trace"),
+    ansicht: "trace",
+    onSeite: (o) => zeigeTraceSeite(o).catch(() => {}),
+    onGroesse: () => ladeTraceSeitenNeu(),
+  });
 }
 
 function setzeTraceFokusUi(an) {
@@ -162,13 +265,20 @@ if (!Zustand.traceSort) {
   Zustand.traceSort = "volume-desc";
 }
 
-function zeichneTraceListe(daten) {
+function zeichneTraceListe(daten, seite) {
   const liste = $("#trace-liste");
+  const warOffen = Boolean(
+    liste.querySelector(":scope > .ausgegeben-block .ausgegeben-inhalt:not([hidden])"),
+  );
   liste.replaceChildren();
 
+  // Fiat nur bei einheitlichem Datum aller UTXOs — die kennt nur eine Seite,
+  // die alles enthält.
   const traceUtxos = [];
-  for (const g of daten.addresses || []) {
-    for (const u of g.utxos || []) traceUtxos.push(u);
+  if (seite.items.length >= seite.total) {
+    for (const g of seitenGruppen(seite)) {
+      for (const u of g.utxos || []) traceUtxos.push(u);
+    }
   }
   const teile = [
     `${daten.total_count} UTXO`,
@@ -188,9 +298,8 @@ function zeichneTraceListe(daten) {
       sel.dataset.gebunden = "1";
       sel.addEventListener("change", () => {
         Zustand.traceSort = sel.value;
-        if (Zustand.traceLastData) {
-          zeichneTraceListe(Zustand.traceLastData);
-        }
+        // Sortierung wechselt die Seitenfolge: vom Server neu (Seite 1).
+        ladeTraceSeitenNeu();
       });
     }
   } else if (!sortWrap) {
@@ -210,15 +319,16 @@ function zeichneTraceListe(daten) {
     neu.dataset.gebunden = "1";
     neu.addEventListener("change", () => {
       Zustand.traceSort = neu.value;
-      if (Zustand.traceLastData) zeichneTraceListe(Zustand.traceLastData);
+      ladeTraceSeitenNeu();
     });
     wrap.appendChild(neu);
     const kopf = document.querySelector("#ansicht-trace .karte-kopf");
     if (kopf) kopf.appendChild(wrap);
   }
 
-  // Daten für spätere Sortier-Wechsel merken
+  // Seite merken (Filter, findeTraceUtxo); Verlauf kommt beim Aufklappen.
   Zustand.traceLastData = daten;
+  Zustand.traceListe = { ...daten, addresses: seitenGruppen(seite) };
 
   if (daten.total_count === 0 && !daten.hat_verlauf) {
     liste.append(hinweisZeile(
@@ -229,10 +339,21 @@ function zeichneTraceListe(daten) {
     return;
   }
 
-  const sortMode = Zustand.traceSort || "volume-desc";
-  fuelleTraceSortiert(liste, daten.addresses || [], sortMode);
+  fuelleTraceSeite(liste, seite);
+  liste.append(traceBestandPager(seite));
 
-  liste.append(zeichneAusgegeben(daten));
+  liste.append(zeichneAusgegeben(daten, {
+    quelle: () => traceSeitenQuelle("verlauf"),
+    offen: warOffen,
+    merke: (s) => {
+      if (Zustand.traceListe) {
+        Zustand.traceListe.verlauf = {
+          ...(Zustand.traceListe.verlauf || {}),
+          addresses: seitenGruppen(s),
+        };
+      }
+    },
+  }));
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
 }
@@ -304,7 +425,7 @@ function fuelleTraceSortiert(behaelter, addresses, sortMode) {
  * schnell hunderte Vorgänge sind; öffnet man ihn, verhalten sich Gruppen und
  * Bäume darin wie beim aktuellen Bestand.
  */
-function zeichneAusgegeben(daten) {
+function zeichneAusgegeben(daten, seitenweise = null) {
   const block = document.createElement("div");
   block.className = "ausgegeben-block";
 
@@ -350,7 +471,7 @@ function zeichneAusgegeben(daten) {
     (pendingN > 0
       ? ` · ${t("wallet.spentPendingCount", { n: pendingN })}`
       : "") +
-    (verlauf.shown_count < verlauf.total_count
+    (!seitenweise && verlauf.shown_count < verlauf.total_count
       ? ` · ${t("wallet.spentShown", { n: verlauf.shown_count })}`
       : "");
 
@@ -360,8 +481,53 @@ function zeichneAusgegeben(daten) {
   inhalt.className = "ausgegeben-inhalt";
   inhalt.hidden = true;
 
+  // Seitenweise: erst beim Aufklappen die erste Seite vom Server holen.
+  let quelle = null;
+  const zeigeSeite = async (offset) => {
+    if (!quelle) quelle = seitenweise.quelle();
+    const q = quelle;
+    const seite = await q.seite(offset);
+    if (q !== quelle) return;
+    inhalt.replaceChildren();
+    fuelleTraceSeite(inhalt, seite);
+    inhalt.append(zeichnePager({
+      total: seite.total,
+      offset: seite.offset,
+      groesse: q.groesse,
+      ansicht: "ausgegeben",
+      onSeite: (o) => zeigeSeite(o).catch(() => {}),
+      onGroesse: () => {
+        quelle = null;
+        zeigeSeite(0).catch(() => {});
+      },
+    }));
+    if (typeof seitenweise.merke === "function") seitenweise.merke(seite);
+    if (kopfFilterAnsichtAktiv(Zustand.ansicht)) wendeKopfFilterAn();
+  };
+  const oeffne = () => {
+    setzeKlapp(kopf, klapp, inhalt, true);
+    if (inhalt.dataset.gezeichnet) return;
+    inhalt.dataset.gezeichnet = "ja";
+    inhalt.replaceChildren(hinweisZeile(t("common.loadingFromCache")));
+    Promise.resolve(ladeKursSerie())
+      .finally(() => zeigeSeite(0).catch((fehler) => {
+        inhalt.replaceChildren(hinweisZeile(
+          t("common.couldNotLoad", { msg: fehler.message }),
+        ));
+      }));
+  };
+  if (seitenweise) {
+    // Für den Kopf-Filter: Treffer sollen sichtbar werden.
+    block.oeffneAusgegeben = oeffne;
+  }
+
   kopf.addEventListener("click", () => {
     const auf = inhalt.hidden;
+    if (seitenweise) {
+      if (auf) oeffne();
+      else setzeKlapp(kopf, klapp, inhalt, false);
+      return;
+    }
     setzeKlapp(kopf, klapp, inhalt, auf);
     // Erst beim Aufklappen zeichnen: Bei hunderten Vorgängen kostet das
     // sonst bei jedem Öffnen der Ansicht Zeit, die niemand angefordert hat.
@@ -381,6 +547,7 @@ function zeichneAusgegeben(daten) {
   });
 
   block.append(kopf, inhalt);
+  if (seitenweise && seitenweise.offen) oeffne();
   return block;
 }
 
@@ -680,9 +847,13 @@ async function ladeGespeichertenZweig(utxo, zweig, klapp, ausJob = null) {
   zweig.replaceChildren(hinweisZeile(t("common.looking")));
   try {
     const ziel = (ausJob && ausJob.target) || utxo.key;
-    const gespeichert = await api(`/trace?target=${encodeURIComponent(ziel)}`);
+    // Seitenweise (ISSUES P2): Wurzel + erste Kinderseite, tiefer beim Aufklappen.
+    const gespeichert = await api(
+      `/trace?target=${encodeURIComponent(ziel)}&seite=1&limit=${2 * pagerGroesse("baum")}`,
+    );
     if (gespeichert && gespeichert.vorhanden && gespeichert.ergebnis) {
       if (ausJob && ausJob.source) gespeichert.ergebnis.source = ausJob.source;
+      if (gespeichert.ergebnis.seitenweise) gespeichert.ergebnis._ziel = ziel;
       zweig.dataset.geladen = "ja";
       try {
         zeichneZweig(gespeichert.ergebnis, zweig, utxo, klapp);
@@ -1119,6 +1290,7 @@ function gebeAnderenBaumFrei(zweig) {
   alt.replaceChildren();
   alt.dataset.geladen = "";
   delete alt.dataset.teilbaum;
+  delete alt.dataset.baumZiel;
   const kopf = alt.closest(".utxo-wurzel")?.querySelector(".utxo-kopf");
   setzeKlapp(kopf, kopf && kopf.querySelector(".klapp"), alt, false);
 }
@@ -1140,7 +1312,10 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
     tx_class: (ergebnis.root || ergebnis || {}).tx_class || ergebnis.tx_class,
   });
 
-  if (ergebnis.children.length === 0) {
+  const kinderAnzahl = ergebnis.seitenweise
+    ? Number(ergebnis.children_total) || 0
+    : ergebnis.children.length;
+  if (kinderAnzahl === 0) {
     // Leere Kinder sind kein Trace-Ergebnis: entweder CJ-Soft-Label ohne
     // eigene Vorgänger, oder unvollständiger Lauf (Prevout fehlte). Nie
     // „Keine Zuflüsse“ so tun, als wäre extern/Coinbase erreicht.
@@ -1155,7 +1330,21 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
     return;
   }
 
-  zweig.append(zeichneKnotenListe(ergebnis.children, utxo ? (utxo.wallet || "") : undefined));
+  const wurzelWallet = utxo ? (utxo.wallet || "") : undefined;
+  if (ergebnis.seitenweise && ergebnis._ziel) {
+    zweig.dataset.baumZiel = ergebnis._ziel;
+    const ebene = document.createElement("div");
+    ebene.className = "baum-ebene";
+    ebene._elternWallet = wurzelWallet;
+    zweig.append(ebene);
+    zeichneBaumSeiten(ebene, ergebnis._ziel, "", {
+      elternWallet: wurzelWallet,
+      vorab: { items: ergebnis.children, total: kinderAnzahl },
+    });
+  } else {
+    delete zweig.dataset.baumZiel;
+    zweig.append(zeichneKnotenListe(ergebnis.children, wurzelWallet));
+  }
   zeichneFolgeBand(ergebnis, zweig, utxo, klapp);
 
   const vorbehalt = vorbehaltText(ergebnis.summary);
@@ -1417,11 +1606,19 @@ function expandiereKnotenBlock(block) {
   if (!kinder.dataset.gezeichnet) {
     kinder.dataset.gezeichnet = "ja";
     kinder.replaceChildren();
-    kinder.append(zeichneKnotenListe(
-      knoten.children || [],
-      knoten.type === "internal" ? (knoten.wallet || "") : undefined,
-      knoten,
-    ));
+    const elternWallet = knoten.type === "internal" ? (knoten.wallet || "") : undefined;
+    const ziel = !Array.isArray(knoten.children) && knoten.pfad != null
+      ? block.closest(".utxo-zweig")?.dataset.baumZiel
+      : "";
+    if (ziel) {
+      // Seitenweise: Kinder dieses Knotens erst jetzt vom Server.
+      zeichneBaumSeiten(kinder, ziel, knoten.pfad, {
+        elternWallet,
+        elternKnoten: knoten,
+      });
+    } else {
+      kinder.append(zeichneKnotenListe(knoten.children || [], elternWallet, knoten));
+    }
   }
   kinder.hidden = false;
   if (klapp && !klapp.classList.contains("leer")) klapp.textContent = "▾";
@@ -1447,8 +1644,25 @@ function toggleKnotenBlock(block) {
 }
 
 /** Gesamten Herkunftszweig unter *zweig* (.utxo-zweig) aufklappen. */
-function expandiereBaumAlles(zweig) {
+async function expandiereBaumAlles(zweig) {
   if (!zweig) return;
+  // Seitenweise geladen: „Alles aufklappen“ holt den Baum einmal ganz (ein
+  // Abruf statt einer Anfrage je Knoten) und zeichnet wie bisher. Es bleibt
+  // derselbe eine Baum im Browser.
+  const ziel = zweig.dataset.baumZiel;
+  if (ziel) {
+    try {
+      const g = await api(`/trace?target=${encodeURIComponent(ziel)}`);
+      const voll = g && g.vorhanden && g.ergebnis;
+      const ebene = zweig.querySelector(":scope > .baum-ebene");
+      if (voll && Array.isArray(voll.children) && ebene && zweig.dataset.baumZiel === ziel) {
+        delete zweig.dataset.baumZiel;
+        ebene.replaceChildren(zeichneKnotenListe(voll.children, ebene._elternWallet));
+      }
+    } catch (_) {
+      return;
+    }
+  }
   // Iterativ: nach jedem Zeichnen neue Blöcke, bis nichts mehr zu öffnen ist.
   let guard = 0;
   let fort = true;
@@ -1464,6 +1678,46 @@ function expandiereBaumAlles(zweig) {
       }
     }
   }
+}
+
+/**
+ * Kinder eines Knotens (oder die oberste Ebene, *pfad* leer) seitenweise
+ * aus dem gespeicherten Baum. *vorab*: schon mitgelieferte erste Seiten.
+ */
+function zeichneBaumSeiten(behaelter, ziel, pfad, { elternWallet, elternKnoten, vorab = null }) {
+  const neueQuelle = (erste) => neueSeitenQuelle({
+    groesse: pagerGroesse("baum"),
+    laden: (o, l) => api(
+      `/trace/knoten?target=${encodeURIComponent(ziel)}` +
+      `&pfad=${encodeURIComponent(pfad || "")}&offset=${o}&limit=${l}`,
+    ),
+    auszug: (a) => ({ items: a.items || [], total: Number(a.total) || 0 }),
+    vorab: erste,
+  });
+  let quelle = neueQuelle(vorab);
+  const zeige = async (offset) => {
+    const q = quelle;
+    const seite = await q.seite(offset);
+    if (q !== quelle) return;
+    behaelter.replaceChildren(zeichneKnotenListe(seite.items, elternWallet, elternKnoten));
+    behaelter.append(zeichnePager({
+      total: seite.total,
+      offset: seite.offset,
+      groesse: q.groesse,
+      ansicht: "baum",
+      onSeite: (o) => { zeige(o).catch(() => {}); },
+      onGroesse: () => {
+        quelle = neueQuelle(null);
+        zeige(0).catch(() => {});
+      },
+    }));
+  };
+  if (!vorab) behaelter.replaceChildren(hinweisZeile(t("common.looking")));
+  return zeige(0).catch((fehler) => {
+    behaelter.replaceChildren(hinweisZeile(
+      t("common.couldNotLoad", { msg: fehler.message }),
+    ));
+  });
 }
 
 function klappeBaumAlles(zweig) {
@@ -1994,19 +2248,22 @@ async function herkunftGelbUtxos() {
     return;
   }
   let daten = Zustand.steuer;
-  if (!daten || !Array.isArray(daten.eintraege)) {
+  if (!daten || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.gelb_keys))) {
     const jahr = $("#jahr-wahl")?.value || "";
     const frist = $("#frist-wahl")?.value || "";
     const stichtag = steuerEinstellungen().stichtag || "";
     const abfrage =
       `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
       `&stichtag=${encodeURIComponent(stichtag)}`;
-    daten = await api(`/tax${abfrage}`);
+    daten = await api(`/tax${abfrage}&seite=1&limit=0`);
   }
+  // Seitenweise nennt der Server alle gelben Schlüssel (nicht nur die Seite).
   const liste = daten.eintraege || [];
-  const keys = liste
-    .filter((e) => e.geprueft && !e.erfuellt)
-    .map((e) => `${e.txid}:${e.vout}`);
+  const keys = Array.isArray(daten.gelb_keys)
+    ? daten.gelb_keys
+    : liste
+      .filter((e) => e.geprueft && !e.erfuellt)
+      .map((e) => `${e.txid}:${e.vout}`);
   if (!keys.length) {
     const k = $("#steuer-meldung");
     k.className = "hinweis hinweis-warn";

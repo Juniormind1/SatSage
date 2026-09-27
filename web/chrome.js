@@ -500,8 +500,11 @@ async function start() {
     });
   }
 
-  $("#limit-wahl").addEventListener("change", () => zeigeWallet(Zustand.walletId));
-  $("#sort-wahl").addEventListener("change", () => zeigeWallet(Zustand.walletId));
+  $("#sort-wahl").addEventListener("change", () => {
+    // Andere Reihenfolge: vorgeladene Seiten gehören zur alten (ISSUES P2).
+    if (typeof pagerCachesVerwerfen === "function") pagerCachesVerwerfen();
+    zeigeWallet(Zustand.walletId);
+  });
   $("#tip-sync-knopf")?.addEventListener("click", starteTipSync);
   $("#rescan-knopf").addEventListener("click", starteRescan);
   $("#verlauf-knopf").addEventListener("click", starteVerlaufsscan);

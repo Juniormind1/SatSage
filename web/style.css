@@ -979,6 +979,14 @@ html[data-theme="dark"] .utxo-aktionen-praefix {
 }
 .knopf-primaer:hover:not(:disabled) { color: var(--auf-akzent); filter: brightness(1.08); }
 .knopf-klein { padding: 3px 8px; font-size: 10px; }
+/* Seitenleiste langer Listen (views/pager.js) */
+.pager {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 6px 12px; margin: 8px 0 4px;
+}
+.pager-seiten { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pager-seite.aktiv { font-weight: 600; border-color: var(--fg, currentColor); }
+.pager-luecke { padding: 0 2px; }
 .knopf-gefahr {
   background: var(--krit); border-color: var(--krit); color: #fff;
   font-weight: 600;
@@ -1760,6 +1768,9 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
   border-left: none;
 }
 /* Wallet-Wechsel oder Extern/Coinbase unter internem Segment → eine Stufe. */
+/* Seitenweise oberste Baumebene: Hülle ohne eigene Box. */
+.baum-ebene { display: contents; }
+
 .baum-kinder.flach > .baum-knoten-block.knoten-austritt {
   margin-left: 6px;
   padding-left: 14px;

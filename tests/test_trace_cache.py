@@ -11,6 +11,7 @@ bekannt sind. Kommt ein XPUB dazu oder reicht ein Scan tiefer, kann aus einem
 externen Zufluss ein interner werden. Der gespeicherte Baum wird deshalb mit
 einem Fingerabdruck der Adressmenge abgelegt und beim Laden dagegen geprüft.
 """
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,6 +89,90 @@ class TestRundlauf(TraceCacheBasis):
         self.assertIsNone(
             trace_cache.speichern(txid("a1"), 0, BAUM, None, EIGENE)
         )
+
+
+class TestKnotenTabelle(TraceCacheBasis):
+    """ISSUES P2 Schritt 6: Rauten stehen nur einmal in der Datei (DAG)."""
+
+    @staticmethod
+    def _raute():
+        # Derselbe Vorgänger über zwei Wege: gleicher Teilbaum, andere ids.
+        def vorfahr(pfad, tiefe):
+            return {
+                "id": pfad, "type": "internal", "depth": tiefe,
+                "txid": txid("c3"), "vout": 1, "amount_sats": 5,
+                "children": [{
+                    "id": pfad + ".0", "type": "external", "depth": tiefe + 1,
+                    "address": EXTERN_A, "amount_sats": 5,
+                }],
+            }
+        weg = lambda i: {
+            "id": f"0.{i}", "type": "internal", "depth": 1,
+            "txid": txid(f"d{i}"), "vout": 0, "amount_sats": 5,
+            "children": [vorfahr(f"0.{i}.0", 2)],
+        }
+        return {
+            "found": True,
+            "root": {"id": 0, "txid": txid("a1"), "vout": 0},
+            "children": [weg(0), weg(1)],
+            "summary": {"external_sats": 10},
+            "origin_tree": {"sources": [
+                {"trace": {"txid": txid("c3"), "vout": 1, "sources": []}},
+                {"trace": {"txid": txid("c3"), "vout": 1, "sources": []}},
+            ]},
+        }
+
+    def test_neues_format_rundlauf_exakt(self):
+        baum = self._raute()
+        trace_cache.speichern(txid("a1"), 0, baum, self.dir, EIGENE)
+        roh = json.loads(trace_cache.pfad(txid("a1"), 0, self.dir).read_text())
+        self.assertEqual(roh["version"], trace_cache.VERSION_KNOTEN)
+        self.assertIn("knoten", roh)
+        geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        self.assertEqual(geladen["baum"], baum)
+        # Jede Stelle ist ein eigenes Objekt (keine geteilten Mutationen).
+        k = geladen["baum"]["children"]
+        self.assertIsNot(k[0]["children"][0], k[1]["children"][0])
+
+    def test_raute_steht_einmal_in_der_datei(self):
+        trace_cache.speichern(txid("a1"), 0, self._raute(), self.dir, EIGENE)
+        text = trace_cache.pfad(txid("a1"), 0, self.dir).read_text()
+        # Ohne Tabelle 4× (zwei Wege × Anzeige-/Rohbaum), jetzt je Form 1×.
+        self.assertEqual(json.dumps(self._raute()).count(txid("c3")), 4)
+        self.assertEqual(text.count(txid("c3")), 2)
+        self.assertNotIn('"0.1.0"', text)
+
+    def test_alte_dateien_bleiben_lesbar(self):
+        ziel = trace_cache.pfad(txid("a1"), 0, self.dir)
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        ziel.write_text(json.dumps({
+            "version": 1, "txid": txid("a1"), "vout": 0, "erstellt_ts": 5,
+            "adressen_fingerprint": "", "adressen_anzahl": 0,
+            "baum": self._raute(),
+        }))
+        geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        self.assertEqual(geladen["baum"], self._raute())
+        self.assertEqual(geladen["erstellt_ts"], 5)
+
+    def test_ungewoehnliche_ids_bleiben_erhalten(self):
+        """Nicht ableitbare id/depth werden gespeichert statt geraten."""
+        baum = self._raute()
+        baum["children"][1]["id"] = "x"
+        del baum["children"][0]["depth"]
+        trace_cache.speichern(txid("a1"), 0, baum, self.dir, EIGENE)
+        geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        self.assertEqual(geladen["baum"], baum)
+        roh = json.loads(trace_cache.pfad(txid("a1"), 0, self.dir).read_text())
+        # Fehlendes depth ist nicht rekonstruierbar → altes Format.
+        self.assertEqual(roh["version"], trace_cache.VERSION)
+
+    def test_kaputte_tabelle_fuehrt_zu_none(self):
+        trace_cache.speichern(txid("a1"), 0, self._raute(), self.dir, EIGENE)
+        ziel = trace_cache.pfad(txid("a1"), 0, self.dir)
+        roh = json.loads(ziel.read_text())
+        roh["knoten"] = roh["knoten"][:1]
+        ziel.write_text(json.dumps(roh))
+        self.assertIsNone(trace_cache.laden(txid("a1"), 0, self.dir, EIGENE))
 
 
 class TestVollstaendigkeit(TraceCacheBasis):

@@ -675,14 +675,16 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   $("#adress-liste").hidden = true;
   $("#wallet-leer").hidden = true;
 
-  const limit = $("#limit-wahl").value;
-  const sort = $("#sort-wahl")?.value || "betrag";
-  const basis =
-    `/wallets/${walletId}/utxos?limit=${limit}&sort=${encodeURIComponent(sort)}`;
+  // Seitenweise (ISSUES P2): Adressgruppen kommen seitenweise vom Server,
+  // gefiltert über alle Seiten; die Seitengröße ersetzt „Top 10/25/Alle“.
+  const quelle = walletSeitenQuelle(walletId, "bestand");
+  Zustand.walletQuelle = quelle;
   try {
-    const daten = await api(`${basis}&mempool=0`);
+    const daten = await api(
+      `/wallets/${walletId}/utxos?${walletListenParameter("bestand", 0, quelle.groesse, quelle.q)}&mempool=0`,
+    );
     if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
-    zeichneUtxos(daten, wallet);
+    zeichneUtxos(daten, wallet, { ...bestandSeitenAuszug(daten), offset: 0 });
   } catch (fehler) {
     if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeigeLeer(t("wallet.loadFailed", { msg: fehler.message }), "");
@@ -691,13 +693,81 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   aktualisiereScanAnzeige();
 
   // Pending über eigenen Electrs — blockiert den Erst-Paint nicht.
-  api(basis)
-    .then((frisch) => {
+  quelle.seite(0)
+    .then((seite) => {
       if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
-      zeichneUtxos(frisch, wallet);
+      if (Zustand.walletQuelle !== quelle) return;
+      zeichneUtxos(seite.antwort, wallet, seite);
       aktualisiereScanAnzeige();
     })
     .catch(() => {});
+}
+
+/** Anfrage-Parameter der Wallet-Liste (Seite, Sortierung, Kopf-Filter). */
+function walletListenParameter(teil, offset, limit, filter = "") {
+  const p = new URLSearchParams(filter);
+  p.set("seite", "1");
+  p.set("teil", teil);
+  // Ausgegeben: dieselbe Darstellung wie in der Herkunft (Volumen/Alter).
+  p.set("modus", teil === "verlauf" ? (Zustand.traceSort || "volume-desc") : "gruppen");
+  p.set("sort", $("#sort-wahl")?.value || "betrag");
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  p.set("lang", uiSprache());
+  return p.toString();
+}
+
+/** Seitenquelle der Wallet-Ansicht; Pending über den eigenen Electrs. */
+function walletSeitenQuelle(walletId, teil) {
+  const filter = kopfFilterParameter().toString();
+  const quelle = neueSeitenQuelle({
+    groesse: pagerGroesse(teil === "verlauf" ? "ausgegeben" : "wallet"),
+    laden: (o, l) => api(
+      `/wallets/${walletId}/utxos?${walletListenParameter(teil, o, l, filter)}`,
+    ),
+    auszug: teil === "verlauf" ? verlaufSeitenAuszug : bestandSeitenAuszug,
+  });
+  quelle.q = filter;
+  return quelle;
+}
+
+/** Filter/Seitengröße geändert: erste Seite neu, ohne die Ansicht zu leeren. */
+function ladeWalletSeitenNeu() {
+  const walletId = Zustand.walletId;
+  if (Zustand.ansicht !== "wallet" || !walletId) return;
+  const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+  const quelle = walletSeitenQuelle(walletId, "bestand");
+  Zustand.walletQuelle = quelle;
+  quelle.seite(0)
+    .then((seite) => {
+      if (Zustand.walletId !== walletId || Zustand.walletQuelle !== quelle) return;
+      zeichneUtxos(seite.antwort, wallet, seite);
+    })
+    .catch(() => {});
+}
+
+/** Andere Seite der Adressgruppen; „Bereits ausgegeben“ bleibt stehen. */
+async function zeigeWalletSeite(offset) {
+  const quelle = Zustand.walletQuelle;
+  if (!quelle) return;
+  const seite = await quelle.seite(offset);
+  if (Zustand.walletQuelle !== quelle) return;
+  const koerper = $("#adress-koerper");
+  koerper.replaceChildren();
+  for (const gruppe of seite.items) koerper.append(zeichneAdressGruppe(gruppe));
+  koerper.append(walletPager(seite));
+  wendeKopfFilterAn();
+}
+
+function walletPager(seite) {
+  return zeichnePager({
+    total: seite.total,
+    offset: seite.offset,
+    groesse: Zustand.walletQuelle ? Zustand.walletQuelle.groesse : pagerGroesse("wallet"),
+    ansicht: "wallet",
+    onSeite: (o) => zeigeWalletSeite(o).catch(() => {}),
+    onGroesse: () => ladeWalletSeitenNeu(),
+  });
 }
 
 function zeigeLeer(titel, text) {
@@ -712,7 +782,7 @@ function zeigeLeer(titel, text) {
   $("#sanktions-karte").hidden = true;
 }
 
-function zeichneUtxos(daten, wallet) {
+function zeichneUtxos(daten, wallet, seite = null) {
   // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
   Zustand._walletUtxoDaten = daten || null;
   const hatVerlauf = Boolean(daten.hat_verlauf);
@@ -744,7 +814,7 @@ function zeichneUtxos(daten, wallet) {
     const utxoListe = daten.utxos || [];
     setzeWalletTitel(wallet, daten.total_sats);
     teile.push(`${daten.total_count} UTXO`);
-    if (daten.shown_count < daten.total_count) {
+    if (!seite && daten.shown_count < daten.total_count) {
       teile.push(
         `angezeigt: ${daten.shown_count} · ${formatSatsGemeinsam(daten.shown_sats, utxoListe)}`,
       );
@@ -752,7 +822,8 @@ function zeichneUtxos(daten, wallet) {
     const pendOut = Number(daten.pending_spending_count || 0);
     const pendIn = Number(daten.pending_receive_count || 0);
     if (wallet && wallet.id) {
-      const internOut = (daten.utxos || []).some(
+      // Seitenweise zählt der Server über den ganzen Bestand.
+      const internOut = daten.pending_spending_internal ?? (daten.utxos || []).some(
         (u) => u && u.spending_pending && u.spending_internal,
       );
       meldePendingAenderung(wallet.id, pendIn, pendOut, { internOut });
@@ -796,12 +867,12 @@ function zeichneUtxos(daten, wallet) {
 
   zeichneSanktionsBefund(daten.sanctions);
 
-  const gruppen = daten.addresses || [];
+  const gruppen = seite ? seite.items : (daten.addresses || []);
   setzeText(
     $("#adress-zusatz"),
     hatUtxos
       ? t("wallet.addressCountWithBalance", {
-          count: gruppen.length,
+          count: seite ? (daten.adressen_count ?? seite.total) : gruppen.length,
           sort: ($("#sort-wahl")?.value === "datum")
             ? t("wallet.sortNewestFirst")
             : t("wallet.sortLargestFirst"),
@@ -815,6 +886,7 @@ function zeichneUtxos(daten, wallet) {
     for (const gruppe of gruppen) {
       koerper.append(zeichneAdressGruppe(gruppe));
     }
+    if (seite) koerper.append(walletPager(seite));
   } else {
     koerper.append(hinweisZeile(
       daten.has_cache
@@ -825,8 +897,11 @@ function zeichneUtxos(daten, wallet) {
 
   const ausgegeben = $("#wallet-ausgegeben");
   ausgegeben.replaceChildren();
+  const verlaufWalletId = daten.wallet_id || Zustand.walletId;
   if (hatVerlauf) {
-    ausgegeben.append(zeichneAusgegeben(daten));
+    ausgegeben.append(zeichneAusgegeben(daten, seite ? {
+      quelle: () => walletSeitenQuelle(verlaufWalletId, "verlauf"),
+    } : null));
   }
 
   $("#wallet-leer").hidden = true;
@@ -1985,6 +2060,7 @@ async function pruefeWalletScan() {
     if (job.status === "done") {
       beendeRescan("");
       Zustand.traceListe = null;
+      pagerCachesVerwerfen();
       await ladeConfig();
       if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
         await zeigeWallet(Zustand.walletId);

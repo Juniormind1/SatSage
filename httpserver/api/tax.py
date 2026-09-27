@@ -137,8 +137,60 @@ def api_tax(
         sprache = _ui_lang_fuer_web(
             state.env().values(), accept_language, client_lang
         )
+    if (query.get("seite") or [""])[0] == "1":
+        # Seitenweise (ISSUES P2): Summen über alles, Zeilen nur im Fenster.
+        from core import listen_fenster as lf
+        from core import steuer_fenster
+
+        auswertung = _steuer_auswertung_gecacht(state, query, sprache)
+        lim_ab = lf.query_int(query, "limit_abgaenge", -1)
+        return steuer_fenster.fenster(
+            auswertung,
+            teil=lf.query_text(query, "teil", "alle"),
+            offset=lf.query_int(query, "offset", 0),
+            limit=lf.query_int(query, "limit", 10),
+            limit_abgaenge=None if lim_ab < 0 else lim_ab,
+            f=lf.filter_aus_query(query),
+            lang=lf.query_text(query, "lang", "") or sprache,
+        )
     auswertung = _steuer_auswertung(state, query, lang=sprache)
     auswertung.pop("_objekte", None)
+    return auswertung
+
+
+#: Letzte Auswertungen für Seitenwechsel (ISSUES P2, Schritt 6): Blättern
+#: rechnet nicht jedes Mal das ganze Jahr neu. Gültig, solange Parameter,
+#: Sprache, Tag und der Abdruck der Caches/Einstellungen gleich bleiben.
+_STEUER_FENSTER_CACHE = None
+
+
+def _steuer_auswertung_gecacht(state: AppState, query: dict, sprache: str) -> dict:
+    global _STEUER_FENSTER_CACHE
+    import datetime
+
+    from core import listen_fenster as lf
+    from httpserver.api.listen_fenster import cache_abdruck
+    from server import _steuer_auswertung
+
+    if _STEUER_FENSTER_CACHE is None:
+        _STEUER_FENSTER_CACHE = lf.KleinCache(2)
+    def schluessel():
+        return (
+            tuple((query.get(k) or [None])[0]
+                  for k in ("jahr", "frist", "stichtag", "anschaffung")),
+            sprache,
+            datetime.date.today().isoformat(),
+            cache_abdruck(state, preise=True),
+        )
+
+    vorher = schluessel()
+    auswertung = _STEUER_FENSTER_CACHE.hole(vorher)
+    if auswertung is None:
+        auswertung = _steuer_auswertung(state, query, lang=sprache)
+        auswertung.pop("_objekte", None)
+        # Die Rechnung kann eigene Adressen aus den Caches nachladen — der
+        # Stand danach ist der, den die nächste Anfrage sieht.
+        _STEUER_FENSTER_CACHE.lege(schluessel(), auswertung)
     return auswertung
 
 
