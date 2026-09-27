@@ -85,7 +85,7 @@ In der GUI: viele unterschiedliche `hold_days` (nicht nur 1 T / 377 T).
 
 **Mocktime + Descriptor-Wallets:** `createwallet` setzt die Birthtime auf die Host-Uhr; Blöcke mit `setmocktime` (2022–2025) erscheinen erst nach `rescanblockchain 0` in `listunspent`. `generate_scenarios.py` rescanned Faucet und Lab-Wallets automatisch. `mine_at` ruft `mine` direkt (keine Rekursion über `mine_next`).
 
-**Electrs im Docker:** bitcoind muss P2P im Compose-Netz lauschen (`-bind=0.0.0.0 -port=18444 -whitelist=0.0.0.0/0`). Cookie für electrs: `regtest/.cookie` als `bitcoin:secret`. `start.sh` schreibt die Datei im Container (User `bitcoin`) und gibt dem Image die Host-UID/GID mit, damit der Datadir nicht auf UID 101 (Mode 700) liegen bleibt. Nach Chain-Wipe electrs-DB mitlöschen (`.data/electrs/`).
+**Electrs im Docker:** bitcoind muss P2P im Compose-Netz lauschen (`-bind=0.0.0.0 -port=18444 -whitelist=0.0.0.0/0`). Cookie für electrs: `regtest/.cookie` als `bitcoin:secret`. `start.sh` schreibt die Datei im Container (User `bitcoin`) und gibt dem Image die Host-UID/GID mit, damit der Datadir nicht auf UID 101 (Mode 700) liegen bleibt. Ist die Host-GID im Image schon belegt (macOS `staff` = 20 = `dialout`), mappt `scripts/bitcoin-entrypoint.sh` die Gruppe mit `groupmod -o`. Nach Chain-Wipe electrs-DB mitlöschen (`.data/electrs/`).
 
 **GUI mit Lab-Env:** Immer `--env lab/regtest/.data/.regtest.env` (und eigene Cache-Dirs). `main._load_dotenv()` folgt zur Laufzeit `ENV_FILE` (nicht Import-Default) — sonst überschreibt die Root-`.env` (`NETWORK=main`) Regtest-Adressen (`bcrt1` → fälschlich `bc1`).
 

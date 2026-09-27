@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Regtest-Labor · macOS:** Der Präsentationsstart bricht nicht mehr ab, wenn die Benutzergruppe GID 20 hat. Im Bitcoin-Image gehört diese Nummer schon `dialout`; der Container startet `bitcoind` jetzt trotzdem unter der Host-Kennung.
 - **Anmeldung:** Nach „Passwort korrekt“ öffnet sich die Oberfläche, sobald die Konfiguration entschlüsselt ist. Adressen und Cache werden danach gelesen. Solange atmet der Empfangs-QR, und es erscheint keine Empfangsadresse. „Ist die meine?“ wartet denselben Moment.
 - **Bericht Sat-Geschichte:** Die Datei heißt `satsage-trace-<Jahr>.html` bzw. `.csv`.
 - **Filter:** „Kraken“ findet auch die Zeile „davon … an Kraken“. Bisher kannte die Suche nur Herkunftslabels (Auszahlung von der Börse), nicht das Ziel der Ausgabetransaktion. Gilt in Wallet, Herkunft und in den Abgängen des Steuerjahrs.

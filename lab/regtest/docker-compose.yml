@@ -4,12 +4,16 @@ services:
     container_name: satsage-bitcoind-regtest
     # Image legt den Datadir als User bitcoin an (sonst UID 101, Mode 700).
     # UID/GID des Hosts mitgeben, damit start.sh den Mount weiter beschreiben kann.
+    # GID 20 ist auf macOS staff und im Image schon dialout — groupmod ohne -o
+    # bricht dann mit Exit 4 ab, bevor bitcoind startet.
+    entrypoint: ["/bin/bash", "/lab-entrypoint.sh"]
     environment:
       UID: ${SATSAGE_LAB_UID:-}
       GID: ${SATSAGE_LAB_GID:-}
     ports:
       - "127.0.0.1:18443:18443"
     volumes:
+      - ./scripts/bitcoin-entrypoint.sh:/lab-entrypoint.sh:ro
       - ./.data/bitcoin:/home/bitcoin/.bitcoin
     command:
       - -regtest=1
