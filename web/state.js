@@ -61,6 +61,8 @@ const Zustand = {
   llmStatus: null,
   /** Dealbreaker T14: Core-RPC-Allowlist-Verstoß ({verstoss, anzahl, letzter}). */
   rpcAllowlist: null,
+  /** Anzahl Verstöße, für die schon eine Log-Zeile steht. */
+  rpcAllowlistGeloggt: 0,
   llmTimer: null,
   kurs: null,
   kursSerie: null,

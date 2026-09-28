@@ -2379,24 +2379,23 @@ function zeichneRpcSperrePille() {
     return;
   }
   const methode = String(s.letzter?.method || "?");
+  const anzahl = Number(s.anzahl || 1);
   const neu = pille("krit", t("header.rpcBlocked"));
   neu.id = "rpc-sperre-pille";
-  neu.title = t("header.rpcBlockedTitle", { methode, n: Number(s.anzahl || 1) });
+  neu.title = t("header.rpcBlockedTitle", { methode, n: anzahl });
   if (alt) alt.replaceWith(neu);
   else pillen.prepend(neu);
+  // Eine Log-Zeile je neuem Verstoß — auch wenn er schon mit /config kam.
+  if (Zustand.rpcAllowlistGeloggt !== anzahl) {
+    Zustand.rpcAllowlistGeloggt = anzahl;
+    logZeile(t("header.rpcBlockedLog", { methode }), true);
+  }
 }
 
 function nimmRpcAllowlist(stand) {
   if (!stand || typeof stand !== "object") return;
-  const vorher = rpcAllowlistStand();
   Zustand.rpcAllowlist = stand;
   if (Zustand.config) Zustand.config.rpc_allowlist = stand;
-  const neuerVerstoss = stand.verstoss
-    && (!vorher || !vorher.verstoss || Number(vorher.anzahl) !== Number(stand.anzahl));
-  if (neuerVerstoss) {
-    const methode = String(stand.letzter?.method || "?");
-    logZeile(t("header.rpcBlockedLog", { methode }), true);
-  }
   zeichneRpcSperrePille();
 }
 

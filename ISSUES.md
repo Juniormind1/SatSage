@@ -5,6 +5,27 @@ Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalte
 
 **Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie).
 
+## Bitcoin Core · RPC-Allowlist + rpcwhitelist-Hinweis
+
+**Stand:** 2026-09-28 · **umgesetzt** · Maintainer-Abnahme offen · Sicherheit / Doku
+**Ort:** `core/bitcoind_rpc.py` (`BitcoinRpcClient.call`, `pruefe_rpc_methode`, `RpcAllowlistError`); Handbuch Kap. 9 „Bitcoin Core absichern“; `doc/merge-dealbreakers.md` T14
+Aufwand: **gering–mittel**
+
+SatSage liest von Bitcoin Core nur. Bisher konnte der RPC-Nutzer aber alles, was Core erlaubt (auch `dumpwallet`, `sendtoaddress`, `stop`), und der Client selbst hätte jede Methode geschickt.
+
+**Umgesetzt:**
+
+- **Client-Allowlist:** `call()` prüft als erste Zeile, vor Payload, Auth und Socket. Erlaubt sind A Kern (`getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`), B Core-Wallet-Import (`listwallets`, `listwalletdir`, `loadwallet`, `listdescriptors` nur mit `[]` bzw. `[false]`), C `sendtoaddress` nur bei `NETWORK=regtest` (Lab-Faucet).
+- **Verstoß = Sicherheitsstopp:** `RpcAllowlistError` (Unterklasse von `OutboundPolicyError`), ERROR-Log `RPC-ALLOWLIST-VERSTOSS`, Prozess-Flag in `/api/health` (nur ja/nein), Quellen-Status und `/config`, rote Pille „Core-RPC gesperrt“ in der Kopfzeile plus Log-Zeile (de/en). Die Stellen, die RPC-Fehler bisher verschluckten und auf Electrum/P2P auswichen, werfen den Verstoß weiter.
+- **Node-Seite:** HTTP 403 mit leerem Body wird zu „Node verweigert Methode X (HTTP 403) – rpcwhitelist?“. Die Wallet-Suche nennt bei `-32601` „disablewallet?“ statt „nicht erreichbar“.
+- **Merge-Regel T14** (hart) in `doc/merge-dealbreakers.md` und `AGENTS.md`; AST-Test `tests/test_rpc_allowlist_statisch.py` prüft jeden `.call("…")` im Produktivcode und dass die Doku-Liste zur Konstante passt.
+- **Doku:** `rpcauth` + `rpcwhitelist` + `rpcwhitelistdefault=0`, `rpcbind`/`rpcallowip`, `disablewallet` (ganzer Node, Core-Import entfällt), kein TLS im LAN; StartOS/Umbrel nur als Hinweis. In `.env.example`, Handbuch, README, `packaging/instructions.md`, `doc/START9-hardening.md`.
+- **Regtest-Lab** einmal real geprüft: GUI mit `rpcauth`-User und `rpcwhitelist` (nur A) läuft, `dumpwallet` blockt der Client (erreicht den Node nicht), `listwallets` lehnt der Node mit 403 ab.
+
+**Offen:** Abnahme durch den Maintainer. Auf StartOS und Umbrel teilt sich SatSage Cookie bzw. User mit anderen Diensten, dort greift nur die Client-Allowlist; eigener `rpcauth`-User wäre Sache der Plattform. Verwandt: Sonderfall `rpcbind` nur auf LAN-IP im Abschnitt „Erledigt: Lokal Bitcoin Core erkennen“.
+
+---
+
 ## Steuerjahr · Herkunftsnetz als Overlay, dann Interpreter / Register
 
 **Stand:** 2026-09-27 · **offen** · Produkt / UI / Trace
