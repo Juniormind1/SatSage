@@ -9,7 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Regtest-Labor:** Die Klassifikation fällt auf Core-RPC zurück, ohne Nutzer und Passwort in die Adresse zu schreiben. Der GitHub-Lauf hat den Host sonst nicht aufgelöst. Das Netz steht auf Regtest, bevor die Lab-Adressen abgeleitet werden.
+- **Regtest-Labor:** Schlägt die Prüfung fehl, bleiben die Electrs-Logs im Lauf, bevor die Container weggeworfen werden. Die Klassifikation fällt auf Core-RPC zurück, ohne Nutzer und Passwort in die Adresse zu schreiben. Der GitHub-Lauf hat den Host sonst nicht aufgelöst. Das Netz steht auf Regtest, bevor die Lab-Adressen abgeleitet werden.
 
 - **Tools · Adresse:** Die Prüfung wartet, bis die Wallets vorbereitet sind. Der Knopf heißt „Los“; der Hinweis „ist die meine?“ steht in der Sprache der Oberfläche.
 
