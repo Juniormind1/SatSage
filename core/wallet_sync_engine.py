@@ -884,7 +884,7 @@ def _try_scantxoutset_xpub(
                 on_progress(msg)
         return None
 
-    from core.bitcoind_rpc import try_scantxoutset_for_xpubs
+    from core.bitcoind_rpc import RpcAllowlistError, try_scantxoutset_for_xpubs
 
     scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
 
@@ -900,6 +900,8 @@ def _try_scantxoutset_xpub(
             wallet=wallet,
             on_progress=on_progress,
         )
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nicht still auf Electrum/BIP-158 ausweichen
     except Exception as exc:
         from core.jobs import ist_abbruch
 

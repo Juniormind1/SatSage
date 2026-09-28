@@ -1146,6 +1146,7 @@ function nimmOwnFulcrumStand(info) {
 
 function nimmPeerStand(ergebnis, still) {
   const altStand = Zustand.peerStatus;
+  if (ergebnis && ergebnis.rpc_allowlist) nimmRpcAllowlist(ergebnis.rpc_allowlist);
   const quellen = uebernehmeQuellenErreichbarkeit(
     Zustand.config?.sources,
     ergebnis.sources || [],
@@ -1615,6 +1616,7 @@ function zeichneKopfStatus(quellen) {
   pillen.append(privPill);
   zeichneKursPille();
   zeichneLlmPille();
+  zeichneRpcSperrePille();
   aktualisiereKopfFilterFuerAnsicht();
   if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
   if (lernhinweiseAn()) {
@@ -2356,6 +2358,46 @@ function aktualisiereFiatAnzeigen() {
       ladeSteuerjahr().catch(() => {});
     }
   }
+}
+
+/**
+ * Dealbreaker T14: SatSage wollte eine Core-RPC-Methode außerhalb der
+ * Allowlist aufrufen. Der Server hat blockiert und ein Prozess-Flag gesetzt;
+ * die rote Pille bleibt bis zum Neustart stehen.
+ */
+function rpcAllowlistStand() {
+  return Zustand.rpcAllowlist || Zustand.config?.rpc_allowlist || null;
+}
+
+function zeichneRpcSperrePille() {
+  const pillen = $("#quelle-pillen") || $("#quelle-status");
+  if (!pillen) return;
+  const s = rpcAllowlistStand();
+  const alt = $("#rpc-sperre-pille");
+  if (!s || !s.verstoss) {
+    if (alt) alt.remove();
+    return;
+  }
+  const methode = String(s.letzter?.method || "?");
+  const neu = pille("krit", t("header.rpcBlocked"));
+  neu.id = "rpc-sperre-pille";
+  neu.title = t("header.rpcBlockedTitle", { methode, n: Number(s.anzahl || 1) });
+  if (alt) alt.replaceWith(neu);
+  else pillen.prepend(neu);
+}
+
+function nimmRpcAllowlist(stand) {
+  if (!stand || typeof stand !== "object") return;
+  const vorher = rpcAllowlistStand();
+  Zustand.rpcAllowlist = stand;
+  if (Zustand.config) Zustand.config.rpc_allowlist = stand;
+  const neuerVerstoss = stand.verstoss
+    && (!vorher || !vorher.verstoss || Number(vorher.anzahl) !== Number(stand.anzahl));
+  if (neuerVerstoss) {
+    const methode = String(stand.letzter?.method || "?");
+    logZeile(t("header.rpcBlockedLog", { methode }), true);
+  }
+  zeichneRpcSperrePille();
 }
 
 function zeichneLlmPille() {

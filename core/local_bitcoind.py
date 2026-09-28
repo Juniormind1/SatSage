@@ -128,7 +128,7 @@ def _probe_rpc(
     *,
     timeout: float = 2.0,
 ) -> dict[str, Any] | None:
-    from core.bitcoind_rpc import BitcoinRpcClient, CoreRpcConfig
+    from core.bitcoind_rpc import BitcoinRpcClient, CoreRpcConfig, RpcAllowlistError
 
     cfg = CoreRpcConfig(
         host=host,
@@ -139,6 +139,8 @@ def _probe_rpc(
     )
     try:
         return BitcoinRpcClient(cfg, timeout=timeout).call("getblockchaininfo")
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nie als „kein Node“ verschlucken
     except Exception:
         return None
 

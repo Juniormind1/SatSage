@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import socket
 import ssl
 import struct
@@ -18,6 +19,157 @@ from pathlib import Path
 from typing import Any, Callable
 
 LogFn = Callable[[str], None]
+
+LOGGER = logging.getLogger("satsage.rpc")
+
+
+# ---------------------------------------------------------------------------
+# RPC-Allowlist (Dealbreaker T14, doc/merge-dealbreakers.md)
+# ---------------------------------------------------------------------------
+# Jeder Aufruf an bitcoind läuft durch ``BitcoinRpcClient.call``. Dort prüft
+# ``pruefe_rpc_methode`` *vor* Payload, Auth und Socket. Alles außerhalb der
+# Liste ist ein Verstoß: ERROR-Log, Prozess-Flag (Quellen-Status, /api/health,
+# Kopfzeile) und ``RpcAllowlistError`` — kein stilles Ausweichen.
+#
+# Neue Methode? Nur nach Maintainer-Freigabe, zusammen mit Doku
+# (.env.example, doc/handbuch.html, README) und tests/test_rpc_allowlist.py.
+
+#: A · Kern — nur lesend, Kette und UTXO-Set.
+RPC_KERN: tuple[str, ...] = (
+    "getblockchaininfo",
+    "getblockhash",
+    "getblockheader",
+    "getblock",
+    "getrawtransaction",
+    "scantxoutset",
+)
+
+#: B · Core-Wallet-Import („Wallets suchen“): öffentliche Deskriptoren lesen.
+#: ``listdescriptors`` nur mit ``[]`` oder ``[false]`` — ``true`` gäbe
+#: private Schlüssel aus (rpcwhitelist auf dem Node prüft keine Parameter).
+RPC_WALLET_IMPORT: tuple[str, ...] = (
+    "listwallets",
+    "listwalletdir",
+    "loadwallet",
+    "listdescriptors",
+)
+
+#: C · Lab-Faucet — nur wenn ``NETWORK=regtest`` (``loadwallet`` steckt in B).
+RPC_LAB_REGTEST: tuple[str, ...] = (
+    "sendtoaddress",
+)
+
+#: Immer erlaubt (A + B).
+ERLAUBTE_RPC_METHODEN: frozenset[str] = frozenset(RPC_KERN + RPC_WALLET_IMPORT)
+
+#: Alle Methoden, die überhaupt im Produktivcode stehen dürfen (A + B + C).
+ALLE_RPC_METHODEN: frozenset[str] = frozenset(
+    RPC_KERN + RPC_WALLET_IMPORT + RPC_LAB_REGTEST
+)
+
+_REGTEST_NAMEN = ("regtest", "reg")
+
+
+class RpcAllowlistError(outbound_policy.OutboundPolicyError):
+    """SatSage wollte eine Core-RPC-Methode außerhalb der Allowlist aufrufen.
+
+    Das ist ein Programmfehler bzw. Sicherheitsverstoß (Dealbreaker T14),
+    kein Verbindungsproblem. Aufrufer dürfen ihn nicht in einen Fallback
+    (Electrum, BIP-158, „nicht erreichbar“) verwandeln, sondern müssen ihn
+    weiterwerfen.
+    """
+
+    def __init__(self, method: str, grund: str):
+        self.method = str(method)
+        self.grund = str(grund)
+        super().__init__(
+            f"Core-RPC „{self.method}“ blockiert (SatSage-Allowlist, "
+            f"Dealbreaker T14): {self.grund}"
+        )
+
+
+class RpcVerweigertError(RuntimeError):
+    """Der Node hat die Methode abgelehnt (HTTP 403, meist ``rpcwhitelist``)."""
+
+    def __init__(self, method: str, status: int = 403):
+        self.method = str(method)
+        self.status = int(status)
+        super().__init__(
+            f"Node verweigert Methode {self.method} (HTTP {self.status}) – "
+            "rpcwhitelist? Den SatSage-RPC-User auf dem Node freischalten "
+            "oder die Funktion hier nicht nutzen."
+        )
+
+
+_verstoss_lock = threading.Lock()
+_verstoesse: list[dict[str, Any]] = []
+_VERSTOESSE_MAX = 20
+
+
+def _melde_verstoss(method: str, grund: str) -> None:
+    eintrag = {
+        "method": str(method)[:80],
+        "grund": str(grund)[:200],
+        "zeit": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    with _verstoss_lock:
+        _verstoesse.append(eintrag)
+        del _verstoesse[:-_VERSTOESSE_MAX]
+    LOGGER.error(
+        "RPC-ALLOWLIST-VERSTOSS method=%s · %s (Dealbreaker T14)",
+        eintrag["method"],
+        eintrag["grund"],
+    )
+
+
+def rpc_allowlist_status() -> dict[str, Any]:
+    """Prozess-Flag für Quellen-Status, /api/health und die Kopfzeile."""
+    with _verstoss_lock:
+        liste = list(_verstoesse)
+    return {
+        "verstoss": bool(liste),
+        "anzahl": len(liste),
+        "letzter": dict(liste[-1]) if liste else None,
+    }
+
+
+def setze_rpc_allowlist_status_zurueck() -> None:
+    """Nur für Tests: Flag löschen (im Betrieb hilft nur ein Neustart)."""
+    with _verstoss_lock:
+        _verstoesse.clear()
+
+
+def _ist_regtest(network: str | None) -> bool:
+    return str(network or "").strip().lower() in _REGTEST_NAMEN
+
+
+def pruefe_rpc_methode(
+    method: Any,
+    params: list | None = None,
+    *,
+    network: str | None = None,
+) -> None:
+    """Wirft ``RpcAllowlistError`` (und setzt das Flag), wenn *method* nicht darf."""
+    grund = ""
+    if not isinstance(method, str) or not method:
+        grund = "kein gültiger Methodenname"
+    elif method in ERLAUBTE_RPC_METHODEN:
+        if method == "listdescriptors":
+            p = list(params or [])
+            if not (p == [] or (len(p) == 1 and p[0] is False)):
+                grund = (
+                    "listdescriptors nur ohne Parameter oder mit [false] "
+                    "(private Schlüssel bleiben im Node)"
+                )
+    elif method in RPC_LAB_REGTEST:
+        if not _ist_regtest(network):
+            grund = f"{method} nur im Lab (NETWORK=regtest)"
+    else:
+        grund = "nicht in der Allowlist"
+    if grund:
+        name = method if isinstance(method, str) else repr(method)
+        _melde_verstoss(name, grund)
+        raise RpcAllowlistError(name, grund)
 
 
 def _log(on_log: LogFn | None, text: str) -> None:
@@ -57,6 +209,8 @@ class CoreRpcConfig:
     tor_proxy: tuple[str, int] | None = None
     #: Optional: Wallet-RPC-Pfad ``/wallet/<name>`` (z. B. Lab ``lab-faucet``).
     wallet: str | None = None
+    #: ``NETWORK`` aus der Env — Allowlist-Gruppe C (Lab-Faucet) nur bei regtest.
+    network: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -150,6 +304,7 @@ def _config_from_keys(
         password=password,
         use_ssl=use_ssl,
         tor_proxy=proxy,
+        network=(env.get("NETWORK") or "").strip().lower() or None,
     )
 
 
@@ -254,6 +409,8 @@ class BitcoinRpcClient:
         self._id = 0
 
     def call(self, method: str, params: list | None = None) -> Any:
+        # Allowlist zuerst — vor Payload, Auth und Socket (Dealbreaker T14).
+        pruefe_rpc_methode(method, params, network=self.cfg.network)
         self._id += 1
         payload = {
             "jsonrpc": "1.0",
@@ -310,6 +467,18 @@ class BitcoinRpcClient:
         if b"\r\n\r\n" not in raw:
             raise ConnectionError("ungültige HTTP-Antwort vom Node")
         _head, _, resp_body = raw.partition(b"\r\n\r\n")
+        status = _http_status(_head)
+        if status in (401, 403) and not resp_body.strip():
+            if status == 403:
+                LOGGER.warning(
+                    "Node verweigert RPC-Methode %s (HTTP 403, rpcwhitelist?)",
+                    method,
+                )
+                raise RpcVerweigertError(method, status)
+            raise ConnectionError(
+                f"RPC {method}: Anmeldung abgelehnt (HTTP 401) – "
+                "RPC-User/Passwort oder Cookie prüfen"
+            )
         # chunked transfer
         if b"transfer-encoding: chunked" in _head.lower():
             resp_body = _dechunk(resp_body)
@@ -327,6 +496,17 @@ class BitcoinRpcClient:
                 raise RuntimeError(f"RPC {method} Fehler {code}: {msg}")
             raise RuntimeError(f"RPC {method}: {err}")
         return data.get("result")
+
+
+def _http_status(head: bytes) -> int | None:
+    """Statuscode aus der ersten Antwortzeile (``HTTP/1.1 403 Forbidden``)."""
+    erste = head.split(b"\r\n", 1)[0].split()
+    if len(erste) >= 2 and erste[0].upper().startswith(b"HTTP/"):
+        try:
+            return int(erste[1])
+        except ValueError:
+            return None
+    return None
 
 
 def _dechunk(body: bytes) -> bytes:
@@ -375,6 +555,8 @@ def _client_aus_config(
             password=cfg.password,
             use_ssl=cfg.use_ssl,
             tor_proxy=proxy,
+            wallet=cfg.wallet,
+            network=cfg.network,
         )
     return BitcoinRpcClient(cfg, timeout=timeout)
 
@@ -630,14 +812,23 @@ def _scantxoutset_status_poller(
             if stand is not None and stand.job.cancelled:
                 try:
                     status_client.call("scantxoutset", ["abort"])
+                except RpcAllowlistError:
+                    # Flag ist gesetzt; der Hauptpfad wirft beim nächsten call.
+                    return
                 except Exception:
                     pass
                 return
+        except RpcAllowlistError:
+            # Flag ist gesetzt; der Hauptpfad wirft beim nächsten call.
+            return
         except Exception:
             pass
 
         try:
             raw = status_client.call("scantxoutset", ["status"])
+        except RpcAllowlistError:
+            # Flag ist gesetzt; der Hauptpfad wirft beim nächsten call.
+            return
         except Exception:
             progress.heartbeat(
                 elapsed_s=time.monotonic() - t0,
@@ -708,6 +899,8 @@ def scantxoutset_utxos(
     _log(on_log, f"scantxoutset: {len(objs)} Deskriptor-Zweige…")
     try:
         client.call("scantxoutset", ["abort"])
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nie im Fallback verschlucken
     except Exception:
         pass
 
@@ -813,6 +1006,8 @@ def try_scantxoutset_for_xpubs(
         return None
     try:
         info = verify_core_rpc(client, on_log=log)
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nie im Fallback verschlucken
     except Exception as exc:
         log(f"Bitcoin Core nicht erreichbar: {exc}")
         return None
@@ -850,6 +1045,8 @@ def try_scantxoutset_for_xpubs(
             on_log=log,
             on_progress=on_progress,
         )
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nie im Fallback verschlucken
     except Exception as exc:
         log(f"scantxoutset fehlgeschlagen: {exc}")
         return None
@@ -941,6 +1138,8 @@ def normalize_core_tx(tx: dict, client: BitcoinRpcClient | None = None) -> dict:
                 status["block_height"] = int(header["height"])
             if isinstance(header, dict) and header.get("time") and "block_time" not in status:
                 status["block_time"] = int(header["time"])
+        except RpcAllowlistError:
+            raise  # Dealbreaker T14: nie im Fallback verschlucken
         except Exception:
             pass
     if status.get("confirmed") or status.get("block_height") or status.get("block_time"):
@@ -995,6 +1194,8 @@ def fetch_tx_core(client: BitcoinRpcClient, txid: str) -> dict:
             raise
         try:
             raw = client.call("getrawtransaction", [key, False])
+        except RpcAllowlistError:
+            raise  # Dealbreaker T14: nie im Fallback verschlucken
         except Exception:
             raise exc from None
 
@@ -1012,6 +1213,8 @@ def pruneheight_of(client: BitcoinRpcClient) -> int | None:
     """
     try:
         info = client.call("getblockchaininfo")
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nie im Fallback verschlucken
     except Exception:
         return None
     if not isinstance(info, dict):
@@ -1148,6 +1351,8 @@ def fetch_tx_core_mit_rollen(
         try:
             _log(on_log, f"Tx {key[:16]}… über Core-RPC ({name})…")
             return fetch_tx_core(client, key)
+        except RpcAllowlistError:
+            raise  # Dealbreaker T14: nie im Fallback verschlucken
         except Exception as exc:
             fehler.append(f"{name}/getrawtransaction: {exc}")
 
@@ -1163,6 +1368,8 @@ def fetch_tx_core_mit_rollen(
             try:
                 _log(on_log, f"Tx {key[:16]}… Core-getblock {hoehe} ({name})…")
                 return fetch_tx_from_block_core(client, key, hoehe)
+            except RpcAllowlistError:
+                raise  # Dealbreaker T14: nie im Fallback verschlucken
             except Exception as exc:
                 fehler.append(f"{name}/getblock: {exc}")
 

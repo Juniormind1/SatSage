@@ -506,6 +506,8 @@ def fetch_tx_p2p_mit_fallback(
     sonst Lookup z. B. Start9). *core_client* bleibt als Einzel-Fallback.
     *height* oder ``note_tx_height`` für Block-Fallback.
     """
+    from core.bitcoind_rpc import RpcAllowlistError
+
     key = (txid or "").strip().lower()
     hoehe = height if (height and int(height) > 0) else tx_height_hint(key)
     fehler: list[str] = []
@@ -527,6 +529,8 @@ def fetch_tx_p2p_mit_fallback(
             if st.get("block_height"):
                 note_tx_height(key, st["block_height"])
             return tx
+        except RpcAllowlistError:
+            raise  # Dealbreaker T14: nicht auf P2P ausweichen
         except Exception as exc:
             fehler.append(f"Core: {exc}")
     elif core_client is not None:
@@ -540,6 +544,8 @@ def fetch_tx_p2p_mit_fallback(
             if st.get("block_height"):
                 note_tx_height(key, st["block_height"])
             return tx
+        except RpcAllowlistError:
+            raise  # Dealbreaker T14
         except Exception as exc:
             fehler.append(f"Core: {exc}")
 

@@ -178,13 +178,19 @@ def core_fuer_scantxoutset(env: dict[str, str]):
 
     Bevorzugt den UTXO-RPC-Slot, sonst den Lookup-Core.
     """
-    from core.bitcoind_rpc import stelle_utxo_core_client_bereit, verify_core_rpc
+    from core.bitcoind_rpc import (
+        RpcAllowlistError,
+        stelle_utxo_core_client_bereit,
+        verify_core_rpc,
+    )
 
     client = stelle_utxo_core_client_bereit(env, timeout=20.0)
     if client is None:
         return None
     try:
         verify_core_rpc(client)
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14
     except Exception:
         try:
             client.close()

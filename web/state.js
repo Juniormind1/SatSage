@@ -59,6 +59,8 @@ const Zustand = {
   blockEventSeq: 0,
   blockEventSeqInit: false,
   llmStatus: null,
+  /** Dealbreaker T14: Core-RPC-Allowlist-Verstoß ({verstoss, anzahl, letzter}). */
+  rpcAllowlist: null,
   llmTimer: null,
   kurs: null,
   kursSerie: null,

@@ -1298,7 +1298,7 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
         fetch_tx_p2p_mit_fallback,
         fetch_wallet_utxos_bip158,
     )
-    from core.bitcoind_rpc import stelle_tx_lookup_rollen
+    from core.bitcoind_rpc import RpcAllowlistError, stelle_tx_lookup_rollen
 
     if args.bip158_start is not None:
         start_height = args.bip158_start
@@ -1385,6 +1385,8 @@ def _setup_bip158_client(args, env: dict[str, str], *, raise_on_error: bool = Tr
             )
         if lokal_core is None and archival_core is None:
             _log_quelle("→ kein Core-RPC für Tx-Lookup konfiguriert")
+    except RpcAllowlistError:
+        raise  # Dealbreaker T14: nie still auf P2P ausweichen
     except Exception as exc:
         _log_quelle(f"→ Core-RPC für Tx-Lookup nicht nutzbar: {exc}")
 
@@ -1669,6 +1671,7 @@ def _build_blockchain_fetchers(
             fetch_wallet_history_fulcrum,
         )
         from core.bitcoind_rpc import (
+            RpcAllowlistError,
             fetch_tx_core_mit_rollen,
             stelle_tx_lookup_rollen,
         )
@@ -1692,6 +1695,8 @@ def _build_blockchain_fetchers(
             _core_lokal, _core_arch, _core_ph = stelle_tx_lookup_rollen(
                 _env_tx, timeout=20.0,
             )
+        except RpcAllowlistError:
+            raise  # Dealbreaker T14
         except Exception:
             pass
 
@@ -1709,6 +1714,8 @@ def _build_blockchain_fetchers(
                         local_pruneheight=_core_ph,
                         on_log=_log_quelle,
                     )
+                except RpcAllowlistError:
+                    raise  # Dealbreaker T14: nicht hinter Electrs-Fehler verstecken
                 except Exception:
                     raise electrs_exc from None
 

@@ -1026,6 +1026,8 @@ def api_lab_faucet_senden(state: AppState, payload: dict) -> dict:
             replace(cfg, wallet=_LAB_FAUCET_WALLET), timeout=60.0,
         )
         txid = client.call("sendtoaddress", [adresse, btc])
+    except bitcoind_rpc.RpcAllowlistError:
+        raise  # Dealbreaker T14 → 403 im Handler, Flag gesetzt
     except Exception as exc:
         raise ApiError(502, f"Faucet-Send fehlgeschlagen: {exc}") from exc
 

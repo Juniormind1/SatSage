@@ -3236,6 +3236,7 @@ async function leseSourceCheckStream(antwort) {
   let sources = null;
   let peers = null;
   let peer_status = null;
+  let rpc_allowlist = null;
   let fehler = "";
 
   const nimm = (obj) => {
@@ -3243,6 +3244,7 @@ async function leseSourceCheckStream(antwort) {
     if (obj.sources) sources = obj.sources;
     if (obj.peers != null) peers = obj.peers;
     if (obj.peer_status) peer_status = obj.peer_status;
+    if (obj.rpc_allowlist) rpc_allowlist = obj.rpc_allowlist;
     if (obj.error) fehler = obj.error;
   };
 
@@ -3259,7 +3261,7 @@ async function leseSourceCheckStream(antwort) {
   }
   if (puffer.trim()) nimm(JSON.parse(puffer));
   if (fehler && !sources) throw new ApiFehler(500, fehler);
-  return { sources: sources || [], peers, peer_status };
+  return { sources: sources || [], peers, peer_status, rpc_allowlist };
 }
 
 async function apiSourceCheck(optionen = {}) {

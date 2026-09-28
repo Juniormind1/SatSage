@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 
+def _rpc_allowlist_status_for_api() -> dict:
+    """Dealbreaker T14 — Prozess-Flag für die Kopfzeile (schon beim Laden)."""
+    from core.bitcoind_rpc import rpc_allowlist_status
+
+    return rpc_allowlist_status()
+
+
 def _ui_theme_aus_env(werte: dict) -> str:
     """``light`` oder ``dark`` aus UI_THEME; Default Hell."""
     roh = str((werte or {}).get("UI_THEME") or "").strip().lower()
@@ -140,6 +147,7 @@ def api_config(
             _specter_labels_for_api(state) if state.managed_by == "specter" else None
         ),
         "local_core": _local_core_status_for_api(state),
+        "rpc_allowlist": _rpc_allowlist_status_for_api(),
         # App-Passwort (Hash in .satsage-password) — UI Einstellungen; Scrambling später.
         "password_set": _password_is_set(state),
         "env_scramble": _env_scramble_status(state),

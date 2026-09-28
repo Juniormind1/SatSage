@@ -425,6 +425,8 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     sources_dicts = [q.as_dict() for q in quellen]
     if check_an and not skip_live_check:
         state.sources_last = sources_dicts
+    from core.bitcoind_rpc import rpc_allowlist_status
+
     out = {
         "sources": sources_dicts,
         "peers": stand["count"],
@@ -432,6 +434,8 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         "live_p2p_peers": _live_p2p_peers(),
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
+        # Dealbreaker T14: Kopfzeile zeigt eine rote Pille, solange gesetzt.
+        "rpc_allowlist": rpc_allowlist_status(),
     }
     if electrum_busy:
         out["electrum_busy"] = True

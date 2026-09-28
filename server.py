@@ -1457,6 +1457,12 @@ class Handler(
                 LOGGER.exception("API-Fehler: %s", _redact_url(self.path))
             self._fehler(exc.status, exc.message)
         except Exception as exc:
+            from core.bitcoind_rpc import RpcAllowlistError
+
+            if isinstance(exc, RpcAllowlistError):
+                # Dealbreaker T14: klar melden (Flag + ERROR-Log sind gesetzt).
+                self._fehler(403, str(exc))
+                return
             if _shutdown_rauschen(exc) or _server_faehrt_runter(self.state):
                 return
             LOGGER.exception("API-Fehler: %s", _redact_url(self.path))

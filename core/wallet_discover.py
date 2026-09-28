@@ -275,6 +275,24 @@ def suche_lokale_wallets(
     return treffer
 
 
+def _core_wallet_fehlertext(exc: Exception) -> str:
+    """Log-Zeile, wenn ``listwallets`` scheitert — Ursache statt Pauschale."""
+    text = str(exc)
+    klein = text.lower()
+    if "-32601" in text or "method not found" in klein:
+        # disablewallet=1 oder Build ohne Wallet: Node läuft, nur ohne Wallets.
+        return (
+            "Bitcoin Core: Wallet-Funktion abgeschaltet (disablewallet?) — "
+            "Core-Wallets übersprungen."
+        )
+    if "http 403" in klein or "verweigert" in klein:
+        return (
+            "Bitcoin Core: Node verweigert listwallets (rpcwhitelist?) — "
+            "Core-Wallets übersprungen."
+        )
+    return f"Bitcoin Core: nicht erreichbar ({type(exc).__name__})."
+
+
 def suche_core_rpc_wallets(
     *,
     env: dict[str, str] | None = None,
@@ -320,8 +338,10 @@ def suche_core_rpc_wallets(
     try:
         client = rpc_mod.BitcoinRpcClient(cfg, timeout=20.0)
         geladen = list(client.call("listwallets") or [])
+    except rpc_mod.RpcAllowlistError:
+        raise  # Dealbreaker T14: nie als „nicht erreichbar“ verschlucken
     except Exception as exc:
-        _log(f"Bitcoin Core: nicht erreichbar ({type(exc).__name__}).")
+        _log(_core_wallet_fehlertext(exc))
         return out
 
     namen: set[str] = set()
@@ -334,6 +354,8 @@ def suche_core_rpc_wallets(
                 namen.add(str(ein.get("name") or ""))
             elif ein is not None:
                 namen.add(str(ein))
+    except rpc_mod.RpcAllowlistError:
+        raise
     except Exception:
         pass
 
@@ -345,6 +367,8 @@ def suche_core_rpc_wallets(
         if wname and wname not in [str(x or "") for x in geladen]:
             try:
                 client.call("loadwallet", [wname])
+            except rpc_mod.RpcAllowlistError:
+                raise
             except Exception:
                 out.append(GefundenesWallet(
                     id=f"core:{wname or 'default'}",
@@ -361,6 +385,8 @@ def suche_core_rpc_wallets(
         try:
             wclient = rpc_mod.BitcoinRpcClient(wcfg, timeout=30.0)
             roh = wclient.call("listdescriptors")
+        except rpc_mod.RpcAllowlistError:
+            raise
         except Exception as exc:
             msg = str(exc)
             if "legacy" in msg.lower() or "descriptor" in msg.lower():
@@ -445,6 +471,8 @@ def importiere_core_rpc_wallet(
         wcfg = replace(cfg, wallet=wname if wname else None)
         client = rpc_mod.BitcoinRpcClient(wcfg, timeout=30.0)
         roh_desc = client.call("listdescriptors")
+    except rpc_mod.RpcAllowlistError:
+        raise  # Dealbreaker T14
     except Exception as exc:
         return export_mod.WalletExportErgebnis(
             fehler=f"Core-RPC: {exc}"
