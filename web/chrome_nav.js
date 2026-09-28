@@ -51,6 +51,33 @@ function aktualisiereSpecterUi() {
   if (mempool) mempool.hidden = !managed;
 }
 
+/**
+ * Ein Wallet, sobald sein Cache gelesen ist — nicht erst mit dem letzten.
+ * Reihenfolge bleibt die der Konfiguration. Der Cache-Stand (UTXO-Zahl,
+ * Frische) kommt mit „Cache gelesen.“ und ersetzt den Platzhalter.
+ */
+function nimmWalletSobaldFertig(wallet) {
+  if (!wallet || !wallet.id) return;
+  if (!Zustand.config) Zustand.config = {};
+  const liste = Zustand.config.wallets || [];
+  const da = liste.findIndex((w) => w.id === wallet.id);
+  if (da >= 0) liste[da] = { ...liste[da], ...wallet };
+  else liste.push(wallet);
+  Zustand.config.wallets = liste;
+  if (!Array.isArray(Zustand.entwurf) || !Zustand.entwurf.length) {
+    Zustand.entwurf = liste.map((w) => ({ ...w }));
+  }
+  zeichneNav();
+  if (
+    Zustand.ansicht === "wallet"
+    && !Zustand.walletId
+    && liste.length === 1
+    && typeof zeigeWallet === "function"
+  ) {
+    zeigeWallet(wallet.id, { ohneEmpfang: true });
+  }
+}
+
 function zeichneNav() {
   const behaelter = $("#wallet-nav");
   behaelter.replaceChildren();

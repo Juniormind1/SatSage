@@ -21,11 +21,13 @@ class BootLog:
         self._hoerer: list[Callable[[dict], None]] = []
         self._ereignis = threading.Event()
 
-    def zeile(self, text: str, *, wallet: str = "") -> None:
+    def zeile(self, text: str, *, wallet: str = "", extra: dict | None = None) -> None:
         eintrag = {"text": str(text or "").strip()}
         name = str(wallet or "").strip()
         if name:
             eintrag["wallet"] = name
+        if extra:
+            eintrag["extra"] = dict(extra)
         with self._lock:
             self._seq += 1
             eintrag["seq"] = self._seq

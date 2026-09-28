@@ -69,7 +69,14 @@ class HandlerSseMixin:
 
         def on_zeile(eintrag: dict) -> None:
             try:
-                self._ndjson_zeile({"log": eintrag.get("text") or "", "wallet": eintrag.get("wallet") or ""})
+                zeile = {
+                    "log": eintrag.get("text") or "",
+                    "wallet": eintrag.get("wallet") or "",
+                }
+                extra = eintrag.get("extra") or {}
+                if extra.get("wallet"):
+                    zeile["wallet_summary"] = extra["wallet"]
+                self._ndjson_zeile(zeile)
             except Exception as exc:
                 if _client_weg(exc):
                     return

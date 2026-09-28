@@ -320,7 +320,26 @@ class AppState:
             except Exception:
                 LOGGER.exception("Resolution-Cache-Seed fehlgeschlagen")
             if on_log:
-                on_log("Cache gelesen.", wallet=name)
+                extra = None
+                try:
+                    from core import wallets as wallets_mod
+
+                    eintrag = next(
+                        (
+                            e for e in self._entries
+                            if e.analyse_schluessel == schluessel_eins
+                        ),
+                        None,
+                    )
+                    if eintrag is not None:
+                        extra = {
+                            "wallet": wallets_mod.summarize(
+                                [eintrag], self.cache_dir,
+                            )[0].as_dict(),
+                        }
+                except Exception:
+                    LOGGER.exception("Wallet-Stand fürs Start-Log fehlgeschlagen")
+                on_log("Cache gelesen.", wallet=name, extra=extra)
 
     def _verwerfe_empfang_clients_unlocked(self) -> None:
         """Empfangs-QR neu ableiten. Aufrufer hält ``_lock``."""

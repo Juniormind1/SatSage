@@ -50,6 +50,27 @@ class TestBootLog(ApiTestBasis):
         self.assertEqual(job["log_wallets"][1], "Cold Storage")
         self.state._context_bereit.set()
 
+    def test_config_wartet_nicht_auf_cache_waehrend_vorbereitung(self):
+        self.state._context_bereit.clear()
+        _, koerper = self.anfrage("/api/config")
+        self.assertFalse(koerper["context_bereit"])
+        self.assertGreaterEqual(len(koerper["wallets"]), 1)
+        self.assertIn("name", koerper["wallets"][0])
+        self.state._context_bereit.set()
+
+    def test_cache_gelesen_traegt_den_wallet_stand(self):
+        self.state.reload(hintergrund=True)
+        self.assertTrue(self.state.warte_auf_context(timeout=10))
+        zeilen, fertig = self.state.boot_log.stand()
+        self.assertTrue(fertig)
+        staende = [
+            z["extra"]["wallet"] for z in zeilen
+            if z.get("text") == "Cache gelesen." and (z.get("extra") or {}).get("wallet")
+        ]
+        self.assertGreaterEqual(len(staende), 1)
+        self.assertIn("id", staende[0])
+        self.assertIn("name", staende[0])
+
     def test_ableitung_meldet_jedes_wallet(self):
         gesehen = []
         self.state._build_context(

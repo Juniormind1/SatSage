@@ -81,6 +81,9 @@ async function leseBootLogStream(antwort) {
   let puffer = "";
   const nimm = (obj) => {
     if (obj.log) logZeile(obj.log, undefined, obj.wallet || "");
+    if (obj.wallet_summary && typeof nimmWalletSobaldFertig === "function") {
+      nimmWalletSobaldFertig(obj.wallet_summary);
+    }
     if (obj.done && obj.context_bereit) {
       Zustand.contextBereit = true;
       if (typeof EmpfangPuls !== "undefined") EmpfangPuls.stop();

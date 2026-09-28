@@ -66,7 +66,14 @@ def api_config(
     )
 
     entries = state.entries
-    zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
+    # Während der Vorbereitung nur die Namen. summarize liest jeden Cache und
+    # würde die Oberfläche sonst festhalten, bis das letzte Wallet fertig ist.
+    if state.context_bereit():
+        zusammenfassung = wallets_mod.summarize(entries, state.cache_dir)
+    else:
+        zusammenfassung = [
+            wallets_mod.WalletSummary(entry=e, has_cache=False) for e in entries
+        ]
     werte = state.env().values()
     # Haftungsabsatz: ohne Header deutsch (Export/Tests). Die Oberfläche
     # bekommt denselben Code wie ui_lang, sobald ein Browser fragt.

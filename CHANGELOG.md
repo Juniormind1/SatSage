@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Start · Wallets:** Jedes Wallet erscheint in der Seitenleiste, sobald sein Cache gelesen ist. Die übrigen folgen einzeln, nicht erst alle zusammen am Ende.
+
 - **Start · Log:** Während die Oberfläche schon steht und der Empfangs-QR atmet, schreibt die Vorbereitung eine Zeile je Wallet ins Log — Ankündigung vor dem Ableiten, Ergebnis danach, und dasselbe für den Cache. Jede Zeile erscheint, sobald sie entsteht, nicht erst wenn das letzte Wallet fertig ist.
 
 - **Bereits ausgegeben:** Aufklappen liest nur noch den Verlaufs-Cache. Der Electrum-Mempool-Check entfällt für diesen Abschnitt — er änderte die 670 historischen Ausgaben nicht und hielt „Lade aus Cache…“ so lange fest, wie der Verbindungsversuch dauerte.
