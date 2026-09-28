@@ -92,6 +92,17 @@ def main() -> int:
         print("Zuerst generate_scenarios.py laufen lassen.", file=sys.stderr)
         return 1
 
+    # Alte Mock-Zeit sonst: der nächste Mine scheitert mit time-too-new,
+    # bevor die Prüfung überhaupt eine Tx sieht.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from kette_aktualisieren import tip_nachziehen
+
+    try:
+        print(tip_nachziehen())
+    except RuntimeError as exc:
+        print(f"Kette nicht nachziehbar: {exc}", file=sys.stderr)
+        return 1
+
     os.environ.setdefault("NETWORK", "regtest")
     werte = _load_env(ENV_PATH)
     # Vor dem Wallet-Kontext: sonst leitet Mainnet ab und die Lab-Adressen
