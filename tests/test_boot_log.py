@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import urllib.request
-
 from tests.fixtures import BIP84_ZPUB
 from tests.test_api import ApiTestBasis
 
@@ -70,6 +68,19 @@ class TestBootLog(ApiTestBasis):
         self.assertGreaterEqual(len(staende), 1)
         self.assertIn("id", staende[0])
         self.assertIn("name", staende[0])
+
+    def test_wallet_ansicht_wartet_nicht_auf_den_cache_der_anderen(self):
+        """Die Ansicht nimmt den Kontext, sobald die Adressen stehen."""
+        self.state._context_bereit.clear()
+        self.state._adressen_bereit.set()
+        self.assertFalse(self.state.context_bereit())
+        self.assertIsNotNone(self.state.wallet_ctx_fuer_ansicht())
+        kennung = self.wallet_id(BIP84_ZPUB)
+        _, koerper = self.anfrage(
+            f"/api/wallets/{kennung}/utxos?seite=1&mempool=0&limit=5")
+        self.assertIn("utxos", koerper)
+        self.assertFalse(self.state.context_bereit())
+        self.state._context_bereit.set()
 
     def test_ableitung_meldet_jedes_wallet(self):
         gesehen = []

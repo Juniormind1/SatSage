@@ -802,7 +802,8 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     # mempool=0: nur Cache (schneller Erst-Paint). Default: Pending über Electrs.
     mempool = _query_flag(query, "mempool", default=True)
 
-    _seed_wallet_ctx_aus_caches(state)
+    # Bestand aus der Cache-Datei. Nicht auf den Seed der übrigen Wallets warten.
+    state.wallet_ctx_fuer_ansicht()
     from httpserver.api.listen_fenster import fenster_antwort, ist_fenster
 
     fenster = ist_fenster(query)

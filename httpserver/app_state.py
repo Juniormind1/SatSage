@@ -125,6 +125,10 @@ class AppState:
         # Login zeigt die GUI, bevor Adressen und Cache-Seed fertig sind.
         self._context_bereit = threading.Event()
         self._context_bereit.set()
+        # Adressableitung ist in einer Sekunde durch. Der Cache-Seed der
+        # übrigen Wallets darf eine einzelne Wallet-Ansicht nicht festhalten.
+        self._adressen_bereit = threading.Event()
+        self._adressen_bereit.set()
         self.boot_log = BootLog()
         # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
         self.empfang_cache: dict[str, dict] = {}
@@ -242,6 +246,7 @@ class AppState:
                 self._context_bereit.set()
             else:
                 self._wallet_ctx = None
+                self._adressen_bereit.clear()
                 self._context_bereit.clear()
                 self.boot_log = BootLog()
             self._verwerfe_empfang_clients_unlocked()
@@ -266,6 +271,10 @@ class AppState:
             ctx = self._build_context(gueltig, on_log=log.zeile)
             with self._lock:
                 self._wallet_ctx = ctx
+            # Ab hier darf eine Wallet-Ansicht den Kontext lesen, während der
+            # Cache der übrigen Wallets noch in den Seed läuft.
+            self._adressen_bereit.set()
+            with self._lock:
                 self._seed_wallet_context_unlocked(on_log=log.zeile)
             log.zeile("Wallets bereit.")
         except Exception:
@@ -360,9 +369,28 @@ class AppState:
     def context_bereit(self) -> bool:
         return self._context_bereit.is_set()
 
+    def adressen_bereit(self) -> bool:
+        return self._adressen_bereit.is_set()
+
+    def warte_auf_adressen(self, timeout: float | None = None) -> bool:
+        """Blockiert, bis die Adressableitung steht. Cache-Seed darf noch laufen."""
+        return self._adressen_bereit.wait(timeout)
+
     def warte_auf_context(self, timeout: float | None = None) -> bool:
         """Blockiert, bis Ableitung und Cache-Seed fertig sind."""
         return self._context_bereit.wait(timeout)
+
+    def wallet_ctx_fuer_ansicht(self):
+        """
+        Kontext für eine einzelne Wallet-Ansicht.
+
+        Wartet auf die Adressableitung, nicht auf den Cache-Seed der übrigen
+        Wallets. Deren Lesen läuft im selben Prozess weiter; der Klick soll
+        den schon gelesenen Cache dieses Wallets zeichnen.
+        """
+        self.warte_auf_adressen()
+        with self._lock:
+            return self._wallet_ctx
 
     @staticmethod
     def _build_context(entries: list[WalletEntry], *, on_log=None):

@@ -62,7 +62,7 @@ def cache_abdruck(state: Any, *, preise: bool = False) -> str:
     if preise and imm:
         dateien.append(Path(imm) / "btc_price")
     abdruck = lf.datei_abdruck(dateien=dateien, ordner=ordner)
-    ctx = state.wallet_ctx
+    ctx = state.wallet_ctx_fuer_ansicht()
     try:
         env = sorted((state.env().values() or {}).items())
     except Exception:
@@ -197,7 +197,8 @@ def fenster_antwort(
         xpub_cache.enrich_utxos_with_block_times(roh, imm)
         fenster = lf.Fenster(
             lambda e: utxos_mod.verlauf_eintrag_als_dict(
-                e, wallet=state.wallet_ctx, immutable_cache_dir=imm, own_addresses=own,
+                e, wallet=state.wallet_ctx_fuer_ansicht(),
+                immutable_cache_dir=imm, own_addresses=own,
             ),
             lang=lang,
             label_cache=_label_cache(state, "verlauf", lang, filt),
@@ -218,7 +219,8 @@ def fenster_antwort(
     else:
         fenster = lf.Fenster(
             lambda u: utxos_mod.utxo_as_dict(
-                u, wallet=state.wallet_ctx, immutable_cache_dir=imm, own_addresses=own,
+                u, wallet=state.wallet_ctx_fuer_ansicht(),
+                immutable_cache_dir=imm, own_addresses=own,
             ),
             lang=lang,
             label_cache=_label_cache(state, "bestand", lang, filt),

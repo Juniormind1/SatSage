@@ -747,7 +747,7 @@ def _eigene_adressen(state: AppState) -> set | None:
     Unterscheidung. None, solange kein gültiges Wallet konfiguriert ist; dann
     lässt sich über gespeicherte Bäume weder „aktuell" noch „veraltet" sagen.
     """
-    ctx = state.wallet_ctx
+    ctx = state.wallet_ctx_fuer_ansicht()
     return set(ctx.address_to_wallet) if ctx else None
 
 
