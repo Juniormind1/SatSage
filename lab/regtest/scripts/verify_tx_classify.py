@@ -94,10 +94,13 @@ def main() -> int:
 
     os.environ.setdefault("NETWORK", "regtest")
     werte = _load_env(ENV_PATH)
+    # Vor dem Wallet-Kontext: sonst leitet Mainnet ab und die Lab-Adressen
+    # gelten nicht als eigen. Die Tx bleibt dann unknown.
     for k, v in werte.items():
         os.environ[k] = v
 
     import main as satsage_main
+    satsage_main.set_chain_network(werte.get("NETWORK") or "regtest")
     from core.config import EnvFile, read_wallets
     from core.tx_classify import classify_tx
 
