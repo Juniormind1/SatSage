@@ -35,6 +35,20 @@ Wallets, caches, and the password hash live on the service volume.
 A StartOS backup of SatSage includes `.env`, the password hash, and the
 analysis caches. Restoring a backup restores that volume.
 
+## Bitcoin Core RPC
+
+SatSage only calls a fixed allowlist of read-only Bitcoin Core RPC methods
+(chain lookups and `scantxoutset`; for importing Core wallets also
+`listwallets`, `listwalletdir`, `loadwallet` and public-only
+`listdescriptors`). Anything else is blocked inside SatSage before it reaches
+the node, and the header shows a red “Core RPC blocked” pill.
+
+On StartOS SatSage reads the Bitcoin package's cookie file. That cookie user
+is shared with other services, so an `rpcwhitelist` for it would restrict
+them too. Treat `rpcwhitelist` / `rpcauth` / `disablewallet` as a note for
+your own standalone node only (see the SatSage handbook, chapter 9, “Bitcoin
+Core absichern”); do not change the StartOS Bitcoin settings for SatSage.
+
 ## Limitations
 
 - Watch-only: no signing, no seed management.

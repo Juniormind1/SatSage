@@ -173,6 +173,7 @@ FÃ¼r Start9 bleibt der sichere Default der Bind auf `127.0.0.1` hinter dem Sta
 - `SATSAGE_MANAGED_BY=start9` oder `SATSAGE_START9=1` aktiviert den Start9-Modus. `BITCOIND_HOST` und `ELECTRS_HOST` werden als nicht persistierte Bridge-Aliase genutzt; Node-/DatenquellenÃ¤nderungen sind in der API gesperrt und in der UI ausgeblendet. Mempool, LLM und Status-Mail bleiben separat konfigurierbar und unterliegen der Allowlist.
 - Core-/Fulcrum-TLS: Ã¶ffentliche Clearnet-Hosts validieren Zertifikate; private/LAN/Loopback/Onion behalten die Desktop-Praxis ohne CA-PrÃ¼fung (Start9-LAN-Self-Signed). Der Sideload setzt `FULCRUM_SSL=false` auf der Bridge. `SATSAGE_TLS_INSECURE=1` ist die Ausnahme fÃ¼r Ã¶ffentliche Self-Signed-Ziele.
 - Der Cookie-RO-Mount fÃ¼r den Bitcoin-Core-RPC und die eigentliche StartOS-Bridge bleiben Wrapper-Arbeit in S4; diese Phase verdrahtet nur die App-seitigen Hooks.
+- Core-RPC-Methoden (2026-09-28): Der SatSage-Client ruft nur eine feste Allowlist auf (`core/bitcoind_rpc.py`, Dealbreaker T14 in `doc/merge-dealbreakers.md`); alles andere blockiert er vor dem Senden und zeigt „Core-RPC gesperrt“. Eine `rpcwhitelist` auf dem Node ist unter StartOS **nur ein Hinweis**: SatSage liest die Cookie-Datei des Bitcoin-Pakets, und der Cookie-User (`__cookie__`) wird mit anderen Diensten geteilt — eine Whitelist dafür würde auch sie einschränken. Die `bitcoin.conf`-Vorlage für eigene Nodes steht im Handbuch (Kap. 9, „Bitcoin Core absichern“).
 
 ### Phase S3 â€” Betrieb / DoS
 

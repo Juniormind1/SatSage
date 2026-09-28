@@ -229,6 +229,16 @@ FULCRUM_TOR_PROXY=127.0.0.1:9150
 # STEUER_STICHTAG=
 ```
 
+**Bitcoin Core absichern:** SatSage ruft nur eine feste Liste lesender RPC-Methoden auf und blockiert alles andere selbst (rote Pille „Core-RPC gesperrt“, Dealbreaker T14). Auf einem eigenen Node zusätzlich einen eigenen User anlegen und einschränken:
+
+```ini
+rpcauth=satsage:<salt>$<hash>
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset
+rpcwhitelistdefault=0
+```
+
+Mit Core-Wallet-Import zusätzlich `listwallets,listwalletdir,loadwallet,listdescriptors`. Dazu `rpcbind`/`rpcallowip`, optional `disablewallet=1` (betrifft den ganzen Node; Core-Import entfällt), kein TLS im LAN. StartOS/Umbrel: nur Hinweis. Details: Handbuch Kap. 9 „Bitcoin Core absichern“, `.env.example`.
+
 **Start9 / electrs über Tor:** `FULCRUM_TOR=<electrs-onion>.onion`, Port oft 50001 ohne TLS. Tor startet SatSage selbst (SOCKS 9050), sofern ein `tor`-Binary gefunden wird — Windows: `Tor Browser\Browser\TorBrowser\Tor\tor.exe`, macOS: `/Applications/Tor Browser.app/Contents/MacOS/Tor/tor`. Ein laufender Tor Browser (9150) wird weiter genutzt. Abschalten: `TOR_AUTOSTART=0`. Eigenes Binary: `TOR_BINARY`. Derselbe Weg gilt für Compact-Filter-P2P, wenn Clearnet (Port 8333) keine Peers liefert.
 
 ---

@@ -230,7 +230,11 @@
     <li><a href="#labels">Adress-Labels</a></li>
     <li><a href="#menue">Menü und CLI (Legacy / Fallback)</a></li>
     <li><a href="#datenquellen">Datenquellen und Privatsphäre</a></li>
-    <li><a href="#konfiguration">Konfiguration (<code>.env</code>)</a></li>
+    <li><a href="#konfiguration">Konfiguration (<code>.env</code>)</a>
+      <ol>
+        <li><a href="#core-absichern">Bitcoin Core absichern</a></li>
+      </ol>
+    </li>
     <li><a href="#caches">Caches</a></li>
     <li><a href="#sicherheit">Sicherheit und Datenschutz</a></li>
     <li><a href="#technik">Technischer Teil</a>
@@ -1709,6 +1713,79 @@ RPCPASSWORD=...
   Datei steht in <code>.gitignore</code> und gehört niemals in ein
   Repository.</p>
 </div>
+
+<h3 id="core-absichern">Bitcoin Core absichern</h3>
+
+<p>SatSage liest vom Node nur, was es braucht. Im Programm steht eine feste
+Liste erlaubter RPC-Methoden; alles andere blockiert SatSage selbst, bevor
+etwas an den Node geht (siehe unten). Auf dem eigenen Node lässt sich
+dasselbe noch einmal erzwingen — dann hilft auch ein fehlerhaftes oder
+manipuliertes Programm nichts.</p>
+
+<div class="hinweis acht">
+  <div class="kopf">Bitcoin Core absichern</div>
+  <p>Für einen <strong>eigenen</strong> <code>bitcoind</code> bzw.
+  <code>bitcoin-qt</code>: SatSage bekommt einen eigenen RPC-User, der nur
+  die Methoden aufrufen darf, die SatSage nutzt. In die
+  <code>bitcoin.conf</code>:</p>
+<pre><code># Eigener RPC-User nur für SatSage. Salt und Hash erzeugt
+# share/rpcauth/rpcauth.py satsage — das Passwort steht nur in der SatSage-.env
+rpcauth=satsage:&lt;salt&gt;$&lt;hash&gt;
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset
+# Mit Core-Wallet-Import („Wallets suchen“) stattdessen diese Zeile:
+# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,listwallets,listwalletdir,loadwallet,listdescriptors
+# Andere RPC-User (Electrs, Sparrow, Cookie …) behalten vollen Zugriff:
+rpcwhitelistdefault=0
+# RPC nur lokal; zweite Zeile nur, wenn SatSage auf einem anderen Rechner läuft
+rpcbind=127.0.0.1
+rpcallowip=127.0.0.1
+# rpcbind=&lt;LAN-IP-des-Nodes&gt;
+# rpcallowip=&lt;IP-des-SatSage-Rechners&gt;/32
+# Nur wenn weder SatSage noch eine andere App die Core-Wallet braucht:
+# disablewallet=1</code></pre>
+  <p>In der SatSage-<code>.env</code> dazu <code>RPCUSER=satsage</code> und
+  <code>RPCPASSWORD=…</code> (das Passwort aus <code>rpcauth.py</code>).</p>
+  <ul>
+    <li><strong><code>rpcwhitelistdefault=0</code> nicht weglassen.</strong>
+        Sobald irgendeine <code>rpcwhitelist</code> gesetzt ist, sperrt Core
+        sonst alle anderen RPC-User aus (leere Liste). Stehen mehrere
+        <code>rpcwhitelist</code>-Zeilen für denselben User, gilt nur die
+        Schnittmenge — also nur eine davon aktiv lassen.</li>
+    <li><strong><code>disablewallet=1</code> nur mit Bedacht.</strong> Es
+        betrifft den ganzen Node, nicht nur SatSage: Andere Apps, die die
+        Core-Wallet nutzen, funktionieren dann nicht mehr. In SatSage fällt
+        nur der Import von Core-Wallets unter „Wallets suchen“ weg; UTXO-Scan
+        (<code>scantxoutset</code>) und Tx-Lookup laufen weiter.</li>
+    <li><strong>Kein TLS im LAN.</strong> Bitcoin Core spricht RPC nur als
+        unverschlüsseltes HTTP; RPC-User und Passwort gehen im Klartext über
+        das Netz. Am besten läuft SatSage auf demselben Rechner
+        (<code>127.0.0.1</code>). Sonst nur im eigenen, vertrauten LAN, über
+        Tor (Onion) oder einen SSH-/TLS-Tunnel
+        (<code>RPC_SSL=true</code> nur mit einem TLS-Proxy davor).</li>
+    <li>Verweigert der Node eine Methode, meldet SatSage
+        „Node verweigert Methode … – rpcwhitelist?“. Dann fehlt die Methode in
+        der Zeile oben.</li>
+  </ul>
+  <p><strong>StartOS und Umbrel:</strong> Dort ist das nur ein Hinweis, keine
+  Einstellung für SatSage. Unter StartOS liest SatSage die Cookie-Datei des
+  Bitcoin-Pakets; der Cookie-User wird mit anderen Diensten geteilt, eine
+  <code>rpcwhitelist</code> dafür würde auch sie einschränken. Unter Umbrel
+  nutzen alle Apps denselben RPC-User der Bitcoin-App. Die Allowlist im
+  SatSage-Client gilt dort trotzdem.</p>
+</div>
+
+<p><strong>Allowlist in SatSage.</strong> Erlaubt sind nur
+<code>getblockchaininfo</code>, <code>getblockhash</code>,
+<code>getblockheader</code>, <code>getblock</code>,
+<code>getrawtransaction</code> und <code>scantxoutset</code>; für den
+Core-Wallet-Import zusätzlich <code>listwallets</code>,
+<code>listwalletdir</code>, <code>loadwallet</code> und
+<code>listdescriptors</code> (nur öffentliche Deskriptoren, nie mit privaten
+Schlüsseln); im Regtest-Labor außerdem <code>sendtoaddress</code> für den
+Faucet. Versucht SatSage etwas anderes, blockiert es den Aufruf, schreibt
+<code>RPC-ALLOWLIST-VERSTOSS</code> ins Server-Log und zeigt oben rechts die
+rote Pille <em>Core-RPC gesperrt</em> — bis zum Neustart. Das ist ein
+Programmfehler; bitte melden.</p>
 
 <a class="zurueck" href="#">↑ nach oben</a>
 </section>

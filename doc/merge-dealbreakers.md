@@ -33,8 +33,15 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 | T11 | **Öffentliche Electrum** oder **Remote-LLM** als stiller Default / ohne Opt-in-Dialog | Hart |
 | T12 | **Phishing-UX**: „Wallet gesperrt — Seed eingeben“, Fake-Support, irreführende Fremdlinks zur Seed-Eingabe | Hart+Review |
 | T13 | **Lern-URLs / „Kaninchenbau“**: Shitcoin-, Altcoin- oder Eth-Content; „Crypto“-Gemischtwaren; im Zweifel **warnen und blocken**, nicht durchwinken. Nur Bitcoin-only. Lernstoff erklärt **Bitcoin-Mechanismen** für Plebs — keine SatSage-Implementierungsdetails | Hart+Review |
+| T14 | **Core-RPC außerhalb der Allowlist** im Produktivcode — neue bitcoind-Methode ohne Freigabe, wallet-schreibende oder signierende RPCs (`sendrawtransaction`, `signrawtransactionwithwallet`, `walletprocesspsbt`, `importdescriptors`, `dumpprivkey`, `createwallet` …), `listdescriptors true`, Roh-JSON-RPC oder `bitcoin-cli` am Client vorbei | Hart |
 
 **Präzisierung T3:** Gewollte Abfragen an vom Nutzer konfigurierte Datenquellen (Electrs/Fulcrum, BIP-158-Peers, Sanktions-Clearnet laut Design) sind kein Leak. Verboten ist Weitergabe an **andere** Endpoints / Telemetrie / Cloud ohne Opt-in.
+
+**Präzisierung T14:** Alle bitcoind-Aufrufe laufen durch `BitcoinRpcClient.call` (`core/bitcoind_rpc.py`). Dort prüft die Allowlist jede Methode vor Payload, Auth und Socket. Ein Verstoß wirft `RpcAllowlistError`, schreibt `RPC-ALLOWLIST-VERSTOSS` als ERROR ins Server-Log, setzt ein Prozess-Flag (Quellen-Status, `/api/health`, rote Kopfzeilen-Pille „Core-RPC gesperrt“) und fällt nie still auf Electrum/BIP-158 zurück. CI: `tests/test_rpc_allowlist.py` (Laufzeit) und `tests/test_rpc_allowlist_statisch.py` (AST-Scan aller `.py` außer `lab/`, `tests/`, `specter_plugin/scripts/`). Lab-Skripte dürfen mehr (regtest, eigener Node). Erweitern nur mit Maintainer-Freigabe und zusammen mit Doku und bitcoin.conf-Beispiel:
+
+- **A · Kern:** `getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`
+- **B · Core-Wallet-Import:** `listwallets`, `listwalletdir`, `loadwallet`, `listdescriptors` (nur ohne Parameter oder mit `false`)
+- **C · Lab-Faucet, nur bei NETWORK=regtest:** `sendtoaddress`
 
 **Präzisierung T13:** Gilt für `web/lernhinweise.json`, Tooltips und Lern-QR. Zulässig: konkrete Artikel/BIPs/Whitepaper zu Bitcoin-Mechanismen. Unzulässig: Altcoin-Portale, Staking-Eth, SatSage-Internals, **Anbieter-Startseiten, Mediathek-Index, Shop/„Buch kaufen“**. Im Review: unklare oder generische URL = Nein bis kuratiert (`status: ok`).
 
@@ -89,6 +96,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
 7. S2 — Juniormind1 nur für Maintainer/Agent (Hooks)  
 8. Q1 — Unittests grün
 9. Q6 — Regtest-Labor grün vor Merge nach `main`  
+10. T14 — Core-RPC nur aus der Allowlist (`tests/test_rpc_allowlist*.py`)
 
 ---
 

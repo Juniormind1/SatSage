@@ -334,6 +334,7 @@ Harte und weiche Kriterien gegen riskante Merges (Malware/Trust, Secrets, CI, Pr
 - **HART:** Niemals Geheimnisse pushen oder persönliche Daten doxxen — Abschnitt oben; Dealbreaker **S1**
 - XPUBs erlauben Ableitung aller Wallet-Adressen — sensibel behandeln; keine Seed/xprv/WIF-Eingabe in SatSage (Dealbreaker T1 in `doc/merge-dealbreakers.md`)
 - Lern-URLs / Kaninchenbau: nur Bitcoin-only-Content für Plebs (Mechanismen, keine SatSage-Internals); Shitcoins/Eth im Zweifel warnen (Dealbreaker T13)
+- **HART · Core-RPC nur aus der Allowlist** (Dealbreaker **T14**): Jeder bitcoind-Aufruf geht durch `BitcoinRpcClient.call` in `core/bitcoind_rpc.py`; erlaubt sind nur `RPC_KERN` (lesend), `RPC_WALLET_IMPORT` (`listdescriptors` nur ohne private Schlüssel) und `RPC_LAB_REGTEST` (nur `NETWORK=regtest`). Keine wallet-schreibenden/signierenden RPCs, kein Roh-JSON-RPC, kein `bitcoin-cli` im Produktivcode. `RpcAllowlistError` nie in einen Fallback verschlucken (`except RpcAllowlistError: raise` vor `except Exception`). Neue Methode = Maintainer-Freigabe + Doku (`.env.example`, Handbuch „Bitcoin Core absichern“, README) + Tests `tests/test_rpc_allowlist*.py`
 - Wallet-Namen in `.env`, `utxo_cache/` und `immutable_cache/utxo_ingress/` können Klarnamen enthalten — nicht committen
 - Git-Commit-Metadaten (Autor/E-Mail) sind bei `push` öffentlich sichtbar
 - Fulcrum (öffentliche Onions/Clearnet): mäßig (Rotation mildert Risiko); öffentliche Server und Remote-LLM nur nach Opt-in
