@@ -375,6 +375,12 @@ class TestSprachstringsVorStart(unittest.TestCase):
             roh.index("await ladeSprachstringsVorStart("),
             "Gerüst zuerst, dann Sprachstrings",
         )
+        self.assertLess(
+            roh.index("folgeBootLog()"),
+            roh.index("await ladeConfig()"),
+            "Start-Log vor dem blockierenden Config-Abruf",
+        )
+        self.assertNotIn("await folgeBootLog()", roh)
 
     def test_sprachwahl_ohne_config(self):
         """Die Sprache kommt aus /api/auth/status, nicht aus /api/config."""

@@ -447,8 +447,13 @@ def build_wallet_context(
     max_addresses: int = DEFAULT_MAX_ADDRESSES,
     max_addresses_per_xpub: list[int] | None = None,
     script_types: list[str] | None = None,
+    on_log=None,
 ) -> WalletContext:
-    """Baut Namenszuordnung aus XPUBs und optionalen CLI-Namen."""
+    """Baut Namenszuordnung aus XPUBs und optionalen CLI-Namen.
+
+    *on_log(text, wallet=name)*: eine Zeile je Wallet, bevor die Ableitung
+    startet, und eine danach. Ohne Callback bleibt der Aufbau still.
+    """
     names_by_xpub: dict[str, str] = {}
     max_by_xpub: dict[str, int] = {}
     type_by_xpub: dict[str, str] = {}
@@ -476,9 +481,13 @@ def build_wallet_context(
     for xpub in xpubs:
         wallet_name = names_by_xpub[xpub]
         xpub_max = max_by_xpub[xpub]
+        if on_log:
+            on_log("Leite Adressen ab…", wallet=wallet_name)
         for addr in derive_addresses(xpub, xpub_max, script_type=type_by_xpub[xpub]):
             address_to_wallet[addr] = wallet_name
             address_to_xpub[addr] = xpub
+        if on_log:
+            on_log("Adressen abgeleitet.", wallet=wallet_name)
 
     return WalletContext(
         xpubs=xpubs,

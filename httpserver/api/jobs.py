@@ -62,14 +62,16 @@ def api_jobs(state: Any, query: dict) -> dict:
             block_event = {"seq": seq, "height": int(hoehe)}
     except (TypeError, ValueError):
         block_event = None
-    if not state.context_bereit():
+    if not state.context_bereit() and getattr(state, "boot_log", None) is not None:
+        zeilen, _fertig = state.boot_log.stand()
         jobs.insert(0, {
             "id": "wallet-context",
             "kind": "wallet_context",
             "label": "Wallets werden vorbereitet",
             "status": "running",
-            "message": "Adressen und Cache werden gelesen…",
-            "log": [],
+            "message": (zeilen[-1]["text"] if zeilen else "Adressen und Cache werden gelesen…"),
+            "log": [z["text"] for z in zeilen],
+            "log_wallets": [z.get("wallet") or "" for z in zeilen],
             "running": True,
             "elapsed_s": 0,
             "error": None,

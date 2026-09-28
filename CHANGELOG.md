@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Start · Log:** Während die Oberfläche schon steht und der Empfangs-QR atmet, schreibt die Vorbereitung eine Zeile je Wallet ins Log — Ankündigung vor dem Ableiten, Ergebnis danach, und dasselbe für den Cache. Jede Zeile erscheint, sobald sie entsteht, nicht erst wenn das letzte Wallet fertig ist.
+
 - **Bereits ausgegeben:** Aufklappen liest nur noch den Verlaufs-Cache. Der Electrum-Mempool-Check entfällt für diesen Abschnitt — er änderte die 670 historischen Ausgaben nicht und hielt „Lade aus Cache…“ so lange fest, wie der Verbindungsversuch dauerte.
 
 - **Steuerjahr · Lot-Donut am angeklickten Punkt:** Liegt das Herkunftsnetz über dem Zeitstrahl, ist die Umrandung des angeklickten Punkts der Los-Ring. Grün, orange und grau kommen aus den Endknoten des Netzes. Der Außenradius bleibt, das Loch ist halb so groß. Eine Farbe bleibt ein Ring mit Loch, in der Herkunftsliste und im Zeitstrahl. Der Punkt selbst und sein Tooltip bleiben in der gewohnten Größe. Schließt das Netz, ist der Punkt wieder einfarbig.

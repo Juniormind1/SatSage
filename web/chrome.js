@@ -56,6 +56,55 @@ function zeichneFussLocalOnly() {
 }
 
 
+/**
+ * Start-Log der Wallet-Vorbereitung, Zeile für Zeile.
+ * Nicht awaiten: der Strom endet erst, wenn das letzte Wallet gelesen ist.
+ */
+function folgeBootLog() {
+  if (Zustand.bootLogGestartet) return;
+  Zustand.bootLogLive = true;
+  Zustand.bootLogGestartet = true;
+  const kopf = { ...tokenKopf(), Accept: "application/x-ndjson" };
+  fetch("/api/boot-log", { headers: kopf, credentials: "same-origin" })
+    .then((antwort) => {
+      if (!antwort.ok || !antwort.body) return null;
+      const typ = antwort.headers.get("Content-Type") || "";
+      if (!typ.includes("ndjson")) return null;
+      return leseBootLogStream(antwort);
+    })
+    .catch(() => {});
+}
+
+async function leseBootLogStream(antwort) {
+  const leser = antwort.body.getReader();
+  const decoder = new TextDecoder();
+  let puffer = "";
+  const nimm = (obj) => {
+    if (obj.log) logZeile(obj.log, undefined, obj.wallet || "");
+    if (obj.done && obj.context_bereit) {
+      Zustand.contextBereit = true;
+      if (typeof EmpfangPuls !== "undefined") EmpfangPuls.stop();
+      if (Zustand.walletId && typeof ladeEmpfang === "function") {
+        ladeEmpfang(Zustand.walletId).catch(() => {});
+      }
+    }
+  };
+  while (true) {
+    const { done, value } = await leser.read();
+    if (done) break;
+    puffer += decoder.decode(value, { stream: true });
+    const zeilen = puffer.split("\n");
+    puffer = zeilen.pop();
+    for (const zeile of zeilen) {
+      if (!zeile.trim()) continue;
+      try { nimm(JSON.parse(zeile)); } catch (_) { /* halbe Zeile */ }
+    }
+  }
+  if (puffer.trim()) {
+    try { nimm(JSON.parse(puffer)); } catch (_) { /* Ende ohne Zeile */ }
+  }
+}
+
 async function ladeConfig() {
   const altQuellen = Zustand.config?.sources;
   Zustand.config = await api("/config");
@@ -197,6 +246,9 @@ async function start() {
   }
   setzeEmpfangPoll();
   if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
+  // Vorbereitung läuft schon. Zeilen kommen, sobald sie entstehen — start()
+  // wartet diesen Strom nicht ab.
+  folgeBootLog();
 
   try {
     await ladeConfig();

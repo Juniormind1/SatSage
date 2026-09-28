@@ -52,6 +52,49 @@ class HandlerSseMixin:
                 return
             raise
 
+    def _stream_boot_log(self) -> None:
+        _ensure_server_names()
+        """Start-Log Zeile für Zeile, sobald sie entsteht — nicht erst am Ende."""
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+        except Exception as exc:
+            if _client_weg(exc):
+                return
+            raise
+
+        def on_zeile(eintrag: dict) -> None:
+            try:
+                self._ndjson_zeile({"log": eintrag.get("text") or "", "wallet": eintrag.get("wallet") or ""})
+            except Exception as exc:
+                if _client_weg(exc):
+                    return
+                raise
+
+        log = getattr(self.state, "boot_log", None)
+        if log is None:
+            self._ndjson_zeile({"done": True, "context_bereit": self.state.context_bereit()})
+            return
+        abmelden = log.abonniere(on_zeile)
+        try:
+            while not _server_faehrt_runter(self.state):
+                _, fertig = log.stand()
+                if fertig:
+                    break
+                log.warte(1.0)
+            _, fertig = log.stand()
+            self._ndjson_zeile({"done": True, "context_bereit": bool(fertig and self.state.context_bereit())})
+        except Exception as exc:
+            if _shutdown_rauschen(exc) or _client_weg(exc) or _server_faehrt_runter(self.state):
+                return
+            LOGGER.exception("Start-Log fehlgeschlagen")
+        finally:
+            abmelden()
+
     def _stream_wallet_export_suchen(self) -> None:
         _ensure_server_names()
         """Wallet-Suche: Log-Zeilen live („Suche Sparrow…“), danach Ergebnis."""

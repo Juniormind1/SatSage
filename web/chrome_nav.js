@@ -182,6 +182,20 @@ function nimmBlockEvent(daten) {
   }
 }
 
+/** Fallback, falls der Start-Strom die Zeile noch nicht gezeigt hat. */
+function nimmBootLogAusJobs(daten) {
+  // Der Live-Strom schreibt dieselben Zeilen schon. Nur ohne ihn nachziehen.
+  if (Zustand.bootLogLive) return;
+  const job = (daten.jobs || []).find((j) => j && j.kind === "wallet_context");
+  if (!job || !Array.isArray(job.log)) return;
+  if (!Zustand.bootLogStand) Zustand.bootLogStand = { index: 0 };
+  const namen = job.log_wallets || [];
+  const stand = Zustand.bootLogStand;
+  for (; stand.index < job.log.length; stand.index += 1) {
+    logZeile(job.log[stand.index], undefined, namen[stand.index] || "");
+  }
+}
+
 async function ladeJobsNav() {
   try {
     const daten = await api("/jobs?recent_s=3");
@@ -199,6 +213,7 @@ async function ladeJobsNav() {
     };
     Zustand.jobsNavFehler = "";
     nimmBlockEvent(daten);
+    nimmBootLogAusJobs(daten);
   } catch (fehler) {
     /* offline / alter Server ohne /api/jobs */
     Zustand.jobsNavFehler = (fehler && fehler.message) || t("common.netError");

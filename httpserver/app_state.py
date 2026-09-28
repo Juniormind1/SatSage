@@ -6,6 +6,8 @@ Keine HTTP-Handler; Fassade bleibt in server.py für Late-Imports / bestehende
 
 from __future__ import annotations
 
+from httpserver.boot_log import BootLog
+
 import logging
 import os
 import secrets
@@ -123,6 +125,7 @@ class AppState:
         # Login zeigt die GUI, bevor Adressen und Cache-Seed fertig sind.
         self._context_bereit = threading.Event()
         self._context_bereit.set()
+        self.boot_log = BootLog()
         # Nächste Empfangsadresse je Wallet — sofort beim Wechsel, ohne Netz.
         self.empfang_cache: dict[str, dict] = {}
         # Wiederverwendeter Electrs-Client nur für Empfangs-QR (eigen oder öffentlich).
@@ -240,6 +243,7 @@ class AppState:
             else:
                 self._wallet_ctx = None
                 self._context_bereit.clear()
+                self.boot_log = BootLog()
             self._verwerfe_empfang_clients_unlocked()
         if hintergrund:
             threading.Thread(
@@ -249,38 +253,74 @@ class AppState:
             ).start()
 
     def _context_im_hintergrund(self) -> None:
+        log = self.boot_log
         try:
+            gueltig = [e for e in self.entries if e.is_valid()]
+            if not gueltig:
+                log.zeile("Keine Wallets eingetragen.")
+                return
+            log.zeile(
+                f"Bereite {len(gueltig)} Wallet"
+                f"{'' if len(gueltig) == 1 else 's'} vor…"
+            )
+            ctx = self._build_context(gueltig, on_log=log.zeile)
             with self._lock:
-                ctx = self._build_context(self._entries)
                 self._wallet_ctx = ctx
-                self._seed_wallet_context_unlocked()
+                self._seed_wallet_context_unlocked(on_log=log.zeile)
+            log.zeile("Wallets bereit.")
         except Exception:
             LOGGER.exception("Wallet-Kontext im Hintergrund fehlgeschlagen")
+            log.zeile("Wallet-Vorbereitung fehlgeschlagen.")
         finally:
+            log.fertig()
             self._context_bereit.set()
 
-    def _seed_wallet_context_unlocked(self) -> None:
+    def _seed_wallet_context_unlocked(self, *, on_log=None) -> None:
         """UTXO- und Resolution-Cache ins Mapping. Aufrufer hält ``_lock``."""
         if self._wallet_ctx is None:
             return
         schluessel = [
             e.analyse_schluessel for e in self._entries if e.is_valid()
         ]
+        namen = {
+            e.analyse_schluessel: e.display_name
+            for e in self._entries if e.is_valid()
+        }
         # Sonst resolve_address je ungeseedeter Adresse
         # MAX_TRACE_ADDRESS_SEARCH Ableitungen (Herkunft mit 30+ UTXOs:
         # Sekunden).
-        try:
-            main.seed_wallet_addresses_from_utxo_cache(
-                self._wallet_ctx, schluessel, self.cache_dir,
-            )
-        except Exception:
-            LOGGER.exception("UTXO-Cache-Seed fehlgeschlagen")
-        try:
-            main.seed_wallet_addresses_from_resolution_cache(
-                self._wallet_ctx, schluessel,
-            )
-        except Exception:
-            LOGGER.exception("Resolution-Cache-Seed fehlgeschlagen")
+        from core.wallet_context import (
+            seed_wallet_addresses_from_resolution_cache,
+            seed_wallet_addresses_from_utxo_cache,
+            seed_wallet_addresses_from_verlauf_cache,
+        )
+
+        for schluessel_eins in schluessel:
+            name = namen.get(schluessel_eins) or ""
+            if on_log:
+                on_log("Lese Cache…", wallet=name)
+            try:
+                seed_wallet_addresses_from_utxo_cache(
+                    self._wallet_ctx, [schluessel_eins], self.cache_dir,
+                )
+            except Exception:
+                LOGGER.exception("UTXO-Cache-Seed fehlgeschlagen")
+                if on_log:
+                    on_log("UTXO-Cache nicht lesbar.", wallet=name)
+            try:
+                seed_wallet_addresses_from_verlauf_cache(
+                    self._wallet_ctx, [schluessel_eins], self.cache_dir,
+                )
+            except Exception:
+                LOGGER.exception("Verlaufs-Cache-Seed fehlgeschlagen")
+            try:
+                seed_wallet_addresses_from_resolution_cache(
+                    self._wallet_ctx, [schluessel_eins],
+                )
+            except Exception:
+                LOGGER.exception("Resolution-Cache-Seed fehlgeschlagen")
+            if on_log:
+                on_log("Cache gelesen.", wallet=name)
 
     def _verwerfe_empfang_clients_unlocked(self) -> None:
         """Empfangs-QR neu ableiten. Aufrufer hält ``_lock``."""
@@ -306,7 +346,7 @@ class AppState:
         return self._context_bereit.wait(timeout)
 
     @staticmethod
-    def _build_context(entries: list[WalletEntry]):
+    def _build_context(entries: list[WalletEntry], *, on_log=None):
         # Single-Sig wie Multisig. Der Stack führt seine Wallets über einen
         # Zeichenketten-Schlüssel: bei Single-Sig der XPUB, bei Multisig der
         # Deskriptor. Aus beiden lassen sich Adressen ableiten — mehr braucht
@@ -320,6 +360,7 @@ class AppState:
             wallet_names=[e.display_name for e in gueltig],
             max_addresses_per_xpub=[e.max_addresses for e in gueltig],
             script_types=[e.script_type for e in gueltig],
+            on_log=on_log,
         )
 
     @property
