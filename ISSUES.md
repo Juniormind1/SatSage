@@ -5,6 +5,107 @@ Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalte
 
 **Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie).
 
+## Steuerjahr · Herkunftsnetz als Overlay, dann Interpreter / Register
+
+**Stand:** 2026-09-27 · **offen** · Produkt / UI / Trace
+**Ort:** Steuerjahr-Zeitstrahl (`core/tax.py` `zeitstrahl()`, `web/app.js` `#achse-spur`); Trace nur als Datenquelle (`utxo_trace` / Ingress-Cache)
+**Aufwand Schritt 1:** **mittel** (UI-Overlay + vorhandener On-Demand-Trace; kein Backend-Umbau)
+**Aufwand Zielbild:** hoch — nicht dieser Issue
+
+### Zielbild (Richtung, nicht dieser Sprint)
+
+SatSage bleibt On-Chain-Beobachter und On-Chain-Beleg, kein Gutachten.
+Langfristig zwei zusätzliche Rollen, klar getrennt von der defensiven UTXO-Farbe:
+
+1. **Verbrauchsregel-Interpreter** — dieselbe Spend-Tx lesbar unter
+   defensiv (jüngster Extern färbt den Input) und unter
+   FIFO / Einzelbetrachtung (älteste offene Lose zuerst).
+2. **Losregister** — Herkunftsäste plus Restmenge nach Abgang, Fee und Change.
+
+Der Herkunftsbaum ist der Rohstoff für Lose, nicht schon das Register:
+der Trace zeigt, *welche Äste in den Output liefen*; das Register erst,
+*wie viel davon noch offen ist*. Coin-Control erst ganz am Ende, und nur
+über heutige Unspents plus offene Lose — nie über verbrauchte Hops.
+
+Konsolidierung auf ein neues XPUB setzt die Frist nicht zurück. Sie
+zerstört nur die getrennte Ausgebbarkeit der alten UTXOs.
+
+### Nicht in diesem Issue
+
+Lose, FIFO-Rechnung, Restmengen, Coin-Control, Abgangs-X,
+Punkte links vom Klick löschen, Graph-DB, HTML/CSV-Overlay,
+Default beim Öffnen der Ansicht.
+
+### Schritt 1 — Oneshot: Herkunftsnetz temporär überlagern
+
+Klick auf einen Bestandspunkt im Steuerjahr-Punktdiagramm blendet
+ephemer das eigene Vorgängernetz dieses UTXO ein.
+Der Plot bleibt Bestands-Scatter zur Haltefrist.
+Der Overlay sagt nur: *woraus dieser Punkt gebaut ist.*
+
+Anschluss an die beschlossene Linie: Trace on demand, Chain bleibt
+Source of Truth, kein shared Herkunfts-DAG.
+
+#### Zwei Layer, eine Fläche
+
+| Layer | X | Wer | Darstellung |
+|-------|---|-----|-------------|
+| A Bestand | wirksame Anschaffung (defensiv: jüngster Extern) | heutige UTXOs | grün/gelb; ungewählte **dimmen**, nicht löschen |
+| B Netz | **Output-Zeit** des Hops (Blockzeit aus Höhe, `block_header`-Cache) | gewählter UTXO + eigene Vorfahren | orange Ringe + orangene Kanten |
+
+Haltefristlinie und `geister_saldo` bleiben.
+Interner Hop **erbt die Anschaffung** (Layer A) und **behält seine
+Bewegungszeit** (Layer B). Nicht dieselbe X.
+
+#### Interaktion
+
+- Einstieg: Klick auf `.achse-punkt`.
+- Hinweiszeile, solange der Modus an ist:
+  „Orange: eigene Vorgänger nach Output-Zeit“.
+- Ende: Esc, Klick ins Leere, zweiter Klick auf denselben Punkt,
+  Ansichtswechsel.
+- Fehlender Trace: begrenzter Steuer-Horizont-Job wie
+  „Herkünfte UTXOs“ (Stop an Frist/Stichtag reicht). Log + „Moment noch“.
+  Abbruch lässt den Bestand unangetastet.
+- Volllauf bis extern/Coinbase nur, wenn der Cache das schon hat.
+
+#### Zeichnen
+
+- Gewählter Punkt bleibt gefüllt (grün/gelb nach Frist).
+- Eigene Vorfahren: orange Ringe, nicht Bestands-Vollpunkte.
+- Kanten orange, Dicke ~ Sat-Anteil am gewählten Output; Anteil im Tooltip.
+- Fremd / Coinbase: gestrichelter Endknoten, kein Weiterzeichnen.
+- CoinJoin / Sammel-Tx / `FULL_RESOLUTION_INPUT_LIMIT`: ein Bündel
+  „n Eingänge“, kein Haarnetz.
+- Y bleibt log1p. Vorfahren dürfen größer sein als der geklickte Output.
+
+#### Daten / Schnitt
+
+`zeitstrahl()` unverändert. Overlay ephemer in der Session, nicht in
+`events[]` einmischen.
+
+Vorschlag nur für die GUI:
+
+```json
+{
+  "fokus_key": "txid:vout",
+  "vorfahren": [
+    {
+      "key": "txid:vout",
+      "pos_output": 12.3,
+      "y": 40.0,
+      "value_sats": 123456,
+      "wallet": "…",
+      "eigen": true,
+      "ende": false
+    }
+  ],
+  "kanten": [
+    { "von": "txidA:0", "nach": "txidB:1", "sats": 123456, "eigen": true }
+  ]
+}
+```
+
 ## Firefox · „Token fehlt“ hinter StartOS
 
 **Stand:** 2026-09-25 · **offen** · nicht weiterverfolgen, bis jemand den Client isoliert
