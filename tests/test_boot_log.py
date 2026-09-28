@@ -14,7 +14,7 @@ from tests.test_api import ApiTestBasis
 class TestBootLog(ApiTestBasis):
 
     def test_zeile_kommt_bevor_das_naechste_wallet_fertig_ist(self):
-        """Der Strom liefert die Ankündigung, während die Ableitung noch hängt."""
+        """Der Strom liefert die Ankündigung, während der Aufbau noch hängt."""
         tor = threading.Barrier(2)
         original = self.state._build_context
 

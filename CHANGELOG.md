@@ -9,6 +9,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Fulcrum:** Transaktionen kommen als Roh-Hex und werden lokal geparst. Die verbose JSON-Form großer CoinJoins kam über Fulcrum nicht zuverlässig zurück.
+- **Vervollständigen:** Die Diagnose-Datei `logs/vervollstaendigen.log` ist aus. Die Spur bleibt im Code und lässt sich für den nächsten Lauf wieder einschalten.
+- **Steuerjahr · Dotplot:** UTXOs mit unvollständiger Herkunft tragen einen roten Ring. Die Angabe kommt aus dem Cache-Kopf, den die Liste ohnehin liest.
+- **Herkunft:** Steht an einem UTXO die rote Marke „unvollständig“, sitzt direkt daneben „vervollständigen“. Gebündelte Eingänge lösen „Herkunftslücken schließen“ aus, sonst „Scan neu“.
+- **Start:** Die GUI wartet nicht mehr auf die Adressableitung. Bestand und Verlauf kommen aus dem Cache. Die Ableitung bis zum alten Scan-Horizont läuft danach und merkt sich die Adressen, damit der nächste Start sie liest.
 - **Herkunft tracen:** Nach dem Sprung aus dem Herkunftsnetz lässt sich ein Knoten aufklappen, auch wenn seine Kinder noch nicht mitgezeichnet waren. Dafür reicht der gespeicherte Baum; ein neuer Scan ist nicht nötig.
 - **Steuerjahr · Herkunftsnetz:** Sobald das Netz steht, wird der gespeicherte Herkunftsbaum im Hintergrund geladen. Der Klick auf einen Vorgänger muss nicht mehr auf den ersten Abruf warten. Verschwindet das Netz, wird dieser Baum verworfen.
 - **Steuerjahr · Herkunftsnetz:** Ein Klick auf einen Vorgänger-Punkt öffnet „Herkunft tracen“ für das gewählte UTXO und springt dort an die Stelle, die der Punkt meint. Ein Bündel öffnet die zusammengefassten Eingänge. Derselbe Klick kopiert `txid:vout`, der Klick auf den UTXO-Punkt die Adresse — beides lässt sich in der Suche von mempool.space einfügen. Ein Bündel kopiert die Transaktion, deren Eingänge es zusammenfasst.

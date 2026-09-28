@@ -268,12 +268,12 @@ class AppState:
                 f"Bereite {len(gueltig)} Wallet"
                 f"{'' if len(gueltig) == 1 else 's'} vor…"
             )
-            ctx = self._build_context(gueltig, on_log=log.zeile)
+            # Namen und Limits ohne HD-Ableitung. Die GUI liest den Bestand
+            # aus dem Cache; Empfang und Herkunft leiten danach ab.
+            ctx = self._build_context(gueltig, on_log=log.zeile, ableiten=False)
             with self._lock:
                 self._wallet_ctx = ctx
                 eintraege = list(self._entries)
-            # Ab hier darf eine Wallet-Ansicht den Kontext lesen, während der
-            # Cache der übrigen Wallets noch in den Seed läuft.
             self._adressen_bereit.set()
             # Seed ohne ``_lock``: Er liest nur Cache-Dateien und trägt Adressen
             # in *ctx* ein. Unter dem Lock hielte er ``entries`` und
@@ -288,6 +288,16 @@ class AppState:
         finally:
             log.fertig()
             self._context_bereit.set()
+            # Konfigurierte Tiefe, danach Change jenseits davon. Beides erst,
+            # wenn die GUI steht. Die Herkunft braucht die Adressen beim Trace.
+            ctx = self.wallet_ctx_fuer_ansicht()
+            if ctx is not None:
+                threading.Thread(
+                    target=self._ableitung_im_hintergrund,
+                    args=(ctx, list(self.entries)),
+                    name="satsage-ableitung",
+                    daemon=True,
+                ).start()
 
     def _seed_wallet_context_unlocked(self, *, on_log=None) -> None:
         """UTXO- und Resolution-Cache ins Mapping. Aufrufer hält ``_lock``."""
@@ -325,6 +335,7 @@ class AppState:
             try:
                 seed_wallet_addresses_from_utxo_cache(
                     ctx, [schluessel_eins], self.cache_dir,
+                    scan_end_ableiten=False,
                 )
             except Exception:
                 LOGGER.exception("UTXO-Cache-Seed fehlgeschlagen")
@@ -364,6 +375,27 @@ class AppState:
                     LOGGER.exception("Wallet-Stand fürs Start-Log fehlgeschlagen")
                 on_log("Cache gelesen.", wallet=name, extra=extra)
 
+    def _ableitung_im_hintergrund(self, ctx, entries) -> None:
+        """HD-Ableitung, nachdem die GUI bereit ist."""
+        from core.derivation import derive_addresses
+        from core.wallet_context import seed_wallet_addresses_from_scan_end
+
+        schluessel = [e.analyse_schluessel for e in entries if e.is_valid()]
+        try:
+            for xpub in schluessel:
+                name = ctx.names_by_xpub.get(xpub) or ""
+                tiefe = int(ctx.max_addresses_for(xpub) or 0)
+                for addr in derive_addresses(
+                    xpub, tiefe, script_type=ctx.script_type_for(xpub),
+                ):
+                    ctx.address_to_wallet.setdefault(addr, name)
+                    ctx.address_to_xpub.setdefault(addr, xpub)
+            seed_wallet_addresses_from_scan_end(
+                ctx, schluessel, self.cache_dir, ableiten=True,
+            )
+        except Exception:
+            LOGGER.exception("Adressableitung im Hintergrund fehlgeschlagen")
+
     def _verwerfe_empfang_clients_unlocked(self) -> None:
         """Empfangs-QR neu ableiten. Aufrufer hält ``_lock``."""
         self.empfang_cache.clear()
@@ -387,18 +419,18 @@ class AppState:
         return self._adressen_bereit.is_set()
 
     def warte_auf_adressen(self, timeout: float | None = None) -> bool:
-        """Blockiert, bis die Adressableitung steht. Cache-Seed darf noch laufen."""
+        """Blockiert, bis Namen und Limits stehen. Die Ableitung läuft danach."""
         return self._adressen_bereit.wait(timeout)
 
     def warte_auf_context(self, timeout: float | None = None) -> bool:
-        """Blockiert, bis Ableitung und Cache-Seed fertig sind."""
+        """Blockiert, bis der Cache-Seed fertig ist. Die Ableitung läuft danach."""
         return self._context_bereit.wait(timeout)
 
     def wallet_ctx_fuer_ansicht(self):
         """
         Kontext für eine einzelne Wallet-Ansicht.
 
-        Wartet auf die Adressableitung, nicht auf den Cache-Seed der übrigen
+        Wartet auf Namen und Limits, nicht auf den Cache-Seed der übrigen
         Wallets. Deren Lesen läuft im selben Prozess weiter; der Klick soll
         den schon gelesenen Cache dieses Wallets zeichnen.
         """
@@ -407,7 +439,7 @@ class AppState:
             return self._wallet_ctx
 
     @staticmethod
-    def _build_context(entries: list[WalletEntry], *, on_log=None):
+    def _build_context(entries: list[WalletEntry], *, on_log=None, ableiten: bool = True):
         # Single-Sig wie Multisig. Der Stack führt seine Wallets über einen
         # Zeichenketten-Schlüssel: bei Single-Sig der XPUB, bei Multisig der
         # Deskriptor. Aus beiden lassen sich Adressen ableiten — mehr braucht
@@ -422,6 +454,7 @@ class AppState:
             max_addresses_per_xpub=[e.max_addresses for e in gueltig],
             script_types=[e.script_type for e in gueltig],
             on_log=on_log,
+            ableiten=ableiten,
         )
 
     @property

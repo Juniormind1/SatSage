@@ -1278,6 +1278,7 @@ def save_xpub_utxo_cache(
     *,
     bip158_fullscan_ok: bool | None = None,
     extra_scanned: list[str] | None = None,
+    derived_addresses: list[str] | None = None,
 ) -> Path:
     """
     Speichert UTXOs eines XPUB als JSON-Flatfile.
@@ -1373,6 +1374,15 @@ def save_xpub_utxo_cache(
         gescannt.update(str(a) for a in extra_scanned if a)
     if gescannt:
         payload["scanned_addresses"] = sorted(gescannt)
+    # Adressen, die der Scan bis scan_end_index schon abgeleitet hat.
+    # Der nächste Start liest sie, statt denselben Horizont neu zu rechnen.
+    abgeleitet = {
+        str(a) for a in (roh_bisher.get("derived_addresses") or []) if a
+    }
+    if derived_addresses is not None:
+        abgeleitet = {str(a) for a in derived_addresses if a}
+    if abgeleitet:
+        payload["derived_addresses"] = sorted(abgeleitet)
     if not cache_disk_write_allowed(cache_dir):
         # Früher: still return path — Scan meldete Erfolg, UI zeigte keinen Cache.
         raise CacheDiskFullError(_cache_disk_full_meldung(cache_dir))

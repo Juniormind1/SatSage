@@ -30,6 +30,20 @@ Gilt für **Commit, Push, PR, Issue, Changelog, Log-Ausgabe, Screenshot, Chat-An
 
 Technische Riegel: `.gitignore`, `githooks/pre-commit` (Secret-Pfade), Dealbreaker **S1** in [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Hooks ersetzen diese Prüfung nicht — Agents prüfen den Diff selbst.
 
+## HART · Nur der Worktree
+
+**Arbeiten nur im aktuellen Worktree und darunter.**
+
+Der Worktree ist der Ordner, in dem die Sitzung geöffnet ist (`git rev-parse --show-toplevel` dieses Clones). Lesen, Schreiben, Bauen, Testen und Logs bleiben in diesem Baum, inklusive `dist/`, `logs/`, `tmp/`.
+
+Nicht erlaubt, auch nicht kurz und auch nicht, weil dort die laufende GUI, ihre Caches oder ein älteres Binary liegen:
+
+- Dateien außerhalb des Worktrees anlegen, ändern, löschen oder dorthin kopieren (Home, Desktop, andere Projektordner)
+- Binaries, Logs oder Caches dorthin schreiben
+- Prozesse außerhalb des Worktrees starten, deren Dateien lesen oder sie samplen, um eine Aufgabe zu erledigen
+
+Läuft die GUI woanders, sagt der Assistent nur, welche Datei aus diesem Worktree der Nutzer wohin kopiert. Das Kopieren macht der Nutzer. Die App darf danach ihre eigene Log-Datei neben der Executable schreiben; der Assistent liest sie nur, wenn der Nutzer sie in den Worktree legt oder den Inhalt hier einfügt.
+
 ## Zweck
 
 **SatSage â€“ know your sats** (frÃ¼her xPubQuery) ist ein Multi-XPUB- und Taproot-Analyzer fÃ¼r Wasabi- und Standard-Wallets. Das Tool analysiert Transaktionen und unspent UTXOs und zeigt, **woher die Sats wann kamen** â€” insbesondere wann sie ein xPub-Wallet betraten oder es wieder verlieÃŸen. Typischer Anwendungsfall: Nachweise fÃ¼r die SteuererklÃ¤rung (Haltedauer, Stichtage). Anzeigename, Logo und technische IDs (`satsage`, Binary `satsage-webgui`, Specter-Package) sind vereinheitlicht.

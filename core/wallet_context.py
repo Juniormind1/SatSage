@@ -404,7 +404,15 @@ class WalletContext:
         return None
 
     def is_own_address(self, address: str) -> bool:
-        return self.resolve_address(address) is not None
+        """Nur der schon bekannte Bestand. Keine XPUB-Ableitung.
+
+        Eine unbekannte Adresse in einer großen Transaktion würde sonst über
+        alle XPUBs abgeleitet. Bei einem CoinJoin mit 100 Ausgängen blockiert
+        das die Folgeanalyse, ohne dass eine Zeile entsteht.
+        """
+        if not address:
+            return False
+        return address in self.address_to_wallet
 
     def own_labels(self, addresses: list[str]) -> list[str]:
         labels: list[str] = []
@@ -450,11 +458,14 @@ def build_wallet_context(
     max_addresses_per_xpub: list[int] | None = None,
     script_types: list[str] | None = None,
     on_log=None,
+    ableiten: bool = True,
 ) -> WalletContext:
     """Baut Namenszuordnung aus XPUBs und optionalen CLI-Namen.
 
     *on_log(text, wallet=name)*: eine Zeile je Wallet, bevor die Ableitung
     startet, und eine danach. Ohne Callback bleibt der Aufbau still.
+    *ableiten=False*: nur Namen, Limits und Skripttyp. Der GUI-Start liest
+    den Bestand aus dem Cache und leitet danach im Hintergrund ab.
     """
     names_by_xpub: dict[str, str] = {}
     max_by_xpub: dict[str, int] = {}
@@ -483,6 +494,8 @@ def build_wallet_context(
     for xpub in xpubs:
         wallet_name = names_by_xpub[xpub]
         xpub_max = max_by_xpub[xpub]
+        if not ableiten:
+            continue
         if on_log:
             on_log("Leite Adressen ab…", wallet=wallet_name)
         for addr in derive_addresses(xpub, xpub_max, script_type=type_by_xpub[xpub]):
@@ -541,6 +554,8 @@ def seed_wallet_addresses_from_utxo_cache(
     wallet: WalletContext | None,
     xpubs: list[str],
     cache_dir: Path,
+    *,
+    scan_end_ableiten: bool = True,
 ) -> None:
     """Lädt alle bekannten Wallet-Adressen aus dem UTXO-Flatfile-Cache."""
     from core.xpub_cache import load_xpub_utxo_cache
@@ -558,26 +573,44 @@ def seed_wallet_addresses_from_utxo_cache(
     )
     # Ausgegebene Change-Adressen jenseits max_addresses: nicht in utxos[],
     # oft auch nicht im Verlauf — scan_end_index kennt den Scan-Horizont.
-    seed_wallet_addresses_from_scan_end(wallet, xpubs, cache_dir)
+    # Liegen die Adressen schon im Cache, werden sie gelesen. Die Ableitung
+    # läuft nur für einen alten Cache und nicht auf dem Startpfad.
+    seed_wallet_addresses_from_scan_end(
+        wallet, xpubs, cache_dir, ableiten=scan_end_ableiten,
+    )
+
+
+def _scan_end_ueber_konfiguration(wallet: WalletContext, xpub: str, scan_end: int) -> int:
+    """0, wenn die Start-Ableitung den Scan-Horizont schon abdeckt."""
+    configured = int(wallet.max_addresses_for(xpub) or 0)
+    if scan_end <= max(1, configured // 2):
+        return 0
+    return max(scan_end * 2, configured)
 
 
 def seed_wallet_addresses_from_scan_end(
     wallet: WalletContext | None,
     xpubs: list[str],
     cache_dir: Path,
+    *,
+    ableiten: bool = False,
 ) -> int:
     """
-    Leitet Adressen bis ``scan_end_index`` ab und registriert sie.
+    Registriert Adressen bis ``scan_end_index``.
 
     Der UTXO-Scan hat diese Indizes bereits geprüft. Ausgegebene Change-
     Adressen stehen danach oft weder in ``utxos[]`` noch im Verlauf (wenn
     der Verlauf nur bis ``max_addresses`` geplant war). ``match_own_address``
     macht absichtlich keine HD-Suche — ohne diesen Seed stuft die Herkunft
     interne Überträge (Change jenseits der Start-Ableitung) als Extern ein.
+
+    ``derived_addresses`` im Cache wird gelesen. Die HD-Ableitung läuft nur
+    mit ``ableiten=True`` (Hintergrund nach „Wallets bereit.“) und schreibt
+    das Ergebnis zurück, damit der nächste Start sie nur noch liest.
     """
     if wallet is None:
         return 0
-    from core.xpub_cache import load_xpub_cache_entry
+    from core.xpub_cache import load_xpub_cache_entry, save_xpub_utxo_cache
 
     n = 0
     for xpub in xpubs:
@@ -592,20 +625,45 @@ def seed_wallet_addresses_from_scan_end(
             scan_end = 0
         if scan_end <= 0:
             continue
-        # derive_addresses: max//2 Indizes je Chain → Indizes 0 .. scan_end-1
-        max_addr = max(scan_end * 2, int(wallet.max_addresses_for(xpub) or 0))
-        configured = int(wallet.max_addresses_for(xpub) or 0)
-        # Schon in build_wallet_context abgedeckt?
-        if scan_end <= max(1, configured // 2):
+        max_addr = _scan_end_ueber_konfiguration(wallet, xpub, scan_end)
+        if not max_addr:
+            continue
+        roh = entry.get("raw") or {}
+        gespeichert = [
+            str(a) for a in (roh.get("derived_addresses") or []) if a
+        ]
+        if gespeichert:
+            for addr in gespeichert:
+                if addr in wallet.address_to_wallet:
+                    continue
+                _register_wallet_address(wallet, xpub, addr)
+                n += 1
+            if max_addr > int(wallet.max_addresses_for(xpub) or 0):
+                wallet.max_addresses_by_xpub[xpub] = max_addr
+            continue
+        if not ableiten:
             continue
         script = wallet.script_type_for(xpub)
-        for addr in derive_addresses(xpub, max_addr, script_type=script):
+        adressen = derive_addresses(xpub, max_addr, script_type=script)
+        for addr in adressen:
             if addr in wallet.address_to_wallet:
                 continue
             _register_wallet_address(wallet, xpub, addr)
             n += 1
-        if max_addr > configured:
+        if max_addr > int(wallet.max_addresses_for(xpub) or 0):
             wallet.max_addresses_by_xpub[xpub] = max_addr
+        try:
+            save_xpub_utxo_cache(
+                xpub,
+                list(entry.get("utxos") or []),
+                cache_dir,
+                str(roh.get("source") or "cache"),
+                scan_end_index=scan_end,
+                max_addresses=int(roh.get("max_addresses") or max_addr),
+                derived_addresses=sorted(adressen),
+            )
+        except Exception:
+            pass
     return n
 
 
