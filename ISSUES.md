@@ -8,6 +8,7 @@ Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalte
 ## Steuerjahr · Herkunftsnetz als Overlay, dann Interpreter / Register
 
 **Stand:** 2026-09-27 · **offen** · Produkt / UI / Trace
+**Schritt 1:** umgesetzt 2026-09-28 (Maintainer-Abnahme offen) — Issue bleibt offen für das Zielbild.
 **Ort:** Steuerjahr-Zeitstrahl (`core/tax.py` `zeitstrahl()`, `web/app.js` `#achse-spur`); Trace nur als Datenquelle (`utxo_trace` / Ingress-Cache)
 **Aufwand Schritt 1:** **mittel** (UI-Overlay + vorhandener On-Demand-Trace; kein Backend-Umbau)
 **Aufwand Zielbild:** hoch — nicht dieser Issue
@@ -37,6 +38,11 @@ Punkte links vom Klick löschen, Graph-DB, HTML/CSV-Overlay,
 Default beim Öffnen der Ansicht.
 
 ### Schritt 1 — Oneshot: Herkunftsnetz temporär überlagern
+
+> **Umgesetzt (2026-09-28, Maintainer-Abnahme offen):** `GET /api/tax/herkunftsnetz?key=txid:vout&jahr=&frist=&stichtag=`
+> (`core/herkunftsnetz.py`, `httpserver/api/tax.py`) liefert nur das flache Netz aus dem einen gespeicherten Baum;
+> Overlay in `web/views/herkunftsnetz.js`. `zeitstrahl()` unverändert (Auswertung trägt zusätzlich `bezug_ts` für die exakte Skala).
+> Fehlender Baum: Steuer-Horizont-Lauf über `/api/trace/alle` mit `baum_noetig`. HTML-Report des Punkts jetzt in der Hinweiszeile.
 
 Klick auf einen Bestandspunkt im Steuerjahr-Punktdiagramm blendet
 ephemer das eigene Vorgängernetz dieses UTXO ein.
