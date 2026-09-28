@@ -60,11 +60,16 @@ function tokenKopf() {
   return Token ? { "X-Satsage-Token": Token } : {};
 }
 
-async function api(pfad, { methode = "GET", daten, timeoutMs } = {}) {
-  const ctrl = timeoutMs ? new AbortController() : null;
-  const timer = ctrl
+async function api(pfad, { methode = "GET", daten, timeoutMs, signal } = {}) {
+  // *signal*: Aufrufer bricht ab (Wallet gewechselt). Gibt die Verbindung frei.
+  const ctrl = (timeoutMs || signal) ? new AbortController() : null;
+  const timer = timeoutMs
     ? setTimeout(() => ctrl.abort(), timeoutMs)
     : null;
+  if (signal) {
+    if (signal.aborted) ctrl.abort();
+    else signal.addEventListener("abort", () => ctrl.abort(), { once: true });
+  }
   let antwort;
   try {
     antwort = await fetch(`/api${pfad}`, {
@@ -80,6 +85,11 @@ async function api(pfad, { methode = "GET", daten, timeoutMs } = {}) {
     });
   } catch (fehler) {
     if (fehler && fehler.name === "AbortError") {
+      if (signal && signal.aborted) {
+        const abbruch = new ApiFehler(0, t("common.cancelled"));
+        abbruch.abgebrochen = true;
+        throw abbruch;
+      }
       throw new ApiFehler(408, t("common.timeout"));
     }
     const text = (fehler && fehler.message) || t("common.netError");

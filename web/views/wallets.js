@@ -677,6 +677,8 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
 
   // Seitenweise (ISSUES P2): Adressgruppen kommen seitenweise vom Server,
   // gefiltert über alle Seiten; die Seitengröße ersetzt „Top 10/25/Alle“.
+  // Anfragen des vorigen Wallets freigeben — ihr Ergebnis zeigt keiner mehr.
+  if (Zustand.walletQuelle?.abbrechen) Zustand.walletQuelle.abbrechen();
   const quelle = walletSeitenQuelle(walletId, "bestand");
   Zustand.walletQuelle = quelle;
   try {
@@ -691,6 +693,15 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
     setzeText($("#wallet-meta"), "");
   }
   aktualisiereScanAnzeige();
+
+  // Während des Starts wartet der Mempool-Abgleich serverseitig auf alle
+  // Wallets und hielte so lange eine Browser-Verbindung. Er kommt nach dem
+  // Start, und nur für das dann offene Wallet.
+  if (!walletMempoolErlaubt()) {
+    Zustand.walletMempoolNachStart = walletId;
+    return;
+  }
+  Zustand.walletMempoolNachStart = null;
 
   // Pending über eigenen Electrs — blockiert den Erst-Paint nicht.
   quelle.seite(0)
@@ -720,17 +731,43 @@ function walletListenParameter(teil, offset, limit, filter = "") {
   return p.toString();
 }
 
+/**
+ * Mempool-Abgleich (Pending über Electrs) erst, wenn der Start fertig ist.
+ * Vorher wartet der Server dafür auf den Kontext aller Wallets.
+ */
+function walletMempoolErlaubt() {
+  return Zustand.contextBereit !== false;
+}
+
+/**
+ * Start fertig: Mempool-Markierungen für das jetzt offene Wallet nachholen.
+ * Wallets, die während des Starts nur kurz offen waren, holt das nicht nach.
+ */
+function holeWalletMempoolNachStart() {
+  if (!walletMempoolErlaubt()) return false;
+  const offen = Zustand.walletMempoolNachStart;
+  Zustand.walletMempoolNachStart = null;
+  if (!offen || Zustand.ansicht !== "wallet" || Zustand.walletId !== offen) return false;
+  ladeWalletSeitenNeu();
+  return true;
+}
+
 /** Seitenquelle der Wallet-Ansicht; Pending über den eigenen Electrs. */
 function walletSeitenQuelle(walletId, teil) {
   const filter = kopfFilterParameter().toString();
+  const abbruch = new AbortController();
   const quelle = neueSeitenQuelle({
     groesse: pagerGroesse(teil === "verlauf" ? "ausgegeben" : "wallet"),
-    laden: (o, l) => api(
-      `/wallets/${walletId}/utxos?${walletListenParameter(teil, o, l, filter)}`,
-    ),
+    laden: (o, l) => {
+      let p = walletListenParameter(teil, o, l, filter);
+      // Blättern/Filtern während des Starts: nur Cache (s. walletMempoolErlaubt).
+      if (teil !== "verlauf" && !walletMempoolErlaubt()) p += "&mempool=0";
+      return api(`/wallets/${walletId}/utxos?${p}`, { signal: abbruch.signal });
+    },
     auszug: teil === "verlauf" ? verlaufSeitenAuszug : bestandSeitenAuszug,
   });
   quelle.q = filter;
+  quelle.abbrechen = () => abbruch.abort();
   return quelle;
 }
 
@@ -739,6 +776,7 @@ function ladeWalletSeitenNeu() {
   const walletId = Zustand.walletId;
   if (Zustand.ansicht !== "wallet" || !walletId) return;
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+  if (Zustand.walletQuelle?.abbrechen) Zustand.walletQuelle.abbrechen();
   const quelle = walletSeitenQuelle(walletId, "bestand");
   Zustand.walletQuelle = quelle;
   quelle.seite(0)

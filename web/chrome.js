@@ -90,6 +90,7 @@ async function leseBootLogStream(antwort) {
       if (Zustand.walletId && typeof ladeEmpfang === "function") {
         ladeEmpfang(Zustand.walletId).catch(() => {});
       }
+      if (typeof holeWalletMempoolNachStart === "function") holeWalletMempoolNachStart();
     }
   };
   while (true) {

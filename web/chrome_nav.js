@@ -58,6 +58,9 @@ function aktualisiereSpecterUi() {
  */
 function nimmWalletSobaldFertig(wallet) {
   if (!wallet || !wallet.id) return;
+  // Stand kommt aus dem Start-Log, /api/config steht evtl. noch aus: Der
+  // Start läuft. Ein Klick jetzt holt den Mempool-Abgleich erst danach.
+  if (Zustand.contextBereit === undefined) Zustand.contextBereit = false;
   if (!Zustand.config) Zustand.config = {};
   const liste = Zustand.config.wallets || [];
   const da = liste.findIndex((w) => w.id === wallet.id);
@@ -244,6 +247,7 @@ async function ladeJobsNav() {
       if (war === false && daten.context_bereit) {
         if (Zustand.walletId) ladeEmpfang(Zustand.walletId).catch(() => {});
         else zeichneEmpfangLeer();
+        if (typeof holeWalletMempoolNachStart === "function") holeWalletMempoolNachStart();
       }
     }
     Zustand.jobsNav = {
