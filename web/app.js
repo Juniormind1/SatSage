@@ -2373,7 +2373,8 @@ function zeichneRpcSperrePille() {
   const pillen = $("#quelle-pillen") || $("#quelle-status");
   if (!pillen) return;
   const s = rpcAllowlistStand();
-  const alt = $("#rpc-sperre-pille");
+  // Nur dynamisch da (kein Platzhalter in index.html) — daher getElementById statt $("#…").
+  const alt = document.getElementById("rpc-sperre-pille");
   if (!s || !s.verstoss) {
     if (alt) alt.remove();
     return;
