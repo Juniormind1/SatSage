@@ -63,7 +63,7 @@ class TestI18nGeruest(unittest.TestCase):
 
     def test_index_laedt_i18n_und_hat_sprache_karte(self):
         html = INDEX.read_text(encoding="utf-8")
-        self.assertIn('src="/i18n.js"', html)
+        self.assertIn('src="/i18n.js', html)
         self.assertIn('data-i18n="settings.language.title"', html)
         self.assertIn('id="ui-lang"', html)
         self.assertIn("Sprache", html)

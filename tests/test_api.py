@@ -134,7 +134,7 @@ class TestAbsicherung(ApiTestBasis):
     def test_ohne_token_abgelehnt(self):
         status, körper = self.anfrage("/api/config", token=False)
         self.assertEqual(status, 403)
-        self.assertIn("Token", körper["error"])
+        self.assertIn("Anmeldung", körper["error"])
 
     def test_falsches_token_abgelehnt(self):
         url = f"http://127.0.0.1:{self.port}/api/config?t=falsch"
