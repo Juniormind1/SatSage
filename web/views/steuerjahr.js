@@ -683,11 +683,35 @@ function formatTickMonatJahr(d) {
   return `${mm}/${d.getFullYear()}`;
 }
 
+function formatTickTag(d) {
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${dd}.${formatTickMonatJahr(d)}`;
+}
+
 /** Daten-% → sichtbare left-% im aktuellen X-Fenster. */
 function zeitstrahlSichtPos(pos) {
   const span = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0;
   if (span <= 0) return 50;
   return ((pos - ZeitstrahlAnsicht.x0) / span) * 100;
+}
+
+/**
+ * Linke Grenze der Zeitachse in Daten-%.
+ * 0 = ältester UTXO minus sechs Monate. Liegt ein Herkunfts-Input davor,
+ * geht die Achse bis zu dessen Datum, damit er nicht auf dem Nullpunkt stapelt.
+ */
+function zeitstrahlXMin() {
+  let min = 0;
+  const netz = typeof Herkunftsnetz !== "undefined" ? Herkunftsnetz : null;
+  const daten = netz && netz.daten;
+  if (!daten) return min;
+  const werte = [daten.fokus_pos];
+  for (const v of daten.vorfahren || []) werte.push(v && v.pos_output);
+  for (const pos of werte) {
+    const n = Number(pos);
+    if (Number.isFinite(n) && n < min) min = n;
+  }
+  return min;
 }
 
 /** Oberkante in Daten-%: 100, oder höher wenn ein Netz-Ring darüber liegt. */
@@ -714,6 +738,8 @@ function zeitstrahlSichtY(y) {
 
 function zeitstrahlFensterBegrenzen() {
   let { x0, x1 } = ZeitstrahlAnsicht;
+  const xMin = zeitstrahlXMin();
+  const xSpanne = 100 - xMin;
   let span = x1 - x0;
   if (span < ZEITSTRAHL_MIN_SPAN) {
     const mitte = (x0 + x1) / 2;
@@ -721,19 +747,19 @@ function zeitstrahlFensterBegrenzen() {
     x1 = mitte + ZEITSTRAHL_MIN_SPAN / 2;
     span = ZEITSTRAHL_MIN_SPAN;
   }
-  if (span > 100) {
-    x0 = 0;
+  if (span > xSpanne) {
+    x0 = xMin;
     x1 = 100;
   } else {
-    if (x0 < 0) {
-      x1 -= x0;
-      x0 = 0;
+    if (x0 < xMin) {
+      x1 += xMin - x0;
+      x0 = xMin;
     }
     if (x1 > 100) {
       x0 -= x1 - 100;
       x1 = 100;
     }
-    x0 = Math.max(0, x0);
+    x0 = Math.max(xMin, x0);
     x1 = Math.min(100, x1);
   }
   ZeitstrahlAnsicht.x0 = x0;
@@ -783,7 +809,8 @@ function zeitstrahlZoom(faktor, ankerXPct, ankerYPct) {
   const { x0, x1, y0, y1 } = ZeitstrahlAnsicht;
   const span = x1 - x0;
   const anker = x0 + (ankerXPct / 100) * span;
-  const neu = Math.min(100, Math.max(ZEITSTRAHL_MIN_SPAN, span * faktor));
+  const xSpanne = 100 - zeitstrahlXMin();
+  const neu = Math.min(xSpanne, Math.max(ZEITSTRAHL_MIN_SPAN, span * faktor));
   const linksAnteil = span > 0 ? (anker - x0) / span : 0.5;
   ZeitstrahlAnsicht.x0 = anker - linksAnteil * neu;
   ZeitstrahlAnsicht.x1 = ZeitstrahlAnsicht.x0 + neu;
@@ -809,23 +836,80 @@ function zeitstrahlPan(deltaXPct, deltaYPct) {
   zeitstrahlFensterBegrenzen();
 }
 
-/** Gleichmäßig verteilte Tick-Labels für das sichtbare X-Fenster. */
-function zeitstrahlTicksImFenster(strahl) {
+const ZEITSTRAHL_TICK_TAG = 86_400_000;
+const ZEITSTRAHL_TICK_STUFEN = [
+  { ms: ZEITSTRAHL_TICK_TAG, art: "tag" },
+  { ms: 7 * ZEITSTRAHL_TICK_TAG, art: "tag" },
+  { ms: 30 * ZEITSTRAHL_TICK_TAG, art: "monat" },
+  { ms: 90 * ZEITSTRAHL_TICK_TAG, art: "monat" },
+  { ms: 365 * ZEITSTRAHL_TICK_TAG, art: "jahr" },
+  { ms: 2 * 365 * ZEITSTRAHL_TICK_TAG, art: "jahr" },
+  { ms: 5 * 365 * ZEITSTRAHL_TICK_TAG, art: "jahr" },
+];
+
+/** Kleinste Stufe, bei der die Labels noch auseinanderliegen. */
+function zeitstrahlTickStufe(sichtMs, breitePx) {
+  const ziel = Math.max(72, Math.min(140, (Number(breitePx) || 640) / 6));
+  const n = Math.max(2, Math.floor((Number(breitePx) || 640) / ziel));
+  const gewuenscht = Math.max(ZEITSTRAHL_TICK_TAG, sichtMs / n);
+  let stufe = ZEITSTRAHL_TICK_STUFEN[ZEITSTRAHL_TICK_STUFEN.length - 1];
+  for (const kandidat of ZEITSTRAHL_TICK_STUFEN) {
+    if (kandidat.ms >= gewuenscht) {
+      stufe = kandidat;
+      break;
+    }
+  }
+  return stufe;
+}
+
+function zeitstrahlTickText(datum, art) {
+  if (art === "tag") return formatTickTag(datum);
+  if (art === "jahr") return String(datum.getFullYear());
+  return formatTickMonatJahr(datum);
+}
+
+/**
+ * Tick-Labels für das sichtbare X-Fenster.
+ * Weit herausgezoomt: Jahre. Reinzoomen verdichtet bis auf einzelne Tage,
+ * sobald der Platz zwischen den Labels das hergibt.
+ */
+function zeitstrahlTicksImFenster(strahl, breitePx) {
   const von = parseDeDatum(strahl.von);
   const bis = parseDeDatum(strahl.bis);
   if (!von || !bis) {
-    return (strahl.ticks || []).map((tick) => tick.label);
+    return (strahl.ticks || []).map((tick) => ({ label: tick.label, left: null }));
   }
   const gesamtMs = bis.getTime() - von.getTime();
-  const { x0, x1 } = ZeitstrahlAnsicht;
-  const schritte = 4;
-  const labels = [];
-  for (let i = 0; i <= schritte; i += 1) {
-    const dataPct = x0 + ((x1 - x0) * i) / schritte;
-    const tMs = von.getTime() + (gesamtMs * dataPct) / 100;
-    labels.push(formatTickMonatJahr(new Date(tMs)));
+  if (!(gesamtMs > 0)) {
+    return [{ label: formatTickMonatJahr(von), left: 0 }];
   }
-  return labels;
+  const { x0, x1 } = ZeitstrahlAnsicht;
+  const span = x1 - x0;
+  const sichtMs = gesamtMs * span / 100;
+  const stufe = zeitstrahlTickStufe(sichtMs, breitePx);
+  const fensterStart = von.getTime() + (gesamtMs * x0) / 100;
+  const fensterEnde = von.getTime() + (gesamtMs * x1) / 100;
+  const erster = Math.ceil(fensterStart / stufe.ms) * stufe.ms;
+  const ticks = [];
+  const gesehen = new Set();
+  for (let t = erster; t <= fensterEnde + stufe.ms / 2; t += stufe.ms) {
+    const datum = new Date(t);
+    const label = zeitstrahlTickText(datum, stufe.art);
+    if (gesehen.has(label)) continue;
+    gesehen.add(label);
+    const dataPct = ((t - von.getTime()) / gesamtMs) * 100;
+    ticks.push({
+      label,
+      left: ((dataPct - x0) / span) * 100,
+    });
+  }
+  if (!ticks.length) {
+    ticks.push({
+      label: zeitstrahlTickText(new Date(fensterStart), stufe.art),
+      left: 0,
+    });
+  }
+  return ticks;
 }
 
 /**
@@ -978,7 +1062,8 @@ function bindeZeitstrahlInteraktion() {
   viewport.addEventListener("pointerdown", (ereignis) => {
     if (!ZeitstrahlAnsicht.daten) return;
     if (ereignis.button !== 0 && ereignis.button !== 1) return;
-    const xVoll = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0 >= 99.9;
+    const xVoll = ZeitstrahlAnsicht.x0 <= zeitstrahlXMin() + 0.05
+      && ZeitstrahlAnsicht.x1 >= 99.9;
     const yVoll = ZeitstrahlAnsicht.y0 <= 0.05
       && ZeitstrahlAnsicht.y1 <= 100.05;
     if (xVoll && yVoll) return;
@@ -1085,6 +1170,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   if (!optionen.fensterBehalten) {
     ZeitstrahlAnsicht.x0 = 0;
     ZeitstrahlAnsicht.x1 = 100;
+    if (typeof Herkunftsnetz !== "undefined") Herkunftsnetz.fensterGeoeffnet = false;
     ZeitstrahlAnsicht.y0 = 0;
     ZeitstrahlAnsicht.y1 = 100;
   }
@@ -1243,9 +1329,15 @@ function zeichneZeitstrahl(daten, optionen = {}) {
 
   const ticks = $("#achse-ticks");
   ticks.replaceChildren();
-  for (const label of zeitstrahlTicksImFenster(strahl)) {
+  const breite = ticks.getBoundingClientRect().width
+    || (ticks.parentElement && ticks.parentElement.getBoundingClientRect().width)
+    || 0;
+  for (const tick of zeitstrahlTicksImFenster(strahl, breite)) {
     const span = document.createElement("span");
-    span.textContent = label;
+    span.textContent = tick.label;
+    if (tick.left != null) {
+      span.style.left = `${tick.left}%`;
+    }
     ticks.append(span);
   }
 

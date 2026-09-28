@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Zeitachse:** Die Datumsabstände folgen dem Zoom. Weit draußen stehen Jahre, weiter rein Monate, Wochen und schließlich einzelne Tage, sobald der Platz zwischen den Labels das hergibt. Rauszoomen macht die Abstände wieder größer.
+
+- **Steuerjahr · Herkunftsnetz:** Inputs vor dem Achsenbeginn stapeln sich nicht mehr auf dem Nullpunkt. Die Zeitachse reicht bis zum ältesten Herkunftsdatum, dorthin kann man pannen.
+
 - **Steuerjahr · Punktwolke:** Die Unterkante der UTXO-Punktwolke lässt sich ziehen; die Höhe bleibt gemerkt, Doppelklick setzt sie zurück. Reinzoomen vergrößert Zeit und Betrag am Mauszeiger. Die Betragsachse geht nicht unter null und nicht über den höchsten gezeichneten Punkt. Liegt ein Herkunftsnetz-Ring höher als der größte UTXO, reicht die Achse bis dorthin. Die Unterkante darf über null liegen. Ziehen folgt der Maus, auch nach oben.
 
 - **Tools · Los:** Die drei Auslöser heißen einheitlich „Los“. Vor dem gründlichen Wallet-Scan wählt ein Dropdown das Wallet; „Alle Wallets“ sucht wie bisher in allen.

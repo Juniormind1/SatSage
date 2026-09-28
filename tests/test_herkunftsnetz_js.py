@@ -135,10 +135,9 @@ class TestEinUndAusstieg(unittest.TestCase):
           const laedt = stand();
           await warte();
           const an = stand();
-          const schicht = spur.querySelector(".netz-schicht");
-          const fremd = schicht.querySelectorAll(".netz-fremd")[0];
-          const vorFrist = schicht.querySelector(".netz-eigen:not(.netz-fokus-b)");
-          const kanten = [...schicht.querySelectorAll(".netz-kante")];
+          const fremd = spur.querySelector(".netz-fremd");
+          const vorFrist = spur.querySelector(".netz-eigen:not(.netz-fokus-b)");
+          const kanten = [...spur.querySelectorAll(".netz-kante")];
           const verlauf = kanten.filter((k) => k.classList.contains("netz-kante-verlauf"));
           pA.fire("click");
           console.log(JSON.stringify({ laedt, an, aus: stand(), api: aufrufe.api,
@@ -156,8 +155,9 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertEqual(an["ringe"], 3)
         self.assertEqual(an["linien"], 3)  # 2 Kanten + Anschaffung→Output-Zeit
         self.assertIn("tax.netzHint", an["hinweisText"])
-        # Vor dem Achsenbeginn / über dem Skalenende: an den Rand geklemmt.
-        self.assertEqual(r["fremdLeft"], "0%")
+        # Über dem Skalenende an den Rand. Vor dem Achsenbeginn als eigene X-Lage,
+        # nicht auf den Nullpunkt geklemmt (Fenster steht hier bei 0..100).
+        self.assertEqual(r["fremdLeft"], "-10%")
         self.assertEqual(r["fremdBottom"], "100%")
         self.assertIn("netz-vor-achse", r["fremdKlasse"])
         self.assertIn("netz-ueber-achse", r["fremdKlasse"])
@@ -169,6 +169,90 @@ class TestEinUndAusstieg(unittest.TestCase):
         aus = r["aus"]
         self.assertFalse(aus["an"] or aus["fokus"] or aus["hinweis"])
         self.assertEqual(aus["ringe"], 0)
+
+    def test_x_achse_reicht_bis_zum_aeltesten_herkunftsdatum(self):
+        steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        start = steuer.index("/**\n * Linke Grenze der Zeitachse")
+        ende = steuer.index("function zeitstrahlZoom(")
+        rumpf = steuer[start:ende]
+        aus = subprocess.run(
+            ["node", "-e", """
+const Herkunftsnetz = { daten: { fokus_pos: 40, vorfahren: [
+  { pos_output: 40 }, { pos_output: -25 }, { pos_output: -8 },
+] } };
+const ZEITSTRAHL_MIN_SPAN = 2;
+function zeitstrahlYMax() { return 100; }
+""" + rumpf + """
+const ZeitstrahlAnsicht = { x0: 0, x1: 100, y0: 0, y1: 100 };
+zeitstrahlFensterBegrenzen();
+const voll = { x0: ZeitstrahlAnsicht.x0, x1: ZeitstrahlAnsicht.x1 };
+ZeitstrahlAnsicht.x0 = -40;
+ZeitstrahlAnsicht.x1 = 60;
+zeitstrahlFensterBegrenzen();
+const links = { x0: ZeitstrahlAnsicht.x0, x1: ZeitstrahlAnsicht.x1 };
+ZeitstrahlAnsicht.x0 = -10;
+ZeitstrahlAnsicht.x1 = -8;
+zeitstrahlFensterBegrenzen();
+const nah = { x0: ZeitstrahlAnsicht.x0, x1: ZeitstrahlAnsicht.x1 };
+const ohne = (() => {
+  Herkunftsnetz.daten = null;
+  const a = { x0: -5, x1: 95, y0: 0, y1: 100 };
+  Object.assign(ZeitstrahlAnsicht, a);
+  zeitstrahlFensterBegrenzen();
+  return { x0: ZeitstrahlAnsicht.x0, x1: ZeitstrahlAnsicht.x1 };
+})();
+console.log(JSON.stringify({ min: zeitstrahlXMin(), quelle: zeitstrahlXMin.toString().slice(0, 180), voll, links, nah, ohne }));
+"""],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(aus.returncode, 0, aus.stderr)
+        r = json.loads(aus.stdout)
+        self.assertEqual(r["links"]["x0"], -25)
+        self.assertEqual(r["links"]["x1"], 75)
+        self.assertLess(r["nah"]["x0"], 0)
+        self.assertEqual(r["ohne"], {"x0": 0, "x1": 100})
+        self.assertEqual(r["voll"], {"x0": 0, "x1": 100})
+        self.assertIn("zeitstrahlXMin()", (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8"))
+        self.assertIn("fensterGeoeffnet", NETZ)
+
+    def test_x_labels_verdichten_sich_bis_auf_tage(self):
+        steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        start = steuer.index("function formatTickMonatJahr(")
+        ende = steuer.index("/**\n * Dekaden-Ticks")
+        aus = subprocess.run(
+            ["node", "-e", """
+function parseDeDatum(text) {
+  const m = String(text || "").match(/^(\\d{2})\\.(\\d{2})\\.(\\d{4})$/);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12, 0, 0);
+}
+const ZeitstrahlAnsicht = { x0: 0, x1: 100 };
+""" + steuer[start:ende] + """
+const strahl = { von: "01.01.2016", bis: "01.01.2026" };
+function labels(x0, x1) {
+  ZeitstrahlAnsicht.x0 = x0;
+  ZeitstrahlAnsicht.x1 = x1;
+  return zeitstrahlTicksImFenster(strahl, 720).map((t) => t.label);
+}
+const weit = labels(0, 100);
+const monate = labels(50, 56);
+const tage = labels(50, 50.15);
+console.log(JSON.stringify({ weit, monate, tage }));
+"""],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(aus.returncode, 0, aus.stderr)
+        r = json.loads(aus.stdout)
+        self.assertTrue(all(len(x) == 4 for x in r["weit"]), r)
+        self.assertGreaterEqual(len(r["monate"]), 3, r)
+        self.assertTrue(all("/" in x for x in r["monate"]), r)
+
+        self.assertTrue(any("." in x and len(x) > 7 for x in r["tage"]), r["tage"])
+        abstaende = []
+        for a, b in zip(r["tage"], r["tage"][1:]):
+            abstaende.append(abs(int(a[:2]) - int(b[:2])))
+        self.assertTrue(abstaende)
+        self.assertTrue(all(d <= 1 or d >= 27 for d in abstaende), abstaende)
 
     def test_esc_leerklick_ziehen_und_ringklick(self):
         r = _node("""

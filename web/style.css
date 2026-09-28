@@ -2722,13 +2722,19 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 
 
 .achse-ticks {
-  display: flex; justify-content: space-between;
+  position: relative;
+  height: 16px;
   font-family: var(--mono); font-size: 10px; color: var(--blass);
   padding-top: 4px;
 }
-.achse-ticks span { flex: 1; text-align: center; }
-.achse-ticks span:first-child { text-align: left; }
-.achse-ticks span:last-child { text-align: right; }
+.achse-ticks span {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.achse-ticks span:first-child { transform: none; }
+.achse-ticks span:last-child { transform: translateX(-100%); }
 
 .achse-leer {
   padding: 18px 0; text-align: center;

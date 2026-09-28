@@ -18,6 +18,7 @@ const Herkunftsnetz = {
   status: "",      // "" | "laedt" | "trace" | "fehlt" | "busy" | "fehler"
   fehler: "",
   lauf: 0,
+  fensterGeoeffnet: false,
   gebunden: false,
   druck: null,     // pointerdown-Position — Ziehen ist kein „Klick ins Leere“
 };
@@ -52,6 +53,7 @@ function herkunftsnetzUmschalten(key) {
 }
 
 function herkunftsnetzBeenden() {
+  Herkunftsnetz.fensterGeoeffnet = false;
   if (!Herkunftsnetz.key && !Herkunftsnetz.daten) return;
   Herkunftsnetz.key = null;
   Herkunftsnetz.daten = null;
@@ -185,16 +187,17 @@ function herkunftsnetzProzent(anteil) {
   })} %`;
 }
 
-/** Daten-% (ungeklemmt) → sichtbare Koordinaten; Vorfahren vor der Achse an den Rand. */
+/** Daten-% (ungeklemmt) → sichtbare Koordinaten. X darf vor 0 liegen. */
 function herkunftsnetzLage(pos, y) {
   const p = Number(pos);
   const yy = Number(y) || 0;
+  const xMin = typeof zeitstrahlXMin === "function" ? zeitstrahlXMin() : 0;
   return {
-    x: zeitstrahlSichtPos(Math.max(0, Math.min(100, p))),
+    x: zeitstrahlSichtPos(p),
     y: typeof zeitstrahlSichtY === "function"
       ? zeitstrahlSichtY(yy)
       : Math.max(0, Math.min(100, yy)),
-    vorAchse: p < 0,
+    vorAchse: Number.isFinite(p) && p < xMin,
     ueberAchse: yy > (typeof zeitstrahlYMax === "function" ? zeitstrahlYMax() : 100),
   };
 }
@@ -377,6 +380,26 @@ function herkunftsnetzZeichnen() {
   }
   herkunftsnetzHinweis();
   const d = Herkunftsnetz.daten;
+  // Ältester Input links vom Achsenbeginn: Fenster einmal dorthin öffnen,
+  // damit er nicht außerhalb bei 0 liegt. Danach darf der Nutzer frei pannen.
+  if (
+    aktiv && d
+    && !Herkunftsnetz.fensterGeoeffnet
+    && typeof ZeitstrahlAnsicht !== "undefined"
+    && typeof zeitstrahlXMin === "function"
+    && typeof zeichneZeitstrahl === "function"
+  ) {
+    const xMin = zeitstrahlXMin();
+    if (xMin < -0.05 && ZeitstrahlAnsicht.x0 > xMin + 0.05 && ZeitstrahlAnsicht.daten) {
+      Herkunftsnetz.fensterGeoeffnet = true;
+      const span = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0;
+      ZeitstrahlAnsicht.x0 = xMin;
+      ZeitstrahlAnsicht.x1 = xMin + span;
+      zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+      return;
+    }
+    Herkunftsnetz.fensterGeoeffnet = true;
+  }
   if (!aktiv || !d) return;
 
   const schicht = document.createElement("div");
@@ -470,7 +493,9 @@ function herkunftsnetzZeichnen() {
 
   for (const v of d.vorfahren || []) {
     const lage = lagen.get(v.key);
-    if (!lage || lage.x < -1 || lage.x > 101) continue;
+    // Auch knapp links vom Fenster: sonst verschwindet der älteste Ring,
+    // solange die Achse noch bei 0 steht und der Pan noch nicht dort ist.
+    if (!lage || lage.x < -12 || lage.x > 108) continue;
     const ring = document.createElement("span");
     const klassen = ["netz-knoten", `netz-${v.typ || "eigen"}`];
     if (v.key === d.fokus_key) klassen.push("netz-fokus-b");
