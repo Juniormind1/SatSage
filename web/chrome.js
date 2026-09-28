@@ -149,6 +149,7 @@ async function ladeConfig() {
   ggfEnvScrambleUnlockDialog();
   zeichneFussVersion();
   logReleaseAlsErsteZeile();
+  if (typeof fuelleSchatzWallets === "function") fuelleSchatzWallets();
   if (Zustand.config?.lernhinweise_plebs) {
     wendeAlleLernTooltipsAn().catch(() => {});
   }
@@ -382,8 +383,10 @@ async function start() {
       zeigeAnsicht("tools");
       const feld = $("#tools-adresse");
       if (feld) feld.focus();
+      if (typeof fuelleSchatzWallets === "function") fuelleSchatzWallets();
       if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
       if (typeof merkeLaufendeSchatzsuche === "function") merkeLaufendeSchatzsuche();
+      if (typeof merkeLaufendeCacheSuche === "function") merkeLaufendeCacheSuche();
     });
   document
     .querySelector('[data-ansicht="sanktionen"]')

@@ -9,6 +9,14 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Punktwolke:** Die Unterkante der UTXO-Punktwolke lässt sich ziehen; die Höhe bleibt gemerkt, Doppelklick setzt sie zurück. Reinzoomen vergrößert Zeit und Betrag am Mauszeiger. Die Betragsachse geht nicht unter null und nicht über den höchsten gezeichneten Punkt. Liegt ein Herkunftsnetz-Ring höher als der größte UTXO, reicht die Achse bis dorthin. Die Unterkante darf über null liegen. Ziehen folgt der Maus, auch nach oben.
+
+- **Tools · Los:** Die drei Auslöser heißen einheitlich „Los“. Vor dem gründlichen Wallet-Scan wählt ein Dropdown das Wallet; „Alle Wallets“ sucht wie bisher in allen.
+
+- **Tools · Karten:** Adressprüfung, Cache-Suche und der gründliche Wallet-Scan haben je eine eigene Überschrift und darunter eine kurze Erklärung. Die Zeile unter „Tools“ nennt nur noch, dass es drei getrennte Werkzeuge sind.
+
+- **Tools · Gesamten Cache durchsuchen:** Eine eigene Karte sucht auf Knopf oder Return über den gespeicherten Bestand und die bereits ausgegebenen Beträge aller Wallets. Dieselben Regeln wie das Suchfeld oben (Adresse, TxID, Börse, Betrag, Datum). Ein Treffer im Bestand öffnet das Wallet, ein ausgegebener Betrag die Herkunft. Die Suche läuft als abbrechbarer Vorgang und lässt die Seiten in den Listen unverändert.
+
 - **Start · Wallet-Ansicht:** Während des Starts fragt ein Wallet-Klick nur noch den Cache ab. Der Mempool-Abgleich über Electrs wartete serverseitig auf alle Wallets und belegte je Klick eine der sechs Browser-Verbindungen. Er folgt jetzt nach „Wallets bereit.“, einmal und nur für das dann offene Wallet; Anfragen eines verlassenen Wallets werden abgebrochen.
 
 - **Start · Wallet-Ansicht:** Ein Wallet, dessen Cache gelesen ist, zeigt seinen Bestand nach dem Klick sofort. Das Cache-Lesen der übrigen Wallets hielt bisher eine Sperre, an der Ansicht und Wallet-Liste bis zum letzten Wallet warteten. Wer früh ein Wallet anklickt, wird beim Start nicht mehr zum ersten zurückgeholt.

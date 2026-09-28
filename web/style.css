@@ -1038,6 +1038,7 @@ html[data-theme="dark"] .utxo-aktionen-praefix {
 }
 select,
 input[type="text"],
+input[type="search"],
 input[type="number"],
 input[type="password"],
 input[type="email"],
@@ -1530,6 +1531,12 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
   border-bottom: 1px solid var(--linie);
 }
 .karte-titel { font-family: var(--mono); font-size: 12px; font-weight: 700; }
+#ansicht-tools .karte-titel {
+  font-family: var(--sans, inherit);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
 .karte-zusatz { font-size: 11px; color: var(--blass); }
 .karte-kopf .knopf { margin-left: auto; }
 .karte-fuss {
@@ -1723,8 +1730,40 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 
 .suchleiste { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
 .tools-zeile {
-  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  --tools-feld: 68ch;
+  --tools-knopf: 8rem;
+  display: grid;
+  grid-template-columns: min(var(--tools-feld), 100%) var(--tools-knopf) max-content;
+  align-items: center;
+  justify-content: start;
+  gap: 9px;
   padding: 12px 13px;
+}
+.tools-eingabe {
+  width: min(var(--tools-feld), 100%);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+.tools-zeile > .knopf { width: 100%; }
+.tools-zeile > .knopf + .knopf { width: auto; }
+.tools-eingabe-platz { width: min(var(--tools-feld), 100%); }
+@media (max-width: 720px) {
+  .tools-zeile { grid-template-columns: minmax(0, 1fr); }
+  .tools-eingabe,
+  .tools-eingabe-platz { width: 100%; }
+  .tools-zeile > .knopf,
+  .tools-zeile > .knopf + .knopf { width: auto; justify-self: start; }
+}
+.tools-zeile > .tools-ergebnis,
+.tools-zeile > .meta,
+.tools-zeile > .tools-schatz-liste {
+  grid-column: 1 / -1;
+}
+.tools-erklaerung {
+  margin: 0;
+  padding: 10px 13px 0;
 }
 .tools-ergebnis {
   flex: 1 0 100%;
@@ -2395,7 +2434,8 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .achse-y-skala {
   position: relative;
-  flex: 0 0 220px; /* = .achse-spur height */
+  flex: 0 0 auto;
+  height: 220px; /* JS setzt die gezogene Höhe */
   width: 100%;
 }
 /* Senkrechte Achsenlinie: trifft X-Linie in der Ecke (gap: 0). */
@@ -2433,6 +2473,26 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .achse-viewport.ziehend { cursor: grabbing; }
 
 .achse-spur { position: relative; height: 220px; overflow: visible; }
+.zeitstrahl-griff {
+  height: 10px;
+  margin: 0 22px 6px;
+  cursor: ns-resize;
+  border-top: 1px solid var(--linie);
+  position: relative;
+}
+.zeitstrahl-griff::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 36px;
+  height: 3px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: var(--blass);
+  opacity: 0.7;
+}
+.zeitstrahl-griff.ziehend::after { opacity: 1; background: var(--akzent); }
 .achse-linie {
   position: absolute; left: 0; right: 0; bottom: 0;
   height: 1px; background: var(--linie);

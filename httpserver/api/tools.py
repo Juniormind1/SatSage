@@ -23,7 +23,78 @@ def api_tools_adresse(state: Any, payload: dict | None) -> dict:
     )
 
 
-def api_tools_schatzsuche(state: Any, _payload: dict | None = None) -> dict:
+def api_tools_cache_suche(state: Any, payload: dict | None = None) -> dict:
+    """
+    Durchsucht UTXO- und Verlaufs-Cache aller Wallets.
+
+    Dieselbe Grammatik wie der Kopf-Filter. Läuft als Job, weil ein großer
+    Cache das Anreichern der Labels dauern lässt. 409, solange schon eine
+    Suche läuft.
+    """
+    from server import ApiError
+
+    from core.cache_suche import suche_cache
+
+    for job in state.jobs.list():
+        if job.kind == "cache_suche" and job.status == "running":
+            raise ApiError(409, "Die Cache-Suche läuft schon.")
+
+    koerper = payload or {}
+    roh = str(koerper.get("q") or "").strip()
+    if not roh:
+        raise ApiError(400, "Bitte einen Suchtext eingeben.")
+    nach_ts = koerper.get("q_nach")
+    vor_ts = koerper.get("q_vor")
+    lang = str(koerper.get("lang") or "de")
+
+    def lauf(job):
+        from server import main, utxos_mod
+
+        def fortschritt(text: str) -> None:
+            job.progress(text, log=True)
+
+        ctx = state.wallet_ctx_fuer_ansicht()
+        imm = state.immutable_cache_dir
+
+        def anreichere(e: dict, *, verlauf: bool) -> dict:
+            if verlauf:
+                return utxos_mod.verlauf_eintrag_als_dict(
+                    e, wallet=ctx, immutable_cache_dir=imm,
+                )
+            return utxos_mod.utxo_as_dict(
+                e, wallet=ctx, immutable_cache_dir=imm,
+            )
+
+        ergebnis = suche_cache(
+            eintraege=state.analyse_entries,
+            roh=roh,
+            lang=lang,
+            lade_bestand=lambda s: main.load_xpub_utxo_cache(s, state.cache_dir),
+            lade_verlauf=lambda s: main.load_xpub_verlauf_cache(s, state.cache_dir),
+            anreichere_bestand=lambda e: anreichere(e, verlauf=False),
+            anreichere_verlauf=lambda e: anreichere(e, verlauf=True),
+            nach_ts=nach_ts,
+            vor_ts=vor_ts,
+            on_progress=fortschritt,
+            raise_if_cancelled=job.raise_if_cancelled,
+        )
+        n = int(ergebnis["total"])
+        job.progress(
+            f"{n} Treffer." if n else "Keine Treffer im Cache.",
+            log=True,
+        )
+        return ergebnis
+
+    job = state.jobs.start(
+        "cache_suche",
+        "Gesamten Cache durchsuchen",
+        lauf,
+        meta={"art": "cache_suche", "q": roh},
+    )
+    return job.as_dict()
+
+
+def api_tools_schatzsuche(state: Any, payload: dict | None = None) -> dict:
     """
     Startet scantxoutset jenseits des Suchfensters.
 
@@ -55,6 +126,15 @@ def api_tools_schatzsuche(state: Any, _payload: dict | None = None) -> dict:
     except Exception:
         pass
 
+    koerper = payload or {}
+    ziel = str(koerper.get("wallet_id") or "").strip()
+    wallets = list(state.analyse_entries)
+    if ziel and ziel != "*":
+        wallets = [e for e in wallets if e.wallet_id() == ziel]
+        if not wallets:
+            raise ApiError(404, "Wallet nicht gefunden.")
+    label = wallets[0].display_name if ziel and ziel != "*" and wallets else "alle Wallets"
+
     def lauf(job):
         def fortschritt(text: str, sofort: bool = False) -> None:
             if sofort:
@@ -64,7 +144,7 @@ def api_tools_schatzsuche(state: Any, _payload: dict | None = None) -> dict:
 
         funde = jage_verlorene_schaetze(
             env=state.env().values(),
-            wallets=state.analyse_entries,
+            wallets=wallets,
             wallet_ctx=state.wallet_ctx,
             cache_dir=state.cache_dir,
             on_log=lambda text: job.progress(text, log=True),
@@ -86,8 +166,8 @@ def api_tools_schatzsuche(state: Any, _payload: dict | None = None) -> dict:
 
     job = state.jobs.start(
         "schatzsuche",
-        "Jäger der verlorene Schätze",
+        f"Jäger der verlorene Schätze · {label}",
         lauf,
-        meta={"art": "schatzsuche"},
+        meta={"art": "schatzsuche", "wallet_id": ziel or "*"},
     )
     return job.as_dict()

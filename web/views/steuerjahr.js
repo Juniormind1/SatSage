@@ -657,10 +657,19 @@ const ZeitstrahlAnsicht = {
   daten: null,
   x0: 0,
   x1: 100,
+  // Y: 0 = Betrag 0, 100 = größter UTXO. y0 darf über 0 steigen,
+  // unter 0 nicht. y1 höchstens bis zum höchsten gezeichneten Punkt
+  // (UTXO-Plot oder, wenn offen, Herkunftsnetz).
+  y0: 0,
+  y1: 100,
+  hoehe: 220,
   gebunden: false,
 };
 
 const ZEITSTRAHL_MIN_SPAN = 2;
+const ZEITSTRAHL_MIN_HOEHE = 140;
+const ZEITSTRAHL_MAX_HOEHE = 720;
+const ZEITSTRAHL_HOEHE_KEY = "satsage-zeitstrahl-hoehe";
 
 /** Datum dd.mm.yyyy → Date (lokal, Mittag — vermeidet DST-Kanten). */
 function parseDeDatum(text) {
@@ -679,6 +688,28 @@ function zeitstrahlSichtPos(pos) {
   const span = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0;
   if (span <= 0) return 50;
   return ((pos - ZeitstrahlAnsicht.x0) / span) * 100;
+}
+
+/** Oberkante in Daten-%: 100, oder höher wenn ein Netz-Ring darüber liegt. */
+function zeitstrahlYMax() {
+  let max = 100;
+  const netz = typeof Herkunftsnetz !== "undefined" ? Herkunftsnetz : null;
+  const daten = netz && netz.daten;
+  if (!daten) return max;
+  const werte = [daten.fokus_y];
+  for (const v of daten.vorfahren || []) werte.push(v && v.y);
+  for (const y of werte) {
+    const n = Number(y);
+    if (n > max) max = n;
+  }
+  return max;
+}
+
+/** Daten-Y-% (0 = 0 sats, 100 = max) → sichtbare bottom-% im Y-Fenster. */
+function zeitstrahlSichtY(y) {
+  const span = ZeitstrahlAnsicht.y1 - ZeitstrahlAnsicht.y0;
+  if (span <= 0) return 0;
+  return ((Number(y) - ZeitstrahlAnsicht.y0) / span) * 100;
 }
 
 function zeitstrahlFensterBegrenzen() {
@@ -707,28 +738,74 @@ function zeitstrahlFensterBegrenzen() {
   }
   ZeitstrahlAnsicht.x0 = x0;
   ZeitstrahlAnsicht.x1 = x1;
+
+  // Unterkante mindestens 0, Oberkante höchstens beim höchsten Punkt.
+  const yDeckel = zeitstrahlYMax();
+  let y0 = ZeitstrahlAnsicht.y0;
+  let y1 = ZeitstrahlAnsicht.y1;
+  let ySpan = y1 - y0;
+  if (!(ySpan > 0)) {
+    y0 = 0;
+    y1 = yDeckel;
+    ySpan = yDeckel;
+  }
+  if (ySpan < ZEITSTRAHL_MIN_SPAN) {
+    const mitte = (y0 + y1) / 2;
+    y0 = mitte - ZEITSTRAHL_MIN_SPAN / 2;
+    y1 = mitte + ZEITSTRAHL_MIN_SPAN / 2;
+    ySpan = ZEITSTRAHL_MIN_SPAN;
+  }
+  if (ySpan > yDeckel) {
+    y0 = 0;
+    y1 = yDeckel;
+  } else {
+    if (y0 < 0) {
+      y1 -= y0;
+      y0 = 0;
+    }
+    if (y1 > yDeckel) {
+      y0 -= y1 - yDeckel;
+      y1 = yDeckel;
+    }
+    y0 = Math.max(0, y0);
+    y1 = Math.min(yDeckel, y1);
+  }
+  ZeitstrahlAnsicht.y0 = y0;
+  ZeitstrahlAnsicht.y1 = y1;
 }
 
 /**
- * Zoom nur auf der Zeitachse. ankerSichtPct: Mausposition im Viewport 0..100.
+ * Zoom auf Zeit- und Betragsachse. Anker: Mausposition im Viewport 0..100.
+ * Y zoomt am senkrechten Mauszeiger. Die Unterkante bleibt mindestens bei 0.
  */
-function zeitstrahlZoom(faktor, ankerSichtPct) {
+function zeitstrahlZoom(faktor, ankerXPct, ankerYPct) {
   zeitstrahlFensterBegrenzen();
-  const { x0, x1 } = ZeitstrahlAnsicht;
+  const { x0, x1, y0, y1 } = ZeitstrahlAnsicht;
   const span = x1 - x0;
-  const anker = x0 + (ankerSichtPct / 100) * span;
+  const anker = x0 + (ankerXPct / 100) * span;
   const neu = Math.min(100, Math.max(ZEITSTRAHL_MIN_SPAN, span * faktor));
   const linksAnteil = span > 0 ? (anker - x0) / span : 0.5;
   ZeitstrahlAnsicht.x0 = anker - linksAnteil * neu;
   ZeitstrahlAnsicht.x1 = ZeitstrahlAnsicht.x0 + neu;
+
+  const ySpan = y1 - y0;
+  const yAnker = y0 + (Math.max(0, Math.min(100, ankerYPct)) / 100) * ySpan;
+  const yNeu = Math.max(ZEITSTRAHL_MIN_SPAN, ySpan * faktor);
+  const untenAnteil = ySpan > 0 ? (yAnker - y0) / ySpan : 0;
+  ZeitstrahlAnsicht.y0 = yAnker - untenAnteil * yNeu;
+  ZeitstrahlAnsicht.y1 = ZeitstrahlAnsicht.y0 + yNeu;
   zeitstrahlFensterBegrenzen();
 }
 
-function zeitstrahlPan(deltaSichtPct) {
+function zeitstrahlPan(deltaXPct, deltaYPct) {
   const span = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0;
-  const shift = (deltaSichtPct / 100) * span;
+  const shift = (deltaXPct / 100) * span;
   ZeitstrahlAnsicht.x0 -= shift;
   ZeitstrahlAnsicht.x1 -= shift;
+  const ySpan = ZeitstrahlAnsicht.y1 - ZeitstrahlAnsicht.y0;
+  const yShift = ((deltaYPct || 0) / 100) * ySpan;
+  ZeitstrahlAnsicht.y0 += yShift;
+  ZeitstrahlAnsicht.y1 += yShift;
   zeitstrahlFensterBegrenzen();
 }
 
@@ -802,6 +879,14 @@ function geisterSaldoDurchmesserPx(saldoSats, maxUtxoSats) {
  * Y-Achsenbeschriftung zur log1p-Skala (oben = max, unten = 0).
  * Stil wie X-Achse: Linie + mono/blass-Ticks an Zehnerpotenzen.
  */
+/** Sats an einer Daten-Y-% (0 = 0 sats, 100 = max), log1p. */
+function zeitstrahlYSatsAn(maxSats, yPct) {
+  const max = Math.max(Number(maxSats) || 0, 0);
+  if (max <= 0 || yPct <= 0) return 0;
+  if (yPct >= 99.9) return max;
+  return Math.expm1(Math.log1p(max) * (yPct / 100));
+}
+
 function zeichneZeitstrahlYAchse(maxSats) {
   const yAchse = $("#achse-y");
   if (!yAchse) return;
@@ -809,27 +894,57 @@ function zeichneZeitstrahlYAchse(maxSats) {
   yAchse.removeAttribute("aria-hidden");
 
   const max = Math.max(Number(maxSats) || 0, 0);
+  const unten = zeitstrahlYSatsAn(max, ZeitstrahlAnsicht.y0);
+  const oben = Math.max(unten, zeitstrahlYSatsAn(max, ZeitstrahlAnsicht.y1));
   const skala = document.createElement("div");
   skala.className = "achse-y-skala";
+  skala.style.height = `${ZeitstrahlAnsicht.hoehe}px`;
 
   // Senkrechte Linie — Pendant zu .achse-linie auf der X-Achse.
   const linie = document.createElement("div");
   linie.className = "achse-y-linie";
   linie.setAttribute("aria-hidden", "true");
+  linie.style.height = `${ZeitstrahlAnsicht.hoehe}px`;
   skala.append(linie);
 
-  const logMax = Math.log1p(max);
-  for (const sats of zeitstrahlYTickSats(max)) {
+  const logUnten = Math.log1p(unten);
+  const logOben = Math.log1p(oben);
+  const logSpan = logOben - logUnten;
+  const kandidaten = new Set(zeitstrahlYTickSats(oben));
+  if (unten > 0) kandidaten.add(Math.round(unten));
+  for (const sats of [...kandidaten].sort((a, b) => a - b)) {
+    if (sats < unten * 0.98) continue;
     const span = document.createElement("span");
     span.className = "achse-y-tick";
     span.textContent = formatZeitstrahlBetrag(sats);
-    const y = max <= 0 || logMax <= 0
+    const y = logSpan <= 0
       ? 0
-      : (Math.log1p(sats) / logMax) * 100;
+      : ((Math.log1p(Math.min(sats, oben)) - logUnten) / logSpan) * 100;
+    if (y < -2 || y > 102) continue;
     span.style.bottom = `${y}%`;
     skala.append(span);
   }
   yAchse.append(skala);
+}
+
+function zeitstrahlHoeheSetzen(px) {
+  const hoehe = Math.round(
+    Math.max(ZEITSTRAHL_MIN_HOEHE, Math.min(ZEITSTRAHL_MAX_HOEHE, Number(px) || 220)),
+  );
+  ZeitstrahlAnsicht.hoehe = hoehe;
+  const spur = $("#achse-spur");
+  if (spur) spur.style.height = `${hoehe}px`;
+  try {
+    localStorage.setItem(ZEITSTRAHL_HOEHE_KEY, String(hoehe));
+  } catch (_) { /* privat / voll — Höhe gilt nur für diese Sitzung */ }
+}
+
+function liesZeitstrahlHoehe() {
+  try {
+    const roh = Number(localStorage.getItem(ZEITSTRAHL_HOEHE_KEY));
+    if (roh >= ZEITSTRAHL_MIN_HOEHE && roh <= ZEITSTRAHL_MAX_HOEHE) return roh;
+  } catch (_) { /* leer */ }
+  return 220;
 }
 
 function bindeZeitstrahlInteraktion() {
@@ -842,11 +957,12 @@ function bindeZeitstrahlInteraktion() {
     if (!ZeitstrahlAnsicht.daten) return;
     ereignis.preventDefault();
     const rect = viewport.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const anker = ((ereignis.clientX - rect.left) / rect.width) * 100;
-    // Runter = rauszoomen, hoch = reinzoomen — nur X.
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const ankerX = ((ereignis.clientX - rect.left) / rect.width) * 100;
+    const ankerY = ((rect.bottom - ereignis.clientY) / rect.height) * 100;
+    // Runter = rauszoomen, hoch = reinzoomen — am Mauszeiger, Y nicht unter 0.
     const faktor = ereignis.deltaY > 0 ? 1.15 : 1 / 1.15;
-    zeitstrahlZoom(faktor, anker);
+    zeitstrahlZoom(faktor, ankerX, ankerY);
     zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
   }, { passive: false });
 
@@ -862,7 +978,10 @@ function bindeZeitstrahlInteraktion() {
   viewport.addEventListener("pointerdown", (ereignis) => {
     if (!ZeitstrahlAnsicht.daten) return;
     if (ereignis.button !== 0 && ereignis.button !== 1) return;
-    if (ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0 >= 99.9) return;
+    const xVoll = ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0 >= 99.9;
+    const yVoll = ZeitstrahlAnsicht.y0 <= 0.05
+      && ZeitstrahlAnsicht.y1 <= 100.05;
+    if (xVoll && yVoll) return;
     if (
       ereignis.button === 0
       && ereignis.target
@@ -872,17 +991,20 @@ function bindeZeitstrahlInteraktion() {
       return;
     }
     ereignis.preventDefault();
-    const drag = { id: ereignis.pointerId, x: ereignis.clientX };
+    const drag = { id: ereignis.pointerId, x: ereignis.clientX, y: ereignis.clientY };
     viewport.classList.add("ziehend");
 
     const onMove = (ev) => {
       if (ev.pointerId !== drag.id) return;
       const rect = viewport.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      const deltaPct = ((ev.clientX - drag.x) / rect.width) * 100;
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const deltaX = ((ev.clientX - drag.x) / rect.width) * 100;
+      // Maus rauf → Inhalt rauf (Fenster sinkt), wie die Zeitachse der Maus folgt.
+      const deltaY = ((ev.clientY - drag.y) / rect.height) * 100;
       drag.x = ev.clientX;
-      if (deltaPct === 0) return;
-      zeitstrahlPan(deltaPct);
+      drag.y = ev.clientY;
+      if (deltaX === 0 && deltaY === 0) return;
+      zeitstrahlPan(deltaX, deltaY);
       zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
     };
     const onUp = (ev) => {
@@ -901,8 +1023,44 @@ function bindeZeitstrahlInteraktion() {
     if (!ZeitstrahlAnsicht.daten) return;
     ZeitstrahlAnsicht.x0 = 0;
     ZeitstrahlAnsicht.x1 = 100;
+    ZeitstrahlAnsicht.y0 = 0;
+    ZeitstrahlAnsicht.y1 = 100;
     zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
   });
+
+  const griff = $("#zeitstrahl-griff");
+  if (griff && !griff.dataset.gebunden) {
+    griff.dataset.gebunden = "1";
+    griff.addEventListener("pointerdown", (ereignis) => {
+      if (ereignis.button !== 0) return;
+      ereignis.preventDefault();
+      const startY = ereignis.clientY;
+      const startH = ZeitstrahlAnsicht.hoehe;
+      griff.classList.add("ziehend");
+      const onMove = (ev) => {
+        zeitstrahlHoeheSetzen(startH + (ev.clientY - startY));
+        if (ZeitstrahlAnsicht.daten) {
+          zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+        }
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        griff.classList.remove("ziehend");
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+    griff.addEventListener("dblclick", (ereignis) => {
+      ereignis.preventDefault();
+      zeitstrahlHoeheSetzen(220);
+      if (ZeitstrahlAnsicht.daten) {
+        zeichneZeitstrahl(ZeitstrahlAnsicht.daten, { fensterBehalten: true });
+      }
+    });
+  }
 }
 
 /**
@@ -927,7 +1085,13 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   if (!optionen.fensterBehalten) {
     ZeitstrahlAnsicht.x0 = 0;
     ZeitstrahlAnsicht.x1 = 100;
+    ZeitstrahlAnsicht.y0 = 0;
+    ZeitstrahlAnsicht.y1 = 100;
   }
+  if (!ZeitstrahlAnsicht.hoehe || ZeitstrahlAnsicht.hoehe === 220) {
+    ZeitstrahlAnsicht.hoehe = liesZeitstrahlHoehe();
+  }
+  zeitstrahlHoeheSetzen(ZeitstrahlAnsicht.hoehe);
   zeitstrahlFensterBegrenzen();
   bindeZeitstrahlInteraktion();
 
@@ -998,7 +1162,8 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     const lage = haltefristBeschriftung(
       eintrag, Boolean(daten.stichtag_regel),
     );
-    const y = Number(eintrag.y ?? 0);
+    const y = zeitstrahlSichtY(eintrag.y ?? 0);
+    if (y < -8 || y > 108) continue;
     const key = eintrag.key
       || (eintrag.txid != null && eintrag.vout != null
         ? `${eintrag.txid}:${eintrag.vout}`

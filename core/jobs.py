@@ -193,6 +193,7 @@ NUTZER_JOB_KINDS = frozenset({
     "wallet_sync",  # Start-Aktualisierung — Nutzer soll „wird frisch“ sehen
     "export_adressen",  # Adressen nach Wallet-Export (Electrs-Batch)
     "schatzsuche",  # scantxoutset jenseits des Suchfensters
+    "cache_suche",  # UTXO- und Verlaufs-Cache aller Wallets
 })
 
 

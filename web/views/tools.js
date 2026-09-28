@@ -83,6 +83,8 @@ window.addEventListener("satsage:lang", () => {
   if (!toolsLetztes) return;
   zeichneToolsStatus(toolsLetztes.status, toolsLetztes.wallet);
   zeichneSchatzListe(schatzFunde);
+  zeichneCacheListe(cacheTreffer);
+  fuelleSchatzWallets();
 });
 
 let schatzJobId = null;
@@ -100,6 +102,27 @@ function scantxoutsetVerbunden() {
   return Boolean(core && core.reachable === true);
 }
 
+function fuelleSchatzWallets() {
+  const wahl = $("#tools-schatz-wallet");
+  if (!wahl) return;
+  const bisher = wahl.value || "*";
+  const wallets = (Zustand.config && Zustand.config.wallets) || [];
+  wahl.replaceChildren();
+  const alle = document.createElement("option");
+  alle.value = "*";
+  alle.textContent = t("tools.treasureAll");
+  wahl.append(alle);
+  for (const wallet of wallets) {
+    if (!wallet || !wallet.id) continue;
+    const option = document.createElement("option");
+    option.value = wallet.id;
+    option.textContent = wallet.name || wallet.id;
+    wahl.append(option);
+  }
+  wahl.value = [...wahl.options].some((o) => o.value === bisher) ? bisher : "*";
+  wahl.disabled = Boolean(schatzJobId);
+}
+
 function aktualisiereSchatzKnopf() {
   const knopf = $("#tools-schatz");
   if (!knopf) return;
@@ -108,6 +131,8 @@ function aktualisiereSchatzKnopf() {
   // der Start — ein grauer Knopf bei noch unbekannter Quelle wäre eine Sackgasse.
   knopf.disabled = laeuft;
   knopf.title = laeuft ? t("tools.treasureRunning") : t("tools.treasureTitle");
+  const wahl = $("#tools-schatz-wallet");
+  if (wahl) wahl.disabled = laeuft;
 }
 
 function schatzStatus(text) {
@@ -214,7 +239,12 @@ async function starteSchatzsuche() {
   schatzStatus(t("tools.treasureRunning"));
   knopf.disabled = true;
   try {
-    const job = await api("/tools/schatzsuche", { methode: "POST", daten: {} });
+    const wahl = $("#tools-schatz-wallet");
+    const walletId = (wahl && wahl.value) || "*";
+    const job = await api("/tools/schatzsuche", {
+      methode: "POST",
+      daten: { wallet_id: walletId },
+    });
     bindeSchatzJob(job.id);
   } catch (fehler) {
     schatzStatus((fehler && fehler.message) || t("common.netError"));
@@ -230,11 +260,188 @@ function merkeLaufendeSchatzsuche() {
   bindeSchatzJob(laufend.id);
 }
 
+let cacheJobId = null;
+let cacheTimer = null;
+let cacheLogStand = { index: 0, knoten: [], texte: [] };
+let cacheTreffer = [];
+let cacheListeAnzeigen = false;
+
+function cacheKnopfStand() {
+  const suche = $("#tools-cache");
+  const abbruch = $("#tools-cache-abbruch");
+  const laeuft = Boolean(cacheJobId);
+  if (suche) suche.disabled = laeuft;
+  if (abbruch) abbruch.hidden = !laeuft;
+}
+
+function cacheStatus(text) {
+  const el = $("#tools-cache-status");
+  if (!el) return;
+  setzeText(el, text || "");
+  el.hidden = !text;
+}
+
+function zeichneCacheListe(treffer) {
+  const liste = $("#tools-cache-liste");
+  if (!liste) return;
+  liste.replaceChildren();
+  if (!cacheListeAnzeigen || Zustand.ansicht !== "tools" || !treffer || !treffer.length) {
+    liste.hidden = true;
+    return;
+  }
+  for (const trefferEintrag of treffer) {
+    const li = document.createElement("li");
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "knopf knopf-klein";
+    const wo = trefferEintrag.spent || trefferEintrag.teil === "verlauf"
+      ? t("tools.cacheSpent")
+      : t("tools.cacheOpen");
+    knopf.textContent = t("tools.cacheItem", {
+      amount: formatSats(trefferEintrag.value_sats),
+      wallet: trefferEintrag.wallet || "",
+      wo,
+      address: kuerze(trefferEintrag.address || trefferEintrag.key || ""),
+    });
+    knopf.addEventListener("click", () => oeffneCacheTreffer(trefferEintrag));
+    li.append(knopf);
+    liste.append(li);
+  }
+  liste.hidden = false;
+}
+
+function oeffneCacheTreffer(treffer) {
+  const key = String(treffer.key || "");
+  if (!key) return;
+  if (treffer.teil === "verlauf" || treffer.spent) {
+    if (typeof zeigeHerkunftFuer === "function") {
+      zeigeHerkunftFuer(key, {
+        meta: {
+          key,
+          wallet: treffer.wallet || "",
+          value_sats: treffer.value_sats ?? null,
+          address: treffer.address || "",
+          time_label: treffer.time_label || "",
+        },
+      });
+    }
+    return;
+  }
+  if (treffer.wallet_id && typeof zeigeWallet === "function") {
+    zeigeWallet(treffer.wallet_id).catch(() => {});
+  }
+}
+
+function cachePollStop() {
+  if (cacheTimer) clearInterval(cacheTimer);
+  cacheTimer = null;
+  cacheJobId = null;
+  cacheKnopfStand();
+}
+
+async function pruefeCacheJob() {
+  if (!cacheJobId) return;
+  try {
+    const job = await api("/jobs/" + cacheJobId);
+    nimmLogZeilen(job, cacheLogStand);
+    if (job.running) {
+      cacheStatus(job.message || t("tools.cacheRunning"));
+      return;
+    }
+    const treffer = (job.result && job.result.treffer) || [];
+    if (cacheListeAnzeigen && Zustand.ansicht === "tools" && job.status === "done") {
+      cacheTreffer = treffer;
+      zeichneCacheListe(treffer);
+      cacheStatus(treffer.length ? "" : t("tools.cacheEmpty"));
+    } else if (Zustand.ansicht === "tools" && job.status !== "done") {
+      cacheStatus(job.error || job.message || t("tools.cacheEmpty"));
+    } else {
+      cacheStatus("");
+    }
+    cachePollStop();
+  } catch (fehler) {
+    cacheStatus((fehler && fehler.message) || t("common.netError"));
+    cachePollStop();
+  }
+}
+
+function bindeCacheJob(id) {
+  cacheJobId = id;
+  cacheLogStand = { index: 0, knoten: [], texte: [] };
+  cacheKnopfStand();
+  if (cacheTimer) clearInterval(cacheTimer);
+  cacheTimer = setInterval(pruefeCacheJob, 1000);
+  pruefeCacheJob();
+}
+
+async function starteCacheSuche() {
+  const feld = $("#tools-cache-q");
+  const knopf = $("#tools-cache");
+  if (!feld || !knopf || knopf.disabled) return;
+  const roh = (feld.value || "").trim();
+  if (!roh) {
+    feld.focus();
+    return;
+  }
+  cacheListeAnzeigen = true;
+  cacheTreffer = [];
+  zeichneCacheListe([]);
+  cacheStatus(t("tools.cacheRunning"));
+  knopf.disabled = true;
+  const daten = { q: roh, lang: uiSprache() };
+  if (typeof parseKopfFilter === "function") {
+    const f = parseKopfFilter(roh);
+    if (f.afterTs != null) daten.q_nach = f.afterTs;
+    if (f.beforeTs != null) daten.q_vor = f.beforeTs;
+  }
+  try {
+    const job = await api("/tools/cache-suche", { methode: "POST", daten });
+    bindeCacheJob(job.id);
+  } catch (fehler) {
+    cacheStatus((fehler && fehler.message) || t("common.netError"));
+    cachePollStop();
+  }
+}
+
+async function brichCacheSucheAb() {
+  if (!cacheJobId) return;
+  try {
+    await api("/jobs/" + cacheJobId, { methode: "DELETE" });
+  } catch (_) { /* Poll zeigt den Stand */ }
+}
+
+function merkeLaufendeCacheSuche() {
+  const jobs = Zustand.jobsNav?.jobs || [];
+  const laufend = jobs.find((j) => j.kind === "cache_suche" && j.running);
+  if (!laufend || !laufend.id || cacheJobId) return;
+  cacheListeAnzeigen = false;
+  bindeCacheJob(laufend.id);
+}
+
+function bindeCacheSuche() {
+  const knopf = $("#tools-cache");
+  const feld = $("#tools-cache-q");
+  const abbruch = $("#tools-cache-abbruch");
+  if (!knopf || !feld || knopf.dataset.gebunden) return;
+  knopf.dataset.gebunden = "1";
+  knopf.addEventListener("click", starteCacheSuche);
+  feld.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    starteCacheSuche();
+  });
+  if (abbruch) abbruch.addEventListener("click", brichCacheSucheAb);
+  cacheKnopfStand();
+}
+
+bindeCacheSuche();
+
 function bindeSchatzKnopf() {
   const knopf = $("#tools-schatz");
   if (!knopf || knopf.dataset.gebunden) return;
   knopf.dataset.gebunden = "1";
   knopf.addEventListener("click", starteSchatzsuche);
+  fuelleSchatzWallets();
   aktualisiereSchatzKnopf();
 }
 

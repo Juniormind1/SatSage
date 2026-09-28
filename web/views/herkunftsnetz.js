@@ -191,9 +191,11 @@ function herkunftsnetzLage(pos, y) {
   const yy = Number(y) || 0;
   return {
     x: zeitstrahlSichtPos(Math.max(0, Math.min(100, p))),
-    y: Math.max(0, Math.min(100, yy)),
+    y: typeof zeitstrahlSichtY === "function"
+      ? zeitstrahlSichtY(yy)
+      : Math.max(0, Math.min(100, yy)),
     vorAchse: p < 0,
-    ueberAchse: yy > 100,
+    ueberAchse: yy > (typeof zeitstrahlYMax === "function" ? zeitstrahlYMax() : 100),
   };
 }
 

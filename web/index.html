@@ -547,24 +547,30 @@
           <div>
             <h1 data-i18n="tools.heading">Tools</h1>
             <p class="meta" data-i18n="tools.meta">
-              Leitet aus den hinterlegten Wallets ab, ob die Adresse dazu
-              gehört. Ohne Guthaben, ohne Verlauf, auch noch unbenutzt.
+              Drei getrennte Werkzeuge. Jedes startet erst auf Knopf oder Return.
             </p>
           </div>
         </div>
 
         <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tools.addressHeading">Adresse prüfen: Gehört sie zu einem eigenen Wallet?</span>
+          </div>
+          <p class="meta tools-erklaerung" data-i18n="tools.addressLead">
+            Leitet aus den hinterlegten Wallets ab, ob die Adresse dazu gehört.
+            Ohne Guthaben, ohne Verlauf, auch noch unbenutzt.
+          </p>
           <div class="tools-zeile">
-            <input type="text" id="tools-adresse" class="feld-breit mono"
+            <input type="text" id="tools-adresse" class="tools-eingabe mono"
                    data-i18n-placeholder="tools.addressPlaceholder"
                    data-i18n-aria-label="tools.addressAria"
                    placeholder="Bitcoin-Adresse"
                    aria-label="Bitcoin-Adresse"
                    autocomplete="off" spellcheck="false">
             <button type="button" id="tools-meine" class="knopf"
-                    data-i18n="tools.isMine" data-i18n-title="tools.isMineTitle"
+                    data-i18n="tools.go" data-i18n-title="tools.isMineTitle"
                     title="Prüft lokal an den Schlüsseln der Wallets — ohne Node und ohne dass je sats darauf lagen.">
-              ist die meine?
+              Los
             </button>
             <p id="tools-meine-ergebnis" class="tools-ergebnis" role="status"
                aria-live="polite" hidden></p>
@@ -572,11 +578,54 @@
         </div>
 
         <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tools.cacheHeading">Globale Suche durch den Cache</span>
+          </div>
+          <p class="meta tools-erklaerung" data-i18n="tools.cacheLead">
+            Durchsucht den gespeicherten Bestand und die bereits ausgegebenen
+            Beträge aller Wallets. Dieselben Regeln wie das Suchfeld oben.
+            Das dauert bei großem Cache.
+          </p>
           <div class="tools-zeile">
+            <input type="search" id="tools-cache-q" class="tools-eingabe mono"
+                   data-i18n-placeholder="tools.cachePlaceholder"
+                   data-i18n-aria-label="tools.cacheAria"
+                   data-i18n-title="tools.cacheFieldTitle"
+                   placeholder="Adresse, TxID, Börse, >5000, >1.1.25…"
+                   aria-label="Gesamten Cache durchsuchen"
+                   title="Globale Cache-Suche. Dieselben Regeln wie das Suchfeld oben. Sucht erst auf Knopf oder Return, über den UTXO- und Verlaufs-Cache aller Wallets."
+                   autocomplete="off" spellcheck="false">
+            <button type="button" id="tools-cache" class="knopf"
+                    data-i18n="tools.go" data-i18n-title="tools.cacheSearchTitle"
+                    title="Durchsucht den gespeicherten Bestand und die bereits ausgegebenen Beträge aller Wallets. Das dauert bei großem Cache.">
+              Los
+            </button>
+            <button type="button" id="tools-cache-abbruch" class="knopf" hidden
+                    data-i18n="tools.cacheCancel">
+              Abbrechen
+            </button>
+            <p id="tools-cache-status" class="meta" hidden></p>
+            <ul id="tools-cache-liste" class="tools-schatz-liste" hidden></ul>
+          </div>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tools.treasureHeading">Außergewöhnlich gründlicher Wallet-Scan nach bisher unentdeckten UTXOs</span>
+          </div>
+          <p class="meta tools-erklaerung" data-i18n="tools.treasureLead">
+            Sucht mit scantxoutset UTXOs jenseits des normalen Adressfensters
+            und sortiert sie in den Wallet-Cache. Braucht eine verbundene
+            Bitcoin-Core-Quelle.
+          </p>
+          <div class="tools-zeile">
+            <select id="tools-schatz-wallet" class="tools-eingabe"
+                    data-i18n-aria-label="tools.treasureWalletAria"
+                    aria-label="Wallet für die Schatzsuche"></select>
             <button type="button" id="tools-schatz" class="knopf"
-                    data-i18n="tools.treasure" data-i18n-title="tools.treasureTitle"
+                    data-i18n="tools.go" data-i18n-title="tools.treasureTitle"
                     title="Sucht mit scantxoutset UTXOs jenseits des normalen Adressfensters und sortiert sie in den Wallet-Cache.">
-              Jäger der verlorene Schätze
+              Los
             </button>
             <p id="tools-schatz-status" class="meta" hidden></p>
             <ul id="tools-schatz-liste" class="tools-schatz-liste" hidden></ul>
@@ -646,6 +695,10 @@
             </div>
           </div>
           <div id="netz-hinweis" class="netz-hinweis" role="status" aria-live="polite" hidden></div>
+          <div id="zeitstrahl-griff" class="zeitstrahl-griff" role="separator"
+               aria-orientation="horizontal"
+               data-i18n-title="tax.timelineResize"
+               title="Unterkante ziehen, um die Höhe zu ändern. Doppelklick setzt sie zurück."></div>
         </div>
 
         <div class="karte" id="selbstanzeige-karte">
@@ -1782,9 +1835,9 @@
 <script src="/views/adress_labels.js?v=0.9.8"></script>
 <script src="/views/wallets.js?v=0.9.8"></script>
 <script src="/views/herkunft.js?v=0.9.8-lot8"></script>
-<script src="/views/steuerjahr.js?v=0.9.8"></script>
-<script src="/views/herkunftsnetz.js?v=0.9.8-lot"></script>
-<script src="/views/tools.js?v=0.9.8"></script>
+<script src="/views/steuerjahr.js?v=0.9.8-plot"></script>
+<script src="/views/herkunftsnetz.js?v=0.9.8-plot"></script>
+<script src="/views/tools.js?v=0.9.8-cache"></script>
 <script src="/chrome_nav.js?v=0.9.8"></script>
 <script src="/chrome.js?v=0.9.8"></script>
 <script src="/boot.js?v=0.9.8"></script>
