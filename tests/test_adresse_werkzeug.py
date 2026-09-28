@@ -20,6 +20,9 @@ class _State:
     def __init__(self, wallet):
         self.wallet_ctx = wallet
 
+    def context_bereit(self):
+        return True
+
 
 class TestAdresseWerkzeug(unittest.TestCase):
 
@@ -103,7 +106,9 @@ class TestAdresseWerkzeug(unittest.TestCase):
         self.assertIn('data-ansicht="tools"', html)
         self.assertIn('id="ansicht-tools"', html)
         self.assertIn('id="tools-meine"', html)
-        self.assertIn("ist die meine?", html)
+        self.assertIn('data-i18n-title="tools.isMineTitle"', html)
+        katalog = (wurzel / "web" / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn("ist die meine?", katalog)
         self.assertLess(
             html.index('data-ansicht="sanktionen"'),
             html.index('data-ansicht="tools"'),
