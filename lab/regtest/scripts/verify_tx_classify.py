@@ -7,6 +7,7 @@ Voraussetzung: Lab läuft, ``generate_scenarios.py`` hat
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -54,7 +55,8 @@ def _make_get_tx(werte: dict[str, str]):
     port = werte.get("RPCPORT") or "18443"
     user = werte.get("RPCUSER") or "bitcoin"
     password = werte.get("RPCPASSWORD") or "secret"
-    url = f"http://{user}:{password}@{host}:{port}"
+    url = f"http://{host}:{port}"
+    token = base64.b64encode(f"{user}:{password}".encode()).decode()
 
     def get_tx(txid: str) -> dict:
         payload = json.dumps({
@@ -64,7 +66,12 @@ def _make_get_tx(werte: dict[str, str]):
             "params": [txid, True],
         }).encode()
         req = urllib.request.Request(
-            url, data=payload, headers={"Content-Type": "application/json"}
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {token}",
+            },
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read().decode())

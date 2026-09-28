@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Regtest-Labor:** Die Klassifikation fällt auf Core-RPC zurück, ohne Nutzer und Passwort in die Adresse zu schreiben. Der GitHub-Lauf hat den Host sonst nicht aufgelöst.
+
 - **Tools · Adresse:** Die Prüfung wartet, bis die Wallets vorbereitet sind. Der Knopf heißt „Los“; der Hinweis „ist die meine?“ steht in der Sprache der Oberfläche.
 
 - **Wallets · Suche:** Ledger Live und BitBoxApp (app.json / accounts.json). Bitcoin-Konten erscheinen einzeln; importierbar, wenn ein Klartext-Deskriptor oder XPUB lesbar ist. Passwort-Lock und fremde Coins werden nicht angefasst.
