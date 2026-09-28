@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallets · Suche:** Ledger Live und BitBoxApp (app.json / accounts.json). Bitcoin-Konten erscheinen einzeln; importierbar, wenn ein Klartext-Deskriptor oder XPUB lesbar ist. Passwort-Lock und fremde Coins werden nicht angefasst.
+
 - **Steuerjahr · Zeitachse:** Die Datumsabstände folgen dem Zoom. Weit draußen stehen Jahre, weiter rein Monate, Wochen und schließlich einzelne Tage, sobald der Platz zwischen den Labels das hergibt. Rauszoomen macht die Abstände wieder größer.
 
 - **Steuerjahr · Herkunftsnetz:** Inputs vor dem Achsenbeginn stapeln sich nicht mehr auf dem Nullpunkt. Die Zeitachse reicht bis zum ältesten Herkunftsdatum, dorthin kann man pannen.

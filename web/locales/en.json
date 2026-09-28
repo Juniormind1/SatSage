@@ -1359,7 +1359,7 @@
   "wallets.exportSearch": "Search",
   "wallets.exportSearchDone": "{n} found · {imp} importable",
   "wallets.exportSearchEmpty": "No new local wallets found.",
-  "wallets.exportSearchTitle": "Scans Sparrow, Wasabi, Specter, Electrum and Bitcoin Core (RPC) on this machine.",
+  "wallets.exportSearchTitle": "Scans Sparrow, Wasabi, Specter, Electrum, Ledger, BitBox and Bitcoin Core (RPC) on this machine.",
   "wallets.exportSearching": "Searching local wallets…",
   "wallets.hard.48466a35e2": "{n} keys",
   "wallets.heading": "Wallets",

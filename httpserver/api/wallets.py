@@ -418,7 +418,7 @@ def api_wallet_export_import_pfade(state: AppState, payload: dict) -> dict:
     for p in sauber:
         if str(p).startswith("corerpc:"):
             continue
-        path = Path(p).expanduser()
+        path = Path(str(p).split("#", 1)[0]).expanduser()
         try:
             resolved = path.resolve()
         except OSError as exc:
@@ -430,7 +430,7 @@ def api_wallet_export_import_pfade(state: AppState, payload: dict) -> dict:
             raise ApiError(
                 400,
                 f"„{path.name}“ liegt nicht in einem bekannten "
-                "Wallet-Ordner (Sparrow/Wasabi/Specter/Electrum).",
+                "Wallet-Ordner.",
             )
 
     try:

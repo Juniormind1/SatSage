@@ -26,7 +26,7 @@ class GefundenesWallet:
 
     id: str
     name: str
-    app: str  # sparrow | wasabi | specter | electrum | core
+    app: str  # sparrow | wasabi | specter | electrum | core | ledger | bitbox
     path: str
     locked: bool = False
     importable: bool = False
@@ -57,6 +57,8 @@ def _app_anzeige(app: str) -> str:
         "specter": "Specter",
         "electrum": "Electrum",
         "core": "Bitcoin Core",
+        "ledger": "Ledger",
+        "bitbox": "BitBox",
     }.get((app or "").lower(), (app or "?").title())
 
 
@@ -67,6 +69,7 @@ def standard_suchwurzeln() -> list[Path]:
     appdata = os.environ.get("APPDATA") or ""
     local = os.environ.get("LOCALAPPDATA") or ""
     xdg = os.environ.get("XDG_DATA_HOME") or ""
+    xdg_config = os.environ.get("XDG_CONFIG_HOME") or ""
 
     if appdata:
         kandidaten += [
@@ -74,10 +77,16 @@ def standard_suchwurzeln() -> list[Path]:
             Path(appdata) / "WalletWasabi" / "Client" / "Wallets",
             Path(appdata) / "Electrum" / "wallets",
             Path(appdata) / "specter" / "wallets",
+            Path(appdata) / "Ledger Live",
+            Path(appdata) / "Ledger Wallet",
+            Path(appdata) / "bitbox",
         ]
     if local:
         kandidaten += [
             Path(local) / "Sparrow" / "wallets",
+            Path(local) / "Ledger Live",
+            Path(local) / "Ledger Wallet",
+            Path(local) / "bitbox",
         ]
     # macOS
     kandidaten += [
@@ -85,6 +94,10 @@ def standard_suchwurzeln() -> list[Path]:
         home / "Library" / "Application Support" / "WalletWasabi" / "Client" / "Wallets",
         home / "Library" / "Application Support" / "Electrum" / "wallets",
         home / "Library" / "Application Support" / "specter" / "wallets",
+        home / "Library" / "Application Support" / "Ledger Live",
+        home / "Library" / "Application Support" / "Ledger Wallet",
+        home / "Library" / "Application Support" / "bitbox",
+        home / "Library" / "Application Support" / "BitBoxApp",
         home / ".sparrow" / "wallets",
         home / ".walletwasabi" / "client" / "Wallets",
         home / ".electrum" / "wallets",
@@ -97,12 +110,23 @@ def standard_suchwurzeln() -> list[Path]:
             Path(xdg) / "WalletWasabi" / "Client" / "Wallets",
             Path(xdg) / "electrum" / "wallets",
             Path(xdg) / "specter" / "wallets",
+            Path(xdg) / "Ledger Live",
+            Path(xdg) / "Ledger Wallet",
+            Path(xdg) / "bitbox",
         ]
+    if xdg_config:
+        kandidaten.append(Path(xdg_config) / "bitbox")
     kandidaten += [
         home / ".local" / "share" / "sparrow" / "wallets",
         home / ".local" / "share" / "WalletWasabi" / "Client" / "Wallets",
         home / ".local" / "share" / "electrum" / "wallets",
         home / ".local" / "share" / "specter" / "wallets",
+        home / ".config" / "Ledger Live",
+        home / ".config" / "Ledger Wallet",
+        home / ".config" / "bitbox",
+        home / ".local" / "share" / "Ledger Live",
+        home / ".local" / "share" / "Ledger Wallet",
+        home / ".local" / "share" / "bitbox",
     ]
 
     gesehen: set[str] = set()
@@ -120,13 +144,18 @@ def standard_suchwurzeln() -> list[Path]:
 
 
 def _app_label_fuer_wurzel(root: Path) -> str | None:
-    """Anzeigename fürs Log: Sparrow / Wasabi / Specter / Electrum."""
+    """Anzeigename fürs Log: Sparrow / Wasabi / Specter / Electrum / Ledger / BitBox."""
     # Teile können ``.electrum`` / ``.specter`` heißen — Substring, nicht exakt.
     parts = [x.lower() for x in root.parts]
 
     def _hat(*needles: str) -> bool:
         return any(any(n in p for n in needles) for p in parts)
 
+    # Vor Sparrow/Wasabi: sonst frisst ein Substring den Ordnernamen.
+    if _hat("ledger live", "ledger wallet", "ledgerlive"):
+        return "Ledger"
+    if _hat("bitboxapp", "bitbox"):
+        return "BitBox"
     if _hat("sparrow"):
         return "Sparrow"
     if _hat("walletwasabi", "wasabi"):
@@ -136,6 +165,34 @@ def _app_label_fuer_wurzel(root: Path) -> str | None:
     if _hat("electrum"):
         return "Electrum"
     return None
+
+
+def _datei_unter(root: Path, name: str) -> list[Path]:
+    """Eine bekannte Datei direkt oder eine Ebene tiefer. Kein Plattenlauf."""
+    if not root.is_dir():
+        return []
+    direkt = root / name
+    if direkt.is_file():
+        return [direkt]
+    try:
+        kinder = list(root.iterdir())
+    except OSError:
+        return []
+    treffer = [p / name for p in kinder if p.is_dir() and (p / name).is_file()]
+    return sorted(treffer, key=lambda p: str(p).lower())
+
+
+def _ledger_app_json(root: Path) -> list[Path]:
+    """``app.json``. Die ``.bak`` nur, wenn die Hauptdatei fehlt."""
+    dateien = _datei_unter(root, "app.json")
+    if dateien:
+        return dateien
+    return _datei_unter(root, "app.json.bak")
+
+
+def _bitbox_accounts_json(root: Path) -> list[Path]:
+    """Nur ``accounts.json``. Nicht config.json, log.txt, cache/ oder notes/."""
+    return _datei_unter(root, "accounts.json")
 
 
 def _specter_wallet_json_dateien(root: Path) -> list[Path]:
@@ -221,6 +278,10 @@ def suche_lokale_wallets(
         for root in roots_pro_app[label]:
             if label == "Specter":
                 dateien = _specter_wallet_json_dateien(root)
+            elif label == "Ledger":
+                dateien = _ledger_app_json(root)
+            elif label == "BitBox":
+                dateien = _bitbox_accounts_json(root)
             else:
                 try:
                     dateien = [
@@ -246,12 +307,10 @@ def suche_lokale_wallets(
                         app = "specter"
                     else:
                         continue
-                fund = _analysiere_datei(pfad, app=app)
-                if fund is None:
-                    continue
-                if _fund_schon_vorhanden(fund, vorhanden, vorhanden_kenn):
-                    continue
-                treffer.append(fund)
+                for fund in _analysiere_datei(pfad, app=app):
+                    if _fund_schon_vorhanden(fund, vorhanden, vorhanden_kenn):
+                        continue
+                    treffer.append(fund)
         _log(f"Suche {label}… {len(treffer) - n_vor} gefunden")
 
     if mit_core_rpc:
@@ -526,8 +585,18 @@ def importiere_pfade(
                 gemerged.dateien.extend(teil.dateien)
             continue
 
+        fragment = ""
+        if "#" in s:
+            basis, fragment = s.split("#", 1)
+            s = basis
         p = Path(s).expanduser()
         if not p.is_file():
+            continue
+        if p.name.lower() in ("app.json", "accounts.json"):
+            konten = _companion_import_dateien(p, fragment)
+            if isinstance(konten, export_mod.WalletExportErgebnis):
+                return konten
+            dateien.extend(konten)
             continue
         try:
             data = p.read_bytes()
@@ -586,6 +655,37 @@ def importiere_pfade(
     return export_mod.WalletExportErgebnis(fehler="Keine Dateien gelesen.")
 
 
+def _companion_import_dateien(
+    pfad: Path, fragment: str,
+) -> list[dict[str, str]] | export_mod.WalletExportErgebnis:
+    """Ein Konto (Fragment) oder alle Bitcoin-Konten der Datei als Descriptor-JSON."""
+    if pfad.name.lower() == "app.json":
+        konten = _analysiere_ledger(pfad)
+    else:
+        konten = _analysiere_bitbox(pfad)
+    if fragment:
+        konten = [k for k in konten if k.path.endswith(f"#{fragment}")]
+    importierbar = [k for k in konten if k.importable and k.descriptors]
+    if not importierbar:
+        grund = next((k.reason for k in konten if k.reason), "")
+        return export_mod.WalletExportErgebnis(
+            fehler=grund or f"„{pfad.name}“: kein importierbares Bitcoin-Konto."
+        )
+    dateien = []
+    for konto in importierbar:
+        payload = {
+            "name": konto.name,
+            "wallet_name": konto.name,
+            "descriptors": list(konto.descriptors),
+        }
+        dateien.append({
+            "name": f"{konto.name}.json",
+            "text": json.dumps(payload),
+            "path": konto.path,
+        })
+    return dateien
+
+
 def _app_fuer_pfad(root: Path, pfad: Path) -> str | None:
     parts = [x.lower() for x in root.parts]
     name = pfad.name.lower()
@@ -593,6 +693,12 @@ def _app_fuer_pfad(root: Path, pfad: Path) -> str | None:
     def _hat(*needles: str) -> bool:
         return any(any(n in p for n in needles) for p in parts)
 
+    if _hat("ledger live", "ledger wallet", "ledgerlive"):
+        if name == "app.json":
+            return "ledger"
+    if _hat("bitboxapp", "bitbox"):
+        if name == "accounts.json":
+            return "bitbox"
     if _hat("sparrow"):
         if name.endswith((".mv.db", ".json", ".db", ".txt", ".desc")):
             return "sparrow"
@@ -610,12 +716,12 @@ def _app_fuer_pfad(root: Path, pfad: Path) -> str | None:
     return None
 
 
-def _analysiere_datei(pfad: Path, *, app: str) -> GefundenesWallet | None:
+def _analysiere_datei(pfad: Path, *, app: str) -> list[GefundenesWallet]:
     name = _anzeige_name(pfad)
     try:
         head = pfad.read_bytes()[:8192]
     except OSError:
-        return GefundenesWallet(
+        return [GefundenesWallet(
             id=f"path:{pfad}",
             name=name,
             app=app,
@@ -623,17 +729,23 @@ def _analysiere_datei(pfad: Path, *, app: str) -> GefundenesWallet | None:
             locked=True,
             importable=False,
             reason="Datei nicht lesbar",
-        )
+        )]
 
     if app == "sparrow":
-        return _analysiere_sparrow(pfad, name, head)
-    if app == "wasabi":
-        return _analysiere_wasabi(pfad, name, head)
-    if app == "specter":
-        return _analysiere_specter(pfad, name, head)
-    if app == "electrum":
-        return _analysiere_electrum(pfad, name, head)
-    return None
+        fund = _analysiere_sparrow(pfad, name, head)
+    elif app == "wasabi":
+        fund = _analysiere_wasabi(pfad, name, head)
+    elif app == "specter":
+        fund = _analysiere_specter(pfad, name, head)
+    elif app == "electrum":
+        fund = _analysiere_electrum(pfad, name, head)
+    elif app == "ledger":
+        return _analysiere_ledger(pfad)
+    elif app == "bitbox":
+        return _analysiere_bitbox(pfad)
+    else:
+        fund = None
+    return [fund] if fund is not None else []
 
 
 def _analysiere_sparrow(pfad: Path, name: str, head: bytes) -> GefundenesWallet:
@@ -893,6 +1005,324 @@ def _analysiere_electrum(pfad: Path, name: str, head: bytes) -> GefundenesWallet
         namen=list(parsed.namen),
         reason="",
     )
+
+
+_XPUB_RE = re.compile(
+    r"(?:xpub|ypub|zpub|tpub|upub|vpub)[1-9A-HJ-NP-Za-km-z]{20,}"
+)
+_FINGERPRINT_RE = re.compile(r"^[0-9a-fA-F]{8}$")
+
+
+def _json_aus_datei(pfad: Path) -> Any | None:
+    try:
+        text = pfad.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _xpub_aus_text(text: str) -> str:
+    treffer = _XPUB_RE.search(str(text or ""))
+    return treffer.group(0) if treffer else ""
+
+
+def _fingerprint_aus(obj: dict) -> str:
+    for key in ("xpubFingerprint", "masterFingerprint", "fingerprint", "xfp"):
+        roh = str(obj.get(key) or "").strip()
+        if _FINGERPRINT_RE.fullmatch(roh):
+            return roh.lower()
+    return ""
+
+
+def _deskriptor_aus_xpub(
+    xpub: str, purpose: str, index: int, *, fingerprint: str = "",
+) -> str:
+    """Watch-only-Deskriptor. Prefix des XPUB zählt nicht, der Purpose schon."""
+    huelle = {
+        "84": "wpkh",
+        "86": "tr",
+        "49": "shwpkh",
+        "44": "pkh",
+    }.get(purpose, "wpkh")
+    # Origin nur mit Fingerprint. Der Purpose steckt sonst in der Hülle
+    # (wpkh = 84), nicht in einem geratenen [84h/…]-Pfad.
+    origin = f"[{fingerprint}/{purpose}h/0h/{index}h]" if fingerprint else ""
+    key = f"{origin}{xpub}/<0;1>/*"
+    if huelle == "shwpkh":
+        roh = f"sh(wpkh({key}))"
+    else:
+        roh = f"{huelle}({key})"
+    return export_mod._deskriptor_brauchbar(roh) or ""
+
+
+def _purpose_aus_keypath(keypath: str) -> str:
+    treffer = re.search(r"(?:m/)?(\d+)['h]", str(keypath or ""))
+    if treffer and treffer.group(1) in ("84", "86", "49", "44"):
+        return treffer.group(1)
+    return ""
+
+
+def _ledger_script_purpose(mode: str) -> str:
+    roh = str(mode or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if roh in ("taproot", "native_taproot", "p2tr"):
+        return "86"
+    if roh in ("segwit", "p2sh", "wrapped", "wrapped_segwit"):
+        return "49"
+    if roh in ("legacy", "unsplit", ""):
+        return "44"
+    return "84"
+
+
+def _ledger_ist_bitcoin(obj: dict) -> bool:
+    felder = [
+        obj.get("currencyId"), obj.get("currency"), obj.get("currency_id"),
+        obj.get("ticker"),
+    ]
+    teile = str(obj.get("id") or "").split(":")
+    if len(teile) >= 3:
+        felder.append(teile[2])
+    texte = [str(f).strip().lower() for f in felder if str(f or "").strip()]
+    if not texte:
+        return False
+    if any(
+        "test" in t or t in ("ltc", "litecoin", "eth", "ethereum")
+        or t.startswith(("ltc", "eth"))
+        for t in texte
+    ):
+        return False
+    return any(t in ("bitcoin", "btc") or t.startswith("bitcoin") for t in texte)
+
+
+def _ledger_konten(data: Any) -> list[dict]:
+    """Objekte mit XPUB, bevorzugt aus accounts, sonst rekursiv."""
+    fund: list[dict] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if _xpub_aus_text(node.get("xpub") or "") or _xpub_aus_text(node.get("id") or ""):
+                fund.append(node)
+            for wert in node.values():
+                walk(wert)
+        elif isinstance(node, list):
+            for wert in node:
+                walk(wert)
+
+    if isinstance(data, dict):
+        for schluessel in ("accounts",):
+            if isinstance(data.get(schluessel), list):
+                walk(data[schluessel])
+        innen = data.get("data")
+        if isinstance(innen, dict) and isinstance(innen.get("accounts"), list):
+            walk(innen["accounts"])
+    if not fund:
+        walk(data)
+    return fund
+
+
+def _analysiere_ledger(pfad: Path) -> list[GefundenesWallet]:
+    data = _json_aus_datei(pfad)
+    if not isinstance(data, (dict, list)):
+        return [GefundenesWallet(
+            id=f"ledger:{pfad.name}",
+            name="Ledger",
+            app="ledger",
+            path=str(pfad),
+            locked=True,
+            importable=False,
+            reason="Passwort-Lock / verschlüsselt",
+        )]
+    konten = [k for k in _ledger_konten(data) if _ledger_ist_bitcoin(k)]
+    if not konten:
+        text = json.dumps(data).lower()
+        verschluesselt = (
+            "encryption" in text or "encrypted" in text or "ciphertext" in text
+        ) and "xpub" not in text
+        if verschluesselt or not isinstance(data, dict):
+            return [GefundenesWallet(
+                id=f"ledger:{pfad.name}",
+                name="Ledger",
+                app="ledger",
+                path=str(pfad),
+                locked=True,
+                importable=False,
+                reason="Passwort-Lock / verschlüsselt",
+            )]
+        return [GefundenesWallet(
+            id=f"ledger:{pfad.name}",
+            name="Ledger",
+            app="ledger",
+            path=str(pfad),
+            locked=False,
+            importable=False,
+            reason="keine Bitcoin-Konten",
+        )]
+    out: list[GefundenesWallet] = []
+    gesehen: set[str] = set()
+    for nr, konto in enumerate(konten):
+        xpub = _xpub_aus_text(konto.get("xpub") or "") or _xpub_aus_text(konto.get("id") or "")
+        if not xpub or xpub in gesehen:
+            continue
+        gesehen.add(xpub)
+        try:
+            index = int(konto.get("index") if konto.get("index") is not None else nr)
+        except (TypeError, ValueError):
+            index = nr
+        purpose = _ledger_script_purpose(str(konto.get("derivationMode") or ""))
+        desc = _deskriptor_aus_xpub(
+            xpub, purpose, index, fingerprint=_fingerprint_aus(konto),
+        )
+        name = str(konto.get("name") or "").strip() or f"Ledger Bitcoin #{index + 1}"
+        fragment = str(konto.get("id") or index)
+        out.append(GefundenesWallet(
+            id=_deskriptor_wallet_id(desc) if desc else f"ledger:{fragment}",
+            name=name,
+            app="ledger",
+            path=f"{pfad}#{fragment}",
+            locked=False,
+            importable=bool(desc),
+            descriptors=[desc] if desc else [],
+            namen=[name],
+            reason="" if desc else "Kein xpub",
+            network="main",
+        ))
+    return out
+
+
+def _bitbox_ist_bitcoin(code: str) -> bool:
+    roh = str(code or "").strip().lower()
+    if not roh:
+        return False
+    if roh.startswith(("ltc", "eth", "tbtc", "rbtc")) or "goerli" in roh:
+        return False
+    return roh == "btc" or roh.startswith("btc-") or roh.startswith("btc_")
+
+
+def _bitbox_codes(obj: dict) -> list[str]:
+    codes = []
+    for key in ("coinCode", "coin", "code", "coin_code"):
+        if obj.get(key):
+            codes.append(str(obj.get(key)))
+    return codes
+
+
+def _bitbox_xpubs(node: Any) -> list[tuple[str, str, str]]:
+    """(xpub, keypath, fingerprint) aus signingConfigurations / bitcoinSimple."""
+    fund: list[tuple[str, str, str]] = []
+
+    def walk(wert: Any, keypath: str = "", fingerprint: str = "") -> None:
+        if isinstance(wert, dict):
+            pfad = str(
+                wert.get("keypath") or wert.get("keyPath") or wert.get("bip44Path")
+                or keypath
+            )
+            fp = _fingerprint_aus(wert) or fingerprint
+            xpub = _xpub_aus_text(
+                wert.get("extendedPublicKey") or wert.get("xpub") or wert.get("pub") or ""
+            )
+            if xpub:
+                fund.append((xpub, pfad, fp))
+            for kind in wert.values():
+                walk(kind, pfad, fp)
+        elif isinstance(wert, list):
+            for kind in wert:
+                walk(kind, keypath, fingerprint)
+        elif isinstance(wert, str):
+            xpub = _xpub_aus_text(wert)
+            if xpub and keypath:
+                fund.append((xpub, keypath, fingerprint))
+
+    walk(node)
+    return fund
+
+
+def _bitbox_deskriptor_strings(node: Any) -> list[str]:
+    fund: list[str] = []
+
+    def walk(wert: Any) -> None:
+        if isinstance(wert, str):
+            text = wert.strip()
+            if text.startswith(("wpkh(", "sh(wpkh(", "tr(", "pkh(", "wsh(")):
+                fund.append(text)
+        elif isinstance(wert, dict):
+            for kind in wert.values():
+                walk(kind)
+        elif isinstance(wert, list):
+            for kind in wert:
+                walk(kind)
+
+    walk(node)
+    return fund
+
+
+def _analysiere_bitbox(pfad: Path) -> list[GefundenesWallet]:
+    data = _json_aus_datei(pfad)
+    if not isinstance(data, (dict, list)):
+        return []
+    roh_konten = data.get("accounts") if isinstance(data, dict) else data
+    if not isinstance(roh_konten, list):
+        roh_konten = [data] if isinstance(data, dict) else []
+    bitcoin = [
+        k for k in roh_konten
+        if isinstance(k, dict) and any(_bitbox_ist_bitcoin(c) for c in _bitbox_codes(k))
+    ]
+    if not bitcoin:
+        return []
+    out: list[GefundenesWallet] = []
+    for konto in bitcoin:
+        name = str(konto.get("name") or konto.get("Name") or "").strip() or "BitBox"
+        code = str(konto.get("code") or konto.get("coinCode") or name)
+        configs = (
+            konto.get("signingConfigurations")
+            or konto.get("configuration")
+            or konto.get("bitcoinSimple")
+            or konto
+        )
+        desc = ""
+        for roh in _bitbox_deskriptor_strings(configs):
+            desc = export_mod._deskriptor_brauchbar(roh) or ""
+            if desc:
+                break
+        if not desc:
+            for xpub, keypath, fp in _bitbox_xpubs(configs):
+                purpose = _purpose_aus_keypath(keypath) or _purpose_aus_coin(code)
+                index = _index_aus_keypath(keypath)
+                desc = _deskriptor_aus_xpub(xpub, purpose, index, fingerprint=fp)
+                if desc:
+                    break
+        out.append(GefundenesWallet(
+            id=_deskriptor_wallet_id(desc) if desc else f"bitbox:{code}",
+            name=name,
+            app="bitbox",
+            path=f"{pfad}#{code}",
+            locked=False,
+            importable=bool(desc),
+            descriptors=[desc] if desc else [],
+            namen=[name],
+            reason="" if desc else "kein Remember-wallet / keine XPUBs",
+            network="main",
+        ))
+    return out
+
+
+def _purpose_aus_coin(code: str) -> str:
+    roh = str(code or "").lower()
+    if "p2tr" in roh or "taproot" in roh:
+        return "86"
+    if "p2wpkh-p2sh" in roh or "p2sh" in roh:
+        return "49"
+    if "p2pkh" in roh:
+        return "44"
+    return "84"
+
+
+def _index_aus_keypath(keypath: str) -> int:
+    teile = re.findall(r"(\d+)['h]?", str(keypath or ""))
+    if len(teile) >= 3:
+        return int(teile[2])
+    return 0
 
 
 def _anzeige_name(pfad: Path) -> str:
