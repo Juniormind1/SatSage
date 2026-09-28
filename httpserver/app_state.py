@@ -271,11 +271,16 @@ class AppState:
             ctx = self._build_context(gueltig, on_log=log.zeile)
             with self._lock:
                 self._wallet_ctx = ctx
+                eintraege = list(self._entries)
             # Ab hier darf eine Wallet-Ansicht den Kontext lesen, während der
             # Cache der übrigen Wallets noch in den Seed läuft.
             self._adressen_bereit.set()
-            with self._lock:
-                self._seed_wallet_context_unlocked(on_log=log.zeile)
+            # Seed ohne ``_lock``: Er liest nur Cache-Dateien und trägt Adressen
+            # in *ctx* ein. Unter dem Lock hielte er ``entries`` und
+            # ``wallet_ctx_fuer_ansicht`` fest, bis das letzte Wallet gelesen
+            # ist — der Klick auf ein fertiges Wallet stünde so lange auf
+            # „Lade aus Cache…“.
+            self._seed_wallet_context(ctx, eintraege, on_log=log.zeile)
             log.zeile("Wallets bereit.")
         except Exception:
             LOGGER.exception("Wallet-Kontext im Hintergrund fehlgeschlagen")
@@ -286,14 +291,23 @@ class AppState:
 
     def _seed_wallet_context_unlocked(self, *, on_log=None) -> None:
         """UTXO- und Resolution-Cache ins Mapping. Aufrufer hält ``_lock``."""
-        if self._wallet_ctx is None:
+        self._seed_wallet_context(self._wallet_ctx, self._entries, on_log=on_log)
+
+    def _seed_wallet_context(self, ctx, entries, *, on_log=None) -> None:
+        """
+        UTXO-, Verlaufs- und Resolution-Cache Wallet für Wallet in *ctx*.
+
+        Braucht ``_lock`` nicht: liest nur Cache-Dateien und schreibt nur in
+        *ctx* (einzelne Dict-Einträge, wie ``resolve_address`` zur Laufzeit).
+        """
+        if ctx is None:
             return
         schluessel = [
-            e.analyse_schluessel for e in self._entries if e.is_valid()
+            e.analyse_schluessel for e in entries if e.is_valid()
         ]
         namen = {
             e.analyse_schluessel: e.display_name
-            for e in self._entries if e.is_valid()
+            for e in entries if e.is_valid()
         }
         # Sonst resolve_address je ungeseedeter Adresse
         # MAX_TRACE_ADDRESS_SEARCH Ableitungen (Herkunft mit 30+ UTXOs:
@@ -310,7 +324,7 @@ class AppState:
                 on_log("Lese Cache…", wallet=name)
             try:
                 seed_wallet_addresses_from_utxo_cache(
-                    self._wallet_ctx, [schluessel_eins], self.cache_dir,
+                    ctx, [schluessel_eins], self.cache_dir,
                 )
             except Exception:
                 LOGGER.exception("UTXO-Cache-Seed fehlgeschlagen")
@@ -318,13 +332,13 @@ class AppState:
                     on_log("UTXO-Cache nicht lesbar.", wallet=name)
             try:
                 seed_wallet_addresses_from_verlauf_cache(
-                    self._wallet_ctx, [schluessel_eins], self.cache_dir,
+                    ctx, [schluessel_eins], self.cache_dir,
                 )
             except Exception:
                 LOGGER.exception("Verlaufs-Cache-Seed fehlgeschlagen")
             try:
                 seed_wallet_addresses_from_resolution_cache(
-                    self._wallet_ctx, [schluessel_eins],
+                    ctx, [schluessel_eins],
                 )
             except Exception:
                 LOGGER.exception("Resolution-Cache-Seed fehlgeschlagen")
@@ -335,7 +349,7 @@ class AppState:
 
                     eintrag = next(
                         (
-                            e for e in self._entries
+                            e for e in entries
                             if e.analyse_schluessel == schluessel_eins
                         ),
                         None,

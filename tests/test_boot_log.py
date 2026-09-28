@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.request
+from unittest import mock
+
 from tests.fixtures import BIP84_ZPUB
 from tests.test_api import ApiTestBasis
 
@@ -81,6 +84,55 @@ class TestBootLog(ApiTestBasis):
         self.assertIn("utxos", koerper)
         self.assertFalse(self.state.context_bereit())
         self.state._context_bereit.set()
+
+    def test_klick_auf_gelesenes_wallet_waehrend_seed_der_anderen(self):
+        """
+        Echter Hintergrund-Seed: Das zweite Wallet hängt im Cache-Lesen. Das
+        erste ist gelesen — seine Ansicht, ``entries`` und /api/config kommen
+        sofort, nicht erst mit „Wallets bereit.“.
+        """
+        import core.wallet_context as wc
+
+        zweites = self.state.entries[1]
+        tor = threading.Event()
+        original = wc.seed_wallet_addresses_from_verlauf_cache
+
+        def haengt(wallet, xpubs, cache_dir):
+            if zweites.analyse_schluessel in xpubs:
+                tor.wait(timeout=20)
+            return original(wallet, xpubs, cache_dir)
+
+        self.addCleanup(tor.set)
+        with mock.patch.object(wc, "seed_wallet_addresses_from_verlauf_cache", haengt):
+            self.state.reload(hintergrund=True)
+            ende = time.monotonic() + 10
+            while time.monotonic() < ende:
+                zeilen, _ = self.state.boot_log.stand()
+                if any(
+                    z.get("text") == "Cache gelesen." and z.get("wallet") == "Cold Storage"
+                    for z in zeilen
+                ):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("„Cache gelesen.“ für das erste Wallet kam nicht")
+
+            t0 = time.monotonic()
+            self.assertEqual(len(self.state.entries), 2)
+            self.assertIsNotNone(self.state.wallet_ctx_fuer_ansicht())
+            self.assertLess(time.monotonic() - t0, 2.0)
+            kennung = self.wallet_id(BIP84_ZPUB)
+            status, koerper = self.anfrage(
+                f"/api/wallets/{kennung}/utxos?seite=1&mempool=0&limit=5")
+            self.assertEqual(status, 200, koerper)
+            self.assertIn("utxos", koerper)
+            status, koerper = self.anfrage("/api/config")
+            self.assertEqual(status, 200)
+            self.assertFalse(koerper["context_bereit"])
+            # Der Seed des zweiten Wallets hängt noch — nichts davon wartete.
+            self.assertFalse(self.state.context_bereit())
+            tor.set()
+            self.assertTrue(self.state.warte_auf_context(timeout=10))
 
     def test_ableitung_meldet_jedes_wallet(self):
         gesehen = []

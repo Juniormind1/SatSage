@@ -78,6 +78,18 @@ function nimmWalletSobaldFertig(wallet) {
   }
 }
 
+/**
+ * Wallet für den Einstieg nach /api/config: das erste der Konfiguration.
+ * Hat der Nutzer während der Vorbereitung schon ein Wallet geöffnet, bleibt
+ * es stehen (null) — der Start holt ihn nicht zum ersten zurück.
+ */
+function einstiegsWalletId() {
+  const liste = Zustand.config?.wallets || [];
+  if (!liste.length) return null;
+  if (Zustand.walletId && liste.some((w) => w.id === Zustand.walletId)) return null;
+  return liste[0].id;
+}
+
 function zeichneNav() {
   const behaelter = $("#wallet-nav");
   behaelter.replaceChildren();

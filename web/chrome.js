@@ -681,9 +681,11 @@ async function start() {
   // Datenquelle (P2P „eh da“ zählt nicht) → Datenquellen; sonst Wallets.
   if ((Zustand.config.wallets || []).length > 0) {
     // Kontext noch im Aufbau: Wallet zeigen, Empfangsadresse nicht.
-    zeigeWallet(Zustand.config.wallets[0].id, {
-      ohneEmpfang: Zustand.contextBereit === false,
-    });
+    // Ein während der Vorbereitung schon angeklicktes Wallet bleibt stehen.
+    const einstieg = einstiegsWalletId();
+    if (einstieg) {
+      zeigeWallet(einstieg, { ohneEmpfang: Zustand.contextBereit === false });
+    }
   } else if (walletsManaged()) {
     oeffneVerwaltung("einstellungen");
   } else if (brauchtDatenquellenZuerst()) {

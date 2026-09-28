@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Start · Wallet-Ansicht:** Ein Wallet, dessen Cache gelesen ist, zeigt seinen Bestand nach dem Klick sofort. Das Cache-Lesen der übrigen Wallets hielt bisher eine Sperre, an der Ansicht und Wallet-Liste bis zum letzten Wallet warteten. Wer früh ein Wallet anklickt, wird beim Start nicht mehr zum ersten zurückgeholt.
+
 - **Start · Wallet-Ansicht:** Ein Klick auf ein schon gezeigtes Wallet liest dessen Cache sofort. Die Ansicht wartet nicht mehr, bis die übrigen Wallets ihren Cache gelesen haben. Die Empfangsadresse bleibt gesperrt, bis die Vorbereitung fertig ist.
 
 - **Start · Wallets:** Jedes Wallet erscheint in der Seitenleiste, sobald sein Cache gelesen ist. Die übrigen folgen einzeln, nicht erst alle zusammen am Ende.

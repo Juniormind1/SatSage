@@ -282,7 +282,9 @@ def seed_wallet_addresses_from_resolution_cache(
         return 0
     fp_to_xpub = {_xpub_fingerprint(xpub): xpub for xpub in xpubs}
     loaded = 0
-    for address, fp in _known_wallet_addresses.items():
+    # Abzug statt Live-Iteration: Der Start-Seed läuft ohne AppState-Lock
+    # neben Anfragen, deren resolve_address diesen Cache ergänzt.
+    for address, fp in list(_known_wallet_addresses.items()):
         xpub = fp_to_xpub.get(fp)
         if xpub:
             _register_wallet_address(wallet, xpub, address)
