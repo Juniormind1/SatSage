@@ -787,6 +787,75 @@ function ladeWalletSeitenNeu() {
     .catch(() => {});
 }
 
+/**
+ * „Bereits ausgegeben“ dieses Wallets aufklappen und das UTXO in seinem
+ * Herkunftsbaum zeigen. Der Abschnitt ist seitenweise — der Sprung filtert
+ * auf den Schlüssel, damit die Zeile auf der ersten Seite liegt.
+ */
+async function springeZuAusgegebenemUtxo(walletId, key) {
+  if (!walletId || !key) return false;
+  if (Zustand.ansicht !== "wallet" || Zustand.walletId !== walletId) {
+    await zeigeWallet(walletId, { ohneEmpfang: true });
+  }
+  if (Zustand.walletId !== walletId) return false;
+  // Hintergrund-Nachzug der Wallet-Ansicht darf die eingesetzte Zeile
+  // nicht wieder zuklappen.
+  Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
+
+  const block = $("#wallet-ausgegeben")?.querySelector(".ausgegeben-block");
+  const inhalt = block?.querySelector(".ausgegeben-inhalt");
+  const kopf = block?.querySelector(".adress-kopf");
+  if (!block || !inhalt || typeof api !== "function") return false;
+
+  const p = new URLSearchParams();
+  p.set("seite", "1");
+  p.set("teil", "verlauf");
+  p.set("modus", "volume-desc");
+  p.set("sort", "betrag");
+  p.set("offset", "0");
+  p.set("limit", "25");
+  p.set("mempool", "0");
+  p.set("lang", typeof uiSprache === "function" ? uiSprache() : "de");
+  p.set("q", key);
+  let antwort;
+  try {
+    antwort = await api(`/wallets/${encodeURIComponent(walletId)}/utxos?${p}`);
+  } catch (fehler) {
+    return false;
+  }
+  if (Zustand.walletId !== walletId) return false;
+  const seite = typeof verlaufSeitenAuszug === "function"
+    ? verlaufSeitenAuszug(antwort)
+    : { art: "utxos", items: [], total: 0 };
+  inhalt.replaceChildren();
+  if (typeof fuelleTraceSeite === "function") fuelleTraceSeite(inhalt, seite);
+  inhalt.dataset.gezeichnet = "ja";
+  if (typeof setzeKlapp === "function") {
+    setzeKlapp(kopf, kopf && kopf.querySelector(".klapp"), inhalt, true);
+  } else {
+    inhalt.hidden = false;
+  }
+
+  let wurzel = inhalt.querySelector(
+    `.utxo-wurzel[data-key="${CSS.escape(key)}"]`,
+  );
+  if (!wurzel) {
+    const gruppe = inhalt.querySelector(".adress-gruppe");
+    if (gruppe?.baueUtxos) gruppe.baueUtxos();
+    wurzel = inhalt.querySelector(
+      `.utxo-wurzel[data-key="${CSS.escape(key)}"]`,
+    );
+  }
+  if (!wurzel) return false;
+  const gruppe = wurzel.closest(".adress-gruppe");
+  if (gruppe?.klappeAuf) gruppe.klappeAuf();
+  if (wurzel.oeffneHerkunft) wurzel.oeffneHerkunft();
+  wurzel.classList.add("herkunft-sprung");
+  wurzel.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => wurzel.classList.remove("herkunft-sprung"), 2400);
+  return true;
+}
+
 /** Andere Seite der Adressgruppen; „Bereits ausgegeben“ bleibt stehen. */
 async function zeigeWalletSeite(offset) {
   const quelle = Zustand.walletQuelle;

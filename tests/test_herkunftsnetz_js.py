@@ -26,7 +26,15 @@ const uiSprache = () => "de";
 const formatZeitstrahlBetrag = (s) => `${s} sat`;
 const ZeitstrahlAnsicht = { x0: 0, x1: 100, daten: null };
 const zeitstrahlSichtPos = (p) => ((p - ZeitstrahlAnsicht.x0) / (ZeitstrahlAnsicht.x1 - ZeitstrahlAnsicht.x0)) * 100;
-const Zustand = { steuer: { _abfrage: "?jahr=2024&frist=1&stichtag=" }, herkunftAlleLaeuft: false };
+const Zustand = {
+  steuer: { _abfrage: "?jahr=2024&frist=1&stichtag=" },
+  herkunftAlleLaeuft: false,
+  config: { wallets: [{ id: "wid-1", name: "Cold" }] },
+};
+const spruenge = [];
+const kopien = [];
+function zeigeHerkunftFuer(key, opts) { spruenge.push([key, Zustand.traceSprung, opts]); }
+function kopiereInZwischenablage(text) { kopien.push(text); return true; }
 const aufrufe = { api: [], lauf: [], laden: 0, bericht: [], log: [] };
 let antworten = [];
 async function api(pfad) { aufrufe.api.push(pfad); return antworten.shift(); }
@@ -52,8 +60,8 @@ const NETZ = {
   fokus_key: "%(K)s", fokus_pos: 60, fokus_y: 50, fokus_sats: 1000, trace_fehlt: false,
   verfolgt_vollstaendig: false, gekappt: false,
   vorfahren: [
-    { key: "%(K)s", typ: "eigen", pos_output: 70, y: 50, value_sats: 1000, anteil_sats: 1000, zeit: "01.06.2024 12:00" },
-    { key: "%(V)s", typ: "eigen", pos_output: 40, y: 60, value_sats: 5000, anteil_sats: 600, zeit: "01.02.2024 12:00" },
+    { key: "%(K)s", typ: "eigen", pos_output: 70, y: 50, value_sats: 1000, anteil_sats: 1000, zeit: "01.06.2024 12:00", wallet: "Hot" },
+    { key: "%(V)s", typ: "eigen", pos_output: 40, y: 60, value_sats: 5000, anteil_sats: 600, zeit: "01.02.2024 12:00", wallet: "Cold" },
     { key: "%(F)s", typ: "fremd", pos_output: -10, y: 120, value_sats: 9000, anteil_sats: 400, zeit: "01.01.2020 12:00" },
   ],
   kanten: [
@@ -100,6 +108,13 @@ class TestEinbindung(unittest.TestCase):
     def test_punktklick_und_neuzeichnen_und_ansichtswechsel(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("herkunftsnetzUmschalten(key)", steuer)
+        self.assertIn("herkunftsnetzZumBaum(v)", NETZ)
+        self.assertIn("function herkunftsnetzBaumVorladen", NETZ)
+        self.assertIn("kopiereInZwischenablage(outpoint)", NETZ)
+        self.assertIn("kopiereInZwischenablage(eintrag.address)", steuer)
+        self.assertIn("herkunftsnetzSpringbar", NETZ)
+        herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
+        self.assertIn("function springeImHerkunftsbaum", herkunft)
         self.assertIn("herkunftsnetzBericht(key)", steuer)
         self.assertIn('addEventListener("dblclick"', steuer)
         self.assertIn("herkunftsnetzZeichnen()", steuer)
@@ -122,7 +137,10 @@ class TestEinbindung(unittest.TestCase):
             for s in schluessel:
                 self.assertTrue(katalog.get(s), f"{code}: {s}")
         de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
-        self.assertEqual(de["tax.netzHint"], "Orange: eigene Vorgänger nach Output-Zeit")
+        self.assertIn("eigene Vorgänger nach Output-Zeit", de["tax.netzHint"])
+        self.assertIn("tax.netzJump", schluessel)
+        self.assertIn("tax.netzJumpTitle", schluessel)
+        self.assertNotIn("tax.netzJumpMissing", schluessel)
 
 
 @unittest.skipUnless(shutil.which("node"), "node fehlt")
@@ -169,6 +187,46 @@ class TestEinUndAusstieg(unittest.TestCase):
         aus = r["aus"]
         self.assertFalse(aus["an"] or aus["fokus"] or aus["hinweis"])
         self.assertEqual(aus["ringe"], 0)
+
+    def test_klick_auf_eigenen_vorgaenger_springt_in_den_baum(self):
+        r = _node("""
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          const vorab = aufrufe.api.filter((p) => p.startsWith("/trace?target="));
+          const eigen = spur.querySelector(".netz-eigen:not(.netz-fokus-b)");
+          const fremd = spur.querySelector(".netz-fremd");
+          eigen.fire("click");
+          const nachEigen = spruenge.slice();
+          const kopie = kopien.slice();
+          fremd.fire("click");
+          console.log(JSON.stringify({
+            sprung: eigen.classList.contains("netz-sprung"),
+            fremdSprung: fremd.classList.contains("netz-sprung"),
+            nachEigen, spruenge, kopie, vorab,
+          }));
+        """)
+        self.assertTrue(r["sprung"])
+        self.assertTrue(r["fremdSprung"])
+        self.assertEqual(r["nachEigen"][0][0], K)
+        self.assertEqual(r["nachEigen"][0][1]["key"], VORFAHR)
+        self.assertEqual(r["spruenge"][1][1]["typ"], "fremd")
+        self.assertEqual(r["spruenge"][1][1]["eltern"], K)
+        self.assertEqual(r["kopie"], [VORFAHR])
+        self.assertEqual(len(r["vorab"]), 1)
+        self.assertIn("target=", r["vorab"][0])
+
+    def test_kante_zwischen_verschiedenen_wallets_ist_gepunktet(self):
+        r = _node("""
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          const kanten = [...spur.querySelectorAll(".netz-kante")];
+          console.log(JSON.stringify(kanten.map((k) => k.className)));
+        """)
+        wallet = [k for k in r if "netz-kante-wallet" in k]
+        self.assertEqual(len(wallet), 1)
+        self.assertNotIn("netz-kante-fremd", wallet[0])
 
     def test_x_achse_reicht_bis_zum_aeltesten_herkunftsdatum(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")

@@ -30,6 +30,39 @@ def pfad_teile(pfad: str | None) -> list[int] | None:
     return teile
 
 
+def pfad_zu(baum: dict, schluessel: str) -> list[int] | None:
+    """
+    Erster Pfad zu einem Knoten mit diesem ``from_utxo``.
+
+    ``[]`` ist die Wurzel selbst. Ohne Treffer ``None``.
+    """
+    ziel = str(schluessel or "").strip()
+    if not ziel or not isinstance(baum, dict):
+        return None
+    wurzel = baum.get("root") if isinstance(baum.get("root"), dict) else {}
+    wurzel_key = str(wurzel.get("utxo") or "").strip()
+    if not wurzel_key and wurzel.get("txid") is not None:
+        wurzel_key = f"{wurzel.get('txid')}:{int(wurzel.get('vout') or 0)}"
+    if wurzel_key == ziel:
+        return []
+    stapel: list[tuple[list, list[int]]] = [(baum.get("children") or [], [])]
+    while stapel:
+        kinder, basis = stapel.pop()
+        if not isinstance(kinder, list):
+            continue
+        for i in range(len(kinder) - 1, -1, -1):
+            knoten = kinder[i]
+            if not isinstance(knoten, dict):
+                continue
+            pfad = basis + [i]
+            if str(knoten.get("from_utxo") or "").strip() == ziel:
+                return pfad
+            eigene = knoten.get("children") or []
+            if eigene:
+                stapel.append((eigene, pfad))
+    return None
+
+
 def kinder_an(baum: dict, teile: list[int]) -> list | None:
     """Kinderliste des Knotens unter *teile* (``[]`` = oberste Ebene)."""
     kinder = baum.get("children") if isinstance(baum, dict) else None

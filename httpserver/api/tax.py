@@ -250,6 +250,17 @@ def api_tax_herkunftsnetz(
         return xpub_cache.load_cached_block_time(hoehe, state.immutable_cache_dir)
 
     netz = herkunftsnetz.flach(baum, fokus_key, skala, block_zeit=block_zeit)
+    from core import wallets as wallets_mod
+
+    namen = {
+        str(e.display_name or "").strip(): wallets_mod.eintrag_id(e)
+        for e in (state.entries or [])
+        if str(e.display_name or "").strip()
+    }
+    for v in netz.get("vorfahren") or []:
+        name = str(v.get("wallet") or "").strip()
+        if name and name in namen:
+            v["wallet_id"] = namen[name]
     antwort.update(netz)
     antwort.update({
         "trace_fehlt": False,

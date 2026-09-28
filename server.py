@@ -1044,6 +1044,7 @@ from httpserver.api.trace import (  # noqa: E402
     api_trace_alle,
     api_trace_gespeichert,
     api_trace_knoten,
+    api_trace_pfad,
     api_verlauf,
 )
 
@@ -1636,6 +1637,8 @@ class Handler(
             return 200, api_trace_gespeichert(state, query)
         if teile == ["trace", "knoten"] and methode == "GET":
             return 200, api_trace_knoten(state, query)
+        if teile == ["trace", "pfad"] and methode == "GET":
+            return 200, api_trace_pfad(state, query)
         if teile == ["config", "deskriptor"] and methode == "POST":
             return 200, api_deskriptor_pruefen(state, self._body())
         if teile == ["config", "sparrow-import"] and methode == "POST":

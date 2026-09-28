@@ -255,6 +255,111 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
+  const sprung = Zustand.traceSprung;
+  if (sprung && sprung.fokus === schluessel && typeof springeImHerkunftsbaum === "function") {
+    Zustand.traceSprung = null;
+    await springeImHerkunftsbaum(zweig, sprung);
+  }
+}
+
+/**
+ * Im schon geöffneten Baum des Fokus die Zeile zum Netz-Punkt zeigen.
+ * *sprung*: ``{ key, typ, eltern }``. Bündel landet bei den Kindern des Eltern-Hops.
+ */
+async function springeImHerkunftsbaum(zweig, sprung) {
+  if (!zweig || !sprung) return false;
+  const ziel = sprung.typ === "buendel" ? String(sprung.eltern || "") : String(sprung.key || "");
+  if (!ziel) return false;
+  const fokus = zweig.closest(".utxo-wurzel");
+  const baumZiel = zweig.dataset.baumZiel || (fokus && fokus.dataset.key) || "";
+  let pfad = "";
+  if (baumZiel) {
+    try {
+      const antwort = await api(
+        `/trace/pfad?target=${encodeURIComponent(baumZiel)}&key=${encodeURIComponent(ziel)}`,
+      );
+      if (antwort && antwort.vorhanden && antwort.pfad != null) pfad = String(antwort.pfad);
+    } catch (_) {
+      pfad = "";
+    }
+  }
+  const vorab = typeof Herkunftsnetz !== "undefined" && Herkunftsnetz.baum;
+  const baumSchonDa = Boolean(
+    vorab && vorab.key === baumZiel && vorab.stand === "da" && vorab.wert,
+  );
+  if (!baumSchonDa && pfad && baumZiel && zweig.dataset.baumZiel) {
+    try {
+      await expandiereBaumAlles(zweig);
+    } catch (_) { /* Suche läuft danach über die gezeichneten Zeilen. */ }
+  }
+  if (baumSchonDa && zweig.dataset.baumZiel) {
+    const ebene = zweig.querySelector(":scope > .baum-ebene");
+    if (ebene && Array.isArray(vorab.wert.children)) {
+      delete zweig.dataset.baumZiel;
+      ebene.replaceChildren(zeichneKnotenListe(vorab.wert.children, ebene._elternWallet));
+    }
+  }
+  if (pfad && !zweig.dataset.baumZiel) {
+    const teile = pfad.split(".").filter(Boolean);
+    let behaelter = zweig.querySelector(":scope > .baum-ebene") || zweig;
+    for (let i = 0; i < teile.length; i += 1) {
+      const bis = teile.slice(0, i + 1).join(".");
+      let block = behaelter.querySelector(
+        `:scope > .baum-knoten-block[data-pfad="${CSS.escape(bis)}"]`,
+      );
+      if (!block && baumZiel) {
+        const elternPfad = teile.slice(0, i).join(".");
+        const eltern = behaelter.closest(".baum-knoten-block");
+        const elternKnoten = eltern ? BAUM_KNOTEN_DATEN.get(eltern) : null;
+        const index = Number(teile[i]);
+        const groesse = Math.max(1, pagerGroesse("baum"));
+        await zeichneBaumSeiten(behaelter, baumZiel, elternPfad, {
+          elternWallet: behaelter._elternWallet,
+          elternKnoten,
+          offset: Math.floor(index / groesse) * groesse,
+          limit: Math.max(groesse, (index % groesse) + 1),
+        });
+        block = behaelter.querySelector(
+          `:scope > .baum-knoten-block[data-pfad="${CSS.escape(bis)}"]`,
+        );
+      }
+      if (!block) break;
+      if (i < teile.length - 1 || sprung.typ === "buendel") {
+        expandiereKnotenBlock(block);
+        const { kinder } = baumKnotenEls(block);
+        if (kinder) behaelter = kinder;
+      }
+      if (i === teile.length - 1 && sprung.typ !== "buendel") {
+        return markiereBaumZeile(block);
+      }
+      if (i === teile.length - 1 && sprung.typ === "buendel") {
+        const { kinder } = baumKnotenEls(block);
+        return markiereBaumZeile(kinder || block);
+      }
+    }
+  }
+  const zeile = [...zweig.querySelectorAll(".baum-knoten-block")].find((block) => {
+    const knoten = BAUM_KNOTEN_DATEN.get(block);
+    if (!knoten) return false;
+    if (String(knoten.from_utxo || "") !== ziel) return false;
+    if (sprung.typ === "coinbase") return knoten.type === "coinbase";
+    if (sprung.typ === "horizont") return Boolean(knoten.tax_horizon) || knoten.type === "tax_horizon";
+    if (sprung.typ === "fremd") return knoten.type === "external";
+    if (sprung.typ === "luecke") return knoten.type !== "internal" && knoten.type !== "external";
+    return true;
+  });
+  return markiereBaumZeile(zeile);
+}
+
+function markiereBaumZeile(el) {
+  if (!el) return false;
+  document.querySelectorAll(".herkunft-sprung").forEach((alt) => {
+    alt.classList.remove("herkunft-sprung");
+  });
+  el.classList.add("herkunft-sprung");
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => el.classList.remove("herkunft-sprung"), 2400);
+  return true;
 }
 
 function hinweisZeile(text) {
@@ -650,6 +755,9 @@ function zeichneTraceAdressGruppe(gruppe) {
 
   block.append(kopfzeile, inhalt);
   // Für Fokus-Sprung / Tests: Wurzeln nachziehbar ohne Gruppen-Klick.
+  block.klappeAuf = () => {
+    if (inhalt.hidden) kopf.click();
+  };
   block.baueUtxos = () => {
     if (utxosGebaut) return;
     for (const utxo of gruppe.utxos || []) {
@@ -843,6 +951,16 @@ function zeichneTraceWurzel(utxo) {
     }
     oeffneZweig(utxo, zweig, klapp);
   });
+
+  // Sprung aus dem Herkunftsnetz: aufklappen und den gespeicherten Baum
+  // zeichnen, ohne den Klick-Handler der Zeile zu duplizieren.
+  block.oeffneHerkunft = () => {
+    if (zweig.hidden) zeile.click();
+    else if (zweig.dataset.geladen !== "ja" && zweig.dataset.geladen !== "laeuft") {
+      oeffneZweig(utxo, zweig, klapp);
+    }
+    return zweig;
+  };
 
   return block;
 }
@@ -1875,8 +1993,9 @@ function expandiereKnotenBlock(block) {
     kinder.dataset.gezeichnet = "ja";
     kinder.replaceChildren();
     const elternWallet = knoten.type === "internal" ? (knoten.wallet || "") : undefined;
+    const zweig = block.closest(".utxo-zweig");
     const ziel = !Array.isArray(knoten.children) && knoten.pfad != null
-      ? block.closest(".utxo-zweig")?.dataset.baumZiel
+      ? zweig?.dataset.baumZiel
       : "";
     if (ziel) {
       // Seitenweise: Kinder dieses Knotens erst jetzt vom Server.
@@ -1884,8 +2003,20 @@ function expandiereKnotenBlock(block) {
         elternWallet,
         elternKnoten: knoten,
       });
-    } else {
+    } else if (Array.isArray(knoten.children)) {
       kinder.append(zeichneKnotenListe(knoten.children || [], elternWallet, knoten));
+    } else if (knoten.pfad != null && zweig) {
+      // Der Sprung hat den Baum geholt und baumZiel gelöscht. Ein Knoten ohne
+      // Kinderliste ist noch die schlanke Seite — die Kinder jetzt nachladen.
+      const wurzel = zweig.closest(".utxo-wurzel");
+      const target = wurzel?.dataset.key || "";
+      if (target) {
+        zweig.dataset.baumZiel = target;
+        zeichneBaumSeiten(kinder, target, knoten.pfad, {
+          elternWallet,
+          elternKnoten: knoten,
+        });
+      }
     }
   }
   kinder.hidden = false;
@@ -1952,9 +2083,9 @@ async function expandiereBaumAlles(zweig) {
  * Kinder eines Knotens (oder die oberste Ebene, *pfad* leer) seitenweise
  * aus dem gespeicherten Baum. *vorab*: schon mitgelieferte erste Seiten.
  */
-function zeichneBaumSeiten(behaelter, ziel, pfad, { elternWallet, elternKnoten, vorab = null }) {
+function zeichneBaumSeiten(behaelter, ziel, pfad, { elternWallet, elternKnoten, vorab = null, offset = 0, limit = 0 } = {}) {
   const neueQuelle = (erste) => neueSeitenQuelle({
-    groesse: pagerGroesse("baum"),
+    groesse: Math.max(pagerGroesse("baum"), Number(limit) || 0),
     laden: (o, l) => api(
       `/trace/knoten?target=${encodeURIComponent(ziel)}` +
       `&pfad=${encodeURIComponent(pfad || "")}&offset=${o}&limit=${l}`,
@@ -1981,7 +2112,7 @@ function zeichneBaumSeiten(behaelter, ziel, pfad, { elternWallet, elternKnoten, 
     }));
   };
   if (!vorab) behaelter.replaceChildren(hinweisZeile(t("common.looking")));
-  return zeige(0).catch((fehler) => {
+  return zeige(offset || 0).catch((fehler) => {
     behaelter.replaceChildren(hinweisZeile(
       t("common.couldNotLoad", { msg: fehler.message }),
     ));
@@ -2037,6 +2168,11 @@ function baumKlappLeiste(zweig) {
 function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   const block = document.createElement("div");
   block.className = "baum-knoten-block";
+  if (knoten.pfad != null && knoten.pfad !== "") block.dataset.pfad = String(knoten.pfad);
+  else if (knoten.id != null && /^\d+(?:\.\d+)*$/.test(String(knoten.id))) {
+    block.dataset.pfad = String(knoten.id);
+    knoten.pfad = String(knoten.id);
+  }
   BAUM_KNOTEN_DATEN.set(block, knoten);
 
   const walletUebergang =
@@ -2180,6 +2316,9 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   kopfzeile.append(zeile);
   // Tx vor Adresse: VIN/VOUT-Grafik. Adresse nur, wenn keine Tx bekannt
   // (reine Adresszeilen bleiben bei /address/… — siehe Adressgruppen).
+  if (knoten.from_utxo) block.dataset.fromUtxo = String(knoten.from_utxo);
+  if (knoten.type) block.dataset.typ = String(knoten.type);
+  if (knoten.tax_horizon) block.dataset.horizont = "1";
   const txid =
     (knoten.from_utxo || "").split(":")[0]
     || knoten.txid

@@ -9,6 +9,8 @@
  * Nur das flache Netz vom Server liegt im Speicher (GET /api/tax/herkunftsnetz)
  * — nie ein Baum. Nichts davon landet in zeitstrahl.events[].
  * Ende: Esc, Klick ins Leere, zweiter Klick auf denselben Punkt, Ansichtswechsel.
+ * Klick auf einen eigenen Vorgänger-Ring springt in den Herkunftsbaum
+ * dieses UTXO unter „Bereits ausgegeben“ des zugehörigen Wallets.
  */
 
 const Herkunftsnetz = {
@@ -52,6 +54,10 @@ function herkunftsnetzUmschalten(key) {
   herkunftsnetzStarten(key);
 }
 
+function herkunftsnetzBaumVerwerfen() {
+  Herkunftsnetz.baum = null;
+}
+
 function herkunftsnetzBeenden() {
   Herkunftsnetz.fensterGeoeffnet = false;
   if (!Herkunftsnetz.key && !Herkunftsnetz.daten) return;
@@ -60,6 +66,7 @@ function herkunftsnetzBeenden() {
   Herkunftsnetz.status = "";
   Herkunftsnetz.fehler = "";
   Herkunftsnetz.lauf += 1;
+  herkunftsnetzBaumVerwerfen();
   herkunftsnetzZeichnen();
 }
 
@@ -104,6 +111,30 @@ async function herkunftsnetzStarten(key, { nachJob = false } = {}) {
   Herkunftsnetz.daten = daten;
   Herkunftsnetz.status = "";
   herkunftsnetzZeichnen();
+  herkunftsnetzBaumVorladen(key);
+}
+
+/** Gespeicherten Baum schon holen, solange der Benutzer das Netz ansieht. */
+function herkunftsnetzBaumVorladen(key) {
+  if (!key || typeof api !== "function") return;
+  if (Herkunftsnetz.baum && Herkunftsnetz.baum.key === key && Herkunftsnetz.baum.stand !== "fehler") {
+    return;
+  }
+  const lauf = Herkunftsnetz.lauf;
+  Herkunftsnetz.baum = { key, stand: "laedt", wert: null };
+  api(`/trace?target=${encodeURIComponent(key)}`)
+    .then((antwort) => {
+      if (lauf !== Herkunftsnetz.lauf || Herkunftsnetz.key !== key) return;
+      if (antwort && antwort.vorhanden && antwort.ergebnis) {
+        Herkunftsnetz.baum = { key, stand: "da", wert: antwort.ergebnis };
+      } else {
+        Herkunftsnetz.baum = { key, stand: "fehlt", wert: null };
+      }
+    })
+    .catch(() => {
+      if (lauf !== Herkunftsnetz.lauf) return;
+      Herkunftsnetz.baum = { key, stand: "fehler", wert: null };
+    });
 }
 
 /**
@@ -280,6 +311,51 @@ function herkunftsnetzRingFarbe(posOutput) {
   return "netz";
 }
 
+/** Jeder Punkt außer dem Fokus hat eine Stelle im Baum dieses UTXO. */
+function herkunftsnetzSpringbar(v, fokusKey) {
+  return Boolean(v && v.key && v.key !== fokusKey);
+}
+
+/** txid:vout, wenn der Punkt einen echten Output meint. mempool.space sucht das. */
+function herkunftsnetzOutpoint(key) {
+  const treffer = String(key || "").match(/^([0-9a-f]{64}):(\d+)$/i);
+  return treffer ? `${treffer[1]}:${treffer[2]}` : "";
+}
+
+/**
+ * Klick auf einen Vorgänger-Punkt: Herkunft tracen des Fokus öffnen und
+ * dort die Zeile zeigen, die dieser Punkt meint.
+ */
+function herkunftsnetzZumBaum(v) {
+  const fokus = Herkunftsnetz.key;
+  const eltern = (Herkunftsnetz.daten?.kanten || []).find((k) => k.von === v?.key);
+  // Bündel hat keinen eigenen Output. Die Transaktion, die es zusammenfasst,
+  // ist die des Hops, den die Eingänge finanzieren — bei einem CoinJoin genau die.
+  const outpoint = herkunftsnetzOutpoint(v && v.key)
+    || (v && v.typ === "buendel" ? herkunftsnetzOutpoint(eltern && eltern.nach) : "");
+  if (outpoint && typeof kopiereInZwischenablage === "function") {
+    kopiereInZwischenablage(outpoint);
+  }
+  if (!v || !fokus || typeof zeigeHerkunftFuer !== "function") return;
+  Zustand.traceSprung = {
+    fokus,
+    key: v.key,
+    typ: v.typ || "",
+    eltern: eltern ? eltern.nach : "",
+  };
+  const meta = typeof utxoMetaAusSteuerjahr === "function"
+    ? utxoMetaAusSteuerjahr(fokus)
+    : null;
+  zeigeHerkunftFuer(fokus, { meta: meta || { key: fokus } });
+}
+
+/** Beide Enden haben ein Wallet, und es ist nicht dasselbe. */
+function herkunftsnetzWalletWechsel(kante, knotenNachKey) {
+  const a = String(knotenNachKey.get(kante.von)?.wallet || "").trim();
+  const b = String(knotenNachKey.get(kante.nach)?.wallet || "").trim();
+  return Boolean(a && b && a !== b);
+}
+
 function herkunftsnetzTypText(v, fokusKey) {
   if (v.key === fokusKey) return t("tax.netzFocus");
   if (v.typ === "buendel") return t("tax.netzBundle", { n: v.n });
@@ -368,6 +444,7 @@ function herkunftsnetzZeichnen() {
       Herkunftsnetz.daten = null;
       Herkunftsnetz.status = "";
       Herkunftsnetz.lauf += 1;
+      herkunftsnetzBaumVerwerfen();
     }
   }
   const aktiv = herkunftsnetzAktiv();
@@ -472,8 +549,10 @@ function herkunftsnetzZeichnen() {
   }
 
   const farbeNachKey = new Map();
+  const knotenNachKey = new Map();
   for (const v of d.vorfahren || []) {
     farbeNachKey.set(v.key, herkunftsnetzRingFarbe(v.pos_output));
+    knotenNachKey.set(v.key, v);
   }
 
   for (const kante of d.kanten || []) {
@@ -482,7 +561,11 @@ function herkunftsnetzZeichnen() {
     if (!von || !nach) continue;
     const anteil = Math.max(0, Number(kante.sats) || 0) / fokusSats;
     const breite = 0.75 + 5.25 * Math.min(1, anteil);
-    const klasse = kante.eigen ? "netz-kante" : "netz-kante netz-kante-fremd";
+    const klassen = [kante.eigen ? "netz-kante" : "netz-kante netz-kante-fremd"];
+    if (herkunftsnetzWalletWechsel(kante, knotenNachKey)) {
+      klassen.push("netz-kante-wallet");
+    }
+    const klasse = klassen.join(" ");
     linie(
       von, nach, klasse, breite.toFixed(2),
       `${formatZeitstrahlBetrag(kante.sats)} · ${t("tax.netzShare", { pct: herkunftsnetzProzent(anteil) })}`,
@@ -519,6 +602,16 @@ function herkunftsnetzZeichnen() {
     }
     if (lage.vorAchse) zeilen.push(t("tax.netzBeforeAxis"));
     if (lage.ueberAchse) zeilen.push(t("tax.netzAboveAxis"));
+    if (herkunftsnetzSpringbar(v, d.fokus_key)) {
+      zeilen.push(t("tax.netzJump"));
+      ring.classList.add("netz-sprung");
+      ring.title = t("tax.netzJumpTitle");
+      ring.addEventListener("click", (ereignis) => {
+        ereignis.preventDefault();
+        ereignis.stopPropagation();
+        herkunftsnetzZumBaum(v);
+      });
+    }
     tip.textContent = zeilen.filter(Boolean).join("\n");
     ring.append(tip);
     if (v.typ === "buendel") {

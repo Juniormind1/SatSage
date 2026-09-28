@@ -9,6 +9,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft tracen:** Nach dem Sprung aus dem Herkunftsnetz lässt sich ein Knoten aufklappen, auch wenn seine Kinder noch nicht mitgezeichnet waren. Dafür reicht der gespeicherte Baum; ein neuer Scan ist nicht nötig.
+- **Steuerjahr · Herkunftsnetz:** Sobald das Netz steht, wird der gespeicherte Herkunftsbaum im Hintergrund geladen. Der Klick auf einen Vorgänger muss nicht mehr auf den ersten Abruf warten. Verschwindet das Netz, wird dieser Baum verworfen.
+- **Steuerjahr · Herkunftsnetz:** Ein Klick auf einen Vorgänger-Punkt öffnet „Herkunft tracen“ für das gewählte UTXO und springt dort an die Stelle, die der Punkt meint. Ein Bündel öffnet die zusammengefassten Eingänge. Derselbe Klick kopiert `txid:vout`, der Klick auf den UTXO-Punkt die Adresse — beides lässt sich in der Suche von mempool.space einfügen. Ein Bündel kopiert die Transaktion, deren Eingänge es zusammenfasst.
+- **Steuerjahr · Herkunftsnetz:** Eine Kante zwischen zwei Vorgängern verschiedener Wallets ist gepunktet.
+
 ## [0.9.9] — 2026-09-28
 
 - **Regtest-Labor:** Vor der Klassifikation wird die Kette auf die Host-Uhr gezogen, wenn die Blockzeit zurückliegt. Eine stehen gebliebene Mock-Zeit scheitert sonst mit time-too-new, bevor der Test die Fälle sieht. Schlägt die Prüfung fehl, bleiben die Electrs-Logs im Lauf, bevor die Container weggeworfen werden. Die Klassifikation fällt auf Core-RPC zurück, ohne Nutzer und Passwort in die Adresse zu schreiben. Der GitHub-Lauf hat den Host sonst nicht aufgelöst. Das Netz steht auf Regtest, bevor die Lab-Adressen abgeleitet werden.

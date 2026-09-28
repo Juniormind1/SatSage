@@ -775,6 +775,25 @@ def api_trace_knoten(state: AppState, query: dict) -> dict:
     }
 
 
+def api_trace_pfad(state: AppState, query: dict) -> dict:
+    """Pfad zum ersten Knoten mit diesem ``from_utxo`` im gespeicherten Baum."""
+    from core import listen_fenster as lf
+    from core import trace_knoten
+
+    txid, vout = _ziel_aus_query(query)
+    gespeichert = _gespeicherter_baum(state, txid, vout, mit_veraltet=False)
+    if gespeichert is None:
+        return {"vorhanden": False, "pfad": None}
+    pfad = trace_knoten.pfad_zu(
+        gespeichert["baum"], lf.query_text(query, "key"),
+    )
+    return {
+        "vorhanden": True,
+        "target": f"{txid}:{int(vout)}",
+        "pfad": None if pfad is None else ".".join(str(i) for i in pfad),
+    }
+
+
 def api_trace(state: AppState, payload: dict) -> dict:
     """
     Startet die Herkunftsanalyse als Hintergrund-Vorgang.

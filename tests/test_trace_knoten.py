@@ -25,7 +25,10 @@ def baum(breite=3, tiefe=3, *, zufall=None):
 
     def knoten(t):
         n = next(zaehler)
-        k = {"id": n, "type": "internal", "address": f"bc1q{n}", "amount_sats": n}
+        k = {
+            "id": n, "type": "internal", "address": f"bc1q{n}", "amount_sats": n,
+            "from_utxo": f"{txid(f'{n:04x}'[-2:])}:{n}",
+        }
         wahl = zufall.random()
         if wahl < 0.2:
             k["label"] = {"name": zufall.choice(["Kraken", "Bitstamp"]), "kategorie": "exchange",
@@ -142,6 +145,22 @@ class TestKnotenApi(ApiTestBasis):
         self.assertEqual(status, 404)
         status, _ = self.anfrage(f"/api/trace/knoten?target={self.ziel}&pfad=x")
         self.assertEqual(status, 400)
+
+    def test_pfad_zum_from_utxo(self):
+        kind = next(k for k in self.baum["children"] if k.get("from_utxo"))
+        _, körper = self.anfrage(
+            f"/api/trace/pfad?target={self.ziel}&key={kind['from_utxo']}",
+        )
+        self.assertTrue(körper["vorhanden"])
+        self.assertEqual(
+            körper["pfad"],
+            str(self.baum["children"].index(kind)),
+        )
+        wurzel_key = f"{txid('aa')}:0"
+        _, wurzel = self.anfrage(f"/api/trace/pfad?target={self.ziel}&key={wurzel_key}")
+        self.assertEqual(wurzel["pfad"], "")
+        _, fehlend = self.anfrage(f"/api/trace/pfad?target={self.ziel}&key=fehlt:0")
+        self.assertIsNone(fehlend["pfad"])
 
 
 if __name__ == "__main__":

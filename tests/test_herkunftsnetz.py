@@ -280,6 +280,8 @@ class TestHerkunftsnetzApi(ApiTestBasis):
         self.assertEqual(r["fokus_pos"], ev[self.key]["pos"])
         self.assertEqual(r["fokus_y"], ev[self.key]["y"])
         kn = knoten(r)
+        self.assertEqual(kn[self.key].get("wallet_id"), self.wallet_id(BIP84_ZPUB))
+        self.assertNotIn("wallet_id", kn[f"{txid('e1')}:0"])
         self.assertEqual(kn[f"{txid('e1')}:0"]["typ"], "fremd")
         self.assertEqual(r["kanten"], [{"von": f"{txid('e1')}:0", "nach": self.key,
                                         "sats": 83_999_999, "eigen": False}])

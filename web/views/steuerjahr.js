@@ -1308,6 +1308,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
         ereignis.preventDefault();
         ereignis.stopPropagation();
         if (ereignis.detail > 1) return;
+        if (eintrag.address && typeof kopiereInZwischenablage === "function") {
+          kopiereInZwischenablage(eintrag.address);
+        }
         if (einfach) clearTimeout(einfach);
         einfach = setTimeout(() => {
           einfach = null;
