@@ -1033,6 +1033,10 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
   utxo.verfolgt_veraltet = false;
   utxo.verfolgt_vollstaendig = voll;
   utxo.unvollstaendig = Boolean(ergebnis.unvollstaendig) || !voll;
+  utxo.luecken_buendel = Boolean(
+    ergebnis.luecken_buendel
+    || (ergebnis.summary && Number(ergebnis.summary.unresolved_inputs) > 0),
+  );
   if (ergebnis.juengste_sats_ts) {
     utxo.juengste_sats_ts = ergebnis.juengste_sats_ts;
   }
@@ -1083,6 +1087,7 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
         eintrag.verfolgt_veraltet = false;
         eintrag.verfolgt_vollstaendig = utxo.verfolgt_vollstaendig;
         eintrag.unvollstaendig = utxo.unvollstaendig;
+        eintrag.luecken_buendel = utxo.luecken_buendel;
         if (utxo.juengste_sats_ts) {
           eintrag.juengste_sats_ts = utxo.juengste_sats_ts;
         }
@@ -1185,6 +1190,32 @@ function utxoHerkunftUnvollstaendig(utxo) {
   return false;
 }
 
+/**
+ * Rechts neben der roten Marke: der Knopf, der sie überflüssig macht.
+ * Gebündelte Eingänge brauchen „Lücken schließen“, sonst reicht „Scan neu“.
+ */
+function haengeVervollstaendigenAn(marke, utxo) {
+  if (!marke || !utxo || !utxo.key) return;
+  const buendel = Boolean(utxo.luecken_buendel);
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  knopf.className = "trace-link vervollstaendigen";
+  knopf.textContent = t("trace.complete");
+  knopf.title = buendel ? t("trace.completeGapsTitle") : t("trace.completeRescanTitle");
+  knopf.addEventListener("click", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (typeof starteHerkunftVervollstaendigen === "function") {
+      starteHerkunftVervollstaendigen(utxo, { buendel });
+      return;
+    }
+    if (typeof zeigeHerkunftFuer === "function") {
+      zeigeHerkunftFuer(utxo.key, { neu: true });
+    }
+  });
+  marke.insertAdjacentElement("afterend", knopf);
+}
+
 /** Marke „verfolgt · Datum" / „unvollständig · Datum" (rot) anpassen. */
 function setzeVerfolgtMarke(oben, utxo) {
   if (!oben || !utxo || !utxo.verfolgt) return;
@@ -1196,6 +1227,8 @@ function setzeVerfolgtMarke(oben, utxo) {
     oben.append(marke);
   }
   const unvoll = utxoHerkunftUnvollstaendig(utxo);
+  const alterKnopf = oben.querySelector(".vervollstaendigen");
+  if (alterKnopf) alterKnopf.remove();
   if (unvoll) {
     marke.className = "verfolgt-marke unvollstaendig";
   } else if (utxo.verfolgt_veraltet) {
@@ -1211,6 +1244,7 @@ function setzeVerfolgtMarke(oben, utxo) {
       ? t("trace.incompleteWhen", { wann })
       : t("trace.incomplete");
     marke.title = t("trace.incompleteTitle");
+    haengeVervollstaendigenAn(marke, utxo);
   } else {
     marke.textContent = wann ? t("trace.followedWhen", { wann }) : t("trace.followed");
     marke.title = utxo.verfolgt_veraltet

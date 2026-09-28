@@ -190,6 +190,13 @@ class FulcrumClient:
             raise RuntimeError("Fulcrum-Client nicht verbunden")
         buf = b""
         while not buf.endswith(b"\n"):
+            from display import is_list_abort_requested
+
+            if is_list_abort_requested():
+                from core.jobs import Cancelled
+
+                self.close()
+                raise Cancelled()
             chunk = self._sock.recv(65536)
             if not chunk:
                 raise ConnectionError("Fulcrum-Verbindung geschlossen")
@@ -283,6 +290,10 @@ class FulcrumClient:
         """
         JSON-RPC-Aufruf. Bei Timeout/Abbrecher (typisch Tor + große Tx)
         bis ``FULCRUM_REQUEST_RETRIES`` neu verbinden und wiederholen.
+
+        Ein gesetzter Job-Abbruch beendet den laufenden Leseversuch sofort:
+        sonst bleibt „Abbruch angefordert“ stehen, bis der Socket-Timeout
+        der großen Transaktion abläuft.
         """
         if method == "server.version":
             # Immer über handshake — kein zweites version auf derselben Session.
@@ -296,6 +307,11 @@ class FulcrumClient:
                     return self._request_once(method, params)
                 except (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError) as exc:
                     letzter = exc
+                    from display import is_list_abort_requested
+                    from core.jobs import Cancelled
+
+                    if is_list_abort_requested():
+                        raise Cancelled() from exc
                     if versuch >= FULCRUM_REQUEST_RETRIES:
                         break
                     self.close()

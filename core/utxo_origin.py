@@ -154,7 +154,17 @@ def trace_utxo_origin(
         memo = {}
 
     utxo_key = f"{creator_txid}:{vout_index}"
+    spur = getattr(progress, "spur", None) if progress is not None else None
+    if spur is not None and utxo_key in memo:
+        spur.memo += 1
     if utxo_key in visited_utxos or depth > MAX_TRACE_DEPTH:
+        if spur is not None:
+            spur.zyklus += 1
+            spur.zeile(
+                f"stopp key={utxo_key} "
+                f"grund={'tiefe' if depth > MAX_TRACE_DEPTH else 'zyklus'} "
+                f"tiefe={depth}"
+            )
         return {
             "type": "cycle",
             "utxo": utxo_key,
@@ -172,6 +182,8 @@ def trace_utxo_origin(
             f"↻ Herkunft Trace Tiefe {depth + 1}/{MAX_TRACE_DEPTH}: "
             f"lade Tx {creator_txid[:16]}…"
         )
+    if spur is not None:
+        spur.hop(depth + 1, utxo_key, quelle="lade")
 
     try:
         tx = get_tx(creator_txid)
@@ -180,6 +192,9 @@ def trace_utxo_origin(
 
         if ist_abbruch(e):
             raise
+        if spur is not None:
+            spur.fehler += 1
+            spur.zeile(f"fehler key={utxo_key} {type(e).__name__}: {e}")
         node = {
             "type": "error",
             "utxo": utxo_key,
@@ -336,9 +351,18 @@ def trace_utxo_origin(
         own_prevouts=own_prevouts if own_only else None,
     ):
         if isinstance(inp, CoinbaseFunding):
+            if spur is not None:
+                spur.coinbase += 1
             node["sources"].append({"type": "coinbase", "amount_sats": 0})
             continue
         if isinstance(inp, UnresolvedExternalBatch):
+            if spur is not None:
+                spur.buendel += 1
+                spur.zeile(
+                    f"buendel key={creator_txid}:{vout_index} "
+                    f"eingaenge={getattr(inp, 'input_count', 0)} "
+                    f"alle_eigenen={bool(alle_eigenen_inputs or own_only)}"
+                )
             # Bei CJ sollte das nicht vorkommen; bei normalen Sammel-Txs bleibt
             # die Untergrenze sichtbar.
             node["sources"].append({
@@ -409,6 +433,8 @@ def trace_utxo_origin(
                 # Index-Treffer ohne Adresse am Prevout — trotzdem intern.
                 own_addr = prev_addrs[0] if prev_addrs else prev_ref
             if own_addr:
+                if spur is not None:
+                    spur.intern += 1
                 if progress:
                     wallet_label = (
                         wallet.resolve_address(own_addr) if wallet else own_addr[:12]
@@ -454,6 +480,8 @@ def trace_utxo_origin(
                 # Fremd-Peer trotz Walk — ignorieren (Rauschen).
                 continue
             else:
+                if spur is not None:
+                    spur.extern += 1
                 ext_ts = edge.prev_time_ts
                 ext_time = ""
                 if ext_ts:

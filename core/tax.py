@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from core import trace_cache
 from core import xpub_cache
 
 #: Übliche Haltefrist nach § 23 EStG (private Veräußerungsgeschäfte, DE).
@@ -586,6 +587,9 @@ class Eingang:
     #: True, wenn externe Vorgänger unaufgelöst blieben und das
     #: Anschaffungsdatum deshalb zu alt sein kann.
     untergrenze: bool = False
+    #: Herkunft liegt vor, endet aber nicht an extern/Coinbase.
+    #: „vervollständigen“ ist noch nötig. False, wenn kein Baum vorliegt.
+    herkunft_offen: bool = False
     #: True: Anschaffung nach dem Stichtag — Halten macht nicht steuerfrei.
     neuvermoegen: bool = False
     #: juengste|aelteste — welche Lesart das Datum gewählt hat.
@@ -625,6 +629,7 @@ class Eingang:
             "grundlage": self.grundlage,
             "geprueft": self.geprueft,
             "untergrenze": self.untergrenze,
+            "herkunft_offen": self.herkunft_offen,
             "grundlage_label": self.grundlage_label,
             "neuvermoegen": self.neuvermoegen,
             "anschaffung": self.anschaffung,
@@ -771,6 +776,9 @@ def auswerten(
         frist_ende, erfuellt, neuvermoegen = haltefrist_entscheidung(
             zeitpunkt, ende, haltefrist_jahre, stichtag
         )
+        kopf = None
+        if immutable_cache_dir:
+            kopf = trace_cache.kopf(txid, vout, immutable_cache_dir)
         eintrag = Eingang(
             txid=txid,
             vout=vout,
@@ -783,6 +791,9 @@ def auswerten(
             haltedauer_tage=max(0, (ende - zeitpunkt).days),
             grundlage=grundlage,
             untergrenze=untergrenze,
+            herkunft_offen=bool(
+                kopf and not kopf.get("vollstaendig") and not kopf.get("veraltet")
+            ),
             neuvermoegen=neuvermoegen,
             anschaffung=modus,
             offensiv_fallback=offensiv_fb,
@@ -1037,6 +1048,7 @@ def zeitstrahl(
         sats = int(eintrag.value_sats)
         pos = round(prozent(eintrag.zeitpunkt), 3)
         events.append({
+            "herkunft_offen": eintrag.herkunft_offen,
             "pos": pos,
             "y": _y_log_prozent(sats, hoechst),
             "erfuellt": eintrag.erfuellt,

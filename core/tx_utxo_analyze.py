@@ -73,14 +73,21 @@ def analyze_tx(
         return
     analyzed_txs.add(txid)
 
+    spur = getattr(progress_cb, "spur", None) if progress_cb is not None else None
+    if spur is not None:
+        spur.zeile(f"folge-tx {txid} tiefe={depth}")
     try:
         tx = get_tx(txid)
     except urllib.error.HTTPError as e:
+        if spur is not None:
+            spur.zeile(f"folge-fehler {txid} HTTP {e.code}")
         print(f"Fehler beim Laden der Tx: HTTP {e.code} ({e.reason})")
         return
     except Exception as e:
         if ist_abbruch(e):
             raise
+        if spur is not None:
+            spur.zeile(f"folge-fehler {txid} {type(e).__name__}")
         print(f"Fehler beim Laden der Tx: {e}")
         return
 
@@ -93,7 +100,7 @@ def analyze_tx(
     found_outputs = []
     external_outputs = []
 
-    for inp in iter_funding_inputs(get_tx, txid):
+    for inp in iter_funding_inputs(get_tx, txid, progress=progress_cb):
         if isinstance(inp, CoinbaseFunding):
             continue
         try:
@@ -111,7 +118,14 @@ def analyze_tx(
                 raise
             continue
 
-    for vout in tx.get("vout", []):
+    ausgaenge = list(tx.get("vout") or [])
+    from core.vervollstaendigen_log import schritt
+
+    if len(ausgaenge) > 20:
+        schritt(f"folge-ausgaenge {txid} n={len(ausgaenge)}")
+    for nummer, vout in enumerate(ausgaenge, start=1):
+        if len(ausgaenge) > 20 and (nummer == 1 or nummer % 25 == 0):
+            schritt(f"folge-ausgang {txid} {nummer}/{len(ausgaenge)}")
         addrs = _main()._extract_addresses(vout)
         value_sats = _main()._extract_value_sats(vout)
         value = value_sats / 1e8
@@ -134,7 +148,8 @@ def analyze_tx(
         print(f"{header_pad}📤 Eigene Wallets als INPUT (gesendet):")
         for item in found_inputs:
             label = (
-                wallet.resolve_address(item["address"]) if wallet else item["address"]
+                (wallet.own_label(item["address"]) if wallet else None)
+                or item["address"]
             )
             print(f"{header_pad}   {label}   {_format_amount_display(item['amount_sats'])}")
             print(f"{header_pad}      (aus vorheriger Tx: {format_utxo_ref(item['from_tx'])})")
@@ -147,7 +162,8 @@ def analyze_tx(
         print(f"{header_pad}📥 Eigene Wallets als OUTPUT (empfangen / Change):")
         for item in found_outputs:
             label = (
-                wallet.resolve_address(item["address"]) if wallet else item["address"]
+                (wallet.own_label(item["address"]) if wallet else None)
+                or item["address"]
             )
             print(
                 f"{header_pad}   {label}   "
@@ -190,7 +206,8 @@ def analyze_tx(
             creator_txid, vout_index = parsed
 
             input_label = (
-                wallet.resolve_address(item["address"]) if wallet else item["address"]
+                (wallet.own_label(item["address"]) if wallet else None)
+                or item["address"]
             )
             print(f"{header_pad}Input {input_label} ({_format_amount_display(item['amount_sats'])}):")
             _analyze_utxo_funding(
@@ -226,7 +243,8 @@ def analyze_tx(
         for item in found_outputs:
             print(f"{header_pad}   {tx_time}")
             out_label = (
-                wallet.resolve_address(item["address"]) if wallet else item["address"]
+                (wallet.own_label(item["address"]) if wallet else None)
+                or item["address"]
             )
             print(
                 f"{header_pad}      {out_label}   "

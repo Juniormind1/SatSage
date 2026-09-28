@@ -164,12 +164,41 @@ def iter_funding_inputs(
         _abbruch_durchreichen(exc)
         return
 
-    for vin in tx.get("vin", []):
+    vins = list(tx.get("vin") or [])
+    # Kein Vorabruf. Er läuft im Hintergrund auf demselben Server und hält
+    # große Vorgänger (CoinJoin) fest, während der einzelne Abruf darunter
+    # auf genau diesen Vorgänger wartet. Der Cache füllt sich trotzdem:
+    # jeder gelöste Eingang speichert seine Tx.
+    spur = getattr(progress, "spur", None) if progress is not None else None
+    if spur is not None and len(vins) > 8:
+        spur.zeile(f"folge-eingaenge tx={creator_txid} n={len(vins)}")
+
+    for nummer, vin in enumerate(vins, start=1):
         if vin.get("is_coinbase"):
             yield CoinbaseFunding(spending_txid=creator_txid)
             continue
+        if spur is not None and len(vins) > 8 and (nummer == 1 or nummer % 25 == 0):
+            # Vor dem Abruf: die GUI zeigt denselben Zähler schon, die Datei
+            # darf nicht erst danach schreiben — sonst fehlt die hängende Id.
+            prev = str(vin.get("txid") or "")
+            spur.zeile(
+                f"folge-loese tx={creator_txid} {nummer}/{len(vins)} "
+                f"prev={prev}"
+            )
         try:
-            prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
+            from display import is_list_abort_requested
+
+            if is_list_abort_requested():
+                from core.jobs import Cancelled
+
+                raise Cancelled()
+            from core.vervollstaendigen_log import setze_schritt
+
+            setze_schritt(spur)
+            try:
+                prev_out = resolve_vin_prevout(get_tx, vin, progress=progress)
+            finally:
+                setze_schritt(None)
             if not prev_out:
                 continue
             yield _funding_edge_from_vin(vin, prev_out, creator_txid)
@@ -386,10 +415,17 @@ def iter_trace_funding_inputs(
     if not deferred:
         return
 
+    spur = getattr(progress, "spur", None) if progress is not None else None
+    if spur is not None:
+        spur.zeile(
+            f"eingaenge tx={creator_txid} n={len(tx.get('vin') or [])} "
+            f"nachzuladen={len(deferred)} voll={voll}"
+        )
+
     # Vorgänger vorab parallel in den Cache holen. Die Auflösung darunter
-    # bleibt Schritt für Schritt und liefert dieselbe Reihenfolge — sie
-    # wartet nur nicht mehr auf jede einzelne Abfrage. Ohne Vorlader (Esplora,
-    # BIP-158, Tor) passiert hier schlicht nichts.
+    # bleibt Schritt für Schritt und liefert dieselbe Reihenfolge. Der
+    # Vorlader blockiert nicht: sonst hängt der ganze Baum am langsamsten
+    # Vorgänger einer großen Sammel-Tx, ohne dass eine Zeile entsteht.
     vorladen = getattr(get_tx, "prefetch", None)
     if vorladen is not None:
         try:
@@ -406,7 +442,17 @@ def iter_trace_funding_inputs(
 
     if voll:
         # Alle Eingänge auflösen — bei Opt-in / CJ auch jenseits des 20er-Limits.
-        for vin in deferred:
+        for nummer, vin in enumerate(deferred, start=1):
+            if spur is not None and (nummer == 1 or nummer % 25 == 0):
+                spur.zeile(
+                    f"loese tx={creator_txid} {nummer}/{len(deferred)} "
+                    f"prev={str(vin.get('txid') or '')}"
+                )
+            from display import is_list_abort_requested
+            from core.jobs import Cancelled
+
+            if is_list_abort_requested():
+                raise Cancelled()
             try:
                 if own_inputs_only:
                     key = utxo_ref(str(vin["txid"]), int(vin["vout"])).lower()
@@ -1284,10 +1330,14 @@ class _FortschrittsAdapter:
     """
     utxo_origin.trace_utxo_origin erwartet ein Objekt mit .update(text);
     core.jobs liefert eine schlichte Funktion. Dieser Adapter verbindet beide.
+
+    ``spur`` bleibt erhalten: der Datei-Log hängt am Objekt, das die Engine
+    bekommt. Ein Wrapper ohne dieses Attribut schluckt jeden Hop.
     """
 
     def __init__(self, callback):
         self._callback = callback
+        self.spur = getattr(callback, "spur", None)
 
     def update(self, message: str) -> None:
         self._callback(message)

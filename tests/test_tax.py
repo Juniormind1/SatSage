@@ -313,6 +313,7 @@ class TestLaufendesJahr(unittest.TestCase):
             utxo(2000, "01.03.2026 12:00", marker="b2"),
         ], 2026, jetzt=self.HEUTE)
         self.assertEqual(ergebnis["zeitstrahl"]["frist_datum"], "21.07.2025")
+        self.assertFalse(ergebnis["zeitstrahl"]["events"][0]["herkunft_offen"])
 
     def test_beschriftung_nennt_den_bezug(self):
         ergebnis = auswerten([utxo(1000, "01.01.2024 12:00")], 2026,

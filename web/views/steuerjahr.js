@@ -1269,6 +1269,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
       farbe = "ungeprueft";
     }
     punkt.className = `achse-punkt ${eintrag.groesse} ${farbe}`;
+    if (eintrag.herkunft_offen) punkt.classList.add("herkunft-offen-marke");
     if (key) punkt.dataset.key = key;
     if (eintrag.value_sats != null) {
       punkt.dataset.valueSats = String(eintrag.value_sats);
@@ -1289,7 +1290,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     // Betrag/Datum/Wallet nur im Hover-Tooltip — feste Labels überladen den Plot.
     const tip = document.createElement("span");
     tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
-    const herkunftHinweis = (!eintrag.geprueft && !eintrag.erfuellt)
+    const herkunftHinweis = eintrag.herkunft_offen
+      ? t("tax.plotIncomplete")
+      : (!eintrag.geprueft && !eintrag.erfuellt)
       ? (t("tax.legendUnchecked") !== "tax.legendUnchecked"
         ? t("tax.legendUnchecked")
         : t("ui.hard.e66ad7aa49"))

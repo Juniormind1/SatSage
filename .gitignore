@@ -32,6 +32,7 @@ Thumbs.db
 *.tmp
 *~
 
+logs/
 utxo_cache/
 immutable_cache/
 sanctioned_cache/

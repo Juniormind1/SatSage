@@ -2154,6 +2154,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .verfolgt-marke.unvollstaendig {
   background: var(--krit-bg); color: var(--krit); font-weight: 600;
 }
+.trace-link.vervollstaendigen { margin-left: 2px; }
 
 /* Adressgruppen in der Wallet-Ansicht */
 .adress-gruppe { border-bottom: 1px solid var(--linie-zart); }
@@ -2406,6 +2407,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .punkt-frist-erfuellt { background: var(--gut); border-radius: 50%; }
 .punkt-frist-offen    { background: var(--warn); border-radius: 50%; }
 .punkt-frist-ungeprueft { background: var(--achse-ungeprueft); border-radius: 50%; }
+.punkt-herkunft-offen {
+  background: transparent; border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--krit);
+}
 .punkt-geister-saldo {
   background: transparent;
   border: 2px solid var(--gut);
@@ -2550,6 +2555,8 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   box-sizing: border-box;
 }
 .achse-punkt.klickbar { cursor: pointer; }
+/* Herkunft liegt vor, ist aber unvollständig — Ring, kein zweiter Punkt. */
+.achse-punkt.herkunft-offen-marke { box-shadow: 0 0 0 2px var(--krit); }
 .achse-punkt.erfuellt { background: var(--gut); }
 .achse-punkt.offen    { background: var(--warn); }
 /* Innerhalb Haltefrist + ohne Herkunft: grau statt gelb.

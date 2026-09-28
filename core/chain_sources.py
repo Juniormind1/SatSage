@@ -70,10 +70,16 @@ def wrap_get_tx_with_immutable_cache(
     """
 
     def get_tx(txid: str) -> dict:
+        from core.vervollstaendigen_log import schritt
+
+        schritt(f"cache-suche {txid}")
         cached = load_cached_tx(txid, cache_root)
         if cached is not None:
+            schritt(f"cache-treffer {txid}")
             return cached
+        schritt(f"cache-fehl {txid}")
         tx = fetch_tx(txid)
+        schritt(f"cache-schreibe {txid}")
         save_cached_tx(txid, tx, cache_root, source)
         return tx
 
@@ -107,10 +113,33 @@ def _mache_prefetch(pool, cache_root: Path, source: str):
             return
 
         def hole(client, txid: str) -> None:
-            tx = fetch_tx_fulcrum(client, txid)
+            tx = fetch_tx_fulcrum(client, txid, roh=True)
             save_cached_tx(txid, tx, cache_root, source)
 
-        parallel_ueber_pool(pool, fehlend, hole)
+        # Im Hintergrund: die Herkunft wartet sonst auf den langsamsten
+        # Vorgänger, bevor sie den erste Eingang weitergibt. Der Cache
+        # füllt sich parallel, der einzelne Abruf danach trifft ihn warm.
+        # Worker 0 bleibt frei: den nutzt der Aufrufer selbst. Sonst teilen
+        # sich Vorabruf und Folgeanalyse einen Socket und blockieren sich.
+        class _OhnePrimary:
+            def __init__(self, quelle):
+                self._quelle = quelle
+
+            def __len__(self):
+                return max(0, len(self._quelle) - 1)
+
+            def client_at(self, worker_id: int):
+                return self._quelle.client_at(worker_id + 1)
+
+        rest = _OhnePrimary(pool)
+        if len(rest) < 1:
+            return
+        threading.Thread(
+            target=parallel_ueber_pool,
+            args=(rest, fehlend, hole),
+            name="tx-prefetch",
+            daemon=True,
+        ).start()
 
     return prefetch
 

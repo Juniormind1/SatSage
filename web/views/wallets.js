@@ -1392,6 +1392,9 @@ function zeichneUtxoZeile(utxo) {
       : t("trace.incomplete");
     marke.title = t("trace.incompleteTitle");
     zeile.append(marke);
+    if (typeof haengeVervollstaendigenAn === "function") {
+      haengeVervollstaendigenAn(marke, utxo);
+    }
   }
 
   const juengste = juengsteSatsMarke(utxo);

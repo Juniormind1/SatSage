@@ -70,6 +70,9 @@ def _lookup_tx_height(client: FulcrumClient, txid: str, vouts: list[dict]) -> in
                 continue
             seen_addrs.add(addr)
             try:
+                from core.vervollstaendigen_log import schritt
+
+                schritt(f"history-abruf {txid} n={len(seen_addrs) + 1}")
                 sh = address_to_scripthash(addr)
                 history = client.request("blockchain.scripthash.get_history", [sh]) or []
             except Exception:
@@ -271,23 +274,51 @@ def fetch_tx_fulcrum(
     txid: str,
     *,
     enrich_block_info: bool = True,
+    roh: bool = True,
 ) -> dict:
-    """Lädt eine Tx; bei fehlendem verbose-Modus Fallback auf Hex-Parsing."""
-    try:
-        tx = client.request("blockchain.transaction.get", [txid, True])
-        if isinstance(tx, str):
-            raise RuntimeError(_VERBOSE_TX_UNSUPPORTED)
-        return _normalize_electrum_tx(tx)
-    except RuntimeError as exc:
-        if not _verbose_tx_unsupported(exc):
-            raise
-        raw_hex = client.request("blockchain.transaction.get", [txid, False])
-        if not isinstance(raw_hex, str):
-            raise RuntimeError("Unerwartete Antwort bei Roh-Transaktion") from exc
-        tx = _normalize_electrum_tx(_parse_tx_hex(raw_hex, expected_txid=txid))
-        if enrich_block_info:
-            return _enrich_tx_block_info(client, tx)
-        return tx
+    """Lädt eine Tx als Roh-Hex und parst sie lokal.
+
+    Die verbose JSON-Form ist bei CoinJoin ein Vielfaches der Rohgröße
+    und kommt über Fulcrum nicht zuverlässig zurück. Adressen und Beträge
+    stehen im Script, die Blockzeit holt der Nachzug. *roh=False* bleibt
+    nur für den alten verbose Weg, den kein Aufrufer mehr braucht.
+    """
+    from core.vervollstaendigen_log import schritt
+
+    host = getattr(client, "host", "")
+    software = getattr(client, "server_software", "") or "?"
+    if not roh:
+        schritt(f"rpc-anfrage {txid} verbose host={host} software={software}")
+        try:
+            tx = client.request("blockchain.transaction.get", [txid, True])
+            if isinstance(tx, str):
+                raise RuntimeError(_VERBOSE_TX_UNSUPPORTED)
+            return _normalize_electrum_tx(tx)
+        except RuntimeError as exc:
+            if not _verbose_tx_unsupported(exc):
+                raise
+    schritt(f"rpc-anfrage {txid} roh host={host} software={software}")
+    raw = client.request("blockchain.transaction.get", [txid, False])
+    schritt(
+        f"rpc-antwort {txid} art={type(raw).__name__} "
+        f"bytes={len(raw) if isinstance(raw, str) else 0}"
+    )
+    if isinstance(raw, dict):
+        # Ältere Tests und Server, die trotz verbose=false JSON liefern.
+        return _normalize_electrum_tx(raw)
+    if not isinstance(raw, str):
+        raise RuntimeError("Unerwartete Antwort bei Roh-Transaktion")
+    schritt(f"parse {txid}")
+    tx = _normalize_electrum_tx(_parse_tx_hex(raw, expected_txid=txid))
+    schritt(
+        f"parsed {txid} vin={len(tx.get('vin') or [])} "
+        f"vout={len(tx.get('vout') or [])}"
+    )
+    if enrich_block_info:
+        schritt(f"blockzeit {txid}")
+        tx = _enrich_tx_block_info(client, tx)
+        schritt(f"blockzeit-fertig {txid}")
+    return tx
 
 
 def fetch_txs_fulcrum_batch(
@@ -318,14 +349,14 @@ def fetch_txs_fulcrum_batch(
     total = len(offen)
     chunk_n = max(1, int(TOR_RPC_BATCH_SIZE)) if batch_ok else 1
 
-    def _norm_eine(txid: str, roh: Any) -> dict | None:
+    def _norm_eine(txid: str, roh_wert: Any) -> dict | None:
         try:
-            if isinstance(roh, str):
+            if isinstance(roh_wert, str):
                 return _normalize_electrum_tx(
-                    _parse_tx_hex(roh, expected_txid=txid)
+                    _parse_tx_hex(roh_wert, expected_txid=txid)
                 )
-            if isinstance(roh, dict):
-                return _normalize_electrum_tx(roh)
+            if isinstance(roh_wert, dict):
+                return _normalize_electrum_tx(roh_wert)
         except Exception:
             return None
         return None
@@ -337,43 +368,6 @@ def fetch_txs_fulcrum_batch(
             on_progress(text, sofort=sofort)
         except TypeError:
             on_progress(text)
-
-    def _chunk_verbose(chunk: list[str]) -> list[str]:
-        """Lädt Chunk verbose; Rückgabe Txids die Hex-Nachzug brauchen."""
-        hex_nachzug: list[str] = []
-        if len(chunk) == 1 or not batch_ok:
-            for t in chunk:
-                try:
-                    ergebnis[t] = fetch_tx_fulcrum(
-                        client, t, enrich_block_info=False,
-                    )
-                except Exception:
-                    pass
-            return hex_nachzug
-        calls = [("blockchain.transaction.get", [t, True]) for t in chunk]
-        try:
-            answers = client.request_batch(calls)
-        except Exception:
-            answers = None
-        if not isinstance(answers, list) or len(answers) != len(chunk):
-            for t in chunk:
-                try:
-                    ergebnis[t] = fetch_tx_fulcrum(
-                        client, t, enrich_block_info=False,
-                    )
-                except Exception:
-                    pass
-            return hex_nachzug
-        for t, ant in zip(chunk, answers):
-            if isinstance(ant, str):
-                hex_nachzug.append(t)
-                continue
-            tx = _norm_eine(t, ant)
-            if tx is not None:
-                ergebnis[t] = tx
-            else:
-                hex_nachzug.append(t)
-        return hex_nachzug
 
     def _chunk_hex(chunk: list[str]) -> None:
         if not chunk:
@@ -419,9 +413,7 @@ def fetch_txs_fulcrum_batch(
             f"(Chunk {start // chunk_n + 1}, je {len(chunk)})…",
             sofort=True,
         )
-        hex_nachzug = _chunk_verbose(chunk)
-        if hex_nachzug:
-            _chunk_hex(hex_nachzug)
+        _chunk_hex(chunk)
         erledigt += len(chunk)
 
     return ergebnis

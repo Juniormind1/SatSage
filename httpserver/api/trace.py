@@ -865,6 +865,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
         ),
     )
     resume_origin = None
+    datei_log = bool(force or followup is not None)
     if force or followup is not None:
         try:
             geladen = trace_cache.laden(
@@ -971,6 +972,40 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 else:
                     stand.tick(t)
 
+            spur = None
+            if datei_log:
+                from core.vervollstaendigen_log import Spur
+
+                art = followup or ("scan-neu" if force else "trace")
+                spur = Spur(txid, vout, art)
+                kinder = (resume_origin or {}).get("sources") or []
+                spur.zeile(
+                    f"START art={art} force={bool(force)} followup={followup or '-'} "
+                    f"job={job.id} quelle={quelle} "
+                    f"resume={'ja' if resume_origin else 'nein'} "
+                    f"quellen={len(kinder) if isinstance(kinder, list) else 0}"
+                )
+                if resume_origin is not None:
+                    spur.zeile(
+                        f"resume luecken={analyze._origin_hat_luecken(resume_origin)} "
+                        f"horizont={analyze._hat_tax_horizon(resume_origin)}"
+                    )
+
+            if spur is not None:
+                class _SpurAdapter:
+                    """Engine erwartet .update(); die Datei bekommt jeden Hop."""
+
+                    def __init__(self, ziel, datei_spur):
+                        self._ziel = ziel
+                        self.spur = datei_spur
+
+                    def update(self, text: str) -> None:
+                        self._ziel(text)
+
+                _fortschritt_engine = _SpurAdapter(_fortschritt, spur)
+            else:
+                _fortschritt_engine = _fortschritt
+
             if folge_tx or folge_bundled:
                 ergebnis = _trace_ein_utxo_tief(
                     get_tx=get_tx,
@@ -982,7 +1017,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     immutable_cache_dir=state.immutable_cache_dir,
                     fetch_addr=fetch_addr,
                     cache_source=quelle,
-                    progress=_fortschritt,
+                    progress=_fortschritt_engine,
                     cancel_cb=lambda: job.cancelled,
                     folge_bundled=folge_bundled,
                     folge_tx=folge_tx,
@@ -999,7 +1034,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     immutable_cache_dir=state.immutable_cache_dir,
                     fetch_address_utxos=fetch_addr,
                     cache_source=quelle,
-                    progress=_fortschritt,
+                    progress=_fortschritt_engine,
                     resume_origin=resume_origin,
                 )
             ergebnis["source"] = quelle
@@ -1008,12 +1043,31 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 f"{ergebnis['summary'].get('node_count', 0)} Zuflüsse ermittelt."
                 if ergebnis.get("found") else "Keine Herkunft ermittelbar."
             )
+            if spur is not None:
+                summary = ergebnis.get("summary") or {}
+                spur.ende(
+                    "done" if ergebnis.get("found") else "leer",
+                    extra=(
+                        f"knoten={summary.get('node_count', 0)} "
+                        f"unresolved={summary.get('unresolved_inputs', 0)} "
+                        f"voll={ergebnis.get('verfolgt_vollstaendig')}"
+                    ),
+                )
             # Gespeichert ist schon (trace_utxo, samt Rohbaum) — im Job
             # bleibt dann nur Meta, den Baum lädt die Oberfläche beim Aufklappen.
             return _job_ergebnis(
                 ergebnis, txid, vout, state.immutable_cache_dir,
                 seit_ts=job.started_at or 0,
             )
+        except Exception as exc:
+            if "spur" in locals() and spur is not None:
+                from core.jobs import ist_abbruch
+
+                spur.ende(
+                    "abbruch" if ist_abbruch(exc) else "fehler",
+                    extra=f"{type(exc).__name__}: {exc}",
+                )
+            raise
         finally:
             halt.set()
             stand.close()

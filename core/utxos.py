@@ -95,6 +95,7 @@ def utxo_as_dict(
         # Steuerjahr reicht auch ein Baum bis zum Horizont (Stichtag/Frist).
         "steuer_ausreichend": False,
         "unvollstaendig": False,
+        "luecken_buendel": False,
         "juengste_sats_ts": None,
         # Mix-Formen / Börsen aus gespeichertem Herkunftsbaum (Gruppen-Kopf).
         "mix_arten": [],
@@ -149,6 +150,8 @@ def utxo_as_dict(
             )
             # Abbruch / Lücken / fehlende Prevouts — Liste zeigt rot „unvollständig“.
             eintrag["unvollstaendig"] = bool(eintrag["verfolgt"]) and not voll
+            # Gebündelte Eingänge: „Scan neu“ lässt die rote Marke stehen.
+            eintrag["luecken_buendel"] = bool(gespeichert.get("luecken_buendel"))
             if voll and ingress:
                 eintrag["juengste_sats_ts"] = (
                     ingress.get("external_time_ts")

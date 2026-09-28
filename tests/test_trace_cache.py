@@ -180,6 +180,17 @@ class TestVollstaendigkeit(TraceCacheBasis):
     def test_externes_ende_ist_vollstaendig(self):
         self.assertTrue(trace_cache.baum_ist_vollstaendig(BAUM))
 
+    def test_buendel_braucht_luecken_schliessen(self):
+        baum = dict(BAUM, summary={"unresolved_inputs": 4})
+        self.assertTrue(trace_cache.luecken_brauchen_buendel(baum))
+        blatt = {
+            "found": True,
+            "children": [{"type": "external_unresolved", "children": []}],
+            "summary": {},
+        }
+        self.assertTrue(trace_cache.luecken_brauchen_buendel(blatt))
+        self.assertFalse(trace_cache.luecken_brauchen_buendel(BAUM))
+
     def test_unaufgeloeste_eingaenge_sind_unvollstaendig(self):
         baum = dict(BAUM, summary={"external_sats": 1000, "unresolved_inputs": 4})
         self.assertFalse(trace_cache.baum_ist_vollstaendig(baum))

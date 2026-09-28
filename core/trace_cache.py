@@ -363,6 +363,7 @@ def _schreibe_meta(
         "adressen_fingerprint": adressen_fingerprint or "",
         "adressen_anzahl": int(adressen_anzahl or 0),
         "vollstaendig": bool(baum_ist_vollstaendig(baum)),
+        "luecken_buendel": bool(luecken_brauchen_buendel(baum)),
         "steuer_ausreichend": bool(baum_ist_steuer_ausreichend(baum)),
         "mix_arten": mix_arten_im_baum(baum),
         "boerse_namen": boerse_namen_im_baum(baum),
@@ -540,6 +541,29 @@ def loeschen(
         except OSError:
             pass
     return geloescht
+
+
+def luecken_brauchen_buendel(baum: dict | None) -> bool:
+    """
+    True, wenn die rote Marke nur durch Auspacken gebündelter Eingänge weggeht.
+
+    ``unresolved_inputs`` und ``external_unresolved``-Blätter lässt „Scan neu“
+    stehen. Abbruch, fehlender Prevout und Steuer-Horizont reichen dafür.
+    """
+    if not baum or not baum.get("found"):
+        return False
+    summary = baum.get("summary") or {}
+    if int(summary.get("unresolved_inputs") or 0) > 0:
+        return True
+    stapel = list(baum.get("children") or [])
+    while stapel:
+        knoten = stapel.pop()
+        if not isinstance(knoten, dict):
+            continue
+        if knoten.get("type") == "external_unresolved":
+            return True
+        stapel.extend(knoten.get("children") or [])
+    return False
 
 
 def baum_ist_vollstaendig(baum: dict | None) -> bool:
@@ -762,6 +786,7 @@ def kopf(
                 "veraltet": veraltet,
                 "adressen_seither": seither,
                 "vollstaendig": voll,
+                "luecken_buendel": bool(daten.get("luecken_buendel")),
                 "steuer_ausreichend": steuer_ok,
                 "mix_arten": list(daten.get("mix_arten") or []),
                 "boerse_namen": list(daten.get("boerse_namen") or []),
@@ -808,6 +833,7 @@ def kopf(
         "veraltet": geladen["veraltet"],
         "adressen_seither": geladen["adressen_seither"],
         "vollstaendig": vollstaendig,
+        "luecken_buendel": bool(luecken_brauchen_buendel(baum)),
         "steuer_ausreichend": steuer_ok,
         "mix_arten": mix_arten,
         "boerse_namen": boerse_namen,

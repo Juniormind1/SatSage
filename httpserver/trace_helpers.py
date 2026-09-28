@@ -229,10 +229,12 @@ def _trace_ein_utxo_tief(
     import contextlib
     import io
 
-    log = progress if callable(progress) else (lambda _m: None)
+    log = progress.update if hasattr(progress, "update") else (
+        progress if callable(progress) else (lambda _m: None)
+    )
     abbruch = cancel_cb if callable(cancel_cb) else None
     # analyze.trace_utxo_origin erwartet .update(text); Jobs liefern Callables.
-    fortschritt = (
+    fortschritt = progress if hasattr(progress, "update") else (
         trace_mod._FortschrittsAdapter(progress) if callable(progress) else None
     )
 
@@ -305,6 +307,8 @@ def _trace_ein_utxo_tief(
                     _check_abbruch()
                     _log_zeilen()
                     log(str(text or ""))
+
+                _folge_fortschritt.spur = getattr(fortschritt, "spur", None)
 
                 with contextlib.redirect_stdout(buf):
                     analyze._run_tx_oriented_followups(

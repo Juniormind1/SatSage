@@ -255,6 +255,13 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
+  const auftrag = Zustand.traceVervollstaendigen;
+  if (auftrag && auftrag.key === schluessel) {
+    Zustand.traceVervollstaendigen = null;
+    starteZweigTrace(utxo, zweig, klapp, auftrag.buendel ? "full" : null, null, {
+      force: !auftrag.buendel,
+    });
+  }
   const sprung = Zustand.traceSprung;
   if (sprung && sprung.fokus === schluessel && typeof springeImHerkunftsbaum === "function") {
     Zustand.traceSprung = null;
@@ -1312,6 +1319,32 @@ async function starteZweigTrace(
       fehlschlag(fehler.message);
     }
   }, 900);
+}
+
+/**
+ * Rote Marke „unvollständig“: gebündelte Eingänge auspacken, sonst den
+ * vorhandenen Baum fortsetzen. Bestätigt wird nicht noch einmal — der Knopf
+ * sitzt direkt an der Marke.
+ */
+function starteHerkunftVervollstaendigen(utxo, { buendel = false } = {}) {
+  if (!utxo || !utxo.key) return;
+  const wurzel = document.querySelector(
+    `.utxo-wurzel[data-key="${CSS.escape(utxo.key)}"]`,
+  );
+  const zweig = wurzel && wurzel.querySelector(".utxo-zweig");
+  const klapp = wurzel && wurzel.querySelector(".klapp");
+  if (zweig && klapp && typeof starteZweigTrace === "function") {
+    if (wurzel) wurzel.classList.add("herkunft-offen");
+    setzeKlapp(wurzel.querySelector(".utxo-kopf") || wurzel, klapp, zweig, true);
+    starteZweigTrace(utxo, zweig, klapp, buendel ? "full" : null, null, {
+      force: !buendel,
+    });
+    return;
+  }
+  if (typeof Zustand !== "undefined") {
+    Zustand.traceVervollstaendigen = { key: utxo.key, buendel: Boolean(buendel) };
+  }
+  if (typeof zeigeHerkunftFuer === "function") zeigeHerkunftFuer(utxo.key);
 }
 
 function folgeLueckenOffen(ergebnis) {

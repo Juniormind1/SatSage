@@ -710,6 +710,7 @@ def _run_tx_oriented_followups(
 
     preds = [t for t in sorted(internal_predecessors) if t != current_txid]
     gesamt = len(preds)
+    spur = getattr(progress_cb, "spur", None) if progress_cb is not None else None
     for index, pred_txid in enumerate(preds, start=1):
         if cancel_cb and cancel_cb():
             raise Cancelled()
@@ -717,6 +718,12 @@ def _run_tx_oriented_followups(
             progress_cb(
                 f"Eigene Vorgänger-Txs {index}/{gesamt}: {pred_txid[:16]}…"
             )
+        if spur is not None:
+            spur.zeile(f"vorgaenger {index}/{gesamt} tx={pred_txid}")
+        if pred_txid in analyzed_txs:
+            if spur is not None:
+                spur.zeile(f"vorgaenger {index}/{gesamt} schon")
+            continue
         analyze_tx(
             get_tx,
             pred_txid,
