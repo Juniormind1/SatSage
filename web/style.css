@@ -1974,6 +1974,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .utxo-wurzel.herkunft-offen .utxo-kopf {
   align-items: center;
 }
+/* Der Ring ist sichtbar ~32 px, die Box nur 7 px. Abstand gilt bis zum Rand. */
+.utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-info {
+  margin-left: 18px;
+}
 .utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-punkt.lot-donut {
   /* Layout bleibt 7×7, damit die Zeile so hoch bleibt wie vorher.
      Sichtbar ~32 px, das ist die Höhe von Pfeil plus Zeilenabstand. */
@@ -2540,56 +2544,62 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   z-index: 5;
   box-shadow: 0 0 0 2px var(--netz);
 }
-/* Los-Doughnut nur am angeklickten Punkt, solange das Netz liegt.
-   Layout bleibt die Punktgröße — der Ring wird darüber gezeichnet. */
+/* Los-Ring ist die Umrandung des angeklickten Punkts, nicht eine Füllung darin.
+   Der Punkt selbst bleibt unskaliert, damit der Tooltip seine Größe behält. */
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot {
-  /* Layout bleibt die Punktgröße. Sichtbar ~32 px, zentriert auf demselben Ort. */
-  transform: translate(-50%, 50%) scale(2.9);
-  z-index: 6;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 8px solid transparent;
   background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
     conic-gradient(
       var(--lot-gruen) calc(var(--lot-g) * 1%),
       var(--lot-orange) 0 calc((var(--lot-g) + var(--lot-o)) * 1%),
       var(--lot-grau) 0
-    );
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"] {
-  background: conic-gradient(
-    var(--lot-gruen) calc(var(--lot-g) * 1%),
-    var(--lot-grau) 0
-  );
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-grau="0"] {
-  background: conic-gradient(
-    var(--lot-gruen) calc(var(--lot-g) * 1%),
-    var(--lot-orange) 0
-  );
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"] {
-  background: conic-gradient(
-    var(--lot-orange) calc(var(--lot-o) * 1%),
-    var(--lot-grau) 0
-  );
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"][data-lot-grau="0"] {
-  background: var(--lot-gruen);
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-grau="0"] {
-  background: var(--lot-orange);
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-orange="0"] {
-  background: var(--lot-grau);
-}
-.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot::after {
-  content: "";
-  position: absolute;
-  left: 30%;
-  top: 30%;
-  width: 40%;
-  height: 40%;
-  border-radius: 50%;
-  background: var(--flaeche);
+    ) border-box;
   pointer-events: none;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"]::before {
+  background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
+    conic-gradient(var(--lot-gruen) calc(var(--lot-g) * 1%), var(--lot-grau) 0) border-box;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-grau="0"]::before {
+  background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
+    conic-gradient(var(--lot-gruen) calc(var(--lot-g) * 1%), var(--lot-orange) 0) border-box;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"]::before {
+  background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
+    conic-gradient(var(--lot-orange) calc(var(--lot-o) * 1%), var(--lot-grau) 0) border-box;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"][data-lot-grau="0"]::before {
+  background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
+    var(--lot-gruen) border-box;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-grau="0"]::before {
+  background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
+    var(--lot-orange) border-box;
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-orange="0"]::before {
+  background:
+    linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
+    var(--lot-grau) border-box;
 }
 .netz-schicht { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .netz-kanten {

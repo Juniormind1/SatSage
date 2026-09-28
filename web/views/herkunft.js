@@ -1550,11 +1550,8 @@ function setzeLotDonut(punkt, mischung) {
   punkt.style.setProperty("--lot-g", String(prozent.gruen));
   punkt.style.setProperty("--lot-o", String(prozent.orange));
   punkt.style.background = "";
-  if (stops.length > 1) {
-    punkt.style.background = `conic-gradient(${stops.join(", ")})`;
-  } else {
-    punkt.style.background = scheiben[0][1];
-  }
+  // Auch eine Farbe bleibt Verlauf, sonst überdeckt die Fläche das Loch.
+  punkt.style.background = `conic-gradient(${stops.join(", ")})`;
   punkt.dataset.lotGruen = String(prozent.gruen);
   punkt.dataset.lotOrange = String(prozent.orange);
   punkt.dataset.lotGrau = String(prozent.grau);
