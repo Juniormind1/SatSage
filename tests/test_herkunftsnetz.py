@@ -157,9 +157,13 @@ class TestFlach(unittest.TestCase):
         self.assertEqual(kn[f"coinbase:{k('b1')}"]["typ"], "coinbase")
         self.assertTrue(kn[f"coinbase:{k('b1')}"]["ende"])
         self.assertEqual(kn[k("b1")]["anteil_sats"], 180)
-        # Vorfahren dürfen größer sein als der Fokus (Y ungeklemmt).
+        # Voller Vorgänger bleibt im Tooltip; Y ist der Anteil am Fokus.
         self.assertGreater(kn[k("e1")]["value_sats"], kn[k("b1")]["value_sats"])
-        self.assertEqual(kn[k("e1")]["y"], SKALA.y(700))
+        self.assertEqual(kn[k("e1")]["anteil_sats"], 420)
+        # Y = Vorgänger-UTXO × Anteil am Fokus (420/1000 bzw. 180/1000).
+        self.assertEqual(kn[k("e1")]["y"], SKALA.y(int(round(700 * 420 / 1000))))
+        self.assertEqual(kn[k("b1")]["y"], SKALA.y(int(round(300 * 180 / 1000))))
+        self.assertGreater(kn[k("e1")]["y"], kn[k("b1")]["y"])
         self.assertTrue(next(e for e in r["kanten"] if e["von"] == k("a1"))["eigen"])
         self.assertFalse(next(e for e in r["kanten"] if e["von"] == k("e1"))["eigen"])
 
@@ -202,6 +206,7 @@ class TestFlach(unittest.TestCase):
         r = netz(b)
         self.assertEqual(sum(1 for v in r["vorfahren"] if v["key"] == k("c1")), 1)
         self.assertEqual(knoten(r)[k("c1")]["anteil_sats"], 200)
+        self.assertEqual(knoten(r)[k("c1")]["y"], SKALA.y(int(round(100 * 200 / 200))))
         self.assertEqual(kanten(r)[(k("c1"), k("a1"))], 100)
         self.assertEqual(kanten(r)[(k("c1"), k("a2"))], 100)
 

@@ -2,8 +2,8 @@
 """Aktualisiert data/btc_price/{EUR,USD}.csv aus Bitstamp (CryptoDataDownload).
 
 Für Release-/PyInstaller-Builds: die mitgelieferte Historie soll bis zum
-aktuellen Tip reichen. Schreibt nur ins Repo-Bundle unter data/btc_price/,
-nicht in immutable_cache/.
+aktuellen Tip reichen. Schreibt nur ins lokale Bundle unter data/btc_price/,
+nicht in immutable_cache/ und nicht ins Git (die CSVs sind gitignore).
 
   ./scripts/refresh_btc_price_bundle.py
   SKIP_BTC_PRICE_REFRESH=1  → no-op (Offline-Builds)

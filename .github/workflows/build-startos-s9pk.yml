@@ -80,3 +80,14 @@ jobs:
             packaging/satsage_x86_64*.s9pk
             packaging/satsage_x86_64*.s9pk.sha256
           if-no-files-found: error
+
+      - name: Kurs-CSVs als Release-Asset
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp -f data/btc_price/EUR.csv btc-price-EUR.csv
+          cp -f data/btc_price/USD.csv btc-price-USD.csv
+          gh release upload "${GITHUB_REF_NAME}" \
+            btc-price-EUR.csv btc-price-USD.csv --clobber

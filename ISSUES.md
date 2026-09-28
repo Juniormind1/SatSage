@@ -104,7 +104,7 @@ Bewegungszeit** (Layer B). Nicht dieselbe X.
 - Fremd / Coinbase: gestrichelter Endknoten, kein Weiterzeichnen.
 - CoinJoin / Sammel-Tx / `FULL_RESOLUTION_INPUT_LIMIT`: ein Bündel
   „n Eingänge“, kein Haarnetz.
-- Y bleibt log1p. Vorfahren dürfen größer sein als der geklickte Output.
+- Y bleibt log1p, auf dem Stück des Vorgänger-UTXO, das in den Fokus geflossen ist (`value_sats * anteil_sats / fokus_sats`). Der volle Betrag bleibt im Tooltip. Ringe links der Fristgrenze sind grün.
 
 #### Daten / Schnitt
 

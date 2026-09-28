@@ -1,7 +1,7 @@
 """
 BTC/Fiat-Kurse für Anzeige und Steuer-Tageskurse.
 
-Lokale Historie zuerst: gebündelte ``data/btc_price/{EUR,USD}.csv`` und
+Lokale Historie zuerst: ``data/btc_price/{EUR,USD}.csv`` (lokal, nicht im Git) und
 Import unter ``immutable_cache/btc_price/``. Erst fehlende Tage holt die
 Mempool Price-API (Spot zusätzlich Coinbase-Fallback).
 
@@ -133,7 +133,7 @@ def preis_cache_dir(immutable_cache_dir: Path | str) -> Path:
 
 
 def bundel_historie_dir() -> Path:
-    """Mitgelieferte Flatfiles unter ``data/btc_price/`` (auch im PyInstaller-Build)."""
+    """Flatfiles unter ``data/btc_price/`` (lokal bzw. im PyInstaller-Build)."""
     return resource_dir() / "data" / "btc_price"
 
 

@@ -46,7 +46,7 @@ function punkt(key) {
 }
 const geist = new El("span"); geist.className = "achse-punkt geister erfuellt"; spur.append(geist);
 const pA = punkt("%(K)s"); const pB = punkt("dd:0");
-ZeitstrahlAnsicht.daten = { zeitstrahl: { events: [{ key: "%(K)s" }, { key: "dd:0" }] } };
+ZeitstrahlAnsicht.daten = { zeitstrahl: { frist_pos: 50, events: [{ key: "%(K)s" }, { key: "dd:0" }] } };
 const warte = () => new Promise((r) => setTimeout(r, 0));
 const NETZ = {
   fokus_key: "%(K)s", fokus_pos: 60, fokus_y: 50, fokus_sats: 1000, trace_fehlt: false,
@@ -68,7 +68,7 @@ const stand = () => {
     fokus: pA.classList.contains("netz-fokus"),
     andererFokus: pB.classList.contains("netz-fokus"),
     ringe: schicht ? schicht.querySelectorAll(".netz-knoten").length : 0,
-    linien: schicht ? schicht.children[0].children.length : 0,
+    linien: schicht ? schicht.children[0].querySelectorAll(".netz-kante").length : 0,
     hinweis: !hinweis.hidden,
     hinweisText: hinweis.textContent,
     status: hinweis.dataset.status || "",
@@ -135,10 +135,15 @@ class TestEinUndAusstieg(unittest.TestCase):
           const an = stand();
           const schicht = spur.querySelector(".netz-schicht");
           const fremd = schicht.querySelectorAll(".netz-fremd")[0];
+          const vorFrist = schicht.querySelector(".netz-eigen:not(.netz-fokus-b)");
+          const kanten = [...schicht.querySelectorAll(".netz-kante")];
+          const verlauf = kanten.filter((k) => k.classList.contains("netz-kante-verlauf"));
           pA.fire("click");
           console.log(JSON.stringify({ laedt, an, aus: stand(), api: aufrufe.api,
             fremdLeft: fremd.style.left, fremdBottom: fremd.style.bottom,
-            fremdKlasse: fremd.className }));
+            fremdKlasse: fremd.className,
+            vorFrist: vorFrist ? vorFrist.className : "",
+            verlauf: verlauf.map((k) => k.style.stroke) }));
         """)
         self.assertEqual(r["laedt"]["status"], "laedt")
         self.assertIn("tax.netzWait", r["laedt"]["hinweisText"])
@@ -154,6 +159,11 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertEqual(r["fremdBottom"], "100%")
         self.assertIn("netz-vor-achse", r["fremdKlasse"])
         self.assertIn("netz-ueber-achse", r["fremdKlasse"])
+        self.assertIn("netz-vor-frist", r["fremdKlasse"])
+        self.assertIn("netz-vor-frist", r["vorFrist"])
+        # Beide Kanten kreuzen die Frist (grün → orange). Die Anschaffungslinie nicht.
+        self.assertEqual(len(r["verlauf"]), 2)
+        self.assertTrue(all(str(s).startswith("url(#netz-verlauf-") for s in r["verlauf"]))
         aus = r["aus"]
         self.assertFalse(aus["an"] or aus["fokus"] or aus["hinweis"])
         self.assertEqual(aus["ringe"], 0)

@@ -70,6 +70,11 @@ lab/regtest/**/seed*
 tmp/live-psbt/
 tmp/live-timing-*.json
 
+# Kurs-Historie: ersetzbar, vor jedem Release-Build neu aus Bitstamp/CDD.
+# Liegt lokal unter data/btc_price/{EUR,USD}.csv, im Release als Asset.
+# Nicht versionieren — sonst blockiert jeder Nachzug Merge und Pull.
+data/btc_price/*.csv
+
 # Local / runtime (public tree)
 price_cache/
 satsage-webgui.exe

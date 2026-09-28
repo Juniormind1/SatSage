@@ -88,6 +88,9 @@ jobs:
           } > "dist/${NAME}.README.txt"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+          # Kurs-CSVs als ersetzbares Release-Asset (nicht mehr im Git).
+          cp -f data/btc_price/EUR.csv dist/btc-price-EUR.csv
+          cp -f data/btc_price/USD.csv dist/btc-price-USD.csv
           ls -lh "dist/${NAME}" "dist/${NAME}.sha256" "dist/${NAME}.README.txt"
           cat "dist/${NAME}.sha256"
 
@@ -104,6 +107,8 @@ jobs:
             "dist/${NAME}" \
             "dist/${NAME}.sha256" \
             "dist/${NAME}.README.txt" \
+            dist/btc-price-EUR.csv \
+            dist/btc-price-USD.csv \
             --clobber
           gh release view "$TAG" --json body -q .body > /tmp/release-body-old.md
           python3 scripts/update_release_notes_linux.py \
@@ -122,4 +127,6 @@ jobs:
             dist/satsage-webgui-linux-x86_64
             dist/satsage-webgui-linux-x86_64.sha256
             dist/satsage-webgui-linux-x86_64.README.txt
+            dist/btc-price-EUR.csv
+            dist/btc-price-USD.csv
           if-no-files-found: error

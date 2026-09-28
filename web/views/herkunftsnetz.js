@@ -184,6 +184,29 @@ function herkunftsnetzLage(pos, y) {
   };
 }
 
+/** Aufgelöste Ringfarbe. CSS-Variable, damit Hell/Dunkel mitgeht. */
+function herkunftsnetzFarbwert(name) {
+  const fallback = name === "gut" ? "#2C7460" : "#E0730B";
+  try {
+    const wert = getComputedStyle(document.documentElement)
+      .getPropertyValue(name === "gut" ? "--gut" : "--netz").trim();
+    if (wert) return wert;
+  } catch (fehler) {
+    // DOM-Stub der Tests kennt getComputedStyle nicht.
+  }
+  return fallback;
+}
+
+/** Ringfarbe: links der Fristgrenze grün, sonst orange. */
+function herkunftsnetzRingFarbe(posOutput) {
+  const strahl = (typeof ZeitstrahlAnsicht !== "undefined"
+    && ZeitstrahlAnsicht.daten && ZeitstrahlAnsicht.daten.zeitstrahl) || {};
+  const frist = Number(strahl.frist_pos);
+  const pos = Number(posOutput);
+  if (Number.isFinite(frist) && Number.isFinite(pos) && pos < frist) return "gut";
+  return "netz";
+}
+
 function herkunftsnetzTypText(v, fokusKey) {
   if (v.key === fokusKey) return t("tax.netzFocus");
   if (v.typ === "buendel") return t("tax.netzBundle", { n: v.n });
@@ -305,7 +328,13 @@ function herkunftsnetzZeichnen() {
     lagen.set(v.key, herkunftsnetzLage(v.pos_output, v.y));
   }
 
-  const linie = (von, nach, klasse, breite, titel) => {
+  const defs = document.createElementNS(NETZ_SVG, "defs");
+  svg.append(defs);
+  let verlaufNr = 0;
+
+  // Kante entlang der sichtbaren Linie. vonFarbe/nachFarbe sind
+  // "gut" oder "netz"; gleiche Farbe bleibt ein einfacher Strich.
+  const linie = (von, nach, klasse, breite, titel, vonFarbe, nachFarbe) => {
     const el = document.createElementNS(NETZ_SVG, "line");
     el.setAttribute("x1", String(von.x));
     el.setAttribute("y1", String(100 - von.y));
@@ -314,6 +343,30 @@ function herkunftsnetzZeichnen() {
     el.setAttribute("class", klasse);
     el.setAttribute("vector-effect", "non-scaling-stroke");
     el.setAttribute("stroke-width", String(breite));
+    if (vonFarbe && nachFarbe && vonFarbe !== nachFarbe) {
+      const id = `netz-verlauf-${++verlaufNr}`;
+      const g = document.createElementNS(NETZ_SVG, "linearGradient");
+      g.setAttribute("id", id);
+      g.setAttribute("gradientUnits", "userSpaceOnUse");
+      g.setAttribute("x1", String(von.x));
+      g.setAttribute("y1", String(100 - von.y));
+      g.setAttribute("x2", String(nach.x));
+      g.setAttribute("y2", String(100 - nach.y));
+      for (const [offset, name] of [["0%", vonFarbe], ["100%", nachFarbe]]) {
+        const stopp = document.createElementNS(NETZ_SVG, "stop");
+        stopp.setAttribute("offset", offset);
+        // Attribut, nicht nur Klasse: sonst bleibt der Stopp ohne Farbe.
+        stopp.setAttribute("stop-color", herkunftsnetzFarbwert(name));
+        g.append(stopp);
+      }
+      defs.append(g);
+      // .netz-kante setzt stroke per CSS und schlägt das Attribut.
+      // Inline-Style gewinnt, sonst bleibt die Kante einfarbig orange.
+      const bezug = `url(#${id})`;
+      el.setAttribute("stroke", bezug);
+      el.style.stroke = bezug;
+      el.classList.add("netz-kante-verlauf");
+    }
     if (titel) {
       const tip = document.createElementNS(NETZ_SVG, "title");
       tip.textContent = titel;
@@ -329,6 +382,11 @@ function herkunftsnetzZeichnen() {
     linie(fokusA, fokusB, "netz-kante netz-anschaffung", 1, "");
   }
 
+  const farbeNachKey = new Map();
+  for (const v of d.vorfahren || []) {
+    farbeNachKey.set(v.key, herkunftsnetzRingFarbe(v.pos_output));
+  }
+
   for (const kante of d.kanten || []) {
     const von = lagen.get(kante.von);
     const nach = lagen.get(kante.nach);
@@ -336,8 +394,12 @@ function herkunftsnetzZeichnen() {
     const anteil = Math.max(0, Number(kante.sats) || 0) / fokusSats;
     const breite = 0.75 + 5.25 * Math.min(1, anteil);
     const klasse = kante.eigen ? "netz-kante" : "netz-kante netz-kante-fremd";
-    linie(von, nach, klasse, breite.toFixed(2),
-      `${formatZeitstrahlBetrag(kante.sats)} · ${t("tax.netzShare", { pct: herkunftsnetzProzent(anteil) })}`);
+    linie(
+      von, nach, klasse, breite.toFixed(2),
+      `${formatZeitstrahlBetrag(kante.sats)} · ${t("tax.netzShare", { pct: herkunftsnetzProzent(anteil) })}`,
+      farbeNachKey.get(kante.von),
+      farbeNachKey.get(kante.nach),
+    );
   }
 
   for (const v of d.vorfahren || []) {
@@ -347,6 +409,7 @@ function herkunftsnetzZeichnen() {
     const klassen = ["netz-knoten", `netz-${v.typ || "eigen"}`];
     if (v.key === d.fokus_key) klassen.push("netz-fokus-b");
     if (lage.vorAchse) klassen.push("netz-vor-achse");
+    if (herkunftsnetzRingFarbe(v.pos_output) === "gut") klassen.push("netz-vor-frist");
     if (lage.ueberAchse) klassen.push("netz-ueber-achse");
     ring.className = klassen.join(" ");
     ring.dataset.key = v.key;

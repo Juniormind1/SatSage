@@ -11,9 +11,11 @@ unberührt — das Netz ist ein ephemerer Zusatz.
 X der Knoten ist die **Output-Zeit** des Hops (Blockzeit aus der Höhe über
 den ``block_header``-Cache, sonst die im Baum abgelegte Blockzeit) — auf
 derselben 0..100-Skala wie ``core.tax.zeitstrahl``. Y ist dieselbe
-log1p-Skala. Beides wird hier nicht geklemmt: Vorfahren dürfen älter als
-der Achsenbeginn und größer als das Skalenende sein; die Oberfläche setzt
-sie an den Rand.
+log1p-Skala, auf dem Stück dieses Vorgänger-UTXO, das in den gewählten
+Output geflossen ist: ``value_sats * anteil_sats / fokus_sats``. Zwei
+Vorgänger mit demselben Prozent am Fokus, aber verschiedenem UTXO-Betrag,
+liegen damit verschieden hoch. X wird nicht geklemmt: Vorfahren dürfen
+älter als der Achsenbeginn sein; die Oberfläche setzt sie an den Rand.
 
 Anteile: Jeder Hop verteilt seinen Anteil anteilig (pro rata) auf die
 aufgelösten Eingänge seiner Erzeuger-Tx. So summieren sich die Kanten in
@@ -61,6 +63,14 @@ class Skala:
 
     def y(self, sats: int) -> float:
         return _y_log_prozent(int(sats), self.hoechst)
+
+
+def y_aus_beitrag(skala: Skala, value_sats: int, anteil_sats: float, fokus_sats: int) -> float:
+    """Höhe = Stück des Vorgänger-UTXO, das in den Fokus geflossen ist."""
+    wert = max(int(value_sats), 0)
+    if fokus_sats <= 0 or anteil_sats <= 0 or wert <= 0:
+        return skala.y(0)
+    return skala.y(int(round(wert * float(anteil_sats) / fokus_sats)))
 
 
 def skala_aus_auswertung(auswertung: dict) -> Skala | None:
@@ -206,6 +216,10 @@ def flach(
             alt = knoten[key]
             alt["anteil_sats"] += anteil
             alt["tiefe"] = min(alt["tiefe"], eintrag["tiefe"])
+            # Höhe: Stück des (ersten) Vorgänger-UTXO × Summe der Wege.
+            alt["y"] = y_aus_beitrag(
+                skala, alt["value_sats"], alt["anteil_sats"], fokus_sats,
+            )
             return
         eintrag["anteil_sats"] = anteil
         knoten[key] = eintrag
@@ -243,7 +257,7 @@ def flach(
         gekappt = gekappt or (voll and not _buendeln(eltern, kinder))
         if voll or _buendeln(eltern, kinder):
             _buendel(
-                kinder, eltern_key, anteil, tiefe + 1,
+                kinder, eltern_key, anteil, tiefe + 1, fokus_sats,
                 neu=neu, kante=kante, zeitfelder=zeitfelder, skala=skala,
                 block_zeit=block_zeit,
             )
@@ -269,7 +283,7 @@ def flach(
                 "key": key,
                 "typ": typ,
                 "value_sats": sats,
-                "y": skala.y(sats),
+                "y": y_aus_beitrag(skala, sats, teil, fokus_sats),
                 "wallet": kind.get("wallet") or "",
                 "eigen": eigen,
                 "ende": ende,
@@ -304,7 +318,8 @@ def flach(
 
 
 def _buendel(
-    kinder, eltern_key, anteil, tiefe, *, neu, kante, zeitfelder, skala, block_zeit,
+    kinder, eltern_key, anteil, tiefe, fokus_sats, *,
+    neu, kante, zeitfelder, skala, block_zeit,
 ) -> None:
     """Alle Eingänge eines Hops als ein Endknoten „n Eingänge“."""
     anzahl = 0
@@ -330,7 +345,7 @@ def _buendel(
         "key": key,
         "typ": TYP_BUENDEL,
         "value_sats": sats,
-        "y": skala.y(sats),
+        "y": y_aus_beitrag(skala, sats, anteil, fokus_sats),
         "wallet": "",
         "eigen": eigen,
         "ende": True,
