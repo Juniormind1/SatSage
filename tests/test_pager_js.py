@@ -86,6 +86,20 @@ class TestEinbindung(unittest.TestCase):
         api = (WEB / "api.js").read_text(encoding="utf-8")
         self.assertEqual(api.count("const stapel = baumStapel(ergebnis);"), 2)
 
+    def test_sa_kandidaten_seitenweise(self):
+        steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        self.assertNotIn("SA_UTXO_CHUNK", steuer)
+        self.assertIn("function zeichneSaSeiten", steuer)
+        self.assertRegex(steuer, r'ansicht: "sa_abfluesse"')
+        self.assertRegex(steuer, r'ansicht: "sa_utxos"')
+        self.assertIn('p.set("werte", "1")', steuer)
+        # Bericht aus der ganzen Auswahl, per POST (lange Auswahl sprengt die URL).
+        self.assertIn("for (const id of Zustand.saGewaehlt || [])", steuer)
+        self.assertRegex(steuer, r'method: "POST",\s*headers: postKopf')
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn("ladeSaSeitenNeu()", app)
+        self.assertIn("_steuerFensterTreffer(abschnitt)", app)
+
     def test_seitencache_verfaellt(self):
         self.assertIn('addEventListener("satsage:lang", () => pagerCachesVerwerfen())', PAGER)
         app = (WEB / "app.js").read_text(encoding="utf-8")
@@ -157,6 +171,63 @@ const q = neueSeitenQuelle({ groesse: 10, laden: async () => { n += 1; return {}
   console.log(JSON.stringify(n)); })();
 """)
         self.assertEqual(aus, 2)
+
+
+def _js_funktion(quelle: str, name: str) -> str:
+    """Eine Top-Level-Funktion aus einer Datei (bis zur schließenden Klammer in Spalte 0)."""
+    m = re.search(rf"^(async )?function {name}\(.*?^}}$", quelle, re.S | re.M)
+    assert m, name
+    return m.group(0)
+
+
+@unittest.skipUnless(shutil.which("node"), "node nicht installiert")
+class TestSaAuswahl(unittest.TestCase):
+    """Auswahl der Kandidaten über Seiten; „Alle“/„Keine“ über alle Treffer."""
+
+    STEUER = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+
+    def _lauf(self, skript: str):
+        teile = "\n".join(_js_funktion(self.STEUER, n) for n in (
+            "saAnkreuzAuswahl", "saZeileMitAuswahl", "saUtxosAlleKeine"))
+        return _node("const Zustand = { saGewaehlt: new Set() };"
+                     "const uiSprache = () => 'de';\n" + teile + "\n" + skript)
+
+    def test_haekchen_ueberleben_blaettern_und_bericht_nimmt_alles(self):
+        aus = self._lauf("""
+const box = (art, value) => ({ dataset: { art }, value, checked: false });
+const zeile = (b) => ({ querySelector: () => b });
+Zustand.saGewaehlt.add('abfluss:tx1'); Zustand.saGewaehlt.add('utxo:utxo:tx9:3');
+const b1 = box('abfluss', 'tx1'), b2 = box('abfluss', 'tx2');
+saZeileMitAuswahl(zeile(b1)); saZeileMitAuswahl(zeile(b2));
+console.log(JSON.stringify({ b1: b1.checked, b2: b2.checked, sel: saAnkreuzAuswahl() }));
+""")
+        self.assertEqual(aus, {"b1": True, "b2": False,
+                               "sel": {"txids": ["tx1"], "utxos": ["tx9:3"]}})
+
+    def test_alle_und_keine_gelten_fuer_alle_treffer(self):
+        aus = self._lauf("""
+const gerufen = [];
+const sichtbar = [{ value: 'utxo:a:0', checked: false }];
+const $ = () => ({ querySelectorAll: () => sichtbar });
+Zustand.saDaten = { _abfrage: '?jahr=2025', _q: 'q=beta' };
+const api = async (pfad) => { gerufen.push(pfad);
+  return { werte: ['utxo:a:0', 'utxo:b:1', 'utxo:c:2'] }; };
+(async () => {
+  await saUtxosAlleKeine(true);
+  const nachAlle = [...Zustand.saGewaehlt];
+  const haken = sichtbar[0].checked;
+  Zustand.saGewaehlt.add('abfluss:tx7');
+  await saUtxosAlleKeine(false);
+  console.log(JSON.stringify({ nachAlle, haken, nachKeine: [...Zustand.saGewaehlt], gerufen }));
+})();
+""")
+        self.assertEqual(aus["nachAlle"], ["utxo:utxo:a:0", "utxo:utxo:b:1", "utxo:utxo:c:2"])
+        self.assertTrue(aus["haken"])
+        self.assertEqual(aus["nachKeine"], ["abfluss:tx7"])
+        # Filter der geladenen Seite geht mit, alle Treffer statt einer Seite.
+        self.assertIn("q=beta", aus["gerufen"][0])
+        self.assertIn("teil=utxos", aus["gerufen"][0])
+        self.assertIn("werte=1", aus["gerufen"][0])
 
 
 if __name__ == "__main__":

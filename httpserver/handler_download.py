@@ -77,6 +77,16 @@ class HandlerDownloadMixin:
         """Bericht Sat-Geschichte als HTML oder CSV (Query: jahr, frist, txids)."""
         from core import selbstanzeige as sa
 
+        if self.command == "POST":
+            try:
+                query = _sa_query_aus_koerper(self._body(max_bytes=8_000_000), query)
+            except ApiError as exc:
+                self._send(
+                    exc.status,
+                    json.dumps({"error": exc.message}).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+                return
         try:
             jahr = int(query.get("jahr", ["0"])[0])
         except (ValueError, TypeError, IndexError):
@@ -178,3 +188,18 @@ class HandlerDownloadMixin:
         if self.command != "HEAD":
             self.wfile.write(inhalt)
 
+
+def _sa_query_aus_koerper(koerper: dict, query: dict) -> dict:
+    """
+    JSON-Körper des Berichts (``jahr``, ``frist``, ``txids``, ``utxos``,
+    ``theme``) in die Query-Form von GET — Listen dürfen Arrays sein.
+    """
+    zusammen = dict(query)
+    for name in ("jahr", "frist", "theme", "txids", "utxos"):
+        if name not in koerper:
+            continue
+        wert = koerper[name]
+        if isinstance(wert, (list, tuple)):
+            wert = ",".join(str(x) for x in wert if x is not None)
+        zusammen[name] = ["" if wert is None else str(wert)]
+    return zusammen

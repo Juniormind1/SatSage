@@ -203,21 +203,69 @@ def api_selbstanzeige_kandidaten(state: AppState, query: dict) -> dict:
 
     from core import selbstanzeige as sa
 
-    utxos, _ohne = _steuer_grundlage(state)
-    try:
-        jahr = int(query.get("jahr", [""])[0])
-    except (ValueError, TypeError, IndexError):
-        jahre = tax_mod.verfuegbare_jahre(utxos)
-        jahr = jahre[0] if jahre else __import__("datetime").date.today().year
-    txid = (query.get("txid", [""])[0] or "").strip() or None
-    try:
-        return sa.kandidaten(
-            utxos,
-            jahr,
-            wallet=state.wallet_ctx,
-            immutable_cache_dir=state.immutable_cache_dir,
-            txid=txid,
+    def rechnen() -> dict:
+        utxos, _ohne = _steuer_grundlage(state)
+        try:
+            jahr = int(query.get("jahr", [""])[0])
+        except (ValueError, TypeError, IndexError):
+            jahre = tax_mod.verfuegbare_jahre(utxos)
+            jahr = jahre[0] if jahre else __import__("datetime").date.today().year
+        txid = (query.get("txid", [""])[0] or "").strip() or None
+        try:
+            return sa.kandidaten(
+                utxos,
+                jahr,
+                wallet=state.wallet_ctx,
+                immutable_cache_dir=state.immutable_cache_dir,
+                txid=txid,
+            )
+        except ValueError as exc:
+            # z. B. ungültige TxID im Filterfeld
+            raise ApiError(400, str(exc)) from exc
+
+    if (query.get("seite") or [""])[0] != "1":
+        return rechnen()
+    # Seitenweise (ISSUES P2): Zahlen über alles, Zeilen nur im Fenster.
+    from core import listen_fenster as lf
+    from core import steuer_fenster
+
+    kandidaten = _sa_kandidaten_gecacht(state, query, rechnen)
+    lim_u = lf.query_int(query, "limit_utxos", -1)
+    return steuer_fenster.sa_fenster(
+        kandidaten,
+        teil=lf.query_text(query, "teil", "alle"),
+        offset=lf.query_int(query, "offset", 0),
+        limit=lf.query_int(query, "limit", 10),
+        limit_utxos=None if lim_u < 0 else lim_u,
+        f=lf.filter_aus_query(query),
+        nur_werte=lf.query_text(query, "werte") == "1",
+    )
+
+
+#: Letzte Kandidatenlisten für Seitenwechsel — gleiche Gültigkeit wie oben.
+_SA_FENSTER_CACHE = None
+
+
+def _sa_kandidaten_gecacht(state: AppState, query: dict, rechnen) -> dict:
+    global _SA_FENSTER_CACHE
+    import datetime
+
+    from core import listen_fenster as lf
+    from httpserver.api.listen_fenster import cache_abdruck
+
+    if _SA_FENSTER_CACHE is None:
+        _SA_FENSTER_CACHE = lf.KleinCache(2)
+
+    def schluessel():
+        return (
+            (query.get("jahr") or [None])[0],
+            ((query.get("txid") or [""])[0] or "").strip(),
+            datetime.date.today().isoformat(),
+            cache_abdruck(state, preise=True),
         )
-    except ValueError as exc:
-        # z. B. ungültige TxID im Filterfeld
-        raise ApiError(400, str(exc)) from exc
+
+    kandidaten = _SA_FENSTER_CACHE.hole(schluessel())
+    if kandidaten is None:
+        kandidaten = rechnen()
+        _SA_FENSTER_CACHE.lege(schluessel(), kandidaten)
+    return kandidaten

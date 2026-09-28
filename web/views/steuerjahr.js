@@ -1296,6 +1296,14 @@ Zustand.saKandidaten = [];
 Zustand.saUtxos = [];
 Zustand.saVerlauf = null;
 Zustand.saStichtag = "";
+/** Seitenweise Kandidaten-Antwort (ISSUES P2) samt ``_abfrage``/``_q``. */
+Zustand.saDaten = null;
+/**
+ * Angekreuzte Kandidaten als ``art:wert`` (wie ``input.dataset.art`` und
+ * ``input.value``) — über Seiten, Vorladen und Filter hinweg; der Bericht
+ * nimmt die ganze Auswahl, nicht nur die sichtbare Seite.
+ */
+Zustand.saGewaehlt = new Set();
 
 /**
  * FiFo-/Report-Kandidaten aus dem Cache (Abflüsse + Was-wäre-wenn-UTXOs).
@@ -1303,6 +1311,9 @@ Zustand.saStichtag = "";
  * Technisch: GET /tax/selbstanzeige/kandidaten — reiner Cache-Read, kein Trace.
  * Wird beim Öffnen des Steuerjahrs und bei Tip-Nachzug/Jahr-Wechsel oft
  * mitgeladen; das ist **kein** Herkunfts-Job.
+ *
+ * Seitenweise (ISSUES P2): Anzahlen über alles, je Liste zwei Seiten in der
+ * ersten Antwort, weitere Seiten per Seitenleiste.
  *
  * *opts.auto*: still nachladen (kein Log-Spam).
  * *opts.laut*: manuell (Knopf) — eine Zeile „FiFo-Kandidaten: …“ ins Log.
@@ -1318,28 +1329,80 @@ async function ladeSelbstanzeigeKandidaten(opts = {}) {
   // flutet das Log mit „Selbstanzeige:“ während ganz anderer Arbeit (Trace).
   if (laut) logZeile(t("ui.hard.221032d4fb"));
   liste.textContent = t("common.loading");
+  const lauf = (Zustand.saLadeLauf || 0) + 1;
+  Zustand.saLadeLauf = lauf;
   try {
-    let pfad = `/tax/selbstanzeige/kandidaten?jahr=${encodeURIComponent(jahr)}`;
-    if (txid) pfad += `&txid=${encodeURIComponent(txid)}`;
-    const daten = await api(pfad);
-    Zustand.saKandidaten = daten.abfluesse || daten.kandidaten || [];
-    Zustand.saUtxos = daten.utxos || [];
+    let abfrage = `?jahr=${encodeURIComponent(jahr)}`;
+    if (txid) abfrage += `&txid=${encodeURIComponent(txid)}`;
+    const filter = steuerFilterParameter();
+    const p = new URLSearchParams(filter);
+    p.set("seite", "1");
+    p.set("limit", String(2 * pagerGroesse("sa_abfluesse")));
+    p.set("limit_utxos", String(2 * pagerGroesse("sa_utxos")));
+    p.set("lang", uiSprache());
+    const daten = await api(`/tax/selbstanzeige/kandidaten${abfrage}&${p}`);
+    if (lauf !== Zustand.saLadeLauf) return;
+    daten._abfrage = abfrage;
+    daten._q = filter.toString();
+    Zustand.saDaten = daten;
+    // Neu geladen = neue Liste: Häkchen wie bisher aus der Vorauswahl.
+    const vorab = daten.ausgewaehlt || {};
+    Zustand.saGewaehlt = new Set([
+      ...(vorab.abfluss || []).map((w) => `abfluss:${w}`),
+      ...(vorab.utxo || []).map((w) => `utxo:${w}`),
+    ]);
+    Zustand.saKandidaten = daten.abfluesse_fenster?.items || [];
+    Zustand.saUtxos = daten.utxos_fenster?.items || [];
     Zustand.saVerlauf = daten.verlauf || null;
     Zustand.saStichtag = daten.stichtag_hypothese || "";
     zeichneSelbstanzeigeKandidaten();
     if (laut) {
-      const n = Zustand.saKandidaten.length;
-      const u = Zustand.saUtxos.length;
+      const n = Number(daten.abfluesse_fenster?.voll_count) || 0;
+      const u = Number(daten.utxos_fenster?.voll_count) || 0;
       logZeile(
         t("ui.hard.92999accba", { n, u }),
       );
     }
   } catch (fehler) {
+    if (lauf !== Zustand.saLadeLauf) return;
     liste.textContent = t("common.errorPrefix", { msg: fehler.message });
     if (laut) {
       logZeile(t("ui.hard.52e00c1044", { msg: fehler.message }));
     }
   }
+}
+
+/** Seiten-Parameter der Kandidatenlisten (Filter wie die geladene Seite). */
+function saSeitenParameter(teil, offset, limit, filter) {
+  const p = new URLSearchParams(filter || "");
+  p.set("seite", "1");
+  p.set("teil", teil);
+  p.set("offset", String(offset));
+  p.set("limit", String(limit));
+  p.set("limit_utxos", String(limit));
+  p.set("lang", uiSprache());
+  return p.toString();
+}
+
+/** Neuer Kopf-Filter: nur die beiden Kandidatenfenster neu (Seite 1). */
+async function ladeSaSeitenNeu() {
+  const daten = Zustand.saDaten;
+  if (!daten || !daten.seitenweise) return;
+  const filter = steuerFilterParameter();
+  const lauf = (Zustand.saZeilenLauf || 0) + 1;
+  Zustand.saZeilenLauf = lauf;
+  const p = new URLSearchParams(filter);
+  p.set("seite", "1");
+  p.set("teil", "zeilen");
+  p.set("limit", String(2 * pagerGroesse("sa_abfluesse")));
+  p.set("limit_utxos", String(2 * pagerGroesse("sa_utxos")));
+  p.set("lang", uiSprache());
+  const neu = await api(`/tax/selbstanzeige/kandidaten${daten._abfrage}&${p}`);
+  if (lauf !== Zustand.saZeilenLauf || Zustand.saDaten !== daten) return;
+  daten.abfluesse_fenster = neu.abfluesse_fenster;
+  daten.utxos_fenster = neu.utxos_fenster;
+  daten._q = filter.toString();
+  zeichneSelbstanzeigeKandidaten();
 }
 
 /** Steuerjahr öffnen bzw. Jahr gewechselt: Auswertung + Kandidaten parallel. */
@@ -1556,34 +1619,139 @@ function saZeilenReportAktionen({ art, id, txid }) {
   return wrap;
 }
 
-/** Wie viele UTXO-Zeilen sofort; Rest per „Weitere laden“ (UI bleibt bedienbar). */
-const SA_UTXO_CHUNK = 40;
+/** Häkchen einer gezeichneten Zeile aus der Auswahl (``art:wert``). */
+function saZeileMitAuswahl(zeile) {
+  const box = zeile.querySelector("input[type=checkbox]");
+  if (box) box.checked = Zustand.saGewaehlt.has(`${box.dataset.art}:${box.value}`);
+  return zeile;
+}
+
+/** Häkchen → Auswahl; einmal je Liste (Zeilen wechseln beim Blättern). */
+function saAuswahlMitschreiben(liste) {
+  if (liste._saAuswahlHorcht) return;
+  liste._saAuswahlHorcht = true;
+  liste.addEventListener("change", (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement) || el.type !== "checkbox" || !el.value) return;
+    const id = `${el.dataset.art}:${el.value}`;
+    if (el.checked) Zustand.saGewaehlt.add(id);
+    else Zustand.saGewaehlt.delete(id);
+  });
+}
+
+/**
+ * „Alle“/„Keine“ für Hypothese-UTXOs: gilt für **alle** Treffer des aktuellen
+ * Filters über alle Seiten — der Server nennt ihre Werte.
+ */
+async function saUtxosAlleKeine(an) {
+  const daten = Zustand.saDaten;
+  const liste = $("#sa-liste");
+  if (!daten || !liste) return;
+  const p = new URLSearchParams(daten._q || "");
+  p.set("seite", "1");
+  p.set("teil", "utxos");
+  p.set("werte", "1");
+  p.set("lang", uiSprache());
+  const antwort = await api(`/tax/selbstanzeige/kandidaten${daten._abfrage}&${p}`);
+  if (Zustand.saDaten !== daten) return;
+  for (const wert of antwort.werte || []) {
+    const id = `utxo:${wert}`;
+    if (an) Zustand.saGewaehlt.add(id);
+    else Zustand.saGewaehlt.delete(id);
+  }
+  for (const el of liste.querySelectorAll("input[type=checkbox][data-art=utxo]")) {
+    el.checked = Zustand.saGewaehlt.has(`utxo:${el.value}`);
+  }
+}
+
+/**
+ * Eine Kandidatenliste seitenweise in *innen*: Zeilen des Fensters, Leiste
+ * darunter; Treffer über alle Seiten merkt sich *abschnitt* für den Filter.
+ */
+function zeichneSaSeiten({ abschnitt, innen, teil, fenster, zeichneZeile, ansicht, hostKlasse }) {
+  const daten = Zustand.saDaten;
+  const host = document.createElement("div");
+  host.className = hostKlasse;
+  const leiste = document.createElement("div");
+  leiste.className = "sa-pager";
+  innen.append(host, leiste);
+  const auszug = (antwort) => {
+    const f = antwort[`${teil}_fenster`] || {};
+    return { items: f.items || [], total: Number(f.total) || 0, sats: Number(f.sats) || 0 };
+  };
+  const neueQuelle = (vorab) => neueSeitenQuelle({
+    groesse: pagerGroesse(ansicht),
+    laden: (o, l) => api(
+      `/tax/selbstanzeige/kandidaten${daten._abfrage}&${saSeitenParameter(teil, o, l, daten._q)}`,
+    ),
+    auszug,
+    vorab,
+  });
+  let quelle = neueQuelle({ [`${teil}_fenster`]: fenster });
+  const zeigeSeite = (seite, q) => {
+    host.replaceChildren(...seite.items.map((e) => saZeileMitAuswahl(zeichneZeile(e))));
+    abschnitt._fensterTreffer = { q: daten._q, total: seite.total, sats: auszug(seite.antwort).sats };
+    leiste.replaceChildren(zeichnePager({
+      total: seite.total,
+      offset: seite.offset,
+      groesse: q.groesse,
+      ansicht,
+      onSeite: (o) => {
+        q.seite(o).then((s2) => { if (q === quelle) zeigeSeite(s2, q); }).catch(() => {});
+      },
+      onGroesse: () => {
+        quelle = neueQuelle(null);
+        const q2 = quelle;
+        q2.seite(0).then((s2) => { if (q2 === quelle) zeigeSeite(s2, q2); }).catch(() => {});
+      },
+    }));
+  };
+  // Erste Seite sofort aus der Gesamtantwort.
+  zeigeSeite({
+    antwort: { [`${teil}_fenster`]: fenster },
+    items: (fenster.items || []).slice(0, quelle.groesse),
+    total: Number(fenster.total) || 0,
+    offset: 0,
+  }, quelle);
+}
 
 function zeichneSelbstanzeigeKandidaten() {
   const liste = $("#sa-liste");
   if (!liste) return;
   liste.replaceChildren();
+  saAuswahlMitschreiben(liste);
 
-  const abfluesse = Zustand.saKandidaten || [];
-  const utxos = Zustand.saUtxos || [];
+  const daten = Zustand.saDaten || {};
+  const abFenster = daten.abfluesse_fenster || { items: [], total: 0, voll_count: 0 };
+  const utFenster = daten.utxos_fenster || { items: [], total: 0, voll_count: 0 };
+  const nAb = Number(abFenster.voll_count) || 0;
+  const nUt = Number(utFenster.voll_count) || 0;
   const verlauf = Zustand.saVerlauf;
 
   const ab = saAbschnitt(
     t("tax.hard.b5128ead22"),
-    abfluesse.length
-      ? `${abfluesse.length} Kandidat(en)`
+    nAb
+      ? `${nAb} Kandidat(en)`
       : "keine",
     {
       offen: false,
-      ausklappbar: abfluesse.length > 0,
-      leerText: abfluesse.length
+      ausklappbar: nAb > 0,
+      leerText: nAb
         ? ""
         : t("ui.hard.38c0e7c352"),
     },
   );
-  const abFrag = document.createDocumentFragment();
-  for (const k of abfluesse) abFrag.append(zeichneSaAbflussZeile(k));
-  ab.innen.append(abFrag);
+  if (nAb) {
+    zeichneSaSeiten({
+      abschnitt: ab.details,
+      innen: ab.innen,
+      teil: "abfluesse",
+      fenster: abFenster,
+      zeichneZeile: zeichneSaAbflussZeile,
+      ansicht: "sa_abfluesse",
+      hostKlasse: "sa-abfluss-host",
+    });
+  }
   liste.append(ab.details);
 
   const stichtag = Zustand.saStichtag
@@ -1592,18 +1760,18 @@ function zeichneSelbstanzeigeKandidaten() {
   // UTXOs aufklappen, wenn keine Abflüsse — sonst sieht man keine Checkboxen.
   const ut = saAbschnitt(
     t("tax.hard.bb993ba73a"),
-    utxos.length
-      ? `${utxos.length} UTXO(s)${stichtag}`
+    nUt
+      ? `${nUt} UTXO(s)${stichtag}`
       : `keine${stichtag}`,
     {
-      offen: utxos.length > 0 && abfluesse.length === 0,
-      ausklappbar: utxos.length > 0,
-      leerText: utxos.length
+      offen: nUt > 0 && nAb === 0,
+      ausklappbar: nUt > 0,
+      leerText: nUt
         ? ""
         : t("ui.hard.3939cbbda7"),
     },
   );
-  if (utxos.length) {
+  if (nUt) {
     const hinweis = document.createElement("p");
     hinweis.className = "sa-leer";
     hinweis.textContent =
@@ -1620,12 +1788,7 @@ function zeichneSelbstanzeigeKandidaten() {
     alle.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      for (const el of ut.innen.querySelectorAll(
-        "input[type=checkbox][data-art=utxo]",
-      )) {
-        if (el.closest(".sa-zeile")?.hidden) continue;
-        el.checked = true;
-      }
+      saUtxosAlleKeine(true).catch(() => {});
     });
     const keine = document.createElement("button");
     keine.type = "button";
@@ -1634,108 +1797,20 @@ function zeichneSelbstanzeigeKandidaten() {
     keine.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      for (const el of ut.innen.querySelectorAll(
-        "input[type=checkbox][data-art=utxo]",
-      )) {
-        if (el.closest(".sa-zeile")?.hidden) continue;
-        el.checked = false;
-      }
+      saUtxosAlleKeine(false).catch(() => {});
     });
     werkzeug.append(alle, keine);
     ut.innen.append(werkzeug);
+    zeichneSaSeiten({
+      abschnitt: ut.details,
+      innen: ut.innen,
+      teil: "utxos",
+      fenster: utFenster,
+      zeichneZeile: zeichneSaUtxoZeile,
+      ansicht: "sa_utxos",
+      hostKlasse: "sa-utxo-host",
+    });
   }
-
-  // Chunked render — große Listen blockieren sonst den Main-Thread.
-  let gezeigt = 0;
-  const host = document.createElement("div");
-  host.className = "sa-utxo-host";
-  ut.innen.append(host);
-
-  const mehr = document.createElement("button");
-  mehr.type = "button";
-  mehr.className = "knopf knopf-klein sa-mehr";
-  mehr.hidden = true;
-
-  let gefiltertVoll = false;
-
-  function saChecksLesen() {
-    const gesehen = new Set();
-    const an = new Set();
-    for (const el of liste.querySelectorAll("input[type=checkbox]")) {
-      const id = `${el.dataset.art}:${el.value}`;
-      gesehen.add(id);
-      if (el.checked) an.add(id);
-    }
-    return { gesehen, an };
-  }
-
-  function zeichneSaUtxoMitCheck(u) {
-    const zeile = zeichneSaUtxoZeile(u);
-    const box = zeile.querySelector("input[type=checkbox]");
-    const stand = Zustand._saChecks;
-    if (box && stand) {
-      const id = `${box.dataset.art}:${box.value}`;
-      if (stand.gesehen.has(id)) box.checked = stand.an.has(id);
-    }
-    return zeile;
-  }
-
-  function haengeUtxoChunk() {
-    const frag = document.createDocumentFragment();
-    const ende = Math.min(gezeigt + SA_UTXO_CHUNK, utxos.length);
-    for (; gezeigt < ende; gezeigt++) {
-      frag.append(zeichneSaUtxoMitCheck(utxos[gezeigt]));
-    }
-    host.append(frag);
-    if (gezeigt < utxos.length) {
-      mehr.hidden = false;
-      mehr.textContent = t("ui.hard.7244232282", { n: utxos.length - gezeigt });
-    } else {
-      mehr.hidden = true;
-    }
-  }
-
-  // Filter: alle passenden UTXOs zeichnen (nicht nur den ersten Chunk).
-  // Zurück auf leer: wieder stückweise, Häkchen bleiben.
-  liste._saFilterNachladen = () => {
-    const roh = ($("#kopf-filter")?.value || "").trim();
-    if (gefiltertVoll && liste.dataset.saFilterRoh === roh) return;
-    const f = typeof kopfFilterGelesen === "function"
-      ? kopfFilterGelesen()
-      : null;
-    if (!f || f.leer || typeof _kopfFilterLeafOk !== "function") return;
-    Zustand._saChecks = saChecksLesen();
-    host.replaceChildren();
-    const frag = document.createDocumentFragment();
-    for (const u of utxos) {
-      const zeile = zeichneSaUtxoMitCheck(u);
-      if (!_kopfFilterLeafOk(zeile, f)) continue;
-      frag.append(zeile);
-    }
-    host.append(frag);
-    gezeigt = utxos.length;
-    gefiltertVoll = true;
-    liste.dataset.saFilterRoh = roh;
-    mehr.hidden = true;
-    Zustand._saChecks = null;
-  };
-  liste._saFilterZurueck = () => {
-    if (!gefiltertVoll) return;
-    Zustand._saChecks = saChecksLesen();
-    host.replaceChildren();
-    gezeigt = 0;
-    gefiltertVoll = false;
-    liste.dataset.saFilterRoh = "";
-    haengeUtxoChunk();
-    Zustand._saChecks = null;
-  };
-  mehr.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    haengeUtxoChunk();
-  });
-  haengeUtxoChunk();
-  ut.innen.append(mehr);
   liste.append(ut.details);
 
   if (verlauf) {
@@ -1785,16 +1860,20 @@ function saTxidAusFeld() {
   return tip.trim();
 }
 
-/** Nur angekreuzte Zeilen (ohne Einzahl-Tx-Feld). */
+/**
+ * Nur angekreuzte Kandidaten (ohne Einzahl-Tx-Feld) — die ganze Auswahl über
+ * alle Seiten, nicht nur die gezeichnete (``Zustand.saGewaehlt``).
+ */
 function saAnkreuzAuswahl() {
   const txids = [];
   const utxos = [];
-  for (const el of document.querySelectorAll(
-    "#sa-liste input[type=checkbox]:checked",
-  )) {
-    const wert = el.value;
+  for (const id of Zustand.saGewaehlt || []) {
+    const trenner = id.indexOf(":");
+    if (trenner < 0) continue;
+    const art = id.slice(0, trenner);
+    const wert = id.slice(trenner + 1);
     if (!wert) continue;
-    if (el.dataset.art === "utxo" || wert.startsWith("utxo:")) {
+    if (art === "utxo" || wert.startsWith("utxo:")) {
       utxos.push(wert.startsWith("utxo:") ? wert.slice(5) : wert);
     } else {
       txids.push(wert);
@@ -1812,6 +1891,9 @@ function saAuswahl() {
   }
   return { txids, utxos };
 }
+
+/** Längste GET-Adresse für den CSV-Bericht; darüber per POST + Download. */
+const SA_URL_MAX = 6000;
 
 function ladeSelbstanzeigeExport(art, auswahl = null) {
   const { txids, utxos } = auswahl && typeof auswahl === "object"
@@ -1842,10 +1924,42 @@ function ladeSelbstanzeigeExport(art, auswahl = null) {
     `&utxos=${encodeURIComponent(utxos.join(","))}` +
     `&theme=${encodeURIComponent(guiThemeFuerBericht())}`;
 
+  // Auswahl über viele Seiten kann für eine URL zu lang werden → POST.
+  const koerper = JSON.stringify({
+    jahr, frist, txids, utxos, theme: guiThemeFuerBericht(),
+  });
+  const postKopf = { ...tokenKopf(), ...sprachKopf(), "Content-Type": "application/json" };
+
   if (art === "csv") {
     const adresse =
       `/api/tax/selbstanzeige/${datei}?${query}&t=${encodeURIComponent(Token)}`;
-    window.open(adresse, "_blank", "noopener");
+    if (adresse.length <= SA_URL_MAX) {
+      window.open(adresse, "_blank", "noopener");
+      return;
+    }
+    (async () => {
+      try {
+        const antwort = await fetch(`/api/tax/selbstanzeige/${datei}`, {
+          method: "POST", headers: postKopf, body: koerper, credentials: "same-origin",
+        });
+        if (!antwort.ok) throw new Error(`HTTP ${antwort.status}`);
+        const url = URL.createObjectURL(await antwort.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `satsage-trace-${jahr}.csv`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 120_000);
+      } catch (fehler) {
+        const kasten = $("#steuer-meldung");
+        if (kasten) {
+          kasten.className = "hinweis hinweis-krit";
+          setzeText(kasten, `Report: ${fehler.message}`);
+          kasten.hidden = false;
+        }
+      }
+    })();
     return;
   }
 
@@ -1871,8 +1985,10 @@ function ladeSelbstanzeigeExport(art, auswahl = null) {
 
   (async () => {
     try {
-      const antwort = await fetch(`/api/tax/selbstanzeige/${datei}?${query}`, {
-        headers: { ...tokenKopf(), ...sprachKopf() },
+      const antwort = await fetch(`/api/tax/selbstanzeige/${datei}`, {
+        method: "POST",
+        headers: postKopf,
+        body: koerper,
         credentials: "same-origin",
       });
       const roh = await antwort.arrayBuffer();

@@ -2111,22 +2111,19 @@ function wendeKopfFilterSteuerjahrAn(f) {
   }
 
   const sa = $("#sa-liste");
-  if (sa && !filter.leer && typeof sa._saFilterNachladen === "function") {
-    sa._saFilterNachladen();
-  }
-  if (sa && filter.leer && typeof sa._saFilterZurueck === "function") {
-    sa._saFilterZurueck();
-  }
   if (sa) {
     for (const abschnitt of sa.querySelectorAll(".sa-abschnitt")) {
       const zeilen = [...abschnitt.querySelectorAll(".sa-zeile")];
-      if (!zeilen.length) continue;
+      // Seitenweise: Treffer über alle Seiten zählt der Server (auch 0).
+      const treffer = filter.leer ? null : _steuerFensterTreffer(abschnitt);
+      if (!zeilen.length && !treffer) continue;
       let n = 0;
       for (const z of zeilen) {
         const ok = filter.leer || _kopfFilterLeafOk(z, filter);
         z.hidden = !ok;
         if (ok) n += 1;
       }
+      if (treffer) n = treffer.total;
       const meta = abschnitt.querySelector(".sa-summary-meta");
       if (meta && !meta.dataset.voll) meta.dataset.voll = meta.textContent;
       if (filter.leer) {
@@ -2182,6 +2179,11 @@ function kopfFilterGeaendert() {
   } else if (Zustand.ansicht === "steuerjahr" && typeof ladeSteuerSeitenNeu === "function") {
     if (Zustand.steuer && Zustand.steuer.seitenweise && Zustand.steuer._q !== q) {
       ladeSteuerSeitenNeu().catch(() => {});
+    }
+    // Kandidaten des Berichts Sat-Geschichte: ebenfalls Seite 1 vom Server.
+    if (typeof ladeSaSeitenNeu === "function" && Zustand.saDaten
+      && Zustand.saDaten.seitenweise && Zustand.saDaten._q !== q) {
+      ladeSaSeitenNeu().catch(() => {});
     }
   }
 }

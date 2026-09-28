@@ -206,3 +206,125 @@ def fenster(auswertung: dict, *, teil: str = "alle", offset: int = 0, limit: int
     antwort["gelb_keys"] = [f"{e.get('txid')}:{e.get('vout')}" for e in alle
                             if e.get("geprueft") and not e.get("erfuellt")]
     return antwort
+
+
+# --- Bericht Sat-Geschichte: Kandidatenlisten seitenweise --------------------
+
+SA_TEILE = ("abfluesse", "utxos")
+
+
+def _ts_aus_de_datum_mittag(text) -> int | None:
+    """Port von ``tsAusDeDatumMittag``/``parseDeDatum`` (TT.MM.JJJJ, 12 Uhr lokal)."""
+    import re
+    from datetime import timedelta
+
+    m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", str(text or ""))
+    if not m:
+        return None
+    tag, monat, jahr = int(m.group(1)), int(m.group(2)) - 1, int(m.group(3))
+    # JS-Date rollt über (31.02. → 03.03., Monat 00 → Dezember davor).
+    try:
+        basis = datetime(jahr + monat // 12, monat % 12 + 1, 1, 12, 0, 0)
+        ts = int((basis + timedelta(days=tag - 1)).timestamp())
+    except (ValueError, OverflowError, OSError):
+        return None
+    return ts or None
+
+
+def sa_abfluss_zeile(k: dict) -> dict:
+    """``data-*`` einer Abfluss-Zeile wie ``zeichneSaAbflussZeile``."""
+    adressen = [i.get("address") for i in (k.get("inputs") or []) if isinstance(i, dict)]
+    return {
+        "key": _js_text(k.get("txid") or k.get("id") or ""),
+        "address": " ".join(_js_text(a) for a in adressen if a),
+        "value_sats": k.get("netto_sats"),
+        "time_label": " ".join(_js_text(x) for x in (k.get("abgang_datum"), k.get("abgang_zeit")) if x),
+        "event_ts": k.get("abgang_ts") or None,
+        "labels": " ".join(_js_text(x) for x in [*(k.get("wallets") or []), k.get("txid")] if x),
+    }
+
+
+def sa_utxo_zeile(u: dict) -> dict:
+    """``data-*`` einer Hypothese-UTXO-Zeile wie ``zeichneSaUtxoZeile``."""
+    if u.get("txid") is not None and u.get("vout") is not None:
+        key = f"{u['txid']}:{u['vout']}"
+    else:
+        key = _js_text(u.get("id") or "")
+    return {
+        "key": key,
+        "address": _js_text(u.get("address")) if u.get("address") else "",
+        "value_sats": u.get("value_sats"),
+        "time_label": " ".join(_js_text(x) for x in (u.get("anschaffung_datum"), u.get("stichtag")) if x),
+        "event_ts": _ts_aus_de_datum_mittag(u.get("anschaffung_datum")),
+        "labels": " ".join(_js_text(x) for x in (u.get("wallet"), u.get("external_address"),
+                                                  u.get("grundlage"), u.get("txid")) if x),
+    }
+
+
+def sa_wert(teil: str, e: dict) -> str:
+    """Wert der Checkbox (``box.value``) — Schlüssel der Auswahl im Browser."""
+    if teil == "utxos":
+        return _js_text(e.get("id") or f"utxo:{e.get('txid')}:{e.get('vout')}")
+    return _js_text(e.get("id") or e.get("txid"))
+
+
+def sa_fenster(kandidaten: dict, *, teil: str = "alle", offset: int = 0, limit: int = 10,
+               limit_utxos: int | None = None, f: dict | None = None,
+               nur_werte: bool = False) -> dict:
+    """
+    Kandidaten seitenweise. ``teil=alle``: alles außer den beiden Listen, dazu
+    je das erste Fenster (``abfluesse_fenster``/``utxos_fenster``) und die
+    Vorauswahl (``ausgewaehlt``). ``teil=abfluesse|utxos``: nur dieses
+    Fenster; mit *nur_werte* stattdessen die Checkbox-Werte **aller** Treffer
+    („Alle“/„Keine“ über alle Seiten). ``teil=zeilen``: beide ersten Fenster.
+    """
+    f = f or lf.parse_filter("")
+    listen = {
+        "abfluesse": list(kandidaten.get("abfluesse") or kandidaten.get("kandidaten") or []),
+        "utxos": list(kandidaten.get("utxos") or []),
+    }
+    zeile_fn = {"abfluesse": sa_abfluss_zeile, "utxos": sa_utxo_zeile}
+    sats_feld = {"abfluesse": "netto_sats", "utxos": "value_sats"}
+
+    def treffer(name: str) -> list[dict]:
+        daten = listen[name]
+        if f["leer"]:
+            return daten
+        return [e for e in daten if zeile_ok(zeile_fn[name](e), f)]
+
+    def fenster(name: str, lim: int, off: int) -> dict:
+        daten = listen[name]
+        passend = treffer(name)
+        off = max(0, int(off or 0))
+        lim = max(0, min(int(lim or 0), lf.MAX_LIMIT))
+        feld = sats_feld[name]
+        return {
+            "items": passend[off:off + lim],
+            "offset": off,
+            "limit": lim,
+            "total": len(passend),
+            "sats": sum(int(e.get(feld) or 0) for e in passend),
+            "voll_count": len(daten),
+            "voll_sats": sum(int(e.get(feld) or 0) for e in daten),
+        }
+
+    lim_u = limit if limit_utxos is None else limit_utxos
+    grenzen = {"abfluesse": limit, "utxos": lim_u}
+    kopf = {"jahr": kandidaten.get("jahr"), "teil": teil, "seitenweise": True}
+    if teil in SA_TEILE:
+        if nur_werte:
+            return {**kopf, "werte": [sa_wert(teil, e) for e in treffer(teil)]}
+        return {**kopf, f"{teil}_fenster": fenster(teil, grenzen[teil], offset)}
+    if teil == "zeilen":
+        return {**kopf, **{f"{n}_fenster": fenster(n, grenzen[n], 0) for n in SA_TEILE}}
+    antwort = {k: v for k, v in kandidaten.items() if k not in ("kandidaten", "abfluesse", "utxos")}
+    antwort.update(kopf)
+    antwort["teil"] = "alle"
+    for n in SA_TEILE:
+        antwort[f"{n}_fenster"] = fenster(n, grenzen[n], 0)
+    # Vorauswahl (TxID im Feld) auch außerhalb der ersten Seite.
+    antwort["ausgewaehlt"] = {
+        "abfluss": [sa_wert("abfluesse", e) for e in listen["abfluesse"] if e.get("ausgewaehlt")],
+        "utxo": [sa_wert("utxos", e) for e in listen["utxos"] if e.get("ausgewaehlt")],
+    }
+    return antwort

@@ -1415,7 +1415,9 @@ class Handler(
                     self._download(pfad, query)
                     return
                 if pfad in ("/api/tax/selbstanzeige/bericht.html", "/api/tax/selbstanzeige/export.csv"):
-                    if methode not in ("GET", "HEAD"):
+                    # POST: Auswahl im JSON-Körper — über Seiten hinweg kann sie
+                    # für eine URL zu lang werden (ISSUES P2).
+                    if methode not in ("GET", "HEAD", "POST"):
                         self._fehler(405, "Methode nicht erlaubt.")
                         return
                     self._download_selbstanzeige(pfad, query)

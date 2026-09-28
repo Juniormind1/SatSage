@@ -3,60 +3,7 @@
 Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst), sofern keine Priorität genannt ist.
 Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalten).
 
-**Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. Umfangreiche Wallets · seitenweise.
-
-## Umfangreiche Wallets · Bäume seitenweise, nicht alles im Speicher
-
-**Stand:** 2026-09-26 · **offen** · **Priorität 2**
-
-Aufwand: **hoch** — Speicher und Aufbau, nicht nur die Anzeige
-
-Umfangreiche Wallets lähmen SatSage, weil Herkunftsbäume und lange Listen immer komplett im Speicher aufgebaut werden.
-
-Betrifft **Bereits ausgegeben**, **Herkunft** und die entsprechend langen Teile von **Steuerjahr**.
-
-- Lange und tiefe Bäume in **20er-Schritten** aufbauen, davon nur **10** zeigen.
-- Unter der jeweiligen Anzeige die übliche Seitenleiste: `(1–10)` `(11–20)` `(21–30)` … `(höchster−10 – höchster)`, plus Dropdown **10, 20, 50, 100** zur Feinsteuerung.
-- Immer den **nächsten Schritt der gewählten Darstellung** vorladen. Steht `(11–20)`, werden `(21–30)` schon aufgebaut, während `(11–20)` aus dem Speicher gezeichnet werden.
-
-**Fortschritt (2026-09-27):** Schritt 1 (`origin_tree` nicht mehr ausgeliefert) umgesetzt, Rest offen. Trace-Antworten an die Oberfläche (`GET /api/trace?target=…`, Cache-Treffer von `POST /api/trace`, Job-Ergebnis) enthalten den Rohbaum nicht mehr; im Herkunfts-Cache bleibt er für das Fortsetzen. Offen: Blättern in der Oberfläche, `offset`/`limit` auf dem Server, Kinder eines Knotens seitenweise nachladen, schrittweiser Aufbau, Filter auf dem Server. Gemessen an Test-Bäumen (JSON der Antwort): einfache Kette 1 859 → 1 344 B (−28 %), 15 Eingänge × 3 Hops 52 376 → 27 750 B (−47 %), 19 × 6 Hops 117 205 → 60 245 B (−49 %).
-
-**Fortschritt (2026-09-27, Schritte 2–6):** umgesetzt bis auf einen Punkt (unten), deshalb noch nicht erledigt. Vorgaben des Maintainers: Kinder je Knoten beim Aufklappen, kein schrittweiser Trace-Aufbau, exakter letzter Bereich, exakte Summen, Steuerjahr-Summen über alles, Seitenleiste statt `#limit-wahl`, Filter auf dem Server, Volumen = Adressgruppen / Alter = UTXOs, Berichte vollständig.
-
-- **Seitenleiste** `web/views/pager.js` (vor den Ansichten geladen): `(1–10)` … exakter letzter Bereich, „…“ bei vielen Seiten, Dropdown 10/20/50/100 je Ansicht im `localStorage`, de/en. Holt je Abruf die doppelte Seitengröße und lädt den nächsten Block im Hintergrund vor. `#limit-wahl` ist weg.
-- **Listen auf dem Server** (`core/listen_fenster.py`, `httpserver/api/listen_fenster.py`): `/api/utxos` und `/api/wallets/<id>/utxos` mit `seite=1` + `teil` (`bestand`/`verlauf`), `modus`, `offset`, `limit`, `sort`, `q` (+ `q_nach`/`q_vor`), `lang`. Sortiert und gefiltert wird auf Rohfeldern, angereichert nur das Fenster. `total_count`/`total_sats` bleiben exakt. Der Stichwortfilter ist eine 1:1-Portierung der Browser-Logik.
-- **Steuerjahr** (`core/steuer_fenster.py`): `/api/tax?seite=1` mit `teil` (`alle`/`erfuellt`/`offen`/`abgaenge`/`zeilen`). Kennzahlen, Zeitstrahl und Gruppensummen über alles, Zeilen und Veräußerungen seitenweise, gelbe Schlüssel vollständig (`gelb_keys`). Nebenbei: Selbstanzeige-Kandidaten mit Index nach Ausgabe-Tx (über 600 s → 0,5 s).
-- **Baum knotenweise** (`core/trace_knoten.py`): `GET /api/trace?target=…&seite=1&limit=` liefert Wurzel + erste Kinderseite (`children_total`, `baum_marken`). `GET /api/trace/knoten?target=&pfad=&offset=&limit=` liefert Kinder eines Knotens aus dem gespeicherten Baum. „Alles aufklappen“ holt den Baum einmal ganz (ein Baum im Speicher, Verhalten 1:1).
-- **Herkunft-Cache als Knotentabelle** (`core/trace_cache.py`, `VERSION_KNOTEN = 2`): gleiche Teilbäume nur einmal (DAG, JSON). `id`/`depth` aus der Position. Geschrieben wird nur, wenn der Rückweg exakt ist, sonst das alte Format. Alte Dateien bleiben lesbar und werden beim nächsten Speichern ersetzt. Stresslabor: größter Baum 5,3 MB → 485 KB, alle 410 Bäume 10,3 → 4,8 MB, Laden gleich schnell (~30 ms).
-- **Fenster-Caches:** Steuer-Auswertung (LRU 2) und Label-Auszüge für die Stichwortsuche. Schlüssel ist ein Abdruck aus UTXO-/Verlaufs-Cache (je Datei), Ordner-mtime von Herkunftsbäumen/Ingress/Tx-Cache, Börsen-/Label-Bestand, eigenen Adressen, `.env` (Wallets, Steuer-Einstellungen), Parametern, Sprache und Tag. Steuer-Seitenwechsel 0,85 s → ~1 ms, zweite Suche in „Bereits ausgegeben“ 2,5 → 0,5 s. Der Browser verwirft vorgeladene Seiten bei Sprachwechsel, Sortierwechsel, fertigem Scan und Cache-Leeren.
-- **API:** keine Brüche. Alles Neue hängt an `seite=1` oder dem neuen Endpunkt; ohne Parameter wie bisher.
-- **Offen (Entscheidung nötig):** Die Listen der Selbstanzeige-Kandidaten sind nicht seitenweise (2025 im Stresslabor: 6 650 Kandidaten, ~5 MB). Blättern bräuchte eine Regel für Häkchen, „Alle/Keine“ und die Berichtsauswahl über Seiten hinweg.
-- **Bekannt, bewusst so:** Der Zeitstrahl des Steuerjahrs bleibt vollständig (2024 im Labor 1,2 MB). „Alles aufklappen“ lädt den vollen Baum. Die Knotentabelle spart bei Bäumen ohne Rauten nichts.
-
-### Unterpunkt: Herkunftsbäume lazy laden (vereinbarte Spezifikation, 2026-09-27)
-
-**Invariante:** Client und Server halten höchstens **einen** vollen Herkunftsbaum im Speicher — den gerade aufgeklappten. Listen (Herkunft, Bereits ausgegeben, Steuerjahr) liefern nur Meta (`txid:vout`, Betrag, Datum, Labels, Cache-Flag), nie den Baum.
-
-- `GET /api/trace` und alle Listen-APIs lassen `origin_tree`/Baum standardmäßig weg. Der Baum wird nur beim ausdrücklichen Aufklappen eines UTXO geladen; der vorherige wird verworfen (Client: Referenzen und DOM freigeben; Server: nicht im Speicher halten, keine Zwischenspeicher voller Bäume). Ein gespeicherter Baum klappt nicht mehr automatisch voll auf.
-- **(a)** Beim Aufklappen nur die erste Ebene sofort zeichnen; tiefere Ebenen beim Weiterklappen aus dem schon geladenen Baum nachzeichnen (keine neue Anfrage).
-- **(b)** Das Cache-Flag in Listen trägt auch Vollständigkeit und Steuer-Status (`verfolgt_vollstaendig`, `steuer_ausreichend` bzw. was die Oberfläche heute für Marken und Hinweise braucht), damit die bestehenden Hinweise ohne Baum weiter funktionieren.
-- **(c)** Suche/Filter: prüfen, ob der globale Stichwortfilter heute in Baumknoten sucht, und das Verhalten 1:1 erhalten (Meta-Felder oder serverseitig aus dem Cache je Treffer). Geht 1:1 nicht ohne großen Umbau: nicht ändern, sondern dokumentieren.
-- **(d)** Berichte/Exporte (HTML/CSV) laden Bäume serverseitig nacheinander einzeln, nicht alle gleichzeitig.
-- **(e)** Zwischenspeicher: bewusst **keiner** — höchstens ein Baum.
-- **Grenzen:** keine zweite Chain, kein SQLite, Trace-Semantik unverändert, Oberfläche sonst 1:1.
-
-**Fortschritt (2026-09-27):** umgesetzt, noch nicht als erledigt markiert (Abnahme offen).
-
-- Bestandsaufnahme: Die Listen (`/api/utxos`, `/api/wallets/<id>/utxos`, Bereits ausgegeben, Steuerjahr) lasen schon nur die kleine `.meta.json` (`trace_cache.kopf`), nie den Baum. Volle Bäume hielten nur die fertigen Einzel-Trace-Jobs im Job-Speicher (bis zu 20) und die Nav-Abfrage `/api/jobs` schickte sie bei jedem Poll mit; im Browser blieb jeder einmal aufgeklappte Baum im DOM, bis die Liste neu gezeichnet wurde.
-- Server: Fertige Einzel-Trace-Jobs behalten nur Meta (`baum_im_cache`), wenn der Baum in diesem Lauf im Herkunfts-Cache gelandet ist; ohne Cache-Datei bleibt der Baum (ohne Rohbaum) im Ergebnis, sonst gäbe es nichts zu zeigen. `/api/jobs` schickt für Trace-Jobs nur Meta.
-- **(a)** war schon so: erste Ebene sofort, tiefere Ebenen aus den geladenen Knotendaten (`WeakMap`) beim Weiterklappen; „Alles aufklappen“ nur per Knopf. Der ungenutzte Auto-Aufklapp-Code für gespeicherte Bäume (`oeffneAusCache`) ist entfernt.
-- Client: Beim Zeichnen eines Baums wird der zuvor offene verworfen (DOM leeren, UTXO zuklappen). Läuft dort gerade eine Analyse, bleibt sie stehen; wird sie fertig, gewinnt der zuletzt gezeichnete Baum.
-- **(b)** Listen-Einträge tragen zusätzlich `steuer_ausreichend` (neben `verfolgt`, `verfolgt_vollstaendig`, `unvollstaendig`, `juengste_sats_ts`, `mix_arten`, `boerse_namen`, `tx_class`). Die Oberfläche nutzt das neue Feld noch nicht; ihre Marken kamen schon aus der Meta.
-- **(c)** Der Stichwortfilter sucht nicht in Baumknoten, nur in Gruppen-/UTXO-Zeilen (Schlüssel, Adresse, Zeit, Labels aus `mix_arten`/`boerse_namen`/`tx_class`). Die Labels kommen aus der Meta bzw. bleiben am UTXO-Objekt, auch wenn der Baum verworfen wird — Verhalten unverändert, kein Umbau nötig.
-- **(d)** Steuer- und Selbstanzeige-Bericht laden die Hop-Ketten schon einzeln nacheinander und behalten nur das HTML; CSV-Exporte brauchen keine Bäume. Jetzt per Test abgesichert.
-- Nicht geändert (außerhalb des Rahmens): Die Sanktionsprüfung lädt `origin_tree` je UTXO parallel in einem Thread-Pool, also kurzzeitig mehrere Bäume. `_wallet_name_fuer_utxo` lädt für den Wallet-Namen laufender Trace-Jobs einmal den vollen Baum und verwirft ihn sofort.
-
----
+**Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie).
 
 ## Firefox · „Token fehlt“ hinter StartOS
 
@@ -433,6 +380,61 @@ Aufwand: **unbekannt/hoch** · hängt an libbitcoin
 ---
 
 # Historie / Langtexte
+
+## Erledigt: Umfangreiche Wallets · Bäume seitenweise, nicht alles im Speicher
+
+**Stand:** 2026-09-27 · **erledigt** · Maintainer-Abnahme offen
+
+**Stand:** 2026-09-26 · **offen** · **Priorität 2**
+
+Aufwand: **hoch** — Speicher und Aufbau, nicht nur die Anzeige
+
+Umfangreiche Wallets lähmen SatSage, weil Herkunftsbäume und lange Listen immer komplett im Speicher aufgebaut werden.
+
+Betrifft **Bereits ausgegeben**, **Herkunft** und die entsprechend langen Teile von **Steuerjahr**.
+
+- Lange und tiefe Bäume in **20er-Schritten** aufbauen, davon nur **10** zeigen.
+- Unter der jeweiligen Anzeige die übliche Seitenleiste: `(1–10)` `(11–20)` `(21–30)` … `(höchster−10 – höchster)`, plus Dropdown **10, 20, 50, 100** zur Feinsteuerung.
+- Immer den **nächsten Schritt der gewählten Darstellung** vorladen. Steht `(11–20)`, werden `(21–30)` schon aufgebaut, während `(11–20)` aus dem Speicher gezeichnet werden.
+
+**Fortschritt (2026-09-27):** Schritt 1 (`origin_tree` nicht mehr ausgeliefert) umgesetzt, Rest offen. Trace-Antworten an die Oberfläche (`GET /api/trace?target=…`, Cache-Treffer von `POST /api/trace`, Job-Ergebnis) enthalten den Rohbaum nicht mehr; im Herkunfts-Cache bleibt er für das Fortsetzen. Offen: Blättern in der Oberfläche, `offset`/`limit` auf dem Server, Kinder eines Knotens seitenweise nachladen, schrittweiser Aufbau, Filter auf dem Server. Gemessen an Test-Bäumen (JSON der Antwort): einfache Kette 1 859 → 1 344 B (−28 %), 15 Eingänge × 3 Hops 52 376 → 27 750 B (−47 %), 19 × 6 Hops 117 205 → 60 245 B (−49 %).
+
+**Fortschritt (2026-09-27, Schritte 2–6 + Kandidatenlisten):** umgesetzt. Vorgaben des Maintainers: Kinder je Knoten beim Aufklappen, kein schrittweiser Trace-Aufbau, exakter letzter Bereich, exakte Summen, Steuerjahr-Summen über alles, Seitenleiste statt `#limit-wahl`, Filter auf dem Server, Volumen = Adressgruppen / Alter = UTXOs, Berichte vollständig.
+
+- **Seitenleiste** `web/views/pager.js` (vor den Ansichten geladen): `(1–10)` … exakter letzter Bereich, „…“ bei vielen Seiten, Dropdown 10/20/50/100 je Ansicht im `localStorage`, de/en. Holt je Abruf die doppelte Seitengröße und lädt den nächsten Block im Hintergrund vor. `#limit-wahl` ist weg.
+- **Listen auf dem Server** (`core/listen_fenster.py`, `httpserver/api/listen_fenster.py`): `/api/utxos` und `/api/wallets/<id>/utxos` mit `seite=1` + `teil` (`bestand`/`verlauf`), `modus`, `offset`, `limit`, `sort`, `q` (+ `q_nach`/`q_vor`), `lang`. Sortiert und gefiltert wird auf Rohfeldern, angereichert nur das Fenster. `total_count`/`total_sats` bleiben exakt. Der Stichwortfilter ist eine 1:1-Portierung der Browser-Logik.
+- **Steuerjahr** (`core/steuer_fenster.py`): `/api/tax?seite=1` mit `teil` (`alle`/`erfuellt`/`offen`/`abgaenge`/`zeilen`). Kennzahlen, Zeitstrahl und Gruppensummen über alles, Zeilen und Veräußerungen seitenweise, gelbe Schlüssel vollständig (`gelb_keys`). Nebenbei: Selbstanzeige-Kandidaten mit Index nach Ausgabe-Tx (über 600 s → 0,5 s).
+- **Baum knotenweise** (`core/trace_knoten.py`): `GET /api/trace?target=…&seite=1&limit=` liefert Wurzel + erste Kinderseite (`children_total`, `baum_marken`). `GET /api/trace/knoten?target=&pfad=&offset=&limit=` liefert Kinder eines Knotens aus dem gespeicherten Baum. „Alles aufklappen“ holt den Baum einmal ganz (ein Baum im Speicher, Verhalten 1:1).
+- **Herkunft-Cache als Knotentabelle** (`core/trace_cache.py`, `VERSION_KNOTEN = 2`): gleiche Teilbäume nur einmal (DAG, JSON). `id`/`depth` aus der Position. Geschrieben wird nur, wenn der Rückweg exakt ist, sonst das alte Format. Alte Dateien bleiben lesbar und werden beim nächsten Speichern ersetzt. Stresslabor: größter Baum 5,3 MB → 485 KB, alle 410 Bäume 10,3 → 4,8 MB, Laden gleich schnell (~30 ms).
+- **Fenster-Caches:** Steuer-Auswertung (LRU 2) und Label-Auszüge für die Stichwortsuche. Schlüssel ist ein Abdruck aus UTXO-/Verlaufs-Cache (je Datei), Ordner-mtime von Herkunftsbäumen/Ingress/Tx-Cache, Börsen-/Label-Bestand, eigenen Adressen, `.env` (Wallets, Steuer-Einstellungen), Parametern, Sprache und Tag. Steuer-Seitenwechsel 0,85 s → ~1 ms, zweite Suche in „Bereits ausgegeben“ 2,5 → 0,5 s. Der Browser verwirft vorgeladene Seiten bei Sprachwechsel, Sortierwechsel, fertigem Scan und Cache-Leeren.
+- **API:** keine Brüche. Alles Neue hängt an `seite=1` oder dem neuen Endpunkt; ohne Parameter wie bisher.
+- **Bericht Sat-Geschichte · Kandidaten** (`core/steuer_fenster.sa_fenster`): `GET /api/tax/selbstanzeige/kandidaten?seite=1` mit `teil` (`alle`/`abfluesse`/`utxos`/`zeilen`), `offset`, `limit`, `limit_utxos`, `q`; `werte=1` liefert die Checkbox-Werte **aller** Treffer. Regel des Maintainers: Die Auswahl lebt im Browser als Menge (`Zustand.saGewaehlt`) und übersteht Blättern, Vorladen und Filter; „Alle“/„Keine“ gelten für alle Treffer des aktuellen Filters über alle Seiten; der Bericht nimmt die ganze Auswahl. HTML/CSV-Bericht nehmen die Auswahl zusätzlich per `POST` (JSON), weil sie für eine URL zu lang werden kann; `GET` bleibt. Stresslabor 2025: erste Antwort 5,1 MB → 21 KB, weitere Seite ~9 KB, „Alle“ über 410 UTXOs 31 KB. Neu geladene Kandidaten (Jahr, TxID-Feld, fertiger Trace) setzen die Häkchen wie bisher auf die Vorauswahl zurück.
+- **Bekannt, bewusst so:** Der Zeitstrahl des Steuerjahrs bleibt vollständig (2024 im Labor 1,2 MB). „Alles aufklappen“ lädt den vollen Baum. Die Knotentabelle spart bei Bäumen ohne Rauten nichts.
+
+### Unterpunkt: Herkunftsbäume lazy laden (vereinbarte Spezifikation, 2026-09-27)
+
+**Invariante:** Client und Server halten höchstens **einen** vollen Herkunftsbaum im Speicher — den gerade aufgeklappten. Listen (Herkunft, Bereits ausgegeben, Steuerjahr) liefern nur Meta (`txid:vout`, Betrag, Datum, Labels, Cache-Flag), nie den Baum.
+
+- `GET /api/trace` und alle Listen-APIs lassen `origin_tree`/Baum standardmäßig weg. Der Baum wird nur beim ausdrücklichen Aufklappen eines UTXO geladen; der vorherige wird verworfen (Client: Referenzen und DOM freigeben; Server: nicht im Speicher halten, keine Zwischenspeicher voller Bäume). Ein gespeicherter Baum klappt nicht mehr automatisch voll auf.
+- **(a)** Beim Aufklappen nur die erste Ebene sofort zeichnen; tiefere Ebenen beim Weiterklappen aus dem schon geladenen Baum nachzeichnen (keine neue Anfrage).
+- **(b)** Das Cache-Flag in Listen trägt auch Vollständigkeit und Steuer-Status (`verfolgt_vollstaendig`, `steuer_ausreichend` bzw. was die Oberfläche heute für Marken und Hinweise braucht), damit die bestehenden Hinweise ohne Baum weiter funktionieren.
+- **(c)** Suche/Filter: prüfen, ob der globale Stichwortfilter heute in Baumknoten sucht, und das Verhalten 1:1 erhalten (Meta-Felder oder serverseitig aus dem Cache je Treffer). Geht 1:1 nicht ohne großen Umbau: nicht ändern, sondern dokumentieren.
+- **(d)** Berichte/Exporte (HTML/CSV) laden Bäume serverseitig nacheinander einzeln, nicht alle gleichzeitig.
+- **(e)** Zwischenspeicher: bewusst **keiner** — höchstens ein Baum.
+- **Grenzen:** keine zweite Chain, kein SQLite, Trace-Semantik unverändert, Oberfläche sonst 1:1.
+
+**Fortschritt (2026-09-27):** umgesetzt, noch nicht als erledigt markiert (Abnahme offen).
+
+- Bestandsaufnahme: Die Listen (`/api/utxos`, `/api/wallets/<id>/utxos`, Bereits ausgegeben, Steuerjahr) lasen schon nur die kleine `.meta.json` (`trace_cache.kopf`), nie den Baum. Volle Bäume hielten nur die fertigen Einzel-Trace-Jobs im Job-Speicher (bis zu 20) und die Nav-Abfrage `/api/jobs` schickte sie bei jedem Poll mit; im Browser blieb jeder einmal aufgeklappte Baum im DOM, bis die Liste neu gezeichnet wurde.
+- Server: Fertige Einzel-Trace-Jobs behalten nur Meta (`baum_im_cache`), wenn der Baum in diesem Lauf im Herkunfts-Cache gelandet ist; ohne Cache-Datei bleibt der Baum (ohne Rohbaum) im Ergebnis, sonst gäbe es nichts zu zeigen. `/api/jobs` schickt für Trace-Jobs nur Meta.
+- **(a)** war schon so: erste Ebene sofort, tiefere Ebenen aus den geladenen Knotendaten (`WeakMap`) beim Weiterklappen; „Alles aufklappen“ nur per Knopf. Der ungenutzte Auto-Aufklapp-Code für gespeicherte Bäume (`oeffneAusCache`) ist entfernt.
+- Client: Beim Zeichnen eines Baums wird der zuvor offene verworfen (DOM leeren, UTXO zuklappen). Läuft dort gerade eine Analyse, bleibt sie stehen; wird sie fertig, gewinnt der zuletzt gezeichnete Baum.
+- **(b)** Listen-Einträge tragen zusätzlich `steuer_ausreichend` (neben `verfolgt`, `verfolgt_vollstaendig`, `unvollstaendig`, `juengste_sats_ts`, `mix_arten`, `boerse_namen`, `tx_class`). Die Oberfläche nutzt das neue Feld noch nicht; ihre Marken kamen schon aus der Meta.
+- **(c)** Der Stichwortfilter sucht nicht in Baumknoten, nur in Gruppen-/UTXO-Zeilen (Schlüssel, Adresse, Zeit, Labels aus `mix_arten`/`boerse_namen`/`tx_class`). Die Labels kommen aus der Meta bzw. bleiben am UTXO-Objekt, auch wenn der Baum verworfen wird — Verhalten unverändert, kein Umbau nötig.
+- **(d)** Steuer- und Selbstanzeige-Bericht laden die Hop-Ketten schon einzeln nacheinander und behalten nur das HTML; CSV-Exporte brauchen keine Bäume. Jetzt per Test abgesichert.
+- Nicht geändert (außerhalb des Rahmens): Die Sanktionsprüfung lädt `origin_tree` je UTXO parallel in einem Thread-Pool, also kurzzeitig mehrere Bäume. `_wallet_name_fuer_utxo` lädt für den Wallet-Namen laufender Trace-Jobs einmal den vollen Baum und verwirft ihn sofort.
+
+---
 
 ## Erledigt: GUI-Start · Sprachstrings vor Cache und Verbindungen
 

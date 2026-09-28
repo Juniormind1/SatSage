@@ -414,7 +414,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("border-style: dotted", self.css)
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("_setzeSteuerGruppe", steuer)
-        self.assertIn("_saFilterNachladen", steuer)
+        # Kandidaten des Berichts: Filter über alle Seiten (Server, ISSUES P2).
+        self.assertIn("async function ladeSaSeitenNeu", steuer)
         self.assertIn("dataset.filterAus", steuer)
         import json
         de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))

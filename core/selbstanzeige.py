@@ -736,8 +736,9 @@ def auswerten(
     stichtag = hypothese_stichtag(jahr)
 
     vorgang_meta = []
+    je_spender = _nach_spender(utxos) if gewaehlt else None
     for spender in gewaehlt:
-        wann = _abfluss_zeit(utxos, spender)
+        wann = _abfluss_zeit(utxos, spender, je_spender)
         if wann is None:
             continue
         betrag = netto.get(spender, 0)
