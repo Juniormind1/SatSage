@@ -145,7 +145,10 @@ def fenster_antwort(
     own = _eigene_adressen(state)
     imm = state.immutable_cache_dir
 
-    if mempool:
+    # „Bereits ausgegeben“ ist der Verlaufs-Cache. Ein Electrs-Mempool-Check
+    # ändert diese Liste nicht und kostet sonst den Verbindungsversuch, bevor
+    # die erste Seite überhaupt geschnitten wird.
+    if mempool and teil != "verlauf":
         # limit=0: nur Summen, kein Eintrag wird angereichert; Pending/
         # bestätigte Spends kommen angereichert zurück (``vorab``).
         anhang = _verlaufs_anhang(state, entries, limit=0, sort=sort)

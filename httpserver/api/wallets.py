@@ -813,17 +813,20 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
         state.cache_dir,
         immutable_cache_dir=state.immutable_cache_dir,
     )
+    # „Bereits ausgegeben“ liest den Verlaufs-Cache. Electrs ändert die Liste nicht.
+    teil_verlauf = (query.get("teil") or [""])[0] == "verlauf"
+    mempool_an = bool(mempool and gecacht is not None and not teil_verlauf)
     if fenster:
         ergebnis = fenster_antwort(
             state, entries=[entry], gesammelt=gecacht or [], query=query,
-            mempool=bool(mempool and gecacht is not None),
+            mempool=mempool_an,
             xpub=entry.analyse_schluessel,
         )
         ergebnis.update({
             "wallet": entry.display_name,
             "wallet_id": kennung,
             "has_cache": gecacht is not None,
-            "mempool_checked": bool(mempool and gecacht is not None),
+            "mempool_checked": mempool_an,
         })
         return ergebnis
     if gecacht is None:
@@ -1082,6 +1085,9 @@ def api_alle_utxos(state: AppState, query: dict) -> dict:
     mempool_an = str((query.get("mempool") or ["1"])[0]).strip().lower() not in (
         "0", "false", "no", "nein", "off",
     )
+    # Verlaufsseite: kein Electrs. Die Ausgaben stehen schon im Cache.
+    if (query.get("teil") or [""])[0] == "verlauf":
+        mempool_an = False
 
     from httpserver.api.listen_fenster import fenster_antwort, ist_fenster
 

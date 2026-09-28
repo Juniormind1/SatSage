@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Bereits ausgegeben:** Aufklappen liest nur noch den Verlaufs-Cache. Der Electrum-Mempool-Check entfällt für diesen Abschnitt — er änderte die 670 historischen Ausgaben nicht und hielt „Lade aus Cache…“ so lange fest, wie der Verbindungsversuch dauerte.
+
 - **Steuerjahr · Lot-Donut am angeklickten Punkt:** Liegt das Herkunftsnetz über dem Zeitstrahl, ist die Umrandung des angeklickten Punkts der Los-Ring. Grün, orange und grau kommen aus den Endknoten des Netzes. Der Außenradius bleibt, das Loch ist halb so groß. Eine Farbe bleibt ein Ring mit Loch, in der Herkunftsliste und im Zeitstrahl. Der Punkt selbst und sein Tooltip bleiben in der gewohnten Größe. Schließt das Netz, ist der Punkt wieder einfarbig.
 - **Herkunft · Lot-Donut an der offenen Wurzel:** Ist der Herkunftszweig aufgeklappt und der Baum geladen, wird der Punkt dieser UTXO-Zeile zum Ring. Sichtbar etwa 32 px, die Zeile bleibt so hoch wie vorher. Der Text rechts hat Abstand bis zum Ringrand. Die Scheiben mischen die Blatt-Lose nach Betrag: grün außerhalb der Haltefrist, orange innerhalb, grau ohne Datum oder unaufgelöst. Interne Zwischenschritte zählen nicht mit. Zugeklappt bleibt der Punkt klein und grün wie bisher. Die übrigen Punkte im Baum bleiben unverändert.
 

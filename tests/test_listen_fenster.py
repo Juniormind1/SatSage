@@ -289,6 +289,24 @@ class TestFensterApi(ApiTestBasis):
         self.assertTrue(körper["has_cache"])
         self.assertIn("sanctions", körper)
 
+    def test_verlauf_seite_ohne_mempool_rundlauf(self):
+        """Aufklappen darf keinen Electrs-Check anstoßen, auch ohne mempool=0."""
+        from unittest import mock
+
+        verlauf = [dict(roh(f"{i:02x}", 1000 + i, BIP84_RECEIVE_0, vout=i), spent=True,
+                        spent_txid=txid("ff"), spent_time_ts=1_700_000_000 + i)
+                   for i in range(5)]
+        main.save_xpub_verlauf_cache(BIP84_ZPUB, verlauf, self.cache)
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch("server._eigener_fulcrum_client") as client:
+            _, körper = self.anfrage(
+                f"/api/wallets/{kennung}/utxos?seite=1&teil=verlauf"
+                "&modus=age-desc&limit=2")
+            client.assert_not_called()
+        self.assertEqual(körper["verlauf"]["fenster"]["total"], 5)
+        self.assertEqual(len(körper["verlauf"]["utxos"]), 2)
+        self.assertFalse(körper["mempool_checked"])
+
     def test_verlauf_seite(self):
         verlauf = [dict(roh(f"{i:02x}", 1000 + i, BIP84_RECEIVE_0, vout=i), spent=True,
                         spent_txid=txid("ff"), spent_time_ts=1_700_000_000 + i)

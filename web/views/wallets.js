@@ -714,6 +714,9 @@ function walletListenParameter(teil, offset, limit, filter = "") {
   p.set("offset", String(offset));
   p.set("limit", String(limit));
   p.set("lang", uiSprache());
+  // Ausgegeben kommt aus dem Verlaufs-Cache. Der Mempool-Check gehört zum
+  // Bestand (Hintergrund nach dem Erst-Paint), nicht zum Aufklappen.
+  if (teil === "verlauf") p.set("mempool", "0");
   return p.toString();
 }
 
