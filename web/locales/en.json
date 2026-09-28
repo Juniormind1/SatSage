@@ -783,7 +783,7 @@
   "tax.netzReport": "HTML report",
   "tax.netzReportTitle": "HTML report for this UTXO (what-if). Ticked outflows/UTXOs below are included.",
   "tax.netzEnd": "Close (Esc)",
-  "tax.netzPointTitle": "Show origin network — click again, Esc or click on empty space hides it.",
+  "tax.netzPointTitle": "Show origin network — click again, Esc or click on empty space hides it. Double-click: HTML report.",
   "tax.netzShare": "Share of the selected output: {pct}",
   "tax.netzBundle": "{n} inputs (bundled)",
   "tax.netzBundleRange": "Output times {von} – {bis}",

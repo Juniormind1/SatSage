@@ -19,6 +19,8 @@ const PUNKT_KLASSE = {
   cycle: "knoten-krit",
 };
 
+
+
 /**
  * Oberste Ebene (Adressen) startet zu. Darunter: gespeicherte Bäume offen,
  * ungescannte UTXOs zu — Aufklappen würde den Node fragen.
@@ -236,6 +238,7 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
   if (!zweig) return;
 
   setzeKlapp(kopf, klapp, zweig, true);
+  block.classList.add("herkunft-offen");
   if (neu) {
     logZeile(
       t("ui.hard.2b19792199", { key: kuerze(schluessel, 12, 8) }),
@@ -248,6 +251,7 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
     await oeffneZweig(utxo, zweig, klapp, jobId);
   }
   aktualisiereTraceWurzelKopf(utxo, block);
+  if (zweig.dataset.geladen === "ja") aktualisiereLotDonut(block, zweig);
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
@@ -825,6 +829,13 @@ function zeichneTraceWurzel(utxo) {
 
     const auf = zweig.hidden;
     setzeKlapp(zeile, klapp, zweig, auf);
+    if (auf) {
+      block.classList.add("herkunft-offen");
+      if (zweig.dataset.geladen === "ja") aktualisiereLotDonut(block, zweig);
+    } else {
+      block.classList.remove("herkunft-offen");
+      entferneLotDonut(punkt);
+    }
     if (!auf) return; // nur zuklappen
     // Schon geladen: nur aufklappen, kein erneuter Cache-/Analyse-Lauf.
     if (zweig.dataset.geladen === "ja" || zweig.dataset.geladen === "laeuft") {
@@ -844,6 +855,8 @@ function zeichneTraceWurzel(utxo) {
 async function ladeGespeichertenZweig(utxo, zweig, klapp, ausJob = null) {
   if (!utxo || !utxo.key || !zweig) return false;
   zweig.dataset.geladen = "laeuft";
+  delete zweig._lotKinder;
+  entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
   zweig.replaceChildren(hinweisZeile(t("common.looking")));
   try {
     const ziel = (ausJob && ausJob.target) || utxo.key;
@@ -982,6 +995,8 @@ async function starteZweigTrace(
 ) {
   const force = Boolean(opts && opts.force);
   zweig.dataset.geladen = "laeuft";
+  delete zweig._lotKinder;
+  entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
 
   const status = document.createElement("div");
   status.className = "zweig-status";
@@ -1289,15 +1304,22 @@ function gebeAnderenBaumFrei(zweig) {
   if (alt.dataset.geladen === "laeuft") return;
   alt.replaceChildren();
   alt.dataset.geladen = "";
+  delete alt._lotKinder;
   delete alt.dataset.teilbaum;
   delete alt.dataset.baumZiel;
-  const kopf = alt.closest(".utxo-wurzel")?.querySelector(".utxo-kopf");
+  const wurzelAlt = alt.closest(".utxo-wurzel");
+  const kopf = wurzelAlt?.querySelector(".utxo-kopf");
+  if (wurzelAlt) wurzelAlt.classList.remove("herkunft-offen");
+  entferneLotDonut(wurzelLotPunkt(wurzelAlt));
   setzeKlapp(kopf, kopf && kopf.querySelector(".klapp"), alt, false);
 }
 
 function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   gebeAnderenBaumFrei(zweig);
   zweig.replaceChildren();
+  delete zweig._lotKinder;
+  const wurzelVorab = zweig.closest(".utxo-wurzel");
+  entferneLotDonut(wurzelLotPunkt(wurzelVorab));
 
   if (!ergebnis.found) {
     zweig.append(hinweisZeile(ergebnis.error || t("trace.none")));
@@ -1327,6 +1349,7 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
       zweig.append(hinweisZeile(t("trace.incompleteEmpty")));
       zeichneFolgeBand(ergebnis, zweig, utxo, klapp);
     }
+    aktualisiereLotDonut(zweig.closest(".utxo-wurzel"), zweig, ergebnis.children);
     return;
   }
 
@@ -1354,6 +1377,254 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   const quelle = ergebnis.source ? `Quelle: ${ergebnis.source}. ` : "";
   fuss.textContent = quelle + vorbehalt;
   zweig.append(fuss);
+  aktualisiereLotDonut(zweig.closest(".utxo-wurzel"), zweig, ergebnis.children);
+}
+
+/**
+ * Haltefrist-Lose der Blatt-Knoten, wertgewichtet.
+ *
+ * Interne Hops sind kein Lot — ihr Gewicht geht an die Kinder.
+ * Liefert ``{gruen, orange, grau}`` oder ``null``, wenn nichts zu mischen ist.
+ */
+function lotBetrag(knoten) {
+  return Math.max(0, Number(knoten && knoten.amount_sats) || 0);
+}
+
+/** Betrag des Teilbaums: Blätter ihr amount_sats, interne Hops die Summe der Kinder. */
+function lotTeilbaumBetrag(knoten, gesehen) {
+  if (!knoten || typeof knoten !== "object" || gesehen.has(knoten)) return 0;
+  gesehen.add(knoten);
+  if (knoten.type !== "internal") return lotBetrag(knoten);
+  const eigene = Array.isArray(knoten.children) ? knoten.children : [];
+  const summe = eigene.reduce((s, k) => s + lotTeilbaumBetrag(k, gesehen), 0);
+  return summe > 0 ? summe : lotBetrag(knoten);
+}
+
+function lotMischungAusBaum(kinder) {
+  if (!Array.isArray(kinder) || !kinder.length) return null;
+  const gesehen = new Set();
+  const starts = kinder.map((knoten) => ({
+    knoten,
+    gewicht: lotTeilbaumBetrag(knoten, gesehen),
+  }));
+  let summe = starts.reduce((s, e) => s + e.gewicht, 0);
+  if (!(summe > 0)) {
+    // Kein Betrag im Baum: jedes Blatt Gewicht 1, interne Hops teilen gleich.
+    starts.forEach((e) => { e.gewicht = 1; });
+  }
+  const acc = { gruen: 0, orange: 0, grau: 0 };
+  const stapel = [...starts];
+  const besucht = new Set();
+  while (stapel.length) {
+    const { knoten, gewicht } = stapel.pop();
+    if (!knoten || typeof knoten !== "object" || !(gewicht > 0)) continue;
+    if (besucht.has(knoten)) continue;
+    besucht.add(knoten);
+    if (knoten.type === "internal") {
+      const eigene = Array.isArray(knoten.children) ? knoten.children : [];
+      if (!eigene.length) {
+        acc.grau += gewicht;
+        continue;
+      }
+      const gesehenKind = new Set();
+      const teile = eigene.map((k) => lotTeilbaumBetrag(k, gesehenKind));
+      const teilSumme = teile.reduce((s, w) => s + w, 0);
+      eigene.forEach((k, i) => {
+        const anteil = teilSumme > 0 ? teile[i] / teilSumme : 1 / eigene.length;
+        if (anteil > 0) stapel.push({ knoten: k, gewicht: gewicht * anteil });
+      });
+      continue;
+    }
+    acc[lotFarbeBlatt(knoten)] += gewicht;
+  }
+  summe = acc.gruen + acc.orange + acc.grau;
+  return summe > 0 ? acc : null;
+}
+
+/** Grün außerhalb der Frist, orange innerhalb, grau ohne Datum oder unaufgelöst. */
+function lotFarbeBlatt(knoten) {
+  const typ = knoten && knoten.type;
+  if (typ !== "external" && typ !== "coinbase") return "grau";
+  const ts = Number(knoten.time_ts);
+  if (!Number.isFinite(ts) || ts <= 0) return "grau";
+  return lotFristErfuellt(ts) ? "gruen" : "orange";
+}
+
+/**
+ * Bezug ist jetzt. Stichtag (Anschaffung danach bleibt orange) nur, wenn
+ * ``steuerEinstellungen().stichtag_iso`` schon im Client liegt — dieselbe
+ * Regel wie ``haltefrist_entscheidung``, ohne neue UI-Texte.
+ */
+function lotFristErfuellt(timeTs) {
+  const steuer = typeof steuerEinstellungen === "function" ? steuerEinstellungen() : {};
+  const jahre = Number(steuer.haltefrist_jahre);
+  const fristJahre = Number.isFinite(jahre) ? jahre : 1;
+  if (fristJahre <= 0) return true;
+  const anschaffung = new Date(timeTs * 1000);
+  const iso = String(steuer.stichtag_iso || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const monat = String(anschaffung.getMonth() + 1).padStart(2, "0");
+    const tag = String(anschaffung.getDate()).padStart(2, "0");
+    if (`${anschaffung.getFullYear()}-${monat}-${tag}` > iso) return false;
+  }
+  const ende = lotPlusJahre(anschaffung, fristJahre);
+  return ende.getTime() <= Date.now();
+}
+
+function lotPlusJahre(zeitpunkt, jahre) {
+  const ziel = new Date(zeitpunkt.getTime());
+  const monat = ziel.getMonth();
+  ziel.setFullYear(ziel.getFullYear() + jahre);
+  if (ziel.getMonth() !== monat) ziel.setDate(0);
+  return ziel;
+}
+
+/** Drei ganzzahlige Prozente, Summe 100. Größter Rest gewinnt. */
+function lotProzente(mischung) {
+  const summe = mischung.gruen + mischung.orange + mischung.grau;
+  if (!(summe > 0)) return null;
+  const roh = ["gruen", "orange", "grau"].map((name) => {
+    const exakt = (mischung[name] / summe) * 100;
+    return { name, boden: Math.floor(exakt), rest: exakt - Math.floor(exakt) };
+  });
+  let offen = 100 - roh.reduce((s, t) => s + t.boden, 0);
+  const reihe = [...roh].sort((a, b) => b.rest - a.rest || (a.name < b.name ? -1 : 1));
+  for (const eintrag of reihe) {
+    if (offen <= 0) break;
+    if (eintrag.rest <= 0 && offen > 0 && roh.every((t) => t.boden === 0)) break;
+    if (eintrag.rest <= 0) continue;
+    eintrag.boden += 1;
+    offen -= 1;
+  }
+  // Rundungsreste ohne Bruchteil (z. B. exakt 100) bleiben; Defizit auf den größten Wert.
+  if (offen > 0) {
+    reihe.sort((a, b) => b.boden - a.boden);
+    reihe[0].boden += offen;
+  }
+  const aus = {};
+  for (const eintrag of roh) aus[eintrag.name] = eintrag.boden;
+  return aus;
+}
+
+function entferneLotDonut(punkt) {
+  if (!punkt) return;
+  punkt.classList.remove("lot-donut");
+  punkt.style.removeProperty("--lot-g");
+  punkt.style.removeProperty("--lot-o");
+  punkt.style.background = "";
+  delete punkt.dataset.lotGruen;
+  delete punkt.dataset.lotOrange;
+  delete punkt.dataset.lotGrau;
+  if (!punkt.getAttribute("class") || punkt.className === "knoten-punkt") {
+    punkt.className = "knoten-punkt knoten-eigen";
+  } else if (!punkt.classList.contains("knoten-eigen") && punkt.closest(".utxo-kopf")) {
+    punkt.classList.add("knoten-eigen");
+  }
+}
+
+function setzeLotDonut(punkt, mischung) {
+  if (!punkt) return;
+  const prozent = mischung ? lotProzente(mischung) : null;
+  const summe = prozent
+    ? prozent.gruen + prozent.orange + prozent.grau
+    : 0;
+  if (!prozent || summe <= 0) {
+    entferneLotDonut(punkt);
+    return;
+  }
+  const stops = [];
+  let grad = 0;
+  const scheiben = [
+    ["gruen", "var(--lot-gruen)"],
+    ["orange", "var(--lot-orange)"],
+    ["grau", "var(--lot-grau)"],
+  ].filter(([name]) => prozent[name] > 0);
+  scheiben.forEach(([name, farbe], index) => {
+    const ende = index === scheiben.length - 1
+      ? 360
+      : Math.round((grad + prozent[name] * 3.6) * 1000) / 1000;
+    stops.push(`${farbe} ${grad}deg ${ende}deg`);
+    grad = ende;
+  });
+  punkt.classList.add("lot-donut");
+  punkt.style.setProperty("--lot-g", String(prozent.gruen));
+  punkt.style.setProperty("--lot-o", String(prozent.orange));
+  punkt.style.background = "";
+  if (stops.length > 1) {
+    punkt.style.background = `conic-gradient(${stops.join(", ")})`;
+  } else {
+    punkt.style.background = scheiben[0][1];
+  }
+  punkt.dataset.lotGruen = String(prozent.gruen);
+  punkt.dataset.lotOrange = String(prozent.orange);
+  punkt.dataset.lotGrau = String(prozent.grau);
+}
+
+function wurzelLotPunkt(wurzel) {
+  return wurzel
+    ? wurzel.querySelector(":scope > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt")
+    : null;
+}
+
+/**
+ * Donut nur bei offener Wurzel und geladenem Zweig.
+ * *kinder* optional — sonst der beim Zeichnen gemerkte Baum, sonst DOM.
+ * Seitenweise Wurzeln holen den vollen Cache-Baum einmal nur für die Mischung.
+ */
+function aktualisiereLotDonut(wurzel, zweig, kinder) {
+  const punkt = wurzelLotPunkt(wurzel);
+  if (!punkt || !wurzel || !zweig) return;
+  // Merken, auch solange der Zweig zu ist — Aufklappen malt daraus.
+  if (Array.isArray(kinder)) zweig._lotKinder = kinder;
+  if (!wurzel.classList.contains("herkunft-offen") || zweig.hidden) {
+    entferneLotDonut(punkt);
+    return;
+  }
+  if (zweig.dataset.geladen !== "ja") {
+    entferneLotDonut(punkt);
+    return;
+  }
+  const quelle = Array.isArray(kinder) ? kinder : zweig._lotKinder;
+  if (Array.isArray(quelle) && lotKinderVollstaendig(quelle)) {
+    const mischung = lotMischungAusBaum(quelle);
+    if (mischung) setzeLotDonut(punkt, mischung);
+    else entferneLotDonut(punkt);
+    return;
+  }
+  const ziel = zweig.dataset.baumZiel;
+  if (ziel && !zweig._lotLauf) {
+    zweig._lotLauf = api(`/trace?target=${encodeURIComponent(ziel)}`)
+      .then((g) => {
+        if (zweig.dataset.baumZiel !== ziel) return;
+        const voll = g && g.vorhanden && g.ergebnis && g.ergebnis.children;
+        if (!Array.isArray(voll)) return;
+        zweig._lotKinder = voll;
+        if (wurzel.classList.contains("herkunft-offen") && !zweig.hidden) {
+          const mischung = lotMischungAusBaum(voll);
+          if (mischung) setzeLotDonut(punkt, mischung);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { delete zweig._lotLauf; });
+    return;
+  }
+  if (Array.isArray(quelle)) {
+    const mischung = lotMischungAusBaum(quelle);
+    if (mischung) setzeLotDonut(punkt, mischung);
+    else entferneLotDonut(punkt);
+  }
+}
+
+/** Seitenweise Kinder haben keine ``children``-Arrays — die Mischung braucht den vollen Baum. */
+function lotKinderVollstaendig(kinder) {
+  const stapel = [...kinder];
+  while (stapel.length) {
+    const knoten = stapel.pop();
+    if (!knoten || knoten.type !== "internal") continue;
+    if (!Array.isArray(knoten.children)) return false;
+    stapel.push(...knoten.children);
+  }
+  return true;
 }
 
 /** Gezielte Suche nach TxID oder UTXO — Ergebnis erscheint oben in der Liste. */
@@ -1388,9 +1659,11 @@ async function starteTrace() {
     const klapp = block.querySelector(".klapp");
     if (zweig) {
       zweig.dataset.geladen = "";
+      delete zweig._lotKinder;
       zweig.replaceChildren();
-      zweig.hidden = false;
-      if (klapp) klapp.textContent = "▾";
+      entferneLotDonut(wurzelLotPunkt(block));
+      const zeile = block.querySelector(".utxo-kopf");
+      setzeKlapp(zeile, klapp, zweig, true);
       // Frisch laden (Cache oder Job) und Kopfzeile danach setzen.
       await oeffneZweig(utxo, zweig, klapp);
       aktualisiereTraceWurzelKopf(utxo, block);
@@ -1422,9 +1695,7 @@ async function starteTrace() {
   // die Kopfzeile wird nicht zuverlässig nachgezogen.
   if (zweig && klapp) {
     const zeile = block.querySelector(".utxo-kopf");
-    if (zeile) zeile.setAttribute("aria-expanded", "true");
-    zweig.hidden = false;
-    klapp.textContent = "▾";
+    setzeKlapp(zeile, klapp, zweig, true);
     await oeffneZweig(utxo, zweig, klapp);
     aktualisiereTraceWurzelKopf(utxo, block);
   }

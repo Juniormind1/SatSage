@@ -1051,12 +1051,26 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     ].filter(Boolean).join("\n");
     punkt.append(tip);
     if (key) {
+      // Einfachklick wartet, bis klar ist, dass kein Doppelklick folgt.
+      let einfach = null;
       punkt.addEventListener("click", (ereignis) => {
         ereignis.preventDefault();
         ereignis.stopPropagation();
-        // Herkunftsnetz ein/aus (views/herkunftsnetz.js); der HTML-Report
-        // sitzt jetzt in dessen Hinweiszeile.
-        herkunftsnetzUmschalten(key);
+        if (ereignis.detail > 1) return;
+        if (einfach) clearTimeout(einfach);
+        einfach = setTimeout(() => {
+          einfach = null;
+          herkunftsnetzUmschalten(key);
+        }, 280);
+      });
+      punkt.addEventListener("dblclick", (ereignis) => {
+        ereignis.preventDefault();
+        ereignis.stopPropagation();
+        if (einfach) {
+          clearTimeout(einfach);
+          einfach = null;
+        }
+        herkunftsnetzBericht(key);
       });
     }
     spur.append(punkt);

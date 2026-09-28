@@ -783,7 +783,7 @@
   "tax.netzReport": "HTML-Report",
   "tax.netzReportTitle": "HTML-Report für dieses UTXO (Was-wäre-wenn). Angekreuzte Abflüsse/UTXOs unten werden mit einbezogen.",
   "tax.netzEnd": "Beenden (Esc)",
-  "tax.netzPointTitle": "Herkunftsnetz einblenden — erneut klicken, Esc oder Klick ins Leere blendet es aus.",
+  "tax.netzPointTitle": "Herkunftsnetz einblenden — erneut klicken, Esc oder Klick ins Leere blendet es aus. Doppelklick: HTML-Bericht.",
   "tax.netzShare": "Anteil am gewählten Output: {pct}",
   "tax.netzBundle": "{n} Eingänge (gebündelt)",
   "tax.netzBundleRange": "Output-Zeiten {von} – {bis}",

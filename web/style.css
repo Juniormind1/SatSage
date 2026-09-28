@@ -38,6 +38,10 @@ html[data-theme="light"] {
      zusätzlich in der Form: eigen eckig, extern rund. */
   --eigen:      #157F3C;
   --fremd:      #E14A2B;
+  /* Haltefrist am Herkunfts-Donut — dieselben Achsenfarben wie Steuerjahr. */
+  --lot-gruen:  var(--gut);
+  --lot-orange: var(--warn);
+  --lot-grau:   var(--gedaempft);
 
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -70,6 +74,9 @@ html[data-theme="dark"] {
   --auf-akzent: #1A1008;
   --eigen:      #5EE88A;
   --fremd:      #FF5F45;
+  --lot-gruen:  var(--gut);
+  --lot-orange: var(--warn);
+  --lot-grau:   var(--gedaempft);
 }
 
 * { box-sizing: border-box; }
@@ -1963,6 +1970,41 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   padding: 6px 0 2px;
 }
 .utxo-wurzel > .baum-knoten { align-items: center; }
+/* Offene Wurzel: nur dieser Punkt wird zum Lot-Donut. Kinder bleiben 7×7. */
+.utxo-wurzel.herkunft-offen .utxo-kopf {
+  align-items: center;
+}
+.utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-punkt.lot-donut {
+  /* Layout bleibt 7×7, damit die Zeile so hoch bleibt wie vorher.
+     Sichtbar ~32 px, das ist die Höhe von Pfeil plus Zeilenabstand. */
+  position: relative;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  box-sizing: border-box;
+  background: var(--lot-grau);
+  transform: scale(4.57);
+  transform-origin: center;
+}
+/* Loch als eigene Fläche — kein mask, das in Edge am Inline-Verlauf verschwindet. */
+.utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-punkt.lot-donut::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 30%;
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  /* Zeile ist durchsichtig; Hover färbt den Knopf. Loch folgt dem Knopf. */
+  background: Canvas;
+  background: inherit;
+  pointer-events: none;
+}
+.utxo-wurzel.herkunft-offen .utxo-kopf:hover > .knoten-punkt.lot-donut::after {
+  background: var(--flaeche-2);
+}
 .utxo-zweig { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie); }
 .zweig-status {
   display: flex;
@@ -2497,6 +2539,57 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .achse-spur.netz-an .achse-punkt.netz-fokus {
   z-index: 5;
   box-shadow: 0 0 0 2px var(--netz);
+}
+/* Los-Doughnut nur am angeklickten Punkt, solange das Netz liegt.
+   Layout bleibt die Punktgröße — der Ring wird darüber gezeichnet. */
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot {
+  /* Layout bleibt die Punktgröße. Sichtbar ~32 px, zentriert auf demselben Ort. */
+  transform: translate(-50%, 50%) scale(2.9);
+  z-index: 6;
+  background:
+    conic-gradient(
+      var(--lot-gruen) calc(var(--lot-g) * 1%),
+      var(--lot-orange) 0 calc((var(--lot-g) + var(--lot-o)) * 1%),
+      var(--lot-grau) 0
+    );
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"] {
+  background: conic-gradient(
+    var(--lot-gruen) calc(var(--lot-g) * 1%),
+    var(--lot-grau) 0
+  );
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-grau="0"] {
+  background: conic-gradient(
+    var(--lot-gruen) calc(var(--lot-g) * 1%),
+    var(--lot-orange) 0
+  );
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"] {
+  background: conic-gradient(
+    var(--lot-orange) calc(var(--lot-o) * 1%),
+    var(--lot-grau) 0
+  );
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"][data-lot-grau="0"] {
+  background: var(--lot-gruen);
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-grau="0"] {
+  background: var(--lot-orange);
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-orange="0"] {
+  background: var(--lot-grau);
+}
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 30%;
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  background: var(--flaeche);
+  pointer-events: none;
 }
 .netz-schicht { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .netz-kanten {

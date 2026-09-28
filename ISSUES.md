@@ -493,6 +493,68 @@ Fulcrum/Electrs-Auswahl: **erledigt**.
 Aufwand: **sehr hoch** (Produkt + Crypto-Flow)
 
 Message-Signatur A (Besitz, cachebar) + B (Report-gebunden). Detail in Historie.
+Ausführung später und enger: Abschnitt „Nachweis · HTML-Report + Proof-JSON“.
+
+---
+---
+
+## Nachweis · HTML-Report + Proof-JSON (ohne XPUB)
+
+**Stand:** 2026-09-28 · **später** · kein MVP · **Priorität niedrig**
+**Zweck:** Herkunftstrace gegenüber Dritten (Steuerberatung / Finanzamt) nachvollziehbar machen, ohne einen XPUB oder Ableitungspfade herauszugeben. On-Chain-Kanten bleiben öffentlich; bewiesen wird nur das Label „diese Adresse ist meine, in diesem Report“.
+
+### Behauptung, nicht die Webseite
+
+- Signiert wird nicht das HTML und nicht der Hop (Tx).
+- Signiert wird eine kanonische Behauptungsliste: jede als *eigen* markierte Adresse plus die Kanten-Txids dazwischen. Fremde Blätter (Börse, CoinJoin-Peer, unaufgelöst) stehen nicht in der Liste.
+- Eine Message für alle Adressen. Klassisches Sign/Verify Message bindet über den verwendeten Schlüssel, nicht über einen anderen Text pro Zeile.
+- Signaturen liegen *neben* dem gehashten Körper. Nachtragen ändert den `report_hash` nicht (signaturappend-only). Halb signiert = gültiges Teildossier; fehlende Sig = Knoten unbewiesen, Haltedauer dort nicht anerkannt.
+
+### Dateien
+
+Nach dem Einfrieren, Signaturfelder leer:
+
+- `herkunft-….html` — Erzählung; an gewählten Knoten `Nachweis: ausstehend` / später `ja`; Verweis auf das JSON. Keine Signature-Blobs in den Zeilen.
+- `herkunft-….proof.json` — Version, Jahr/Stichtag, `report_hash`, kanonische `message`, Liste `(adresse, txid:vout, pubkey?, sig?)`, Kanten-Txids. Kein XPUB, kein Pfad, kein Wallet-Seed.
+- `herkunft-….message.txt` — dieselbe kurze Erklärung wie im JSON (`SatSage-Herkunftsnachweis v1` + Hash + Jahr/Stichtag), klein genug für HW-Display und Coldcard-Textdatei (< 500 Byte).
+
+Kanonisches JSON (stabile Schlüsselreihenfolge, feste Bytefolge) für den Hash. HTML-Layout darf sich ändern, der Hash nicht.
+
+### User-UX
+
+HTML-Export bleibt der lesbare Report und erzeugt **nicht** still ein Proof.
+
+Am Dialog **HTML** ein Häkchen **plus Nachweis (unsigniert)**. Standard aus; letzte Wahl merken. Einstellungen höchstens: Vorgabe für dieses Häkchen — nicht die einzige Stelle.
+
+Ist das Häkchen an:
+
+1. Liste der als eigen vorgesehenen Knoten, gruppiert nach Wallet. Abwählen möglich (bleibt im HTML sichtbar, fehlt im JSON).
+2. Bestätigen = Einfrieren. Ab da Behauptungen unverändert.
+3. Drei Dateien in einem Ordner. Trace danach ändern ⇒ neuer Hash, neues JSON; alte Signaturen passen nicht.
+
+Ohne Häkchen: nur HTML, wie bisher.
+
+Danach (nicht in der App automatisiert): Message in Sparrow oder Electrum *Sign/Verify Message* mit der jeweiligen Adresse signieren, Sig zurück in SatSage bzw. ins JSON. Dieselbe Message für jede Adresse.
+
+### Nicht in der App
+
+- Kein Seed, kein xprv, kein Electrum-RPC, kein CKBunker, kein `ckcc` in SatSage.
+- SatSage bleibt watch-only und prüft eingehende Sigs nur lokal (Adresse + Message + Report-Hash).
+- Poweruser-Anhang in der Doku, ausdrücklich nicht empfohlen: Electrum-Daemon `signmessage` (ggf. `--offline`); Coldcard Mk4/Mk3 HSM nur `msg_paths`, kein Spenden; Mapping Adresse→Pfad bleibt lokal und kommt nicht ins Amt-JSON. Arbeitslose Mk3 nur für wirklich leere Alt-Seeds, ein Master-Seed gleichzeitig, Accounts über `msg_paths`.
+
+### Abgrenzung
+
+- Keine Lot-Pie, keine FIFO-Prozente, kein Steuer-P&L in diesem Issue.
+- Kein Beweis für Vollständigkeit aller Wallets und kein Beweis, dass Sats Lose sind.
+- Off-Chain-Herkunft (Börsenbeleg) bleibt extern.
+
+### Abnahme (wenn es so weit ist)
+
+- HTML ohne Häkchen erzeugt kein JSON.
+- HTML mit Häkchen ohne Listen-Bestätigung erzeugt kein JSON.
+- Proof enthält nur bestätigte eigene Adressen, keine XPUBs/Pfade.
+- Zweite Sig an bestehendes JSON ändert `report_hash` nicht.
+- Verifier: Hash nachrechnen, Kanten gegen die Chain, gesetzte Sigs prüfen, fehlende als unbewiesen zählen.
 
 ---
 ---

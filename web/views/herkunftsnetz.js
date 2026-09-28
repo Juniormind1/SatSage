@@ -28,6 +28,19 @@ function herkunftsnetzAktiv() {
   return Boolean(Herkunftsnetz.key);
 }
 
+/**
+ * HTML-Bericht: angekreuzte Zeilen, sonst nur dieses UTXO.
+ * Doppelklick auf den Punkt und der Knopf in der Hinweiszeile.
+ */
+function herkunftsnetzBericht(key) {
+  if (!key || typeof ladeSelbstanzeigeExport !== "function") return;
+  const angekreuzt = typeof saAnkreuzAuswahl === "function"
+    ? saAnkreuzAuswahl()
+    : { txids: [], utxos: [] };
+  const hatAuswahl = angekreuzt.txids.length > 0 || angekreuzt.utxos.length > 0;
+  ladeSelbstanzeigeExport("html", hatAuswahl ? angekreuzt : { txids: [], utxos: [key] });
+}
+
 /** Klick auf einen Bestandspunkt: ein-, bei zweitem Klick ausblenden. */
 function herkunftsnetzUmschalten(key) {
   if (!key) return;
@@ -197,6 +210,61 @@ function herkunftsnetzFarbwert(name) {
   return fallback;
 }
 
+/**
+ * Lose des Fokus aus den Endknoten des Netzes, gewichtet mit anteil_sats.
+ *
+ * Grün: Output-Zeit links der Fristgrenze. Orange: rechts davon.
+ * Grau: ohne Datum oder Bündel/Lücke/Horizont. Eigene Zwischenhops zählen nicht.
+ */
+function herkunftsnetzLotMischung(daten) {
+  const vorfahren = (daten && daten.vorfahren) || [];
+  const strahl = (typeof ZeitstrahlAnsicht !== "undefined"
+    && ZeitstrahlAnsicht.daten && ZeitstrahlAnsicht.daten.zeitstrahl) || {};
+  const frist = Number(strahl.frist_pos);
+  const acc = { gruen: 0, orange: 0, grau: 0 };
+  for (const v of vorfahren) {
+    if (!v || !v.ende || v.key === daten.fokus_key) continue;
+    const gewicht = Math.max(0, Number(v.anteil_sats) || 0);
+    if (!(gewicht > 0)) continue;
+    const pos = Number(v.pos_output);
+    const typ = v.typ;
+    let farbe = "grau";
+    if (
+      (typ === "fremd" || typ === "coinbase")
+      && Number.isFinite(pos)
+      && Number.isFinite(frist)
+    ) {
+      farbe = pos < frist ? "gruen" : "orange";
+    }
+    acc[farbe] += gewicht;
+  }
+  return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
+}
+
+/** Doughnut auf dem angeklickten Bestandspunkt. Kein title, kein aria-label. */
+function setzeAchseLotDonut(punkt, daten) {
+  if (!punkt || typeof setzeLotDonut !== "function") return;
+  const mischung = herkunftsnetzLotMischung(daten);
+  if (!mischung) {
+    entferneAchseLotDonut(punkt);
+    return;
+  }
+  const vorher = punkt.style.background;
+  setzeLotDonut(punkt, mischung);
+  if (!punkt.classList.contains("lot-donut")) return;
+  punkt.classList.add("achse-lot");
+  punkt.style.background = "";
+  if (vorher) punkt.style.background = vorher;
+}
+
+function entferneAchseLotDonut(punkt) {
+  if (!punkt || !punkt.classList.contains("achse-lot")) return;
+  punkt.classList.remove("achse-lot", "lot-donut");
+  delete punkt.dataset.lotGruen;
+  delete punkt.dataset.lotOrange;
+  delete punkt.dataset.lotGrau;
+}
+
 /** Ringfarbe: links der Fristgrenze grün, sonst orange. */
 function herkunftsnetzRingFarbe(posOutput) {
   const strahl = (typeof ZeitstrahlAnsicht !== "undefined"
@@ -262,14 +330,7 @@ function herkunftsnetzHinweis() {
   const key = Herkunftsnetz.key;
   bericht.addEventListener("click", (ereignis) => {
     ereignis.preventDefault();
-    // Bisherige Punkt-Aktion: angekreuzte Zeilen, sonst nur dieses UTXO.
-    const angekreuzt = typeof saAnkreuzAuswahl === "function"
-      ? saAnkreuzAuswahl()
-      : { txids: [], utxos: [] };
-    const hatAuswahl = angekreuzt.txids.length > 0 || angekreuzt.utxos.length > 0;
-    if (typeof ladeSelbstanzeigeExport === "function") {
-      ladeSelbstanzeigeExport("html", hatAuswahl ? angekreuzt : { txids: [], utxos: [key] });
-    }
+    herkunftsnetzBericht(key);
   });
   const ende = document.createElement("button");
   ende.type = "button";
@@ -307,7 +368,10 @@ function herkunftsnetzZeichnen() {
   const aktiv = herkunftsnetzAktiv();
   spur.classList.toggle("netz-an", aktiv);
   for (const punkt of spur.querySelectorAll(".achse-punkt[data-key]")) {
-    punkt.classList.toggle("netz-fokus", aktiv && punkt.dataset.key === Herkunftsnetz.key);
+    const fokus = aktiv && punkt.dataset.key === Herkunftsnetz.key;
+    punkt.classList.toggle("netz-fokus", fokus);
+    if (fokus && Herkunftsnetz.daten) setzeAchseLotDonut(punkt, Herkunftsnetz.daten);
+    else entferneAchseLotDonut(punkt);
   }
   herkunftsnetzHinweis();
   const d = Herkunftsnetz.daten;

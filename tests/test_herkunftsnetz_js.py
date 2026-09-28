@@ -100,6 +100,8 @@ class TestEinbindung(unittest.TestCase):
     def test_punktklick_und_neuzeichnen_und_ansichtswechsel(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("herkunftsnetzUmschalten(key)", steuer)
+        self.assertIn("herkunftsnetzBericht(key)", steuer)
+        self.assertIn('addEventListener("dblclick"', steuer)
         self.assertIn("herkunftsnetzZeichnen()", steuer)
         # Zeitstrahl-Rechnung unberührt: kein Overlay in events.
         self.assertNotIn("events.push", NETZ)
@@ -245,6 +247,15 @@ class TestEinUndAusstieg(unittest.TestCase):
         """)
         self.assertEqual(r["laeufe"], 0)
         self.assertEqual(r["status"], "busy")
+
+    def test_doppelklick_oeffnet_bericht_ohne_netz_zu_toggeln(self):
+        r = _node("""
+          herkunftsnetzBericht("%(K)s");
+          await warte();
+          console.log(JSON.stringify({ bericht: aufrufe.bericht, an: stand().an }));
+        """ % {"K": K})
+        self.assertEqual(r["bericht"], [["html", {"txids": [], "utxos": [K]}]])
+        self.assertFalse(r["an"])
 
     def test_bericht_knopf_behaelt_html_report(self):
         r = _node("""
