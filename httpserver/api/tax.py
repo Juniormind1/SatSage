@@ -194,6 +194,71 @@ def _steuer_auswertung_gecacht(state: AppState, query: dict, sprache: str) -> di
     return auswertung
 
 
+def api_tax_herkunftsnetz(
+    state: AppState,
+    query: dict,
+    accept_language: str | None = None,
+    client_lang: str | None = None,
+) -> dict:
+    """
+    Herkunftsnetz eines Bestandspunkts als Overlay (ISSUES: Steuerjahr ·
+    Herkunftsnetz, Schritt 1).
+
+    Nur lesend: dieselbe (gecachte) Auswertung wie ``/api/tax?seite=1`` für
+    die Skala, der **eine** gespeicherte Baum des UTXO (LRU-1 aus
+    ``/api/trace``) für das Netz. Ausgeliefert wird nur das flache Netz —
+    kein Baum. Fehlt der Baum, sagt ``trace_fehlt`` das; die Oberfläche
+    startet dann den begrenzten Steuer-Horizont-Lauf.
+    """
+    from core import herkunftsnetz, xpub_cache
+    from httpserver.api.trace import _gespeicherter_baum
+    from server import ApiError, _ui_lang_fuer_web, trace_mod
+
+    ziel = trace_mod.parse_ziel(str((query.get("key") or [""])[0]))
+    if ziel is None or ":" not in str((query.get("key") or [""])[0]):
+        raise ApiError(400, "Bitte ein UTXO in der Form txid:vout angeben.")
+    txid, vout = ziel
+    fokus_key = f"{txid}:{vout}"
+
+    if client_lang is None and accept_language is None:
+        sprache = "de"
+    else:
+        sprache = _ui_lang_fuer_web(
+            state.env().values(), accept_language, client_lang
+        )
+    auswertung = _steuer_auswertung_gecacht(state, query, sprache)
+    skala = herkunftsnetz.skala_aus_auswertung(auswertung)
+    events = (auswertung.get("zeitstrahl") or {}).get("events") or []
+    fokus = next((e for e in events if e.get("key") == fokus_key), None)
+    if skala is None or fokus is None:
+        raise ApiError(404, "Dieses UTXO steht nicht im Bestand des Steuerjahres.")
+
+    antwort = {
+        "fokus_key": fokus_key,
+        "fokus_pos": fokus.get("pos"),
+        "fokus_y": fokus.get("y"),
+        "vorfahren": [],
+        "kanten": [],
+        "trace_fehlt": True,
+    }
+    gespeichert = _gespeicherter_baum(state, txid, vout, mit_veraltet=False)
+    baum = (gespeichert or {}).get("baum") or {}
+    if not baum.get("found") or not baum.get("root"):
+        return antwort
+
+    def block_zeit(hoehe: int) -> int | None:
+        return xpub_cache.load_cached_block_time(hoehe, state.immutable_cache_dir)
+
+    netz = herkunftsnetz.flach(baum, fokus_key, skala, block_zeit=block_zeit)
+    antwort.update(netz)
+    antwort.update({
+        "trace_fehlt": False,
+        "steuer_ausreichend": bool(baum.get("steuer_ausreichend")),
+        "verfolgt_vollstaendig": bool(baum.get("verfolgt_vollstaendig")),
+    })
+    return antwort
+
+
 def api_selbstanzeige_kandidaten(state: AppState, query: dict) -> dict:
     from server import (
         ApiError,

@@ -845,6 +845,9 @@ def auswerten(
     return {
         "jahr": jahr,
         "stichtag": ende.strftime("%d.%m.%Y"),
+        # Bezugszeitpunkt exakt — die Zeitstrahl-Skala endet dort (Overlay
+        # Herkunftsnetz rechnet damit auf derselben X-Achse).
+        "bezug_ts": ende.timestamp(),
         "laufend": laufend,
         "stichtag_label": (
             f"Stand heute, {ende.strftime('%d.%m.%Y')}" if laufend

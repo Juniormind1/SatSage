@@ -1053,6 +1053,7 @@ from httpserver.api.tax import (  # noqa: E402
     api_save_steuer_person,
     api_selbstanzeige_kandidaten,
     api_tax,
+    api_tax_herkunftsnetz,
 )
 
 
@@ -1605,6 +1606,10 @@ class Handler(
             return 202, api_tools_schatzsuche(state, self._body())
         if teile == ["tax"] and methode == "GET":
             return 200, api_tax(
+                state, query, accept_language, client_lang,
+            )
+        if teile == ["tax", "herkunftsnetz"] and methode == "GET":
+            return 200, api_tax_herkunftsnetz(
                 state, query, accept_language, client_lang,
             )
         if teile == ["tax", "selbstanzeige", "kandidaten"] and methode == "GET":
