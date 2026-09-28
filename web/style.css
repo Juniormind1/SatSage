@@ -7,6 +7,8 @@ html[data-theme="light"] {
   color-scheme: light;
   /* Steuerjahr-Punkte ohne Herkunft: dunkelgrau (unterscheidet sich von gelb/grün). */
   --achse-ungeprueft: #5A6570;
+  /* Herkunftsnetz-Overlay im Zeitstrahl (Layer B): orange, klar neben --akzent. */
+  --netz: #E0730B;
   --grund:      #E7EAE7;
   --flaeche:    #F7F9F6;
   --flaeche-2:  #EDF0EC;
@@ -47,6 +49,7 @@ html[data-theme="dark"] {
   color-scheme: dark;
   /* Steuerjahr-Punkte ohne Herkunft: hellgrau. */
   --achse-ungeprueft: #B0B8BE;
+  --netz: #FF9A3C;
   --grund:      #1A1E22;
   --flaeche:    #22272C;
   --flaeche-2:  #2A3036;
@@ -2487,6 +2490,67 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .achse-punkt:hover .achse-punkt-tip { display: block; }
 .achse-punkt-tip.links { left: auto; right: 16px; }
+
+/* Herkunftsnetz (Overlay, views/herkunftsnetz.js): Layer A dimmen, nicht
+   löschen; Layer B = orange Ringe an der Output-Zeit, Kanten per SVG. */
+.achse-spur.netz-an .achse-punkt:not(.geister):not(.netz-fokus) { opacity: .22; }
+.achse-spur.netz-an .achse-punkt.netz-fokus {
+  z-index: 5;
+  box-shadow: 0 0 0 2px var(--netz);
+}
+.netz-schicht { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.netz-kanten {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  overflow: hidden; /* Kanten bleiben in der Fläche, auch reingezoomt */
+}
+.netz-kante {
+  stroke: var(--netz); stroke-opacity: .75; stroke-linecap: round;
+  pointer-events: stroke;
+}
+.netz-kante-fremd { stroke-dasharray: 4 3; }
+.netz-anschaffung { stroke-dasharray: 1 3; stroke-opacity: .9; pointer-events: none; }
+.netz-knoten {
+  position: absolute;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--netz);
+  background: var(--flaeche);
+  transform: translate(-50%, 50%);
+  box-sizing: border-box;
+  pointer-events: auto;
+  z-index: 1;
+}
+.netz-knoten.netz-fokus-b { width: 13px; height: 13px; border-width: 3px; }
+.netz-knoten.netz-fremd,
+.netz-knoten.netz-coinbase,
+.netz-knoten.netz-horizont,
+.netz-knoten.netz-luecke { border-style: dashed; }
+.netz-knoten.netz-buendel {
+  width: 15px; height: 15px; border-style: double; border-width: 4px;
+}
+.netz-knoten.netz-vor-achse { border-left-width: 4px; }
+.netz-knoten.netz-ueber-achse { border-top-width: 4px; }
+.netz-knoten:hover { outline: 2px solid var(--netz); outline-offset: 1px; z-index: 6; }
+.netz-knoten:hover .achse-punkt-tip { display: block; }
+.netz-buendel-zahl {
+  position: absolute; left: 100%; top: 50%; transform: translate(3px, -50%);
+  font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--netz);
+  white-space: nowrap; pointer-events: none;
+}
+.netz-hinweis {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+  margin-top: 8px; padding: 6px 10px;
+  border: 1px solid var(--netz); border-left-width: 4px;
+  font-size: 12px; color: var(--text);
+  background: color-mix(in srgb, var(--netz) 8%, var(--flaeche));
+}
+.netz-hinweis[hidden] { display: none; }
+.netz-hinweis-marke {
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--netz); box-sizing: border-box;
+}
+.netz-hinweis-text { font-weight: 600; color: var(--netz); }
+.netz-hinweis-stand { color: var(--blass); flex: 1 1 auto; }
 
 
 .achse-ticks {

@@ -2343,7 +2343,7 @@ async function herkunftAllerUtxos(ziele = {
       kasten.hidden = false;
     }
     Promise.resolve()
-      .then(() => (typeof ziele.danach === "function" ? ziele.danach() : null))
+      .then(() => (typeof ziele.danach === "function" ? ziele.danach({ art }) : null))
       .catch(() => {})
       .then(() => loeseEmpfangScanPuls());
   };
@@ -2388,6 +2388,8 @@ async function herkunftAllerUtxos(ziele = {
             || steuerEinstellungen().stichtag
             || "",
           utxo_keys: ziele.utxo_keys || null,
+          // Herkunftsnetz: alter Ingress ohne Baum reicht dort nicht.
+          ...(ziele.baumNoetig ? { baum_noetig: true } : {}),
         }
       : {
           modus: "voll",

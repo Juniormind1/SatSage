@@ -224,6 +224,28 @@ class TestFlach(unittest.TestCase):
         self.assertEqual(r["vorfahren"][-1]["typ"], "buendel")
 
 
+class TestHorizontLaufBraucht(unittest.TestCase):
+    """Overlay-Lauf (``baum_noetig``): alter Ingress ohne Baum reicht nicht."""
+
+    def test_ingress_ohne_baum(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import server
+        from httpserver.trace_helpers import _trace_offen_steuer
+
+        state = SimpleNamespace(immutable_cache_dir=None)
+        utxos = [{"txid": txid("a1"), "vout": 0}]
+        with mock.patch.object(server.trace_cache, "kopf", return_value=None), \
+                mock.patch.object(server.main, "load_utxo_ingress_cache",
+                                  return_value={"external_time_ts": 1_700_000_000}):
+            self.assertEqual(_trace_offen_steuer(state, utxos, set()), [])
+            self.assertEqual(
+                _trace_offen_steuer(state, utxos, set(), baum_noetig=True),
+                [(txid("a1"), 0)],
+            )
+
+
 class TestHerkunftsnetzApi(ApiTestBasis):
 
     def setUp(self):

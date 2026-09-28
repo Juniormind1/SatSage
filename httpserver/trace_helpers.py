@@ -55,12 +55,17 @@ def _trace_offen_steuer(
     state: AppState,
     utxos: list[dict],
     eigene_jetzt,
+    *,
+    baum_noetig: bool = False,
 ) -> list[tuple[str, int]]:
     """
     UTXOs ohne steuerlich ausreichenden Herkunftsbaum.
 
     Reicht: Blätter extern/Coinbase **oder** Steuer-Horizont (vor Stichtag/
     Haltefrist-Anfang). Volle Graphen bis Coinbase sind nicht nötig.
+
+    *baum_noetig* (Herkunftsnetz-Overlay): Ein alter Ingress ohne Baum reicht
+    dann nicht — das Netz braucht den gespeicherten Baum.
     """
     from server import (
         main,
@@ -86,7 +91,7 @@ def _trace_offen_steuer(
         )
         if kopf is None:
             # Kein Baum: alter Ingress mit Extern reicht für Steuerjahr.
-            if not _ingress_veraltet(
+            if not baum_noetig and not _ingress_veraltet(
                 main.load_utxo_ingress_cache(
                     txid, vout, state.immutable_cache_dir
                 )

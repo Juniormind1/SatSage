@@ -138,6 +138,8 @@ function zeigeAnsicht(name) {
   if (Zustand.ansicht === "tools" && name !== "tools" && typeof leereSchatzListe === "function") {
     leereSchatzListe();
   }
+  // Ansichtswechsel beendet den Herkunftsnetz-Overlay im Steuerjahr.
+  if (typeof herkunftsnetzBeenden === "function") herkunftsnetzBeenden();
   Zustand.ansicht = name;
   for (const ansicht of ANSICHTEN) {
     const el = $(`#ansicht-${ansicht}`);

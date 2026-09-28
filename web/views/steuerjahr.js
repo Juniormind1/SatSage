@@ -918,6 +918,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   if (!strahl || !strahl.vorhanden || strahl.events.length === 0) {
     karte.hidden = true;
     ZeitstrahlAnsicht.daten = null;
+    if (typeof herkunftsnetzBeenden === "function") herkunftsnetzBeenden();
     return;
   }
   karte.hidden = false;
@@ -1030,9 +1031,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     ].filter(Boolean).join(" ");
     if (key) {
       punkt.classList.add("klickbar");
-      punkt.title =
-        "HTML-Report für dieses UTXO (Was-wäre-wenn). "
-        + "Angekreuzte Abflüsse/UTXOs unten werden mit einbezogen.";
+      punkt.title = t("tax.netzPointTitle");
     }
     punkt.style.left = `${sicht}%`;
     punkt.style.bottom = `${y}%`;
@@ -1055,14 +1054,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
       punkt.addEventListener("click", (ereignis) => {
         ereignis.preventDefault();
         ereignis.stopPropagation();
-        // HTML-Report: angekreuzte Zeilen, sonst nur dieses UTXO.
-        const angekreuzt = saAnkreuzAuswahl();
-        const hatAuswahl =
-          angekreuzt.txids.length > 0 || angekreuzt.utxos.length > 0;
-        const auswahl = hatAuswahl
-          ? angekreuzt
-          : { txids: [], utxos: [key] };
-        ladeSelbstanzeigeExport("html", auswahl);
+        // Herkunftsnetz ein/aus (views/herkunftsnetz.js); der HTML-Report
+        // sitzt jetzt in dessen Hinweiszeile.
+        herkunftsnetzUmschalten(key);
       });
     }
     spur.append(punkt);
@@ -1086,6 +1080,8 @@ function zeichneZeitstrahl(daten, optionen = {}) {
       typeof steuerKopfFilter === "function" ? steuerKopfFilter() : null,
     );
   }
+  // Ephemerer Overlay (Herkunftsnetz) über dem neu gezeichneten Bestand.
+  if (typeof herkunftsnetzZeichnen === "function") herkunftsnetzZeichnen();
 }
 
 /**

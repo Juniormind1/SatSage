@@ -168,7 +168,10 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     if modus == "tief":
         offen = _trace_offen_tief(state, utxos, eigene_jetzt)
     elif modus == "steuer":
-        offen = _trace_offen_steuer(state, utxos, eigene_jetzt)
+        offen = _trace_offen_steuer(
+            state, utxos, eigene_jetzt,
+            baum_noetig=bool(roh.get("baum_noetig")),
+        )
     else:
         offen = _trace_offen_basis(state, utxos, eigene_jetzt)
 
