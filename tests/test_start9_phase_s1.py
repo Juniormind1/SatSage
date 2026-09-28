@@ -181,7 +181,7 @@ class TestStart9PhaseS1(ApiTestBasis):
         # Sprachunabhaengig: die Anmeldeseite folgt seit 0.9.4 dem
         # Accept-Language des Browsers und faellt sonst auf Englisch.
         self.assertIn("StartOS", html)
-        self.assertIn("Actions &amp; Config", html)
+        self.assertIn("SatSage settings", html)
         self.assertIn('class="karte"', html)
         # AJAX-Login: Fehler und Fortschritt bleiben im Dialog.
         self.assertIn('id="login-form"', html)
