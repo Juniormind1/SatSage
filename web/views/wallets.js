@@ -856,6 +856,98 @@ async function springeZuAusgegebenemUtxo(walletId, key) {
   return true;
 }
 
+/**
+ * Bestand dieses Wallets: die UTXO-Zeile aufklappen.
+ * Dort sitzen „Scan neu“ und „Herkunftslücken schließen“.
+ */
+async function springeZuWalletUtxo(walletId, key, adresse = "") {
+  if (!walletId || !key || typeof zeigeWallet !== "function") return false;
+  if (Zustand.ansicht !== "wallet" || Zustand.walletId !== walletId) {
+    await zeigeWallet(walletId, { ohneEmpfang: true });
+  }
+  if (Zustand.walletId !== walletId) return false;
+  // zeigeWallet startet danach noch den Mempool-Nachzug. Dessen Generation
+  // merken, sonst malt er die ungefilterte Liste über die gesprungene Zeile.
+  const sperre = Zustand.walletLadeGen;
+
+  const p = new URLSearchParams();
+  p.set("seite", "1");
+  p.set("teil", "bestand");
+  p.set("modus", "gruppen");
+  p.set("sort", "betrag");
+  p.set("offset", "0");
+  p.set("limit", "25");
+  p.set("mempool", "0");
+  p.set("lang", typeof uiSprache === "function" ? uiSprache() : "de");
+  // Volle txid:vout trifft den Filter oft nicht (Kurzform, Adresse, Betrag).
+  // Erst die Adresse, dann die Kurzform, dann der volle Schlüssel.
+  const suche = [adresse, key.length > 16 ? `${key.slice(0, 12)}…${key.slice(-8)}` : "", key]
+    .map((s) => String(s || "").trim())
+    .filter((s, i, alle) => s && alle.indexOf(s) === i);
+  let antwort = null;
+  for (const q of suche) {
+    p.set("q", q);
+    try {
+      const probe = await api(`/wallets/${encodeURIComponent(walletId)}/utxos?${p}`);
+      const items = (typeof bestandSeitenAuszug === "function"
+        ? bestandSeitenAuszug(probe).items
+        : probe.addresses) || [];
+      const trifft = items.some((g) => (g.utxos || []).some((u) => u.key === key));
+      antwort = probe;
+      if (trifft) break;
+    } catch (_) {
+      antwort = null;
+    }
+  }
+  if (!antwort || Zustand.walletId !== walletId || Zustand.walletLadeGen !== sperre) {
+    return false;
+  }
+  const seite = typeof bestandSeitenAuszug === "function"
+    ? { ...bestandSeitenAuszug(antwort), offset: 0 }
+    : null;
+  const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
+  zeichneUtxos(antwort, wallet, seite);
+
+  const koerper = $("#adress-koerper");
+  let zeile = koerper?.querySelector(
+    `.utxo-zeile[data-key="${CSS.escape(key)}"]`,
+  );
+  if (!zeile) return false;
+  const gruppe = zeile.closest(".adress-gruppe");
+  const inhalt = gruppe?.querySelector(".adress-utxos");
+  const kopf = gruppe?.querySelector(".adress-kopf");
+  if (inhalt && kopf && typeof setzeKlapp === "function") {
+    setzeKlapp(kopf, kopf.querySelector(".klapp"), inhalt, true);
+  }
+  haengeLueckenSchliessenAn(zeile, key);
+  zeile.classList.add("herkunft-sprung");
+  zeile.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => zeile.classList.remove("herkunft-sprung"), 2400);
+  return true;
+}
+
+/** „Herkunftslücken schließen“ neben „Scan neu“, wenn die Zeile noch keinen Baum hat. */
+function haengeLueckenSchliessenAn(zeile, key) {
+  if (!zeile || zeile.querySelector(".luecken-aus-plot")) return;
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  knopf.className = "trace-link luecken-aus-plot";
+  knopf.textContent = t("trace.folgeLuecken");
+  knopf.title = t("trace.folgeLueckenTitle");
+  knopf.addEventListener("click", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (!window.confirm(t("trace.folgeLueckenConfirm"))) return;
+    if (typeof zeigeHerkunftFuer === "function") {
+      Zustand.traceVervollstaendigen = { key, buendel: true };
+      zeigeHerkunftFuer(key, { neu: true });
+    }
+  });
+  const scan = zeile.querySelector(".trace-link");
+  if (scan) scan.insertAdjacentElement("afterend", knopf);
+  else zeile.append(knopf);
+}
+
 /** Andere Seite der Adressgruppen; „Bereits ausgegeben“ bleibt stehen. */
 async function zeigeWalletSeite(offset) {
   const quelle = Zustand.walletQuelle;
@@ -904,6 +996,11 @@ function zeichneUtxos(daten, wallet, seite = null) {
       t("wallet.emptyNoCacheHint"),
     );
     setzeText($("#wallet-meta"), t("wallet.metaNeverScanned"));
+    const metaLeer = $("#wallet-meta");
+    if (metaLeer) {
+      metaLeer.title = "";
+      delete metaLeer.dataset.fresh;
+    }
     setzeWalletTitel(wallet);
     aktualisiereKopfFilterFuerAnsicht();
     return;
@@ -914,12 +1011,20 @@ function zeichneUtxos(daten, wallet, seite = null) {
       t("wallet.emptyNoUtxoHint"),
     );
     setzeText($("#wallet-meta"), t("wallet.metaZeroCache"));
+    const metaNull = $("#wallet-meta");
+    if (metaNull) {
+      metaNull.title = "";
+      delete metaNull.dataset.fresh;
+    }
     setzeWalletTitel(wallet, 0);
     aktualisiereKopfFilterFuerAnsicht();
     return;
   }
 
   const teile = [];
+  // Frische nur aus dieser Antwort. Der Config-Stand kann noch die mtime
+  // von vor dem Löschen tragen — sonst bleibt „Cache vor N Std.“ stehen.
+  const cacheDa = Boolean(daten.has_cache || daten.hat_verlauf);
   if (daten.has_cache) {
     const utxoListe = daten.utxos || [];
     setzeWalletTitel(wallet, daten.total_sats);
@@ -963,16 +1068,21 @@ function zeichneUtxos(daten, wallet, seite = null) {
   }
   const alter = walletAlter(wallet);
   if (alter) teile.push(alter);
-  if (wallet && wallet.has_cache) {
+  if (cacheDa && wallet && wallet.has_cache) {
     const frisch = cacheFrische(wallet);
     if (frisch.lang) teile.push(frisch.lang);
   }
   setzeText($("#wallet-meta"), teile.join(" · "));
   const metaEl = $("#wallet-meta");
-  if (metaEl && wallet) {
-    const frisch = cacheFrische(wallet);
-    metaEl.title = frisch.title || "";
-    metaEl.dataset.fresh = frisch.stufe || "";
+  if (metaEl) {
+    if (cacheDa && wallet && wallet.has_cache) {
+      const frisch = cacheFrische(wallet);
+      metaEl.title = frisch.title || "";
+      metaEl.dataset.fresh = frisch.stufe || "";
+    } else {
+      metaEl.title = "";
+      delete metaEl.dataset.fresh;
+    }
   }
 
   zeichneSanktionsBefund(daten.sanctions);

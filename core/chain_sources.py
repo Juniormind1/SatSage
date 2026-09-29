@@ -754,23 +754,76 @@ def _reset_quelle_log() -> None:
         _quelle_log_zuletzt = ""
 
 
+#: Wie lange ein konfigurierter Onion-Indexer versucht wird, bevor P2P
+#: die Quelle wird. P2P ist beim Start oft schon grün, der Circuit noch nicht.
+INDEXER_WARTEN_SEKUNDEN = 90
+
+
+def _indexer_ist_konfiguriert(args, env: dict[str, str]) -> bool:
+    return bool(
+        _resolve_own_lan_endpoint(args, env)
+        or _resolve_own_tor_endpoint(args, env)
+    )
+
+
+def _warte_auf_eigenen_indexer(args, env: dict[str, str]):
+    """
+    Ein Versuch, dann Wiederholungen, bis der Indexer steht oder die Frist um ist.
+
+    P2P darf den Scan nicht starten, solange der eigene Electrum-Server
+    noch verbindet. Nach der Frist gilt er als nicht erreichbar.
+    """
+    import time
+
+    from display import is_list_abort_requested
+    from core.jobs import Cancelled
+
+    frist = time.monotonic() + INDEXER_WARTEN_SEKUNDEN
+    versuch = 0
+    while True:
+        versuch += 1
+        client = _try_own_fulcrum_client(args, env)
+        if client:
+            return client
+        if is_list_abort_requested():
+            raise Cancelled()
+        if time.monotonic() >= frist:
+            _log_quelle(
+                "Eigener Electrum-Server nach "
+                f"{INDEXER_WARTEN_SEKUNDEN}s nicht erreichbar — "
+                "P2P wird die Quelle."
+            )
+            return None
+        _log_quelle(
+            f"Eigener Electrum-Server noch nicht da "
+            f"(Versuch {versuch}) — warte, P2P startet nicht."
+        )
+        time.sleep(5)
+
+
 def _try_own_fulcrum_client(args, env: dict[str, str]):
     """Priorität 1: eigener Fulcrum (LAN, dann Tor)."""
     lan = _resolve_own_lan_endpoint(args, env)
     if lan:
         host, port, use_ssl = lan
-        client = _try_fulcrum_endpoint(
-            "eigener Fulcrum-Node (LAN)",
-            host,
-            port,
-            use_ssl,
-            None,
-        )
+        try:
+            client = _try_fulcrum_endpoint(
+                "eigener Fulcrum-Node (LAN)",
+                host,
+                port,
+                use_ssl,
+                None,
+            )
+        except Exception as exc:
+            _log_quelle(f"→ LAN-Electrum gescheitert ({exc}) — versuche Onion.")
+            client = None
         if client:
             _log_quelle(
                 f"Datenquelle: eigener Electrum-Server (LAN) {host}:{port}"
             )
             return client
+        if _resolve_own_tor_endpoint(args, env):
+            _log_quelle("LAN-Electrum nicht erreichbar — wechsle auf Onion.")
 
     tor = _resolve_own_tor_endpoint(args, env)
     if tor:
@@ -1008,7 +1061,10 @@ def _try_data_source_priority_chain(
     """
     _log_quelle("Automatische Datenquellen-Priorität…")
 
-    client = _try_own_fulcrum_client(args, env)
+    if _indexer_ist_konfiguriert(args, env):
+        client = _warte_auf_eigenen_indexer(args, env)
+    else:
+        client = _try_own_fulcrum_client(args, env)
     if client:
         return "fulcrum", client, None
 
@@ -1733,6 +1789,8 @@ def _build_blockchain_fetchers(
             try:
                 return fetch_tx_fulcrum(fulcrum, txid)
             except Exception as electrs_exc:
+                # Core nur, wenn er als Lookup eingetragen ist. Sonst den
+                # Electrs-Fehler stehen lassen — kein P2P-Block-Rückfall.
                 if _core_lokal is None and _core_arch is None:
                     raise
                 try:

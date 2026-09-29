@@ -116,6 +116,7 @@ class UnresolvedPrevout:
     spending_txid: str
     prev_txid: str
     prev_vout: int
+    grund: str = ""
 
     @property
     def key(self) -> str:
@@ -433,11 +434,12 @@ def iter_trace_funding_inputs(
         except Exception as exc:
             _abbruch_durchreichen(exc)
 
-    def _unresolved_prev(vin: dict) -> UnresolvedPrevout:
+    def _unresolved_prev(vin: dict, grund: str = "") -> UnresolvedPrevout:
         return UnresolvedPrevout(
             spending_txid=creator_txid,
             prev_txid=str(vin.get("txid") or ""),
             prev_vout=int(vin.get("vout") or 0),
+            grund=str(grund or "")[:180],
         )
 
     if voll:
@@ -482,7 +484,7 @@ def iter_trace_funding_inputs(
                 _abbruch_durchreichen(exc)
                 if own_inputs_only:
                     continue
-                yield _unresolved_prev(vin)
+                yield _unresolved_prev(vin, grund=str(exc))
                 continue
         return
 
@@ -496,7 +498,7 @@ def iter_trace_funding_inputs(
             edge = _funding_edge_from_vin(vin, prev_out, creator_txid)
         except Exception as exc:
             _abbruch_durchreichen(exc)
-            yield _unresolved_prev(vin)
+            yield _unresolved_prev(vin, grund=str(exc))
             continue
 
         if match_own_address(edge.addresses, own_addresses, wallet):
@@ -636,11 +638,10 @@ def erklaere_fehler(roh: str) -> str:
             "Blindflug über die ganze Kette ist absichtlich nicht eingebaut."
         )
     if "no such mempool or blockchain transaction" in klein:
-        return (
-            "Die Datenquelle kennt diese Transaktion nicht. Entweder ist die "
-            "TxID falsch, oder der Node hat den Block noch nicht — bei einem "
-            "frisch synchronisierten Node kann das vorkommen."
-        )
+        # Wortlaut von Bitcoin Core. Ein voller Electrs liefert ihn nicht
+        # für eine bestätigte Tx. Host/Software stehen in eckigen Klammern,
+        # wenn der Electrum-Adapter die Antwort gelesen hat.
+        return text
     if "vout" in klein and "ungültig" in klein:
         return (
             "Diesen Ausgang gibt es in der Transaktion nicht. Stimmt die "
@@ -1104,9 +1105,15 @@ def trace_utxo(
         if progress:
             try:
                 if utxo_origin._hat_tax_horizon(resume_origin):
-                    progress("Setze Steuer-Horizont bis extern/Coinbase fort…")
+                    text = "Setze Steuer-Horizont bis extern/Coinbase fort…"
                 else:
-                    progress("Setze unvollständige Herkunft fort (Teilbaum)…")
+                    text = "Setze unvollständige Herkunft fort (Teilbaum)…"
+                # Job-Fortschritt ist eine Funktion; die Datei-Spur hängt
+                # an einem Objekt mit .update() und .spur.
+                if callable(progress):
+                    progress(text)
+                elif hasattr(progress, "update"):
+                    progress.update(text)
             except Exception:
                 pass
         roh = utxo_origin.vertiefe_herkunft_luecken(
@@ -1340,7 +1347,12 @@ class _FortschrittsAdapter:
         self.spur = getattr(callback, "spur", None)
 
     def update(self, message: str) -> None:
-        self._callback(message)
+        ziel = self._callback
+        # Schon ein Adapter (.update + .spur): nicht noch einmal als Funktion rufen.
+        if callable(ziel):
+            ziel(message)
+        elif hasattr(ziel, "update"):
+            ziel.update(message)
 
     def clear(self) -> None:
         pass

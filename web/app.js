@@ -167,6 +167,32 @@ function setzeCacheLeerenBestaetigung(an) {
   if (an) setzeWalletCacheBestaetigung(null);
 }
 
+/**
+ * Cache-Stand im Client zurücksetzen, damit Frische unter dem Walletnamen
+ * und in der Navigation nicht aus dem Stand vor dem Löschen weiterlebt.
+ * First-seen (Wallet-Alter) bleibt — die Datei überlebt das Löschen.
+ */
+function verwerfeWalletCacheStand(walletId) {
+  const ids = walletId
+    ? [walletId]
+    : (Zustand.config?.wallets || []).map((w) => w.id).filter(Boolean);
+  for (const id of ids) {
+    for (const liste of [Zustand.config?.wallets, Zustand.entwurf]) {
+      const eintrag = (liste || []).find((w) => w && w.id === id);
+      if (!eintrag) continue;
+      eintrag.has_cache = false;
+      eintrag.utxo_count = 0;
+      eintrag.total_sats = 0;
+      eintrag.cache_mtime = null;
+      eintrag.scan_tip_height = null;
+      eintrag.scan_end_index = null;
+      eintrag.export_verlauf_n = 0;
+      eintrag.export_ohne_adresse = 0;
+    }
+  }
+  if (typeof zeichneNav === "function") zeichneNav();
+}
+
 function setzeWalletCacheBestaetigung(walletId) {
   for (const zeile of document.querySelectorAll("#cache-wallets .gefahr-zeile")) {
     const hier = zeile.dataset.walletId === walletId;
@@ -304,6 +330,7 @@ async function leereWalletCache(wallet) {
     Zustand.traceListe = null;
     pagerCachesVerwerfen();
     Zustand.steuer = null;
+    verwerfeWalletCacheStand(wallet.id);
     const n = (ergebnis.utxo_eintraege || 0)
       + (ergebnis.verlauf_eintraege || 0)
       + (ergebnis.herkunft_eintraege || 0);
@@ -349,6 +376,7 @@ async function leereGesamtenCache() {
     Zustand.traceListe = null;
     pagerCachesVerwerfen();
     Zustand.steuer = null;
+    verwerfeWalletCacheStand(null);
     setzeCacheLeerenBestaetigung(false);
     const n = (ergebnis.utxo_eintraege || 0) + (ergebnis.immutable_eintraege || 0);
     const text = n
@@ -360,6 +388,7 @@ async function leereGesamtenCache() {
     logZeile(text);
     await ladeConfig();
     zeichneEinstellungen();
+    await ladeGefahrWallets();
     if (Zustand.ansicht === "wallet" && Zustand.walletId) {
       await zeigeWallet(Zustand.walletId);
     }
@@ -1390,6 +1419,39 @@ function kopfQuelleFehler(quelle) {
   );
 }
 
+/** Ein kurzer Abruf, bevor die Explorer-Pille grün wird. */
+function pruefeBlockExplorer(mp) {
+  const url = String(mp?.url || "").trim();
+  // Nur der eigene Explorer wird grün oder rot nach Erreichbarkeit.
+  // Öffentlich bleibt die gelbe Warnung, auch wenn der Abruf scheitert.
+  if (!(mp.local || mp.stufe === "lokal")) return;
+  if (!mp?.configured || !url) return;
+  if (Zustand._explorerProbeUrl === url && Zustand._explorerProbeLauf) return;
+  if (Zustand._explorerProbeUrl === url && mp.reachable != null) return;
+  Zustand._explorerProbeUrl = url;
+  Zustand._explorerProbeLauf = true;
+  const ziel = url.replace(/\/$/, "") + "/api/blocks/tip/height";
+  const lauf = url;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  fetch(ziel, { signal: controller.signal, cache: "no-store" })
+    .then((antwort) => {
+      if (Zustand._explorerProbeUrl !== lauf) return;
+      if (Zustand.config?.mempool) {
+        Zustand.config.mempool.reachable = antwort.ok;
+      }
+    })
+    .catch(() => {
+      if (Zustand._explorerProbeUrl !== lauf) return;
+      if (Zustand.config?.mempool) Zustand.config.mempool.reachable = false;
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      Zustand._explorerProbeLauf = false;
+      if (Zustand._explorerProbeUrl === lauf) zeichneKopfStatus(Zustand.config?.sources);
+    });
+}
+
 function zeichneKopfStatus(quellen) {
   const nach = {};
   for (const q of quellen || []) nach[q.key] = q;
@@ -1523,9 +1585,11 @@ function zeichneKopfStatus(quellen) {
     });
   }
 
-  // Block-Explorer: immer sichtbar (Konfiguration, kein Live-Peer).
-  // privat=grün, öffentlich=rot, unkonfiguriert=grau ohne Zusatztext.
+  // Block-Explorer: immer sichtbar.
+  // Grün nur nach kurzem Erreichbarkeitstest. Konfiguriert, aber stumm: rot.
+  // Öffentlich: rot. Unkonfiguriert: grau.
   const mp = Zustand.config?.mempool || {};
+  pruefeBlockExplorer(mp);
   const blockExplorerOeffentlich = Boolean(
     mp.configured && !(mp.local || mp.stufe === "lokal"),
   );
@@ -1541,22 +1605,24 @@ function zeichneKopfStatus(quellen) {
       beTitle = t("header.blockExplorerNoneTitle") !== "header.blockExplorerNoneTitle"
         ? t("header.blockExplorerNoneTitle")
         : t("header.blockExplorerNoneTitle");
+    } else if (!(mp.local || mp.stufe === "lokal")) {
+      beLabel = t("header.blockExplorerPublic");
+      beStufe = "warn";
+      beTitle = t("header.blockExplorerPublicTitle");
+    } else if (mp.reachable === false) {
+      beLabel = t("header.blockExplorerUnreachable");
+      beStufe = "krit";
+      beTitle = t("header.blockExplorerUnreachableTitle");
+      if (mp.host) beTitle += ` (${mp.host})`;
     } else if (mp.local || mp.stufe === "lokal") {
       beLabel = t("header.blockExplorerPrivate") !== "header.blockExplorerPrivate"
         ? t("header.blockExplorerPrivate")
         : t("header.blockExplorerPrivate");
-      beStufe = "gut";
+      // Noch kein Test: grau. Grün erst, wenn der kurze Abruf klappt.
+      beStufe = mp.reachable === true ? "gut" : "neutral";
       beTitle = t("header.blockExplorerPrivateTitle") !== "header.blockExplorerPrivateTitle"
         ? t("header.blockExplorerPrivateTitle")
         : `Eigener/LAN-Explorer${mp.host ? `: ${mp.host}` : ""} — Aufrufe bleiben bei dir.`;
-    } else {
-      beLabel = t("header.blockExplorerPublic") !== "header.blockExplorerPublic"
-        ? t("header.blockExplorerPublic")
-        : t("header.blockExplorerPublic");
-      beStufe = "krit";
-      beTitle = t("header.blockExplorerPublicTitle") !== "header.blockExplorerPublicTitle"
-        ? t("header.blockExplorerPublicTitle")
-        : t("ui.hard.695025d2a1", { host: mp.host ? `: ${mp.host}` : "" });
     }
     eintraege.push({
       key: "mempool",

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import queue
 import socket
 import ssl
@@ -209,9 +210,22 @@ class FulcrumClient:
             raise RuntimeError(f"Ungültige Electrum-Antwort: {type(response).__name__}")
         if response.get("error"):
             err = response["error"]
-            if isinstance(err, dict):
-                raise RuntimeError(err.get("message", err))
-            raise RuntimeError(str(err))
+            text = err.get("message", err) if isinstance(err, dict) else err
+            # Host und Software mitgeben. Der Core-Wortlaut
+            # „No such mempool…“ kommt sonst ohne Absender an, und man
+            # sieht nicht, ob der eigene Electrs oder ein anderer Weg
+            # geantwortet hat.
+            host = ""
+            software = ""
+            rahmen = sys._getframe(1)
+            instanz = rahmen.f_locals.get("self")
+            if instanz is not None:
+                host = str(getattr(instanz, "host", "") or "")
+                software = str(getattr(instanz, "server_software", "") or "")
+            wo = " ".join(teil for teil in (host, software) if teil)
+            if wo:
+                raise RuntimeError(f"{text} [{wo}]")
+            raise RuntimeError(str(text))
         return response.get("result")
 
     def _request_once(self, method: str, params: list | None = None) -> Any:

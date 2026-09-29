@@ -9,6 +9,16 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Dotplot:** Der Klick springt nur noch bei rotem Ring ins Wallet. Ohne Ring öffnet er das Herkunftsnetz.
+- **Block-Explorer:** Wechsel auf einen öffentlichen Explorer zeigt die gelbe Pille „öffentlicher Block-Explorer“. Rot bleibt dem eigenen Explorer, der nicht antwortet.
+- **Electrum:** Ist IP und Onion eingetragen und die IP antwortet nicht, wechselt die Verbindung auf die Onion. „Übernehmen“ prüft danach beide Wege neu.
+- **Block-Explorer:** Die Pille wird erst grün, wenn ein kurzer Abruf die eingetragene Adresse erreicht. Eine lokale Adresse, die nicht antwortet, bleibt rot.
+- **Scan:** Ist ein eigener Electrum-Server konfiguriert, wartet „Scan neu“ bis zu 90 Sekunden auf ihn. P2P startet erst, wenn der Indexer endgültig nicht erreichbar ist.
+- **Herkunft:** Kein Rückfall auf P2P, wenn der eigene Electrum-Server eine Transaktion nicht liefert. Die Fehlermeldung nennt Host und Server-Software, damit klar ist, wer geantwortet hat.
+- **Herkunft:** Scheitert das Laden einer Vorgänger-Transaktion, steht der Grund in der Lücke. Ein zweiter Abruf holt den Vorgänger nach, bevor der Zweig abbricht.
+- **Herkunft:** „vervollständigen“ bricht nicht mehr mit einem Typfehler ab. Der Spur-Adapter wurde an einer zweiten Stelle wie eine Funktion aufgerufen.
+- **Steuerjahr · Dotplot:** Fehlt der Herkunftsbaum, springt der Klick auf den Punkt ins Wallet zu diesem UTXO. Dort liegen „Scan neu“ und „Herkunftslücken schließen“.
+- **Wallets:** Nach „Cache löschen“ (ein Wallet oder alles) verschwindet der Aktualitätstext unter dem Walletnamen und in der Navigation. Wallet-Alter bleibt.
 - **Fulcrum:** Transaktionen kommen als Roh-Hex und werden lokal geparst. Die verbose JSON-Form großer CoinJoins kam über Fulcrum nicht zuverlässig zurück.
 - **Vervollständigen:** Die Diagnose-Datei `logs/vervollstaendigen.log` ist aus. Die Spur bleibt im Code und lässt sich für den nächsten Lauf wieder einschalten.
 - **Steuerjahr · Dotplot:** UTXOs mit unvollständiger Herkunft tragen einen roten Ring. Die Angabe kommt aus dem Cache-Kopf, den die Liste ohnehin liest.

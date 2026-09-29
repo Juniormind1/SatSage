@@ -17,6 +17,8 @@ from core.trace import (
     MAX_TRACE_DEPTH,
     UnresolvedExternalBatch,
     UnresolvedPrevout,
+    _abbruch_durchreichen,
+    _funding_edge_from_vin,
     iter_trace_funding_inputs,
     is_own_output,
     match_own_address,
@@ -372,17 +374,49 @@ def trace_utxo_origin(
             })
             continue
         if isinstance(inp, UnresolvedPrevout):
-            # Prevout fehlte (get_tx/Netz) — Lücke, kein leeres „found“.
-            node["sources"].append({
-                "type": "error",
-                "from_utxo": inp.key,
-                "amount_sats": 0,
-                "error": (
-                    "Vorgänger-Tx nicht ladbar — Herkunft hier unterbrochen. "
-                    "„Scan neu“ erneut versuchen."
-                ),
-            })
-            continue
+            # Prevout fehlte (get_tx/Netz) — einmal nachladen. Große
+            # Vorgänger scheitern oft am ersten Timeout; der zweite
+            # Abruf trifft den Cache oder eine neue Verbindung.
+            nachgeladen = None
+            if inp.prev_txid:
+                try:
+                    nachgeladen = resolve_vin_prevout(
+                        get_tx,
+                        {"txid": inp.prev_txid, "vout": inp.prev_vout},
+                        progress=progress_cb,
+                    )
+                except Exception as exc:
+                    _abbruch_durchreichen(exc)
+                    if not inp.grund:
+                        inp = UnresolvedPrevout(
+                            spending_txid=inp.spending_txid,
+                            prev_txid=inp.prev_txid,
+                            prev_vout=inp.prev_vout,
+                            grund=str(exc)[:180],
+                        )
+            if nachgeladen:
+                try:
+                    edge = _funding_edge_from_vin(
+                        {"txid": inp.prev_txid, "vout": inp.prev_vout},
+                        nachgeladen,
+                        creator_txid,
+                    )
+                    inp = edge
+                except Exception as exc:
+                    _abbruch_durchreichen(exc)
+            if isinstance(inp, UnresolvedPrevout):
+                grund = f" ({inp.grund})" if inp.grund else ""
+                node["sources"].append({
+                    "type": "error",
+                    "from_utxo": inp.key,
+                    "amount_sats": 0,
+                    "error": (
+                        "Vorgänger-Tx nicht ladbar"
+                        f"{grund} — Herkunft hier unterbrochen. "
+                        "„Scan neu“ erneut versuchen."
+                    ),
+                })
+                continue
         edge: FundingEdge = inp
         prev_ref = edge.prevout.key
         prev_addrs = list(edge.addresses)

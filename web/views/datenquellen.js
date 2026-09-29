@@ -860,6 +860,8 @@ function quellenFormular(quelle, behaelter) {
       });
       await ladeConfig();
       // Alte grüne Pille verwerfen: grau bis der neue Connect steht.
+      // Electrum: IP und Onion gelten beide als frisch — der Check probiert
+      // beide, auch wenn vorher nur die IP stand und keine Verbindung da war.
       const pending = Array.isArray(ergebnis.pending_sources)
         && ergebnis.pending_sources.length
         ? ergebnis.pending_sources

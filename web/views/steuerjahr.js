@@ -1271,6 +1271,8 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     punkt.className = `achse-punkt ${eintrag.groesse} ${farbe}`;
     if (eintrag.herkunft_offen) punkt.classList.add("herkunft-offen-marke");
     if (key) punkt.dataset.key = key;
+    if (eintrag.wallet_id) punkt.dataset.walletId = eintrag.wallet_id;
+    if (eintrag.wallet) punkt.dataset.wallet = eintrag.wallet;
     if (eintrag.value_sats != null) {
       punkt.dataset.valueSats = String(eintrag.value_sats);
     }

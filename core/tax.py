@@ -904,8 +904,9 @@ def auswerten(
         },
         "hat_verlauf": mit_verlauf,
         "abgaenge": sorted(abgaenge, key=lambda a: a["abgang_datum"]),
-        "zeitstrahl": zeitstrahl(
-            eintraege, ende, haltefrist_jahre, stichtag=stichtag,
+        "zeitstrahl": _zeitstrahl_mit_wallet(
+            zeitstrahl(eintraege, ende, haltefrist_jahre, stichtag=stichtag),
+            wallet,
         ),
         "hinweise": hinweise,
         "_objekte": eintraege,
@@ -985,6 +986,21 @@ def _minus_monate(zeitpunkt: datetime, monate: int) -> datetime:
     letzter = naechster - timedelta(days=1)
     tag = min(zeitpunkt.day, letzter.day)
     return zeitpunkt.replace(year=y, month=m, day=tag)
+
+
+def _zeitstrahl_mit_wallet(strahl: dict, wallet) -> dict:
+    """Wallet-Kennung an die Punkte, damit ein Klick ohne Baum ins Wallet springt."""
+    if wallet is None or not strahl.get("events"):
+        return strahl
+    for event in strahl["events"]:
+        adresse = str(event.get("address") or "")
+        # Cache-Key der Ableitungsgrundlage — dieselbe Kennung wie die
+        # Wallet-Ansicht. Der rohe SHA256 des XPUB-Strings trifft sie nicht.
+        schluessel = wallet.xpub_for_address(adresse) if adresse else None
+        event["wallet_id"] = (
+            xpub_cache._xpub_cache_key(schluessel) if schluessel else ""
+        )
+    return strahl
 
 
 def zeitstrahl(

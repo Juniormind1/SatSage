@@ -70,6 +70,39 @@ function herkunftsnetzBeenden() {
   herkunftsnetzZeichnen();
 }
 
+/** Bestandspunkt zu txid:vout — Plot-DOM, sonst Zeitstrahl-Daten. */
+function herkunftsnetzPunkt(key) {
+  const punkt = document.querySelector(
+    `#achse-spur .achse-punkt[data-key="${CSS.escape(key)}"]`,
+  );
+  const events = (typeof Zustand !== "undefined" && Zustand.steuer?.zeitstrahl?.events) || [];
+  const treffer = events.find(
+    (e) => e && (e.key === key || (e.txid != null && `${e.txid}:${e.vout}` === key)),
+  ) || {};
+  return {
+    walletId: (punkt && punkt.dataset.walletId) || treffer.wallet_id || "",
+    wallet: (punkt && punkt.dataset.wallet) || treffer.wallet || "",
+    address: (punkt && punkt.dataset.address) || treffer.address || "",
+  };
+}
+
+/** Wallet-Kennung des Bestandspunkts — für den Sprung, wenn kein Netz da ist. */
+function herkunftsnetzWalletId(key) {
+  const punkt = herkunftsnetzPunkt(key);
+  if (punkt.walletId) return punkt.walletId;
+  const wallets = (typeof Zustand !== "undefined" && Zustand.config?.wallets) || [];
+  const name = String(punkt.wallet || "").trim();
+  const nachName = wallets.find((w) => w && name && w.name === name);
+  return (nachName && nachName.id) || "";
+}
+
+/** Netz mit wenigstens einem Vorgänger — sonst gehört der Klick ins Wallet. */
+function herkunftsnetzHatDaten(daten) {
+  if (!daten || daten.trace_fehlt) return false;
+  const vorfahren = (daten.vorfahren || []).filter((v) => v && v.key !== daten.fokus_key);
+  return vorfahren.length > 0 || (daten.kanten || []).length > 0;
+}
+
 function herkunftsnetzAbfrage() {
   const daten = typeof Zustand !== "undefined" ? Zustand.steuer : null;
   return (daten && daten._abfrage) || "";
@@ -99,13 +132,30 @@ async function herkunftsnetzStarten(key, { nachJob = false } = {}) {
     return;
   }
   if (lauf !== Herkunftsnetz.lauf || Herkunftsnetz.key !== key) return;
-  if (daten.trace_fehlt) {
+  // Sprung nur beim roten Ring. Ein grauer Punkt ohne Ring hat Herkunftsdaten
+  // oder ist noch ungeprüft — den zeichnet das Netz, auch wenn die Antwort leer ist.
+  const punktEl = document.querySelector(
+    `#achse-spur .achse-punkt[data-key="${CSS.escape(key)}"]`,
+  );
+  const ring = Boolean(punktEl && punktEl.classList.contains("herkunft-offen-marke"));
+  if (ring && !herkunftsnetzHatDaten(daten)) {
     if (nachJob) {
       Herkunftsnetz.status = "fehlt";
       herkunftsnetzZeichnen();
       return;
     }
-    herkunftsnetzHorizontLauf(key, lauf);
+    // Kein brauchbares Netz (kein Baum, oder nur die Wurzel). Im Wallet
+    // liegen „Scan neu“ und „Herkunftslücken schließen“ an diesem UTXO.
+    const punkt = herkunftsnetzPunkt(key);
+    const walletId = herkunftsnetzWalletId(key);
+    herkunftsnetzBeenden();
+    if (walletId && typeof springeZuWalletUtxo === "function") {
+      springeZuWalletUtxo(walletId, key, punkt.address);
+      return;
+    }
+    Herkunftsnetz.key = key;
+    Herkunftsnetz.status = "fehlt";
+    herkunftsnetzZeichnen();
     return;
   }
   Herkunftsnetz.daten = daten;

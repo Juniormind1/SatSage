@@ -1002,6 +1002,9 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     def update(self, text: str) -> None:
                         self._ziel(text)
 
+                    def __call__(self, text: str) -> None:
+                        self.update(text)
+
                 _fortschritt_engine = _SpurAdapter(_fortschritt, spur)
             else:
                 _fortschritt_engine = _fortschritt
