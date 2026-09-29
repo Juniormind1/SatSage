@@ -89,12 +89,13 @@ class HandlerSseMixin:
         abmelden = log.abonniere(on_zeile)
         try:
             while not _server_faehrt_runter(self.state):
-                _, fertig = log.stand()
-                if fertig:
+                log.warte(30.0)
+                if getattr(log, "_bereit", False):
                     break
-                log.warte(1.0)
-            _, fertig = log.stand()
-            self._ndjson_zeile({"done": True, "context_bereit": bool(fertig and self.state.context_bereit())})
+            self._ndjson_zeile({
+                "done": True,
+                "context_bereit": self.state.context_bereit(),
+            })
         except Exception as exc:
             if _shutdown_rauschen(exc) or _client_weg(exc) or _server_faehrt_runter(self.state):
                 return

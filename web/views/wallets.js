@@ -156,6 +156,15 @@ function zeichneEmpfangReadOnly(walletName, { puls = false } = {}) {
  * Sammel-Jobs Historien / Herkünfte UTXOs — auch Read-only-Wallets.
  */
 function zeichneEmpfangBeschaeftigt(walletId) {
+  // Laufender Atem bleibt. Ein neuer Log-Tick darf den Takt nicht zurücksetzen.
+  if (
+    typeof EmpfangPuls !== "undefined"
+    && EmpfangPuls.laeuft()
+    && Zustand.empfang
+    && Zustand.empfang.puls
+  ) {
+    return;
+  }
   const walletMeta = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   Zustand.lernThema = null;
   if (walletMeta && walletMeta.read_only) {

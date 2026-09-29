@@ -18,6 +18,7 @@ class BootLog:
         self._zeilen: list[dict] = []
         self._seq = 0
         self._fertig = False
+        self._bereit = False
         self._hoerer: list[Callable[[dict], None]] = []
         self._ereignis = threading.Event()
 
@@ -41,8 +42,9 @@ class BootLog:
                 pass
 
     def fertig(self) -> None:
+        """Vorbereitung ist durch. Der Strom bleibt für spätere Job-Zeilen offen."""
         with self._lock:
-            self._fertig = True
+            self._bereit = True
             self._ereignis.set()
 
     def stand(self) -> tuple[list[dict], bool]:
@@ -50,9 +52,9 @@ class BootLog:
             return list(self._zeilen), self._fertig
 
     def abonniere(self, fn: Callable[[dict], None]) -> Callable[[], None]:
-        """Liefert die bisher fehlenden Zeilen und hängt *fn* an neue."""
+        """Hängt *fn* an neue Zeilen. Nach der Vorbereitung ohne Rückspiel."""
         with self._lock:
-            bisher = list(self._zeilen)
+            bisher = [] if self._bereit else list(self._zeilen)
             self._hoerer.append(fn)
 
         def abmelden() -> None:

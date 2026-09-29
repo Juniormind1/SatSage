@@ -61,8 +61,8 @@ function zeichneFussLocalOnly() {
  * Nicht awaiten: der Strom endet erst, wenn das letzte Wallet gelesen ist.
  */
 function folgeBootLog() {
-  if (Zustand.bootLogGestartet) return;
   Zustand.bootLogLive = true;
+  if (Zustand.bootLogGestartet) return;
   Zustand.bootLogGestartet = true;
   const kopf = { ...tokenKopf(), Accept: "application/x-ndjson" };
   fetch("/api/boot-log", { headers: kopf, credentials: "same-origin" })

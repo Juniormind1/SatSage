@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Empfangs-QR:** Die Atmung läuft während eines Trace durch. Eine neue Blockhöhen-Zeile setzt den Takt nicht zurück.
+- **Log-Bereich:** Die Tor-Startsequenz erscheint einmal. Ein erneutes Verbinden des Log-Stroms spielt sie nicht noch einmal ab. Hop- und Blockhöhen-Zeilen eines laufenden Trace erscheinen im Log-Bereich, nicht nur im Terminal. Der Strom bleibt nach „Wallets bereit“ offen.
 - **Log · Herkunft:** Die Blockhöhe nennt die Adresse, über die sie geholt wird. Dieselbe Adresse wird nicht für jede Transaktion neu abgefragt. Hop-Zeilen nennen Tiefe, Adresse und Zahl der Eingänge. Die Fulcrum-Prüfung erscheint im Log-Bereich, nicht nur im Terminal. Jeder Vorgänger nennt Tx und Ausgang und erscheint sofort im Log-Bereich, nicht erst nach zehn Sekunden als „Moment noch“. Der Ziel-Scan einer Adresse geht dorthin und nicht ins Terminal.
 - **UTXO-Liste:** „Vervollständigen“ schreibt den Zufluss-Stempel neu. Ein alter „Untergrenze“-Vermerk bleibt danach nicht stehen, und die Zeile wird grün. War „vervollständigen“ erfolgreich, verschwindet der Knopf sofort und „jüngste sats vom …“ erscheint an seiner Stelle. Fehlt „jüngste sats vom …“, steht an derselben Stelle „Alter klären“. Der Knopf startet den Herkunfts-Trace, der dieses Datum liefert. Währenddessen atmet der Empfangs-QR wie bei einem Scan. Ist der Baum schon unvollständig, bleibt nur „vervollständigen“ neben „Scan neu“.
 - **Log · Herkunft:** Ziel-Scan einer Adresse („keine unspent UTXOs …“) erscheint im Log-Bereich der Oberfläche, nicht nur im Terminal. Sonst bleibt dort nur „Moment noch“, während der Scan weiterläuft.

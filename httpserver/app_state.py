@@ -9,7 +9,7 @@ from __future__ import annotations
 from httpserver.boot_log import BootLog
 
 # Erste Zeile im Start-Log. Fehlt sie oder weicht sie ab, läuft alter Code.
-CODE_LAUF_ID = "hoehe-log-20260929k"
+CODE_LAUF_ID = "tor-einmal-20260929m"
 
 import logging
 import os
@@ -292,6 +292,16 @@ class AppState:
         finally:
             log.fertig()
             self._context_bereit.set()
+            from core.jobs import setze_log_spiegel
+
+            def _ins_gui_log(job, text: str) -> None:
+                name = ""
+                meta = getattr(job, "meta", None) or {}
+                if isinstance(meta, dict):
+                    name = str(meta.get("wallet_name") or "")
+                log.zeile(str(text or ""), wallet=name)
+
+            setze_log_spiegel(_ins_gui_log)
             # Konfigurierte Tiefe, danach Change jenseits davon. Beides erst,
             # wenn die GUI steht. Die Herkunft braucht die Adressen beim Trace.
             ctx = self.wallet_ctx_fuer_ansicht()
