@@ -357,16 +357,16 @@ def resolve_wallet_verlauf(
 
 
 def _melde_ziel_scan(text: str, on_progress=None) -> None:
-    """Terminal und, wenn der Herkunftsjob einen Callback hat, GUI-Log."""
-    print(f"  {text}", flush=True)
+    """Ins GUI-Log, wenn ein Job hängt. Sonst ins Terminal (CLI)."""
     if on_progress is None:
+        print(f"  {text}", flush=True)
         return
     try:
         on_progress(text, sofort=True)
     except TypeError:
         on_progress(text)
     except Exception:
-        pass
+        print(f"  {text}", flush=True)
 
 
 def _supplement_cache_address(

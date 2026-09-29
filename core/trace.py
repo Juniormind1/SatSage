@@ -57,7 +57,10 @@ def resolve_vin_prevout(
         return prevout
 
     if progress:
-        progress(f"↻ Herkunft: lade Vorgänger-Output {vin['txid'][:16]}…")
+        vout = int(vin["vout"])
+        progress(
+            f"↻ Herkunft: warte auf Vorgänger {vin['txid'][:12]}…:{vout}"
+        )
     prev_tx = get_tx(vin["txid"])
     vouts = prev_tx.get("vout", [])
     vout_index = int(vin["vout"])
@@ -1076,6 +1079,8 @@ def _stempel_aus_ui_baum(
             quellen.append(_ui_knoten_als_quelle(knoten))
     if not quellen and not baum.get("tax_horizon"):
         return
+    from core import utxo_ingress_report
+
     utxo_ingress_report.persist_utxo_ingress(
         {"type": "utxo", "sources": quellen, "tax_horizon": baum.get("tax_horizon")},
         txid=txid,

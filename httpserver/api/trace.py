@@ -957,6 +957,8 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 # Längere Meilensteine / Hop-Wechsel: sofort ins Log.
                 if (
                     t.startswith("↻")
+                    or t.startswith("Ziel-Scan")
+                    or t.startswith("Keine unspent")
                     or t.startswith("Lücken")
                     or t.startswith("Eigene Vorgänger")
                     or t.startswith("Aktualisiere")
@@ -964,12 +966,12 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     or t.startswith("Schließe")
                     or t.startswith("Verfolge")
                     or t.startswith("Setze")
+                    or t.startswith("Prüfe ")
+                    or t.startswith("→")
                 ):
-                    # tick speichert Stand; phase bei echten Phasen-Texten.
-                    if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
-                        stand.tick(t)
-                    else:
-                        stand.phase(t)
+                    # Jeder Hop und jeder Ziel-Scan sofort — sonst klebt
+                    # zehn Sekunden „Moment noch“ über demselben Text.
+                    stand.phase(t)
                 else:
                     stand.tick(t)
 

@@ -181,8 +181,8 @@ def trace_utxo_origin(
 
     if progress:
         progress.update(
-            f"↻ Herkunft Trace Tiefe {depth + 1}/{MAX_TRACE_DEPTH}: "
-            f"lade Tx {creator_txid[:16]}…"
+            f"↻ Herkunft Tiefe {depth + 1}/{MAX_TRACE_DEPTH}: "
+            f"lade Tx {creator_txid[:12]}…:{vout_index}"
         )
     if spur is not None:
         spur.hop(depth + 1, utxo_key, quelle="lade")
@@ -206,6 +206,15 @@ def trace_utxo_origin(
         # Fehler nicht memoisieren — erneuter Versuch (Follow-up) soll neu laden.
         visited_utxos.discard(utxo_key)
         return node
+
+    if progress:
+        n_ein = len(tx.get("vin") or [])
+        n_aus = len(tx.get("vout") or [])
+        progress.update(
+            f"↻ Herkunft Tiefe {depth + 1}/{MAX_TRACE_DEPTH}: "
+            f"Tx {creator_txid[:12]}…:{vout_index} geladen, "
+            f"{n_ein} Eingänge, {n_aus} Ausgänge"
+        )
 
     if vout_index >= len(tx.get("vout", [])):
         visited_utxos.discard(utxo_key)
@@ -473,9 +482,13 @@ def trace_utxo_origin(
                     wallet_label = (
                         wallet.resolve_address(own_addr) if wallet else own_addr[:12]
                     )
+                    from display import abbrev_display
+
                     progress.update(
-                        f"↻ Herkunft Trace Tiefe {depth + 2}/{MAX_TRACE_DEPTH}: "
-                        f"intern {wallet_label} ← {prev_txid[:16]}…"
+                        f"↻ Herkunft Tiefe {depth + 2}/{MAX_TRACE_DEPTH}: "
+                        f"intern {wallet_label} "
+                        f"{abbrev_display(own_addr)} "
+                        f"← {prev_txid[:12]}…:{prev_vout}"
                     )
                 if wallet and cache_dir and fetch_address_utxos and cache_source:
                     _main()._ensure_address_cached(
@@ -529,6 +542,15 @@ def trace_utxo_origin(
                         ).strftime("%d.%m.%Y %H:%M:%S")
                     except (OSError, OverflowError, TypeError, ValueError):
                         ext_time = ""
+                if progress:
+                    from display import abbrev_display
+
+                    fremd = prev_addrs[0] if prev_addrs else "unbekannt"
+                    progress.update(
+                        f"↻ Herkunft Tiefe {depth + 1}/{MAX_TRACE_DEPTH}: "
+                        f"extern {abbrev_display(fremd)} "
+                        f"← {prev_txid[:12]}…:{prev_vout}"
+                    )
                 node["sources"].append({
                     "type": "external",
                     "address": prev_addrs[0] if prev_addrs else "unbekannt",

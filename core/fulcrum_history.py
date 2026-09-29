@@ -55,6 +55,26 @@ def _vout_matches_address(vout: dict, address: str) -> bool:
     return hex_spk == want
 
 
+_HISTORY_CACHE: dict[str, list] = {}
+
+
+def _history_fuer_adresse(client: FulcrumClient, addr: str, txid: str) -> list:
+    """Historie je Adresse merken. Sonst holt jede neue Tx dieselbe Adresse neu."""
+    sh = address_to_scripthash(addr)
+    if sh in _HISTORY_CACHE:
+        return _HISTORY_CACHE[sh]
+    from display import abbrev_display, melde_zwischenstand
+
+    melde_zwischenstand(
+        f"↻ Herkunft: Blockhöhe von {txid[:12]}… über {abbrev_display(addr)}"
+    )
+    history = client.request("blockchain.scripthash.get_history", [sh]) or []
+    if not isinstance(history, list):
+        history = []
+    _HISTORY_CACHE[sh] = history
+    return history
+
+
 def _lookup_tx_height(client: FulcrumClient, txid: str, vouts: list[dict]) -> int | None:
     cached = _TX_HEIGHT_CACHE.get(txid.lower())
     if cached is not None or txid.lower() in _TX_HEIGHT_CACHE:
@@ -70,11 +90,7 @@ def _lookup_tx_height(client: FulcrumClient, txid: str, vouts: list[dict]) -> in
                 continue
             seen_addrs.add(addr)
             try:
-                from core.vervollstaendigen_log import schritt
-
-                schritt(f"history-abruf {txid} n={len(seen_addrs) + 1}")
-                sh = address_to_scripthash(addr)
-                history = client.request("blockchain.scripthash.get_history", [sh]) or []
+                history = _history_fuer_adresse(client, addr, txid)
             except Exception:
                 continue
             for entry in history:

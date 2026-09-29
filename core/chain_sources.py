@@ -391,12 +391,23 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     return None
 
 
+def _quelle_zeile(text: str) -> None:
+    """Verbindungsprobe: Terminal und, wenn ein Job läuft, GUI-Log."""
+    print(text, flush=True)
+    try:
+        from display import melde_zwischenstand
+
+        melde_zwischenstand(text.strip())
+    except Exception:
+        pass
+
+
 def _print_connection_error(prefix: str, error: str | None, use_ssl: bool) -> None:
     """Meldet einen Verbindungsfehler samt Hinweis, falls einer ableitbar ist."""
-    print(f"{prefix}nicht erreichbar: {error}", flush=True)
+    _quelle_zeile(f"{prefix}nicht erreichbar: {error}")
     hint = connection_error_hint(error, use_ssl)
     if hint:
-        print(f"     ↳ {hint}", flush=True)
+        _quelle_zeile(f"     ↳ {hint}")
 
 
 def _print_public_onion_probe_result(
@@ -428,7 +439,7 @@ def _try_fulcrum_endpoint(
     tor_proxy: tuple[str, int] | None,
 ):
     route = _format_fulcrum_route(use_ssl, tor_proxy)
-    print(f"Prüfe {label}: {host}:{port} ({route})...", flush=True)
+    _quelle_zeile(f"Prüfe {label}: {host}:{port} ({route})...")
     if tor_proxy:
         _index, client, error = _probe_public_onion_endpoint(
             0,
@@ -451,10 +462,9 @@ def _try_fulcrum_endpoint(
     # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung (LAN + Onion).
     if not client and error and tls_should_try_opposite(error):
         alt = not use_ssl
-        print(
+        _quelle_zeile(
             f"  → {'TLS' if use_ssl else 'ohne TLS'} fehlgeschlagen "
-            f"({error}) — versuche {'ohne TLS' if use_ssl else 'mit TLS'}…",
-            flush=True,
+            f"({error}) — versuche {'ohne TLS' if use_ssl else 'mit TLS'}…"
         )
         if tor_proxy:
             _index, client, error = _probe_public_onion_endpoint(
@@ -473,14 +483,13 @@ def _try_fulcrum_endpoint(
             )
         use_ssl = alt
     if client:
-        print(
+        _quelle_zeile(
             f"  → {label} erreichbar"
-            + (f" ({'TLS' if use_ssl else 'ohne TLS'})"),
-            flush=True,
+            + (f" ({'TLS' if use_ssl else 'ohne TLS'})")
         )
         return client
     if error and "listunspent" in error:
-        print(f"  → ungeeignet: {error}", flush=True)
+        _quelle_zeile(f"  → ungeeignet: {error}")
     else:
         _print_connection_error("  → ", error, use_ssl)
     return None
