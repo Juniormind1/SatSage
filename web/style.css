@@ -2155,6 +2155,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   background: var(--krit-bg); color: var(--krit); font-weight: 600;
 }
 .trace-link.vervollstaendigen { margin-left: 2px; }
+.trace-link.alter-klaeren { margin-left: 6px; }
 
 /* Adressgruppen in der Wallet-Ansicht */
 .adress-gruppe { border-bottom: 1px solid var(--linie-zart); }

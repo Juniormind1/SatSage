@@ -1033,6 +1033,8 @@
   "trace.txClass.whirlpool": "Wahrscheinlich Whirlpool-CoinJoin",
   "trace.unresolvedInputsNote": "{count} weitere Eingänge wurden nicht aufgelöst — nach dem ersten eigenen Eingang bricht die Auflösung ab, um bei Sammel-Transaktionen nicht hunderte Abrufe auszulösen. Beträge dieser Eingänge fehlen.",
   "trace.walletTransition": "Wallet-Wechsel · {from} → {to}",
+  "trace.clarifyAge": "Alter klären",
+  "trace.clarifyAgeTitle": "Verfolgt die Sats bis zu einer fremden Adresse. Danach steht hier das Datum der jüngsten Sats.",
   "trace.youngestSats": "jüngste sats vom {wann}",
   "trace.youngestSatsTitle": "Alle Sats sind bis zu einer fremden Adresse verfolgt. Das Datum ist der jüngste Zufluss von außen.",
   "ui.hard.0515d43f6e": "{art} für „{name}“ läuft schon oder wartet.",

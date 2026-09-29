@@ -1035,6 +1035,59 @@ def folge_meta(baum: dict | None) -> dict:
     }
 
 
+def _ui_knoten_als_quelle(knoten: dict) -> dict:
+    """UI-Blatt in die Form, die der Zufluss-Stempel erwartet."""
+    return {
+        "type": knoten.get("type"),
+        "time_ts": knoten.get("block_time") or knoten.get("time_ts"),
+        "amount_sats": knoten.get("amount_sats", 0),
+        "address": knoten.get("address") or "",
+        "from_utxo": knoten.get("from_utxo") or "",
+        "trace": knoten if knoten.get("type") == "internal" else None,
+    }
+
+
+def _stempel_aus_ui_baum(
+    baum: dict,
+    *,
+    txid: str,
+    vout: int,
+    address: str,
+    amount_sats: int,
+    wallet,
+    cache_dir,
+    immutable_cache_dir,
+) -> None:
+    """
+    Schreibt den Zufluss-Stempel aus dem gespeicherten Baum neu.
+
+    Ein Folge-Lauf liefert oft keinen Rohbaum mit externen Quellen mehr.
+    Ohne diesen Schritt bliebe ein alter „Untergrenze“-Stempel stehen.
+    """
+    kinder = baum.get("children") or []
+    quellen = []
+    stapel = list(kinder)
+    while stapel:
+        knoten = stapel.pop()
+        if not isinstance(knoten, dict):
+            continue
+        stapel.extend(knoten.get("children") or [])
+        if knoten.get("type") in ("external", "external_unresolved", "coinbase"):
+            quellen.append(_ui_knoten_als_quelle(knoten))
+    if not quellen and not baum.get("tax_horizon"):
+        return
+    utxo_ingress_report.persist_utxo_ingress(
+        {"type": "utxo", "sources": quellen, "tax_horizon": baum.get("tax_horizon")},
+        txid=txid,
+        vout=vout,
+        address=address,
+        amount_sats=amount_sats,
+        wallet=wallet,
+        cache_dir=cache_dir,
+        immutable_cache_dir=immutable_cache_dir,
+    )
+
+
 def trace_utxo(
     get_tx,
     txid: str,
@@ -1207,6 +1260,9 @@ def trace_utxo(
         cache_dir=cache_dir,
         immutable_cache_dir=immutable_cache_dir,
     )
+    # Folge-Läufe finden die externen Zuflüsse im Rohbaum oft nicht mehr.
+    # Der Stempel wird danach aus dem gespeicherten UI-Baum neu gesetzt,
+    # damit ein alter „Untergrenze“-Vermerk nicht stehen bleibt.
 
     summary = _summen(kinder)
     baum_probe = {
@@ -1217,6 +1273,16 @@ def trace_utxo(
         "coinjoin_noise_skipped": bool(roh.get("coinjoin_noise_skipped")),
         "tax_horizon": bool(roh.get("tax_horizon")),
     }
+    _stempel_aus_ui_baum(
+        baum_probe,
+        txid=roh.get("txid") or xpub_cache._normalize_txid(txid),
+        vout=int(roh.get("vout", vout) or 0),
+        address=wurzel_adresse,
+        amount_sats=int(roh.get("amount_sats", 0) or 0),
+        wallet=wallet,
+        cache_dir=cache_dir,
+        immutable_cache_dir=immutable_cache_dir,
+    )
     voll = trace_cache.baum_ist_vollstaendig(baum_probe)
     steuer_ok = trace_cache.baum_ist_steuer_ausreichend(baum_probe)
     juengste = None

@@ -33,7 +33,7 @@ class TestBootLog(ApiTestBasis):
             zeile = antwort.readline()
             self.assertTrue(zeile, "erste Zeile fehlt, bevor die Ableitung weiterläuft")
             obj = json.loads(zeile)
-            self.assertEqual(obj["log"], "Code vin-20260929a")
+            self.assertEqual(obj["log"], "Code trace-ruhig-20260929f")
             # Die Ableitung hängt noch — die Zeile kam also nicht erst am Ende.
             self.assertFalse(self.state.context_bereit())
             tor.wait(timeout=5)

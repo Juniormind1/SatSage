@@ -9,7 +9,7 @@ from __future__ import annotations
 from httpserver.boot_log import BootLog
 
 # Erste Zeile im Start-Log. Fehlt sie oder weicht sie ab, läuft alter Code.
-CODE_LAUF_ID = "vin-20260929a"
+CODE_LAUF_ID = "trace-ruhig-20260929f"
 
 import logging
 import os

@@ -695,6 +695,8 @@ class TestOberflaeche(unittest.TestCase):
             "utxo.verfolgt_ts = utxo.verfolgt_ts ||", self.format_js
         )
         self.assertIn('t("trace.youngestSats"', self.format_js)
+        self.assertIn("function alterKlaerenKnopf", self.format_js)
+        self.assertIn("alterKlaerenKnopf", self.wallets_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("jüngste sats vom", de)
         self.assertIn("verfolgt_vollstaendig", self.format_js)

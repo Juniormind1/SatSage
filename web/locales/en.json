@@ -1033,6 +1033,8 @@
   "trace.txClass.whirlpool": "Likely Whirlpool CoinJoin",
   "trace.unresolvedInputsNote": "{count} further inputs were not resolved — after the first own input the resolution stops to avoid hundreds of lookups on consolidation transactions. Amounts of these inputs are missing.",
   "trace.walletTransition": "Wallet change · {from} → {to}",
+  "trace.clarifyAge": "Clarify age",
+  "trace.clarifyAgeTitle": "Traces the sats to an external address. The youngest-sats date then appears here.",
   "trace.youngestSats": "youngest sats on {wann}",
   "trace.youngestSatsTitle": "All sats are traced back to an external address. The date is the youngest inflow from outside.",
   "ui.hard.0515d43f6e": "{art} for “{name}” is already running or queued.",

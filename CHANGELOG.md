@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **UTXO-Liste:** „Vervollständigen“ schreibt den Zufluss-Stempel neu. Ein alter „Untergrenze“-Vermerk bleibt danach nicht stehen, und die Zeile wird grün. War „vervollständigen“ erfolgreich, verschwindet der Knopf sofort und „jüngste sats vom …“ erscheint an seiner Stelle. Fehlt „jüngste sats vom …“, steht an derselben Stelle „Alter klären“. Der Knopf startet den Herkunfts-Trace, der dieses Datum liefert. Währenddessen atmet der Empfangs-QR wie bei einem Scan. Ist der Baum schon unvollständig, bleibt nur „vervollständigen“ neben „Scan neu“.
+- **Log · Herkunft:** Ziel-Scan einer Adresse („keine unspent UTXOs …“) erscheint im Log-Bereich der Oberfläche, nicht nur im Terminal. Sonst bleibt dort nur „Moment noch“, während der Scan weiterläuft.
+- **Steuerjahr · klären:** Die Zahl der grauen UTXOs unter „klären“ zählt mit jedem geklärten Punkt herunter, nicht erst wenn die ganze Ansicht neu lädt.
 - **Herkunft · Electrum:** Vorgänger-Transaktionen wurden mit umgedrehter Kennung abgefragt. Electrs (eigen und öffentlich) antwortete dann mit dem Core-Wortlaut „No such mempool or blockchain transaction“, obwohl die Transaktion existiert. Die Kennung bleibt jetzt in der Anzeige-Reihenfolge.
 - **Datenquellen · öffentliche Electrum:** Liegen Onion- oder Clearnet-Listen und ist nichts Privates verbunden, zeigt die Kopfzeile „Electrum öffentlich“ — grau, solange noch nicht geprüft, rot mit „Verbindung hat nicht geklappt“ nach einem Fehlschlag. „Verbinden“ an einer geladenen Liste fragt die Freigabe und stellt danach die Verbindung her. Ohne Liste heißt der Knopf „Liste laden“.
 - **Electrum über Onion:** Ein Abruf wartet bis zu drei Minuten, dreimal.

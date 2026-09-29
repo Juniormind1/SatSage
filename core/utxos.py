@@ -142,7 +142,14 @@ def utxo_as_dict(
             # Nur bei vollständigem Baum: jeder Sat endet außen, das
             # jüngste Datum ist dann keine Untergrenze.
             voll = bool(gespeichert.get("vollstaendig"))
-            if ingress and ingress.get("external_untergrenze"):
+            # Untergrenze nur, solange die Meta sie bestätigt. Ein älterer
+            # Zufluss-Stempel darf einen inzwischen vollständigen Baum nicht
+            # wieder rot färben.
+            if (
+                ingress
+                and ingress.get("external_untergrenze")
+                and gespeichert.get("luecken_buendel")
+            ):
                 voll = False
             eintrag["verfolgt_vollstaendig"] = voll
             eintrag["steuer_ausreichend"] = bool(

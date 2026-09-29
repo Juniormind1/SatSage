@@ -519,7 +519,7 @@ def persist_utxo_ingress(
             "wallet": horizon.get("wallet"),
             "amount_sats": horizon.get("amount_sats") or amount_sats,
         }
-    if not (youngest or external):
+    if not (youngest or external or horizon):
         return None
 
     from main import resolve_immutable_cache_dir, save_utxo_ingress_cache

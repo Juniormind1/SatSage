@@ -337,6 +337,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             immutable_cache_dir=state.immutable_cache_dir,
                             fetch_address_utxos=fetch_addr,
                             cache_source=quelle,
+                            progress=job.progress,
                             stop_before_ts=(
                                 stop_before_ts if modus == "steuer" else None
                             ),

@@ -1814,6 +1814,7 @@ def _build_blockchain_fetchers(
         )
         return {
             "get_tx": get_tx,
+            "fulcrum": fulcrum,
             "fetch_address_utxos": fetch_address_utxos,
             "fetch_addresses_utxos": fetch_addresses_utxos,
             "fetch_addresses_utxos_utxoset": fetch_addresses_utxos,

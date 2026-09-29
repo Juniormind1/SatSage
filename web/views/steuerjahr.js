@@ -252,6 +252,7 @@ function zeichneSteuerjahr(daten) {
     const z = document.createElement("span");
     z.className = "kennzahl-zusatz";
     z.textContent = zusatz;
+    if (art === "ungeprueft") z.dataset.klaerZaehler = "grau";
     zelle.append(titelEl, w, z);
     if (mitKlaeren) {
       const knopf = document.createElement("button");

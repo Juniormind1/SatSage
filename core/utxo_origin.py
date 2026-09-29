@@ -484,6 +484,7 @@ def trace_utxo_origin(
                         cache_dir,
                         fetch_address_utxos,
                         cache_source,
+                        on_progress=progress_cb,
                     )
                 # Eigener Pfad je Kind — Geschwister sehen nur memo, nicht
                 # gegenseitig die besuchten Knoten des anderen Asts.

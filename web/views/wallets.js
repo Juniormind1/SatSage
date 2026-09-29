@@ -301,6 +301,8 @@ function empfangGlobalerScanLaeuft() {
  */
 function empfangScanLaeuftFuer(walletId) {
   if (empfangGlobalerScanLaeuft()) return true;
+  // „Alter klären“ ist ein Einzel-Trace, kein Scan-Job. Atmen, solange er läuft.
+  if (Zustand.traceJobs && Zustand.traceJobs.size > 0) return true;
   if (!walletId) return false;
   if (
     Zustand.herkunftTiefWalletId
@@ -1514,6 +1516,10 @@ function zeichneUtxoZeile(utxo) {
 
   const juengste = juengsteSatsMarke(utxo);
   if (juengste) zeile.append(juengste);
+  else {
+    const klaeren = alterKlaerenKnopf(utxo);
+    if (klaeren) zeile.append(klaeren);
+  }
 
   // Woher der letzte externe Zufluss kam, sofern die Herkunft schon
   // ermittelt und die Adresse zuzuordnen ist.

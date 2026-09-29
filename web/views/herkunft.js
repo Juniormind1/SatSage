@@ -833,6 +833,13 @@ function zeichneTraceWurzel(utxo) {
 
     const juengste = juengsteSatsMarke(utxo);
     if (juengste) oben.append(juengste);
+    else {
+      const klaeren = alterKlaerenKnopf(utxo);
+      if (klaeren) oben.append(klaeren);
+    }
+  } else {
+    const klaeren = alterKlaerenKnopf(utxo);
+    if (klaeren) oben.append(klaeren);
   }
 
   // Ausgabe unterwegs (Mempool, eigener Node) — noch im Bestand sichtbar.
@@ -1120,6 +1127,10 @@ async function starteZweigTrace(
 ) {
   const force = Boolean(opts && opts.force);
   zweig.dataset.geladen = "laeuft";
+  if (utxo && utxo.key && Zustand.traceJobs) {
+    Zustand.traceJobs.set(utxo.key, Zustand.traceJobs.get(utxo.key) || "wartet");
+  }
+  if (typeof stoesseEmpfangScanPuls === "function") stoesseEmpfangScanPuls();
   delete zweig._lotKinder;
   entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
 
@@ -1148,7 +1159,8 @@ async function starteZweigTrace(
   const aufraeumen = () => {
     clearInterval(timer);
     const gemerkt = Zustand.traceJobs.get(utxo.key);
-    if (gemerkt === jobId) Zustand.traceJobs.delete(utxo.key);
+    if (gemerkt === jobId || gemerkt === "wartet") Zustand.traceJobs.delete(utxo.key);
+    if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
   };
 
   const sendeAbbruch = async () => {
@@ -1243,6 +1255,7 @@ async function starteZweigTrace(
         zeichneZweig(job.result, zweig, utxo, klapp);
         merkeTraceAmUtxo(utxo, job.result);
         aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
+        aktualisiereWalletZeileNachTrace(utxo);
         zweig.prepend(gespeicherterKopf({
           erstellt_ts: job.erstellt_ts
             || utxo.verfolgt_ts
@@ -2543,6 +2556,25 @@ async function starteHerkunftVollstaendig() {
 /** Während Massen-Herkunft: aktuelle Ansicht höchstens alle ~2,5 s neu laden. */
 const HERKUNFT_REFRESH_MS = 2500;
 
+/**
+ * Scorecard „Ohne Herkunftsanalyse“: Zahl unter „klären“ sofort senken.
+ * Die Ansicht selbst lädt seltener neu — der Zähler soll trotzdem
+ * Punkt für Punkt mitlaufen.
+ */
+function zaehleGraueKlaerungHerunter(verfolgt) {
+  const ziel = document.querySelector("[data-klaer-zaehler='grau']");
+  if (!ziel || typeof verfolgt !== "number") return;
+  if (ziel.dataset.klaerStart == null) {
+    const treffer = String(ziel.textContent || "").match(/(\d+)/);
+    if (!treffer) return;
+    ziel.dataset.klaerStart = treffer[1];
+  }
+  const start = Number(ziel.dataset.klaerStart);
+  if (!Number.isFinite(start)) return;
+  const rest = Math.max(0, start - verfolgt);
+  ziel.textContent = ziel.textContent.replace(/\d+/, String(rest));
+}
+
 async function erfrischeHerkunftZwischenstand() {
   try {
     if (Zustand.ansicht === "wallet" && Zustand.walletId) {
@@ -2870,6 +2902,9 @@ async function herkunftAllerUtxos(ziele = {
       nimmJobLogAb(job, logStand);
       const zahl = job.result?.verfolgt;
       const juengste = job.result?.juengste_sats;
+      if (typeof zahl === "number" && zahl !== zuletztVerfolgt) {
+        zaehleGraueKlaerungHerunter(zahl);
+      }
       let standText = übersetzeLogText(job.message || t("common.runningEllipsis"));
       if (typeof juengste === "number" && juengste > 0) {
         standText += t("ui.hard.7cdb0db2f7", { n: juengste });

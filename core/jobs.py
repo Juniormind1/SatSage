@@ -365,19 +365,20 @@ class Job:
             zuletzt = self._log_zuletzt
         return max(0.0, time.monotonic() - zuletzt)
 
-    def progress(self, message: str, *, log: bool = False) -> None:
+    def progress(self, message: str, *, log: bool = False, sofort: bool = False) -> None:
         """
         Fortschritts-Callback, kompatibel zu trace_engine.ProgressCallback.
 
         Bricht den Vorgang ab, sobald ein Abbruch angefordert wurde — dadurch
         wirkt der Abbruch an jeder Stelle, die Fortschritt meldet.
 
-        *log=True* hängt die Zeile zusätzlich an die Job-Liste, damit die
-        Oberfläche sie im Log-Bereich zeigen kann — vor dem Schritt, nicht danach.
+        *log=True* oder *sofort=True* hängt die Zeile an die Job-Liste, damit
+        die Oberfläche sie im Log-Bereich zeigen kann — vor dem Schritt,
+        nicht nur als „Moment noch“ im Terminal.
         """
         self.raise_if_cancelled()
         self.message = message
-        if log:
+        if log or sofort:
             self._haenge_log_an(message)
 
     def _haenge_log_an(self, text: str) -> None:

@@ -943,6 +943,38 @@ function juengsteSatsMarke(utxo) {
   return satz;
 }
 
+/**
+ * Fehlt das grüne Label, steht hier der Knopf, der den Trace dafür startet.
+ * Unvollständig: vorhandenen Baum fortsetzen. Sonst neu bis außen.
+ */
+function alterKlaerenKnopf(utxo) {
+  if (!utxo || !utxo.key || formatJuengsteSats(utxo)) return null;
+  // Unvollständig hat schon „vervollständigen“ — kein zweiter Start-Knopf.
+  if (utxo.verfolgt && utxoHerkunftUnvollstaendig(utxo)) return null;
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  knopf.className = "trace-link alter-klaeren";
+  knopf.textContent = t("trace.clarifyAge");
+  knopf.title = t("trace.clarifyAgeTitle");
+  knopf.addEventListener("click", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (
+      utxoHerkunftUnvollstaendig(utxo)
+      && typeof starteHerkunftVervollstaendigen === "function"
+    ) {
+      starteHerkunftVervollstaendigen(utxo, {
+        buendel: Boolean(utxo.luecken_buendel),
+      });
+      return;
+    }
+    if (typeof zeigeHerkunftFuer === "function") {
+      zeigeHerkunftFuer(utxo.key, { neu: true });
+    }
+  });
+  return knopf;
+}
+
 /** Vollständig verfolgt (für den gelben Gruppennachweis). */
 function utxoHatVollenHerkunftstrace(utxo) {
   return Boolean(utxo && utxo.verfolgt_vollstaendig);
@@ -1129,6 +1161,20 @@ function merkeTraceAmUtxo(utxo, ergebnis) {
  * Betrag/Adresse/Wallet in der UTXO-Kopfzeile nachziehen.
  * *wurzelEl*: optional der konkrete Block (zuverlässiger als data-key-Suche).
  */
+/**
+ * Wallet-Zeile nach erfolgreichem Vervollständigen: roter Knopf weg,
+ * grünes „jüngste sats vom …“ an dieselbe Stelle.
+ */
+function aktualisiereWalletZeileNachTrace(utxo) {
+  if (!utxo || !utxo.key || typeof zeichneUtxoZeile !== "function") return;
+  const alt = document.querySelector(
+    `.utxo-zeile[data-key="${CSS.escape(utxo.key)}"]`,
+  );
+  if (!alt) return;
+  const neu = zeichneUtxoZeile(utxo);
+  alt.replaceWith(neu);
+}
+
 function aktualisiereTraceWurzelKopf(utxo, wurzelEl = null) {
   if (!utxo || !utxo.key) return;
   let block = wurzelEl && wurzelEl.classList?.contains("utxo-wurzel")

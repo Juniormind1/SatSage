@@ -356,6 +356,19 @@ def resolve_wallet_verlauf(
     return ergebnis
 
 
+def _melde_ziel_scan(text: str, on_progress=None) -> None:
+    """Terminal und, wenn der Herkunftsjob einen Callback hat, GUI-Log."""
+    print(f"  {text}", flush=True)
+    if on_progress is None:
+        return
+    try:
+        on_progress(text, sofort=True)
+    except TypeError:
+        on_progress(text)
+    except Exception:
+        pass
+
+
 def _supplement_cache_address(
     xpub: str,
     address: str,
@@ -363,6 +376,7 @@ def _supplement_cache_address(
     cache_dir: Path,
     source: str,
     wallet: WalletContext | None = None,
+    on_progress=None,
 ) -> None:
     """Scannt genau eine Adresse und ergänzt den Cache — kein Bereichs-Scan."""
     entry = load_xpub_cache_entry(xpub, cache_dir)
@@ -370,11 +384,14 @@ def _supplement_cache_address(
         return
 
     label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."
-    print(f"  Ziel-Scan {label}: {abbrev_display(address)}", flush=True)
+    _melde_ziel_scan(
+        f"Ziel-Scan {label}: {abbrev_display(address)}",
+        on_progress,
+    )
     try:
         live_utxos = fetch_address_utxos(address)
     except Exception as exc:
-        print(f"  ⚠️  Ziel-Scan fehlgeschlagen: {exc}", flush=True)
+        _melde_ziel_scan(f"Ziel-Scan fehlgeschlagen: {exc}", on_progress)
         return
 
     for utxo in live_utxos:
@@ -388,13 +405,17 @@ def _supplement_cache_address(
         wallet.address_to_wallet[address] = wallet.names_by_xpub[xpub]
         wallet.address_to_xpub[address] = xpub
 
+    kurz = abbrev_display(address)
     if live_utxos:
-        print(
-            f"  → {len(live_utxos)} UTXO(s) für {abbrev_display(address)} im Cache ergänzt",
-            flush=True,
+        _melde_ziel_scan(
+            f"{len(live_utxos)} UTXO(s) für {kurz} im Cache ergänzt",
+            on_progress,
         )
     else:
-        print(f"  → Keine unspent UTXOs auf {abbrev_display(address)} (im Cache vermerkt)", flush=True)
+        _melde_ziel_scan(
+            f"Keine unspent UTXOs auf {kurz} (im Cache vermerkt)",
+            on_progress,
+        )
 
 
 def _ensure_address_cached(
@@ -403,6 +424,7 @@ def _ensure_address_cached(
     cache_dir: Path | None,
     fetch_address_utxos,
     source: str,
+    on_progress=None,
 ) -> None:
     """
     Wallet-Zuordnung lokal per XPUB; API nur für diese eine Adresse,
@@ -414,7 +436,13 @@ def _ensure_address_cached(
     if not xpub or not cache_dir or not fetch_address_utxos:
         return
     _supplement_cache_address(
-        xpub, address, fetch_address_utxos, cache_dir, source, wallet
+        xpub,
+        address,
+        fetch_address_utxos,
+        cache_dir,
+        source,
+        wallet,
+        on_progress=on_progress,
     )
 
 
