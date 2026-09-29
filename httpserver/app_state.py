@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from httpserver.boot_log import BootLog
 
+# Erste Zeile im Start-Log. Fehlt sie oder weicht sie ab, läuft alter Code.
+CODE_LAUF_ID = "vin-20260929a"
+
 import logging
 import os
 import secrets
@@ -249,6 +252,7 @@ class AppState:
                 self._adressen_bereit.clear()
                 self._context_bereit.clear()
                 self.boot_log = BootLog()
+            self.boot_log.zeile(f"Code {CODE_LAUF_ID}")
             self._verwerfe_empfang_clients_unlocked()
         if hintergrund:
             threading.Thread(

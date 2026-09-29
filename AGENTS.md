@@ -30,6 +30,19 @@ Gilt für **Commit, Push, PR, Issue, Changelog, Log-Ausgabe, Screenshot, Chat-An
 
 Technische Riegel: `.gitignore`, `githooks/pre-commit` (Secret-Pfade), Dealbreaker **S1** in [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). Hooks ersetzen diese Prüfung nicht — Agents prüfen den Diff selbst.
 
+## HART · Nutzer prüft das Ziel, bevor der Assistent groß testet
+
+**Bevor der Assistent umfangreiche Tests selbst fährt, bittet er den Nutzer, kurz zu prüfen, ob sein Ziel erreicht ist.**
+
+Umfangreich heißt: Testsuite, Regtest-Labor, Playwright, Chaos-Lauf, langer Verbindungstest, Browser-Durchklick über mehrere Ansichten. Ein einzelner, kurzer Syntax- oder JSON-Check zählt nicht.
+
+Ablauf:
+
+1. Änderung fertig erklären — was der Nutzer sehen oder tun soll.
+2. Den Nutzer bitten, das Ziel kurz selbst zu prüfen.
+3. Umfangreiche Tests auf unerwünschte Seiteneffekte **nur anbieten**. Nicht starten, nicht „ich teste das jetzt noch“.
+4. Erst wenn der Nutzer das Angebot annimmt, die Tests fahren.
+
 ## HART · Nur der Worktree
 
 **Arbeiten nur im aktuellen Worktree und darunter.**

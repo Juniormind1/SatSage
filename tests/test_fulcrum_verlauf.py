@@ -46,6 +46,29 @@ class FakeFulcrumClient:
         raise AssertionError(f"unerwartete Methode in Test: {method}")
 
 
+class TestVinTxidReihenfolge(unittest.TestCase):
+    """Electrum liefert Roh-Hex. Die Vorgänger-ID darf nur einmal gedreht werden."""
+
+    def test_parse_behaelt_anzeige_reihenfolge(self):
+        from embit.script import Script
+        from embit.transaction import Transaction, TransactionInput, TransactionOutput
+
+        from core.fulcrum_history import _parse_tx_hex
+
+        prev = bytes.fromhex("0123456789abcdef" * 4)
+        tx = Transaction(
+            vin=[TransactionInput(prev, 3)],
+            vout=[TransactionOutput(1000, Script(b"\x51"))],
+        )
+        geparst = _parse_tx_hex(tx.serialize().hex())
+        self.assertEqual(geparst["vin"][0]["txid"], prev.hex())
+        self.assertEqual(geparst["vin"][0]["vout"], 3)
+        self.assertNotEqual(
+            geparst["vin"][0]["txid"],
+            prev[::-1].hex(),
+        )
+
+
 class VerlaufTest(unittest.TestCase):
     def setUp(self):
         self.adresse = EXTERN_A

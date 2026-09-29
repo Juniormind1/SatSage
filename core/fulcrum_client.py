@@ -19,7 +19,9 @@ from core.fulcrum_transport import _socks5_connect
 
 FULCRUM_DEFAULT_PORT = 50002
 FULCRUM_CONNECT_TIMEOUT = 8
-FULCRUM_ONION_TIMEOUT = 30
+#: Antwortfenster über Tor. Eine große Transaktion braucht länger als
+#: eine Handshake-Probe; 30 s reichen dafür nicht.
+FULCRUM_ONION_TIMEOUT = 180
 #: Bei Tor/großen Tx-Antworten: nach Timeout neu verbinden und erneut fragen.
 FULCRUM_REQUEST_RETRIES = 3
 #: Electrum-JSON-RPC-Batch über Tor: Calls pro Nachricht (Timeout/Antwortgröße).
@@ -562,7 +564,10 @@ class FulcrumNotifySession:
             except Exception:
                 pass
 
-    def request(self, method: str, params: list | None = None, *, timeout: float = 60.0) -> Any:
+    def request(self, method: str, params: list | None = None, *, timeout: float | None = None) -> Any:
+        if timeout is None:
+            # Dieselbe Grenze wie der Socket: über Onion länger warten.
+            timeout = float(self.timeout) if self.tor_proxy else 60.0
         if self._stop.is_set() or not self._sock:
             raise RuntimeError("Fulcrum-Notify-Session nicht verbunden")
         with self._send_lock:

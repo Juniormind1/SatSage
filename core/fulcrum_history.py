@@ -209,8 +209,12 @@ def _vin_to_dict(inp) -> dict:
             "coinbase": coinbase or "00",
             "sequence": inp.sequence,
         }
+    # embit speichert die Vorgänger-ID schon in Anzeige-Reihenfolge
+    # (read_from dreht die Wire-Bytes). Ein zweites Umdrehen fragt
+    # Electrs nach einer Tx, die es nicht gibt — gleicher Wortlaut
+    # wie Core „No such mempool…“.
     return {
-        "txid": inp.txid[::-1].hex(),
+        "txid": bytes(inp.txid).hex(),
         "vout": inp.vout,
         "sequence": inp.sequence,
     }

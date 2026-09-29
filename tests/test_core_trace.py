@@ -366,8 +366,7 @@ class TestFehlerUebersetzung(unittest.TestCase):
                "mempool or blockchain transaction. Use gettransaction for "
                "wallet transactions.'})")
         text = erklaere_fehler(roh)
-        self.assertNotIn("DaemonError", text)
-        self.assertIn("kennt diese Transaktion nicht", text)
+        self.assertEqual(text, roh)
 
     def test_zeitueberschreitung(self):
         from core.trace import erklaere_fehler

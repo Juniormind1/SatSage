@@ -1253,16 +1253,29 @@ function nimmPeerStand(ergebnis, still) {
 function frageOeffentlicheElectrum() {
   Zustand.oeffentlicheGefragt = true;
   const overlay = $("#oeffentliche-electrum-warnung");
-  if (!overlay) return;
+  if (!overlay) return Promise.resolve(false);
+  if (Zustand._oeffentlichDialog) return Zustand._oeffentlichDialog;
   logZeile(t("ui.hard.6665b8b4e2"));
   overlay.hidden = false;
   const nein = $("#oeffentliche-electrum-nein");
   if (nein) nein.focus();
+  Zustand._oeffentlichDialog = new Promise((resolve) => {
+    Zustand._oeffentlichDialogFertig = resolve;
+  });
+  return Zustand._oeffentlichDialog;
+}
+
+function schliesseOeffentlicheElectrum(erlaubt) {
+  const overlay = $("#oeffentliche-electrum-warnung");
+  if (overlay) overlay.hidden = true;
+  const fertig = Zustand._oeffentlichDialogFertig;
+  Zustand._oeffentlichDialog = null;
+  Zustand._oeffentlichDialogFertig = null;
+  if (fertig) fertig(Boolean(erlaubt));
 }
 
 async function lehneOeffentlicheElectrumAb() {
-  const overlay = $("#oeffentliche-electrum-warnung");
-  if (overlay) overlay.hidden = true;
+  schliesseOeffentlicheElectrum(false);
   logZeile(t("ui.hard.d3aa220782"));
   try {
     await api("/source/oeffentlich", {
@@ -1279,8 +1292,7 @@ async function lehneOeffentlicheElectrumAb() {
 }
 
 async function erlaubeOeffentlicheElectrum() {
-  const overlay = $("#oeffentliche-electrum-warnung");
-  if (overlay) overlay.hidden = true;
+  schliesseOeffentlicheElectrum(true);
   logZeile(
     t("ui.hard.81909b08fe"),
   );
@@ -1293,11 +1305,24 @@ async function erlaubeOeffentlicheElectrum() {
       Zustand.config.oeffentliche_electrum = true;
       Zustand.config.oeffentliche_electrum_session = true;
     }
-    await testeEigenenNode();
+    // Explizites „Verbinden“ prüft selbst. Der automatische Dialog
+    // (keine private Quelle) startet den Check hier.
+    if (!Zustand._oeffentlichVerbindenLaeuft) {
+      await testeEigenenNode();
+    }
   } catch (fehler) {
     Zustand.oeffentlicheGefragt = false;
     logZeile(t("ui.hard.57a8b6a5d2", { msg: fehler.message }), true);
   }
+}
+
+function hatOeffentlicheElectrumListen() {
+  return (Zustand.config?.sources || []).some(
+    (q) =>
+      q
+      && (q.key === "public_onion" || q.key === "clearnet")
+      && q.configured,
+  );
 }
 
 function oeffentlicheElectrumNochAktiv() {
@@ -1581,7 +1606,7 @@ function zeichneKopfStatus(quellen) {
       lern: "privatsphaere",
       label: t("header.sourceElectrumPublic"),
       stufe: "krit",
-      title: t("header.sourceElectrumPublicTitle"),
+      title: `${t("header.sourceConnectionUp")} ${t("header.sourceElectrumPublicTitle")}`,
     });
   }
 
@@ -1639,6 +1664,31 @@ function zeichneKopfStatus(quellen) {
     kopfQuelleAufbau(core)
     || kopfQuelleAufbau(electrs)
     || p2pAufbau;
+
+  if (
+    !oeffentlichVerbunden
+    && !privateVerbunden
+    && !privateAufbau
+    && hatOeffentlicheElectrumListen()
+  ) {
+    // Listen da, nichts Privates verbunden: Pille darf nicht fehlen.
+    const oeffentlichGeprueft = Zustand.peersGeprueft
+      && (
+        oeffentlichOnion?.reachable === false
+        || oeffentlichClear?.reachable === false
+      );
+    eintraege.push({
+      key: "public",
+      lern: "privatsphaere",
+      label: oeffentlichGeprueft
+        ? t("header.sourceElectrumPublicFailed")
+        : t("header.sourceElectrumPublic"),
+      stufe: oeffentlichGeprueft ? "krit" : "neutral",
+      title: oeffentlichGeprueft
+        ? t("header.sourceElectrumPublicFailed")
+        : t("header.sourceElectrumPublicIdle"),
+    });
+  }
 
   let privText;
   let privStufe;

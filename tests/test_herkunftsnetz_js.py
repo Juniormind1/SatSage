@@ -32,6 +32,8 @@ const Zustand = {
   config: { wallets: [{ id: "wid-1", name: "Cold" }] },
 };
 const spruenge = [];
+const walletSpruenge = [];
+function springeZuWalletUtxo(id, key, adresse) { walletSpruenge.push([id, key, adresse]); return true; }
 const kopien = [];
 function zeigeHerkunftFuer(key, opts) { spruenge.push([key, Zustand.traceSprung, opts]); }
 function kopiereInZwischenablage(text) { kopien.push(text); return true; }
@@ -181,6 +183,23 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertIn("netz-ueber-achse", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["vorFrist"])
+
+    def test_roter_rahmen_springt_ins_wallet_auch_mit_netzdaten(self):
+        """Gelber oder grüner Punkt mit rotem Rahmen: Wallet, kein Pie/Netz."""
+        r = _node("""
+          pA.dataset.walletId = "wid-1";
+          pA.dataset.address = "bc1qtest";
+          pA.classList.add("herkunft-offen-marke");
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          console.log(JSON.stringify({
+            an: stand().an, wallet: walletSpruenge, api: aufrufe.api.length,
+          }));
+        """)
+        self.assertFalse(r["an"])
+        self.assertEqual(r["wallet"], [["wid-1", K, "bc1qtest"]])
+        self.assertEqual(r["api"], 1)
         # Beide Kanten kreuzen die Frist (grün → orange). Die Anschaffungslinie nicht.
         self.assertEqual(len(r["verlauf"]), 2)
         self.assertTrue(all(str(s).startswith("url(#netz-verlauf-") for s in r["verlauf"]))

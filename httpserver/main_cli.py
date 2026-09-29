@@ -216,6 +216,9 @@ def main_cli(argv=None) -> int:
     args = build_argumente().parse_args(argv)
 
     _splash_text("Konfiguration …")
+    from httpserver.app_state import CODE_LAUF_ID
+
+    print(f"Code {CODE_LAUF_ID}", flush=True)
     state = build_state(args)
     bind = _bind_host(args.bind, state=state, args=args)
     try:

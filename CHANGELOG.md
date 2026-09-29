@@ -9,10 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft · Electrum:** Vorgänger-Transaktionen wurden mit umgedrehter Kennung abgefragt. Electrs (eigen und öffentlich) antwortete dann mit dem Core-Wortlaut „No such mempool or blockchain transaction“, obwohl die Transaktion existiert. Die Kennung bleibt jetzt in der Anzeige-Reihenfolge.
+- **Datenquellen · öffentliche Electrum:** Liegen Onion- oder Clearnet-Listen und ist nichts Privates verbunden, zeigt die Kopfzeile „Electrum öffentlich“ — grau, solange noch nicht geprüft, rot mit „Verbindung hat nicht geklappt“ nach einem Fehlschlag. „Verbinden“ an einer geladenen Liste fragt die Freigabe und stellt danach die Verbindung her. Ohne Liste heißt der Knopf „Liste laden“.
+- **Electrum über Onion:** Ein Abruf wartet bis zu drei Minuten, dreimal.
 - **Historie:** Fehlt der UTXO-Bestand, entdeckt der Lauf zuerst die UTXOs und holt danach deren Historie.
 - **Herkunft:** Die Steuergrenze ist aufgehoben. Jeder Lauf geht bis zu einer fremden Adresse oder Coinbase.
 - **Wallets:** Nach „Historie“ ohne UTXO-Datei sagt die Zeile „kein UTXO-Cache“ und nennt das Alter des Verlaufs. Die UTXO-Cache-Zeit hängt nur noch an einer vorhandenen UTXO-Datei.
-- **Steuerjahr · Dotplot:** Der Klick springt nur noch bei rotem Ring ins Wallet. Ohne Ring öffnet er das Herkunftsnetz.
+- **Steuerjahr · Dotplot:** Jeder Punkt mit rotem Rahmen springt ins Wallet zu diesem UTXO. Ohne Rahmen öffnet der Klick das Herkunftsnetz.
 - **Block-Explorer:** Wechsel auf einen öffentlichen Explorer zeigt die gelbe Pille „öffentlicher Block-Explorer“. Rot bleibt dem eigenen Explorer, der nicht antwortet.
 - **Electrum:** Ist IP und Onion eingetragen und die IP antwortet nicht, wechselt die Verbindung auf die Onion. „Übernehmen“ prüft danach beide Wege neu.
 - **Block-Explorer:** Die Pille wird erst grün, wenn ein kurzer Abruf die eingetragene Adresse erreicht. Eine lokale Adresse, die nicht antwortet, bleibt rot.

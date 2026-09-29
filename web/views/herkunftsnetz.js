@@ -132,13 +132,13 @@ async function herkunftsnetzStarten(key, { nachJob = false } = {}) {
     return;
   }
   if (lauf !== Herkunftsnetz.lauf || Herkunftsnetz.key !== key) return;
-  // Sprung nur beim roten Ring. Ein grauer Punkt ohne Ring hat Herkunftsdaten
-  // oder ist noch ungeprüft — den zeichnet das Netz, auch wenn die Antwort leer ist.
+  // Roter Ring = Herkunft leer und ungetraced. Farbe des Punkts (grün, gelb,
+  // grau) ändert daran nichts: der Klick geht ins Wallet, nicht ins leere Netz.
   const punktEl = document.querySelector(
     `#achse-spur .achse-punkt[data-key="${CSS.escape(key)}"]`,
   );
   const ring = Boolean(punktEl && punktEl.classList.contains("herkunft-offen-marke"));
-  if (ring && !herkunftsnetzHatDaten(daten)) {
+  if (ring) {
     if (nachJob) {
       Herkunftsnetz.status = "fehlt";
       herkunftsnetzZeichnen();

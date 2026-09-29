@@ -500,12 +500,19 @@ function zeichneQuellen(quellen) {
     }
 
     if (quelle.laden_url && quelle.laden_filter) {
+      const listeDa = Boolean(quelle.configured);
       const laden = document.createElement("button");
       laden.type = "button";
       laden.className = "knopf knopf-klein";
-      laden.textContent = t("sources.connect");
-      laden.title = t("sources.loadElectrumTitle", { url: quelle.laden_url });
-      laden.addEventListener("click", () => ladeElectrumServer(quelle, laden));
+      laden.textContent = listeDa ? t("sources.connect") : t("sources.loadList");
+      laden.title = listeDa
+        ? t("sources.connectPublicTitle")
+        : t("sources.loadElectrumTitle", { url: quelle.laden_url });
+      laden.addEventListener("click", () => (
+        listeDa
+          ? verbindeOeffentlicheElectrum(quelle, laden)
+          : ladeElectrumServer(quelle, laden)
+      ));
       rechts.append(laden);
       // Papierkorb hinter dem Verbinden-Knopf: nur die Serverliste, nicht Opt-in.
       if (quelle.configured) {
@@ -652,6 +659,32 @@ async function verwerfeQuelle(quelle) {
     pruefeNodeStatus();
   } catch (fehler) {
     meldung(fehler.message, "krit");
+  }
+}
+
+/**
+ * Liste ist schon da: „Verbinden“ fragt die Freigabe und prüft danach
+ * die öffentlichen Server. Ohne Ja bleibt alles unverbunden.
+ */
+async function verbindeOeffentlicheElectrum(quelle, knopf) {
+  const vorher = knopf.textContent;
+  knopf.disabled = true;
+  knopf.textContent = t("common.loadingEllipsis");
+  Zustand._oeffentlichVerbindenLaeuft = true;
+  try {
+    if (!Zustand.config?.oeffentliche_electrum) {
+      const erlaubt = await frageOeffentlicheElectrum();
+      if (!erlaubt || !Zustand.config?.oeffentliche_electrum) return;
+    }
+    await testeEigenenNode(knopf);
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  } finally {
+    Zustand._oeffentlichVerbindenLaeuft = false;
+    if (knopf.isConnected) {
+      knopf.disabled = false;
+      knopf.textContent = vorher;
+    }
   }
 }
 
