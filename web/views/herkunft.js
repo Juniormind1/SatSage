@@ -2800,41 +2800,13 @@ async function herkunftAllerUtxos(ziele = {
     }
   };
 
-  // Grau / initial: Steuer-Horizont reicht für erste Einstufung.
-  // Gelb vertiefen: voll bis extern/Coinbase (gelb erst „fertig“ wenn grün
-  // oder voll bestätigt).
-  const gelbVoll = Boolean(ziele.gelbVertiefen) || ziele.knopf === "#herkunft-gelb";
-  const steuerModus = !gelbVoll && (
-    Boolean(ziele.steuer)
-    || ziele.knopf === "#herkunft-alle"
-    || ziele.knopf === "#herkunft-grau"
-  );
-  logZeile(
-    gelbVoll
-      ? t("ui.hard.499f733cb2")
-      : steuerModus
-        ? t("ui.hard.6508c40d20")
-        : t("ui.hard.0a8622a114"),
-  );
+  // Steuergrenze aufgehoben: jeder Lauf bis extern/Coinbase.
+  logZeile(t("ui.hard.0a8622a114"));
   try {
-    const traceDaten = steuerModus
-      ? {
-          modus: "steuer",
-          jahr: Number($("#jahr-wahl")?.value) || new Date().getFullYear(),
-          haltefrist_jahre: Number($("#frist-wahl")?.value)
-            || Number(steuerEinstellungen().haltefrist_jahre)
-            || 1,
-          stichtag: steuerEinstellungen().stichtag_iso
-            || steuerEinstellungen().stichtag
-            || "",
-          utxo_keys: ziele.utxo_keys || null,
-          // Herkunftsnetz: alter Ingress ohne Baum reicht dort nicht.
-          ...(ziele.baumNoetig ? { baum_noetig: true } : {}),
-        }
-      : {
-          modus: "voll",
-          utxo_keys: ziele.utxo_keys || null,
-        };
+    const traceDaten = {
+      modus: "voll",
+      utxo_keys: ziele.utxo_keys || null,
+    };
     let antwort = await api("/trace/alle", {
       methode: "POST",
       daten: traceDaten,

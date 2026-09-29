@@ -644,6 +644,21 @@ function cacheHinweis(wallet) {
   return datum ? t("wallet.cacheFrom", { datum }) : t("wallet.cacheCached");
 }
 
+/** „vor N Min.“ aus einer Unix-mtime — ohne „Cache“, der Text hängt selbst an. */
+function cacheAlterText(mtime) {
+  const sek = Math.max(0, Math.floor(Date.now() / 1000 - Number(mtime || 0)));
+  if (sek < 5 * 60) return t("wallet.fresh.justNowShort");
+  if (sek < 60 * 60) {
+    return t("wallet.fresh.minutesShort", { n: Math.max(1, Math.floor(sek / 60)) });
+  }
+  if (sek < 24 * 60 * 60) {
+    return t("wallet.fresh.hoursShort", { n: Math.max(1, Math.floor(sek / 3600)) });
+  }
+  return t("wallet.fresh.daysShort", {
+    n: Math.max(1, Math.floor(sek / 86400)),
+  });
+}
+
 function walletAlter(wallet, { kurz = false } = {}) {
   if (!wallet) return "";
 

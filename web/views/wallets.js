@@ -1022,10 +1022,11 @@ function zeichneUtxos(daten, wallet, seite = null) {
   }
 
   const teile = [];
-  // Frische nur aus dieser Antwort. Der Config-Stand kann noch die mtime
-  // von vor dem Löschen tragen — sonst bleibt „Cache vor N Std.“ stehen.
-  const cacheDa = Boolean(daten.has_cache || daten.hat_verlauf);
-  if (daten.has_cache) {
+  // UTXO-Datei und Verlauf sind getrennte Caches. Historie allein füllt
+  // den Verlauf; „kein UTXO-Cache“ darf dann nicht die Verlaufs-Zeit anhängen.
+  const utxoDatei = Boolean(daten.has_cache);
+  const cacheDa = utxoDatei || Boolean(daten.hat_verlauf);
+  if (utxoDatei) {
     const utxoListe = daten.utxos || [];
     setzeWalletTitel(wallet, daten.total_sats);
     teile.push(`${daten.total_count} UTXO`);
@@ -1068,14 +1069,18 @@ function zeichneUtxos(daten, wallet, seite = null) {
   }
   const alter = walletAlter(wallet);
   if (alter) teile.push(alter);
-  if (cacheDa && wallet && wallet.has_cache) {
+  if (utxoDatei && wallet && wallet.has_cache && Number(wallet.utxo_count) > 0) {
     const frisch = cacheFrische(wallet);
-    if (frisch.lang) teile.push(frisch.lang);
+    if (frisch.lang && frisch.stufe !== "leer") teile.push(frisch.lang);
+  } else if (cacheDa && wallet && wallet.cache_mtime && !utxoDatei) {
+    teile.push(t("wallet.metaHistoryAge", {
+      alter: cacheAlterText(wallet.cache_mtime),
+    }));
   }
   setzeText($("#wallet-meta"), teile.join(" · "));
   const metaEl = $("#wallet-meta");
   if (metaEl) {
-    if (cacheDa && wallet && wallet.has_cache) {
+    if (utxoDatei && wallet && wallet.has_cache && Number(wallet.utxo_count) > 0) {
       const frisch = cacheFrische(wallet);
       metaEl.title = frisch.title || "";
       metaEl.dataset.fresh = frisch.stufe || "";

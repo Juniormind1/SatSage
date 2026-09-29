@@ -119,7 +119,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     if vollstaendig:
         modus = "tief"
     elif modus_roh in ("steuer", "tax", "haltefrist"):
-        modus = "steuer"
+        # Steuergrenze aufgehoben: derselbe Lauf wie „bis extern/Coinbase“.
+        modus = "voll"
     else:
         # Herkunft tracen / Default: voll bis extern
         modus = "voll"
@@ -523,14 +524,8 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                 except TypeError:
                     return holen(adressen)
 
-            ergebnis = wallet_sync_engine.resolve_wallet_verlauf(
-                xpubs, mit_fortschritt, state.cache_dir, wallet_ctx
-            )
-            gesamt = sum(len(v) for v in ergebnis.values())
-            stand.phase(f"{gesamt} Ein- und Ausgänge erfasst")
-
-            # Bestand: nur nachziehen wenn kein frischer UTXO-Cache da ist
-            # (sonst doppelte Gap-Arbeit direkt nach UTXO-Scan).
+            # Ohne UTXO-Datei kennt der Verlauf nur schon abgeleitete
+            # Adressen. Bestand zuerst, danach deren Historie.
             frisch, frisch_grund = main.utxo_cache_frisch_genug(
                 xpubs, state.cache_dir,
             )
@@ -539,7 +534,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                 gefunden = frisch
             else:
                 stand.phase(
-                    f"Erfasse UTXO-Bestand… ({frisch_grund})"
+                    f"Noch kein UTXO-Bestand — entdecke UTXOs ({frisch_grund})…"
                 )
                 hol_utxo = fetchers.get("fetch_wallet_utxos")
                 if hol_utxo is None:
@@ -549,8 +544,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
 
                 def on_utxos_update(stand_utxos: list) -> None:
                     job.result = {
-                        "eintraege": gesamt,
-                        "wallets": len(ergebnis),
+                        "wallets": len(ziele),
                         "utxo_count": len(stand_utxos),
                         "partial": True,
                     }
@@ -576,6 +570,12 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                     on_utxos_update=on_utxos_update,
                 )
             job.raise_if_cancelled()
+            _seed_wallet_ctx_aus_caches(state)
+            ergebnis = wallet_sync_engine.resolve_wallet_verlauf(
+                xpubs, mit_fortschritt, state.cache_dir, wallet_ctx
+            )
+            gesamt = sum(len(v) for v in ergebnis.values())
+            stand.phase(f"{gesamt} Ein- und Ausgänge erfasst")
             wort = "UTXO" if len(gefunden) == 1 else "UTXOs"
             stand.phase(
                 f"{gesamt} Ein- und Ausgänge, {len(gefunden)} {wort}"

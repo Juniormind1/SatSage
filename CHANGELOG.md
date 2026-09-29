@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Historie:** Fehlt der UTXO-Bestand, entdeckt der Lauf zuerst die UTXOs und holt danach deren Historie.
+- **Herkunft:** Die Steuergrenze ist aufgehoben. Jeder Lauf geht bis zu einer fremden Adresse oder Coinbase.
+- **Wallets:** Nach „Historie“ ohne UTXO-Datei sagt die Zeile „kein UTXO-Cache“ und nennt das Alter des Verlaufs. Die UTXO-Cache-Zeit hängt nur noch an einer vorhandenen UTXO-Datei.
 - **Steuerjahr · Dotplot:** Der Klick springt nur noch bei rotem Ring ins Wallet. Ohne Ring öffnet er das Herkunftsnetz.
 - **Block-Explorer:** Wechsel auf einen öffentlichen Explorer zeigt die gelbe Pille „öffentlicher Block-Explorer“. Rot bleibt dem eigenen Explorer, der nicht antwortet.
 - **Electrum:** Ist IP und Onion eingetragen und die IP antwortet nicht, wechselt die Verbindung auf die Onion. „Übernehmen“ prüft danach beide Wege neu.
