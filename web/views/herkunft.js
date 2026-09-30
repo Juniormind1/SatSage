@@ -1258,7 +1258,6 @@ async function starteZweigTrace(
         zeichneZweig(job.result, zweig, utxo, klapp);
         merkeTraceAmUtxo(utxo, job.result);
         aktualisiereTraceWurzelKopf(utxo, zweig.closest(".utxo-wurzel"));
-        aktualisiereWalletZeileNachTrace(utxo);
         zweig.prepend(gespeicherterKopf({
           erstellt_ts: job.erstellt_ts
             || utxo.verfolgt_ts

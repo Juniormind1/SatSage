@@ -1431,12 +1431,9 @@ function zeichneJuengsteSatsNach(utxo) {
     }
   }
 
-  for (const zeile of document.querySelectorAll(
-    `.utxo-zeile[data-key="${CSS.escape(utxo.key)}"]`,
-  )) {
-    setzeTraceDatenAmKnoten(zeile, utxo);
-    if (marke) ersetzeJuengsteMarke(zeile, juengsteSatsMarke(utxo));
-  }
+  // Wallet-Liste neu zeichnen: nur die grüne Marke anzuhängen ließe
+  // „unvollständig“ und „vervollständigen“ stehen.
+  aktualisiereWalletZeileNachTrace(utxo);
 
   aktualisiereAdressgruppenJuengste(utxo);
 }
