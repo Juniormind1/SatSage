@@ -2943,7 +2943,7 @@ async function herkunftAllerUtxos(ziele = {
     if (antwort.nichts_zu_tun) {
       if (antwort.keine_utxos) {
         fertig(t("trace.allOriginsNeedUtxo"), "warn");
-      } else if (gelbVoll) {
+      } else if (ziele.gelbVertiefen) {
         fertig(
           t("tax.yellowAlreadyDone") !== "tax.yellowAlreadyDone"
             ? t("tax.yellowAlreadyDone")

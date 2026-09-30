@@ -2301,6 +2301,9 @@ async function pruefeWalletScan() {
         if (typeof zahl === "number") {
           await erfrischeScanZwischenstand(scanId, zahl);
         }
+        if (Array.isArray(job.result?.neu) && typeof zeichneScanPunkte === "function") {
+          zeichneScanPunkte(job.result.neu);
+        }
       }
       return;
     }

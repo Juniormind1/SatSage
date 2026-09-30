@@ -153,6 +153,16 @@ def _trace_offen_basis(
             offen.append(key)
             continue
         if kopf.get("vollstaendig"):
+            # Voller Baum ohne Anschaffungsstempel: Steuerjahr bleibt grau.
+            # „Herkünfte UTXOs“ muss genau diese noch einmal laufen lassen.
+            from server import main
+
+            if _ingress_veraltet(
+                main.load_utxo_ingress_cache(
+                    txid, vout, state.immutable_cache_dir
+                )
+            ):
+                offen.append(key)
             continue
         offen.append(key)
     return offen

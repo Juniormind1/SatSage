@@ -2242,6 +2242,10 @@ class TestHerkunftVollstaendig(ApiTestBasis):
         eigene = {BIP84_RECEIVE_0}
         trace_cache.speichern(txid("a1"), 0, voll, self.immutable, eigene)
         trace_cache.speichern(txid("b2"), 1, luecke, self.immutable, eigene)
+        # Voller Baum mit Anschaffungsstempel: nicht grau, nicht nochmal offen.
+        main.save_utxo_ingress_cache(
+            txid("a1"), 0, {"external_time_ts": 1_600_000_000}, self.immutable,
+        )
 
         utxos = server._utxos_fuer_trace(
             self.state, wallet_id=self.wallet_id(BIP84_ZPUB),
@@ -2250,6 +2254,29 @@ class TestHerkunftVollstaendig(ApiTestBasis):
         keys = {(t, v) for t, v in offen}
         self.assertIn((txid("b2"), 1), keys)
         self.assertNotIn((txid("a1"), 0), keys)
+
+    def test_voller_baum_ohne_ingress_bleibt_offen(self):
+        """Grau im Steuerjahr: voller Baum, aber kein Anschaffungsstempel."""
+        from core import trace_cache
+
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB,
+            [utxo(100_000, BIP84_RECEIVE_0, marker="c3", vout=0)],
+            self.cache,
+            "test",
+        )
+        voll = {
+            "found": True,
+            "children": [{"type": "external", "children": []}],
+            "summary": {"external_count": 1, "unresolved_inputs": 0},
+        }
+        eigene = {BIP84_RECEIVE_0}
+        trace_cache.speichern(txid("c3"), 0, voll, self.immutable, eigene)
+        utxos = server._utxos_fuer_trace(
+            self.state, wallet_id=self.wallet_id(BIP84_ZPUB),
+        )
+        offen = server._trace_offen_basis(self.state, utxos, eigene)
+        self.assertIn((txid("c3"), 0), {(t, v) for t, v in offen})
 
 
 class TestGespeicherterBaum(ApiTestBasis):

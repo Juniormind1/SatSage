@@ -645,9 +645,34 @@ def api_rescan(state: AppState, payload: dict) -> dict:
 
             def on_utxos_update(stand_utxos: list) -> None:
                 # Zwischenstand schon während des Scans — GUI kann zeichnen.
+                # Neue Punkte: Output-Datum, grau. Ohne Blockzeit kein X.
+                neu = []
+                for u in stand_utxos or []:
+                    if not isinstance(u, dict):
+                        continue
+                    txid = str(u.get("txid") or "").strip()
+                    if not txid:
+                        continue
+                    status = u.get("status") or {}
+                    try:
+                        ts = int(status.get("block_time") or 0)
+                        vout = int(u.get("vout", 0))
+                        sats = int(u.get("value") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if ts <= 0 or sats < 0:
+                        continue
+                    neu.append({
+                        "key": f"{txid}:{vout}",
+                        "time_ts": ts,
+                        "value_sats": sats,
+                        "wallet": entry.display_name,
+                        "wallet_id": wid,
+                    })
                 job.result = {
                     "utxo_count": len(stand_utxos),
                     "partial": True,
+                    "neu": neu,
                 }
                 wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
                 stand.tick(f"{len(stand_utxos)} {wort} bisher gefunden…")

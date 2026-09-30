@@ -689,6 +689,92 @@ function formatTickTag(d) {
   return `${dd}.${formatTickMonatJahr(d)}`;
 }
 
+/**
+ * UTXO-Discover: neue Outputs grau einzeichnen, sobald der Walk sie kennt.
+ * X = Output-Datum. Punkte, die der Plot schon hat, bleiben unangetastet.
+ */
+const ScanPunktStand = {
+  keys: new Set(),
+  offen: new Map(),
+};
+
+function scanPunktGroesse(sats, maxSats) {
+  const max = Number(maxSats) || Number(sats) || 1;
+  const anteil = Number(sats) / max;
+  if (anteil >= 0.1) return "gross";
+  if (anteil >= 0.01) return "mittel";
+  return "klein";
+}
+
+function zeichneScanPunkte(liste) {
+  if (Zustand.ansicht !== "steuerjahr") return 0;
+  const spur = $("#achse-spur");
+  const strahl = ZeitstrahlAnsicht.daten && ZeitstrahlAnsicht.daten.zeitstrahl;
+  if (!spur || !strahl || !strahl.von || !strahl.bis) return 0;
+  const von = parseDeDatum(strahl.von);
+  const bis = parseDeDatum(strahl.bis);
+  if (!von || !bis) return 0;
+  const gesamtMs = bis.getTime() - von.getTime();
+  if (!(gesamtMs > 0)) return 0;
+  const maxSats = Number(strahl.max_sats) || 1;
+  let dazu = 0;
+  for (const eintrag of liste || []) {
+    const key = String(eintrag.key || "");
+    const ts = Number(eintrag.time_ts || 0);
+    const sats = Number(eintrag.value_sats || 0);
+    if (!key || !(ts > 0) || !(sats >= 0)) continue;
+    if (spur.querySelector(
+      `.achse-punkt[data-key="${CSS.escape(key)}"]:not([data-scan-neu])`,
+    )) {
+      ScanPunktStand.keys.add(key);
+      ScanPunktStand.offen.delete(key);
+      continue;
+    }
+    ScanPunktStand.offen.set(key, eintrag);
+    if (spur.querySelector(`.achse-punkt[data-key="${CSS.escape(key)}"]`)) {
+      continue;
+    }
+    const wann = new Date(ts * 1000);
+    if (Number.isNaN(wann.getTime())) continue;
+    const pos = Math.max(
+      0,
+      Math.min(100, (wann.getTime() - von.getTime()) / gesamtMs * 100),
+    );
+    const sicht = zeitstrahlSichtPos(pos);
+    if (sicht < -5 || sicht > 105) continue;
+    const yRoh = Math.log1p(sats) / Math.log1p(maxSats) * 100;
+    const y = zeitstrahlSichtY(Math.max(0, Math.min(100, yRoh)));
+    const punkt = document.createElement("span");
+    punkt.className = `achse-punkt ${scanPunktGroesse(sats, maxSats)} ungeprueft klickbar`;
+    punkt.dataset.key = key;
+    punkt.dataset.scanNeu = "1";
+    if (eintrag.wallet) punkt.dataset.wallet = eintrag.wallet;
+    if (eintrag.wallet_id) punkt.dataset.walletId = eintrag.wallet_id;
+    punkt.dataset.valueSats = String(sats);
+    punkt.dataset.eventTs = String(ts);
+    punkt.style.left = `${sicht}%`;
+    punkt.style.bottom = `${y}%`;
+    const dd = String(wann.getDate()).padStart(2, "0");
+    const mm = String(wann.getMonth() + 1).padStart(2, "0");
+    const datum = `${dd}.${mm}.${wann.getFullYear()}`;
+    const tip = document.createElement("span");
+    tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
+    const lage = t("tax.legendUnchecked") !== "tax.legendUnchecked"
+      ? t("tax.legendUnchecked")
+      : "innerhalb Frist, ohne Herkunft";
+    tip.textContent = [
+      datum,
+      typeof formatZeitstrahlBetrag === "function" ? formatZeitstrahlBetrag(sats) : "",
+      `${eintrag.wallet || "unbekannt"} · ${lage}`,
+    ].filter(Boolean).join("\n");
+    punkt.append(tip);
+    spur.append(punkt);
+    ScanPunktStand.keys.add(key);
+    dazu += 1;
+  }
+  return dazu;
+}
+
 /** „?“ am laufenden Punkt, „!“ kurz nach seinem Abschluss. Überlebt den Redraw. */
 const TracePunktMarke = {
   frage: "",
@@ -1519,6 +1605,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   // Ephemerer Overlay (Herkunftsnetz) über dem neu gezeichneten Bestand.
   if (typeof herkunftsnetzZeichnen === "function") herkunftsnetzZeichnen();
   traceMarkenNachZeichnen();
+  if (ScanPunktStand.offen.size && typeof zeichneScanPunkte === "function") {
+    zeichneScanPunkte([...ScanPunktStand.offen.values()]);
+  }
 }
 
 /**
