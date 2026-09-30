@@ -1,4 +1,5 @@
 // Minimaler DOM-Ersatz für tests/test_herkunftsnetz_js.py (kein jsdom im Projekt).
+const CSS = { escape: (wert) => String(wert).replace(/[^a-zA-Z0-9_-]/g, "\\$&") };
 class El {
   constructor(tag) {
     this.tagName = String(tag).toUpperCase();
@@ -43,12 +44,18 @@ function passt(el, s) {
   const nicht = [];
   rest = rest.replace(/:not\(\.([\w-]+)\)/g, (_, c) => { nicht.push(c); return ""; });
   const attr = [];
+  const attrGleich = [];
+  rest = rest.replace(/\[data-([\w-]+)="([^"]*)"\]/g, (_, a, v) => {
+    attrGleich.push([a, v.replace(/\\(.)/g, "$1")]);
+    return "";
+  });
   rest = rest.replace(/\[data-([\w-]+)\]/g, (_, a) => { attr.push(a); return ""; });
   const klassen = (rest.match(/\.([\w-]+)/g) || []).map((c) => c.slice(1));
   if (!klassen.every((c) => el.classList.contains(c))) return false;
   if (nicht.some((c) => el.classList.contains(c))) return false;
   const camel = (a) => a.replace(/-(\w)/g, (_, b) => b.toUpperCase());
-  return attr.every((a) => el.dataset[camel(a)] !== undefined);
+  if (!attr.every((a) => el.dataset[camel(a)] !== undefined)) return false;
+  return attrGleich.every(([a, v]) => String(el.dataset[camel(a)] ?? "") === v);
 }
 const ids = {};
 const document = {

@@ -56,18 +56,55 @@ def _vout_matches_address(vout: dict, address: str) -> bool:
 
 
 _HISTORY_CACHE: dict[str, list] = {}
+#: Eigener Electrs im LAN antwortet in Millisekunden. Eine Zeile je Adresse
+#: füllt den Log-Bereich, ohne dass jemand auf den Abruf wartet.
+_HOEHE_LOG_BUENDEL = 32
+_hoehe_abrufe_lan = 0
+
+
+def _electrs_im_lan(client: FulcrumClient) -> bool:
+    """Klares TCP zum eigenen Host. Onion (tor_proxy) und öffentlicher Pool: False."""
+    if getattr(client, "tor_proxy", None):
+        return False
+    host = str(getattr(client, "host", "") or "").strip().lower()
+    return bool(host) and not host.endswith(".onion")
+
+
+def _melde_blockhoehe(txid: str, addr: str, *, lan: bool, n: int) -> None:
+    """
+    Onion und öffentliche Server: eine Zeile je Adresse (der Abruf dauert).
+
+    Eigenes Electrs im LAN: die erste Adresse und dann jede
+    ``_HOEHE_LOG_BUENDEL``-te. Dazwischen bleibt der Log-Bereich still.
+    """
+    from display import abbrev_display, melde_zwischenstand
+
+    if lan and n > 1 and n % _HOEHE_LOG_BUENDEL != 0:
+        return
+    if lan and n > 1:
+        melde_zwischenstand(
+            f"↻ Herkunft: Blockhöhe für {n} Adressen beim eigenen Electrum-Server"
+        )
+        return
+    melde_zwischenstand(
+        f"↻ Herkunft: Blockhöhe von {txid[:12]}… über {abbrev_display(addr)}"
+    )
 
 
 def _history_fuer_adresse(client: FulcrumClient, addr: str, txid: str) -> list:
     """Historie je Adresse merken. Sonst holt jede neue Tx dieselbe Adresse neu."""
+    global _hoehe_abrufe_lan
+
     sh = address_to_scripthash(addr)
     if sh in _HISTORY_CACHE:
         return _HISTORY_CACHE[sh]
-    from display import abbrev_display, melde_zwischenstand
-
-    melde_zwischenstand(
-        f"↻ Herkunft: Blockhöhe von {txid[:12]}… über {abbrev_display(addr)}"
-    )
+    lan = _electrs_im_lan(client)
+    if lan:
+        _hoehe_abrufe_lan += 1
+        n = _hoehe_abrufe_lan
+    else:
+        n = 1
+    _melde_blockhoehe(txid, addr, lan=lan, n=n)
     history = client.request("blockchain.scripthash.get_history", [sh]) or []
     if not isinstance(history, list):
         history = []

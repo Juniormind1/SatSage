@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Dotplot:** Über einem Punkt erscheint nur noch das eigene Tooltip mit Datum, Betrag und Wallet. Die verzögerte Browser-Zeile mit den Klickmöglichkeiten entfällt.
+- **Steuerjahr · Dotplot:** Ein grauer Punkt (innerhalb der Frist, ohne Herkunft) springt ins Wallet zu diesem UTXO. Bisher öffnete der Klick ein leeres Herkunftsnetz.
+- **Block-Explorer:** Die Pille prüft die lokale mempool-Instanz vom Server aus. Der Browser-Abruf scheiterte an der Seitenrichtlinie und an selbst signiertem TLS, obwohl die Adresse im Browser aufging. Es zählen die API-Pfade und, wenn die API woanders hängt, die eingetragene Adresse selbst.
+- **Log · Herkunft:** Am eigenen Electrum-Server im LAN erscheint die Blockhöhe nicht mehr für jede Adresse. Die erste Adresse bleibt sichtbar, danach alle 32 eine Sammelzeile. Über Onion und öffentliche Server bleibt es bei einer Zeile je Adresse.
 - **Empfangs-QR:** Die Atmung läuft während eines Trace durch. Eine neue Blockhöhen-Zeile setzt den Takt nicht zurück.
 - **Log-Bereich:** Die Tor-Startsequenz erscheint einmal. Ein erneutes Verbinden des Log-Stroms spielt sie nicht noch einmal ab. Hop- und Blockhöhen-Zeilen eines laufenden Trace erscheinen im Log-Bereich, nicht nur im Terminal. Der Strom bleibt nach „Wallets bereit“ offen.
 - **Log · Herkunft:** Die Blockhöhe nennt die Adresse, über die sie geholt wird. Dieselbe Adresse wird nicht für jede Transaktion neu abgefragt. Hop-Zeilen nennen Tiefe, Adresse und Zahl der Eingänge. Die Fulcrum-Prüfung erscheint im Log-Bereich, nicht nur im Terminal. Jeder Vorgänger nennt Tx und Ausgang und erscheint sofort im Log-Bereich, nicht erst nach zehn Sekunden als „Moment noch“. Der Ziel-Scan einer Adresse geht dorthin und nicht ins Terminal.

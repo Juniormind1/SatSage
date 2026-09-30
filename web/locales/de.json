@@ -792,7 +792,7 @@
   "tax.netzReport": "HTML-Report",
   "tax.netzReportTitle": "HTML-Report für dieses UTXO (Was-wäre-wenn). Angekreuzte Abflüsse/UTXOs unten werden mit einbezogen.",
   "tax.netzEnd": "Beenden (Esc)",
-  "tax.netzPointTitle": "Herkunftsnetz einblenden und die Adresse kopieren — in mempool.space einfügen. Fehlt der Baum, springt der Klick ins Wallet zu diesem UTXO (dort „Scan neu“ und „Herkunftslücken schließen“). Erneut klicken, Esc oder Klick ins Leere blendet das Netz aus. Doppelklick: HTML-Bericht.",
+  "tax.netzPointTitle": "Herkunftsnetz einblenden und die Adresse kopieren — in mempool.space einfügen. Grauer Punkt oder fehlender Baum: der Klick springt ins Wallet zu diesem UTXO (dort „Scan neu“ und „Herkunftslücken schließen“). Erneut klicken, Esc oder Klick ins Leere blendet das Netz aus. Doppelklick: HTML-Bericht.",
   "tax.netzShare": "Anteil am gewählten Output: {pct}",
   "tax.netzBundle": "{n} Eingänge einer Transaktion (CoinJoin, Sammel-Tx oder nicht aufgelöst)",
   "tax.netzBundleRange": "Output-Zeiten {von} – {bis}",

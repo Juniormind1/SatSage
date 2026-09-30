@@ -1013,6 +1013,7 @@ from httpserver.api.source import (  # noqa: E402
     api_local_core_accept,
     api_oeffentliche_electrum,
     api_rescan,
+    api_mempool_probe,
     api_save_mempool,
     api_save_source,
     api_source_status,
@@ -1514,6 +1515,8 @@ class Handler(
             return 200, api_lade_electrum_server(state, self._body())
         if teile == ["config", "mempool"] and methode == "PUT":
             return 200, api_save_mempool(state, self._body())
+        if teile == ["config", "mempool", "probe"] and methode == "GET":
+            return 200, api_mempool_probe(state)
         if teile == ["config", "start-sync"] and methode == "PUT":
             return 200, api_save_start_sync(state, self._body())
         if teile == ["config", "app-password"] and methode == "PUT":

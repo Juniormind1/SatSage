@@ -1118,6 +1118,122 @@ def mempool_info(roh: str) -> dict:
     }
 
 
+def mempool_erreichbar(url: str, *, timeout: float = 4.0) -> tuple[bool, str]:
+    """
+    Kurzer Abruf der eigenen mempool-Instanz vom Server aus.
+
+    Der Browser darf die Adresse nicht selbst fragen: Die Seitenrichtlinie
+    lässt nur ``'self'`` zu, und eine LAN-Instanz hinter einem anderen Port
+    wäre damit immer „nicht erreichbar“. TLS im Heimnetz folgt derselben
+    lockeren Prüfung wie der Node.
+
+    Rückgabe: ``(ok, grund)``. ``grund`` ist leer, wenn der Abruf klappt.
+    """
+    import urllib.error
+    import urllib.request
+
+    from core.outbound_policy import OutboundPolicyError, ensure_url_allowed, tls_context
+
+    try:
+        ziel = normalize_mempool_url(url)
+    except ValueError as exc:
+        return False, str(exc)
+    if not ziel:
+        return False, "Keine Adresse eingetragen."
+    try:
+        ensure_url_allowed(ziel, service="mempool")
+    except OutboundPolicyError as exc:
+        return False, str(exc)
+
+    from urllib.parse import urlparse
+
+    host = urlparse(ziel).hostname or ""
+    basis = ziel.rstrip("/")
+    # Frontend hängt die API unter /api. Umbrel und StartOS antworten oft
+    # nur auf /api/v1/…. Ein nacktes Backend (Port 8999) hat kein /api davor.
+    # Steht der Pfad schon in der Adresse, nicht noch einmal davorsetzen.
+    if basis.endswith("/api/v1"):
+        kandidaten = [f"{basis}/blocks/tip/height"]
+    elif basis.endswith("/api"):
+        kandidaten = [
+            f"{basis}/blocks/tip/height",
+            f"{basis}/v1/blocks/tip/height",
+        ]
+    else:
+        kandidaten = [
+            f"{basis}/api/blocks/tip/height",
+            f"{basis}/api/v1/blocks/tip/height",
+            f"{basis}/blocks/tip/height",
+        ]
+    letzter = "Die Adresse antwortet nicht."
+    netz_fehler = True
+    for probe in kandidaten:
+        ok, grund, netz = _mempool_probe_eine(probe, host, timeout)
+        if ok:
+            return True, ""
+        letzter = grund or letzter
+        netz_fehler = netz_fehler and netz
+    # Die Oberfläche selbst gilt: der ↗-Verweis öffnet genau diese Adresse.
+    # Ein anderer API-Pfad darf die Pille nicht rot färben, wenn die Seite da ist.
+    if not netz_fehler:
+        ok, grund, _netz = _mempool_probe_eine(
+            basis + "/", host, timeout, nur_antwort=True,
+        )
+        if ok:
+            return True, ""
+        if grund:
+            letzter = grund
+    return False, letzter
+
+
+def _mempool_probe_eine(
+    url: str,
+    host: str,
+    timeout: float,
+    *,
+    nur_antwort: bool = False,
+) -> tuple[bool, str, bool]:
+    """
+    Ein Abruf.
+
+    Rückgabe: ``(ok, grund, netzfehler)``. ``netzfehler`` heißt: der Host
+    hat gar nicht geantwortet (Verbindung, TLS, Zeit). HTTP 404 ist keiner.
+    """
+    import urllib.error
+    import urllib.request
+
+    from core.outbound_policy import tls_context
+
+    anfrage = urllib.request.Request(
+        url,
+        headers={"User-Agent": "SatSage", "Accept": "application/json, text/plain, */*"},
+    )
+    try:
+        with urllib.request.urlopen(
+            anfrage,
+            timeout=timeout,
+            context=tls_context(host=host),
+        ) as antwort:
+            status = int(getattr(antwort, "status", 200) or 200)
+            roh = antwort.read(64)
+    except urllib.error.HTTPError as exc:
+        try:
+            exc.close()
+        except Exception:
+            pass
+        if exc.code in (404, 400, 405):
+            return False, f"HTTP {exc.code}", False
+        return False, f"HTTP {exc.code}", False
+    except Exception as exc:
+        return False, str(exc) or type(exc).__name__, True
+    if nur_antwort:
+        return (200 <= status < 400), "", False
+    text = roh.strip().decode("utf-8", errors="replace").strip().strip('"')
+    if text.isdigit():
+        return True, "", False
+    return False, "Antwort ohne Blockhöhe.", False
+
+
 # ---------------------------------------------------------------------------
 # .env-Datei
 # ---------------------------------------------------------------------------

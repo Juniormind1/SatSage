@@ -65,6 +65,31 @@ def api_save_mempool(state: AppState, payload: dict) -> dict:
     return {"saved": True, "mempool": mempool_info(url)}
 
 
+def api_mempool_probe(state: AppState) -> dict:
+    """
+    Prüft die eingetragene mempool-Instanz vom Server aus.
+
+    Die Oberfläche fragt diese Route, statt die Instanz selbst anzutippen.
+    Ein Browser-Abruf scheitert an der Seitenrichtlinie (nur ``'self'``)
+    und an selbst signiertem TLS im LAN.
+    """
+    from server import mempool_info
+
+    from core.config import mempool_erreichbar
+
+    werte = state.env().values()
+    info = mempool_info(werte.get("MEMPOOL_URL", ""))
+    if not info.get("configured"):
+        return {"ok": False, "reachable": False, "reason": "Keine Adresse eingetragen."}
+    ok, grund = mempool_erreichbar(str(info.get("url") or ""))
+    return {
+        "ok": ok,
+        "reachable": ok,
+        "host": info.get("host") or "",
+        "reason": grund,
+    }
+
+
 def api_save_source(state: AppState, payload: dict) -> dict:
     from server import (
         ApiError,

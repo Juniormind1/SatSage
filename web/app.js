@@ -1444,7 +1444,7 @@ function kopfQuelleFehler(quelle) {
   );
 }
 
-/** Ein kurzer Abruf, bevor die Explorer-Pille grün wird. */
+/** Kurzer Server-Abruf, bevor die Explorer-Pille grün oder rot wird. */
 function pruefeBlockExplorer(mp) {
   const url = String(mp?.url || "").trim();
   // Nur der eigene Explorer wird grün oder rot nach Erreichbarkeit.
@@ -1455,23 +1455,22 @@ function pruefeBlockExplorer(mp) {
   if (Zustand._explorerProbeUrl === url && mp.reachable != null) return;
   Zustand._explorerProbeUrl = url;
   Zustand._explorerProbeLauf = true;
-  const ziel = url.replace(/\/$/, "") + "/api/blocks/tip/height";
   const lauf = url;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
-  fetch(ziel, { signal: controller.signal, cache: "no-store" })
+  // Der Browser fragt die Instanz nicht selbst. Die Seitenrichtlinie lässt
+  // nur die eigene Oberfläche zu, und LAN-TLS ist oft selbst signiert.
+  api("/config/mempool/probe", { timeoutMs: 8000 })
     .then((antwort) => {
       if (Zustand._explorerProbeUrl !== lauf) return;
-      if (Zustand.config?.mempool) {
-        Zustand.config.mempool.reachable = antwort.ok;
-      }
+      if (!Zustand.config?.mempool) return;
+      Zustand.config.mempool.reachable = Boolean(antwort && antwort.ok);
+      const grund = String((antwort && antwort.reason) || "").trim();
+      if (grund) Zustand.config.mempool.probeReason = grund;
     })
     .catch(() => {
       if (Zustand._explorerProbeUrl !== lauf) return;
       if (Zustand.config?.mempool) Zustand.config.mempool.reachable = false;
     })
     .finally(() => {
-      clearTimeout(timer);
       Zustand._explorerProbeLauf = false;
       if (Zustand._explorerProbeUrl === lauf) zeichneKopfStatus(Zustand.config?.sources);
     });
@@ -1639,6 +1638,7 @@ function zeichneKopfStatus(quellen) {
       beStufe = "krit";
       beTitle = t("header.blockExplorerUnreachableTitle");
       if (mp.host) beTitle += ` (${mp.host})`;
+      if (mp.probeReason) beTitle += ` — ${mp.probeReason}`;
     } else if (mp.local || mp.stufe === "lokal") {
       beLabel = t("header.blockExplorerPrivate") !== "header.blockExplorerPrivate"
         ? t("header.blockExplorerPrivate")

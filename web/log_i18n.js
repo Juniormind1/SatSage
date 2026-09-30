@@ -265,6 +265,8 @@
       "Catch-up: all own inputs of large consolidation txs…"],
     [/^↻ Herkunft: Blockzeit zu (.+)…$/, "↻ Origin: block time for $1…"],
     [/^↻ Herkunft: Blockhöhe von (.+) über (.+)$/, "↻ Origin: block height of $1 via $2"],
+    [/^↻ Herkunft: Blockhöhe für (\d+) Adressen beim eigenen Electrum-Server$/,
+      "↻ Origin: block height for $1 addresses at the own Electrum server"],
     [/^↻ Herkunft: warte auf Vorgänger (.+)$/, "↻ Origin: waiting for predecessor $1"],
     [/^↻ Herkunft: lade Vorgänger (.+)$/, "↻ Origin: loading predecessor $1"],
     [/^↻ Herkunft Tiefe (\d+)\/(\d+): lade Tx (.+)$/, "↻ Origin depth $1/$2: loading tx $3"],

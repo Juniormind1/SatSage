@@ -1284,10 +1284,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     punkt.dataset.filterLabels = [
       eintrag.wallet, eintrag.txid, lage,
     ].filter(Boolean).join(" ");
-    if (key) {
-      punkt.classList.add("klickbar");
-      punkt.title = t("tax.netzPointTitle");
-    }
+    if (key) punkt.classList.add("klickbar");
     punkt.style.left = `${sicht}%`;
     punkt.style.bottom = `${y}%`;
     // Betrag/Datum/Wallet nur im Hover-Tooltip — feste Labels überladen den Plot.

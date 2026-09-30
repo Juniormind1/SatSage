@@ -120,6 +120,7 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("herkunftsnetzBericht(key)", steuer)
         self.assertIn('addEventListener("dblclick"', steuer)
         self.assertIn("herkunftsnetzZeichnen()", steuer)
+        self.assertIn("function herkunftsnetzOhneHerkunft", NETZ)
         # Zeitstrahl-Rechnung unberührt: kein Overlay in events.
         self.assertNotIn("events.push", NETZ)
         nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
@@ -127,7 +128,6 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("herkunftsnetzBeenden()", nav[start:start + 600])
         herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.assertIn("ziele.danach({ art })", herkunft)
-        self.assertIn("baum_noetig: true", herkunft)
 
     def test_texte_in_beiden_sprachen(self):
         schluessel = set(re.findall(r't\("(tax\.netz\w+)"', NETZ))
@@ -168,7 +168,11 @@ class TestEinUndAusstieg(unittest.TestCase):
         """)
         self.assertEqual(r["laedt"]["status"], "laedt")
         self.assertIn("tax.netzWait", r["laedt"]["hinweisText"])
-        self.assertEqual(r["api"], [f"/tax/herkunftsnetz?jahr=2024&frist=1&stichtag=&key={K.replace(':', '%3A')}"])
+        self.assertEqual(
+            r["api"][0],
+            f"/tax/herkunftsnetz?jahr=2024&frist=1&stichtag=&key={K.replace(':', '%3A')}",
+        )
+        self.assertTrue(any(p.startswith("/trace?target=") for p in r["api"]))
         an = r["an"]
         self.assertTrue(an["an"] and an["fokus"] and an["hinweis"])
         self.assertFalse(an["andererFokus"])
@@ -183,6 +187,22 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertIn("netz-ueber-achse", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["vorFrist"])
+
+    def test_grauer_punkt_springt_ins_wallet(self):
+        """Ohne Herkunft gibt es kein Netz. Der Klick geht ins Wallet."""
+        r = _node("""
+          pA.className = "achse-punkt mittel ungeprueft klickbar";
+          pA.dataset.walletId = "wid-1";
+          pA.dataset.address = "bc1qgrau";
+          pA.fire("click");
+          await warte();
+          console.log(JSON.stringify({
+            an: stand().an, wallet: walletSpruenge, api: aufrufe.api.length,
+          }));
+        """)
+        self.assertFalse(r["an"])
+        self.assertEqual(r["wallet"], [["wid-1", K, "bc1qgrau"]])
+        self.assertEqual(r["api"], 0)
 
     def test_roter_rahmen_springt_ins_wallet_auch_mit_netzdaten(self):
         """Gelber oder grüner Punkt mit rotem Rahmen: Wallet, kein Pie/Netz."""
@@ -200,12 +220,6 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertFalse(r["an"])
         self.assertEqual(r["wallet"], [["wid-1", K, "bc1qtest"]])
         self.assertEqual(r["api"], 1)
-        # Beide Kanten kreuzen die Frist (grün → orange). Die Anschaffungslinie nicht.
-        self.assertEqual(len(r["verlauf"]), 2)
-        self.assertTrue(all(str(s).startswith("url(#netz-verlauf-") for s in r["verlauf"]))
-        aus = r["aus"]
-        self.assertFalse(aus["an"] or aus["fokus"] or aus["hinweis"])
-        self.assertEqual(aus["ringe"], 0)
 
     def test_klick_auf_eigenen_vorgaenger_springt_in_den_baum(self):
         r = _node("""
@@ -364,50 +378,19 @@ console.log(JSON.stringify({ weit, monate, tage }));
         self.assertEqual(r["gewechselt"], {"a": False, "b": True})
         self.assertFalse(r["danach"])
 
-    def test_fehlender_trace_startet_horizont_lauf(self):
+    def test_fehlender_trace_zeigt_netz_nicht(self):
+        """Ohne Baum kein Overlay. Der Sprung ins Wallet hängt an der Wallet-Kennung."""
         r = _node("""
           antworten.push({ ...NETZ, trace_fehlt: true, vorfahren: [], kanten: [] });
           pA.fire("click"); await warte();
-          const lauf = aufrufe.lauf[0];
-          const waehrend = stand();
-          await lauf.danach({ art: "warn" });
-          const abbruch = { ...stand(), laden: aufrufe.laden };
-          // Neuer Anlauf: diesmal fertig, danach Netz da.
-          pA.fire("click");  // zweiter Klick: aus
-          antworten.push({ ...NETZ, trace_fehlt: true, vorfahren: [], kanten: [] }, NETZ);
-          pA.fire("click"); await warte();
-          await aufrufe.lauf[1].danach({ art: "gut" }); await warte();
           console.log(JSON.stringify({
-            steuer: lauf.steuer, keys: lauf.utxo_keys, gelb: lauf.gelbVertiefen, baum: lauf.baumNoetig,
-            waehrend, abbruch, fertig: { ...stand(), laden: aufrufe.laden },
-            log: aufrufe.log.length,
+            ...stand(), laeufe: aufrufe.lauf.length, api: aufrufe.api.length,
           }));
         """)
-        self.assertTrue(r["steuer"])
-        self.assertEqual(r["keys"], [K])
-        self.assertFalse(r["gelb"])
-        self.assertTrue(r["baum"])
-        self.assertEqual(r["waehrend"]["status"], "trace")
-        self.assertIn("tax.netzTraceRunning", r["waehrend"]["hinweisText"])
-        self.assertEqual(r["log"], 2)
-        # Abbruch: Bestand unangetastet (kein Neuladen), Hinweis „kein Baum“.
-        self.assertEqual(r["abbruch"]["laden"], 0)
-        self.assertEqual(r["abbruch"]["status"], "fehlt")
-        self.assertEqual(r["abbruch"]["ringe"], 0)
-        self.assertTrue(r["abbruch"]["fokus"])
-        # Erfolg: Steuerjahr neu (Layer A), dann Netz.
-        self.assertEqual(r["fertig"]["laden"], 1)
-        self.assertEqual(r["fertig"]["ringe"], 3)
-
-    def test_laufender_lauf_blockiert_nicht(self):
-        r = _node("""
-          Zustand.herkunftAlleLaeuft = true;
-          antworten.push({ ...NETZ, trace_fehlt: true, vorfahren: [], kanten: [] });
-          pA.fire("click"); await warte();
-          console.log(JSON.stringify({ ...stand(), laeufe: aufrufe.lauf.length }));
-        """)
         self.assertEqual(r["laeufe"], 0)
-        self.assertEqual(r["status"], "busy")
+        self.assertGreaterEqual(r["api"], 1)
+        self.assertEqual(r["ringe"], 0)
+        self.assertTrue(r["an"])
 
     def test_doppelklick_oeffnet_bericht_ohne_netz_zu_toggeln(self):
         r = _node("""

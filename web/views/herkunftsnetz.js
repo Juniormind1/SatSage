@@ -44,12 +44,36 @@ function herkunftsnetzBericht(key) {
   ladeSelbstanzeigeExport("html", hatAuswahl ? angekreuzt : { txids: [], utxos: [key] });
 }
 
+/**
+ * Grauer Punkt: innerhalb der Frist, ohne Herkunft.
+ *
+ * Dafür gibt es kein Netz. Der Klick gehört ins Wallet, zu „Scan neu“
+ * und „Herkunftslücken schließen“.
+ */
+function herkunftsnetzOhneHerkunft(key) {
+  const punkt = herkunftsnetzPunktEl(key);
+  if (punkt && punkt.classList.contains("ungeprueft")) return true;
+  const events = (typeof Zustand !== "undefined" && Zustand.steuer?.zeitstrahl?.events) || [];
+  const treffer = events.find(
+    (e) => e && (e.key === key || (e.txid != null && `${e.txid}:${e.vout}` === key)),
+  );
+  return Boolean(treffer && treffer.geprueft === false && !treffer.erfuellt);
+}
+
 /** Klick auf einen Bestandspunkt: ein-, bei zweitem Klick ausblenden. */
 function herkunftsnetzUmschalten(key) {
   if (!key) return;
   if (Herkunftsnetz.key === key) {
     herkunftsnetzBeenden();
     return;
+  }
+  if (herkunftsnetzOhneHerkunft(key)) {
+    const punkt = herkunftsnetzPunkt(key);
+    const walletId = herkunftsnetzWalletId(key);
+    if (walletId && typeof springeZuWalletUtxo === "function") {
+      springeZuWalletUtxo(walletId, key, punkt.address);
+      return;
+    }
   }
   herkunftsnetzStarten(key);
 }
@@ -70,11 +94,20 @@ function herkunftsnetzBeenden() {
   herkunftsnetzZeichnen();
 }
 
+/** Bestandspunkt im Plot. Id-Suche, dann Kinder — der Schlüssel enthält einen Doppelpunkt. */
+function herkunftsnetzPunktEl(key) {
+  const spur = document.querySelector("#achse-spur");
+  if (!spur || !spur.querySelectorAll) return null;
+  const gesucht = String(key || "");
+  for (const el of spur.querySelectorAll(".achse-punkt")) {
+    if (el.dataset && el.dataset.key === gesucht) return el;
+  }
+  return null;
+}
+
 /** Bestandspunkt zu txid:vout — Plot-DOM, sonst Zeitstrahl-Daten. */
 function herkunftsnetzPunkt(key) {
-  const punkt = document.querySelector(
-    `#achse-spur .achse-punkt[data-key="${CSS.escape(key)}"]`,
-  );
+  const punkt = herkunftsnetzPunktEl(key);
   const events = (typeof Zustand !== "undefined" && Zustand.steuer?.zeitstrahl?.events) || [];
   const treffer = events.find(
     (e) => e && (e.key === key || (e.txid != null && `${e.txid}:${e.vout}` === key)),
@@ -134,9 +167,7 @@ async function herkunftsnetzStarten(key, { nachJob = false } = {}) {
   if (lauf !== Herkunftsnetz.lauf || Herkunftsnetz.key !== key) return;
   // Roter Ring = Herkunft leer und ungetraced. Farbe des Punkts (grün, gelb,
   // grau) ändert daran nichts: der Klick geht ins Wallet, nicht ins leere Netz.
-  const punktEl = document.querySelector(
-    `#achse-spur .achse-punkt[data-key="${CSS.escape(key)}"]`,
-  );
+  const punktEl = herkunftsnetzPunktEl(key);
   const ring = Boolean(punktEl && punktEl.classList.contains("herkunft-offen-marke"));
   if (ring) {
     if (nachJob) {

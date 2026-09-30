@@ -7,8 +7,9 @@ welche Adresse den Benutzer interessiert. Zweitens: Eine fremde Instanz wird
 als solche gekennzeichnet, damit die Entscheidung bewusst fällt.
 """
 import unittest
+import unittest.mock
 
-from core.config import mempool_info, normalize_mempool_url
+from core.config import mempool_erreichbar, mempool_info, normalize_mempool_url
 
 
 class TestAdressPruefung(unittest.TestCase):
@@ -179,6 +180,90 @@ class TestFremdeInstanz(unittest.TestCase):
     def test_host_wird_genannt(self):
         self.assertEqual(mempool_info("https://mempool.space")["host"],
                          "mempool.space")
+
+
+class _Antwort:
+    def __init__(self, roh: bytes):
+        self._roh = roh
+
+    def read(self, n: int = -1) -> bytes:
+        return self._roh[:n] if n >= 0 else self._roh
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class TestMempoolErreichbar(unittest.TestCase):
+    """Die Pille fragt den Server, nicht den Browser."""
+
+    def test_leere_adresse(self):
+        ok, grund = mempool_erreichbar("")
+        self.assertFalse(ok)
+        self.assertIn("Keine Adresse", grund)
+
+    def test_api_ohne_v1_reicht(self):
+        import urllib.request
+
+        def oeffne(anfrage, timeout=None, context=None):
+            self.assertTrue(anfrage.full_url.endswith("/api/blocks/tip/height"))
+            return _Antwort(b"969173")
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", oeffne):
+            ok, grund = mempool_erreichbar("http://192.168.1.20:3006")
+        self.assertTrue(ok)
+        self.assertEqual(grund, "")
+
+    def test_v1_nach_404(self):
+        import urllib.error
+        import urllib.request
+
+        gesehen = []
+
+        def oeffne(anfrage, timeout=None, context=None):
+            gesehen.append(anfrage.full_url)
+            if anfrage.full_url.endswith("/api/v1/blocks/tip/height"):
+                return _Antwort(b'"800001"')
+            raise urllib.error.HTTPError(
+                anfrage.full_url, 404, "missing", hdrs=None, fp=None,
+            )
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", oeffne):
+            ok, grund = mempool_erreichbar("http://10.0.0.8:8999")
+        self.assertTrue(ok, grund)
+        self.assertEqual(len(gesehen), 2)
+
+    def test_html_an_der_eingetragenen_adresse_reicht(self):
+        """Die Oberfläche selbst gilt. Der ↗-Verweis öffnet genau diese URL."""
+        import urllib.error
+        import urllib.request
+
+        def oeffne(anfrage, timeout=None, context=None):
+            if "/blocks/tip/" in anfrage.full_url:
+                raise urllib.error.HTTPError(
+                    anfrage.full_url, 404, "missing", hdrs=None, fp=None,
+                )
+            return _Antwort(b"<!doctype html>")
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", oeffne):
+            ok, grund = mempool_erreichbar("http://192.168.1.20:3006")
+        self.assertTrue(ok, grund)
+
+    def test_pfad_api_v1_wird_nicht_verdoppelt(self):
+        import urllib.request
+
+        gesehen = []
+
+        def oeffne(anfrage, timeout=None, context=None):
+            gesehen.append(anfrage.full_url)
+            return _Antwort(b"1")
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", oeffne):
+            ok, _grund = mempool_erreichbar("http://10.0.0.8:8999/api/v1")
+        self.assertTrue(ok)
+        self.assertEqual(gesehen, ["http://10.0.0.8:8999/api/v1/blocks/tip/height"])
 
 
 if __name__ == "__main__":
