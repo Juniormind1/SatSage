@@ -838,7 +838,7 @@
   "tax.legendIn": "within holding period",
   "tax.legendOut": "outside holding period",
   "tax.legendUnchecked": "within period, no origin",
-  "tax.plotIncomplete": "Origin incomplete — still needs completing",
+  "tax.plotIncomplete": "Origin incomplete",
   "tax.loadCandidates": "Load candidates",
   "tax.loadCandidatesTitle": "Loads tax-year outflows and open UTXOs as what-if.",
   "tax.meta": "UTXOs by holding period. Not tax advice — verify the figures yourself before use.",

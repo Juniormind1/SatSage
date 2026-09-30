@@ -838,7 +838,7 @@
   "tax.legendIn": "innerhalb Haltefrist",
   "tax.legendOut": "außerhalb Haltefrist",
   "tax.legendUnchecked": "innerhalb Frist, ohne Herkunft",
-  "tax.plotIncomplete": "Herkunft unvollständig — vervollständigen fehlt",
+  "tax.plotIncomplete": "Herkunft unvollständig",
   "tax.loadCandidates": "Kandidaten laden",
   "tax.loadCandidatesTitle": "Lädt Abflüsse des Steuerjahres und offene UTXOs als Was-wäre-wenn.",
   "tax.meta": "UTXOs nach Haltefrist. Keine Steuerberatung — die Angaben sind vor der Verwendung selbst zu prüfen.",
