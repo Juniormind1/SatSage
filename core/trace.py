@@ -1109,6 +1109,7 @@ def trace_utxo(
     merke_tx_oriented_done: bool = False,
     stop_before_ts: int | None = None,
     resume_origin: dict | None = None,
+    on_teilstand=None,
 ) -> dict:
     """
     Führt die Herkunftsanalyse durch und liefert sie als Baum aus Wörterbüchern.
@@ -1133,10 +1134,28 @@ def trace_utxo(
     *resume_origin*: gespeicherter Analyse-Rohbaum. Bei vollem Lauf werden
     Lücken nachgezogen (tax_horizon, error-Prevouts, unvollständige interne
     Zweige) — fertige Äste bleiben erhalten (kein Komplett-Neulauf).
+
+    *on_teilstand*: optional ``callable(dict)``. Bekommt nur, was am
+    unfertigen Baum schon feststeht (siehe
+    ``utxo_ingress_report.gesicherte_anschaffung``). Schreibt selbst nichts
+    in den Ingress-Cache.
     """
     from core import utxo_ingress_report, utxo_origin
 
-    fortschritt = _FortschrittsAdapter(progress) if progress else None
+    def _teile(knoten) -> None:
+        if not callable(on_teilstand) or not isinstance(knoten, dict):
+            return
+        stand = utxo_ingress_report.gesicherte_anschaffung(knoten)
+        if not stand:
+            return
+        try:
+            on_teilstand(stand)
+        except Exception:
+            pass
+
+    fortschritt = (
+        _FortschrittsAdapter(progress, on_teilstand=_teile) if progress else None
+    )
     txid_n = xpub_cache._normalize_txid(txid)
     vout_n = int(vout)
 
@@ -1184,6 +1203,7 @@ def trace_utxo(
             cache_source=cache_source,
             progress=fortschritt,
             alle_eigenen_inputs=bool(resolve_bundled),
+            on_teilstand=_teile,
         )
     else:
         roh = utxo_origin.trace_utxo_origin(
@@ -1198,6 +1218,7 @@ def trace_utxo(
             progress=fortschritt,
             alle_eigenen_inputs=bool(resolve_bundled),
             stop_before_ts=stop_before_ts,
+            on_teilstand=_teile,
         )
 
     if roh is None:
@@ -1411,11 +1432,16 @@ class _FortschrittsAdapter:
 
     ``spur`` bleibt erhalten: der Datei-Log hängt am Objekt, das die Engine
     bekommt. Ein Wrapper ohne dieses Attribut schluckt jeden Hop.
+
+    ``on_teilstand`` reicht der Walk durch, wenn der Aufrufer es setzt —
+    sonst sieht der tiefe Lauf den Rohbaum, ohne ihn auf Feststehendes
+    zu filtern.
     """
 
-    def __init__(self, callback):
+    def __init__(self, callback, on_teilstand=None):
         self._callback = callback
         self.spur = getattr(callback, "spur", None)
+        self.on_teilstand = on_teilstand or getattr(callback, "on_teilstand", None)
 
     def update(self, message: str) -> None:
         ziel = self._callback

@@ -270,6 +270,19 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
 }
 
 /**
+ * Grauer Punkt im Dotplot: „Herkunft tracen“ öffnen und dieses UTXO
+ * sofort aufklappen — nicht die zugeklappte Zeile in der Gesamtliste.
+ */
+async function springeZuTraceUtxo(key, meta = null) {
+  if (!key || typeof zeigeHerkunftFuer !== "function") return false;
+  const ausSteuer = typeof utxoMetaAusSteuerjahr === "function"
+    ? utxoMetaAusSteuerjahr(key)
+    : null;
+  await zeigeHerkunftFuer(key, { meta: { ...(ausSteuer || {}), ...(meta || {}), key } });
+  return true;
+}
+
+/**
  * Im schon geöffneten Baum des Fokus die Zeile zum Netz-Punkt zeigen.
  * *sprung*: ``{ key, typ, eltern }``. Bündel landet bei den Kindern des Eltern-Hops.
  */
@@ -933,7 +946,9 @@ function zeichneTraceWurzel(utxo) {
     zeigeHerkunftFuer(utxo.key, { neu: true });
   });
   kopfzeile.append(neu);
-  if (typeof blendeScanNeuNebenVervollstaendigen === "function") {
+  if (typeof blendeAlterKlaerenUndScan === "function") {
+    blendeAlterKlaerenUndScan(kopfzeile);
+  } else if (typeof blendeScanNeuNebenVervollstaendigen === "function") {
     blendeScanNeuNebenVervollstaendigen(kopfzeile);
   }
   const extern = mempoolVerweis("tx", (utxo.key || "").split(":")[0]);
@@ -2706,6 +2721,55 @@ async function scanneAlleWalletsUtxo({
   }
 }
 
+async function herkunftGrauUtxos() {
+  // Graue Scorecard: noch nie analysiert. Der Massenlauf ohne Schlüssel
+  // nimmt nur UTXOs ohne vollen Baum — ein grauer Punkt kann einen
+  // unvollständigen Cache haben und würde sonst sofort als „nichts zu tun“
+  // enden. Deshalb dieselben Schlüssel wie der Punkt selbst.
+  if (Zustand.herkunftAlleLaeuft) {
+    const k = $("#steuer-meldung");
+    if (k) {
+      k.className = "hinweis hinweis-warn";
+      setzeText(k, t("tax.originAlreadyRunning") !== "tax.originAlreadyRunning"
+        ? t("tax.originAlreadyRunning")
+        : t("ui.hard.2c151e092b"));
+      k.hidden = false;
+    }
+    return;
+  }
+  let daten = Zustand.steuer;
+  if (!daten || !Array.isArray(daten.grau_keys)) {
+    const jahr = $("#jahr-wahl")?.value || "";
+    const frist = $("#frist-wahl")?.value || "";
+    const stichtag = steuerEinstellungen().stichtag || "";
+    const abfrage =
+      `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
+      `&stichtag=${encodeURIComponent(stichtag)}`;
+    daten = await api(`/tax${abfrage}&seite=1&limit=0`);
+  }
+  const keys = Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
+  if (!keys.length) {
+    const k = $("#steuer-meldung");
+    if (!k) return;
+    k.className = "hinweis hinweis-warn";
+    setzeText(k, t("trace.allOriginsNothing"));
+    k.hidden = false;
+    return;
+  }
+  herkunftAllerUtxos({
+    knopf: "#herkunft-grau",
+    lauf: "#herkunft-lauf",
+    text: "#herkunft-text",
+    abbruch: "#herkunft-abbruch",
+    meldung: "#steuer-meldung",
+    danach: ladeSteuerjahrMitKandidaten,
+    utxo_keys: keys,
+    steuer: false,
+    gelbVertiefen: false,
+    erzwingen: true,
+  });
+}
+
 async function herkunftGelbUtxos() {
   // Gelbe Scorecard (geprueft && !erfuellt): gründlich bis extern/Coinbase.
   // Steuer-Horizont allein reicht nicht — gelb ist erst „fertig“, wenn grün
@@ -2771,6 +2835,7 @@ async function herkunftAllerUtxos(ziele = {
   utxo_keys: null,
   steuer: false,
   gelbVertiefen: false,
+  erzwingen: false,
 }) {
   // Selector-String oder bereits aufgelöstes Element (Zeilen-„klären“).
   const knopf = typeof ziele.knopf === "string"
@@ -2803,9 +2868,11 @@ async function herkunftAllerUtxos(ziele = {
   let refreshUm = 0;
   let refreshLaeuft = false;
   let abbruchWunsch = false;
+  let zuletztFertig = "";
 
   const fertig = (meldung, art) => {
     clearInterval(timer);
+    if (typeof traceFrageAus === "function") traceFrageAus();
     Zustand.herkunftAlleLaeuft = false;
     merkeScanJobBeendet(jobId);
     if (knopf) knopf.disabled = false;
@@ -2840,6 +2907,7 @@ async function herkunftAllerUtxos(ziele = {
     const traceDaten = {
       modus: "voll",
       utxo_keys: ziele.utxo_keys || null,
+      erzwingen: Boolean(ziele.erzwingen),
     };
     let antwort = await api("/trace/alle", {
       methode: "POST",
@@ -2904,8 +2972,20 @@ async function herkunftAllerUtxos(ziele = {
       nimmJobLogAb(job, logStand);
       const zahl = job.result?.verfolgt;
       const juengste = job.result?.juengste_sats;
+      const live = job.result?.live;
+      const fertigKey = job.result?.fertig ? String(job.result.fertig) : "";
       if (typeof zahl === "number" && zahl !== zuletztVerfolgt) {
         zaehleGraueKlaerungHerunter(zahl);
+      }
+      if (fertigKey && fertigKey !== zuletztFertig && typeof traceAusrufeAn === "function") {
+        zuletztFertig = fertigKey;
+        traceAusrufeAn(fertigKey);
+      }
+      if (live && live.key && typeof traceFrageAn === "function") {
+        traceFrageAn(live.key);
+      }
+      if (live && typeof wendeLivePunktAn === "function") {
+        wendeLivePunktAn(live);
       }
       let standText = übersetzeLogText(job.message || t("common.runningEllipsis"));
       if (typeof juengste === "number" && juengste > 0) {

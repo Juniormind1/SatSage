@@ -2556,6 +2556,24 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   box-sizing: border-box;
 }
 .achse-punkt.klickbar { cursor: pointer; }
+/* Laufender Trace: „?“ über dem Punkt. Nach Abschluss kurz „!“. */
+.achse-punkt.trace-frage::after,
+.achse-punkt.trace-fertig::after {
+  content: "?";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 1px);
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  text-shadow: 0 0 2px var(--flaeche), 0 0 3px var(--flaeche);
+  pointer-events: none;
+  z-index: 4;
+}
+.achse-punkt.trace-fertig::after { content: "!"; }
 /* Herkunft liegt vor, ist aber unvollständig — Ring, kein zweiter Punkt. */
 .achse-punkt.herkunft-offen-marke { box-shadow: 0 0 0 2px var(--krit); }
 .achse-punkt.erfuellt { background: var(--gut); }

@@ -1546,7 +1546,9 @@ function zeichneUtxoZeile(utxo) {
     zeigeHerkunftFuer(utxo.key, { neu: true });
   });
   zeile.append(neu);
-  if (typeof blendeScanNeuNebenVervollstaendigen === "function") {
+  if (typeof blendeAlterKlaerenUndScan === "function") {
+    blendeAlterKlaerenUndScan(zeile);
+  } else if (typeof blendeScanNeuNebenVervollstaendigen === "function") {
     blendeScanNeuNebenVervollstaendigen(zeile);
   }
 

@@ -792,7 +792,7 @@
   "tax.netzReport": "HTML report",
   "tax.netzReportTitle": "HTML report for this UTXO (what-if). Ticked outflows/UTXOs below are included.",
   "tax.netzEnd": "Close (Esc)",
-  "tax.netzPointTitle": "Show the origin net and copy the address — paste it into mempool.space. A grey dot, or no tree, opens this UTXO in its wallet (“Rescan” and “Close origin gaps”). Click again, Esc, or a click on empty space hides the net. Double-click: HTML report.",
+  "tax.netzPointTitle": "Show the origin net and copy the address — paste it into mempool.space. A grey dot opens Trace origin with this UTXO expanded. No tree: the click opens the UTXO in its wallet (“Rescan” and “Close origin gaps”). Click again, Esc, or a click on empty space hides the net. Double-click: HTML report.",
   "tax.netzShare": "Share of the selected output: {pct}",
   "tax.netzBundle": "{n} inputs of one transaction (coinjoin, consolidation, or unresolved)",
   "tax.netzBundleRange": "Output times {von} – {bis}",

@@ -449,6 +449,41 @@ def _youngest_tax_horizon(trace: dict | None) -> dict | None:
     return max(bekannte, key=lambda e: e["time_ts"])
 
 
+def gesicherte_anschaffung(trace: dict | None) -> dict | None:
+    """
+    Was am unfertigen Baum schon feststeht — für den Dotplot während des Trace.
+
+    Defensiv (jüngster externer Zufluss) wandert das Datum nur nach rechts.
+    Ein datierter externer Zufluss innerhalb der Haltefrist bleibt deshalb
+    innerhalb, auch wenn spätere Hops jünger sind. Liegt er außerhalb, oder
+    fehlen Daten (undatierte Fremd-Eingänge, nur Wallet-Eingang), kann sich
+    Farbe oder X-Koordinate noch umkehren — dann ``None``.
+
+    Offensiv (ältester Zufluss) ist die Gegenrichtung: fest ist nur Grün,
+    solange der älteste bekannte Zufluss die Frist schon erfüllt und kein
+    undatierter Fremd-Eingang daneben steht.
+    """
+    if not isinstance(trace, dict):
+        return None
+    extrema = _external_ingress_extrema(trace)
+    if not extrema or extrema.get("untergrenze"):
+        return None
+    juengster = extrema.get("youngest") or {}
+    aeltester = extrema.get("oldest") or {}
+    try:
+        ts_jung = int(juengster.get("time_ts") or 0)
+        ts_alt = int(aeltester.get("time_ts") or 0)
+    except (TypeError, ValueError):
+        return None
+    if ts_jung <= 0 or ts_alt <= 0:
+        return None
+    return {
+        "time_ts": ts_jung,
+        "oldest_time_ts": ts_alt,
+        "untergrenze": False,
+    }
+
+
 def _youngest_external_ingress(trace: dict | None) -> dict | None:
     """
     Jüngster bekannter externer Zufluss — defensive Anschaffungslesart.

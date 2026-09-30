@@ -112,6 +112,8 @@ def _trace_offen_basis(
     state: AppState,
     utxos: list[dict],
     eigene_jetzt,
+    *,
+    erzwingen: bool = False,
 ) -> list[tuple[str, int]]:
     """
     Herkunft tracen: UTXOs ohne **vollen** Baum bis extern/Coinbase.
@@ -135,6 +137,12 @@ def _trace_offen_basis(
         if key in gesehen:
             continue
         gesehen.add(key)
+        # Ausdrücklich genannt (graue Scorecard): Cache-Kopf gilt nicht als
+        # fertig. Der Punkt ist grau, weil kein Anschaffungsdatum vorliegt —
+        # ein voller Baum ohne Ingress-Stempel würde sonst übersprungen.
+        if erzwingen:
+            offen.append(key)
+            continue
         kopf = trace_cache.kopf(
             txid, vout, state.immutable_cache_dir, eigene_jetzt
         )
@@ -205,6 +213,7 @@ def _trace_ein_utxo_tief(
     folge_bundled: bool = True,
     folge_tx: bool = True,
     resume_origin: dict | None = None,
+    on_teilstand=None,
 ) -> dict:
     """
     Ein UTXO wie „Herkunftslücken schließen“ (followup=full):
@@ -234,8 +243,11 @@ def _trace_ein_utxo_tief(
     )
     abbruch = cancel_cb if callable(cancel_cb) else None
     # analyze.trace_utxo_origin erwartet .update(text); Jobs liefern Callables.
-    fortschritt = progress if hasattr(progress, "update") else (
-        trace_mod._FortschrittsAdapter(progress) if callable(progress) else None
+    # Eigenes Objekt: on_teilstand nicht an den gemeinsamen Job hängen.
+    ziel = progress if hasattr(progress, "update") or callable(progress) else None
+    fortschritt = (
+        trace_mod._FortschrittsAdapter(ziel, on_teilstand=on_teilstand)
+        if ziel is not None else None
     )
 
     def _check_abbruch() -> None:
@@ -266,6 +278,7 @@ def _trace_ein_utxo_tief(
                 cache_source=cache_source,
                 progress=fortschritt,
                 alle_eigenen_inputs=folge_bundled,
+                on_teilstand=on_teilstand,
             )
         else:
             roh = analyze.trace_utxo_origin(
@@ -279,6 +292,7 @@ def _trace_ein_utxo_tief(
                 cache_source=cache_source,
                 progress=fortschritt,
                 alle_eigenen_inputs=folge_bundled,
+                on_teilstand=on_teilstand,
             )
         _check_abbruch()
         if folge_tx:

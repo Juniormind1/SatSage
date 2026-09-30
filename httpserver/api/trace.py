@@ -174,7 +174,10 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             baum_noetig=bool(roh.get("baum_noetig")),
         )
     else:
-        offen = _trace_offen_basis(state, utxos, eigene_jetzt)
+        offen = _trace_offen_basis(
+            state, utxos, eigene_jetzt,
+            erzwingen=bool(roh.get("erzwingen")),
+        )
 
     if not offen:
         return {
@@ -235,8 +238,12 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             voll_ok = 0
             steuer_ok_n = 0
 
+            live_key = ""
+            live_stand: dict | None = None
+            fertig_key = ""
+
             def _zwischenstand() -> None:
-                job.result = {
+                stand = {
                     "verfolgt": fertig,
                     "fehlgeschlagen": fehler,
                     "offen": gesamt,
@@ -247,9 +254,32 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     "modus": modus,
                     "partial": True,
                 }
+                # Laufendes UTXO: key ab dem ersten Hop, Datum nur wenn fest.
+                if live_key:
+                    live = {"key": live_key}
+                    if isinstance(live_stand, dict) and live_stand.get("time_ts"):
+                        live["time_ts"] = int(live_stand["time_ts"])
+                        live["oldest_time_ts"] = int(
+                            live_stand.get("oldest_time_ts") or 0
+                        )
+                    stand["live"] = live
+                if fertig_key:
+                    stand["fertig"] = fertig_key
+                job.result = stand
+
+            def _live(stand: dict) -> None:
+                nonlocal live_stand
+                if not isinstance(stand, dict) or not stand.get("time_ts"):
+                    return
+                live_stand = {
+                    "time_ts": int(stand["time_ts"]),
+                    "oldest_time_ts": int(stand.get("oldest_time_ts") or 0),
+                }
+                _zwischenstand()
 
             for index, (txid, vout) in enumerate(offen):
                 job.raise_if_cancelled()
+                fertig_key = ""
                 rest = gesamt - index
                 if modus == "tief":
                     text = (
@@ -270,6 +300,9 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     stand.phase(text)
                 else:
                     stand.tick(text)
+                live_key = f"{txid}:{vout}"
+                live_stand = None
+                _zwischenstand()
                 try:
                     fetch_addr = fetchers.get("fetch_address_utxos")
                     if modus == "tief":
@@ -314,6 +347,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             folge_bundled=True,
                             folge_tx=True,
                             resume_origin=resume_tief,
+                            on_teilstand=_live,
                         )
                     else:
                         resume = None
@@ -344,6 +378,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             # voll: Lücken fortsetzen; steuer: Horizont neu
                             # mit stop — Resume nur bei voll.
                             resume_origin=resume if modus == "voll" else None,
+                            on_teilstand=_live,
                         )
                     fertig += 1
                     if isinstance(ergebnis, dict) and ergebnis.get("found"):
@@ -355,11 +390,17 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             steuer_ok_n += 1
                         if ergebnis.get("juengste_sats_ts"):
                             juengste += 1
+                    fertig_key = live_key
+                    live_key = ""
+                    live_stand = None
                     _zwischenstand()
                 except Cancelled:
                     raise          # Abbruch muss durchschlagen
                 except Exception:
                     fehler += 1    # eine unerreichbare Tx stoppt nicht den Rest
+                    fertig_key = live_key
+                    live_key = ""
+                    live_stand = None
                     _zwischenstand()
                     continue
 
@@ -382,6 +423,9 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     + (f", {fehler} fehlgeschlagen" if fehler else "")
                 )
             stand.phase(fertig_text)
+            live_key = ""
+            live_stand = None
+            _zwischenstand()
             return {
                 "verfolgt": fertig,
                 "fehlgeschlagen": fehler,

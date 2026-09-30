@@ -284,7 +284,7 @@ function zeichneSteuerjahr(daten) {
         knopf.title = t("tax.hard.a430621437");
         knopf.setAttribute("data-i18n-title", "");
         knopf.addEventListener("click", () => {
-          Promise.resolve(herkunftAllerUtxos()).catch((fehler) => {
+          Promise.resolve(herkunftGrauUtxos()).catch((fehler) => {
             Zustand.herkunftAlleLaeuft = false;
             if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
             const k = $("#steuer-meldung");
@@ -687,6 +687,165 @@ function formatTickMonatJahr(d) {
 function formatTickTag(d) {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${dd}.${formatTickMonatJahr(d)}`;
+}
+
+/** „?“ am laufenden Punkt, „!“ kurz nach seinem Abschluss. Überlebt den Redraw. */
+const TracePunktMarke = {
+  frage: "",
+  ausrufe: new Map(),
+};
+
+function tracePunktImPlot(key) {
+  const spur = $("#achse-spur");
+  if (!spur || !key) return null;
+  return spur.querySelector(
+    `.achse-punkt[data-key="${CSS.escape(String(key))}"]`,
+  );
+}
+
+function setzeTraceMarke(key, art) {
+  const punkt = tracePunktImPlot(key);
+  if (!punkt || punkt.classList.contains("geister")) return;
+  punkt.classList.remove("trace-frage", "trace-fertig");
+  if (art === "frage") punkt.classList.add("trace-frage");
+  if (art === "fertig") punkt.classList.add("trace-fertig");
+}
+
+/** Dieses UTXO wird gerade getracet. Der vorige Punkt wechselt auf „!“. */
+function traceFrageAn(key) {
+  const neu = String(key || "");
+  if (!neu) return;
+  if (TracePunktMarke.frage && TracePunktMarke.frage !== neu) {
+    traceAusrufeAn(TracePunktMarke.frage);
+  }
+  const timer = TracePunktMarke.ausrufe.get(neu);
+  if (timer) {
+    clearTimeout(timer);
+    TracePunktMarke.ausrufe.delete(neu);
+  }
+  TracePunktMarke.frage = neu;
+  setzeTraceMarke(neu, "frage");
+}
+
+/** Trace dieses UTXO ist durch: „!“ bleibt kurz, dann weg. */
+function traceAusrufeAn(key) {
+  const ziel = String(key || "");
+  if (!ziel) return;
+  if (TracePunktMarke.frage === ziel) TracePunktMarke.frage = "";
+  setzeTraceMarke(ziel, "fertig");
+  const alt = TracePunktMarke.ausrufe.get(ziel);
+  if (alt) clearTimeout(alt);
+  TracePunktMarke.ausrufe.set(ziel, setTimeout(() => {
+    TracePunktMarke.ausrufe.delete(ziel);
+    const punkt = tracePunktImPlot(ziel);
+    if (punkt) punkt.classList.remove("trace-fertig", "trace-frage");
+  }, 1600));
+}
+
+function traceFrageAus() {
+  if (TracePunktMarke.frage) traceAusrufeAn(TracePunktMarke.frage);
+}
+
+function traceMarkenNachZeichnen() {
+  if (TracePunktMarke.frage) setzeTraceMarke(TracePunktMarke.frage, "frage");
+  for (const key of TracePunktMarke.ausrufe.keys()) {
+    setzeTraceMarke(key, "fertig");
+  }
+}
+
+/**
+ * Laufender Trace: Punkt nur verschieben, wenn das Datum schon feststeht.
+ *
+ * Defensiv wandert X nur nach rechts (jünger). Fest ist Gelb, sobald der
+ * jüngste bekannte externe Zufluss innerhalb der Frist liegt. Offensiv
+ * wandert X nur nach links; fest ist dann Grün. Alles andere wartet auf
+ * den fertigen Trace — ein späterer Hop könnte die Farbe umkehren.
+ */
+function wendeLivePunktAn(live) {
+  if (!live || !live.key || Zustand.ansicht !== "steuerjahr") return false;
+  const ts = Number(live.time_ts || 0);
+  const altTs = Number(live.oldest_time_ts || 0);
+  if (!(ts > 0)) return false;
+  const spur = $("#achse-spur");
+  if (!spur) return false;
+  const punkt = spur.querySelector(
+    `.achse-punkt[data-key="${CSS.escape(String(live.key))}"]`,
+  );
+  if (!punkt || punkt.classList.contains("geister")) return false;
+  const strahl = ZeitstrahlAnsicht.daten && ZeitstrahlAnsicht.daten.zeitstrahl;
+  if (!strahl || !strahl.von || !strahl.bis) return false;
+  const von = parseDeDatum(strahl.von);
+  const bis = parseDeDatum(strahl.bis);
+  if (!von || !bis) return false;
+  const gesamtMs = bis.getTime() - von.getTime();
+  if (!(gesamtMs > 0)) return false;
+
+  const anschaffung = (steuerEinstellungen().anschaffung || "juengste") === "aelteste"
+    ? "aelteste"
+    : "juengste";
+  const wirksamTs = anschaffung === "aelteste" ? (altTs || ts) : ts;
+  const fristJahre = Number(
+    ($("#frist-wahl") && $("#frist-wahl").value)
+    || steuerEinstellungen().haltefrist_jahre
+    || 1,
+  );
+  const jahr = Number(($("#jahr-wahl") && $("#jahr-wahl").value) || 0);
+  const bezug = jahr
+    ? new Date(jahr, 11, 31, 23, 59, 59)
+    : new Date();
+  const stichtagIso = steuerEinstellungen().stichtag_iso || steuerEinstellungen().stichtag || "";
+  const stichtag = stichtagIso ? new Date(`${stichtagIso}T12:00:00`) : null;
+  const anschaffungDate = new Date(wirksamTs * 1000);
+  if (Number.isNaN(anschaffungDate.getTime())) return false;
+
+  let erfuellt = false;
+  let neuvermoegen = false;
+  if (stichtag && !Number.isNaN(stichtag.getTime())
+      && anschaffungDate.getTime() > stichtag.getTime()) {
+    neuvermoegen = true;
+  } else if (!(fristJahre > 0)) {
+    erfuellt = true;
+  } else {
+    const fristEnde = new Date(anschaffungDate.getTime());
+    fristEnde.setFullYear(fristEnde.getFullYear() + fristJahre);
+    erfuellt = fristEnde.getTime() <= bezug.getTime();
+  }
+  // Nur die Richtung, die ein späterer Hop nicht mehr umkehren kann.
+  const sicherGelb = anschaffung === "juengste" && !erfuellt;
+  const sicherGruen = anschaffung === "aelteste" && erfuellt;
+  if (!sicherGelb && !sicherGruen) return false;
+
+  const pos = Math.max(
+    0,
+    Math.min(100, (anschaffungDate.getTime() - von.getTime()) / gesamtMs * 100),
+  );
+  const bisher = Number(punkt.dataset.livePos);
+  if (Number.isFinite(bisher)) {
+    const rueckwaerts = anschaffung === "juengste" ? pos < bisher - 0.05 : pos > bisher + 0.05;
+    if (rueckwaerts) return false;
+  }
+  punkt.dataset.livePos = String(pos);
+  punkt.style.left = `${zeitstrahlSichtPos(pos)}%`;
+  punkt.classList.remove("ungeprueft", "offen", "erfuellt");
+  punkt.classList.add(sicherGruen ? "erfuellt" : "offen");
+  punkt.classList.add("herkunft-offen-marke");
+  const tip = punkt.querySelector(".achse-punkt-tip");
+  if (tip) {
+    const dd = String(anschaffungDate.getDate()).padStart(2, "0");
+    const mm = String(anschaffungDate.getMonth() + 1).padStart(2, "0");
+    const datum = `${dd}.${mm}.${anschaffungDate.getFullYear()}`;
+    const lage = sicherGruen
+      ? (t("tax.haltefristOut") !== "tax.haltefristOut" ? t("tax.haltefristOut") : "außerhalb Haltefrist")
+      : (t("tax.haltefristIn") !== "tax.haltefristIn" ? t("tax.haltefristIn") : "innerhalb Haltefrist");
+    const wallet = punkt.dataset.wallet || "unbekannt";
+    const betrag = punkt.dataset.valueSats
+      ? formatZeitstrahlBetrag(Number(punkt.dataset.valueSats))
+      : "";
+    tip.textContent = [datum, betrag, `${wallet} · ${lage}`, t("tax.plotIncomplete")]
+      .filter(Boolean)
+      .join("\n");
+  }
+  return true;
 }
 
 /** Daten-% → sichtbare left-% im aktuellen X-Fenster. */
@@ -1359,6 +1518,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   }
   // Ephemerer Overlay (Herkunftsnetz) über dem neu gezeichneten Bestand.
   if (typeof herkunftsnetzZeichnen === "function") herkunftsnetzZeichnen();
+  traceMarkenNachZeichnen();
 }
 
 /**

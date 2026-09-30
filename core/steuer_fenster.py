@@ -202,9 +202,12 @@ def fenster(auswertung: dict, *, teil: str = "alle", offset: int = 0, limit: int
         "offen": gemeinsamer_ts(gruppen["offen"]),
         "ungeprueft": gemeinsamer_ts([e for e in alle if not e.get("geprueft")]),
     }
-    # „klären“ für gelbe UTXOs braucht alle Schlüssel, nicht nur die Seite.
+    # „klären“ braucht alle Schlüssel, nicht nur die Seite.
+    # Gelb: analysiert, Frist offen. Grau: noch keine Herkunftsanalyse.
     antwort["gelb_keys"] = [f"{e.get('txid')}:{e.get('vout')}" for e in alle
                             if e.get("geprueft") and not e.get("erfuellt")]
+    antwort["grau_keys"] = [f"{e.get('txid')}:{e.get('vout')}" for e in alle
+                            if not e.get("geprueft")]
     return antwort
 
 

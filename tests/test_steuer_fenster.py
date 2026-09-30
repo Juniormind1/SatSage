@@ -55,6 +55,7 @@ class TestFenster(unittest.TestCase):
         # Verschiedene Tage → kein gemeinsamer Bewertungstag (kein Fiat).
         self.assertIsNone(r["kennzahlen_ts"]["gesamt"])
         self.assertEqual(len(r["gelb_keys"]), 9)
+        self.assertEqual(len(r["grau_keys"]), 0)
 
     def test_teil_seite_ohne_rest(self):
         r = sf.fenster(auswertung(self.e, self.a), teil="offen", offset=4, limit=4)
@@ -110,6 +111,7 @@ class TestFenster(unittest.TestCase):
         e = [eintrag(i, 10, erfuellt=False, geprueft=i % 2 == 0) for i in range(30)]
         r = sf.fenster(auswertung(e), limit=1)
         self.assertEqual(len(r["gelb_keys"]), 15)
+        self.assertEqual(len(r["grau_keys"]), 15)
         self.assertEqual(len(r["steuer_gruppen"]["offen"]["items"]), 1)
 
 

@@ -33,7 +33,9 @@ const Zustand = {
 };
 const spruenge = [];
 const walletSpruenge = [];
+const traceSpruenge = [];
 function springeZuWalletUtxo(id, key, adresse) { walletSpruenge.push([id, key, adresse]); return true; }
+function springeZuTraceUtxo(key, meta) { traceSpruenge.push([key, meta]); return true; }
 const kopien = [];
 function zeigeHerkunftFuer(key, opts) { spruenge.push([key, Zustand.traceSprung, opts]); }
 function kopiereInZwischenablage(text) { kopien.push(text); return true; }
@@ -117,10 +119,13 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("herkunftsnetzSpringbar", NETZ)
         herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.assertIn("function springeImHerkunftsbaum", herkunft)
+        self.assertIn("function springeZuTraceUtxo", herkunft)
+        self.assertIn("setzeKlapp(kopf, klapp, zweig, true)", herkunft)
         self.assertIn("herkunftsnetzBericht(key)", steuer)
         self.assertIn('addEventListener("dblclick"', steuer)
         self.assertIn("herkunftsnetzZeichnen()", steuer)
         self.assertIn("function herkunftsnetzOhneHerkunft", NETZ)
+        self.assertIn("springeZuTraceUtxo(key, punkt)", NETZ)
         # Zeitstrahl-Rechnung unberührt: kein Overlay in events.
         self.assertNotIn("events.push", NETZ)
         nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
@@ -188,8 +193,8 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertIn("netz-vor-frist", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["vorFrist"])
 
-    def test_grauer_punkt_springt_ins_wallet(self):
-        """Ohne Herkunft gibt es kein Netz. Der Klick geht ins Wallet."""
+    def test_grauer_punkt_oeffnet_herkunft_aufgeklappt(self):
+        """Ohne Herkunft gibt es kein Netz. Der Klick öffnet den Trace aufgeklappt."""
         r = _node("""
           pA.className = "achse-punkt mittel ungeprueft klickbar";
           pA.dataset.walletId = "wid-1";
@@ -197,11 +202,14 @@ class TestEinUndAusstieg(unittest.TestCase):
           pA.fire("click");
           await warte();
           console.log(JSON.stringify({
-            an: stand().an, wallet: walletSpruenge, api: aufrufe.api.length,
+            an: stand().an, trace: traceSpruenge, wallet: walletSpruenge,
+            api: aufrufe.api.length,
           }));
         """)
         self.assertFalse(r["an"])
-        self.assertEqual(r["wallet"], [["wid-1", K, "bc1qgrau"]])
+        self.assertEqual(r["wallet"], [])
+        self.assertEqual(r["trace"][0][0], K)
+        self.assertEqual(r["trace"][0][1]["address"], "bc1qgrau")
         self.assertEqual(r["api"], 0)
 
     def test_roter_rahmen_springt_ins_wallet_auch_mit_netzdaten(self):

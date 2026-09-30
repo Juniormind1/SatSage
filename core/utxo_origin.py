@@ -125,6 +125,7 @@ def trace_utxo_origin(
     *,
     memo: dict | None = None,
     stop_before_ts: int | None = None,
+    on_teilstand=None,
 ) -> dict | None:
     """
     Verfolgt, wie der Output creator_txid:vout_index finanziert wurde.
@@ -145,6 +146,11 @@ def trace_utxo_origin(
     tiefer bis extern/Coinbase braucht das Steuerjahr nicht. Herkunft tracen
     übergibt ``None`` und führt Horizont-Blätter später nach (siehe
     ``vertiefe_tax_horizon``).
+
+    *on_teilstand*: optional ``callable(node)``. Nach jedem neuen Blatt an
+    der Wurzel (``depth == 0``), sobald ein externer Zufluss datiert ist
+    und sich nicht mehr umkehren kann. Der Ingress-Cache bleibt unberührt —
+    der Aufrufer legt den Stand in den laufenden Job.
     """
     # Pfad-lokal: Aufrufer dürfen ein Set übergeben (Tests), aber Geschwister
     # dürfen sich die besuchten Knoten nicht teilen — sonst wird jede Raute
@@ -154,6 +160,10 @@ def trace_utxo_origin(
         visited_utxos = set()
     if memo is None:
         memo = {}
+    # Tiefen Lauf hängt den Callback an den Fortschritt — Kind-Aufrufe
+    # bekommen ihn so mit, ohne jede Signatur zu erweitern.
+    if on_teilstand is None and progress is not None:
+        on_teilstand = getattr(progress, "on_teilstand", None)
 
     utxo_key = f"{creator_txid}:{vout_index}"
     spur = getattr(progress, "spur", None) if progress is not None else None
@@ -292,6 +302,18 @@ def trace_utxo_origin(
         return node
 
     progress_cb = progress.update if progress else None
+
+    def _melde_teilstand() -> None:
+        # Nur die Wurzel: Kind-Bäume sind noch nicht in den Quellen der
+        # Wurzel eingehängt, ein Stand von dort wäre unvollständig.
+        if depth != 0 or not callable(on_teilstand):
+            return
+        if not node.get("sources"):
+            return
+        try:
+            on_teilstand(node)
+        except Exception:
+            pass
 
     # CoinJoin-/Mix-Klassifikation: Eigentum (Verlauf-Index + Prevouts), dann Form.
     # Große Nicht-CJ-Txs nicht blind alle Prevouts fürs Label laden.
@@ -467,6 +489,7 @@ def trace_utxo_origin(
                     "time": ext_time,
                     "exchange_stop": True,
                 })
+                _melde_teilstand()
                 continue
 
             own_addr = _match_own_address(prev_addrs, own_addresses, wallet)
@@ -516,6 +539,7 @@ def trace_utxo_origin(
                     alle_eigenen_inputs=alle_eigenen_inputs,
                     memo=memo,
                     stop_before_ts=stop_before_ts,
+                    on_teilstand=on_teilstand,
                 )
                 node["sources"].append({
                     "type": "internal",
@@ -524,6 +548,7 @@ def trace_utxo_origin(
                     "from_utxo": prev_ref,
                     "trace": child,
                 })
+                _melde_teilstand()
             elif own_only:
                 # Fremd-Peer trotz Walk — ignorieren (Rauschen).
                 continue
@@ -559,6 +584,7 @@ def trace_utxo_origin(
                     "time_ts": ext_ts,
                     "time": ext_time,
                 })
+                _melde_teilstand()
         except Exception as exc:
             # Job-Abbruch (Cancelled) darf hier nicht verschwinden — sonst
             # bleibt „Lücken schließen“ trotz Abbruch-Knopf ewig laufen.
@@ -808,6 +834,7 @@ def vertiefe_herkunft_luecken(
     progress: _EphemeralProgress | None = None,
     alle_eigenen_inputs: bool = False,
     memo: dict | None = None,
+    on_teilstand=None,
 ) -> dict | None:
     """
     Setzt einen unvollständigen Herkunfts-Rohbaum fort.
@@ -821,6 +848,8 @@ def vertiefe_herkunft_luecken(
     if memo is None:
         memo = {}
         _seed_memo_fertige_unterbaeume(node, memo)
+    if on_teilstand is None and progress is not None:
+        on_teilstand = getattr(progress, "on_teilstand", None)
 
     if not _origin_hat_luecken(node):
         return node
@@ -852,6 +881,7 @@ def vertiefe_herkunft_luecken(
             alle_eigenen_inputs=alle_eigenen_inputs,
             memo=memo,
             stop_before_ts=None,
+            on_teilstand=on_teilstand,
         )
 
     quellen = node.get("sources")
@@ -874,6 +904,7 @@ def vertiefe_herkunft_luecken(
             alle_eigenen_inputs=alle_eigenen_inputs,
             memo=memo,
             stop_before_ts=None,
+            on_teilstand=on_teilstand,
         )
 
     # Ganze Node neu, wenn gebündelte unresolved-Eingänge mit Opt-in.
@@ -898,6 +929,7 @@ def vertiefe_herkunft_luecken(
                 alle_eigenen_inputs=True,
                 memo=memo,
                 stop_before_ts=None,
+                on_teilstand=on_teilstand,
             )
 
     neu_quellen: list = []
@@ -921,12 +953,18 @@ def vertiefe_herkunft_luecken(
                     progress=progress,
                     alle_eigenen_inputs=alle_eigenen_inputs,
                     memo=memo,
+                    on_teilstand=on_teilstand,
                 )
                 if frisch is not kind:
                     src = dict(src)
                     src["trace"] = frisch
                     geaendert = True
             neu_quellen.append(src)
+            if geaendert and callable(on_teilstand):
+                try:
+                    on_teilstand({**node, "sources": list(neu_quellen)})
+                except Exception:
+                    pass
         elif typ == "error":
             ref = _knoten_txid_vout(src)
             if ref is None:
@@ -961,6 +999,7 @@ def vertiefe_herkunft_luecken(
                     alle_eigenen_inputs=alle_eigenen_inputs,
                     memo=memo,
                     stop_before_ts=None,
+                    on_teilstand=on_teilstand,
                 )
                 # error-Source → internal oder external ersetzen
                 own_addr = None

@@ -47,8 +47,8 @@ function herkunftsnetzBericht(key) {
 /**
  * Grauer Punkt: innerhalb der Frist, ohne Herkunft.
  *
- * Dafür gibt es kein Netz. Der Klick gehört ins Wallet, zu „Scan neu“
- * und „Herkunftslücken schließen“.
+ * Dafür gibt es kein Netz. Der Klick öffnet „Herkunft tracen“ und
+ * klappt dieses UTXO dort auf.
  */
 function herkunftsnetzOhneHerkunft(key) {
   const punkt = herkunftsnetzPunktEl(key);
@@ -69,9 +69,8 @@ function herkunftsnetzUmschalten(key) {
   }
   if (herkunftsnetzOhneHerkunft(key)) {
     const punkt = herkunftsnetzPunkt(key);
-    const walletId = herkunftsnetzWalletId(key);
-    if (walletId && typeof springeZuWalletUtxo === "function") {
-      springeZuWalletUtxo(walletId, key, punkt.address);
+    if (typeof springeZuTraceUtxo === "function") {
+      springeZuTraceUtxo(key, punkt);
       return;
     }
   }

@@ -943,12 +943,17 @@ function juengsteSatsMarke(utxo) {
   return satz;
 }
 
+/** Grünes „jüngste sats“ ist da — „Alter klären“ hat seinen Zweck erfüllt. */
+function utxoAlterGeklaert(utxo) {
+  return Boolean(formatJuengsteSats(utxo));
+}
+
 /**
  * Fehlt das grüne Label, steht hier der Knopf, der den Trace dafür startet.
  * Unvollständig: vorhandenen Baum fortsetzen. Sonst neu bis außen.
  */
 function alterKlaerenKnopf(utxo) {
-  if (!utxo || !utxo.key || formatJuengsteSats(utxo)) return null;
+  if (!utxo || !utxo.key || utxoAlterGeklaert(utxo)) return null;
   // Unvollständig hat schon „vervollständigen“ — kein zweiter Start-Knopf.
   if (utxo.verfolgt && utxoHerkunftUnvollstaendig(utxo)) return null;
   const knopf = document.createElement("button");
@@ -1280,29 +1285,75 @@ function haengeVervollstaendigenAn(marke, utxo) {
   blendeScanNeuNebenVervollstaendigen(marke);
 }
 
-/**
- * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht.
- * Ist die rote Marke weg, kommt der Knopf wieder.
- */
-function blendeScanNeuNebenVervollstaendigen(anker) {
-  const zeile = anker && (
+/** Wallet-Zeile oder Herkunfts-Kopf, in der die Trace-Knöpfe sitzen. */
+function traceKnopfZeile(anker) {
+  if (!anker) return null;
+  if (
     anker.classList?.contains("utxo-zeile")
     || anker.classList?.contains("kopf-mit-verweis")
-  )
-    ? anker
-    : anker && anker.closest && (
-      anker.closest(".utxo-zeile") || anker.closest(".kopf-mit-verweis")
-    );
-  if (!zeile) return;
-  const scan = [...zeile.querySelectorAll(".trace-link")].find((knopf) => (
+  ) {
+    return anker;
+  }
+  // Aufruf von der UTXO-Wurzel: die Knöpfe liegen im Kopf darunter.
+  const innen = anker.querySelector?.(".utxo-zeile, .kopf-mit-verweis");
+  if (innen) return innen;
+  return anker.closest
+    ? (anker.closest(".utxo-zeile") || anker.closest(".kopf-mit-verweis"))
+    : null;
+}
+
+/** „Scan neu“ in derselben Zeile — nicht „Alter klären“ oder „vervollständigen“. */
+function scanNeuKnopfIn(zeile) {
+  if (!zeile) return null;
+  return [...zeile.querySelectorAll(".trace-link")].find((knopf) => (
     !knopf.classList.contains("vervollstaendigen")
     && !knopf.classList.contains("alter-klaeren")
     && !knopf.classList.contains("luecken-aus-plot")
     && knopf.textContent.trim() === t("trace.rescan")
-  ));
+  )) || null;
+}
+
+/**
+ * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht
+ * oder das Alter noch nicht geklärt ist. Ist die rote Marke weg und das
+ * grüne „jüngste sats“ da, kommt der Knopf wieder.
+ */
+function blendeScanNeuNebenVervollstaendigen(anker) {
+  const zeile = traceKnopfZeile(anker);
+  const scan = scanNeuKnopfIn(zeile);
   if (!scan) return;
-  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen"));
+  const alterOffen = Boolean(zeile.querySelector(".alter-klaeren"));
+  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen")) || alterOffen;
   scan.hidden = zeigt;
+}
+
+/**
+ * Nach dem Trace: grünes Label ersetzt „Alter klären“.
+ * Solange der Knopf noch nötig ist, bleibt „Scan neu“ aus.
+ */
+function blendeAlterKlaerenUndScan(anker) {
+  const zeile = traceKnopfZeile(anker);
+  if (!zeile) return;
+  const oben = zeile.classList.contains("utxo-zeile")
+    ? zeile
+    : (zeile.querySelector(".knoten-oben") || zeile);
+  const geklaert = Boolean(oben.querySelector(".juengste-sats-marke"));
+  if (geklaert) {
+    for (const knopf of oben.querySelectorAll(".alter-klaeren")) knopf.remove();
+  } else if (!oben.querySelector(".alter-klaeren, .vervollstaendigen")) {
+    const key = zeile.dataset.key
+      || zeile.querySelector("[data-key]")?.dataset.key
+      || "";
+    const klaeren = key ? alterKlaerenKnopf({ key }) : null;
+    if (klaeren) {
+      const juengstePlatz = oben.querySelector(
+        ".verfolgt-marke:not(.ausgegeben):not(.juengste-sats-marke):not(.ohne-herkunft-marke)",
+      );
+      if (juengstePlatz) juengstePlatz.insertAdjacentElement("afterend", klaeren);
+      else oben.append(klaeren);
+    }
+  }
+  blendeScanNeuNebenVervollstaendigen(zeile);
 }
 
 /** Marke „verfolgt · Datum" / „unvollständig · Datum" (rot) anpassen. */
@@ -1429,6 +1480,7 @@ function zeichneJuengsteSatsNach(utxo) {
       setzeVerfolgtMarke(oben, utxo);
       if (marke) ersetzeJuengsteMarke(oben, juengsteSatsMarke(utxo));
     }
+    blendeAlterKlaerenUndScan(wurzel);
   }
 
   // Wallet-Liste neu zeichnen: nur die grüne Marke anzuhängen ließe
