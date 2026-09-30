@@ -1546,6 +1546,9 @@ function zeichneUtxoZeile(utxo) {
     zeigeHerkunftFuer(utxo.key, { neu: true });
   });
   zeile.append(neu);
+  if (typeof blendeScanNeuNebenVervollstaendigen === "function") {
+    blendeScanNeuNebenVervollstaendigen(zeile);
+  }
 
   const extern = mempoolVerweis("tx", utxo.txid);
   if (extern) zeile.append(extern);

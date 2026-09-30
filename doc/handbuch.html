@@ -790,8 +790,10 @@ weitergeben.</p>
 zuerst. Jede Adresse lässt sich aufklappen und zeigt dann ihre einzelnen UTXOs
 mit Betrag, Eingangsdatum, Blockhöhe und Haltedauer. Das Datum
 <strong>Ankunft am … um …</strong> führt in die Herkunftsansicht — derselbe
-Weg wie der Ausklapp-Pfeil dort. <strong>Scan neu</strong> verwirft
-einen gespeicherten Herkunftsbaum und verfolgt nur dieses UTXO erneut.</p>
+Weg wie der Ausklapp-Pfeil dort. <strong>Scan neu</strong> verfolgt
+nur dieses UTXO erneut. Steht die rote Marke „unvollständig“ in der Zeile,
+steht dort <strong>vervollständigen</strong> statt <strong>Scan neu</strong>.
+Der Neustart erscheint wieder, sobald die Marke weg ist.</p>
 
 <p>Die <strong>Haltedauer</strong> steht als Balken neben jedem UTXO: grün und
 voll, sobald ein Jahr überschritten ist, sonst gelb mit dem erreichten Anteil.
@@ -1004,7 +1006,8 @@ Walletübersicht und unter Herkunft, ohne den Baum aufzuklappen —
 jüngste Zufluss von außen. Bei unaufgelösten Sammel-Eingängen fehlt diese
 Angabe, weil irgendeiner davon jünger sein könnte. Darüber steht beim
 Aufklappen „Stand …"; zum erneuten Abfragen dient <strong>Scan neu</strong>
-am UTXO (Wallet-Liste und Herkunftsansicht).</p>
+am UTXO (Wallet-Liste und Herkunftsansicht). Solange die Zeile
+<strong>vervollständigen</strong> zeigt, bleibt <strong>Scan neu</strong> aus.</p>
 
 <div class="hinweis warn">
   <div class="kopf">Wenn Wallet-Adressen dazukommen</div>

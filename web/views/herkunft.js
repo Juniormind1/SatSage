@@ -933,6 +933,9 @@ function zeichneTraceWurzel(utxo) {
     zeigeHerkunftFuer(utxo.key, { neu: true });
   });
   kopfzeile.append(neu);
+  if (typeof blendeScanNeuNebenVervollstaendigen === "function") {
+    blendeScanNeuNebenVervollstaendigen(kopfzeile);
+  }
   const extern = mempoolVerweis("tx", (utxo.key || "").split(":")[0]);
   if (extern) kopfzeile.append(extern);
 

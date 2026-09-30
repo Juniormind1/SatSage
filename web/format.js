@@ -1253,7 +1253,7 @@ function utxoHerkunftUnvollstaendig(utxo) {
 
 /**
  * Rechts neben der roten Marke: der Knopf, der sie überflüssig macht.
- * Gebündelte Eingänge brauchen „Lücken schließen“, sonst reicht „Scan neu“.
+ * Gebündelte Eingänge packt der Lauf aus. „Scan neu“ bleibt daneben aus.
  */
 function haengeVervollstaendigenAn(marke, utxo) {
   if (!marke || !utxo || !utxo.key) return;
@@ -1275,6 +1275,34 @@ function haengeVervollstaendigenAn(marke, utxo) {
     }
   });
   marke.insertAdjacentElement("afterend", knopf);
+  // „Scan neu“ ist der seltene Neustart. Solange diese Zeile
+  // „vervollständigen“ zeigt, bleibt er aus.
+  blendeScanNeuNebenVervollstaendigen(marke);
+}
+
+/**
+ * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht.
+ * Ist die rote Marke weg, kommt der Knopf wieder.
+ */
+function blendeScanNeuNebenVervollstaendigen(anker) {
+  const zeile = anker && (
+    anker.classList?.contains("utxo-zeile")
+    || anker.classList?.contains("kopf-mit-verweis")
+  )
+    ? anker
+    : anker && anker.closest && (
+      anker.closest(".utxo-zeile") || anker.closest(".kopf-mit-verweis")
+    );
+  if (!zeile) return;
+  const scan = [...zeile.querySelectorAll(".trace-link")].find((knopf) => (
+    !knopf.classList.contains("vervollstaendigen")
+    && !knopf.classList.contains("alter-klaeren")
+    && !knopf.classList.contains("luecken-aus-plot")
+    && knopf.textContent.trim() === t("trace.rescan")
+  ));
+  if (!scan) return;
+  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen"));
+  scan.hidden = zeigt;
 }
 
 /** Marke „verfolgt · Datum" / „unvollständig · Datum" (rot) anpassen. */
@@ -1311,6 +1339,7 @@ function setzeVerfolgtMarke(oben, utxo) {
     marke.title = utxo.verfolgt_veraltet
       ? t("trace.followedStale")
       : t("trace.followedCached");
+    blendeScanNeuNebenVervollstaendigen(marke);
   }
 }
 
