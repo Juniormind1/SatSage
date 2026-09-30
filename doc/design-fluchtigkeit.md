@@ -1,6 +1,6 @@
 # Designrichtlinie: Flüchtigkeit / Eilige Nutzer
 
-**Verankert in:** [`AGENTS.md`](../AGENTS.md) (UI-Konventionen)
+**Verankert in:** [`web/AGENTS.md`](../web/AGENTS.md) (UI-Konventionen)
 
 ## Ausgangslage
 

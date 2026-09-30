@@ -12,7 +12,7 @@ Kriterien, die einen Merge nach `main` (und strenge Übernahme auf `dev-*`) verh
 
 Dieselbe Liste gilt als Leitplanke für Assistenten (Grok o. Ä.) und optional Copilot-Instructions. **CI-Checks für alle Hart-Punkte sind noch nicht vollständig verdrahtet** — die Suite (`Q1`) und die Identitäts-Hooks (`S2`) sind der Anfang.
 
-Verankert in [`AGENTS.md`](../AGENTS.md) (Git / Sicherheit).
+Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AGENTS.md`](../githooks/AGENTS.md) (Git).
 
 ---
 

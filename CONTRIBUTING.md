@@ -1,6 +1,6 @@
 # Mitmachen
 
-SatSage ist ein Analysewerkzeug: woher Sats kamen und wie lange sie on-chain lagen. Es signiert nicht und sendet keine Transaktionen. Neue Logik landet in der passenden Domäne, nicht in den Root-Fassaden. Die Grenzen stehen in [`AGENTS.md`](AGENTS.md) unter **Modulgrenzen**.
+SatSage ist ein Analysewerkzeug: woher Sats kamen und wie lange sie on-chain lagen. Es signiert nicht und sendet keine Transaktionen. Neue Logik landet in der passenden Domäne, nicht in den Root-Fassaden. Die Grenzen stehen in [`core/AGENTS.md`](core/AGENTS.md) unter **Modulgrenzen**.
 
 ## Nichts Sensibles schicken
 

@@ -1,6 +1,6 @@
 # Designrichtlinie: Unwissend, lernfaul, neugierig
 
-**Verankert in:** [`AGENTS.md`](../AGENTS.md) (UI-Konventionen)  
+**Verankert in:** [`web/AGENTS.md`](../web/AGENTS.md) (UI-Konventionen)  
 **Ergänzung zu:** [`design-fluchtigkeit.md`](design-fluchtigkeit.md) (Eile / Fehlerverhinderung)
 
 ## Ausgangslage

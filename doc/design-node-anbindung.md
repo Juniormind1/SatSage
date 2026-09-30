@@ -44,4 +44,4 @@ Bei Änderungen an Verbindung, TLS, Datenquellenwahl, Start9 vs. Desktop:
 2. Ist der neue harte Default nur für einen Modus nötig (z. B. Sideload)? Dann **nicht** global.
 3. Scheitert der Happy Path an einem typischen Heimnetz-Detail, ist das ein **Produktbug**, kein „User-Error“.
 
-Siehe auch: Datenquellen-Priorität in `AGENTS.md`, Start9-Modus in `doc/START9-hardening.md`, TLS-Policy in `outbound_policy.py`.
+Siehe auch: Datenquellen-Priorität in `core/AGENTS.md`, Start9-Modus in `doc/START9-hardening.md`, TLS-Policy in `outbound_policy.py`.

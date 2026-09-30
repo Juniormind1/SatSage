@@ -118,7 +118,7 @@ Mindestens: `tests/test_api.py`, `tests/test_eingebetteter_server.py`, `tests/te
 
 ## Arbeitsregeln
 
-Stehen in [`AGENTS.md`](../AGENTS.md) · Modulgrenzen (2026-09-24). Die 80-Zeilen-Grenze gilt weich: nur im Change, der die Funktion ohnehin anfasst.
+Stehen in [`core/AGENTS.md`](../core/AGENTS.md) · Modulgrenzen (2026-09-24). Die 80-Zeilen-Grenze gilt weich: nur im Change, der die Funktion ohnehin anfasst.
 
 ## Entscheidung
 
@@ -327,7 +327,7 @@ Pfad: **`httpserver/`** und **`httpserver/api/`**. Einstieg bleibt `server.py` m
 1. Laden-Ballast in `app.js` häppchenweise (Kurs, Chat/LLM, Sync-UI) — nur mit klarer Grenze.
 2. Optional Server: `build_state`, `starte_header_vorab`, weiteren Handler-Feinschnitt.
 3. Laut ADR: **Slice 3 `main.py` erledigt**; als Nächstes `analyze.py` (Slice 4) / Adapter-Feinschnitt (Slice 5).
-4. Arbeitsregeln in `AGENTS.md` · Modulgrenzen — **nachgezogen** (2026-09-24).
+4. Arbeitsregeln in `core/AGENTS.md` · Modulgrenzen — **nachgezogen** (2026-09-24; vorher Root-`AGENTS.md`).
 
 
 ### Nachzug · UI 1–4 + Server 5–6 (2026-09-23)

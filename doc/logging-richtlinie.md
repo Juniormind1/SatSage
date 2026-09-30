@@ -1,7 +1,7 @@
 # Log-Richtlinie (Web-GUI + gespiegelter Strom)
 
 **Stand:** 2026-09-15  
-**Verankert in:** [`AGENTS.md`](../AGENTS.md) (UI-Konventionen)
+**Verankert in:** [`web/AGENTS.md`](../web/AGENTS.md) (UI-Konventionen)
 
 ## Zweck
 

@@ -4,7 +4,7 @@
 **Für:** Maintainer, manuelle Live-Tests, spätere Automatisierung (Unit/Chaos).  
 **Zweck:** Den Server und die GUI **abhärten**, wenn während UTXO-/Verlaufs-Scans die Datenquelle wechselt — besonders **P2P (BIP-158) ↔ öffentliche Electrum (Onion/Clearnet)** und zurück.
 
-**Verwandt:** [`testprotokoll-webgui-stabilitaet.md`](testprotokoll-webgui-stabilitaet.md), [`logging-richtlinie.md`](logging-richtlinie.md), [`plan-bip158-erstscan.md`](plan-bip158-erstscan.md), [`AGENTS.md`](../AGENTS.md) (Datenquellen-Priorität).
+**Verwandt:** [`testprotokoll-webgui-stabilitaet.md`](testprotokoll-webgui-stabilitaet.md), [`logging-richtlinie.md`](logging-richtlinie.md), [`plan-bip158-erstscan.md`](plan-bip158-erstscan.md), [`core/AGENTS.md`](../core/AGENTS.md) (Datenquellen-Priorität).
 
 ---
 
