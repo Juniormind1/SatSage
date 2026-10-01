@@ -193,19 +193,9 @@ function fuelleJahresauswahl(jahre, gewaehlt) {
   if (gewaehlt) wahl.value = gewaehlt;
 }
 
-function zeichneSteuerjahr(daten) {
-  fuelleJahresauswahl(daten.verfuegbare_jahre || [], daten.jahr);
-  fuelleHaltefristAuswahl(
-    $("#frist-wahl"),
-    daten.haltefrist_jahre,
-    steuerEinstellungen().haltefrist_jahre_auswahl,
-  );
-  zeichneAbgaenge(daten);
-
-  const k = daten.kennzahlen;
-  const kasten = $("#steuer-kennzahlen");
-  kasten.replaceChildren();
-
+/** Scorecards oben im Steuerjahr. id bleibt stabil, solange die Farbe steht. */
+function steuerScorecardModelle(daten) {
+  const k = daten.kennzahlen || {};
   const alleE = daten.eintraege || [];
   const erfuelltE = alleE.filter((e) => e.erfuellt);
   const offenE = alleE.filter((e) => !e.erfuellt);
@@ -217,88 +207,163 @@ function zeichneSteuerjahr(daten) {
     ? steuerSatsGemeinsam(sats, kts[name])
     : formatSatsGemeinsam(sats, liste));
 
-  const kennzahlen = [
-    [t("tax.hard.ee18fac200"), fiatE(k.gesamt_sats, alleE, "gesamt"), `${k.gesamt_count} UTXOs`, ""],
-    [t("tax.hard.91a2ea86bd"), fiatE(k.erfuellt_sats, erfuelltE, "erfuellt"),
-     `${k.erfuellt_count} UTXOs`, "gut"],
-    [t("tax.hard.innerhalbHaltefrist"), fiatE(k.offen_sats, offenE, "offen"),
-     k.naechste_frist ? t("tax.hard.ed098d09aa", { naechste_frist: k.naechste_frist }) : `${k.offen_count} UTXOs`,
-     "warn",
-     true], // separater „klären“ nur für gelbe UTXOs
+  const karten = [
+    {
+      id: "gesamt",
+      titel: t("tax.hard.ee18fac200"),
+      wert: fiatE(k.gesamt_sats, alleE, "gesamt"),
+      zusatz: `${k.gesamt_count} UTXOs`,
+      art: "",
+      klaeren: false,
+    },
+    {
+      id: "erfuellt",
+      titel: t("tax.hard.91a2ea86bd"),
+      wert: fiatE(k.erfuellt_sats, erfuelltE, "erfuellt"),
+      zusatz: `${k.erfuellt_count} UTXOs`,
+      art: "gut",
+      klaeren: false,
+    },
+    {
+      id: "offen",
+      titel: t("tax.hard.innerhalbHaltefrist"),
+      wert: fiatE(k.offen_sats, offenE, "offen"),
+      zusatz: k.naechste_frist
+        ? t("tax.hard.ed098d09aa", { naechste_frist: k.naechste_frist })
+        : `${k.offen_count} UTXOs`,
+      art: "warn",
+      klaeren: true,
+    },
   ];
   if (k.ungeprueft_count > 0) {
-    kennzahlen.push([
-      "Ohne Herkunftsanalyse", fiatE(k.ungeprueft_sats, ungeprueftE, "ungeprueft"),
-      `${k.ungeprueft_count} UTXOs — Frist evtl. länger`, "ungeprueft",
-      true, // Aktion „klären“ nur für graue UTXOs
-    ]);
+    karten.push({
+      id: "ungeprueft",
+      titel: "Ohne Herkunftsanalyse",
+      wert: fiatE(k.ungeprueft_sats, ungeprueftE, "ungeprueft"),
+      zusatz: `${k.ungeprueft_count} UTXOs — Frist evtl. länger`,
+      art: "ungeprueft",
+      klaeren: true,
+    });
   }
   if (k.ohne_datum > 0) {
-    kennzahlen.push([
-      t("tax.hard.f99058be55"), String(k.ohne_datum), t("tax.hard.3199eeb8e0"), "",
-      false,
-    ]);
+    karten.push({
+      id: "ohne_datum",
+      titel: t("tax.hard.f99058be55"),
+      wert: String(k.ohne_datum),
+      zusatz: t("tax.hard.3199eeb8e0"),
+      art: "",
+      klaeren: false,
+    });
   }
+  return karten;
+}
 
-  for (const [titel, wert, zusatz, art, mitKlaeren] of kennzahlen) {
-    const zelle = document.createElement("div");
-    zelle.className = "kennzahl";
-    const titelEl = document.createElement("span");
-    titelEl.className = "kennzahl-titel";
-    titelEl.textContent = titel;
-    const w = document.createElement("span");
-    w.className = `kennzahl-wert ${art}`.trim();
-    w.textContent = wert;
-    const z = document.createElement("span");
-    z.className = "kennzahl-zusatz";
-    z.textContent = zusatz;
-    if (art === "ungeprueft") z.dataset.klaerZaehler = "grau";
-    zelle.append(titelEl, w, z);
-    if (mitKlaeren) {
-      const knopf = document.createElement("button");
-      knopf.type = "button";
-      // Unterschiedliche IDs je Scorecard, damit wir gezielt nur gelbe oder nur graue tracen können
-      knopf.id = art === "warn" ? "herkunft-gelb" : "herkunft-grau";
-      knopf.className = "knopf knopf-klein kennzahl-aktion";
-      knopf.textContent = t("tax.originAll");
-      knopf.setAttribute("data-i18n", "tax.originAll");
-      if (art === "warn") {
-        // Gelb: voll bis extern/Coinbase — erst dann grün oder bestätigt gelb.
-        knopf.title = t("tax.yellowClarifyTitle") !== "tax.yellowClarifyTitle"
-          ? t("tax.yellowClarifyTitle")
-          : t("tax.hard.4f776c0011");
-        knopf.setAttribute("data-i18n-title", "tax.yellowClarifyTitle");
-        knopf.addEventListener("click", () => {
-          herkunftGelbUtxos().catch((fehler) => {
-            Zustand.herkunftAlleLaeuft = false;
-            if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
-            const k = $("#steuer-meldung");
-            if (!k) return;
-            k.className = "hinweis hinweis-krit";
-            setzeText(k, fehler.message || String(fehler));
-            k.hidden = false;
-          });
-        });
-      } else {
-        // Grauer Scorecard-Knopf: alle noch nie analysierten UTXOs
-        knopf.title = t("tax.hard.a430621437");
-        knopf.setAttribute("data-i18n-title", "");
-        knopf.addEventListener("click", () => {
-          Promise.resolve(herkunftGrauUtxos()).catch((fehler) => {
-            Zustand.herkunftAlleLaeuft = false;
-            if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
-            const k = $("#steuer-meldung");
-            if (!k) return;
-            k.className = "hinweis hinweis-krit";
-            setzeText(k, fehler.message || String(fehler));
-            k.hidden = false;
-          });
-        });
-      }
-      w.append(knopf);
-    }
-    kasten.append(zelle);
+function baueSteuerScorecard(karte) {
+  const zelle = document.createElement("div");
+  zelle.className = "kennzahl";
+  zelle.dataset.score = karte.id;
+  const titelEl = document.createElement("span");
+  titelEl.className = "kennzahl-titel";
+  titelEl.textContent = karte.titel;
+  const w = document.createElement("span");
+  w.className = `kennzahl-wert ${karte.art}`.trim();
+  const zahl = document.createElement("span");
+  zahl.className = "kennzahl-zahl";
+  zahl.textContent = karte.wert;
+  w.append(zahl);
+  const z = document.createElement("span");
+  z.className = "kennzahl-zusatz";
+  z.textContent = karte.zusatz;
+  if (karte.art === "ungeprueft") z.dataset.klaerZaehler = "grau";
+  zelle.append(titelEl, w, z);
+  if (!karte.klaeren) return zelle;
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  // Unterschiedliche IDs je Scorecard, damit wir gezielt nur gelbe oder nur graue tracen können
+  knopf.id = karte.art === "warn" ? "herkunft-gelb" : "herkunft-grau";
+  knopf.className = "knopf knopf-klein kennzahl-aktion";
+  knopf.textContent = t("tax.originAll");
+  knopf.setAttribute("data-i18n", "tax.originAll");
+  if (karte.art === "warn") {
+    // Gelb: voll bis extern/Coinbase — erst dann grün oder bestätigt gelb.
+    knopf.title = t("tax.yellowClarifyTitle") !== "tax.yellowClarifyTitle"
+      ? t("tax.yellowClarifyTitle")
+      : t("tax.hard.4f776c0011");
+    knopf.setAttribute("data-i18n-title", "tax.yellowClarifyTitle");
+    knopf.addEventListener("click", () => {
+      herkunftGelbUtxos().catch((fehler) => {
+        Zustand.herkunftAlleLaeuft = false;
+        if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+        const kasten = $("#steuer-meldung");
+        if (!kasten) return;
+        kasten.className = "hinweis hinweis-krit";
+        setzeText(kasten, fehler.message || String(fehler));
+        kasten.hidden = false;
+      });
+    });
+  } else {
+    // Grauer Scorecard-Knopf: alle noch nie analysierten UTXOs
+    knopf.title = t("tax.hard.a430621437");
+    knopf.setAttribute("data-i18n-title", "");
+    knopf.addEventListener("click", () => {
+      Promise.resolve(herkunftGrauUtxos()).catch((fehler) => {
+        Zustand.herkunftAlleLaeuft = false;
+        if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+        const kasten = $("#steuer-meldung");
+        if (!kasten) return;
+        kasten.className = "hinweis hinweis-krit";
+        setzeText(kasten, fehler.message || String(fehler));
+        kasten.hidden = false;
+      });
+    });
   }
+  w.append(knopf);
+  return zelle;
+}
+
+/**
+ * Scorecards neu zeichnen.
+ * Kommt eine Farbe dazu oder fällt sie weg, werden alle Karten neu gebaut.
+ * Sonst bleiben die Karten stehen und nur die geänderten Zahlen werden ersetzt.
+ */
+function zeichneSteuerScorecards(daten) {
+  const kasten = $("#steuer-kennzahlen");
+  if (!kasten || !daten) return;
+  const karten = steuerScorecardModelle(daten);
+  const neu = karten.map((karte) => karte.id).join("\0");
+  const alt = [...kasten.children]
+    .map((el) => (el.dataset && el.dataset.score) || "")
+    .join("\0");
+  if (neu !== alt) {
+    kasten.replaceChildren(...karten.map(baueSteuerScorecard));
+    return;
+  }
+  for (const karte of karten) {
+    const zelle = kasten.querySelector(`[data-score="${karte.id}"]`);
+    if (!zelle) continue;
+    const zahl = zelle.querySelector(".kennzahl-zahl");
+    if (zahl && zahl.textContent !== karte.wert) zahl.textContent = karte.wert;
+    const zusatz = zelle.querySelector(".kennzahl-zusatz");
+    if (zusatz && zusatz.textContent !== karte.zusatz) {
+      zusatz.textContent = karte.zusatz;
+      if (karte.id === "ungeprueft") delete zusatz.dataset.klaerStart;
+    }
+  }
+}
+
+function zeichneSteuerjahr(daten) {
+  fuelleJahresauswahl(daten.verfuegbare_jahre || [], daten.jahr);
+  fuelleHaltefristAuswahl(
+    $("#frist-wahl"),
+    daten.haltefrist_jahre,
+    steuerEinstellungen().haltefrist_jahre_auswahl,
+  );
+  zeichneAbgaenge(daten);
+
+  // Serverstand ist maßgeblich. Scan-Punkte, die der Plot noch nicht hat,
+  // zählt zeichneScanPunkte danach erneut auf diesen Stand drauf.
+  ScanPunktStand.gezahlt.clear();
+  zeichneSteuerScorecards(daten);
 
   zeichneZeitstrahl(daten);
 
@@ -696,7 +761,28 @@ function formatTickTag(d) {
 const ScanPunktStand = {
   keys: new Set(),
   offen: new Map(),
+  // Schlüssel, die schon in den Scorecards stecken. Zoom zeichnet die
+  // Punkte neu, ohne die Summen ein zweites Mal zu erhöhen.
+  gezahlt: new Set(),
 };
+
+/** Neuer grauer Scan-Punkt: Bestand und „ohne Herkunft“ um diesen Betrag heben. */
+function steuerScanPunktInKennzahlen(eintrag) {
+  const daten = Zustand.steuer;
+  const k = daten && daten.kennzahlen;
+  const key = String((eintrag && eintrag.key) || "");
+  if (!k || !key || ScanPunktStand.gezahlt.has(key)) return false;
+  ScanPunktStand.gezahlt.add(key);
+  const sats = Number(eintrag.value_sats) || 0;
+  k.gesamt_count = (Number(k.gesamt_count) || 0) + 1;
+  k.gesamt_sats = (Number(k.gesamt_sats) || 0) + sats;
+  k.ungeprueft_count = (Number(k.ungeprueft_count) || 0) + 1;
+  k.ungeprueft_sats = (Number(k.ungeprueft_sats) || 0) + sats;
+  if (Array.isArray(daten.grau_keys) && !daten.grau_keys.includes(key)) {
+    daten.grau_keys.push(key);
+  }
+  return true;
+}
 
 function scanPunktGroesse(sats, maxSats) {
   const max = Number(maxSats) || Number(sats) || 1;
@@ -771,6 +857,11 @@ function zeichneScanPunkte(liste) {
     spur.append(punkt);
     ScanPunktStand.keys.add(key);
     dazu += 1;
+    // Pro neuem Punkt. Fehlt die graue Karte, baut der erste Punkt alle
+    // Scorecards neu. Jeder weitere ändert nur die Zahlen.
+    if (steuerScanPunktInKennzahlen(eintrag)) {
+      zeichneSteuerScorecards(Zustand.steuer);
+    }
   }
   return dazu;
 }
