@@ -913,6 +913,8 @@
   "trace.allOriginsNothing": "Origin analysis is already available for all UTXOs.",
   "trace.allOriginsScanAbort": "Balance+origin cancelled.",
   "trace.allOriginsScanDone": "Balance collected — starting origin…",
+  "trace.clarifyScanFirst": "No UTXO balance yet for {n} wallet(s). Scanning first, then tracing.",
+  "trace.clarifyScanEmpty": "The wallets that had not been scanned have no UTXO balance. Nothing to trace.",
   "trace.allOriginsScanning": "Balance {aktuell}/{gesamt}: {name}…",
   "trace.allOriginsTitle": "For every still-open UTXO, walks backwards to a foreign address or coinbase. Once computed, it stays stored.",
   "trace.amountPending": "…",

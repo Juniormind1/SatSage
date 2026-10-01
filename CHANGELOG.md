@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · klären:** Gelb und grau starten zuerst einen UTXO-Scan für jedes Wallet, das noch nie gescannt wurde, und danach die bisherige Klären-Routine. Wallets ohne UTXOs und Wallets hinter dem aktuellen Tip bleiben außen vor.
 - **Steuerjahr · Dotplot:** Ein neuer grauer Punkt während des Wallet-Scans aktualisiert die Scorecards sofort. Kommt die graue Karte neu dazu, werden alle Karten neu gezeichnet. Weitere graue Punkte ändern nur die Zahlen in den Karten, deren Stand sich ändert.
 - **Cache · Blockzeit:** Eine bestätigte Transaktion mit Höhe und ohne Blockzeit wird aus dem Header-Cache nachgetragen und überschrieben. Ohne Blockzeit entsteht kein neuer Cache-Eintrag. Im Herkunftsnetz zählt ein Ende ohne Position grau, nicht grün.
 - **Mempool · Mindesthöhe:** Eine noch unbestätigte Transaktion bekommt nicht mehr Blockhöhe 0. Die frühestmögliche Höhe ist der aktuelle Chain-Tip, die Zeit die dieses Blocks. Der Eintrag bleibt ein Zwischenstand und wird nicht als fertiger Cache-Treffer behalten.

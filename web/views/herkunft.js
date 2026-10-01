@@ -2644,21 +2644,75 @@ async function warteAufJobEnde(jobId, {
 }
 
 /**
+ * Dieselbe Toleranz wie die Frische-Anzeige: zwei Blöcke sind noch „am Tip“.
+ * Weiter zurück ist der Bestand nur nicht nachgezogen — kein Erst-Scan.
+ */
+const KLAEREN_TIP_TOLERANZ = 2;
+
+function walletLiegtHinterTip(wallet, tipHoehe) {
+  if (tipHoehe == null || !Number.isFinite(Number(tipHoehe))) return false;
+  if (!wallet || wallet.scan_tip_height == null || wallet.scan_tip_height === "") {
+    return false;
+  }
+  const scanTip = Number(wallet.scan_tip_height);
+  if (!Number.isFinite(scanTip)) return false;
+  return Number(tipHoehe) - scanTip > KLAEREN_TIP_TOLERANZ;
+}
+
+/**
+ * Wallets, für die noch kein UTXO-Scan vorliegt.
+ * Schon gescannt und leer, sowie Bestände hinter dem aktuellen Tip, bleiben außen vor.
+ */
+function walletsOhneUtxoScan(config, tipHoehe) {
+  const quelle = config || (typeof Zustand !== "undefined" ? Zustand.config : null);
+  if (!quelle || quelle.context_bereit === false) return [];
+  const tip = tipHoehe !== undefined
+    ? tipHoehe
+    : (typeof chainTipHoehe === "function" ? chainTipHoehe() : quelle.header_tip);
+  return (quelle.wallets || []).filter((wallet) => {
+    if (!wallet || !wallet.id || wallet.is_new) return false;
+    if (Number(wallet.utxo_count) > 0) return false;
+    if (wallet.has_cache) return false;
+    if (walletLiegtHinterTip(wallet, tip)) return false;
+    return true;
+  });
+}
+
+function sperreKlaerenKnoepfe(an) {
+  for (const id of ["#herkunft-gelb", "#herkunft-grau"]) {
+    const el = typeof $ === "function" ? $(id) : null;
+    if (el) el.disabled = Boolean(an);
+  }
+}
+
+function gibKlaerenSperreFrei() {
+  Zustand.herkunftAlleLaeuft = false;
+  sperreKlaerenKnoepfe(false);
+  const lauf = $("#herkunft-lauf");
+  if (lauf) lauf.hidden = true;
+  if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+}
+
+/**
  * UTXO-Scan für jedes konfigurierte Wallet — Voraussetzung für
  * „Herkunft aller UTXOs“ bei leerem Cache.
+ * *wallets* schränkt auf die noch nie gescannten ein (Scorecard „klären“).
  */
 async function scanneAlleWalletsUtxo({
   textEl = null,
   sollAbbrechen = () => false,
   logStand = null,
+  wallets = null,
 } = {}) {
-  const wallets = (Zustand.config?.wallets || []).filter((w) => w && w.id);
-  if (!wallets.length) {
+  const liste = Array.isArray(wallets)
+    ? wallets.filter((w) => w && w.id)
+    : (Zustand.config?.wallets || []).filter((w) => w && w.id);
+  if (!liste.length) {
     throw new Error(t("wallets.emptyList"));
   }
   let scanAb = "";
-  for (let i = 0; i < wallets.length; i += 1) {
-    const wallet = wallets[i];
+  for (let i = 0; i < liste.length; i += 1) {
+    const wallet = liste[i];
     if (sollAbbrechen()) {
       const err = new Error("abgebrochen");
       err.abgebrochen = true;
@@ -2667,14 +2721,14 @@ async function scanneAlleWalletsUtxo({
     if (textEl) {
       setzeText(textEl, t("trace.allOriginsScanning", {
         aktuell: i + 1,
-        gesamt: wallets.length,
+        gesamt: liste.length,
         name: wallet.name || wallet.id,
       }));
     }
     logZeile(
       t("trace.allOriginsScanning", {
         aktuell: i + 1,
-        gesamt: wallets.length,
+        gesamt: liste.length,
         name: wallet.name || wallet.id,
       }),
       undefined,
@@ -2711,7 +2765,7 @@ async function scanneAlleWalletsUtxo({
             textEl,
             t("trace.allOriginsScanning", {
               aktuell: i + 1,
-              gesamt: wallets.length,
+              gesamt: liste.length,
               name: wallet.name || wallet.id,
             }) + ` · ${übersetzeLogText(j.message)}`,
           );
@@ -2721,22 +2775,112 @@ async function scanneAlleWalletsUtxo({
   }
 }
 
+/**
+ * Scorecard „klären“: fehlende UTXO-Scans zuerst, dann die eigentliche Routine.
+ * Hält die Sperre, solange der Scan lief und die Routine ihn übernehmen soll.
+ */
+async function scanneUngescannteVorKlaeren() {
+  if (
+    Zustand.config?.context_bereit === false
+    && typeof ladeConfig === "function"
+  ) {
+    try { await ladeConfig(); } catch (_) { /* alter Stand bleibt */ }
+  }
+  const tip = typeof chainTipHoehe === "function" ? chainTipHoehe() : null;
+  const offen = walletsOhneUtxoScan(Zustand.config, tip);
+  if (!offen.length) return { gescannt: false, haeltSperre: false };
+
+  Zustand.herkunftAlleLaeuft = true;
+  if (typeof stoesseEmpfangScanPuls === "function") stoesseEmpfangScanPuls();
+  sperreKlaerenKnoepfe(true);
+  const lauf = $("#herkunft-lauf");
+  const textEl = $("#herkunft-text");
+  const abbruchKnopf = $("#herkunft-abbruch");
+  if (lauf) lauf.hidden = false;
+  const ankuendigung = t("trace.clarifyScanFirst", { n: offen.length });
+  if (textEl) setzeText(textEl, ankuendigung);
+  if (typeof logZeile === "function") logZeile(ankuendigung);
+  let abbruchWunsch = false;
+  if (abbruchKnopf) {
+    abbruchKnopf.onclick = () => {
+      abbruchWunsch = true;
+      if (textEl) setzeText(textEl, t("common.abortRequested"));
+    };
+  }
+  try {
+    await scanneAlleWalletsUtxo({
+      textEl,
+      sollAbbrechen: () => abbruchWunsch,
+      logStand: { index: 0 },
+      wallets: offen,
+    });
+  } catch (fehler) {
+    if (typeof ladeConfig === "function") {
+      try { await ladeConfig(); } catch (_) { /* nächster Klick sieht den alten Stand */ }
+    }
+    gibKlaerenSperreFrei();
+    if (fehler && fehler.abgebrochen) {
+      const k = $("#steuer-meldung");
+      if (k) {
+        k.className = "hinweis hinweis-warn";
+        setzeText(k, t("trace.allOriginsScanAbort"));
+        k.hidden = false;
+      }
+      return { gescannt: false, haeltSperre: false, abbruch: true };
+    }
+    throw fehler;
+  }
+  if (typeof ladeConfig === "function") {
+    try { await ladeConfig(); } catch (_) { /* Schlüssel kommen trotzdem neu */ }
+  }
+  if (textEl) setzeText(textEl, t("trace.allOriginsScanDone"));
+  return { gescannt: true, haeltSperre: true };
+}
+
+function zeigeKlaerenLaeuftSchon() {
+  const k = $("#steuer-meldung");
+  if (!k) return;
+  k.className = "hinweis hinweis-warn";
+  setzeText(k, t("tax.originAlreadyRunning") !== "tax.originAlreadyRunning"
+    ? t("tax.originAlreadyRunning")
+    : t("ui.hard.2c151e092b"));
+  k.hidden = false;
+}
+
+/**
+ * Gelb und grau: erst fehlende UTXO-Scans, danach die bisherige Klären-Routine.
+ * *sammle* liefert die Schlüssel oder null, wenn nichts zu tun ist (Meldung selbst).
+ */
+async function klaerenNachUngescannten(sammle, starte) {
+  if (Zustand.herkunftAlleLaeuft) {
+    zeigeKlaerenLaeuftSchon();
+    return;
+  }
+  let vorab = { gescannt: false, haeltSperre: false };
+  let keys = null;
+  try {
+    vorab = await scanneUngescannteVorKlaeren();
+    if (vorab.abbruch) return;
+    if (vorab.gescannt) Zustand.steuer = null;
+    keys = await sammle();
+  } catch (fehler) {
+    if (vorab.haeltSperre || Zustand.herkunftAlleLaeuft) gibKlaerenSperreFrei();
+    throw fehler;
+  }
+  if (!keys) {
+    if (vorab.haeltSperre) gibKlaerenSperreFrei();
+    return;
+  }
+  if (vorab.haeltSperre) sperreKlaerenKnoepfe(false);
+  return starte(keys, Boolean(vorab.haeltSperre));
+}
+
 async function herkunftGrauUtxos() {
   // Graue Scorecard: noch nie analysiert. Der Massenlauf ohne Schlüssel
   // nimmt nur UTXOs ohne vollen Baum — ein grauer Punkt kann einen
   // unvollständigen Cache haben und würde sonst sofort als „nichts zu tun“
   // enden. Deshalb dieselben Schlüssel wie der Punkt selbst.
-  if (Zustand.herkunftAlleLaeuft) {
-    const k = $("#steuer-meldung");
-    if (k) {
-      k.className = "hinweis hinweis-warn";
-      setzeText(k, t("tax.originAlreadyRunning") !== "tax.originAlreadyRunning"
-        ? t("tax.originAlreadyRunning")
-        : t("ui.hard.2c151e092b"));
-      k.hidden = false;
-    }
-    return;
-  }
+  return klaerenNachUngescannten(async () => {
   let daten = Zustand.steuer;
   if (!daten || !Array.isArray(daten.grau_keys)) {
     const jahr = $("#jahr-wahl")?.value || "";
@@ -2750,13 +2894,14 @@ async function herkunftGrauUtxos() {
   const keys = Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
   if (!keys.length) {
     const k = $("#steuer-meldung");
-    if (!k) return;
+    if (!k) return null;
     k.className = "hinweis hinweis-warn";
     setzeText(k, t("trace.allOriginsNothing"));
     k.hidden = false;
-    return;
+    return null;
   }
-  herkunftAllerUtxos({
+  return keys;
+  }, (keys, uebernommen) => herkunftAllerUtxos({
     knopf: "#herkunft-grau",
     lauf: "#herkunft-lauf",
     text: "#herkunft-text",
@@ -2767,24 +2912,16 @@ async function herkunftGrauUtxos() {
     steuer: false,
     gelbVertiefen: false,
     erzwingen: true,
-  });
+    uebernommen,
+    keinPauschalScan: true,
+  }));
 }
 
 async function herkunftGelbUtxos() {
   // Gelbe Scorecard (geprueft && !erfuellt): gründlich bis extern/Coinbase.
   // Steuer-Horizont allein reicht nicht — gelb ist erst „fertig“, wenn grün
   // oder der volle Baum bestätigt, dass gelb korrekt ist.
-  if (Zustand.herkunftAlleLaeuft) {
-    const k = $("#steuer-meldung");
-    if (k) {
-      k.className = "hinweis hinweis-warn";
-      setzeText(k, t("tax.originAlreadyRunning") !== "tax.originAlreadyRunning"
-        ? t("tax.originAlreadyRunning")
-        : t("ui.hard.2c151e092b"));
-      k.hidden = false;
-    }
-    return;
-  }
+  return klaerenNachUngescannten(async () => {
   let daten = Zustand.steuer;
   if (!daten || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.gelb_keys))) {
     const jahr = $("#jahr-wahl")?.value || "";
@@ -2804,14 +2941,17 @@ async function herkunftGelbUtxos() {
       .map((e) => `${e.txid}:${e.vout}`);
   if (!keys.length) {
     const k = $("#steuer-meldung");
-    k.className = "hinweis hinweis-warn";
-    setzeText(k, t("tax.noYellowToClarify") !== "tax.noYellowToClarify"
-      ? t("tax.noYellowToClarify")
-      : t("ui.hard.d3b790167b"));
-    k.hidden = false;
-    return;
+    if (k) {
+      k.className = "hinweis hinweis-warn";
+      setzeText(k, t("tax.noYellowToClarify") !== "tax.noYellowToClarify"
+        ? t("tax.noYellowToClarify")
+        : t("ui.hard.d3b790167b"));
+      k.hidden = false;
+    }
+    return null;
   }
-  herkunftAllerUtxos({
+  return keys;
+  }, (keys, uebernommen) => herkunftAllerUtxos({
     knopf: "#herkunft-gelb",
     lauf: "#herkunft-lauf",
     text: "#herkunft-text",
@@ -2822,7 +2962,9 @@ async function herkunftGelbUtxos() {
     // voll bis extern/Coinbase — nicht nur Steuer-Horizont
     steuer: false,
     gelbVertiefen: true,
-  });
+    uebernommen,
+    keinPauschalScan: true,
+  }));
 }
 
 async function herkunftAllerUtxos(ziele = {
@@ -2841,7 +2983,7 @@ async function herkunftAllerUtxos(ziele = {
   const knopf = typeof ziele.knopf === "string"
     ? $(ziele.knopf)
     : ziele.knopf;
-  if (Zustand.herkunftAlleLaeuft) {
+  if (Zustand.herkunftAlleLaeuft && !ziele.uebernommen) {
     const kasten = $(ziele.meldung);
     if (kasten) {
       kasten.className = "hinweis hinweis-warn";
@@ -2913,6 +3055,12 @@ async function herkunftAllerUtxos(ziele = {
       methode: "POST",
       daten: traceDaten,
     });
+    if (antwort.nichts_zu_tun && antwort.keine_utxos && ziele.keinPauschalScan) {
+      // Scorecard hat fehlende Bestände schon gezielt gescannt. Leer und
+      // hinter dem Tip bleiben außen vor — kein zweiter Lauf über alle.
+      fertig(t("trace.clarifyScanEmpty"), "warn");
+      return;
+    }
     if (antwort.nichts_zu_tun && antwort.keine_utxos) {
       // Bestand fehlt: nach Bestätigung erst alle Wallets scannen, dann Trace.
       if (knopf) knopf.disabled = false;

@@ -913,6 +913,8 @@
   "trace.allOriginsNothing": "Für alle UTXOs liegt bereits eine Herkunftsanalyse vor.",
   "trace.allOriginsScanAbort": "Bestand+Herkunft abgebrochen.",
   "trace.allOriginsScanDone": "Bestand erhoben — starte Herkunft…",
+  "trace.clarifyScanFirst": "Noch kein UTXO-Bestand für {n} Wallet(s). Scan startet, danach klären.",
+  "trace.clarifyScanEmpty": "Die noch nicht gescannten Wallets haben keinen UTXO-Bestand. Nichts zu klären.",
   "trace.allOriginsScanning": "Bestand {aktuell}/{gesamt}: {name}…",
   "trace.allOriginsTitle": "Verfolgt für jedes noch offene UTXO rückwärts bis zu einer fremden Adresse oder Coinbase. Einmal ermittelt, bleibt sie gespeichert.",
   "trace.amountPending": "…",
