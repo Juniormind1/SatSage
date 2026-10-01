@@ -23,7 +23,7 @@
 | **Version** | [`VERSION`](VERSION) → aktuell **0.9.2** (einzige Quelle; Fußzeile der Web-GUI) |
 | **Oberfläche** | Web (`py server.py`) + Terminal-Steuerung · Specter-Plugin · StartOS-Sideload |
 | **Sprache** | DE/EN in der UI (`UI_LANG` / Einstellungen); Handbuch vorerst DE |
-| **IDs** | `satsage` · Binary `satsage-webgui` · Specter `satsage.specterext.satsage` |
+| **IDs** | `satsage` · Binary `satsage-linux` / `satsage-macos` / `satsage-windows.exe` · Specter `satsage.specterext.satsage` |
 
 **Datenquellen:** eigener Electrum-Server (electrs/Fulcrum) → Compact Filter über Bitcoin-P2P (`--bip158`) → öffentliche Onions/Clearnet erst nach Bestätigung. Lokaler Pruned-Node für schnellen UTXO-Scan wird erkannt. Nutzerhandbuch: [`doc/handbuch.html`](doc/handbuch.html).
 

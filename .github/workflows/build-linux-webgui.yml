@@ -1,9 +1,7 @@
 name: Build Linux webgui (x86_64)
 
-# PyInstaller Onefile auf ubuntu-latest (x86_64). Hängt Assets an ein
-# bestehendes Release an — erzeugt kein neues Release.
-#
-# Hinweis am Binary: GitHub-Build für Linux, ungetestet.
+# Deaktiviert. Linux-Onefile wird lokal gebaut und von Hand ans Release
+# gehängt (scripts/build_satsage_linux). GitHub Actions baut das nicht mehr.
 on:
   workflow_dispatch:
     inputs:
@@ -12,10 +10,17 @@ on:
         required: true
         default: "v0.9"
 
+jobs:
+  deaktiviert:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow deaktiviert. Lokal bauen: ./scripts/build_satsage_linux"
+
 permissions:
   contents: write
 
-jobs:
+jobs-disabled:
   labor:
     uses: ./.github/workflows/regtest-lab.yml
 
@@ -58,15 +63,15 @@ jobs:
           chmod +x scripts/build_satsage_linux
           # Bundle bereits oben aktualisiert — Build nicht doppelt ziehen
           SKIP_BTC_PRICE_REFRESH=1 ./scripts/build_satsage_linux
-          test -x dist/satsage-webgui
-          file dist/satsage-webgui
+          test -x dist/satsage-linux
+          file dist/satsage-linux
 
       - name: Release-Assets benennen
         id: assets
         run: |
           set -euo pipefail
           NAME=satsage-webgui-linux-x86_64
-          cp -f dist/satsage-webgui "dist/${NAME}"
+          cp -f dist/satsage-linux "dist/${NAME}"
           chmod +x "dist/${NAME}"
           HASH="$(sha256sum "dist/${NAME}" | awk '{print $1}')"
           printf '%s  %s\n' "$HASH" "$NAME" > "dist/${NAME}.sha256"

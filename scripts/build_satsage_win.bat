@@ -39,13 +39,15 @@ echo → BTC-Preis-Bundle bis Tip (Bitstamp/CDD; SKIP_BTC_PRICE_REFRESH=1 zum Ue
 if errorlevel 1 exit /b 1
 
 echo → PyInstaller (Onefile + Splash^)…
+set "SATSAGE_BINARY_NAME=satsage-windows"
 if exist "build\satsage-webgui" rmdir /s /q "build\satsage-webgui"
 if exist "dist\satsage-webgui.exe" del /f /q "dist\satsage-webgui.exe"
+if exist "dist\satsage-windows.exe" del /f /q "dist\satsage-windows.exe"
 "%PY%" -m PyInstaller --noconfirm --clean packaging\satsage-webgui.spec
 if errorlevel 1 exit /b 1
 
-if not exist "dist\satsage-webgui.exe" (
-  echo Fehler: dist\satsage-webgui.exe nicht erzeugt.
+if not exist "dist\satsage-windows.exe" (
+  echo Fehler: dist\satsage-windows.exe nicht erzeugt.
   exit /b 1
 )
 
@@ -53,9 +55,9 @@ if exist ".env.example" copy /y ".env.example" "dist\.env.example" >nul
 
 echo.
 echo Fertig.
-echo   Binary : %CD%\dist\satsage-webgui.exe
+echo   Binary : %CD%\dist\satsage-windows.exe
 echo   Splash : packaging\satsage-splash.png (Logo beim Start^)
-echo   Start  : dist\satsage-webgui.exe
+echo   Start  : dist\satsage-windows.exe
 echo   Config : .env neben der EXE anlegen (Vorlage: dist\.env.example^)
 echo   Caches : utxo_cache\ und immutable_cache\ entstehen neben der EXE
 exit /b 0

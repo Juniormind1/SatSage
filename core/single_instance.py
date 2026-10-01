@@ -1,8 +1,9 @@
 """
 Ein-Instanz-Hilfe: Prozess auf einem TCP-Port finden und SatSage-Instanzen beenden.
 
-Wenn ``satsage-webgui`` / ``server.py`` versehentlich doppelt startet, gibt der
-zweite Start den Port frei (SIGTERM/taskkill) und bindet neu.
+Wenn ``satsage-linux`` / ``satsage-macos`` / ``satsage-windows.exe`` oder
+``server.py`` versehentlich doppelt startet, gibt der zweite Start den Port
+frei (SIGTERM/taskkill) und bindet neu.
 """
 from __future__ import annotations
 
@@ -55,6 +56,9 @@ def ist_satsage_prozess(pid: int) -> bool:
     marken = (
         "satsage-webgui",
         "satsage_webgui",
+        "satsage-linux",
+        "satsage-macos",
+        "satsage-windows",
         "server.py",
         "packaging/satsage",
     )
@@ -199,4 +203,12 @@ def port_freigeben_satsage(
 
 
 def binary_name() -> str:
-    return Path(sys.argv[0]).name if sys.argv else "satsage-webgui"
+    if sys.argv and sys.argv[0]:
+        return Path(sys.argv[0]).name
+    if sys.platform == "darwin":
+        return "satsage-macos"
+    if sys.platform.startswith("win"):
+        return "satsage-windows.exe"
+    if sys.platform.startswith("linux"):
+        return "satsage-linux"
+    return "server.py"

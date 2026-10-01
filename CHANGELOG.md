@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Standalone-Build:** macOS heißt `dist/satsage-macos`, Linux `dist/satsage-linux`, Windows `dist/satsage-windows.exe`. Der gemeinsame Name `satsage-webgui` entfällt, damit sich die drei Dateien auseinanderhalten lassen.
 - **Steuerjahr · Herkunftsnetz:** Die Höhe eines Vorgängers ist sein Anteil am angeklickten UTXO. 100 % liegen auf derselben Höhe wie dieser UTXO. Der volle Nennwert des Vorfahren steht weiter im Tooltip.
 - **Steuerjahr · Lot-Ring:** Ein Bündel mit Datum zählt nach seinem jüngsten Eingang. Liegt der links der Fristgrenze, wird der Anteil grün, sonst orange. Ohne Datum bleibt das Bündel grau.
 - **Steuerjahr · klären:** Gelb und grau starten zuerst einen UTXO-Scan für jedes Wallet, das noch nie gescannt wurde, und danach die bisherige Klären-Routine. Wallets ohne UTXOs und Wallets hinter dem aktuellen Tip bleiben außen vor.

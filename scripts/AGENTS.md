@@ -29,6 +29,6 @@ Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Identi
 
 ## Builds
 
-StartOS: `./scripts/build_startos_s9pk` (x86_64). PyInstaller: `scripts/build_satsage_*`. Regeln: [`../packaging/AGENTS.md`](../packaging/AGENTS.md).
+StartOS: `./scripts/build_startos_s9pk` (x86_64). PyInstaller: `scripts/build_satsage_macos` → `dist/satsage-macos`, `build_satsage_linux` → `dist/satsage-linux`, `build_satsage_win.bat` → `dist/satsage-windows.exe`. Regeln: [`../packaging/AGENTS.md`](../packaging/AGENTS.md).
 
 Umfangreiche Läufe (Chaos, Playwright, langer Verbindungstest): erst den Nutzer das Ziel prüfen lassen (Root-HART), dann nur auf Angebot starten.
