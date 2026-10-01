@@ -342,11 +342,9 @@ async function ladeJobsNav() {
     Zustand._walletSyncEmpfangSig = empfangPhase;
     zeichneNav();
   }
-  aktualisiereScanAnzeige(
-    Zustand.rescanJob
-      ? ($("#rescan-text") && $("#rescan-text").textContent) || undefined
-      : undefined,
-  );
+  // Rohe Job-Meldung liegt in Zustand.scanSchritt. Der Leistentext nicht
+  // zurückgeben — sonst bleibt „läuft für …“ stehen, obwohl das Wallet offen ist.
+  aktualisiereScanAnzeige();
 }
 
 function jobNavZeileText(job, pipe) {

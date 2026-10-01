@@ -160,9 +160,9 @@ class TestFlach(unittest.TestCase):
         # Voller Vorgänger bleibt im Tooltip; Y ist der Anteil am Fokus.
         self.assertGreater(kn[k("e1")]["value_sats"], kn[k("b1")]["value_sats"])
         self.assertEqual(kn[k("e1")]["anteil_sats"], 420)
-        # Y = Vorgänger-UTXO × Anteil am Fokus (420/1000 bzw. 180/1000).
-        self.assertEqual(kn[k("e1")]["y"], SKALA.y(int(round(700 * 420 / 1000))))
-        self.assertEqual(kn[k("b1")]["y"], SKALA.y(int(round(300 * 180 / 1000))))
+        self.assertEqual(kn[k("e1")]["y"], SKALA.y(420))
+        self.assertEqual(kn[k("b1")]["y"], SKALA.y(180))
+        self.assertEqual(kn[f"coinbase:{k('b1')}"]["y"], SKALA.y(180))
         self.assertGreater(kn[k("e1")]["y"], kn[k("b1")]["y"])
         self.assertTrue(next(e for e in r["kanten"] if e["von"] == k("a1"))["eigen"])
         self.assertFalse(next(e for e in r["kanten"] if e["von"] == k("e1"))["eigen"])
@@ -206,9 +206,19 @@ class TestFlach(unittest.TestCase):
         r = netz(b)
         self.assertEqual(sum(1 for v in r["vorfahren"] if v["key"] == k("c1")), 1)
         self.assertEqual(knoten(r)[k("c1")]["anteil_sats"], 200)
-        self.assertEqual(knoten(r)[k("c1")]["y"], SKALA.y(int(round(100 * 200 / 200))))
+        self.assertEqual(knoten(r)[k("c1")]["value_sats"], 100)
+        self.assertEqual(knoten(r)[k("c1")]["y"], SKALA.y(200))
         self.assertEqual(kanten(r)[(k("c1"), k("a1"))], 100)
         self.assertEqual(kanten(r)[(k("c1"), k("a2"))], 100)
+
+    def test_voller_anteil_auf_fokushoehe(self):
+        # Alleiniger großer Vorfahr: 100 % des kleinen Fokus, Nennwert bleibt groß.
+        r = netz(baum(181_400, [intern("a1", 1_000_000, "01.01.2024 12:00:00")]))
+        kn = knoten(r)
+        self.assertEqual(kn[k("a1")]["value_sats"], 1_000_000)
+        self.assertEqual(kn[k("a1")]["anteil_sats"], 181_400)
+        self.assertEqual(kn[k("a1")]["y"], kn[k("f0")]["y"])
+        self.assertEqual(kn[k("a1")]["y"], SKALA.y(181_400))
 
     def test_horizont_marker_am_hop_ohne_eigenen_knoten(self):
         b = baum(1000, [{"type": "tax_horizon", "from_utxo": k("f0"), "amount_sats": 1000,

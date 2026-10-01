@@ -129,6 +129,9 @@ def _oeffne_browser_sicher(adresse: str) -> None:
                 webbrowser.open(adresse)
             except Exception:
                 pass
+        finally:
+            # Always-on-top-Splash sonst über der Passwortseite (gescrambelte .env).
+            _splash_schliessen()
 
     threading.Thread(target=_lauf, name="satsage-open-browser", daemon=True).start()
 
@@ -278,7 +281,7 @@ def main_cli(argv=None) -> int:
     except Exception:
         session_pfad = None
 
-    # Splash bleibt bis Browser die GUI lädt (nicht schon beim Bind).
+    # Splash bleibt bis der Browser aufgeht, nicht bis nach der Anmeldung.
     _splash_text("Browser …")
 
     mit_steuerung = steuerung_sinnvoll(plain_console=bool(args.plain_console))

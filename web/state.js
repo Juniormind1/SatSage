@@ -19,6 +19,8 @@ const Zustand = {
   scanArt: null,
   scanWalletId: null,
   scanWalletName: "",
+  /** Letzte rohe Job-Meldung des Scans — nicht der zusammengesetzte Leistentext. */
+  scanSchritt: "",
   /** Server-Scan-Pipeline + andere Nutzer-Jobs (Nav). */
   jobsNav: { jobs: [], scan_pipeline: { current: null, queued: [] } },
   jobsNavFehler: "",

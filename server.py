@@ -1392,6 +1392,8 @@ class Handler(
         pfad = unquote(zerlegt.path)
         query = parse_qs(zerlegt.query, keep_blank_values=True)
         if methode == "GET" and pfad in ("/login", "/login.html"):
+            # Passwortseite ist schon die GUI — Splash nicht bis nach dem Login halten.
+            _splash_bei_browser()
             self._login_page()
             return
         if pfad == "/api/health" and methode == "GET":
@@ -1437,6 +1439,7 @@ class Handler(
                 return
             if methode == "GET" and pfad in ("/handbuch.html", "/handbuch"):
                 if _password_is_set(self.state) and not auth_ok:
+                    _splash_bei_browser()
                     self._redirect("/login?next=/handbuch.html")
                 else:
                     self._sende_handbuch()
@@ -1444,6 +1447,9 @@ class Handler(
             if methode == "GET":
                 if _password_is_set(self.state) and not auth_ok:
                     # Auch Loopback: gesetztes Passwort → Login, nicht nur ?t=.
+                    # Der Browser ist offen (sonst käme der GET nicht) — Splash weg,
+                    # bevor die Passwortseite darunter liegt.
+                    _splash_bei_browser()
                     next_pfad = pfad or "/"
                     if next_pfad == "/":
                         self._redirect("/login?next=/")

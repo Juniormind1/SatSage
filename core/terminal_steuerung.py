@@ -724,6 +724,14 @@ def _oeffne_browser_sicher(adresse: str, *, verzoegerung_s: float = 1.2) -> None
                 webbrowser.open(adresse)
             except Exception:
                 pass
+        finally:
+            # Splash zu, sobald der Browser aufgeht — nicht erst nach dem Login.
+            try:
+                from httpserver.splash import _splash_schliessen
+
+                _splash_schliessen()
+            except Exception:
+                pass
 
     threading.Thread(target=_lauf, name="satsage-open-browser", daemon=True).start()
 

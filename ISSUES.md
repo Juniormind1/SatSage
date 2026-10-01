@@ -104,7 +104,8 @@ Bewegungszeit** (Layer B). Nicht dieselbe X.
 - Fremd / Coinbase: gestrichelter Endknoten, kein Weiterzeichnen.
 - CoinJoin / Sammel-Tx / `FULL_RESOLUTION_INPUT_LIMIT`: ein Bündel
   „n Eingänge“, kein Haarnetz.
-- Y bleibt log1p, auf dem Stück des Vorgänger-UTXO, das in den Fokus geflossen ist (`value_sats * anteil_sats / fokus_sats`). Der volle Betrag bleibt im Tooltip. Ringe links der Fristgrenze sind grün.
+- Y bleibt log1p und ist der Anteil am gewählten Output (`anteil_sats`). 100 % liegen auf der Höhe dieses UTXO. Der volle Nennwert bleibt im Tooltip. Ringe links der Fristgrenze sind grün.
+- Offen: ob der Nennwert bei gleichem Anteil die Höhe zusätzlich spreizen soll.
 
 #### Daten / Schnitt
 

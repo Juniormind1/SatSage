@@ -91,7 +91,11 @@ def _splash_schliessen() -> None:
 
 
 def _splash_bei_browser() -> None:
-    """Erster authentifizierter GUI-Request → Oberfläche steht, Splash weg."""
+    """Browser zeigt die Oberfläche oder die Passwortseite — Splash weg.
+
+    Nicht erst nach gelungener Anmeldung: bei gescrambelter ``.env`` liegt
+    das always-on-top-Fenster sonst über dem Login.
+    """
     if _splash_browser_gesehen.is_set():
         return
     _splash_browser_gesehen.set()

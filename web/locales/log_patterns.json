@@ -112,6 +112,18 @@
     "en": "Starting connection test…"
   },
   {
+    "re": "^Starte (?!.+ für )(.+)…$",
+    "en": "Starting $1…"
+  },
+  {
+    "re": "^(.+) läuft schon oder wartet\\.$",
+    "en": "$1 already running or queued."
+  },
+  {
+    "re": "^(.+) in die Warteschlange\\.$",
+    "en": "$1 queued."
+  },
+  {
     "re": "^Start-Aktualisierung der Wallets…$",
     "en": "Start-up wallet refresh…"
   },

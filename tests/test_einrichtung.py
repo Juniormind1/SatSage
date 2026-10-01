@@ -820,6 +820,8 @@ class TestOberflaeche(unittest.TestCase):
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("nicht für dieses Wallet", de);
         self.assertIn("hinweis-fremd", self.wallets_js);
+        self.assertIn("scanZielAnhang", self.wallets_js);
+        self.assertNotIn('`„${name}“ · ${art}', self.wallets_js);
 
     def test_scan_schlange_ist_duenn(self):
         """Ein Klick während eines Scans stellt an, startet nicht parallel."""

@@ -1576,8 +1576,32 @@ function walletNameZu(id) {
   return (Zustand.config?.wallets || []).find((w) => w.id === id)?.name || "";
 }
 
+function scanZielWalletId() {
+  if (Zustand.scanWalletId) return String(Zustand.scanWalletId);
+  const cur = scanPipeline().current;
+  if (cur && cur.wallet_id) return String(cur.wallet_id);
+  return "";
+}
+
 function scanBetrifftDieseAnsicht() {
-  return Zustand.ansicht === "wallet" && Zustand.walletId === Zustand.scanWalletId;
+  if (Zustand.ansicht !== "wallet" || !Zustand.walletId) return false;
+  const ziel = scanZielWalletId();
+  return Boolean(ziel) && ziel === String(Zustand.walletId);
+}
+
+/** „für „Name““ nur, wenn der Scan nicht das gerade offene Wallet ist. */
+function scanZielAnhang(ziel) {
+  if (!ziel || scanBetrifftOffenesWallet(ziel.id)) return "";
+  const name = ziel.name || walletNameZu(ziel.id);
+  return name ? ` für „${name}“` : "";
+}
+
+function scanBetrifftOffenesWallet(id) {
+  return Boolean(
+    id
+    && Zustand.ansicht === "wallet"
+    && String(Zustand.walletId) === String(id),
+  );
 }
 
 function scanPipeline() {
@@ -1699,10 +1723,12 @@ function aktualisiereScanAnzeige(stand) {
   if (!hatScan) {
     leiste.hidden = true;
     leiste.classList.remove("hinweis-fremd");
+    Zustand.scanSchritt = "";
     setzeWalletScanGesperrt();
     return;
   }
   leiste.hidden = false;
+  if (stand) Zustand.scanSchritt = stand;
   const art = scanArtName();
   const name = scanWalletName();
   const quelleHinweis = ladeHinweisVonQuelle(
@@ -1711,14 +1737,15 @@ function aktualisiereScanAnzeige(stand) {
       meta: pipe.current?.meta || { source: pipe.current?.source },
     }),
   );
-  const schritt = stand || quelleHinweis;
+  const schritt = stand || Zustand.scanSchritt || quelleHinweis;
   const danach = schlangeText();
   if (!Zustand.rescanJob && !pipe.current) {
     leiste.classList.remove("hinweis-fremd");
     setzeText($("#rescan-text"), (danach || "").trim() || t("common.runningEllipsis"));
   } else if (scanBetrifftDieseAnsicht()) {
+    // Das Wallet ist schon gewählt — den Namen nicht noch einmal nennen.
     leiste.classList.remove("hinweis-fremd");
-    setzeText($("#rescan-text"), `„${name}“ · ${art} · ${schritt}${danach}`);
+    setzeText($("#rescan-text"), `${art} · ${schritt}${danach}`);
   } else {
     leiste.classList.add("hinweis-fremd");
     setzeText(
@@ -1755,7 +1782,7 @@ function stelleScanAn(art) {
   };
   if (schonGeplant(ziel)) {
     logZeile(
-      `${scanArtName(art)} für „${ziel.name}“ läuft schon oder wartet.`,
+      `${scanArtName(art)}${scanZielAnhang(ziel)} läuft schon oder wartet.`,
       undefined,
       ziel.name,
     );
@@ -1960,7 +1987,7 @@ async function starteScanFuer(ziel) {
 
   if (schonGeplant(ziel)) {
     logZeile(
-      `${scanArtName(ziel.art)} für „${ziel.name}“ läuft schon oder wartet.`,
+      `${scanArtName(ziel.art)}${scanZielAnhang(ziel)} läuft schon oder wartet.`,
       undefined,
       ziel.name,
     );
@@ -1969,7 +1996,7 @@ async function starteScanFuer(ziel) {
   }
 
   logZeile(
-    `Starte ${scanArtName(ziel.art)} für „${ziel.name}“…`,
+    `Starte ${scanArtName(ziel.art)}${scanZielAnhang(ziel)}…`,
     undefined,
     ziel.name,
   );
@@ -1991,7 +2018,7 @@ async function starteScanFuer(ziel) {
 
     if (job.queue_status === "queued" || job.status === "queued") {
       logZeile(
-        `${scanArtName(ziel.art)} für „${ziel.name}“ in die Warteschlange.`,
+        `${scanArtName(ziel.art)}${scanZielAnhang(ziel)} in die Warteschlange.`,
         undefined,
         ziel.name,
       );
@@ -2360,6 +2387,7 @@ function beendeRescan(_meldung, _istFehler = false) {
   Zustand.scanArt = null;
   Zustand.scanWalletId = null;
   Zustand.scanWalletName = "";
+  Zustand.scanSchritt = "";
   Zustand.scanUtxoZahl = null;
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
