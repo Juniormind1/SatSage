@@ -362,7 +362,10 @@ class TestStart9PhaseS1(ApiTestBasis):
             "/api/auth/forgot",
             method="POST",
             host="remote.example",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://remote.example",
+            },
             data={"confirm": ""},
         )
         self.assertEqual(status, 400, payload)
@@ -371,6 +374,7 @@ class TestStart9PhaseS1(ApiTestBasis):
             "/api/auth/forgot",
             method="POST",
             host="remote.example",
+            headers={"Origin": "https://remote.example"},
             data={"confirm": "start-over"},
         )
         self.assertEqual(status, 200, payload)
@@ -460,6 +464,248 @@ class TestStart9PhaseS1(ApiTestBasis):
         status, body, headers = self.request("/style.css", host="remote.example")
         self.assertEqual(status, 303)
         self.assertTrue(headers.get("Location", "").startswith("/login"))
+
+    def _als_start9(self):
+        import os
+        from unittest import mock
+
+        self.state.managed_by = "start9"
+        trust = mock.patch.dict(
+            os.environ,
+            {
+                "SATSAGE_TRUST_PROXY": "1",
+                "SATSAGE_HOST_ALLOWLIST": "remote.example",
+                "SATSAGE_MANAGED_BY": "start9",
+            },
+        )
+        trust.start()
+        self.addCleanup(trust.stop)
+
+    @staticmethod
+    def _set_cookies(headers) -> list[str]:
+        if headers is None:
+            return []
+        alle = headers.get_all("Set-Cookie") if hasattr(headers, "get_all") else None
+        if alle:
+            return list(alle)
+        einzeln = headers.get("Set-Cookie")
+        return [einzeln] if einzeln else []
+
+    def test_start9_ohne_passwort_ist_ohne_token_angemeldet(self):
+        from core import env_scramble as sc
+        from tests.env_scramble_helpers import read_env_plaintext
+
+        self._als_start9()
+        text = read_env_plaintext(self.env_pfad)
+        sc.clear_session_key()
+        self.env_pfad.write_text(text, encoding="utf-8")
+        status, payload, _ = self.request(
+            "/api/auth/status",
+            host="remote.example",
+            headers={"X-Forwarded-Host": "remote.example"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload.get("authenticated"))
+        self.assertFalse(payload.get("password_set"))
+        self.assertNotIn("wallets", payload)
+        opener = urllib.request.build_opener(_NoRedirect)
+        start = urllib.request.Request(f"http://127.0.0.1:{self.port}/")
+        start.add_header("Host", "remote.example")
+        start.add_header("X-Forwarded-Host", "remote.example")
+        with opener.open(start, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIsNone(response.headers.get("Location"))
+            self.assertIn(b"<html", response.read()[:400].lower())
+
+    def test_start9_passwort_ueber_proxy_dann_login_dann_loeschen(self):
+        from core import env_scramble as sc
+
+        self._als_start9()
+        browser = {
+            "Origin": "https://remote.example",
+            "X-Forwarded-Host": "remote.example",
+            "X-Forwarded-Proto": "https",
+            "Sec-Fetch-Site": "same-origin",
+        }
+        # Host ist die Container-Adresse. Der Browser-Host steht in
+        # X-Forwarded-Host, nicht im Host-Header.
+        status, payload, headers = self.request(
+            "/api/config/app-password",
+            method="PUT",
+            host="10.23.0.7",
+            headers=browser,
+            data={"new_password": "tralala123", "confirm": "tralala123"},
+        )
+        self.assertEqual(status, 200, payload)
+        cookies = self._set_cookies(headers)
+        joined = "\n".join(cookies)
+        self.assertIn("satsage_session=", joined)
+        self.assertIn("HttpOnly", joined)
+        self.assertIn("SameSite=Lax", joined)
+        self.assertIn("Secure", joined)
+        self.assertTrue(any("Secure" not in teil for teil in cookies))
+        self.assertTrue(server._password_is_set(self.state))
+        self.assertTrue(sc.is_env_scrambled(self.env_pfad))
+        cookie = cookies[0].split(";", 1)[0]
+
+        status, payload, _ = self.request(
+            "/api/auth/status",
+            host="10.23.0.7",
+            headers={"X-Forwarded-Host": "remote.example"},
+        )
+        self.assertFalse(payload.get("authenticated"))
+        self.assertTrue(payload.get("password_set"))
+        status, _, headers = self.request(
+            "/",
+            host="remote.example",
+            headers={"X-Forwarded-Host": "remote.example"},
+        )
+        self.assertEqual(status, 303)
+        self.assertTrue(headers.get("Location", "").startswith("/login"))
+        opener = urllib.request.build_opener(_NoRedirect)
+        login = urllib.request.Request(f"http://127.0.0.1:{self.port}/login")
+        login.add_header("Host", "remote.example")
+        login.add_header("X-Forwarded-Host", "remote.example")
+        login.add_header("Accept-Language", "de")
+        with opener.open(login, timeout=10) as response:
+            roh = response.read().decode("utf-8")
+        self.assertIn("kein StartOS-Passwort", roh)
+        self.assertNotIn("Token fehlt", roh)
+
+        # Wie nach einem Neustart: der Schlüssel aus demselben Prozess (setUp
+        # bzw. enable) ist weg. Ein falsches Passwort setzt ihn nicht neu.
+        sc.clear_session_key()
+        status, payload, _ = self.request(
+            "/api/auth/login",
+            method="POST",
+            host="remote.example",
+            headers=browser,
+            data={"password": "falsch", "phase": "full"},
+        )
+        self.assertEqual(status, 403, payload)
+        self.assertIsNone(sc.get_session_key())
+        self.assertTrue(self.env_pfad.read_bytes().startswith(b"SSGB1\n"))
+        status, payload, _ = self.request(
+            "/api/config",
+            host="remote.example",
+            headers={"X-Forwarded-Host": "remote.example"},
+        )
+        self.assertNotEqual(status, 200, payload)
+        self.assertNotIn("wallets", payload if isinstance(payload, dict) else {})
+
+        status, payload, headers = self.request(
+            "/api/auth/login",
+            method="POST",
+            host="remote.example",
+            headers=browser,
+            data={"password": "tralala123", "phase": "full"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertIsNotNone(sc.get_session_key())
+        cookie = self._set_cookies(headers)[0].split(";", 1)[0]
+        status, payload, _ = self.request(
+            "/api/config",
+            cookie=cookie,
+            host="remote.example",
+            headers={"X-Forwarded-Host": "remote.example"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertIn("wallets", payload)
+
+        status, payload, _ = self.request(
+            "/api/config/app-password",
+            method="POST",
+            cookie=cookie,
+            host="10.23.0.7",
+            headers=browser,
+            data={"action": "delete", "current_password": "tralala123"},
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertFalse(payload.get("password_set"))
+        self.assertFalse(server._password_is_set(self.state))
+        self.assertFalse(self.env_pfad.read_bytes().startswith(b"SSGB1\n"))
+        with self.state._auth_lock:
+            self.state.sessions.clear()
+        status, payload, _ = self.request(
+            "/api/auth/status",
+            host="remote.example",
+            headers={"X-Forwarded-Host": "remote.example"},
+        )
+        self.assertTrue(payload.get("authenticated"))
+        self.assertFalse(payload.get("password_set"))
+
+    def test_start9_setup_hinter_proxy_nicht_nur_loopback(self):
+        self._als_start9()
+        status, payload, _ = self.request(
+            "/api/auth/setup",
+            method="POST",
+            host="10.23.0.7",
+            headers={"Origin": "https://remote.example"},
+            data={"password": "tralala123", "confirm": "tralala123"},
+        )
+        self.assertEqual(status, 403, payload)
+        status, payload, headers = self.request(
+            "/api/auth/setup",
+            method="POST",
+            host="10.23.0.7",
+            headers={
+                "Origin": "https://remote.example",
+                "X-Forwarded-Host": "remote.example",
+                "Sec-Fetch-Site": "same-origin",
+            },
+            data={"password": "tralala123", "confirm": "tralala123"},
+        )
+        self.assertEqual(status, 201, payload)
+        self.assertIn("satsage_session=", "\n".join(self._set_cookies(headers)))
+        self.assertTrue(server._password_is_set(self.state))
+
+    def test_cookie_secure_nur_wenn_browser_https_sieht(self):
+        self._als_start9()
+        self.setup_password()
+        status, payload, headers = self.request(
+            "/api/auth/login",
+            method="POST",
+            host="remote.example",
+            headers={
+                "Origin": "http://remote.example",
+                "X-Forwarded-Host": "remote.example",
+                "X-Forwarded-Proto": "https",
+            },
+            data={"password": "tralala123"},
+        )
+        self.assertEqual(status, 200, payload)
+        cookies = self._set_cookies(headers)
+        self.assertTrue(cookies)
+        self.assertTrue(all("Secure" not in zeile for zeile in cookies))
+
+        status, payload, headers = self.request(
+            "/api/auth/login",
+            method="POST",
+            host="remote.example",
+            headers={
+                "Origin": "https://remote.example",
+                "X-Forwarded-Host": "remote.example",
+            },
+            data={"password": "tralala123"},
+        )
+        self.assertEqual(status, 200, payload)
+        joined = "\n".join(self._set_cookies(headers))
+        self.assertIn("Secure", joined)
+        self.assertIn("HttpOnly", joined)
+        self.assertIn("SameSite=Lax", joined)
+
+    def test_start9_seed_behaelt_hash_wenn_env_scrambled(self):
+        import os
+        from unittest import mock
+
+        self.setup_password()
+        self.state.managed_by = "start9"
+        with mock.patch.dict(os.environ, {"SATSAGE_BOOTSTRAP_PASSWORD": "startos-erfunden"}):
+            server._seed_managed_password(self.state)
+        self.assertTrue((self.env_pfad.parent / ".satsage-password").is_file())
+        self.assertTrue(server._password_is_set(self.state))
+        self.assertTrue(server._verify_password("tralala123", server._password_hash(self.state)))
+        self.assertFalse(server._verify_password("startos-erfunden", server._password_hash(self.state)))
 
 
 if __name__ == "__main__":

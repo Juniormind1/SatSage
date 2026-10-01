@@ -57,6 +57,7 @@ function sprachKopf() {
  * ist dort leer, und der Server darf die Anfrage nicht deshalb ablehnen.
  */
 function tokenKopf() {
+  if (window.SatSageOhneToken) return {};
   return Token ? { "X-Satsage-Token": Token } : {};
 }
 
@@ -75,6 +76,9 @@ async function api(pfad, { methode = "GET", daten, timeoutMs, signal } = {}) {
     antwort = await fetch(`/api${pfad}`, {
       method: methode,
       credentials: "same-origin",
+      // Seite ist no-referrer. Derselbe Origin soll Referer trotzdem schicken,
+      // sonst scheitert die Prüfung hinter dem StartOS-Proxy.
+      referrerPolicy: "same-origin",
       headers: {
         ...tokenKopf(),
         ...sprachKopf(),

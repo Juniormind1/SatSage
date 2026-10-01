@@ -135,15 +135,9 @@ Vorschlag nur für die GUI:
 
 ## Firefox · „Token fehlt“ hinter StartOS
 
-**Stand:** 2026-09-25 · **offen** · nicht weiterverfolgen, bis jemand den Client isoliert
+**Stand:** 2026-10-01 · **im Code** · Abnahme auf dem Gerät offen
 
-Aufwand: **gering**, sobald reproduzierbar ohne StartOS-Gerät
-
-Safari auf dem MacBook öffnet dieselbe StartOS-Oberfläche (`https://<lan-ip>:<port>/`). Firefox auf dem MacBook und Firefox auf dem StartOS-Gerät zeigen den Dialog „Token fehlt“ (`http://127.0.0.1:8730/?t=…`). Der Konsolen-Token ist hinter StartOS nicht der Zugang; Basic Auth der Plattform ist es. Server-Log zeigt den Prozess als bereit, keinen Auth-Fehler.
-
-Lokal gegen das Image: `GET /api/auth/status` mit `Host: 192.168.2.168:57289` und `SATSAGE_MANAGED_BY=start9` liefert `authenticated: true`. Der Dialog entsteht im Client, nicht weil der Dienst nicht läuft.
-
-**Nicht angefasst lassen**, bis ein Firefox-Lauf ohne Sideload den Unterschied zu Safari zeigt (Cookie, Cache, Host-Header).
+Ohne Passwort gilt der StartOS-Proxy als Anmeldung. Mit Passwort aus den Einstellungen leitet die Oberfläche auf den SatSage-Login, nicht auf „Token fehlt“ und nicht auf `http://127.0.0.1:8730/?t=…`. Die Sitzung hängt am Cookie (HttpOnly, SameSite=Lax; Secure nur, wenn der Browser HTTPS sieht). Firefox und Safari gegen dieselbe StartOS-URL prüfen.
 
 ---
 

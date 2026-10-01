@@ -192,32 +192,35 @@ async function ladeSprachstringsVorStart(auth) {
 }
 
 async function start() {
-  // Konsolen-Token oder Passwort-Sitzung. Hinter StartOS gibt es kein ?t=
-  // und kein sessionStorage; die API läuft über den Proxy, nicht über den
-  // Token-Header. Ohne Token zuerst den Status fragen, sonst „Token fehlt“.
+  // Status immer zuerst — auch wenn sessionStorage noch ein altes ?t= hat.
+  // Hinter StartOS ist das kein Zugang. Mit gesetztem Passwort kommt der
+  // Login aus den Einstellungen, nicht der Kasten „Token fehlt“.
   let auth = null;
-  if (!Token) {
-    try {
-      const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
-      if (antwort.ok) auth = await antwort.json();
-    } catch (_) {
-      auth = null;
-    }
-    if (auth && auth.authenticated) {
-      // Session, oder StartOS ohne Passwort: die Web-UI hat kein ?t=.
-    } else if (auth && auth.password_set) {
-      location.href = "/login?next=/";
-      return;
-    } else if (auth && auth.managed_by === "umbrel") {
-      location.href = "/login?next=/";
-      return;
-    } else if (auth && auth.managed_by === "start9") {
-      // Kein Konsolen-Token, kein StartOS-Passwort. Oberfläche offen,
-      // bis der Nutzer in den Einstellungen selbst eines setzt.
-    } else {
-      $("#token-fehlt").hidden = false;
-      return;
-    }
+  try {
+    const antwort = await fetch("/api/auth/status", { credentials: "same-origin" });
+    if (antwort.ok) auth = await antwort.json();
+  } catch (_) {
+    auth = null;
+  }
+  const start9 = auth && auth.managed_by === "start9";
+  const umbrel = auth && auth.managed_by === "umbrel";
+  if (start9) {
+    // Konsolen-Token nicht mitschicken. Ein leerer oder fremder Header
+    // darf die Proxy-Anmeldung nicht überstimmen.
+    window.SatSageOhneToken = true;
+    try { sessionStorage.removeItem("xpq-token"); } catch (_) {}
+  }
+  if (auth && auth.authenticated) {
+    // Sitzung, oder StartOS ohne Passwort.
+  } else if (auth && (auth.password_set || umbrel)) {
+    location.replace("/login?next=/");
+    return;
+  } else if (start9) {
+    // Kein Konsolen-Token, kein StartOS-Passwort. Oberfläche offen,
+    // bis der Nutzer in den Einstellungen selbst eines setzt.
+  } else if (!Token) {
+    $("#token-fehlt").hidden = false;
+    return;
   }
   // Reihenfolge: 1. Oberfläche (Gerüst), 2. Sprachstrings, 3. Cache,
   // Verbindungen und der Rest (Wallet-Kontext, Empfangsadresse, Quellen).
@@ -342,8 +345,17 @@ async function start() {
     folgeHeaderJob();
     folgeWalletSyncJob();
   } catch (fehler) {
+    const status = fehler && fehler.status;
+    if (status === 401 || status === 403) {
+      if (auth && (auth.password_set || auth.managed_by === "umbrel" || auth.managed_by === "start9")) {
+        location.replace("/login?next=/");
+        return;
+      }
+    }
     $("#app").hidden = true;
     $("#token-fehlt").hidden = false;
+    const mono = $("#token-fehlt").querySelector(".mono");
+    if (mono && auth && auth.managed_by === "start9") mono.hidden = true;
     $("#token-fehlt").querySelector("h1").textContent = t("common.noConnection");
     $("#token-fehlt").querySelector("p").textContent = fehler.message;
     return;

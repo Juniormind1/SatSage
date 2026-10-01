@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **StartOS · Anmeldung:** Die Web-UI öffnet ohne StartOS-Passwort und ohne Token. Ein Passwort gibt es nur aus den SatSage-Einstellungen; es verschlüsselt die `.env`. Danach zeigt die Oberfläche den SatSage-Login („Passwort aus den Einstellungen, kein StartOS-Passwort“), nicht „Token fehlt“ und nicht die Adresse `127.0.0.1` aus dem Container-Log. Firefox und Safari nutzen dieselbe StartOS-Adresse. Passwort löschen stellt den direkten Start wieder her.
 - **Steuerjahr · Dotplot:** Über einem Punkt erscheint nur noch das eigene Tooltip mit Datum, Betrag und Wallet. Die verzögerte Browser-Zeile mit den Klickmöglichkeiten entfällt.
 - **Steuerjahr · Dotplot:** Ein grauer Punkt (innerhalb der Frist, ohne Herkunft) springt ins Wallet zu diesem UTXO. Bisher öffnete der Klick ein leeres Herkunftsnetz.
 - **Block-Explorer:** Die Pille prüft die lokale mempool-Instanz vom Server aus. Der Browser-Abruf scheiterte an der Seitenrichtlinie und an selbst signiertem TLS, obwohl die Adresse im Browser aufging. Es zählen die API-Pfade und, wenn die API woanders hängt, die eingetragene Adresse selbst.

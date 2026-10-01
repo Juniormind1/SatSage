@@ -230,6 +230,7 @@ LOGIN_PAGE_JS = r"""
     var res = await fetch(url, {
       method: "POST",
       credentials: "same-origin",
+      referrerPolicy: "same-origin",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body || {}),
     });
@@ -503,8 +504,7 @@ _LOGIN_TEXTE = {
         "von_vorn": "Von vorn anfangen",
         "nochmal": "Ich denk nochmal nach",
         "hinweis_start9": (
-            "Das ist das Passwort aus den SatSage-Einstellungen, "
-            "nicht ein StartOS-Passwort."
+            "Passwort aus den Einstellungen, kein StartOS-Passwort."
         ),
         "hinweis_umbrel": "Umbrel zeigt dieses Passwort in den App-Details von SatSage an.",
         # Client-JS (Login-Dialog, kein app.js)
@@ -545,7 +545,7 @@ _LOGIN_TEXTE = {
         "von_vorn": "Start over",
         "nochmal": "Let me think again",
         "hinweis_start9": (
-            "This is the password from SatSage settings, not a StartOS password."
+            "Password from SatSage settings, not a StartOS password."
         ),
         "hinweis_umbrel": "Umbrel shows this password in the SatSage app details.",
         "passwort_falsch": "Wrong password.",
@@ -1312,8 +1312,7 @@ class Handler(
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Cache-Control", "no-store")
-            if getattr(self, "_pending_cookie", None):
-                self.send_header("Set-Cookie", self._pending_cookie)
+            self._emit_cookies()
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self'; "
@@ -1364,8 +1363,7 @@ class Handler(
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
-        if getattr(self, "_pending_cookie", None):
-            self.send_header("Set-Cookie", self._pending_cookie)
+        self._emit_cookies()
         self.end_headers()
 
     # -- Verteiler ----------------------------------------------------------
@@ -1384,6 +1382,7 @@ class Handler(
 
     def _verarbeite(self, methode: str):
         self._pending_cookie = None
+        self._pending_cookies = None
         if _server_faehrt_runter(self.state):
             return
         if not self._host_ok():
@@ -1520,16 +1519,25 @@ class Handler(
         if teile == ["config", "start-sync"] and methode == "PUT":
             return 200, api_save_start_sync(state, self._body())
         if teile == ["config", "app-password"] and methode == "PUT":
-            return 200, api_save_app_password(state, self._body())
+            # Proxy-Anmeldung endet mit dem Hash. Die Sitzung muss im selben
+            # Antwort-Cookie stehen, sonst fällt der nächste Aufruf auf
+            # „Token fehlt“.
+            payload = api_save_app_password(state, self._body())
+            self._login_succeeded()
+            return 200, payload
         if teile == ["config", "app-password"] and methode == "POST":
             # Löschen per POST (Body); DELETE+Body bricht in manchen Browsern ab.
             body = self._body()
             aktion = str(body.get("action") or body.get("op") or "").strip().lower()
             if aktion in ("delete", "remove", "clear", "loeschen", "löschen"):
-                return 200, api_delete_app_password(state, body)
+                payload = api_delete_app_password(state, body)
+                self._login_succeeded()
+                return 200, payload
             raise ApiError(400, "Unbekannte app-password-Aktion.")
         if teile == ["config", "app-password"] and methode == "DELETE":
-            return 200, api_delete_app_password(state, self._body())
+            payload = api_delete_app_password(state, self._body())
+            self._login_succeeded()
+            return 200, payload
         if teile == ["config", "unlock-env"] and methode == "POST":
             return 200, api_unlock_env(state, self._body())
         if teile == ["config", "ui-lang"] and methode == "PUT":

@@ -109,25 +109,80 @@ class HandlerAuthMixin:
         except ValueError:
             return False
 
-    def _secure_cookie(self) -> bool:
+    def _forwarded_param(self, name: str) -> str:
+        """Erster ``name=``-Wert aus RFC 7239 ``Forwarded``."""
+        raw = self.headers.get("Forwarded") or ""
+        for part in raw.split(","):
+            for item in part.split(";"):
+                key, sep, value = item.strip().partition("=")
+                if sep and key.lower() == name:
+                    return value.strip().strip('"').strip()
+        return ""
+
+    def _origin_parts(self) -> tuple[str, str]:
+        """``(scheme, host)`` aus Origin, sonst Referer. Leer, wenn keins da ist."""
         _ensure_server_names()
-        # The request URL inside the container is plain HTTP. A Secure cookie
-        # is only stored when the browser itself saw HTTPS. StartOS terminates
-        # TLS and should set X-Forwarded-Proto; if that header is missing the
-        # cookie must still stick, otherwise the UI falls through to „Token fehlt“.
+        raw = self.headers.get("Origin") or self.headers.get("Referer") or ""
+        if not raw or raw.lower() == "null":
+            return "", ""
+        try:
+            parsed = urlparse(raw)
+        except ValueError:
+            return "", ""
+        return (parsed.scheme or "").lower(), _normalisiere_host(parsed.netloc)
+
+    def _browser_scheme(self) -> str:
+        """``https`` / ``http``, wenn der Browser-Scheme feststeht, sonst leer.
+
+        Hinter dem Proxy zählt ``X-Forwarded-Proto`` (sonst ``Forwarded: proto``).
+        Widerspricht das dem Scheme von Origin/Referer, oder fehlt die Angabe,
+        ist der Scheme unbekannt: ein Secure-Cookie würde der Browser dann
+        verwerfen und die Oberfläche fiele auf „Token fehlt“.
+        """
+        _ensure_server_names()
+        origin_scheme, _host = self._origin_parts()
+        if origin_scheme not in ("http", "https"):
+            origin_scheme = ""
         if _env_setting(self.state, "SATSAGE_TRUST_PROXY") == "1":
             proto = (self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
-            return proto == "https"
-        return (urlparse(self.path).scheme or "").lower() == "https"
+            if proto not in ("http", "https"):
+                proto = self._forwarded_param("proto")
+            if proto not in ("http", "https"):
+                proto = ""
+            if proto and origin_scheme and proto != origin_scheme:
+                return ""
+            return proto or origin_scheme
+        if origin_scheme:
+            return origin_scheme
+        return (urlparse(self.path).scheme or "").lower()
+
+    def _secure_cookie(self) -> bool:
+        _ensure_server_names()
+        return self._browser_scheme() == "https"
 
     def _set_session_cookie(self, value: str, *, delete: bool = False) -> None:
         _ensure_server_names()
+        # Immer ohne Secure speicherbar (HttpOnly, SameSite=Lax). Sieht der
+        # Browser HTTPS, zusätzlich dieselbe Sitzung mit Secure. Lehnt er das
+        # Secure-Cookie ab, bleibt die erste Zeile.
         parts = [f"{SESSION_COOKIE}={value}", "Path=/", "HttpOnly", "SameSite=Lax"]
-        if self._secure_cookie():
-            parts.append("Secure")
         if delete:
             parts.extend(("Max-Age=0", "Expires=Thu, 01 Jan 1970 00:00:00 GMT"))
-        self._pending_cookie = "; ".join(parts)
+        plain = "; ".join(parts)
+        cookies = [plain]
+        if self._secure_cookie():
+            cookies.append(plain + "; Secure")
+        self._pending_cookies = cookies
+        self._pending_cookie = plain
+
+    def _emit_cookies(self) -> None:
+        cookies = getattr(self, "_pending_cookies", None)
+        if not cookies:
+            one = getattr(self, "_pending_cookie", None)
+            cookies = [one] if one else []
+        for cookie in cookies:
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
 
     def _new_session(self) -> None:
         _ensure_server_names()
@@ -210,16 +265,25 @@ class HandlerAuthMixin:
 
     def _origin_ok(self) -> bool:
         _ensure_server_names()
-        raw = self.headers.get("Origin") or self.headers.get("Referer")
-        if not raw or raw.lower() == "null":
+        # same-site reicht nicht: auf einer StartOS-IP teilen sich Dienste
+        # den Host und unterscheiden sich nur im Port. cross-site ebenso.
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site in ("cross-site", "same-site"):
             return False
-        try:
-            parsed = urlparse(raw)
-            origin_host = _normalisiere_host(parsed.netloc)
-        except ValueError:
-            return False
+        _scheme, origin_host = self._origin_parts()
         if not origin_host or not self._host_value_ok(origin_host):
             return False
+        trust_proxy = _env_setting(self.state, "SATSAGE_TRUST_PROXY") == "1"
+        if trust_proxy:
+            forwarded = self.headers.get("X-Forwarded-Host") or self._forwarded_param("host")
+            if forwarded:
+                # Effektiver Browser-Host, nicht die Container-Adresse im Host-Header.
+                return origin_host == _normalisiere_host(forwarded)
+            if origin_host == self._request_host():
+                return True
+            # StartOS setzt oft nur Proto/For und schreibt Host auf die
+            # Container-Adresse um. same-origin setzt nur der Browser.
+            return site == "same-origin"
         return origin_host == self._request_host()
 
     def _csrf_ok(self, methode: str) -> bool:
@@ -446,9 +510,18 @@ class HandlerAuthMixin:
             if _password_is_set(self.state):
                 self._fehler(409, "Passwort ist bereits gesetzt.")
                 return True
+            # Loopback bleibt ohne Origin (lokales Setup, Unittests). Hinter
+            # dem StartOS-Proxy ist der Peer nicht Loopback: ohne Passwort gilt
+            # der Proxy als Anmeldung, aber nur mit passendem Origin/Referer.
+            # Danach ist der Weg zu.
+            proxy = _start9_proxy_authenticated(self.state, self.headers)
             if not self._loopback_request():
-                self._fehler(403, "Passwort-Ersteinrichtung nur über Loopback.")
-                return True
+                if not proxy:
+                    self._fehler(403, "Passwort-Ersteinrichtung nur über Loopback.")
+                    return True
+                if not self._origin_ok():
+                    self._fehler(403, "Origin/Referer fehlt oder ist nicht erlaubt.")
+                    return True
             try:
                 body = self._body()
                 password = str(body.get("password") or body.get("new_password") or "")
@@ -479,6 +552,9 @@ class HandlerAuthMixin:
             # Ohne Passwort ist der Inhalt nicht lesbar. Die Bestätigung sitzt
             # im Folgedialog; der Server verlangt dasselbe Wort, damit ein
             # versehentlicher POST die .env nicht leert.
+            if not self._loopback_request() and not self._origin_ok():
+                self._fehler(403, "Origin/Referer fehlt oder ist nicht erlaubt.")
+                return True
             if not _password_is_set(self.state):
                 self._json(200, {"ok": True, "password_set": False})
                 return True
