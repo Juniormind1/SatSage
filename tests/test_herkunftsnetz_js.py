@@ -314,6 +314,31 @@ console.log(JSON.stringify({ min: zeitstrahlXMin(), quelle: zeitstrahlXMin.toStr
         self.assertIn("zeitstrahlXMin()", (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8"))
         self.assertIn("fensterGeoeffnet", NETZ)
 
+    def test_null_pos_ist_grau_nicht_gruen(self):
+        text = (WEB / "views" / "herkunftsnetz.js").read_text(encoding="utf-8")
+        start = text.index("function herkunftsnetzPos(")
+        ende = text.index("function herkunftsnetzSpringbar(")
+        aus = subprocess.run(
+            ["node", "-e", """
+const ZeitstrahlAnsicht = { daten: { zeitstrahl: { frist_pos: 40 } } };
+""" + text[start:ende] + """
+const m = herkunftsnetzLotMischung({
+  fokus_key: "f",
+  vorfahren: [
+    { key: "a", ende: true, typ: "fremd", anteil_sats: 30, pos_output: null },
+    { key: "b", ende: true, typ: "fremd", anteil_sats: 70, pos_output: 80 },
+  ],
+});
+const ring = herkunftsnetzRingFarbe(null);
+console.log(JSON.stringify({ m, ring }));
+"""],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(aus.returncode, 0, aus.stderr)
+        r = json.loads(aus.stdout)
+        self.assertEqual(r["m"], {"gruen": 0, "orange": 70, "grau": 30})
+        self.assertNotEqual(r["ring"], "gut")
+
     def test_x_labels_verdichten_sich_bis_auf_tage(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         start = steuer.index("function formatTickMonatJahr(")

@@ -1166,9 +1166,10 @@ Zuflüsse: 01.03.2021 (0,8 BTC) und 15.06.2022 (0,7 BTC). Der
 
 <p>In den Einstellungen unter <strong>Anschaffung aus Herkunft</strong> (bzw.
 <code>STEUER_ANSCHAFFUNG</code>) lässt sich optional die <strong>offensive</strong>
-Lesart wählen: dann zählt der <em>älteste</em> externe Zufluss. Default bleibt
-defensiv. Offensiv kann eine längere Haltedauer ausweisen und ist bei
-unvollständigem Herkunftsbaum besonders riskant — der Report kennzeichnet den
+Lesart wählen. Defensiv ist der UTXO nur ganz grün, wenn kein grauer und kein
+oranger Lot-Anteil bleibt. Offensiv zählt in der Summe nur den grünen Anteil
+(fremde oder Coinbase-Enden links der Fristgrenze), nicht das älteste Datum
+für den ganzen UTXO. Default bleibt defensiv. Der Report kennzeichnet den
 Modus.</p>
 
 <p>In der Herkunftsansicht können nach dem ersten Trace optional

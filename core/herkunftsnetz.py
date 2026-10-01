@@ -146,6 +146,60 @@ def output_zeit(
     return None
 
 
+def lot_mischung(
+    vorfahren: list[dict] | None,
+    frist_pos,
+    fokus_key: str = "",
+) -> dict | None:
+    """
+    Lose des Fokus aus den Endknoten, gewichtet mit ``anteil_sats``.
+
+    Dieselbe Regel wie ``herkunftsnetzLotMischung`` in
+    ``web/views/herkunftsnetz.js``: Grün, wenn ein fremdes oder
+    Coinbase-Ende links der Fristgrenze liegt (``pos_output < frist_pos``).
+    Orange, wenn es darauf oder rechts liegt. Grau ohne Datum, ohne
+    Fristposition, oder bei Bündel, Lücke und Horizont. Eigene Zwischenhops
+    und der Fokus zählen nicht.
+    """
+    acc = {"sats_gruen": 0.0, "sats_orange": 0.0, "sats_grau": 0.0}
+    try:
+        frist = float(frist_pos)
+    except (TypeError, ValueError):
+        frist = None
+    else:
+        if frist != frist or frist in (float("inf"), float("-inf")):
+            frist = None
+    for v in vorfahren or []:
+        if not isinstance(v, dict) or not v.get("ende"):
+            continue
+        if fokus_key and v.get("key") == fokus_key:
+            continue
+        try:
+            gewicht = float(v.get("anteil_sats") or 0)
+        except (TypeError, ValueError):
+            continue
+        if gewicht <= 0:
+            continue
+        farbe = "sats_grau"
+        try:
+            pos = float(v.get("pos_output"))
+        except (TypeError, ValueError):
+            pos = None
+        else:
+            if pos != pos or pos in (float("inf"), float("-inf")):
+                pos = None
+        if (
+            v.get("typ") in (TYP_FREMD, TYP_COINBASE)
+            and pos is not None
+            and frist is not None
+        ):
+            farbe = "sats_gruen" if pos < frist else "sats_orange"
+        acc[farbe] += gewicht
+    if acc["sats_gruen"] + acc["sats_orange"] + acc["sats_grau"] <= 0:
+        return None
+    return {name: int(round(wert)) for name, wert in acc.items()}
+
+
 def _typ(knoten: dict) -> str:
     typ = knoten.get("type")
     if typ == "internal":

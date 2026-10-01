@@ -954,6 +954,7 @@ function zeitstrahlXMin() {
   const werte = [daten.fokus_pos];
   for (const v of daten.vorfahren || []) werte.push(v && v.pos_output);
   for (const pos of werte) {
+    if (pos === null || pos === undefined || pos === "") continue;
     const n = Number(pos);
     if (Number.isFinite(n) && n < min) min = n;
   }

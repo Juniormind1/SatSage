@@ -1151,5 +1151,201 @@ class TestKanonischerHinweis(unittest.TestCase):
             self.assertIn(tax.HINWEIS_ONCHAIN, text, rel)
 
 
+class TestLotSegmente(unittest.TestCase):
+    """Offensiv zählt Lot-Anteile, nicht das älteste Datum als 100 %."""
+
+    FRIST = 40.0
+
+    def _ende(self, key, typ, anteil, pos):
+        return {
+            "key": key,
+            "ende": True,
+            "typ": typ,
+            "anteil_sats": anteil,
+            "pos_output": pos,
+        }
+
+    def _misch(self, knoten):
+        from core.herkunftsnetz import lot_mischung
+
+        return lot_mischung(knoten, self.FRIST, "fokus:0")
+
+    def test_haelfte_gruen_haelfte_orange(self):
+        seg = self._misch([
+            {
+                "key": "fokus:0", "ende": True, "typ": "eigen",
+                "anteil_sats": 1000, "pos_output": 90,
+            },
+            self._ende("a", "fremd", 500, 10),
+            self._ende("b", "fremd", 500, 80),
+        ])
+        self.assertEqual(
+            seg, {"sats_gruen": 500, "sats_orange": 500, "sats_grau": 0},
+        )
+
+    def test_alles_gruen(self):
+        seg = self._misch([
+            self._ende("a", "fremd", 400, 10),
+            self._ende("b", "coinbase", 600, 20),
+        ])
+        self.assertEqual(seg["sats_gruen"], 1000)
+        self.assertEqual(seg["sats_orange"], 0)
+        self.assertEqual(seg["sats_grau"], 0)
+
+    def test_alles_orange(self):
+        seg = self._misch([self._ende("a", "fremd", 1000, self.FRIST)])
+        self.assertEqual(seg["sats_gruen"], 0)
+        self.assertEqual(seg["sats_orange"], 1000)
+        self.assertEqual(seg["sats_grau"], 0)
+
+    def test_graues_ende(self):
+        seg = self._misch([
+            self._ende("a", "fremd", 500, 10),
+            self._ende("b", "buendel", 500, 5),
+        ])
+        self.assertEqual(
+            seg, {"sats_gruen": 500, "sats_orange": 0, "sats_grau": 500},
+        )
+
+    def test_hinweis_nennt_den_lot_anteil(self):
+        from core import i18n
+
+        self.assertEqual(i18n.t_lang("de", "tax.hintOffensive"), tax.HINWEIS_OFFENSIV)
+        self.assertIn("Lot-Ring", tax.HINWEIS_OFFENSIV)
+        self.assertNotIn("ältester externer", tax.HINWEIS_OFFENSIV)
+
+
+class TestLotSummen(unittest.TestCase):
+    """Synthetische Vorfahren, ohne Node. Achse über Ingress 2020, Frist im Bild."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cache = Path(self._tmp.name)
+
+    def _extern(self, name, sats, zeit):
+        return {
+            "type": "external",
+            "from_utxo": f"{txid(name)}:0",
+            "amount_sats": sats,
+            "time_label": zeit,
+            "children": [],
+        }
+
+    def _speichern(self, marker, kinder, sats=1000):
+        from core import trace_cache
+
+        trace_cache.speichern(txid(marker), 0, {
+            "found": True,
+            "root": {
+                "txid": txid(marker),
+                "vout": 0,
+                "amount_sats": sats,
+                "wallet": "Alpha",
+                "time_label": "01.10.2026 12:00:00",
+                "type": "utxo",
+            },
+            "children": kinder,
+        }, self.cache)
+
+    def _ingress(self, marker):
+        ordner = self.cache / main.UTXO_INGRESS_CACHE_SUBDIR
+        ordner.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "txid": txid(marker),
+            "vout": 0,
+            "external_time_ts": zeitstempel("01.01.2020 12:00"),
+            "external_oldest_time_ts": zeitstempel("01.01.2019 12:00"),
+        }
+        (ordner / f"{txid(marker)}_0.json").write_text(
+            json.dumps(payload), encoding="utf-8",
+        )
+
+    def _aus(self, marker, **kw):
+        self._ingress(marker)
+        return auswerten_zum_jahresende(
+            [utxo(1000, "01.10.2026 12:00", marker=marker)],
+            immutable_cache_dir=self.cache,
+            **kw,
+        )
+
+    def test_offensiv_50_50_addiert_nur_gruen(self):
+        self._speichern("a1", [
+            self._extern("e1", 500, "01.01.2020 12:00:00"),
+            self._extern("e2", 500, "01.06.2026 12:00:00"),
+        ])
+        defensiv = self._aus("a1")
+        offensiv = self._aus("a1", anschaffung="aelteste")
+        d = defensiv["eintraege"][0]
+        o = offensiv["eintraege"][0]
+        self.assertEqual(
+            (d["sats_gruen"], d["sats_orange"], d["sats_grau"]),
+            (500, 500, 0),
+        )
+        self.assertFalse(d["erfuellt"])
+        self.assertEqual(defensiv["kennzahlen"]["erfuellt_sats"], 0)
+        self.assertEqual(defensiv["kennzahlen"]["offen_sats"], 1000)
+        self.assertFalse(o["erfuellt"])
+        self.assertEqual(o["datum"], "01.01.2019")
+        self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["offen_sats"], 500)
+        event = offensiv["zeitstrahl"]["events"][0]
+        self.assertEqual(event["sats_gruen"], 500)
+        self.assertEqual(event["sats_orange"], 500)
+        self.assertEqual(event["sats_grau"], 0)
+        self.assertEqual(
+            offensiv["zeitstrahl"]["geister_saldo"]["value_sats"], 500,
+        )
+
+    def test_alles_gruen(self):
+        self._speichern("b2", [
+            self._extern("g1", 600, "01.03.2019 12:00:00"),
+            self._extern("g2", 400, "01.06.2020 12:00:00"),
+        ])
+        offensiv = self._aus("b2", anschaffung="aelteste")
+        e = offensiv["eintraege"][0]
+        self.assertEqual(
+            (e["sats_gruen"], e["sats_orange"], e["sats_grau"]),
+            (1000, 0, 0),
+        )
+        self.assertTrue(e["erfuellt"])
+        self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 1000)
+        defensiv = self._aus("b2")
+        self.assertTrue(defensiv["eintraege"][0]["erfuellt"])
+        self.assertEqual(defensiv["kennzahlen"]["erfuellt_sats"], 1000)
+
+    def test_alles_orange(self):
+        self._speichern("c3", [
+            self._extern("o1", 1000, "01.06.2026 12:00:00"),
+        ])
+        ergebnis = self._aus("c3", anschaffung="aelteste")
+        e = ergebnis["eintraege"][0]
+        self.assertEqual(e["sats_gruen"], 0)
+        self.assertEqual(e["sats_orange"], 1000)
+        self.assertEqual(e["sats_grau"], 0)
+        self.assertFalse(e["erfuellt"])
+        self.assertEqual(ergebnis["kennzahlen"]["erfuellt_sats"], 0)
+        self.assertEqual(e["datum"], "01.01.2019")
+
+    def test_graues_ende(self):
+        self._speichern("d4", [
+            self._extern("h1", 500, "01.01.2020 12:00:00"),
+            self._extern("h2", 500, ""),
+        ])
+        defensiv = self._aus("d4")
+        offensiv = self._aus("d4", anschaffung="aelteste")
+        self.assertEqual(
+            (
+                defensiv["eintraege"][0]["sats_gruen"],
+                defensiv["eintraege"][0]["sats_grau"],
+            ),
+            (500, 500),
+        )
+        self.assertFalse(defensiv["eintraege"][0]["erfuellt"])
+        self.assertEqual(defensiv["kennzahlen"]["erfuellt_sats"], 0)
+        self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 500)
+        self.assertFalse(offensiv["eintraege"][0]["erfuellt"])
+
+
 if __name__ == "__main__":
     unittest.main()

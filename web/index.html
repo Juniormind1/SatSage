@@ -1182,9 +1182,9 @@
               <span class="feld-titel" data-i18n="settings.deadlines.acquisition">Anschaffung aus Herkunft</span>
               <select id="steuer-anschaffung"
                       data-i18n-title="settings.deadlines.acquisitionTitle"
-                      title="Defensiv: jüngster externer Zufluss (Handbuch 4.3). Offensiv: ältester — längere Haltedauer, riskanter. Nie stiller Default.">
+                      title="Defensiv: der UTXO ist ganz grün nur ohne grauen und ohne orangen Lot-Anteil. Offensiv: die Summe zählt nur den grünen Anteil, nicht das älteste Datum für 100 %.">
                 <option value="juengste" data-i18n="settings.deadlines.defensive">Defensiv (jüngste sats)</option>
-                <option value="aelteste" data-i18n="settings.deadlines.offensive">Offensiv (älteste sats)</option>
+                <option value="aelteste" data-i18n="settings.deadlines.offensive">Offensiv (grüner Lot-Anteil)</option>
               </select>
             </label>
             <button type="button" id="steuer-uebernehmen" class="knopf"
@@ -1196,9 +1196,11 @@
           <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.deadlines.hint">
             Haltefrist vorbelegt mit 1 Jahr (Deutschland, § 23 EStG).
             Stichtag leer: die Frist gilt für alle Anschaffungen.
-            Anschaffung aus Herkunft: Vorgabe defensiv (jüngster externer Zufluss).
-            Offensiv nutzt den ältesten Zufluss und kann eine längere Haltedauer
-            ausweisen — bei unvollständigem Herkunftsbaum besonders riskant.
+            Anschaffung aus Herkunft: Vorgabe defensiv — der UTXO ist ganz grün
+            nur, wenn kein grauer und kein oranger Lot-Anteil bleibt.
+            Offensiv zählt in der Summe nur den grünen Anteil (fremde oder
+            Coinbase-Enden links der Fristgrenze), nicht das älteste Datum
+            für den ganzen UTXO. Grau und Orange bleiben offen.
             Bekannte Haltefristen in Europa (privat, Stand 2026 — keine Steuerberatung):
             Deutschland 1 Jahr, Portugal 1 Jahr, Tschechien 3 Jahre, Luxemburg 6 Monate.
             Schweiz: private Veräußerungsgewinne in der Regel ohne Frist steuerfrei.

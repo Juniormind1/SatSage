@@ -203,12 +203,69 @@ def _normalize_txid(txid: str) -> str:
 def _immutable_tx_cache_path(txid: str, cache_root: Path) -> Path:
     return cache_root / TX_IMMUTABLE_CACHE_SUBDIR / f"{_normalize_txid(txid)}.json"
 
+def _tx_ist_nur_untergrenze(tx: dict) -> bool:
+    """Mempool-Zwischenstand: Mindesthöhe ist der Tip, nicht die Bestätigung."""
+    status = tx.get("status")
+    return isinstance(status, dict) and bool(status.get("mindesthoehe"))
+
+
+def _tx_blockzeit(tx: dict) -> int | None:
+    status = tx.get("status") if isinstance(tx.get("status"), dict) else {}
+    for wert in (status.get("block_time"), tx.get("blocktime"), tx.get("time")):
+        if not wert:
+            continue
+        try:
+            return int(wert)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _tx_bestaetigte_hoehe(tx: dict) -> int | None:
+    """Höhe einer bestätigten Tx. 0 und Mempool-Untergrenze zählen nicht."""
+    if _tx_ist_nur_untergrenze(tx):
+        return None
+    status = tx.get("status") if isinstance(tx.get("status"), dict) else {}
+    if status.get("confirmed") is False:
+        return None
+    for wert in (status.get("block_height"), tx.get("blockheight"), tx.get("blockHeight")):
+        if wert is None or wert == "":
+            continue
+        try:
+            hoehe = int(wert)
+        except (TypeError, ValueError):
+            continue
+        if hoehe > 0:
+            return hoehe
+    return None
+
+
+def tx_cache_vollstaendig(tx: dict) -> bool:
+    """Nur mit Blockzeit persistieren. Höhe ohne Zeit bleibt draußen."""
+    return isinstance(tx, dict) and not _tx_ist_nur_untergrenze(tx) and _tx_blockzeit(tx) is not None
+
+
+def _trage_blockzeit_ein(tx: dict, zeit: int) -> None:
+    status = tx.get("status")
+    if not isinstance(status, dict):
+        status = {}
+        tx["status"] = status
+    status["block_time"] = int(zeit)
+    status["confirmed"] = True
+    tx["blocktime"] = int(zeit)
+
+
 def load_cached_tx(txid: str, cache_root: Path | None = None) -> dict | None:
-    """Lädt eine gecachte Transaktion (RAM → Flatfile)."""
+    """Lädt eine gecachte Transaktion (RAM → Flatfile).
+
+    Ein Eintrag mit ``mindesthoehe`` ist nur die frühestmögliche Höhe einer
+    noch unbestätigten Transaktion. Der zählt nicht als Treffer, sonst
+    bliebe der Tip von vorhin stehen, obwohl die Chain weiter ist.
+    """
     key = _normalize_txid(txid)
     with _immutable_tx_lock:
         cached = _immutable_tx_memory.get(key)
-        if cached is not None:
+        if cached is not None and tx_cache_vollstaendig(cached):
             return cached
 
     root = cache_root or IMMUTABLE_CACHE_DIR
@@ -222,8 +279,16 @@ def load_cached_tx(txid: str, cache_root: Path | None = None) -> dict | None:
     if str(data.get("txid", "")).lower() != key:
         return None
     tx = data.get("tx")
-    if not isinstance(tx, dict):
+    if not isinstance(tx, dict) or _tx_ist_nur_untergrenze(tx):
         return None
+    if _tx_blockzeit(tx) is None:
+        hoehe = _tx_bestaetigte_hoehe(tx)
+        zeit = load_cached_block_time(hoehe, root) if hoehe else None
+        if not zeit:
+            return None
+        _trage_blockzeit_ein(tx, zeit)
+        save_cached_tx(key, tx, root, str(data.get("source") or "blockzeit-nachzug"))
+        return tx
     with _immutable_tx_lock:
         _immutable_tx_memory[key] = tx
     return tx
@@ -234,10 +299,17 @@ def save_cached_tx(
     cache_root: Path,
     source: str,
 ) -> Path:
-    """Speichert eine Transaktion als JSON-Flatfile."""
+    """Speichert eine Transaktion als JSON-Flatfile.
+
+    Ohne Blockzeit wird nichts geschrieben: Höhe ohne Zeit und Mempool-Untergrenze
+    sind kein fertiger Eintrag. Der nächste Abruf überschreibt die Datei, sobald
+    die Header-Zeit da ist.
+    """
     key = _normalize_txid(txid)
     root = Path(cache_root)
     path = _immutable_tx_cache_path(key, root)
+    if not tx_cache_vollstaendig(tx):
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "txid": key,

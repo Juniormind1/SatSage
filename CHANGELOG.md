@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Cache · Blockzeit:** Eine bestätigte Transaktion mit Höhe und ohne Blockzeit wird aus dem Header-Cache nachgetragen und überschrieben. Ohne Blockzeit entsteht kein neuer Cache-Eintrag. Im Herkunftsnetz zählt ein Ende ohne Position grau, nicht grün.
+- **Mempool · Mindesthöhe:** Eine noch unbestätigte Transaktion bekommt nicht mehr Blockhöhe 0. Die frühestmögliche Höhe ist der aktuelle Chain-Tip, die Zeit die dieses Blocks. Der Eintrag bleibt ein Zwischenstand und wird nicht als fertiger Cache-Treffer behalten.
+- **Steuerjahr · Offensiv:** Erfüllt ist nur der grüne Lot-Anteil (fremde oder Coinbase-Enden links der Fristgrenze), nicht mehr das älteste Datum für den ganzen UTXO. Defensiv bleibt ein UTXO ganz grün nur ohne Grau und ohne Orange. Die Anteile stehen in der Steuer- und Zeitstrahl-Antwort.
 - **StartOS · Anmeldung:** Die Web-UI öffnet ohne StartOS-Passwort und ohne Token. Ein Passwort gibt es nur aus den SatSage-Einstellungen; es verschlüsselt die `.env`. Danach zeigt die Oberfläche den SatSage-Login („Passwort aus den Einstellungen, kein StartOS-Passwort“), nicht „Token fehlt“ und nicht die Adresse `127.0.0.1` aus dem Container-Log. Firefox und Safari nutzen dieselbe StartOS-Adresse. Passwort löschen stellt den direkten Start wieder her.
 - **Steuerjahr · Dotplot:** Über einem Punkt erscheint nur noch das eigene Tooltip mit Datum, Betrag und Wallet. Die verzögerte Browser-Zeile mit den Klickmöglichkeiten entfällt.
 - **Steuerjahr · Dotplot:** Ein grauer Punkt öffnet „Herkunft tracen“ und klappt dieses UTXO dort auf. Bisher landete der Klick in der Wallet-Liste, und die Zeile blieb zu.

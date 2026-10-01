@@ -298,6 +298,13 @@ function herkunftsnetzProzent(anteil) {
   })} %`;
 }
 
+/** Echte Daten-Position. null/leer ist keine 0 — sonst liegt ein undatiertes Ende links der Frist. */
+function herkunftsnetzPos(wert) {
+  if (wert === null || wert === undefined || wert === "") return null;
+  const n = Number(wert);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Daten-% (ungeklemmt) → sichtbare Koordinaten. X darf vor 0 liegen. */
 function herkunftsnetzLage(pos, y) {
   const p = Number(pos);
@@ -342,12 +349,12 @@ function herkunftsnetzLotMischung(daten) {
     if (!v || !v.ende || v.key === daten.fokus_key) continue;
     const gewicht = Math.max(0, Number(v.anteil_sats) || 0);
     if (!(gewicht > 0)) continue;
-    const pos = Number(v.pos_output);
+    const pos = herkunftsnetzPos(v.pos_output);
     const typ = v.typ;
     let farbe = "grau";
     if (
       (typ === "fremd" || typ === "coinbase")
-      && Number.isFinite(pos)
+      && pos !== null
       && Number.isFinite(frist)
     ) {
       farbe = pos < frist ? "gruen" : "orange";
@@ -386,8 +393,9 @@ function herkunftsnetzRingFarbe(posOutput) {
   const strahl = (typeof ZeitstrahlAnsicht !== "undefined"
     && ZeitstrahlAnsicht.daten && ZeitstrahlAnsicht.daten.zeitstrahl) || {};
   const frist = Number(strahl.frist_pos);
-  const pos = Number(posOutput);
-  if (Number.isFinite(frist) && Number.isFinite(pos) && pos < frist) return "gut";
+  const pos = herkunftsnetzPos(posOutput);
+  if (pos !== null && Number.isFinite(frist) && pos < frist) return "gut";
+  if (pos === null) return "";
   return "netz";
 }
 

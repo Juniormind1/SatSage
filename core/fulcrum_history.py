@@ -208,13 +208,19 @@ def _enrich_tx_block_info(client: FulcrumClient, tx: dict) -> dict:
 
     tx["blockheight"] = height
     if height <= 0:
+        # Noch nicht im Block. Frühestens im aktuellen Tip, eher später.
+        # Höhe 0 wäre eine falsche Hypothese und bliebe im Cache hängen.
+        status = _status_fuer_hoehe(client, 0)
         tx["confirmations"] = 0
-        tx["status"] = {"confirmed": False, "block_height": 0}
+        tx["blockheight"] = status.get("block_height")
+        tx["status"] = status
         return tx
 
     blocktime = _block_time_for_height(client, height)
-    if blocktime is not None:
-        tx["blocktime"] = blocktime
+    if blocktime is None:
+        # Höhe ohne Zeit nicht festschreiben. Aufrufer speichert nur Vollständiges.
+        return tx
+    tx["blocktime"] = blocktime
     tx["confirmations"] = max(int(tx.get("confirmations", 0)), 1)
     tx["status"] = {
         "confirmed": True,
@@ -599,13 +605,27 @@ def _walk_address_history(
 
 
 def _status_fuer_hoehe(client: FulcrumClient, height: int) -> dict:
-    """Bestätigungs-Status eines Outputs; Blockzeit nur bei bestätigter Höhe."""
-    status: dict[str, object] = {"confirmed": height > 0}
-    if height > 0:
-        status["block_height"] = height
-        block_time = _block_time_for_height(client, height)
+    """Bestätigungs-Status eines Outputs.
+
+    Unbestätigt (Höhe ≤ 0): die Mindesthöhe ist der aktuelle Chain-Tip,
+    die Zeit die dieses Blocks. ``mindesthoehe`` markiert den Zwischenstand,
+    damit der Cache ihn nicht als endgültige Bestätigung behält.
+    """
+    if height <= 0:
+        tip = int(get_chain_tip_height(client))
+        status: dict[str, object] = {
+            "confirmed": False,
+            "block_height": tip,
+            "mindesthoehe": True,
+        }
+        block_time = _block_time_for_height(client, tip)
         if block_time is not None:
             status["block_time"] = block_time
+        return status
+    status = {"confirmed": True, "block_height": height}
+    block_time = _block_time_for_height(client, height)
+    if block_time is not None:
+        status["block_time"] = block_time
     return status
 
 

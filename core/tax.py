@@ -50,7 +50,8 @@ STANDARD_STICHTAG = None
 HALTEFRIST_MAX_JAHRE = 10
 
 #: Anschaffungsdatum aus Herkunft: defensiv (jüngster externer Zufluss) oder
-#: offensiv (ältester). Default bleibt defensiv.
+#: offensiv (Lot-Anteile, nicht das älteste Datum für den ganzen UTXO).
+#: Default bleibt defensiv.
 ANSCHAFFUNG_JUENGSTE = "juengste"
 ANSCHAFFUNG_AELTESTE = "aelteste"
 ANSCHAFFUNG_MODI = (ANSCHAFFUNG_JUENGSTE, ANSCHAFFUNG_AELTESTE)
@@ -292,10 +293,11 @@ HINWEIS_UNTERGRENZE = (
 )
 
 HINWEIS_OFFENSIV = (
-    "Anschaffungsdatum aus Herkunft: **offensiv** (ältester externer "
-    "Zufluss). Das kann eine längere Haltedauer ausweisen als die defensive "
-    "Lesart (jüngster Zufluss). Bei unvollständigem Baum ist das besonders "
-    "riskant — betroffene Zeilen bleiben gekennzeichnet."
+    "Anschaffungslesart **offensiv**: erfüllt zählt nur der Sat-Anteil, "
+    "dessen fremde oder Coinbase-Enden links der Fristgrenze liegen "
+    "(Lot-Ring). Orange (rechts der Grenze) und Grau (ohne Datum, Bündel, "
+    "Lücke) zählen nicht. Nicht mehr das älteste Datum für den ganzen UTXO. "
+    "Bei einem unvollständigen Baum bleibt der graue Teil außen vor."
 )
 
 HINWEIS_OFFENSIV_OHNE_AELTESTE = (
@@ -349,7 +351,7 @@ def _grundlage_label(
     """
     if grundlage == GRUNDLAGE_HERKUNFT:
         if anschaffung == ANSCHAFFUNG_AELTESTE:
-            basis = "Herkunft verfolgt (offensiv, älteste)"
+            basis = "Herkunft verfolgt (offensiv, Lot-Anteil)"
             if offensiv_fallback:
                 basis = "Herkunft verfolgt (offensiv, Fallback jüngste)"
         else:
@@ -596,6 +598,10 @@ class Eingang:
     anschaffung: str = STANDARD_ANSCHAFFUNG
     #: Offensiv gewählt, aber nur jüngstes Datum im Cache vorhanden.
     offensiv_fallback: bool = False
+    #: Lot-Anteile am UTXO. None, solange kein Herkunftsnetz da ist.
+    sats_gruen: int | None = None
+    sats_orange: int | None = None
+    sats_grau: int | None = None
 
     @property
     def geprueft(self) -> bool:
@@ -634,6 +640,9 @@ class Eingang:
             "neuvermoegen": self.neuvermoegen,
             "anschaffung": self.anschaffung,
             "offensiv_fallback": self.offensiv_fallback,
+            "sats_gruen": self.sats_gruen,
+            "sats_orange": self.sats_orange,
+            "sats_grau": self.sats_grau,
         }
 
 
@@ -853,7 +862,7 @@ def auswerten(
     if laufend:
         hinweise.insert(0, _h("tax.hintRunningYear", jahr=jahr))
 
-    return {
+    ergebnis = {
         "jahr": jahr,
         "stichtag": ende.strftime("%d.%m.%Y"),
         # Bezugszeitpunkt exakt — die Zeitstrahl-Skala endet dort (Overlay
@@ -910,6 +919,158 @@ def auswerten(
         ),
         "hinweise": hinweise,
         "_objekte": eintraege,
+    }
+    _lot_segmente_eintragen(ergebnis, eintraege, immutable_cache_dir)
+    return ergebnis
+
+
+def _ganz_gruen(seg: dict) -> bool:
+    """Defensiv: der UTXO ist nur ganz grün ohne Grau und ohne Orange."""
+    return (
+        int(seg.get("sats_grau") or 0) == 0
+        and int(seg.get("sats_orange") or 0) == 0
+        and int(seg.get("sats_gruen") or 0) > 0
+    )
+
+
+def _lot_aus_cache(eintrag: Eingang, skala, frist_pos, cache: Path | None) -> dict | None:
+    """Endknoten des gespeicherten Baums, dieselbe Mischung wie der Lot-Ring."""
+    if skala is None or cache is None:
+        return None
+    from core import herkunftsnetz
+    from core import trace_cache
+
+    try:
+        geladen = trace_cache.laden(eintrag.txid, int(eintrag.vout), cache)
+    except (OSError, ValueError, TypeError):
+        return None
+    baum = (geladen or {}).get("baum") or {}
+    if not baum.get("found") or not baum.get("root"):
+        return None
+    key = f"{eintrag.txid}:{int(eintrag.vout)}"
+    try:
+        netz = herkunftsnetz.flach(baum, key, skala)
+        return herkunftsnetz.lot_mischung(
+            netz.get("vorfahren"), frist_pos, key,
+        )
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
+def _lot_segmente_eintragen(
+    ergebnis: dict,
+    objekte: list[Eingang],
+    cache: Path | None,
+) -> None:
+    """
+    Schreibt ``sats_gruen`` / ``sats_orange`` / ``sats_grau`` in Einträge
+    und Zeitstrahl.
+
+    Mit Herkunftsnetz gilt für beide Lesarten: ganz grün nur wenn Grau und
+    Orange null sind. Offensiv addiert in den Steuerjahr-Summen nur den
+    grünen Anteil, nicht den ganzen UTXO nach dem ältesten Datum.
+    Neuvermögen bleibt unfrei, Halten hebt den Stichtag nicht auf.
+    """
+    from core import herkunftsnetz
+
+    strahl = ergebnis.get("zeitstrahl") or {}
+    events = {
+        e.get("key"): e for e in (strahl.get("events") or []) if e.get("key")
+    }
+    skala = herkunftsnetz.skala_aus_auswertung(ergebnis)
+    frist = strahl.get("frist_pos")
+    modus = ergebnis.get("anschaffung") or STANDARD_ANSCHAFFUNG
+    nach_key = {f"{e.txid}:{int(e.vout)}": e for e in objekte}
+
+    for eintrag in ergebnis.get("eintraege") or []:
+        key = f"{eintrag.get('txid')}:{int(eintrag.get('vout') or 0)}"
+        objekt = nach_key.get(key)
+        seg = _lot_aus_cache(objekt, skala, frist, cache) if objekt else None
+        if seg:
+            eintrag["sats_gruen"] = seg["sats_gruen"]
+            eintrag["sats_orange"] = seg["sats_orange"]
+            eintrag["sats_grau"] = seg["sats_grau"]
+            ganz = _ganz_gruen(seg) and not eintrag.get("neuvermoegen")
+            eintrag["erfuellt"] = ganz
+        if objekt is not None:
+            objekt.sats_gruen = eintrag.get("sats_gruen")
+            objekt.sats_orange = eintrag.get("sats_orange")
+            objekt.sats_grau = eintrag.get("sats_grau")
+            objekt.erfuellt = bool(eintrag.get("erfuellt"))
+        event = events.get(key)
+        if event is not None:
+            event["erfuellt"] = bool(eintrag.get("erfuellt"))
+            event["sats_gruen"] = eintrag.get("sats_gruen")
+            event["sats_orange"] = eintrag.get("sats_orange")
+            event["sats_grau"] = eintrag.get("sats_grau")
+
+    eintraege = ergebnis.get("eintraege") or []
+    erfuellt = [e for e in eintraege if e.get("erfuellt")]
+    offen = [e for e in eintraege if not e.get("erfuellt")]
+    kennzahlen = ergebnis["kennzahlen"]
+    kennzahlen["erfuellt_count"] = len(erfuellt)
+    kennzahlen["offen_count"] = len(offen)
+    if modus == ANSCHAFFUNG_AELTESTE:
+        gruen = 0
+        for e in eintraege:
+            anteil = e.get("sats_gruen")
+            if e.get("neuvermoegen"):
+                continue
+            if anteil is not None:
+                gruen += int(anteil)
+            elif e.get("erfuellt"):
+                gruen += int(e.get("value_sats") or 0)
+        kennzahlen["erfuellt_sats"] = gruen
+    else:
+        kennzahlen["erfuellt_sats"] = sum(int(e.get("value_sats") or 0) for e in erfuellt)
+    kennzahlen["offen_sats"] = int(kennzahlen.get("gesamt_sats") or 0) - kennzahlen["erfuellt_sats"]
+    naechste = None
+    for e in offen:
+        text = e.get("frist_ende") or ""
+        if not text:
+            continue
+        try:
+            tag = datetime.strptime(text, "%d.%m.%Y")
+        except ValueError:
+            continue
+        if naechste is None or tag < naechste:
+            naechste = tag
+    kennzahlen["naechste_frist"] = naechste.strftime("%d.%m.%Y") if naechste else ""
+    _geister_aus_events(strahl, modus)
+
+
+def _geister_aus_events(strahl: dict, modus: str) -> None:
+    """Grüner Geister-Saldo: defensiv ganze grüne UTXOs, offensiv nur Lot-Grün."""
+    if not strahl.get("vorhanden"):
+        return
+    events = strahl.get("events") or []
+    sats = 0
+    anzahl = 0
+    letzte = None
+    for event in events:
+        anteil = event.get("sats_gruen")
+        if modus == ANSCHAFFUNG_AELTESTE and anteil is not None:
+            if int(anteil) <= 0:
+                continue
+            sats += int(anteil)
+            anzahl += 1
+            letzte = event.get("pos")
+        elif event.get("erfuellt"):
+            sats += int(event.get("value_sats") or 0)
+            anzahl += 1
+            letzte = event.get("pos")
+    if sats <= 0:
+        strahl["geister_saldo"] = None
+        return
+    g_pos = strahl.get("frist_pos")
+    if g_pos is None:
+        g_pos = letzte if letzte is not None else 0.0
+    strahl["geister_saldo"] = {
+        "pos": float(g_pos),
+        "y": 0.0,
+        "value_sats": int(sats),
+        "count": int(anzahl),
+        "erfuellt": True,
     }
 
 
