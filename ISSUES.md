@@ -133,14 +133,6 @@ Vorschlag nur für die GUI:
 }
 ```
 
-## Firefox · „Token fehlt“ hinter StartOS
-
-**Stand:** 2026-10-01 · **im Code** · Abnahme auf dem Gerät offen
-
-Ohne Passwort gilt der StartOS-Proxy als Anmeldung. Mit Passwort aus den Einstellungen leitet die Oberfläche auf den SatSage-Login, nicht auf „Token fehlt“ und nicht auf `http://127.0.0.1:8730/?t=…`. Die Sitzung hängt am Cookie (HttpOnly, SameSite=Lax; Secure nur, wenn der Browser HTTPS sieht). Firefox und Safari gegen dieselbe StartOS-URL prüfen.
-
----
-
 ## StartOS · Passwort anzeigen und bei laufendem Dienst rotieren
 
 **Stand:** 2026-09-25 · **verworfen**
@@ -564,6 +556,14 @@ Aufwand: **unbekannt/hoch** · hängt an libbitcoin
 ---
 
 # Historie / Langtexte
+
+## Erledigt: Firefox · „Token fehlt“ hinter StartOS
+
+**Stand:** 2026-10-01 · **erledigt** (Maintainer-Abnahme auf StartOS)
+
+Ohne Passwort gilt der StartOS-Proxy als Anmeldung. Mit Passwort aus den Einstellungen zeigt die Oberfläche den SatSage-Login, nicht „Token fehlt“ und nicht `http://127.0.0.1:8730/?t=…`. Die Sitzung hängt am Cookie (HttpOnly, SameSite=Lax; Secure nur, wenn der Browser HTTPS sieht). Auf dem Gerät geprüft: mit gesetztem Passwort funktioniert die Anmeldung.
+
+---
 
 ## Erledigt: Umfangreiche Wallets · Bäume seitenweise, nicht alles im Speicher
 
