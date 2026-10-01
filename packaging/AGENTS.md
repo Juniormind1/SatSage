@@ -11,7 +11,7 @@ Web-GUI als Onefile-Binary:
 scripts\build_satsage_win.bat    # Windows (py / .venv)
 ```
 
-Spec: `packaging/satsage-webgui.spec` → `dist/satsage-webgui` (`.exe` unter Windows).  
+Spec: `packaging/satsage-webgui.spec`. Die Build-Skripte setzen `SATSAGE_BINARY_NAME`: `dist/satsage-macos`, `dist/satsage-linux`, `dist/satsage-windows.exe`.  
 Assets (`web/`, `data/`, `doc/`) über `resource_dir()`; `.env` und Caches neben der Executable (`app_dir()`).
 
 `VERSION` im Repo-Root in `packaging/satsage-webgui.spec` als data bundeln. Bump nur der Maintainer (Root-Verfassung).

@@ -32,10 +32,11 @@ echo "→ BTC-Preis-Bundle bis Tip (Bitstamp/CDD; SKIP_BTC_PRICE_REFRESH=1 zum �
 "$PY" "$ROOT/scripts/refresh_btc_price_bundle.py"
 
 echo "→ PyInstaller (Onefile; unter macOS ohne Splash-Bootloader)…"
-rm -rf build/satsage-webgui dist/satsage-webgui
+export SATSAGE_BINARY_NAME=satsage-macos
+rm -rf build/satsage-webgui dist/satsage-webgui "dist/${SATSAGE_BINARY_NAME}"
 "$PY" -m PyInstaller --noconfirm --clean packaging/satsage-webgui.spec
 
-OUT="$ROOT/dist/satsage-webgui"
+OUT="$ROOT/dist/${SATSAGE_BINARY_NAME}"
 if [[ ! -f "$OUT" ]]; then
   echo "Fehler: $OUT nicht erzeugt." >&2
   exit 1

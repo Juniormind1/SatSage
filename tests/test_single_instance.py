@@ -20,10 +20,14 @@ class TestIstSatsageProzess(unittest.TestCase):
         self.assertFalse(si.ist_satsage_prozess(os.getpid()))
 
     def test_cmdline_erkennung(self):
-        with mock.patch.object(
-            si, "_cmdline", return_value="/tmp/dist/satsage-webgui --port 8730"
+        for cmd in (
+            "/tmp/dist/satsage-webgui --port 8730",
+            "/tmp/dist/satsage-linux --port 8730",
+            "/tmp/dist/satsage-macos",
+            r"C:\dist\satsage-windows.exe",
         ):
-            self.assertTrue(si.ist_satsage_prozess(12345))
+            with mock.patch.object(si, "_cmdline", return_value=cmd):
+                self.assertTrue(si.ist_satsage_prozess(12345), cmd)
         with mock.patch.object(
             si, "_cmdline", return_value="python3 server.py --plain-console"
         ):

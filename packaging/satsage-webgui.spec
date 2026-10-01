@@ -1,7 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
 # PyInstaller-Spec für die SatSage-Web-Oberfläche (Standalone).
-# Binary-Name: satsage-webgui.
+# Dateiname je System (Build-Skripte setzen SATSAGE_BINARY_NAME):
+#   macOS   dist/satsage-macos
+#   Linux   dist/satsage-linux
+#   Windows dist/satsage-windows.exe
 #
 # Bauen (aus dem Projekt-Wurzelverzeichnis):
 #   scripts/build_satsage_macos
@@ -10,7 +13,6 @@
 # oder:
 #   pyinstaller packaging/satsage-webgui.spec
 #
-# Ergebnis: dist/satsage-webgui (bzw. .exe unter Windows).
 # Nutzerdaten (.env, Caches) liegen neben der Executable (siehe core/paths.py).
 #
 # Splash: packaging/satsage-splash.png (volles logo.jpg). Build-Skripte:
@@ -20,8 +22,26 @@
 #   server schließt bei erstem Browser-Request mit Token
 # Bild immer mitbündeln (Tk-Fallback und Dev).
 
+import os
 import sys
 from pathlib import Path
+
+
+def _exe_name() -> str:
+    """Dateiname ohne Suffix. Unter Windows hängt PyInstaller .exe an."""
+    name = os.environ.get("SATSAGE_BINARY_NAME", "").strip()
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    if name:
+        return name
+    if sys.platform == "darwin":
+        return "satsage-macos"
+    if sys.platform.startswith("win"):
+        return "satsage-windows"
+    if sys.platform.startswith("linux"):
+        return "satsage-linux"
+    return "satsage-" + sys.platform.replace("/", "-")
+
 
 PROJEKT_ROOT = Path(SPECPATH).resolve().parent
 
@@ -82,7 +102,7 @@ pyz = PYZ(a.pure)
 
 exe_args = [pyz, a.scripts]
 exe_kw = dict(
-    name="satsage-webgui",
+    name=_exe_name(),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

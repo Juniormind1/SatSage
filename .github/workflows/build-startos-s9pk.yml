@@ -1,20 +1,22 @@
 name: Build StartOS s9pk (x86_64)
 
-# Sideload package for StartOS. Optional manual CI build only.
-# Does NOT attach anything to GitHub Releases — publish after local test:
-#   ./scripts/publish_startos_release <tag>
+# Deaktiviert. Das Sideload-Paket wird lokal gebaut
+# (scripts/build_startos_s9pk) und von Hand ans Release gehängt.
 # Docs: doc/START9-packaging.md
-#
-# Signing: start-cli needs a workspace key. Store the PEM in the repo secret
-# STARTOS_BUILD_KEY (contents of .startos/build.key.pem). Without it the job
-# still compiles the image and TypeScript, then pack fails — artifact-less.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+
+jobs:
+  deaktiviert:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow deaktiviert. Lokal bauen: ./scripts/build_startos_s9pk"
 
 permissions:
   contents: read
 
-jobs:
+jobs-disabled:
   labor:
     uses: ./.github/workflows/regtest-lab.yml
 
