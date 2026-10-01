@@ -2628,7 +2628,9 @@ async function warteAufJobEnde(jobId, {
       throw err;
     }
     const job = await api(`/jobs/${jobId}`);
-    if (typeof onTick === "function") onTick(job);
+    if (typeof onTick === "function") {
+      try { onTick(job); } catch (_) { /* Zeichnen darf das Warten nicht abbrechen */ }
+    }
     if (job.running) {
       await new Promise((r) => setTimeout(r, intervallMs));
       continue;
@@ -2756,10 +2758,15 @@ async function scanneAlleWalletsUtxo({
       throw new Error(t("wallet.utxoScan") + " — " + t("common.failed"));
     }
     // Pipeline kann „queued“ liefern — trotzdem auf diese Job-ID warten.
+    // Neue graue Punkte kommen im Job-Zwischenstand. Ohne Zeichnen hier
+    // bleiben sie bis zum nächsten Steuerjahr-Reload an alter Stelle.
     await warteAufJobEnde(jid, {
       sollAbbrechen,
       onTick: (j) => {
         if (logStand) nimmJobLogAb(j, logStand, wallet.name);
+        if (Array.isArray(j.result?.neu) && typeof zeichneScanPunkte === "function") {
+          zeichneScanPunkte(j.result.neu);
+        }
         if (textEl && j.message) {
           setzeText(
             textEl,

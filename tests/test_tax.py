@@ -1198,10 +1198,20 @@ class TestLotSegmente(unittest.TestCase):
         self.assertEqual(seg["sats_orange"], 1000)
         self.assertEqual(seg["sats_grau"], 0)
 
-    def test_graues_ende(self):
+    def test_datiertes_buendel_zaehlt_wie_ein_zufluss(self):
         seg = self._misch([
             self._ende("a", "fremd", 500, 10),
-            self._ende("b", "buendel", 500, 5),
+            self._ende("b", "buendel", 300, 5),
+            self._ende("c", "buendel", 200, 80),
+        ])
+        self.assertEqual(
+            seg, {"sats_gruen": 800, "sats_orange": 200, "sats_grau": 0},
+        )
+
+    def test_buendel_ohne_datum_bleibt_grau(self):
+        seg = self._misch([
+            self._ende("a", "fremd", 500, 10),
+            self._ende("b", "buendel", 500, None),
         ])
         self.assertEqual(
             seg, {"sats_gruen": 500, "sats_orange": 0, "sats_grau": 500},

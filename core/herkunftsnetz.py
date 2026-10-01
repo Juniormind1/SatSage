@@ -156,10 +156,11 @@ def lot_mischung(
 
     Dieselbe Regel wie ``herkunftsnetzLotMischung`` in
     ``web/views/herkunftsnetz.js``: Grün, wenn ein fremdes oder
-    Coinbase-Ende links der Fristgrenze liegt (``pos_output < frist_pos``).
-    Orange, wenn es darauf oder rechts liegt. Grau ohne Datum, ohne
-    Fristposition, oder bei Bündel, Lücke und Horizont. Eigene Zwischenhops
-    und der Fokus zählen nicht.
+    Coinbase-Ende oder ein datiertes Bündel links der Fristgrenze liegt
+    (``pos_output < frist_pos``). Orange, wenn es darauf oder rechts liegt.
+    Das Bündeldatum ist die jüngste bekannte Output-Zeit seiner Eingänge.
+    Grau ohne Datum, ohne Fristposition, oder bei Lücke und Horizont.
+    Eigene Zwischenhops und der Fokus zählen nicht.
     """
     acc = {"sats_gruen": 0.0, "sats_orange": 0.0, "sats_grau": 0.0}
     try:
@@ -189,7 +190,7 @@ def lot_mischung(
             if pos != pos or pos in (float("inf"), float("-inf")):
                 pos = None
         if (
-            v.get("typ") in (TYP_FREMD, TYP_COINBASE)
+            v.get("typ") in (TYP_FREMD, TYP_COINBASE, TYP_BUENDEL)
             and pos is not None
             and frist is not None
         ):
@@ -375,7 +376,11 @@ def _buendel(
     kinder, eltern_key, anteil, tiefe, fokus_sats, *,
     neu, kante, zeitfelder, skala, block_zeit,
 ) -> None:
-    """Alle Eingänge eines Hops als ein Endknoten „n Eingänge“."""
+    """Alle Eingänge eines Hops als ein Endknoten „n Eingänge“.
+
+    Das Lot nimmt die jüngste bekannte Eingangszeit. Fehlt jede Zeit, bleibt
+    der Knoten ohne Position und damit grau.
+    """
     anzahl = 0
     sats = 0
     eigen = False

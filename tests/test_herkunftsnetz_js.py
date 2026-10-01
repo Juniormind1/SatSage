@@ -329,14 +329,23 @@ const m = herkunftsnetzLotMischung({
     { key: "b", ende: true, typ: "fremd", anteil_sats: 70, pos_output: 80 },
   ],
 });
+const bund = herkunftsnetzLotMischung({
+  fokus_key: "f",
+  vorfahren: [
+    { key: "g", ende: true, typ: "buendel", anteil_sats: 40, pos_output: 10 },
+    { key: "o", ende: true, typ: "buendel", anteil_sats: 25, pos_output: 90 },
+    { key: "x", ende: true, typ: "buendel", anteil_sats: 35, pos_output: null },
+  ],
+});
 const ring = herkunftsnetzRingFarbe(null);
-console.log(JSON.stringify({ m, ring }));
+console.log(JSON.stringify({ m, bund, ring }));
 """],
             capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(aus.returncode, 0, aus.stderr)
         r = json.loads(aus.stdout)
         self.assertEqual(r["m"], {"gruen": 0, "orange": 70, "grau": 30})
+        self.assertEqual(r["bund"], {"gruen": 40, "orange": 25, "grau": 35})
         self.assertNotEqual(r["ring"], "gut")
 
     def test_x_labels_verdichten_sich_bis_auf_tage(self):

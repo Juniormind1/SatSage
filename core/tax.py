@@ -295,7 +295,8 @@ HINWEIS_UNTERGRENZE = (
 HINWEIS_OFFENSIV = (
     "Anschaffungslesart **offensiv**: erfüllt zählt nur der Sat-Anteil, "
     "dessen fremde oder Coinbase-Enden links der Fristgrenze liegen "
-    "(Lot-Ring). Orange (rechts der Grenze) und Grau (ohne Datum, Bündel, "
+    "(Lot-Ring). Ein datiertes Bündel zählt wie ein Zufluss an seinem "
+    "jüngsten Eingang. Orange (rechts der Grenze) und Grau (ohne Datum, "
     "Lücke) zählen nicht. Nicht mehr das älteste Datum für den ganzen UTXO. "
     "Bei einem unvollständigen Baum bleibt der graue Teil außen vor."
 )

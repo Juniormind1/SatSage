@@ -337,7 +337,8 @@ function herkunftsnetzFarbwert(name) {
  * Lose des Fokus aus den Endknoten des Netzes, gewichtet mit anteil_sats.
  *
  * Grün: Output-Zeit links der Fristgrenze. Orange: rechts davon.
- * Grau: ohne Datum oder Bündel/Lücke/Horizont. Eigene Zwischenhops zählen nicht.
+ * Datierte Bündel zählen mit ihrem jüngsten Eingang. Grau: ohne Datum,
+ * Lücke oder Horizont. Eigene Zwischenhops zählen nicht.
  */
 function herkunftsnetzLotMischung(daten) {
   const vorfahren = (daten && daten.vorfahren) || [];
@@ -353,7 +354,7 @@ function herkunftsnetzLotMischung(daten) {
     const typ = v.typ;
     let farbe = "grau";
     if (
-      (typ === "fremd" || typ === "coinbase")
+      (typ === "fremd" || typ === "coinbase" || typ === "buendel")
       && pos !== null
       && Number.isFinite(frist)
     ) {

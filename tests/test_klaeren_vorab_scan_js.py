@@ -57,10 +57,18 @@ async function ladeConfig() {
   }
 }
 const aufrufe = [];
+const gezeichnet = [];
+function zeichneScanPunkte(liste) { gezeichnet.push(liste.map((p) => p.key)); }
 async function api(url, opt) {
   aufrufe.push({ url: String(url), daten: (opt && opt.daten) || null });
   if (url === "/jobs/rescan") return { id: "job-" + opt.daten.wallet_id };
-  if (String(url).startsWith("/jobs/")) return { running: false, status: "done" };
+  if (String(url).startsWith("/jobs/")) {
+    return {
+      running: false,
+      status: "done",
+      result: { neu: [{ key: "entdeckt:0", time_ts: 1, value_sats: 1 }] },
+    };
+  }
   if (String(url).startsWith("/tax")) {
     return { gelb_keys: ["neu:0"], grau_keys: ["grauneu:0"], eintraege: [] };
   }
@@ -118,6 +126,7 @@ console.log(JSON.stringify({
   nachGelb,
   nachGrau,
   confirmN,
+  gezeichnet,
   abbruch: {
     laeuft: Zustand.herkunftAlleLaeuft,
     gelb: $("#herkunft-gelb").disabled,
@@ -155,6 +164,7 @@ class TestKlaerenVorabScan(unittest.TestCase):
         )
         self.assertEqual(r["nachGelb"][0]["wallet"], "nie")
         self.assertEqual(r["nachGelb"][3]["keys"], ["neu:0"])
+        self.assertEqual(r["gezeichnet"], [["entdeckt:0"]])
         self.assertEqual(
             [a["url"] for a in r["nachGrau"]],
             ["/trace/alle"],
