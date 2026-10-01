@@ -334,6 +334,59 @@ Offen: Browser-E2E-Smoke, Test-Marker/Schichten, weniger String-Suche in app.js,
 ---
 ---
 
+## Wallet-Nav · Fortschritt in % bis „gerade eben“
+
+**Stand:** 2026-10-01 · **offen** · UI / Scan
+
+Aufwand: **gering–mittel** (Fortschritt aus bekannten Zählern + Nav-Anzeige)
+
+Unter dem Walletnamen in der Seitenleiste (`web/chrome_nav.js`, `.nav-name` → bisher `.nav-marker`) einen **Fortschrittszähler in %**, möglicherweise als Gauge. Er bleibt stehen, bis dort **„gerade eben“ in Grün** erscheint (`wallet.fresh.justNowShort`, `.nav-marker-gut` — Cache-mtime unter 5 Minuten, UTXO-Tip fertig).
+
+**Nicht:** Sanktionsliste / Sanktions-UTXO-Scan.
+
+**Wo eine Prozentzahl ehrlich ist** (endliche, vor dem Lauf bekannte Menge; Rate aus schon erledigten Stücken):
+
+- Verlaufsscan (Electrs/Fulcrum): `noch {rest} von {gesamt} Adressen` in `core/fulcrum_history.py`. **Gauge-tauglich** — siehe unten.
+- UTXO-Abfrage auf schon bekannten Adressen: `Prüfe Adresse {done} von {gesamt}` in `core/fulcrum_wallet.py`.
+- Wallet-Alter: `Adresse {n} von {gesamt}` ebenda.
+
+### Verlaufsscan · `noch x von y` ist der Gauge
+
+`y` ist keine Chain-Zahl. Es ist `len(adressen)` der Liste, die `resolve_wallet_verlauf` aus `wallet.address_to_xpub` für dieses XPUB baut, bevor die erste History-Abfrage rausgeht (`httpserver/api/trace.py` `mit_fortschritt` → `core/wallet_sync_engine.py`). Die Liste steht vorher fest und wächst im Lauf nicht:
+
+1. HD-Ableitung bis `max_addresses` (Empfang und Change, je `max_addresses // 2`).
+2. UTXO-Cache: Adressen der gespeicherten UTXOs plus `scanned_addresses`.
+3. Verlaufs-Cache: Adressen früherer Einträge.
+4. `scan_end_index`: Horizont des letzten UTXO-/Gap-Scans, soweit er über der Start-Ableitung liegt.
+
+Leere Adressen zählen mit. `y` ist die geplante Abrufmenge, nicht „so viele Adressen haben Historie“. Nach Abbruch bleibt `y` gleich (`planned_addresses`); `x` ist nur der noch offene Rest.
+
+**Gauge:** Anteil erledigter Adressen `(y − x) / y`. Erst ab der Zeile `Frage Verlauf für y Adressen` — davor läuft ggf. noch der UTXO-/Gap-Scan, und es gibt kein `y`. Die Nadel misst abgefragte Adressen, nicht Zeit: eine Adresse mit langer Historie hält sie still, während `noch N Tx` läuft. Diesen inneren Zähler nicht in denselben Nenner mischen (`N` kennt der Lauf erst nach `get_history` dieser einen Adresse). Bei „Verlauf aller Wallets“ gilt `y` je XPUB; ein Gauge für den ganzen Job braucht die Summe der geplanten Listen, nicht das `y` des Wallets, das gerade dran ist.
+
+**Wo nicht** (Ende wächst oder ist kein Adresszähler): Gap-Scan (siehe unten), BIP-158 (Blockhöhen, weitere Pässe nach Treffern), `scantxoutset` (Core-Prozent, letzte Phase „finalisiere“ nicht linear). Dort kein geratener Adress-Prozentwert — höchstens der vorhandene Block-/Set-Fortschritt, klar als solcher beschriftet, oder weiter der bisherige Kurztext (`Verlauf…` / `UTXO…` / `n UTXOs…`).
+
+### Gap-Scan · `gap_limit` ist kein Nenner
+
+`gap_limit` (`UTXO_SCAN_GAP_LIMIT` = 100, `core/wallet_sync_engine.py`) bricht den Walk ab, nachdem so viele Indizes **in Folge** leer waren. Der Zähler `gap` springt bei jedem Treffer auf 0. Ein Gauge `(geprüfte Indizes) / gap_limit` stünde nach den ersten 100 Indizes auf 100 % und müsste beim nächsten Treffer zurückspringen — das Gegenteil von `noch x von y`, wo `y` vor der ersten Abfrage feststeht. Genau deshalb ist das Limit 100 und nicht 20: Wasabi/CoinJoin haben größere Lücken, der Lauf soll sich verlängern.
+
+Die echte Walk-Obergrenze `max_index_per_chain` (`MAX_TRACE_ADDRESS_SEARCH` bzw. `max_addresses // 2`) ist endlich, als Gauge aber irreführend: der Scan soll lange vorher aufhören, die Nadel bliebe bei einem normalen Wallet nahe 0.
+
+Ehrlich, aber kein Wallet-Fortschritt: ein **Fenster-Gauge der aktuellen Lücke** `gap / gap_limit` („20 von 100 leer“). Der läuft auf 100 % zu und setzt sich bei einem Treffer zurück. Das heißt „wie nah am Abbruch“, nicht „wie viel vom Wallet noch fehlt“.
+
+### Gap-Scan · wachsender Horizont ist gauge-tauglich
+
+Denkbar, und die Nadel darf dabei schrumpfen (dieselbe Schätzungskorrektur wie in Windows-Kopierdialogen):
+
+`n` ist nicht die Konstante `gap_limit`, sondern der **aktuelle Horizont** — wie weit der Scan mindestens noch muss, bevor er aufhören darf. Ohne Treffer ist das `gap_limit` Indizes. Nach einem Treffer an Index `i` rückt das früheste Ende auf `i + gap_limit`: `n` springt nach vorn, der erledigte Anteil `geprüfte Indizes / n` schrumpft auf die neue Ratio. Solange nur leere Indizes kommen, bleibt `n` stehen und die Nadel läuft auf 100 %. Bei `gap_limit` leeren Indizes in Folge ist die Chain fertig (`erledigt == n`). Die harte Kappe `max_index_per_chain` deckelt `n`; darüber hinaus verlängert auch ein Treffer den Balken nicht.
+
+Empfang und Change sind zwei solche Horizonte. Unter dem Walletnamen starten beide bei `gap_limit`, `n` ist ihre Summe, ein Treffer verlängert nur den Anteil seiner Chain. Ein Light-Rescan startet bei `scan_end_index` mit demselben Fenster.
+
+Das misst „wie nah am frühesten erlaubten Stopp“. Sobald die Adressliste feststeht, übernimmt der Verlaufs-Gauge `(y − x) / y` — der wächst nur noch.
+
+Gauge ersetzt den Marker nur während der Arbeit. Sobald die Frische grün „gerade eben“ ist, verschwindet er; der grüne Text bleibt die Fertigmeldung.
+
+---
+
 ## Web-UI · Mobile-Darstellung für Tablet
 
 **Stand:** 2026-09-10 · **offen** · notiert
