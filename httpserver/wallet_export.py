@@ -394,6 +394,9 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
 
     Enthält denselben Multisig-Schutz wie beim Speichern: ungesendete Multisig
     bleiben erhalten, damit eine ältere Oberfläche sie nicht still löscht.
+
+    Die aktuelle Oberfläche setzt ``kennt_multisig``. Dann ist ein fehlender
+    Eintrag eine Löschung, kein Versehen einer Fassung, die Multisig nicht kennt.
     """
     from server import (
         ApiError,
@@ -507,6 +510,10 @@ def _wallets_aus_payload(state: AppState, payload: dict) -> list[WalletEntry]:
     # zurückschickt — eine ältere Fassung kennt sie nicht. Sie stillschweigend
     # zu verlieren wäre nicht wiedergutzumachen: Die Cosigner stehen dann
     # nirgends mehr.
+    # Die aktuelle Oberfläche meldet kennt_multisig. Fehlt der Eintrag dann,
+    # hat der Nutzer ihn gelöscht — auch wenn es die einzige Multisig war.
+    if payload.get("kennt_multisig") is True:
+        return entries
     gesendete_ids = {wallets_mod.eintrag_id(e) for e in entries}
     for vorhandener in vorhanden:
         if vorhandener.is_multisig and (

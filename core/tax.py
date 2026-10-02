@@ -1017,7 +1017,11 @@ def auswerten(
         "hat_verlauf": mit_verlauf,
         "abgaenge": sorted(abgaenge, key=lambda a: a["abgang_datum"]),
         "zeitstrahl": _zeitstrahl_mit_wallet(
-            zeitstrahl(eintraege, ende, haltefrist_jahre, stichtag=stichtag),
+            zeitstrahl(eintraege, ende, haltefrist_jahre, stichtag=stichtag)
+            if eintraege
+            else leerer_zeitstrahl(
+                haltefrist_jahre, stichtag, jetzt=jetzt,
+            ),
             wallet,
         ),
         "hinweise": hinweise,
@@ -1274,6 +1278,95 @@ def _zeitstrahl_mit_wallet(strahl: dict, wallet) -> dict:
             xpub_cache._xpub_cache_key(schluessel) if schluessel else ""
         )
     return strahl
+
+
+#: Leerer Dotplot: sichtbares Y-Fenster, solange noch kein UTXO da ist.
+LEER_Y_MIN_SATS = 1_000
+LEER_Y_MAX_SATS = 1_000_000
+
+
+def _mittag(zeitpunkt: datetime) -> datetime:
+    """Kalendertag, mittags — dieselbe Kante wie die Achsenbeschriftung."""
+    return zeitpunkt.replace(hour=12, minute=0, second=0, microsecond=0)
+
+
+def leere_achse_von(
+    heute: datetime,
+    haltefrist_jahre: int,
+    stichtag: date | None,
+) -> datetime:
+    """
+    Linke Kante ohne UTXOs.
+
+    Ohne Stichtag in der Vergangenheit: heute minus zweimal die Haltefrist.
+    Mit Stichtag: dieselbe Spanne noch einmal davor, der Stichtag liegt
+    in der Mitte zwischen links und heute.
+    """
+    bis = _mittag(heute)
+    s_tag = stichtag
+    if s_tag is not None and s_tag < bis.date():
+        s = datetime(s_tag.year, s_tag.month, s_tag.day, 12, 0, 0)
+        return s - (bis - s)
+    jahre = max(0, int(haltefrist_jahre or 0)) * 2
+    return plus_jahre(bis, -jahre)
+
+
+def leerer_zeitstrahl(
+    haltefrist_jahre: int,
+    stichtag: date | None = None,
+    *,
+    jetzt: datetime | None = None,
+) -> dict:
+    """
+    Dotplot ohne UTXOs.
+
+    Rechts ist heute. Die Betragsachse läuft von 1 000 bis 1 000 000 sats
+    (``y_min_sats`` / ``max_sats``). Sobald Eingänge da sind, baut
+    ``zeitstrahl()`` die Achsen aus den Daten — dieser Rahmen gilt nur leer.
+    """
+    bis = _mittag(jetzt or datetime.now())
+    von = leere_achse_von(bis, haltefrist_jahre, stichtag)
+    # Frist 0 ohne vergangenen Stichtag: beide Kanten wären heute.
+    if von >= bis:
+        von = bis - timedelta(days=1)
+
+    spanne = (bis - von).total_seconds()
+
+    def prozent(zeitpunkt: datetime) -> float:
+        return max(0.0, min(100.0, (zeitpunkt - von).total_seconds() / spanne * 100))
+
+    frist_grenze = (
+        plus_jahre(bis, -int(haltefrist_jahre)) if int(haltefrist_jahre or 0) > 0 else None
+    )
+    frist_pos = None
+    frist_datum = ""
+    if frist_grenze is not None and von <= frist_grenze <= bis:
+        frist_pos = round(prozent(frist_grenze), 3)
+        frist_datum = frist_grenze.strftime("%d.%m.%Y")
+
+    schritte = 4
+    ticks = [
+        {
+            "pos": round(i / schritte * 100, 3),
+            "label": (von + timedelta(seconds=spanne * i / schritte)).strftime("%m/%Y"),
+        }
+        for i in range(schritte + 1)
+    ]
+    return {
+        "vorhanden": True,
+        "leer": True,
+        "von": von.strftime("%d.%m.%Y"),
+        "bis": bis.strftime("%d.%m.%Y"),
+        "frist_pos": frist_pos,
+        "frist_datum": frist_datum,
+        "events": [],
+        "geister_saldo": None,
+        "ticks": ticks,
+        "max_sats": LEER_Y_MAX_SATS,
+        "y_min_sats": LEER_Y_MIN_SATS,
+        "y_scale": "log",
+        "verdeckt": 0,
+    }
 
 
 def zeitstrahl(

@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Dotplot:** Ohne UTXOs bleibt die Fläche sichtbar. Rechts ist heute, links heute minus zweimal die Haltefrist. Liegt ein Stichtag in der Vergangenheit, sitzt er in der Mitte: dieselbe Spanne noch einmal davor. Die Betragsachse zeigt 1 000 bis 1 000 000 sats. Sobald UTXOs da sind, bauen die Achsen wieder aus den Daten.
 - **Steuerjahr · Lot-Ring:** Fehlende Zeiten an Herkunfts-Enden kommen wie im Overlay aus Tx- und Header-Cache. Unvollständige Bäume in `immutable_cache` werden nachgezogen, vollständige bleiben unverändert. Ein ganz grüner Lot-Ring färbt den Punkt grün.
 - **Herkunft tracen:** Der Massenlauf geht hop-weise über alle offenen UTXOs. Kurze Ketten sind nach der ersten Runde fertig und sichtbar; Remix-Nüsse laufen in späteren Runden weiter, ohne die anderen zu blockieren.
 - **Einstellungen · Walletnamen in Berichten:** Neue Karte. Häkchen „Echte Walletnamen in externen Berichten verwenden“ aus: HTML- und CSV-Export nutzen einen gemeinsamen Namen (Vorgabe Eigenverwahrung), den man darunter einträgt. Die Oberfläche behält die echten Walletnamen. An: Export wie bisher mit den Namen aus den Wallet-Einstellungen.

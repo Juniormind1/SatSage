@@ -2189,6 +2189,60 @@ class TestWalletBloeckeUeberDieApi(ApiTestBasis):
         )
         self.assertIn("sortedmulti", deskriptoren[0])
 
+    def test_put_mit_kennt_multisig_loescht_sie(self):
+        """Aktuelle Oberfläche darf Multisig löschen, auch die einzige."""
+        self.multisig_eintragen()
+        wallets = self.wallets()
+        single = [w for w in wallets if not w["is_multisig"]]
+        multisig = [w for w in wallets if w["is_multisig"]]
+        self.assertEqual(len(multisig), 1)
+        status, koerper = self.anfrage(
+            "/api/config/wallets/cache-vorschau",
+            methode="POST",
+            daten={
+                "wallets": [
+                    {"id": w["id"], "name": w["name"],
+                     "script_type": w["script_type"],
+                     "max_addresses": w["max_addresses"]}
+                    for w in single
+                ],
+                "kennt_multisig": True,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            [e["wallet_id"] for e in koerper["entfernt"]],
+            [multisig[0]["id"]],
+        )
+        status, _ = self.anfrage(
+            "/api/config/wallets",
+            methode="PUT",
+            daten={
+                "wallets": [
+                    {"id": w["id"], "name": w["name"],
+                     "script_type": w["script_type"],
+                     "max_addresses": w["max_addresses"]}
+                    for w in single
+                ],
+                "kennt_multisig": True,
+                "confirm": False,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.state.reload()
+        self.assertEqual(
+            [w for w in self.wallets() if w["is_multisig"]],
+            [],
+        )
+        werte = server.EnvFile.load(self.env_pfad).values()
+        deskriptoren = [
+            v for k, v in werte.items() if k.endswith("_DESC") and v.strip()
+        ]
+        self.assertFalse(
+            any("sortedmulti" in v for v in deskriptoren),
+            "Die Multisig-Wallet steht nach dem Löschen noch in der .env.",
+        )
+
     def test_multisig_ist_nicht_im_analyse_stack(self):
         self.multisig_eintragen()
         args = self.state.args_namespace()

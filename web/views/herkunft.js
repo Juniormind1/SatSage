@@ -2857,6 +2857,7 @@ function zeigeKlaerenLaeuftSchon() {
 /**
  * Gelb und grau: erst fehlende UTXO-Scans, danach die bisherige Klären-Routine.
  * *sammle* liefert die Schlüssel oder null, wenn nichts zu tun ist (Meldung selbst).
+ * Ein Objekt ist ebenfalls ein Auftrag — Gelb hängt den grauen Lauf davor.
  */
 async function klaerenNachUngescannten(sammle, starte) {
   if (Zustand.herkunftAlleLaeuft) {
@@ -2882,83 +2883,72 @@ async function klaerenNachUngescannten(sammle, starte) {
   return starte(keys, Boolean(vorab.haeltSperre));
 }
 
-async function herkunftGrauUtxos() {
-  // Graue Scorecard: noch nie analysiert. Der Massenlauf ohne Schlüssel
-  // nimmt nur UTXOs ohne vollen Baum — ein grauer Punkt kann einen
-  // unvollständigen Cache haben und würde sonst sofort als „nichts zu tun“
-  // enden. Deshalb dieselben Schlüssel wie der Punkt selbst.
-  return klaerenNachUngescannten(async () => {
+function steuerAbfrageFuerKlaeren() {
+  const jahr = $("#jahr-wahl")?.value || "";
+  const frist = $("#frist-wahl")?.value || "";
+  const stichtag = steuerEinstellungen().stichtag || "";
+  return (
+    `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
+    `&stichtag=${encodeURIComponent(stichtag)}`
+  );
+}
+
+/** Steuerjahr-Stand mit grau_keys und gelb_keys. Fehlende Listen neu holen. */
+async function steuerStandFuerKlaeren() {
   let daten = Zustand.steuer;
-  if (!daten || !Array.isArray(daten.grau_keys)) {
-    const jahr = $("#jahr-wahl")?.value || "";
-    const frist = $("#frist-wahl")?.value || "";
-    const stichtag = steuerEinstellungen().stichtag || "";
-    const abfrage =
-      `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
-      `&stichtag=${encodeURIComponent(stichtag)}`;
-    daten = await api(`/tax${abfrage}&seite=1&limit=0`);
+  const hatGrau = daten && Array.isArray(daten.grau_keys);
+  const hatGelb = daten && (
+    Array.isArray(daten.eintraege) || Array.isArray(daten.gelb_keys)
+  );
+  if (!hatGrau || !hatGelb) {
+    daten = await api(`/tax${steuerAbfrageFuerKlaeren()}&seite=1&limit=0`);
   }
-  const keys = Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
-  if (!keys.length) {
-    const k = $("#steuer-meldung");
-    if (!k) return null;
-    k.className = "hinweis hinweis-warn";
-    setzeText(k, t("trace.allOriginsNothing"));
-    k.hidden = false;
-    return null;
-  }
-  return keys;
-  }, (keys, uebernommen) => herkunftAllerUtxos({
+  return daten || {};
+}
+
+function grauKeysAus(daten) {
+  return Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
+}
+
+function gelbKeysAus(daten) {
+  if (!daten) return [];
+  if (Array.isArray(daten.gelb_keys)) return daten.gelb_keys;
+  const liste = daten.eintraege || [];
+  return liste
+    .filter((e) => e.geprueft && !e.erfuellt)
+    .map((e) => `${e.txid}:${e.vout}`);
+}
+
+function zeigeKeinGelbZumKlaeren() {
+  const k = $("#steuer-meldung");
+  if (!k) return;
+  k.className = "hinweis hinweis-warn";
+  setzeText(k, t("tax.noYellowToClarify") !== "tax.noYellowToClarify"
+    ? t("tax.noYellowToClarify")
+    : t("ui.hard.d3b790167b"));
+  k.hidden = false;
+}
+
+/** Dieselben Argumente wie der graue Scorecard-Knopf. *danach* nur für Gelb. */
+function starteGrauKlaerung(keys, uebernommen, danach) {
+  return herkunftAllerUtxos({
     knopf: "#herkunft-grau",
     lauf: "#herkunft-lauf",
     text: "#herkunft-text",
     abbruch: "#herkunft-abbruch",
     meldung: "#steuer-meldung",
-    danach: ladeSteuerjahrMitKandidaten,
+    danach: danach || ladeSteuerjahrMitKandidaten,
     utxo_keys: keys,
     steuer: false,
     gelbVertiefen: false,
     erzwingen: true,
     uebernommen,
     keinPauschalScan: true,
-  }));
+  });
 }
 
-async function herkunftGelbUtxos() {
-  // Gelbe Scorecard (geprueft && !erfuellt): gründlich bis extern/Coinbase.
-  // Steuer-Horizont allein reicht nicht — gelb ist erst „fertig“, wenn grün
-  // oder der volle Baum bestätigt, dass gelb korrekt ist.
-  return klaerenNachUngescannten(async () => {
-  let daten = Zustand.steuer;
-  if (!daten || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.gelb_keys))) {
-    const jahr = $("#jahr-wahl")?.value || "";
-    const frist = $("#frist-wahl")?.value || "";
-    const stichtag = steuerEinstellungen().stichtag || "";
-    const abfrage =
-      `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
-      `&stichtag=${encodeURIComponent(stichtag)}`;
-    daten = await api(`/tax${abfrage}&seite=1&limit=0`);
-  }
-  // Seitenweise nennt der Server alle gelben Schlüssel (nicht nur die Seite).
-  const liste = daten.eintraege || [];
-  const keys = Array.isArray(daten.gelb_keys)
-    ? daten.gelb_keys
-    : liste
-      .filter((e) => e.geprueft && !e.erfuellt)
-      .map((e) => `${e.txid}:${e.vout}`);
-  if (!keys.length) {
-    const k = $("#steuer-meldung");
-    if (k) {
-      k.className = "hinweis hinweis-warn";
-      setzeText(k, t("tax.noYellowToClarify") !== "tax.noYellowToClarify"
-        ? t("tax.noYellowToClarify")
-        : t("ui.hard.d3b790167b"));
-      k.hidden = false;
-    }
-    return null;
-  }
-  return keys;
-  }, (keys, uebernommen) => herkunftAllerUtxos({
+function starteGelbKlaerung(keys, uebernommen) {
+  return herkunftAllerUtxos({
     knopf: "#herkunft-gelb",
     lauf: "#herkunft-lauf",
     text: "#herkunft-text",
@@ -2971,7 +2961,89 @@ async function herkunftGelbUtxos() {
     gelbVertiefen: true,
     uebernommen,
     keinPauschalScan: true,
-  }));
+  });
+}
+
+/**
+ * Grauer Lauf aus Gelb ist fertig (gut): Steuerjahr neu lesen, dann Gelb.
+ * Abbruch und Fehler beenden hier — Gelb startet nicht hinterher.
+ */
+function gelbNachGrauFortsetzen(info) {
+  if (!info || info.art !== "gut") return;
+  Promise.resolve()
+    .then(async () => {
+      if (typeof ladeSteuerjahrMitKandidaten === "function") {
+        try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Schlüssel unten */ }
+      }
+      let daten = Zustand.steuer;
+      if (
+        !daten
+        || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.gelb_keys))
+      ) {
+        Zustand.steuer = null;
+        daten = await steuerStandFuerKlaeren();
+      }
+      const keys = gelbKeysAus(daten);
+      if (!keys.length) {
+        zeigeKeinGelbZumKlaeren();
+        return;
+      }
+      return starteGelbKlaerung(keys, false);
+    })
+    .catch((fehler) => {
+      Zustand.herkunftAlleLaeuft = false;
+      if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+      const kasten = $("#steuer-meldung");
+      if (!kasten) return;
+      kasten.className = "hinweis hinweis-krit";
+      setzeText(kasten, fehler.message || String(fehler));
+      kasten.hidden = false;
+    });
+}
+
+async function herkunftGrauUtxos() {
+  // Graue Scorecard: noch nie analysiert. Der Massenlauf ohne Schlüssel
+  // nimmt nur UTXOs ohne vollen Baum — ein grauer Punkt kann einen
+  // unvollständigen Cache haben und würde sonst sofort als „nichts zu tun“
+  // enden. Deshalb dieselben Schlüssel wie der Punkt selbst.
+  return klaerenNachUngescannten(async () => {
+    const keys = grauKeysAus(await steuerStandFuerKlaeren());
+    if (!keys.length) {
+      const k = $("#steuer-meldung");
+      if (!k) return null;
+      k.className = "hinweis hinweis-warn";
+      setzeText(k, t("trace.allOriginsNothing"));
+      k.hidden = false;
+      return null;
+    }
+    return keys;
+  }, (keys, uebernommen) => starteGrauKlaerung(keys, uebernommen));
+}
+
+async function herkunftGelbUtxos() {
+  // Nach dem UTXO-Scan ungescannter Portfolios: derselbe Grau-Lauf wie der
+  // graue Knopf. Erst wenn der gut durch ist, die gelben Schlüssel.
+  // Gelb (geprueft && !erfuellt) läuft gründlich bis extern/Coinbase.
+  return klaerenNachUngescannten(async () => {
+    const daten = await steuerStandFuerKlaeren();
+    const grau = grauKeysAus(daten);
+    if (grau.length) return { art: "grau", keys: grau };
+    const gelb = gelbKeysAus(daten);
+    if (!gelb.length) {
+      zeigeKeinGelbZumKlaeren();
+      return null;
+    }
+    return { art: "gelb", keys: gelb };
+  }, (auftrag, uebernommen) => {
+    if (auftrag && auftrag.art === "grau") {
+      return starteGrauKlaerung(
+        auftrag.keys,
+        uebernommen,
+        gelbNachGrauFortsetzen,
+      );
+    }
+    return starteGelbKlaerung(auftrag.keys, uebernommen);
+  });
 }
 
 async function herkunftAllerUtxos(ziele = {

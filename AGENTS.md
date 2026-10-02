@@ -57,6 +57,17 @@ Nicht erlaubt, auch nicht kurz und auch nicht, weil dort die laufende GUI, ihre 
 
 Läuft die GUI woanders, sagt der Assistent nur, welche Datei aus diesem Worktree der Nutzer wohin kopiert. Das Kopieren macht der Nutzer. Die App darf danach ihre eigene Log-Datei neben der Executable schreiben; der Assistent liest sie nur, wenn der Nutzer sie in den Worktree legt oder den Inhalt hier einfügt.
 
+## HART · Missverständliche Prompts nachfragen
+
+**Ist ein Auftrag mehrdeutig, klärt der Assistent ihn mit dem Nutzer durch konkrete Rückfragen. Er rät nicht.**
+
+Mehrdeutig heißt: ein Wort lässt mehrere Umsetzungen zu, eine Grenze oder ein Sonderfall ist nicht gesagt, oder der Assistent müsste wählen, was der Nutzer „wohl gemeint“ hat.
+
+- Fragen, bevor Code, Tests oder Doku daraus entstehen.
+- Jede Frage nennt die konkreten Varianten. Kein Raten in der Frage verstecken.
+- Keine Heuristik, die eine Lesart still zur Regel macht (Fallback, „näher an heute“, „was üblich wäre“, Sonderfall selbst ausgedacht).
+- Erst umsetzen, wenn die Antwort die Wahl festlegt.
+
 ## HART · Core-RPC nur aus der Allowlist
 
 Dealbreaker **T14**. Jeder bitcoind-Aufruf geht durch `BitcoinRpcClient.call` in `core/bitcoind_rpc.py`; erlaubt sind nur `RPC_KERN` (lesend), `RPC_WALLET_IMPORT` (`listdescriptors` nur ohne private Schlüssel) und `RPC_LAB_REGTEST` (nur `NETWORK=regtest`). Keine wallet-schreibenden/signierenden RPCs, kein Roh-JSON-RPC, kein `bitcoin-cli` im Produktivcode. `RpcAllowlistError` nie in einen Fallback verschlucken (`except RpcAllowlistError: raise` vor `except Exception`). Neue Methode = Maintainer-Freigabe + Doku (`.env.example`, Handbuch „Bitcoin Core absichern“, README) + Tests `tests/test_rpc_allowlist*.py`.

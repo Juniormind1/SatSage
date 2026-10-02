@@ -653,6 +653,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("function frageCacheBeiWalletLoeschung", self.js)
         self.assertIn('"/config/wallets/cache-vorschau"', self.js)
         self.assertIn("cache_entfernte_loeschen", self.js)
+        self.assertIn("kennt_multisig: true", self.js)
         self.assertIn("window.confirm", self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("Zugehörigen Analyse-Cache auch löschen", de)

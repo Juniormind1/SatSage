@@ -1309,6 +1309,15 @@ function zeitstrahlYSatsAn(maxSats, yPct) {
   return Math.expm1(Math.log1p(max) * (yPct / 100));
 }
 
+/** log1p-Daten-% eines Betrags auf der Achse 0 … max. */
+function zeitstrahlYPctFuerSats(maxSats, sats) {
+  const max = Math.max(Number(maxSats) || 0, 0);
+  const ziel = Math.max(0, Number(sats) || 0);
+  if (max <= 0 || ziel <= 0) return 0;
+  if (ziel >= max) return 100;
+  return (Math.log1p(ziel) / Math.log1p(max)) * 100;
+}
+
 function zeichneZeitstrahlYAchse(maxSats) {
   const yAchse = $("#achse-y");
   if (!yAchse) return;
@@ -1495,8 +1504,11 @@ function bindeZeitstrahlInteraktion() {
 function zeichneZeitstrahl(daten, optionen = {}) {
   const karte = $("#zeitstrahl-karte");
   const strahl = daten.zeitstrahl;
+  const events = (strahl && strahl.events) || [];
+  // Ohne UTXOs bleibt die Fläche sichtbar, mit festem Ausschnitt.
+  const leerRahmen = Boolean(strahl && strahl.leer && strahl.von && strahl.bis);
 
-  if (!strahl || !strahl.vorhanden || strahl.events.length === 0) {
+  if (!strahl || !strahl.vorhanden || (!events.length && !leerRahmen)) {
     karte.hidden = true;
     ZeitstrahlAnsicht.daten = null;
     if (typeof herkunftsnetzBeenden === "function") herkunftsnetzBeenden();
@@ -1509,8 +1521,13 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     ZeitstrahlAnsicht.x0 = 0;
     ZeitstrahlAnsicht.x1 = 100;
     if (typeof Herkunftsnetz !== "undefined") Herkunftsnetz.fensterGeoeffnet = false;
-    ZeitstrahlAnsicht.y0 = 0;
-    ZeitstrahlAnsicht.y1 = 100;
+    if (leerRahmen && Number(strahl.y_min_sats) > 0) {
+      ZeitstrahlAnsicht.y0 = zeitstrahlYPctFuerSats(strahl.max_sats, strahl.y_min_sats);
+      ZeitstrahlAnsicht.y1 = 100;
+    } else {
+      ZeitstrahlAnsicht.y0 = 0;
+      ZeitstrahlAnsicht.y1 = 100;
+    }
   }
   if (!ZeitstrahlAnsicht.hoehe || ZeitstrahlAnsicht.hoehe === 220) {
     ZeitstrahlAnsicht.hoehe = liesZeitstrahlHoehe();

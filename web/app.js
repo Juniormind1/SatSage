@@ -476,7 +476,7 @@ async function frageCacheBeiWalletLoeschung(nutzlast) {
   try {
     vorschau = await api("/config/wallets/cache-vorschau", {
       methode: "POST",
-      daten: { wallets: nutzlast },
+      daten: { wallets: nutzlast, kennt_multisig: true },
     });
   } catch (fehler) {
     meldung(t("ui.hard.592e956ae3", { msg: fehler.message }), "krit");
@@ -562,6 +562,7 @@ async function speichereWallets(
       methode: "PUT",
       daten: {
         wallets: nutzlast,
+        kennt_multisig: true,
         confirm: bestaetigt,
         cache_entfernte_loeschen: Boolean(cacheEntfernteLoeschen),
       },

@@ -96,10 +96,14 @@ const ohneKontext = walletsOhneUtxoScan({
   wallets: [{ id: "nie", has_cache: false, utxo_count: 0 }],
 }, 200);
 await herkunftGelbUtxos();
+for (let i = 0; i < 6; i += 1) {
+  await new Promise((r) => setTimeout(r, 0));
+}
 const nachGelb = aufrufe.map((a) => ({
   url: a.url.split("?")[0],
   wallet: a.daten && a.daten.wallet_id,
   keys: a.daten && a.daten.utxo_keys,
+  erzwingen: Boolean(a.daten && a.daten.erzwingen),
 }));
 aufrufe.length = 0;
 Zustand.steuer = { gelb_keys: ["alt:0"], grau_keys: ["altg:0"], eintraege: [] };
@@ -107,6 +111,7 @@ await herkunftGrauUtxos();
 const nachGrau = aufrufe.map((a) => ({
   url: a.url.split("?")[0],
   keys: a.daten && a.daten.utxo_keys,
+  erzwingen: Boolean(a.daten && a.daten.erzwingen),
 }));
 aufrufe.length = 0;
 Zustand.config.wallets.find((w) => w.id === "nie").has_cache = false;
@@ -160,16 +165,23 @@ class TestKlaerenVorabScan(unittest.TestCase):
         self.assertEqual(r["ohneKontext"], [])
         self.assertEqual(
             [a["url"] for a in r["nachGelb"]],
-            ["/jobs/rescan", "/jobs/job-nie", "/tax", "/trace/alle"],
+            [
+                "/jobs/rescan", "/jobs/job-nie", "/tax", "/trace/alle",
+                "/tax", "/trace/alle",
+            ],
         )
         self.assertEqual(r["nachGelb"][0]["wallet"], "nie")
-        self.assertEqual(r["nachGelb"][3]["keys"], ["neu:0"])
+        self.assertEqual(r["nachGelb"][3]["keys"], ["grauneu:0"])
+        self.assertTrue(r["nachGelb"][3]["erzwingen"])
+        self.assertEqual(r["nachGelb"][5]["keys"], ["neu:0"])
+        self.assertFalse(r["nachGelb"][5]["erzwingen"])
         self.assertEqual(r["gezeichnet"], [["entdeckt:0"]])
         self.assertEqual(
             [a["url"] for a in r["nachGrau"]],
             ["/trace/alle"],
         )
         self.assertEqual(r["nachGrau"][0]["keys"], ["altg:0"])
+        self.assertTrue(r["nachGrau"][0]["erzwingen"])
         self.assertEqual(r["confirmN"], 0)
         self.assertFalse(r["abbruch"]["laeuft"])
         self.assertFalse(r["abbruch"]["gelb"])

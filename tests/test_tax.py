@@ -10,7 +10,7 @@ import io
 import json
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import main
@@ -706,10 +706,48 @@ class TestZeitstrahl(unittest.TestCase):
     def strahl(self, utxos, jahr=2026, frist=1):
         return auswerten_zum_jahresende(utxos, jahr, haltefrist_jahre=frist)["zeitstrahl"]
 
-    def test_ohne_eingaenge_nichts_zu_zeichnen(self):
+    def test_ohne_eingaenge_zeigt_den_leeren_rahmen(self):
+        """Ohne UTXO bleibt der Plot da: rechts der Bezug, links 2× Haltefrist."""
         strahl = self.strahl([])
-        self.assertFalse(strahl["vorhanden"])
+        self.assertTrue(strahl["vorhanden"])
+        self.assertTrue(strahl["leer"])
         self.assertEqual(strahl["events"], [])
+        # auswerten_zum_jahresende friert „heute“ auf den 01.01.2027.
+        # Haltefrist im Test ist 1 Jahr → links zwei Jahre davor.
+        self.assertEqual(strahl["bis"], "01.01.2027")
+        self.assertEqual(strahl["von"], "01.01.2025")
+        self.assertEqual(strahl["y_min_sats"], 1_000)
+        self.assertEqual(strahl["max_sats"], 1_000_000)
+        self.assertAlmostEqual(strahl["frist_pos"], 50.0, delta=0.2)
+
+    def test_leere_achse_ohne_stichtag_zwei_haltefristen(self):
+        from core.tax import leerer_zeitstrahl
+
+        strahl = leerer_zeitstrahl(3, None, jetzt=datetime(2026, 10, 2, 8, 15))
+        self.assertEqual(strahl["bis"], "02.10.2026")
+        self.assertEqual(strahl["von"], "02.10.2020")
+        self.assertEqual(strahl["y_min_sats"], 1_000)
+        self.assertEqual(strahl["max_sats"], 1_000_000)
+
+    def test_leere_achse_spiegelt_einen_vergangenen_stichtag(self):
+        from core.tax import leerer_zeitstrahl
+
+        tag = date(2024, 1, 15)
+        strahl = leerer_zeitstrahl(1, tag, jetzt=datetime(2026, 10, 2, 19, 0))
+        von = datetime.strptime(strahl["von"], "%d.%m.%Y")
+        bis = datetime.strptime(strahl["bis"], "%d.%m.%Y")
+        stichtag_mittag = datetime(tag.year, tag.month, tag.day)
+        self.assertEqual(bis, datetime(2026, 10, 2))
+        self.assertEqual(bis - stichtag_mittag, stichtag_mittag - von)
+
+    def test_stichtag_heute_oder_spaeter_nimmt_die_haltefrist(self):
+        from core.tax import leerer_zeitstrahl
+
+        jetzt = datetime(2026, 10, 2, 12)
+        for tag in (date(2026, 10, 2), date(2027, 1, 1)):
+            strahl = leerer_zeitstrahl(1, tag, jetzt=jetzt)
+            self.assertEqual(strahl["von"], "02.10.2024", tag)
+            self.assertEqual(strahl["bis"], "02.10.2026")
 
     def test_erster_eingang_liegt_nach_sechs_monaten_polster(self):
         """Achse beginnt 6 Monate vor dem ältesten UTXO — nicht bei pos 0."""
