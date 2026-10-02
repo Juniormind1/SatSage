@@ -460,6 +460,16 @@ async function start() {
   $("#steuer-uebernehmen").addEventListener("click", speichereSteuerEinstellungen);
   const personBtn = $("#person-uebernehmen");
   if (personBtn) personBtn.addEventListener("click", speicherePersonEinstellungen);
+  const berichtWalletBtn = $("#bericht-wallet-uebernehmen");
+  if (berichtWalletBtn) {
+    berichtWalletBtn.addEventListener("click", speichereBerichtWalletEinstellungen);
+  }
+  const berichtWalletEcht = $("#bericht-wallet-echt");
+  if (berichtWalletEcht) {
+    berichtWalletEcht.addEventListener("change", () => {
+      setzeBerichtWalletAliasAktiv(berichtWalletEcht.checked);
+    });
+  }
   bindeAppPasswortUi();
   zeichneAppPasswort();
   const lernPlebs = $("#lernhinweise-plebs");

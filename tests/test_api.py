@@ -214,6 +214,33 @@ class TestKonfiguration(ApiTestBasis):
         self.assertNotIn("esplora", quellen)
         self.assertTrue(quellen["own_fulcrum"]["configured"])
 
+    def test_bericht_wallet_default_ist_alias(self):
+        _, cfg = self.anfrage("/api/config")
+        self.assertFalse(cfg["bericht_wallet"]["echte"])
+        self.assertEqual(cfg["bericht_wallet"]["alias"], "Eigenverwahrung")
+
+    def test_bericht_wallet_wird_gespeichert(self):
+        status, körper = self.anfrage(
+            "/api/config/bericht-wallet", methode="PUT",
+            daten={"echte": True, "alias": "Self-Custody"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["bericht_wallet"]["echte"])
+        self.assertEqual(körper["bericht_wallet"]["alias"], "Self-Custody")
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte["STEUER_BERICHT_WALLET_ECHT"], "1")
+        self.assertEqual(werte["STEUER_BERICHT_WALLET_ALIAS"], "Self-Custody")
+
+        _, aus = self.anfrage(
+            "/api/config/bericht-wallet", methode="PUT",
+            daten={"echte": False, "alias": "Eigenverwahrung"},
+        )
+        self.assertFalse(aus["bericht_wallet"]["echte"])
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["STEUER_BERICHT_WALLET_ECHT"],
+            "0",
+        )
+
 
 class TestWalletsSpeichern(ApiTestBasis):
 
@@ -1992,6 +2019,13 @@ class TestExport(ApiTestBasis):
         text = inhalt.decode("utf-8-sig")
         self.assertIn("Steuerjahr 2026", text)
         self.assertIn("0,84000000", text)
+
+    def test_csv_nutzt_einheitliches_wallet_etikett(self):
+        _, inhalt = self._hole_roh("/api/tax/export.csv?jahr=2026")
+        text = inhalt.decode("utf-8-sig")
+        self.assertNotIn("Cold Storage", text)
+        self.assertNotIn("Ledger Alt", text)
+        self.assertIn("Eigenverwahrung", text)
 
     def test_bericht_ist_eigenstaendiges_html(self):
         antwort, inhalt = self._hole_roh("/api/tax/bericht.html?jahr=2026")

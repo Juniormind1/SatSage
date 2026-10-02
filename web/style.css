@@ -1199,6 +1199,27 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 .person-einstellungen > .knopf {
   align-self: flex-start;
 }
+
+.karte-fuss.bericht-wallet-einstellungen {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.bericht-wallet-einstellungen > .check-zeile {
+  align-self: flex-start;
+}
+.bericht-wallet-einstellungen .feld {
+  width: 100%;
+  max-width: 36rem;
+  min-width: 0;
+}
+.bericht-wallet-einstellungen > .knopf {
+  align-self: flex-start;
+}
+.bericht-wallet-einstellungen input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 @media (max-width: 720px) {
   .person-spalten {
     grid-template-columns: 1fr;

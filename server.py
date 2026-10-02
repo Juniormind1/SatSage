@@ -1051,6 +1051,7 @@ from httpserver.api.trace import (  # noqa: E402
 
 
 from httpserver.api.tax import (  # noqa: E402
+    api_save_bericht_wallet,
     api_save_steuer,
     api_save_steuer_person,
     api_selbstanzeige_kandidaten,
@@ -1556,6 +1557,8 @@ class Handler(
             return 200, api_save_steuer(state, self._body())
         if teile == ["config", "person"] and methode == "PUT":
             return 200, api_save_steuer_person(state, self._body())
+        if teile == ["config", "bericht-wallet"] and methode == "PUT":
+            return 200, api_save_bericht_wallet(state, self._body())
         if teile == ["config", "hinweis-onchain"] and methode == "PUT":
             return 200, api_save_hinweis_onchain(state, self._body())
         if teile == ["config", "llm"] and methode == "PUT":

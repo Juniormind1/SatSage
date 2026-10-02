@@ -821,7 +821,18 @@ def _btc(sats: int) -> str:
     return f"{sats / 1e8:.8f}".replace(".", ",")
 
 
-def als_csv(report: dict) -> bytes:
+def _wallet_namen_im_report(report: dict) -> list[str]:
+    namen: list[str] = []
+    for vg in report.get("vorgaenge") or []:
+        namen.extend(vg.get("wallets") or [])
+        for los in vg.get("lose") or []:
+            namen.append(los.get("wallet") or "")
+        for inp in vg.get("inputs") or []:
+            namen.append(inp.get("wallet") or "")
+    return namen
+
+
+def als_csv(report: dict, *, wallet_ersatz: str | None = None) -> bytes:
     puffer = io.StringIO()
     w = csv.writer(puffer, delimiter=";", quoting=csv.QUOTE_MINIMAL,
                    lineterminator="\r\n")
@@ -844,7 +855,9 @@ def als_csv(report: dict) -> bytes:
     w.writerow(["Erstellt am", report["erstellt"]])
     w.writerow(["Quelle", "SatSage, lokale Blockchain-/Cache-Auswertung"])
     w.writerow([])
-    for h in report["hinweise"]:
+    for h in tax_mod.hinweise_fuer_bericht(
+        report.get("hinweise"), _wallet_namen_im_report(report), wallet_ersatz,
+    ):
         w.writerow(["Hinweis", h])
     w.writerow([])
 
@@ -881,7 +894,8 @@ def als_csv(report: dict) -> bytes:
         for los in vg["lose"]:
             w.writerow([
                 los["anschaffung_datum"], los["anschaffung_zeit"],
-                los["wallet"], los["address"], los["external_address"],
+                tax_mod.wallet_fuer_bericht(los["wallet"], wallet_ersatz),
+                los["address"], los["external_address"],
                 _btc(los["sats"]), los["sats"], los["haltedauer_tage"],
                 "ja" if los["frist_erfuellt"] else "nein",
                 los["grundlage"], los["lot_txid"], los["lot_vout"],
@@ -894,7 +908,8 @@ def als_csv(report: dict) -> bytes:
             for inp in vg["inputs"]:
                 w.writerow([
                     "",
-                    inp["wallet"], inp["address"], inp["value_sats"],
+                    tax_mod.wallet_fuer_bericht(inp["wallet"], wallet_ersatz),
+                    inp["address"], inp["value_sats"],
                     inp["txid"], inp["vout"],
                 ])
         w.writerow([])
@@ -919,6 +934,7 @@ def als_html(
     *,
     immutable_cache_dir: Path | str | None = None,
     theme: str | None = None,
+    wallet_ersatz: str | None = None,
 ) -> bytes:
     from core import herkunft_bericht as hb
 
@@ -946,6 +962,7 @@ def als_html(
         hop_eintraege,
         immutable_cache_dir=immutable_cache_dir,
         ueberschrift="Herkunftsnachweis (on-chain Hop-Kette der Lose)",
+        wallet_ersatz=wallet_ersatz,
     )
     hop_css = hb.HOP_KETTE_CSS if hop_abschnitt else ""
 
@@ -953,7 +970,7 @@ def als_html(
         los_zeilen = "".join(
             "<tr>"
             f"<td>{esc(los['anschaffung_datum'])} {esc(los['anschaffung_zeit'])}</td>"
-            f"<td>{esc(los['wallet'])}</td>"
+            f"<td>{esc(tax_mod.wallet_fuer_bericht(los['wallet'], wallet_ersatz))}</td>"
             f"<td class='mono voll'>{esc(los['address'])}</td>"
             f"<td class='mono voll'>{esc(los['external_address'] or '—')}</td>"
             f"<td class='r mono'>{_btc(los['sats'])}</td>"
@@ -966,7 +983,7 @@ def als_html(
         )
         input_zeilen = "".join(
             "<tr>"
-            f"<td>{esc(i['wallet'])}</td>"
+            f"<td>{esc(tax_mod.wallet_fuer_bericht(i['wallet'], wallet_ersatz))}</td>"
             f"<td class='mono voll'>{esc(i['address'])}</td>"
             f"<td class='r'>{i['value_sats']}</td>"
             f"<td class='mono voll'>{esc(i['txid'])}:{i['vout']}</td>"
@@ -986,7 +1003,7 @@ def als_html(
     {"Stichtag" if vg.get("hypothese") else "Abgang"}
     {esc(vg['abgang_datum'])} {esc(vg['abgang_zeit'])} ·
     Netto {_btc(vg['netto_sats'])} BTC ({vg['netto_sats']} sats) ·
-    Wallets: {esc(', '.join(vg['wallets']) or '—')}
+    Wallets: {esc(', '.join(tax_mod.wallets_fuer_bericht(vg['wallets'], wallet_ersatz) or ['—']))}
   </p>
   <p class="summe">
     <strong>Summenzeile (FiFo):</strong>
@@ -1017,7 +1034,14 @@ def als_html(
 </section>
 """)
 
-    hinweise = "".join(f"<li>{esc(h)}</li>" for h in report["hinweise"])
+    hinweise = "".join(
+        f"<li>{esc(h)}</li>"
+        for h in tax_mod.hinweise_fuer_bericht(
+            report.get("hinweise"),
+            _wallet_namen_im_report(report),
+            wallet_ersatz,
+        )
+    )
     kopf_teile = [
         person.get("name") or "",
         f"Steuernummer {person.get('steuernummer') or ''}",

@@ -1295,6 +1295,41 @@
           </p>
         </div>
 
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.reportWallets.title">Walletnamen in Berichten</span>
+            <span class="karte-zusatz" data-i18n="settings.reportWallets.zusatz">
+              HTML- und CSV-Export
+            </span>
+          </div>
+          <div class="karte-fuss bericht-wallet-einstellungen">
+            <label class="check-zeile"
+                   data-i18n-title="settings.reportWallets.realTitle"
+                   title="An: die Namen aus den Wallet-Einstellungen stehen in HTML/CSV. Aus: ein gemeinsamer Name für alle Wallets.">
+              <input type="checkbox" id="bericht-wallet-echt">
+              <span data-i18n="settings.reportWallets.real">Echte Walletnamen in externen Berichten verwenden</span>
+            </label>
+            <label class="feld" id="bericht-wallet-alias-zeile">
+              <span class="feld-titel" data-i18n="settings.reportWallets.alias">Bezeichnung in Berichten</span>
+              <input type="text" id="bericht-wallet-alias" class="feld-breit"
+                     autocomplete="off" spellcheck="false"
+                     data-i18n-placeholder="settings.reportWallets.aliasPlaceholder"
+                     placeholder="Eigenverwahrung">
+            </label>
+            <button type="button" id="bericht-wallet-uebernehmen" class="knopf"
+                    data-i18n="common.save" data-i18n-title="settings.reportWallets.applyTitle"
+                    title="Schreibt die Walletnamen-Regel für HTML-/CSV-Berichte in die .env.">
+              Übernehmen
+            </button>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.reportWallets.hint">
+            Vorgabe aus: alle Wallets erscheinen unter demselben Namen.
+            Interne Bezeichnungen bleiben in der Oberfläche, nicht im Export —
+            das weckt keine Nachfrage nach xpubs. An: die Namen aus den
+            Wallet-Einstellungen stehen in HTML und CSV.
+          </p>
+        </div>
+
         <div class="einstellungen-paar">
           <div class="einstellungen-paarreih">
 

@@ -60,6 +60,12 @@ STANDARD_ANSCHAFFUNG = ANSCHAFFUNG_JUENGSTE
 #: Einmaliger Bestätigungs-Merker in der .env (diese Installation).
 ENV_HINWEIS_ONCHAIN_BESTAETIGT = "HINWEIS_ONCHAIN_BESTAETIGT"
 
+#: HTML-/CSV-Berichte: echte Walletnamen oder ein gemeinsames Etikett.
+ENV_BERICHT_WALLET_ECHT = "STEUER_BERICHT_WALLET_ECHT"
+ENV_BERICHT_WALLET_ALIAS = "STEUER_BERICHT_WALLET_ALIAS"
+BERICHT_WALLET_ALIAS_STANDARD = "Eigenverwahrung"
+BERICHT_WALLET_ALIAS_MAX = 80
+
 # Der eine Absatz. UI, Exporte, Handbuch und README zitieren denselben Wortlaut.
 #: Schlüssel im gemeinsamen Katalog (``web/locales/``), den auch die
 #: Weboberfläche für diesen Absatz verwendet.
@@ -135,6 +141,102 @@ def parse_anschaffung(roh: str | None) -> str:
     if wert in ANSCHAFFUNG_MODI:
         return wert
     return STANDARD_ANSCHAFFUNG
+
+
+def _env_wahr(roh: str | None) -> bool:
+    return str(roh or "").strip().lower() in ("1", "true", "ja", "yes", "on")
+
+
+def lese_bericht_wallet(werte: dict[str, str] | None = None) -> dict:
+    """
+    Ob HTML-/CSV-Berichte die echten Walletnamen verwenden.
+
+    Vorgabe: nein — einheitliches Etikett (Eigenverwahrung). Interne
+    Bezeichnungen und die Zahl der xpubs gehören nicht ins Amt-Dokument.
+    """
+    werte = werte or {}
+    alias = str(werte.get(ENV_BERICHT_WALLET_ALIAS) or "").strip()
+    if not alias:
+        alias = BERICHT_WALLET_ALIAS_STANDARD
+    return {
+        "echte": _env_wahr(werte.get(ENV_BERICHT_WALLET_ECHT)),
+        "alias": alias,
+    }
+
+
+def bericht_wallet_ersatz(werte: dict[str, str] | None = None) -> str | None:
+    """``None`` = echte Namen; sonst das einheitliche Etikett."""
+    cfg = lese_bericht_wallet(werte)
+    if cfg["echte"]:
+        return None
+    return cfg["alias"]
+
+
+def wallet_fuer_bericht(name: str | None, ersatz: str | None) -> str:
+    if ersatz is None:
+        return str(name or "")
+    return ersatz
+
+
+def wallets_fuer_bericht(
+    namen: list | tuple | None, ersatz: str | None,
+) -> list[str]:
+    vorhanden = [str(n) for n in (namen or []) if str(n or "").strip()]
+    if ersatz is None:
+        return vorhanden
+    return [ersatz] if vorhanden else []
+
+
+def _wallet_namen_in_auswertung(auswertung: dict) -> list[str]:
+    namen: list[str] = []
+    gesehen: set[str] = set()
+
+    def _nimm(roh: object) -> None:
+        n = str(roh or "").strip()
+        if n and n not in gesehen:
+            gesehen.add(n)
+            namen.append(n)
+
+    for e in auswertung.get("eintraege") or []:
+        if isinstance(e, dict):
+            _nimm(e.get("wallet"))
+    for a in auswertung.get("abgaenge") or []:
+        if isinstance(a, dict):
+            _nimm(a.get("wallet"))
+    for n in auswertung.get("ohne_verlauf") or []:
+        _nimm(n)
+    return namen
+
+
+def hinweise_fuer_bericht(
+    hinweise: list | None,
+    namen: list[str] | None,
+    ersatz: str | None,
+) -> list[str]:
+    """Ersetzt echte Walletnamen in Hinweistexten durch das Etikett."""
+    if ersatz is None:
+        return [str(h) for h in (hinweise or [])]
+    unikat: list[str] = []
+    gesehen: set[str] = set()
+    for n in namen or []:
+        n = str(n or "").strip()
+        if n and n != ersatz and n not in gesehen:
+            gesehen.add(n)
+            unikat.append(n)
+    unikat.sort(key=len, reverse=True)
+    q = f"„{ersatz}“"
+    doppel = f"{q}, {q}"
+    out: list[str] = []
+    for h in hinweise or []:
+        text = str(h)
+        for n in unikat:
+            text = text.replace(f"„{n}“", q)
+            if len(n) >= 3:
+                text = text.replace(n, ersatz)
+        while doppel in text:
+            text = text.replace(doppel, q)
+        out.append(text)
+    return out
 
 
 def lese_steuer_einstellungen(werte: dict[str, str] | None) -> dict:
@@ -1306,13 +1408,16 @@ def _btc(sats: int) -> str:
     return f"{sats / 1e8:.8f}".replace(".", ",")
 
 
-def als_csv(auswertung: dict) -> bytes:
+def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
     """
     CSV für Tabellenkalkulation und Steuerberatung.
 
     Semikolon als Trenner und ein UTF-8-BOM, weil Excel unter Windows sonst
     weder die Spalten noch die Umlaute richtig erkennt. Beträge mit
     Dezimalkomma, damit sie ohne Nacharbeit als Zahl gelesen werden.
+
+    *wallet_ersatz*: einheitliches Etikett statt der echten Walletnamen;
+    ``None`` lässt die Namen unverändert.
     """
     puffer = io.StringIO()
     schreiber = csv.writer(puffer, delimiter=";", quoting=csv.QUOTE_MINIMAL,
@@ -1331,7 +1436,11 @@ def als_csv(auswertung: dict) -> bytes:
     schreiber.writerow(["Erstellt am", auswertung["erstellt"]])
     schreiber.writerow(["Quelle", "SatSage, lokale Auswertung der Blockchain"])
     schreiber.writerow([])
-    for hinweis in auswertung["hinweise"]:
+    for hinweis in hinweise_fuer_bericht(
+        auswertung.get("hinweise"),
+        _wallet_namen_in_auswertung(auswertung),
+        wallet_ersatz,
+    ):
         schreiber.writerow(["Hinweis", hinweis])
     schreiber.writerow([])
 
@@ -1343,7 +1452,9 @@ def als_csv(auswertung: dict) -> bytes:
     ])
     for eintrag in auswertung["eintraege"]:
         schreiber.writerow([
-            eintrag["datum"], eintrag["zeit"], eintrag["wallet"], eintrag["address"],
+            eintrag["datum"], eintrag["zeit"],
+            wallet_fuer_bericht(eintrag["wallet"], wallet_ersatz),
+            eintrag["address"],
             _btc(eintrag["value_sats"]), eintrag["value_sats"],
             eintrag["haltedauer_tage"], eintrag["frist_ende"],
             "ja" if eintrag["erfuellt"] else "nein",
@@ -1397,7 +1508,8 @@ def als_csv(auswertung: dict) -> bytes:
         ])
         for abgang in abgaenge:
             schreiber.writerow([
-                abgang["datum"], abgang["abgang_datum"], abgang["wallet"],
+                abgang["datum"], abgang["abgang_datum"],
+                wallet_fuer_bericht(abgang["wallet"], wallet_ersatz),
                 abgang["address"], _btc(abgang["value_sats"]),
                 abgang["value_sats"], abgang["haltedauer_tage"],
                 "ja" if abgang["frist_erfuellt"] else "nein",
@@ -1437,6 +1549,7 @@ def als_bericht(
     *,
     immutable_cache_dir: Path | str | None = None,
     theme: str | None = None,
+    wallet_ersatz: str | None = None,
 ) -> bytes:
     """
     Druckbarer Bericht als eigenständige HTML-Datei.
@@ -1447,6 +1560,9 @@ def als_bericht(
 
     Mit *immutable_cache_dir* folgt ein Abschnitt mit vollständiger
     on-chain Hop-Kette je UTXO (gespeicherter Herkunfts-Trace).
+
+    *wallet_ersatz*: einheitliches Etikett statt der echten Walletnamen;
+    ``None`` lässt die Namen unverändert.
     """
     from core import herkunft_bericht as hb
 
@@ -1456,7 +1572,7 @@ def als_bericht(
         zeilen.append(
             "<tr>"
             f"<td>{_html_escape(eintrag['datum'])}</td>"
-            f"<td class='mono'>{_html_escape(eintrag['wallet'])}</td>"
+            f"<td class='mono'>{_html_escape(wallet_fuer_bericht(eintrag['wallet'], wallet_ersatz))}</td>"
             f"<td class='mono klein'>{_html_escape(eintrag['address'])}</td>"
             f"<td class='r mono'>{_btc(eintrag['value_sats'])}</td>"
             f"<td class='r'>{eintrag['haltedauer_tage']}</td>"
@@ -1467,11 +1583,17 @@ def als_bericht(
         )
 
     hinweise = "".join(
-        f"<li>{_html_escape(h)}</li>" for h in auswertung["hinweise"]
+        f"<li>{_html_escape(h)}</li>"
+        for h in hinweise_fuer_bericht(
+            auswertung.get("hinweise"),
+            _wallet_namen_in_auswertung(auswertung),
+            wallet_ersatz,
+        )
     )
     hop_abschnitt = hb.abschnitt_hop_ketten(
         list(auswertung.get("eintraege") or []),
         immutable_cache_dir=immutable_cache_dir,
+        wallet_ersatz=wallet_ersatz,
     )
     hop_css = hb.HOP_KETTE_CSS if hop_abschnitt else ""
 
@@ -1484,7 +1606,7 @@ def als_bericht(
             "<tr>"
             f"<td>{_html_escape(a['abgang_datum'])}</td>"
             f"<td>{_html_escape(a['datum'])}</td>"
-            f"<td class='mono'>{_html_escape(a['wallet'])}</td>"
+            f"<td class='mono'>{_html_escape(wallet_fuer_bericht(a['wallet'], wallet_ersatz))}</td>"
             f"<td class='r mono'>{_btc(a['value_sats'])}</td>"
             f"<td class='r'>{a['haltedauer_tage']}</td>"
             f"<td>{'ja' if a['frist_erfuellt'] else '<b>nein</b>'}</td>"

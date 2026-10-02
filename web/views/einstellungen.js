@@ -311,6 +311,7 @@ function zeichneSteuerEinstellungen() {
       steuer.anschaffung === "aelteste" ? "aelteste" : "juengste";
   }
   zeichnePersonEinstellungen();
+  zeichneBerichtWalletEinstellungen();
 }
 
 function personEinstellungen() {
@@ -366,6 +367,54 @@ async function speicherePersonEinstellungen() {
       t("settings.personSaved") !== "settings.personSaved"
         ? t("settings.personSaved")
         : t("ui.hard.516a1e0970"),
+      "gut",
+    );
+  } catch (fehler) {
+    meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
+  } finally {
+    if (knopf) knopf.disabled = false;
+  }
+}
+
+function berichtWalletEinstellungen() {
+  const b = Zustand.config?.bericht_wallet || {};
+  return {
+    echte: Boolean(b.echte),
+    alias: (b.alias || "Eigenverwahrung").trim() || "Eigenverwahrung",
+  };
+}
+
+function setzeBerichtWalletAliasAktiv(echte) {
+  const feld = $("#bericht-wallet-alias");
+  if (feld) feld.disabled = Boolean(echte);
+}
+
+function zeichneBerichtWalletEinstellungen() {
+  const b = berichtWalletEinstellungen();
+  const box = $("#bericht-wallet-echt");
+  const alias = $("#bericht-wallet-alias");
+  if (box) box.checked = b.echte;
+  if (alias) alias.value = b.alias;
+  setzeBerichtWalletAliasAktiv(b.echte);
+}
+
+async function speichereBerichtWalletEinstellungen() {
+  const knopf = $("#bericht-wallet-uebernehmen");
+  if (knopf) knopf.disabled = true;
+  try {
+    const ergebnis = await api("/config/bericht-wallet", {
+      methode: "PUT",
+      daten: {
+        echte: Boolean($("#bericht-wallet-echt")?.checked),
+        alias: $("#bericht-wallet-alias")?.value || "",
+      },
+    });
+    if (Zustand.config) Zustand.config.bericht_wallet = ergebnis.bericht_wallet;
+    zeichneBerichtWalletEinstellungen();
+    meldung(
+      t("settings.reportWallets.saved") !== "settings.reportWallets.saved"
+        ? t("settings.reportWallets.saved")
+        : "Walletnamen in Berichten übernommen.",
       "gut",
     );
   } catch (fehler) {

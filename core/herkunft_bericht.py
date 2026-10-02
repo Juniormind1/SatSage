@@ -23,7 +23,7 @@ def _btc(sats: int | None) -> str:
     return tax_mod._btc(int(sats or 0))
 
 
-def _knoten_label(knoten: dict) -> str:
+def _knoten_label(knoten: dict, wallet_ersatz: str | None = None) -> str:
     typ = str(knoten.get("type") or "")
     if typ == "internal":
         art = "Intern"
@@ -41,6 +41,8 @@ def _knoten_label(knoten: dict) -> str:
     teile = [art]
     wallet = (knoten.get("wallet") or "").strip()
     if wallet:
+        if wallet_ersatz:
+            wallet = wallet_ersatz
         teile.append(wallet)
     addr = (knoten.get("address") or "").strip()
     if addr:
@@ -80,23 +82,37 @@ def _wallet_norm(wert: Any) -> str:
     return str(wert or "").strip()
 
 
-def _ist_wallet_austritt(eltern: dict | None, kind: dict) -> bool:
+def _ist_wallet_austritt(
+    eltern: dict | None,
+    kind: dict,
+    wallet_ersatz: str | None = None,
+) -> bool:
     """
     True, wenn *kind* das Wallet-Segment von *eltern* verlässt.
 
     Gleiche-Wallet-Hops bleiben flach; Einrückung nur bei Wallet-Wechsel
     oder Übergang zu Extern/Coinbase/unaufgelöst (wie Web-UI).
+
+    Mit *wallet_ersatz* gelten alle eigenen Wallets als eine Verwahrung —
+    interne Wechsel sind dann kein Austritt.
     """
     if not isinstance(eltern, dict):
         return False
     if str(eltern.get("type") or "") != "internal":
         return False
     if str(kind.get("type") or "") == "internal":
+        if wallet_ersatz:
+            return False
         return _wallet_norm(eltern.get("wallet")) != _wallet_norm(kind.get("wallet"))
     return True
 
 
-def _baum_als_ol(knoten: dict, *, max_knoten: int = 50_000) -> tuple[str, int]:
+def _baum_als_ol(
+    knoten: dict,
+    *,
+    max_knoten: int = 50_000,
+    wallet_ersatz: str | None = None,
+) -> tuple[str, int]:
     """
     Nested ``<ol>`` der Hop-Kette. Rückgabe (html, anzahl_gerendert).
 
@@ -111,14 +127,15 @@ def _baum_als_ol(knoten: dict, *, max_knoten: int = 50_000) -> tuple[str, int]:
             abgeschnitten[0] = True
             return ""
         gezaehlt[0] += 1
-        label = _esc(_knoten_label(k))
+        label = _esc(_knoten_label(k, wallet_ersatz=wallet_ersatz))
         typ = str(k.get("type") or "")
         klassen = [f"hop hop-{_esc(typ)}" if typ else "hop"]
-        if _ist_wallet_austritt(eltern, k):
+        if _ist_wallet_austritt(eltern, k, wallet_ersatz=wallet_ersatz):
             klassen.append("hop-austritt")
             if (
                 typ == "internal"
                 and eltern is not None
+                and not wallet_ersatz
                 and _wallet_norm(eltern.get("wallet")) != _wallet_norm(k.get("wallet"))
             ):
                 klassen.append("hop-wallet-uebergang")
@@ -182,6 +199,7 @@ def hop_kette_html(
     wallet: str = "",
     address: str = "",
     value_sats: int | None = None,
+    wallet_ersatz: str | None = None,
 ) -> str:
     """
     Ein Herkunftsblock für *txid:vout* oder leer, wenn kein Trace-Cache.
@@ -208,7 +226,7 @@ def hop_kette_html(
         if value_sats is not None:
             wurzel.setdefault("amount_sats", value_sats)
 
-    ol, n = _baum_als_ol(wurzel)
+    ol, n = _baum_als_ol(wurzel, wallet_ersatz=wallet_ersatz)
     summary = baum.get("summary") if isinstance(baum.get("summary"), dict) else {}
     voll = baum.get("verfolgt_vollstaendig")
     meta_teile = [f"{n} Hops im Nachweis"]
@@ -224,17 +242,19 @@ def hop_kette_html(
         meta_teile.append("Trace vollständig")
 
     titel = f"{_normalize_txid(txid)}:{int(vout)}"
-    if wallet:
-        titel = f"{wallet} · {titel}"
+    anzeige = wallet_ersatz if wallet_ersatz is not None else wallet
+    if anzeige:
+        titel = f"{anzeige} · {titel}"
 
+    aussen = wallet_ersatz or "konfigurierten Wallets"
     return f"""
 <section class="herkunft-utxo">
   <h3 class="mono">{_esc(titel)}</h3>
   <p class="unter klein">{_esc(" · ".join(meta_teile))}</p>
   <p class="klein">
     Hop-Kette rückwärts (Ziel → Vorgänger). <strong>Intern</strong> =
-    eigene Wallet-Adresse; <strong>Extern</strong> = Zufluss von außerhalb
-    der konfigurierten Wallets. Jede Zeile ist on-chain prüfbar (TxID:vout).
+    eigene Adresse; <strong>Extern</strong> = Zufluss von außerhalb
+    der {_esc(aussen)}. Jede Zeile ist on-chain prüfbar (TxID:vout).
   </p>
   {ol}
 </section>
@@ -246,6 +266,7 @@ def abschnitt_hop_ketten(
     *,
     immutable_cache_dir: Path | str | None,
     ueberschrift: str = "Herkunftsnachweis (on-chain Hop-Kette)",
+    wallet_ersatz: str | None = None,
 ) -> str:
     """
     Abschnitt für alle Einträge mit gespeichertem Trace.
@@ -273,6 +294,7 @@ def abschnitt_hop_ketten(
             wallet=str(e.get("wallet") or ""),
             address=str(e.get("address") or ""),
             value_sats=e.get("value_sats"),
+            wallet_ersatz=wallet_ersatz,
         )
         if block:
             bloecke.append(block)

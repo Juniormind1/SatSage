@@ -120,6 +120,52 @@ def api_save_steuer_person(state: AppState, payload: dict) -> dict:
     return {"saved": True, "person": sa_mod.lese_steuer_person(env.values())}
 
 
+def api_save_bericht_wallet(state: AppState, payload: dict) -> dict:
+    """
+    Speichert, ob HTML-/CSV-Berichte echte Walletnamen zeigen.
+
+    Aus: einheitliches Etikett (Vorgabe Eigenverwahrung) für alle Wallets.
+    An: die Namen aus den Wallet-Einstellungen.
+    """
+    from server import ApiError
+
+    from core import tax as tax_mod
+
+    def _als_bool(roh) -> bool:
+        if isinstance(roh, str):
+            return roh.strip().lower() in ("1", "true", "ja", "yes", "on")
+        return bool(roh)
+
+    echte = _als_bool(
+        payload.get("echte", payload.get("echte_walletnamen", False))
+    )
+    alias = str(
+        payload.get("alias", payload.get("wallet_alias", "")) or ""
+    ).strip()
+    if len(alias) > tax_mod.BERICHT_WALLET_ALIAS_MAX:
+        raise ApiError(
+            400,
+            f"Bezeichnung ist zu lang (max. {tax_mod.BERICHT_WALLET_ALIAS_MAX} Zeichen).",
+        )
+    if not alias:
+        alias = tax_mod.BERICHT_WALLET_ALIAS_STANDARD
+
+    env = state.env()
+    env.apply({
+        tax_mod.ENV_BERICHT_WALLET_ECHT: "1" if echte else "0",
+        tax_mod.ENV_BERICHT_WALLET_ALIAS: alias,
+    })
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+
+    return {
+        "saved": True,
+        "bericht_wallet": tax_mod.lese_bericht_wallet(env.values()),
+    }
+
+
 def api_tax(
     state: AppState,
     query: dict,

@@ -103,6 +103,7 @@ def api_config(
         "mempool": mempool_info(werte.get("MEMPOOL_URL", "")),
         "steuer": tax_mod.lese_steuer_einstellungen(werte),
         "person": sa_mod.lese_steuer_person(werte),
+        "bericht_wallet": tax_mod.lese_bericht_wallet(werte),
         "wallets_beim_start_aktualisieren": (
             resolve_wallets_beim_start_aktualisieren(werte)
         ),

@@ -50,8 +50,9 @@ class HandlerDownloadMixin:
             theme_roh = _ui_theme_aus_env(self.state.env().values())
         theme = hb_mod.normalize_bericht_theme(theme_roh)
 
+        wallet_ersatz = tax_mod.bericht_wallet_ersatz(self.state.env().values())
         if pfad.endswith(".csv"):
-            inhalt = tax_mod.als_csv(auswertung)
+            inhalt = tax_mod.als_csv(auswertung, wallet_ersatz=wallet_ersatz)
             typ = "text/csv; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.csv"
         else:
@@ -59,6 +60,7 @@ class HandlerDownloadMixin:
                 auswertung,
                 immutable_cache_dir=self.state.immutable_cache_dir,
                 theme=theme,
+                wallet_ersatz=wallet_ersatz,
             )
             typ = "text/html; charset=utf-8"
             name = f"satsage-steuerjahr-{jahr}.html"
@@ -158,8 +160,9 @@ class HandlerDownloadMixin:
             theme_roh = _ui_theme_aus_env(self.state.env().values())
         theme = hb_mod.normalize_bericht_theme(theme_roh)
 
+        wallet_ersatz = tax_mod.bericht_wallet_ersatz(self.state.env().values())
         if pfad.endswith(".csv"):
-            inhalt = sa.als_csv(report)
+            inhalt = sa.als_csv(report, wallet_ersatz=wallet_ersatz)
             typ = "text/csv; charset=utf-8"
             name = f"satsage-trace-{jahr}.csv"
             # CSV immer als Download — im Tab wäre es nur Rohtext.
@@ -169,6 +172,7 @@ class HandlerDownloadMixin:
                 report,
                 immutable_cache_dir=self.state.immutable_cache_dir,
                 theme=theme,
+                wallet_ersatz=wallet_ersatz,
             )
             typ = "text/html; charset=utf-8"
             name = f"satsage-trace-{jahr}.html"
