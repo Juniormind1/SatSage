@@ -45,6 +45,11 @@ class TestEinstiegsWallet(unittest.TestCase):
 
 class TestEinbindung(unittest.TestCase):
 
+    def test_jobs_poll_nimmt_wallet_watch_log(self):
+        self.assertIn("function nimmWalletWatchLog(", NAV)
+        self.assertIn("nimmWalletWatchLog(daten)", NAV)
+        self.assertIn("daten.wallet_watch.log", NAV)
+
     def test_start_fragt_den_einstieg(self):
         start = CHROME.index("async function start()")
         rumpf = CHROME[start:]

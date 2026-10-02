@@ -22,13 +22,19 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from core import xpub_cache
 
+
+# Nach Drop oder fehlendem Indexer: dieselbe Pause wie bisher.
+_RECONNECT_S = 15.0
 # Nach neuem Block: kurz warten (Batch), dann leichter Tip-Nachzug.
 _HEADER_DEBOUNCE_S = 4.0
 # Nach Scripthash-Notify: Adressen bündeln.
 _SCRIPT_DEBOUNCE_S = 1.0
 # Max. Adressen pro Wallet (UTXO + letzte Verlaufsadressen).
 _MAX_ADDR_PRO_WALLET = 400
+#: Web-Log: letzte Watch-Zeilen im Status (Jobs-Poll).
+_GUI_LOG_MAX = 80
 
 
 def _header_hoehe(header) -> int | None:
@@ -70,6 +76,9 @@ class WalletWatchService:
         #: Letzter gesehener Chain-Tip (Electrs headers.subscribe) für UI-Atem.
         self._last_block_height: int | None = None
         self._last_block_seq: int = 0
+        #: Zeilen fürs Web-Log ({seq, text}), unabhängig vom Terminal-on_log.
+        self._log_seq: int = 0
+        self._gui_log: list[dict[str, Any]] = []
 
     @property
     def laeuft(self) -> bool:
@@ -78,7 +87,7 @@ class WalletWatchService:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return {
+            stand = {
                 "running": self.laeuft,
                 "subscribed": len(self._sh_to_addr),
                 "host": (self._status.get("host") if self._session else None),
@@ -86,6 +95,8 @@ class WalletWatchService:
                 "last_block_seq": self._last_block_seq,
                 **{k: v for k, v in self._status.items() if k != "host"},
             }
+            stand["log"] = list(self._gui_log)
+            return stand
 
     def start(self, state, *, on_log=None) -> bool:
         """
@@ -155,6 +166,14 @@ class WalletWatchService:
                 setattr(self, attr, None)
 
     def _log(self, text: str) -> None:
+        zeile = str(text or "").strip()
+        if zeile:
+            with self._lock:
+                self._log_seq += 1
+                self._gui_log.append({"seq": self._log_seq, "text": zeile})
+                extra = len(self._gui_log) - _GUI_LOG_MAX
+                if extra > 0:
+                    del self._gui_log[:extra]
         if self._on_log:
             try:
                 self._on_log(text)
@@ -164,9 +183,8 @@ class WalletWatchService:
             print(f"  {text}", flush=True)
 
     def _lauf(self) -> None:
-        import core.chain_sources as chain_sources
         from core.env_wallets import resolve_wallets_beim_start_aktualisieren
-        from core.fulcrum_client import FulcrumNotifySession, address_to_scripthash
+        from core.fulcrum_client import FulcrumNotifySession
 
         state = self._state
         if state is None:
@@ -178,20 +196,21 @@ class WalletWatchService:
                 break
             client = None
             try:
-                client = chain_sources._try_own_fulcrum_client(
-                    state.args_namespace(), werte,
-                )
+                client = _eigener_watch_client(state)
             except Exception as exc:
                 self._log(f"Wallet-Watch: kein eigener Electrs ({exc}).")
                 self._status["error"] = str(exc)
-                break
+                self._log("Wallet-Watch: Verbindung weg — Reconnect in 15 s…")
+                self._stop.wait(_RECONNECT_S)
+                continue
             if client is None:
                 self._log(
                     "Wallet-Watch: kein eigener Electrs — "
-                    "nur Start-Tip-Nachzug, kein Dauer-Subscribe."
+                    "Reconnect in 15 s…"
                 )
                 self._status["error"] = "kein eigener Electrs"
-                break
+                self._stop.wait(_RECONNECT_S)
+                continue
 
             host, port = client.host, client.port
             use_ssl = client.use_ssl
@@ -252,7 +271,7 @@ class WalletWatchService:
                 break
             # Kurze Pause, dann Reconnect-Versuch
             self._log("Wallet-Watch: Verbindung weg — Reconnect in 15 s…")
-            self._stop.wait(15.0)
+            self._stop.wait(_RECONNECT_S)
 
         self._cancel_timers()
 
@@ -646,6 +665,37 @@ def _eigener_client_kurz(state):
         return chain_sources._try_own_fulcrum_client(state.args_namespace(), werte)
     except Exception:
         return None
+
+
+def _eigener_watch_client(state):
+    """
+    Connect fürs Dauer-Subscribe: LAN zuerst, ohne Onion-Umweg.
+
+    ``_try_own_fulcrum_client`` fällt bei LAN-Fehler auf Tor zurück (bis 180 s).
+    Der Watcher würde dann Minuten hängen, statt nach 8 s neu zu versuchen.
+    Nur-Onion bleibt über denselben Pfad wie bisher.
+    """
+    import core.chain_sources as chain_sources
+    from core.fulcrum_client import FULCRUM_CONNECT_TIMEOUT, connect_fulcrum
+
+    werte = state.env().values()
+    args = state.args_namespace()
+    lan = chain_sources._resolve_own_lan_endpoint(args, werte)
+    if not lan:
+        return chain_sources._try_own_fulcrum_client(args, werte)
+    host, port, use_ssl = lan
+    client, fehler = connect_fulcrum(
+        host, port, use_ssl=use_ssl, timeout=FULCRUM_CONNECT_TIMEOUT,
+    )
+    if client:
+        return client
+    if fehler and chain_sources.tls_should_try_opposite(fehler):
+        client, _fehler = connect_fulcrum(
+            host, port, use_ssl=not use_ssl, timeout=FULCRUM_CONNECT_TIMEOUT,
+        )
+        if client:
+            return client
+    return None
 
 
 # Singleton für den Server-Prozess

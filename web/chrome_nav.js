@@ -224,6 +224,21 @@ function nimmBlockEvent(daten) {
   }
 }
 
+/** Wallet-Watch-Zeilen aus dem Jobs-Poll ins Web-Log (Reconnect, Subscribe, …). */
+function nimmWalletWatchLog(daten) {
+  const zeilen = daten && daten.wallet_watch && daten.wallet_watch.log;
+  if (!Array.isArray(zeilen) || !zeilen.length) return;
+  let seqStand = Number(Zustand.watchLogSeq) || 0;
+  for (const eintrag of zeilen) {
+    const seq = Number(eintrag && eintrag.seq);
+    const text = String((eintrag && eintrag.text) || "").trim();
+    if (!Number.isFinite(seq) || seq <= seqStand || !text) continue;
+    seqStand = seq;
+    logZeile(text);
+  }
+  Zustand.watchLogSeq = seqStand;
+}
+
 /** Fallback, falls der Start-Strom die Zeile noch nicht gezeigt hat. */
 function nimmBootLogAusJobs(daten) {
   // Der Live-Strom schreibt dieselben Zeilen schon. Nur ohne ihn nachziehen.
@@ -257,6 +272,7 @@ async function ladeJobsNav() {
     Zustand.jobsNavFehler = "";
     nimmBlockEvent(daten);
     nimmBootLogAusJobs(daten);
+    nimmWalletWatchLog(daten);
   } catch (fehler) {
     /* offline / alter Server ohne /api/jobs */
     Zustand.jobsNavFehler = (fehler && fehler.message) || t("common.netError");

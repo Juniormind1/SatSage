@@ -445,6 +445,11 @@ class FulcrumNotifySession:
         self._stop = threading.Event()
         self._reader: threading.Thread | None = None
         self._buf = b""
+        # Genau ein server.version — libbitcoin pausiert die Session sonst.
+        self._handshaked = False
+        self.server_version: Any = None
+        self.server_software: str = ""
+        self.server_software_raw: str = ""
 
     def _sag(self, text: str) -> None:
         if self.on_log:
@@ -473,8 +478,24 @@ class FulcrumNotifySession:
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
         else:
             self._sock = raw
+        self._handshaked = False
+        self.server_version = None
+        self.server_software = ""
+        self.server_software_raw = ""
         # Blocking recv im Reader; send mit Timeout
         self._sock.settimeout(None)
+
+    def handshake(self) -> Any:
+        """``server.version`` genau einmal — sonst bleibt libbitcoin stumm."""
+        if self._handshaked:
+            return self.server_version
+        ver = self.request("server.version", [CLIENT_NAME, PROTOCOL_VERSION])
+        label, roh = parse_electrum_server_software(ver)
+        self.server_version = ver
+        self.server_software = label
+        self.server_software_raw = roh
+        self._handshaked = True
+        return ver
 
     def start(self) -> None:
         if self._reader and self._reader.is_alive():
@@ -488,6 +509,11 @@ class FulcrumNotifySession:
             daemon=True,
         )
         self._reader.start()
+        try:
+            self.handshake()
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self) -> None:
         self._stop.set()
@@ -566,8 +592,11 @@ class FulcrumNotifySession:
 
     def request(self, method: str, params: list | None = None, *, timeout: float | None = None) -> Any:
         if timeout is None:
-            # Dieselbe Grenze wie der Socket: über Onion länger warten.
-            timeout = float(self.timeout) if self.tor_proxy else 60.0
+            # Onion länger, LAN kurz — sonst merkt der Watcher einen toten
+            # Indexer erst nach einer Minute (headers.subscribe).
+            timeout = float(
+                FULCRUM_ONION_TIMEOUT if self.tor_proxy else self.timeout
+            )
         if self._stop.is_set() or not self._sock:
             raise RuntimeError("Fulcrum-Notify-Session nicht verbunden")
         with self._send_lock:

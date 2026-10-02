@@ -60,6 +60,8 @@ const Zustand = {
   /** Chain-Tip-Events vom Wallet-Watch (seq-Baseline gegen Reload-Flash). */
   blockEventSeq: 0,
   blockEventSeqInit: false,
+  /** Letzte ins Web-Log übernommene Wallet-Watch-Zeile (seq). */
+  watchLogSeq: 0,
   llmStatus: null,
   /** Dealbreaker T14: Core-RPC-Allowlist-Verstoß ({verstoss, anzahl, letzter}). */
   rpcAllowlist: null,

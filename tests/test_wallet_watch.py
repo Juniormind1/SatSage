@@ -31,6 +31,16 @@ class TestWalletWatchReconnect(unittest.TestCase):
         self.assertNotIn("on_disconnect=lambda: self._stop.set()", src)
         self.assertIn("Reconnect", src)
 
+    def test_kein_electrs_bricht_nicht_ab(self):
+        """Indexer weg: 15 s warten und weiter, nicht den Watcher beenden."""
+        src = inspect.getsource(wallet_watch.WalletWatchService._lauf)
+        self.assertIn("Reconnect in 15", src)
+        self.assertIn("continue", src)
+        self.assertNotIn(
+            "nur Start-Tip-Nachzug, kein Dauer-Subscribe.",
+            src,
+        )
+
 
 class TestWalletWatchTipPending(unittest.TestCase):
     def test_flush_header_skip_wenn_subscribe_greift(self):
@@ -114,6 +124,67 @@ class TestWalletWatchTipPending(unittest.TestCase):
         if svc._header_timer:
             svc._header_timer.cancel()
             svc._header_timer = None
+
+
+class TestAdressenAusCaches(unittest.TestCase):
+    def test_liest_utxo_und_verlauf(self):
+        svc = wallet_watch.WalletWatchService()
+        entry = mock.Mock()
+        entry.analyse_schluessel = "xpub-test"
+        state = mock.Mock()
+        state.analyse_entries = [entry]
+        state.cache_dir = "cache"
+        with mock.patch.object(
+            wallet_watch.xpub_cache,
+            "load_xpub_utxo_cache",
+            return_value=[{"address": "bc1qtestutxo"}],
+        ), mock.patch.object(
+            wallet_watch.xpub_cache,
+            "load_xpub_verlauf_cache",
+            return_value=[{"address": "bc1qtestverlauf"}],
+        ):
+            mapping = svc._adressen_aus_caches(state)
+        self.assertEqual(mapping["bc1qtestutxo"], {"xpub-test"})
+        self.assertEqual(mapping["bc1qtestverlauf"], {"xpub-test"})
+
+
+class TestEigenerWatchClient(unittest.TestCase):
+    def test_lan_geht_nicht_ueber_onion_fallback(self):
+        state = mock.Mock()
+        state.env.return_value.values.return_value = {}
+        state.args_namespace.return_value = object()
+        with mock.patch(
+            "core.chain_sources._resolve_own_lan_endpoint",
+            return_value=("192.168.1.8", 50001, False),
+        ), mock.patch(
+            "core.fulcrum_client.connect_fulcrum",
+            return_value=(None, "refused"),
+        ) as conn, mock.patch(
+            "core.chain_sources._try_own_fulcrum_client",
+        ) as voll:
+            self.assertIsNone(wallet_watch._eigener_watch_client(state))
+        conn.assert_called()
+        voll.assert_not_called()
+
+
+class TestWalletWatchGuiLog(unittest.TestCase):
+    def test_log_steht_im_status(self):
+        svc = wallet_watch.WalletWatchService()
+        svc._on_log = lambda _t: None
+        svc._log("Wallet-Watch: Verbindung weg — Reconnect in 15 s…")
+        st = svc.status()
+        self.assertEqual(st["log"][-1]["text"], "Wallet-Watch: Verbindung weg — Reconnect in 15 s…")
+        self.assertEqual(st["log"][-1]["seq"], 1)
+
+    def test_log_behaelt_nur_die_letzten(self):
+        svc = wallet_watch.WalletWatchService()
+        svc._on_log = lambda _t: None
+        for i in range(wallet_watch._GUI_LOG_MAX + 5):
+            svc._log(f"Wallet-Watch: Zeile {i}")
+        st = svc.status()
+        self.assertEqual(len(st["log"]), wallet_watch._GUI_LOG_MAX)
+        self.assertEqual(st["log"][0]["seq"], 6)
+        self.assertEqual(st["log"][-1]["seq"], wallet_watch._GUI_LOG_MAX + 5)
 
 
 class TestSubscribeAddresses(unittest.TestCase):

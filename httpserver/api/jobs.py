@@ -84,6 +84,7 @@ def api_jobs(state: Any, query: dict) -> dict:
         "scan_pipeline": state.scan_queue.snapshot(),
         "block_event": block_event,
         "context_bereit": state.context_bereit(),
+        "wallet_watch": watch,
     }
 
 

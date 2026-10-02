@@ -51,5 +51,73 @@ class TestFulcrumRequestRetry(unittest.TestCase):
         self.assertEqual(client._request_once.call_count, 1)
 
 
+class TestNotifySessionTimeout(unittest.TestCase):
+    def test_lan_nimmt_connect_timeout_nicht_60s(self):
+        import queue
+
+        sess = fulcrum.FulcrumNotifySession(
+            "127.0.0.1", 50001, use_ssl=False, timeout=8,
+        )
+        sess._sock = MagicMock()
+        gesehen = {}
+
+        def fake_get(_self, timeout=None):
+            gesehen["timeout"] = timeout
+            raise queue.Empty
+
+        with unittest.mock.patch("queue.Queue.get", fake_get):
+            with self.assertRaises(TimeoutError):
+                sess.request("blockchain.headers.subscribe")
+        self.assertEqual(gesehen["timeout"], 8.0)
+
+    def test_onion_nimmt_onion_timeout(self):
+        import queue
+
+        sess = fulcrum.FulcrumNotifySession(
+            "example.onion", 50001, use_ssl=True, timeout=8,
+            tor_proxy=("127.0.0.1", 9050),
+        )
+        sess._sock = MagicMock()
+        gesehen = {}
+
+        def fake_get(_self, timeout=None):
+            gesehen["timeout"] = timeout
+            raise queue.Empty
+
+        with unittest.mock.patch("queue.Queue.get", fake_get):
+            with self.assertRaises(TimeoutError):
+                sess.request("blockchain.headers.subscribe")
+        self.assertEqual(gesehen["timeout"], float(fulcrum.FULCRUM_ONION_TIMEOUT))
+
+
+class TestNotifySessionHandshake(unittest.TestCase):
+    def test_start_sendet_server_version(self):
+        sess = fulcrum.FulcrumNotifySession(
+            "127.0.0.1", 50001, use_ssl=False, timeout=8,
+        )
+        sess._sock = MagicMock()
+        sess._sock.recv.return_value = b""
+        sess.request = MagicMock(return_value=["/libbitcoin:4.0.0/", "1.4"])
+        try:
+            sess.start()
+            sess.request.assert_called_once()
+            self.assertEqual(sess.request.call_args[0][0], "server.version")
+            self.assertEqual(sess.request.call_args[0][1], ["SatSage", "1.4"])
+            self.assertTrue(sess._handshaked)
+            self.assertEqual(sess.server_software, "libbitcoin")
+        finally:
+            sess.stop()
+
+    def test_handshake_nur_einmal(self):
+        sess = fulcrum.FulcrumNotifySession(
+            "127.0.0.1", 50001, use_ssl=False, timeout=8,
+        )
+        sess._sock = MagicMock()
+        sess.request = MagicMock(return_value=["/libbitcoin:4.0.0/", "1.4"])
+        sess.handshake()
+        sess.handshake()
+        sess.request.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallet-Watch:** Reconnect, Subscribe und die übrigen Watch-Zeilen stehen im Web-Log, nicht nur im Terminal. Ein toter LAN-Indexer gilt nach 8 s als weg (nicht erst nach 60 s). Fehlt er beim Start, versucht der Watcher weiter alle 15 s, statt aufzugeben. Die Subscribe-Session beginnt mit ``server.version``; ohne diesen Handshake bleibt libbitcoin stumm, und ``headers.subscribe`` läuft ins Timeout, obwohl der Indexer erreichbar ist. Nach dem Handshake liest der Watcher die Cache-Adressen (fehlender ``xpub_cache``-Import).
 - **Standalone-Build:** macOS heißt `dist/satsage-macos`, Linux `dist/satsage-linux`, Windows `dist/satsage-windows.exe`. Der gemeinsame Name `satsage-webgui` entfällt, damit sich die drei Dateien auseinanderhalten lassen.
 - **Steuerjahr · Herkunftsnetz:** Die Höhe eines Vorgängers ist sein Anteil am angeklickten UTXO. 100 % liegen auf derselben Höhe wie dieser UTXO. Der volle Nennwert des Vorfahren steht weiter im Tooltip.
 - **Steuerjahr · Lot-Ring:** Ein Bündel mit Datum zählt nach seinem jüngsten Eingang. Liegt der links der Fristgrenze, wird der Anteil grün, sonst orange. Ohne Datum bleibt das Bündel grau.
