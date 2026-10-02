@@ -191,6 +191,13 @@ async function ladeSprachstringsVorStart(auth) {
   }
 }
 
+/** Start-Nachzug: einmal, nachdem die erste Ansicht aus dem Cache da ist. */
+function meldeGuiBereit() {
+  if (Zustand._guiBereitGemeldet) return;
+  Zustand._guiBereitGemeldet = true;
+  api("/gui-bereit", { methode: "POST", daten: {} }).catch(() => {});
+}
+
 async function start() {
   // Status immer zuerst — auch wenn sessionStorage noch ein altes ?t= hat.
   // Hinter StartOS ist das kein Zugang. Mit gesetztem Passwort kommt der
@@ -695,12 +702,16 @@ async function start() {
 
   // Einstieg: mit Wallets → erstes Wallet. Ohne Wallets und ohne echte
   // Datenquelle (P2P „eh da“ zählt nicht) → Datenquellen; sonst Wallets.
+  // Der Start-Nachzug wartet auf diese erste Cache-Ansicht.
+  let ersteAnsicht = Promise.resolve();
   if ((Zustand.config.wallets || []).length > 0) {
     // Kontext noch im Aufbau: Wallet zeigen, Empfangsadresse nicht.
     // Ein während der Vorbereitung schon angeklicktes Wallet bleibt stehen.
     const einstieg = einstiegsWalletId();
     if (einstieg) {
-      zeigeWallet(einstieg, { ohneEmpfang: Zustand.contextBereit === false });
+      ersteAnsicht = Promise.resolve(zeigeWallet(
+        einstieg, { ohneEmpfang: Zustand.contextBereit === false },
+      ));
     }
   } else if (walletsManaged()) {
     oeffneVerwaltung("einstellungen");
@@ -709,6 +720,7 @@ async function start() {
   } else {
     oeffneVerwaltung("wallets");
   }
+  ersteAnsicht.finally(() => { meldeGuiBereit(); });
 
   einrichtungBeimStart();
   // Still nachladen: Server hält Connections; lauter Neu-Test nur über Knopf.

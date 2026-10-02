@@ -23,6 +23,11 @@ from httpserver.empfang import (
 
 LOGGER = logging.getLogger("satsage.server")
 
+#: StartOS/Umbrel: ohne geöffnete Oberfläche trotzdem nachziehen.
+#: Frist läuft ab dem Lauschen, nicht vor dem HTTP-Server.
+START_SYNC_OHNE_GUI_S = 120.0
+_START_SYNC_OHNE_GUI = frozenset(("start9", "umbrel"))
+
 
 def _verwerfe_electrs_verbindungen(state: AppState) -> None:
     """
@@ -96,6 +101,42 @@ def _tip_sync_abbrechen(state: AppState, *, warte_s: float = 3.0) -> None:
                 break
             time.sleep(0.05)
     state.wallet_sync_job_id = None
+
+
+def starte_wallet_aktualisierung_nach_gui(state: AppState) -> None:
+    """
+    Start-Nachzug als ein Job, aber erst wenn „Aktualisieren“ klickbar wäre.
+
+    Desktop wartet auf die Meldung der Oberfläche. StartOS und Umbrel starten
+    denselben Job auch ohne Browser, sobald die Frist nach dem Lauschen um ist.
+    Knopf, Einstellung speichern und Wallet-Watch rufen das hier nicht auf.
+    """
+    try:
+        werte = state.env().values()
+    except Exception:
+        return
+    if not resolve_wallets_beim_start_aktualisieren(werte):
+        return
+    frist = (
+        START_SYNC_OHNE_GUI_S
+        if getattr(state, "managed_by", None) in _START_SYNC_OHNE_GUI
+        else None
+    )
+
+    def _lauf() -> None:
+        try:
+            state.warte_auf_gui_bereit(frist)
+        except Exception:
+            LOGGER.exception("Warten auf GUI-bereit fehlgeschlagen")
+            return
+        try:
+            starte_wallet_aktualisierung(state)
+        except Exception:
+            LOGGER.exception("Start-Aktualisierung nach GUI-bereit fehlgeschlagen")
+
+    threading.Thread(
+        target=_lauf, name="satsage-start-sync", daemon=True,
+    ).start()
 
 
 def starte_wallet_aktualisierung(

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -369,6 +371,101 @@ class TestWalletsBeimStart(unittest.TestCase):
             entry = main.load_xpub_cache_entry(BIP84_ZPUB, cache)
             self.assertEqual(entry["raw"].get("scan_tip_height"), 500)
             self.assertEqual(entry["utxos"], [])
+
+
+class _GuiStart:
+    """Nur die Fläche, die der verzögerte Start-Nachzug braucht."""
+
+    def __init__(self, managed, env):
+        self.managed_by = managed
+        self._env = env
+        self._gui = threading.Event()
+        self.frist = "nicht-aufgerufen"
+
+    def env(self):
+        return self
+
+    def values(self):
+        return self._env
+
+    def merke_gui_bereit(self):
+        self._gui.set()
+
+    def warte_auf_gui_bereit(self, timeout):
+        self.frist = timeout
+        return self._gui.wait(timeout)
+
+
+class TestStartSyncNachGui(unittest.TestCase):
+    def _warte_auf(self, start, sekunden=1.0):
+        deadline = time.monotonic() + sekunden
+        while time.monotonic() < deadline:
+            if start.called:
+                return
+            time.sleep(0.02)
+
+    def _warte_frist(self, state):
+        deadline = time.monotonic() + 1.0
+        while state.frist == "nicht-aufgerufen" and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+    def test_desktop_wartet_auf_die_oberflaeche(self):
+        state = _GuiStart(None, {"WALLETS_BEIM_START_AKTUALISIEREN": "1"})
+        with mock.patch(
+            "httpserver.wallet_sync.starte_wallet_aktualisierung",
+        ) as start:
+            from httpserver.wallet_sync import starte_wallet_aktualisierung_nach_gui
+
+            starte_wallet_aktualisierung_nach_gui(state)
+            self._warte_frist(state)
+            self.assertIsNone(state.frist)
+            time.sleep(0.15)
+            start.assert_not_called()
+            state.merke_gui_bereit()
+            self._warte_auf(start)
+            start.assert_called_once_with(state)
+
+    def test_start9_ohne_gui_nach_frist(self):
+        state = _GuiStart("start9", {"WALLETS_IMMER_AKTUELL": "1"})
+        with mock.patch(
+            "httpserver.wallet_sync.START_SYNC_OHNE_GUI_S", 0.15,
+        ), mock.patch(
+            "httpserver.wallet_sync.starte_wallet_aktualisierung",
+        ) as start:
+            from httpserver.wallet_sync import starte_wallet_aktualisierung_nach_gui
+
+            starte_wallet_aktualisierung_nach_gui(state)
+            self._warte_frist(state)
+            self.assertEqual(state.frist, 0.15)
+            self._warte_auf(start)
+            start.assert_called_once_with(state)
+
+    def test_umbrel_nutzt_dieselbe_frist(self):
+        state = _GuiStart("umbrel", {"WALLETS_BEIM_START_AKTUALISIEREN": "ja"})
+        with mock.patch(
+            "httpserver.wallet_sync.START_SYNC_OHNE_GUI_S", 0.05,
+        ), mock.patch(
+            "httpserver.wallet_sync.starte_wallet_aktualisierung",
+        ) as start:
+            from httpserver.wallet_sync import starte_wallet_aktualisierung_nach_gui
+
+            starte_wallet_aktualisierung_nach_gui(state)
+            state.merke_gui_bereit()
+            self._warte_auf(start)
+            start.assert_called_once_with(state)
+            self.assertEqual(state.frist, 0.05)
+
+    def test_aus_kein_warten(self):
+        state = _GuiStart(None, {})
+        with mock.patch(
+            "httpserver.wallet_sync.starte_wallet_aktualisierung",
+        ) as start:
+            from httpserver.wallet_sync import starte_wallet_aktualisierung_nach_gui
+
+            starte_wallet_aktualisierung_nach_gui(state)
+            time.sleep(0.05)
+            start.assert_not_called()
+            self.assertEqual(state.frist, "nicht-aufgerufen")
 
 
 if __name__ == "__main__":

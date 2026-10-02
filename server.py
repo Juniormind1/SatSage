@@ -1687,6 +1687,10 @@ class Handler(
             return 202, api_header_vorab(state)
         if teile == ["jobs", "rescan"] and methode == "POST":
             return 202, api_rescan(state, self._body())
+        if teile == ["gui-bereit"] and methode == "POST":
+            # Oberfläche kann „Aktualisieren“ — Start-Nachzug darf loslegen.
+            state.merke_gui_bereit()
+            return 200, {"ok": True}
         if teile == ["jobs", "wallet-sync"] and methode == "POST":
             return 202, api_wallet_tip_sync(state, self._body())
         if teile == ["jobs"] and methode == "GET":

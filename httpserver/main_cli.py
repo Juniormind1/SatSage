@@ -210,7 +210,6 @@ def main_cli(argv=None) -> int:
         build_state,
         starte_header_vorab,
         starte_historie_nachzug_taeglich,
-        starte_wallet_aktualisierung,
     )
 
     _splash_start()
@@ -237,7 +236,6 @@ def main_cli(argv=None) -> int:
     Handler.state = state
     _splash_text("Hintergrunddienste …")
     starte_header_vorab(state)
-    starte_wallet_aktualisierung(state)
     try:
         from core import wallet_watch
 
@@ -265,6 +263,11 @@ def main_cli(argv=None) -> int:
             )
             return 1
         raise
+    # Erst jetzt lauscht der Port. Der Start-Nachzug wartet auf die GUI,
+    # auf StartOS/Umbrel höchstens zwei Minuten ab hier.
+    from httpserver.wallet_sync import starte_wallet_aktualisierung_nach_gui
+
+    starte_wallet_aktualisierung_nach_gui(state)
     adresse = f"http://{bind}:{httpd.server_address[1]}/?t={state.token}"
     # Maschinenlesbar für GUI-Tests/Assistenten (kein Log-Grep auf Token).
     session_pfad = None

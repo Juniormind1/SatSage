@@ -50,6 +50,8 @@ class TestEinbindung(unittest.TestCase):
         rumpf = CHROME[start:]
         self.assertIn("einstiegsWalletId()", rumpf)
         self.assertNotIn("zeigeWallet(Zustand.config.wallets[0].id", rumpf)
+        self.assertIn("meldeGuiBereit()", rumpf)
+        self.assertLess(rumpf.index("zeigeWallet("), rumpf.index("meldeGuiBereit()"))
 
 
 if __name__ == "__main__":

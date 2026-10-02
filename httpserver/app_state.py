@@ -118,6 +118,8 @@ class AppState:
         self.scan_queue = ScanQueue(self.jobs)
         self.header_job_id: str | None = None
         self.wallet_sync_job_id: str | None = None
+        # Start-Nachzug wartet, bis die Oberfläche „Aktualisieren“ könnte.
+        self._gui_bereit = threading.Event()
         # Letzter Quellen-Check (dicts) — fuer /api/config ohne erneute Probe.
         self.sources_last: list[dict] | None = None
         #: monotonic: nächster erlaubter Header-Tip-Check (Cooldown-Spam).
@@ -439,6 +441,14 @@ class AppState:
     def warte_auf_context(self, timeout: float | None = None) -> bool:
         """Blockiert, bis der Cache-Seed fertig ist. Die Ableitung läuft danach."""
         return self._context_bereit.wait(timeout)
+
+    def merke_gui_bereit(self) -> None:
+        """Die Oberfläche ist soweit, dass „Aktualisieren“ klickbar wäre."""
+        self._gui_bereit.set()
+
+    def warte_auf_gui_bereit(self, timeout: float | None = None) -> bool:
+        """Wartet auf die GUI-Meldung. ``None`` wartet ohne Frist."""
+        return self._gui_bereit.wait(timeout)
 
     def wallet_ctx_fuer_ansicht(self):
         """
