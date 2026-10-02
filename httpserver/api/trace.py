@@ -277,132 +277,204 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 }
                 _zwischenstand()
 
-            for index, (txid, vout) in enumerate(offen):
+            def _tief_fortschritt(text: str) -> None:
+                t = str(text or "").strip()
                 job.raise_if_cancelled()
-                fertig_key = ""
-                rest = gesamt - index
+                if not t:
+                    return
+                if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
+                    stand.tick(t)
+                else:
+                    stand.phase(t)
+
+            def _teile_wald(knoten) -> None:
+                from core import utxo_ingress_report
+
+                if not isinstance(knoten, dict):
+                    return
+                teil = utxo_ingress_report.gesicherte_anschaffung(knoten)
+                if teil:
+                    _live(teil)
+
+            def _resume_origin(txid: str, vout: int):
+                geladen = trace_cache.laden(
+                    txid, vout, state.immutable_cache_dir, eigene,
+                )
+                if not geladen or not isinstance(geladen.get("baum"), dict):
+                    return None
+                origin = geladen["baum"].get("origin_tree")
+                if (
+                    isinstance(origin, dict)
+                    and analyze.hat_brauchbaren_teilfortschritt(origin)
+                ):
+                    return origin
+                return None
+
+            def _persist(txid: str, vout: int, tree: dict | None):
+                fetch_addr = fetchers.get("fetch_address_utxos")
                 if modus == "tief":
-                    text = (
-                        f"Herkunft vollständig — noch {rest} von {gesamt} UTXOs"
-                        f" · {txid[:12]}…:{vout}"
+                    return _trace_ein_utxo_tief(
+                        get_tx=fetchers["get_tx"],
+                        txid=txid,
+                        vout=vout,
+                        eigene=eigene,
+                        wallet_ctx=wallet_ctx,
+                        cache_dir=state.cache_dir,
+                        immutable_cache_dir=state.immutable_cache_dir,
+                        fetch_addr=fetch_addr,
+                        cache_source=quelle,
+                        progress=_tief_fortschritt,
+                        cancel_cb=lambda: job.cancelled,
+                        folge_bundled=True,
+                        folge_tx=True,
+                        resume_origin=tree,
+                        on_teilstand=_live,
                     )
-                elif modus == "steuer":
-                    text = (
-                        f"Steuerrelevantes Alter — noch {rest} von {gesamt} UTXOs"
-                        f" · {txid[:12]}…:{vout}"
-                    )
-                else:
-                    text = (
-                        f"Herkunft — noch {rest} von {gesamt} UTXOs"
-                        f" · {txid[:12]}…:{vout}"
-                    )
-                if index == 0:
-                    stand.phase(text)
-                else:
-                    stand.tick(text)
+                return trace_mod.trace_utxo(
+                    fetchers["get_tx"], txid, vout, eigene,
+                    wallet=wallet_ctx,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                    fetch_address_utxos=fetch_addr,
+                    cache_source=quelle,
+                    progress=job.progress,
+                    stop_before_ts=(
+                        stop_before_ts if modus == "steuer" else None
+                    ),
+                    origin_tree=tree if isinstance(tree, dict) else None,
+                    on_teilstand=_live,
+                )
+
+            from core.trace_wald import wald_max_runden, wald_schicht
+
+            wald_progress = trace_mod._FortschrittsAdapter(
+                job.progress, on_teilstand=_teile_wald,
+            )
+
+            baeume: dict[tuple[str, int], dict | None] = {}
+            memo: dict = {}
+            for txid, vout in offen:
+                baeume[(txid, vout)] = _resume_origin(txid, vout)
+
+            offen_keys = list(baeume.keys())
+            runde = 0
+            max_runden = wald_max_runden()
+
+            def _on_wurzel(key, _node) -> None:
+                nonlocal live_key, live_stand
+                txid, vout = key
                 live_key = f"{txid}:{vout}"
                 live_stand = None
                 _zwischenstand()
-                try:
-                    fetch_addr = fetchers.get("fetch_address_utxos")
-                    if modus == "tief":
-                        # Gleicher Pfad wie Einzel-Knopf „Herkunftslücken schließen“.
-                        def _tief_fortschritt(text: str) -> None:
-                            t = str(text or "").strip()
-                            job.raise_if_cancelled()
-                            if not t:
-                                return
-                            if t.startswith("↻") or t.startswith("Eigene Vorgänger"):
-                                stand.tick(t)
-                            else:
-                                stand.phase(t)
 
-                        resume_tief = None
-                        geladen_tief = trace_cache.laden(
-                            txid, vout, state.immutable_cache_dir, eigene,
-                        )
-                        if geladen_tief and isinstance(
-                            geladen_tief.get("baum"), dict
-                        ):
-                            origin_t = geladen_tief["baum"].get("origin_tree")
-                            if (
-                                isinstance(origin_t, dict)
-                                and analyze.hat_brauchbaren_teilfortschritt(
-                                    origin_t
-                                )
+            while offen_keys:
+                job.raise_if_cancelled()
+                runde += 1
+                if runde > max_runden:
+                    for key in list(offen_keys):
+                        txid, vout = key
+                        tree = baeume.get(key)
+                        if isinstance(tree, dict):
+                            try:
+                                _persist(txid, vout, tree)
+                            except Cancelled:
+                                raise
+                            except Exception:
+                                fehler += 1
+                    break
+                rest = len(offen_keys)
+                if modus == "tief":
+                    text = (
+                        f"Herkunft vollständig — Runde {runde}"
+                        f" · {rest} von {gesamt} UTXOs offen"
+                    )
+                elif modus == "steuer":
+                    text = (
+                        f"Steuerrelevantes Alter — Runde {runde}"
+                        f" · {rest} von {gesamt} UTXOs offen"
+                    )
+                else:
+                    text = (
+                        f"Herkunft — Runde {runde}"
+                        f" · {rest} von {gesamt} UTXOs offen"
+                    )
+                if runde == 1:
+                    stand.phase(text)
+                else:
+                    stand.tick(text)
+
+                weiter, fertig_jetzt = wald_schicht(
+                    baeume,
+                    offen_keys,
+                    fetchers["get_tx"],
+                    eigene,
+                    wallet=wallet_ctx,
+                    cache_dir=state.cache_dir,
+                    fetch_address_utxos=fetchers.get("fetch_address_utxos"),
+                    cache_source=quelle,
+                    progress=wald_progress,
+                    alle_eigenen_inputs=(modus == "tief"),
+                    memo=memo,
+                    stop_before_ts=(
+                        stop_before_ts if modus == "steuer" else None
+                    ),
+                    on_teilstand=_teile_wald,
+                    on_wurzel=_on_wurzel,
+                )
+
+                for key in fertig_jetzt:
+                    job.raise_if_cancelled()
+                    txid, vout = key
+                    live_key = f"{txid}:{vout}"
+                    tree = baeume.get(key)
+                    try:
+                        ergebnis = _persist(txid, vout, tree)
+                        fertig += 1
+                        if isinstance(ergebnis, dict) and ergebnis.get("found"):
+                            if ergebnis.get("verfolgt_vollstaendig"):
+                                voll_ok += 1
+                            if ergebnis.get("steuer_ausreichend") or ergebnis.get(
+                                "verfolgt_vollstaendig"
                             ):
-                                resume_tief = origin_t
-                        ergebnis = _trace_ein_utxo_tief(
-                            get_tx=fetchers["get_tx"],
-                            txid=txid,
-                            vout=vout,
-                            eigene=eigene,
-                            wallet_ctx=wallet_ctx,
-                            cache_dir=state.cache_dir,
-                            immutable_cache_dir=state.immutable_cache_dir,
-                            fetch_addr=fetch_addr,
-                            cache_source=quelle,
-                            progress=_tief_fortschritt,
-                            cancel_cb=lambda: job.cancelled,
-                            folge_bundled=True,
-                            folge_tx=True,
-                            resume_origin=resume_tief,
-                            on_teilstand=_live,
-                        )
-                    else:
-                        resume = None
-                        if modus in ("voll", "steuer"):
-                            geladen = trace_cache.laden(
-                                txid, vout, state.immutable_cache_dir, eigene,
-                            )
-                            if geladen and isinstance(geladen.get("baum"), dict):
-                                origin = geladen["baum"].get("origin_tree")
-                                if (
-                                    isinstance(origin, dict)
-                                    and analyze.hat_brauchbaren_teilfortschritt(
-                                        origin
-                                    )
-                                ):
-                                    resume = origin
-                        ergebnis = trace_mod.trace_utxo(
+                                steuer_ok_n += 1
+                            if ergebnis.get("juengste_sats_ts"):
+                                juengste += 1
+                        fertig_key = live_key
+                        live_key = ""
+                        live_stand = None
+                        _zwischenstand()
+                    except Cancelled:
+                        raise
+                    except Exception:
+                        fehler += 1
+                        fertig_key = live_key
+                        live_key = ""
+                        live_stand = None
+                        _zwischenstand()
+
+                for key in weiter:
+                    tree = baeume.get(key)
+                    if not isinstance(tree, dict):
+                        continue
+                    txid, vout = key
+                    try:
+                        trace_mod.trace_utxo(
                             fetchers["get_tx"], txid, vout, eigene,
                             wallet=wallet_ctx,
                             cache_dir=state.cache_dir,
                             immutable_cache_dir=state.immutable_cache_dir,
-                            fetch_address_utxos=fetch_addr,
-                            cache_source=quelle,
-                            progress=job.progress,
-                            stop_before_ts=(
-                                stop_before_ts if modus == "steuer" else None
+                            fetch_address_utxos=fetchers.get(
+                                "fetch_address_utxos"
                             ),
-                            # voll: Lücken fortsetzen; steuer: Horizont neu
-                            # mit stop — Resume nur bei voll.
-                            resume_origin=resume if modus == "voll" else None,
-                            on_teilstand=_live,
+                            cache_source=quelle,
+                            origin_tree=tree,
                         )
-                    fertig += 1
-                    if isinstance(ergebnis, dict) and ergebnis.get("found"):
-                        if ergebnis.get("verfolgt_vollstaendig"):
-                            voll_ok += 1
-                        if ergebnis.get("steuer_ausreichend") or ergebnis.get(
-                            "verfolgt_vollstaendig"
-                        ):
-                            steuer_ok_n += 1
-                        if ergebnis.get("juengste_sats_ts"):
-                            juengste += 1
-                    fertig_key = live_key
-                    live_key = ""
-                    live_stand = None
-                    _zwischenstand()
-                except Cancelled:
-                    raise          # Abbruch muss durchschlagen
-                except Exception:
-                    fehler += 1    # eine unerreichbare Tx stoppt nicht den Rest
-                    fertig_key = live_key
-                    live_key = ""
-                    live_stand = None
-                    _zwischenstand()
-                    continue
+                    except Cancelled:
+                        raise
+                    except Exception:
+                        pass
+
+                offen_keys = weiter
 
             if modus == "tief":
                 fertig_text = (

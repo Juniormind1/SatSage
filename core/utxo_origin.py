@@ -26,6 +26,10 @@ from core.trace import (
     resolve_vin_prevout,
 )
 
+#: Interner Stub: dieser Hop ist klassifiziert, die Kinder stehen noch aus.
+#: Eine Wald-Runde expandiert alle solchen Blätter um genau eine Schicht.
+ORIGIN_PENDING = "pending"
+
 if TYPE_CHECKING:
     from main import WalletContext
 
@@ -108,6 +112,29 @@ def _is_own_address(
     return address in own_addresses
 
 
+def _ist_pending(node: dict | None) -> bool:
+    return isinstance(node, dict) and node.get("type") == ORIGIN_PENDING
+
+
+def _pending_stub(
+    prev_txid: str,
+    prev_vout: int,
+    *,
+    depth: int,
+    visited_utxos: set,
+) -> dict:
+    """Platzhalter: Hop erkannt, Kinder erst in der nächsten Schicht."""
+    return {
+        "type": ORIGIN_PENDING,
+        "txid": prev_txid,
+        "vout": prev_vout,
+        "utxo": f"{prev_txid}:{prev_vout}",
+        "depth": depth,
+        "pending_path": list(visited_utxos),
+        "sources": [],
+    }
+
+
 
 def trace_utxo_origin(
     get_tx,
@@ -126,6 +153,7 @@ def trace_utxo_origin(
     memo: dict | None = None,
     stop_before_ts: int | None = None,
     on_teilstand=None,
+    hop_budget: int | None = None,
 ) -> dict | None:
     """
     Verfolgt, wie der Output creator_txid:vout_index finanziert wurde.
@@ -151,6 +179,11 @@ def trace_utxo_origin(
     der Wurzel (``depth == 0``), sobald ein externer Zufluss datiert ist
     und sich nicht mehr umkehren kann. Der Ingress-Cache bleibt unberührt —
     der Aufrufer legt den Stand in den laufenden Job.
+
+    *hop_budget*: optional. Dieser Knoten zählt als 1. Bei ``1`` werden
+    eigene Kinder als ``pending``-Stubs angehängt statt sofort rekursiv
+    verfolgt — eine Wald-Runde expandiert so genau eine Schicht.
+    ``None`` bleibt der volle Tiefenlauf (Einzel-Trace, Tests).
     """
     # Pfad-lokal: Aufrufer dürfen ein Set übergeben (Tests), aber Geschwister
     # dürfen sich die besuchten Knoten nicht teilen — sonst wird jede Raute
@@ -524,23 +557,45 @@ def trace_utxo_origin(
                     )
                 # Eigener Pfad je Kind — Geschwister sehen nur memo, nicht
                 # gegenseitig die besuchten Knoten des anderen Asts.
-                child = trace_utxo_origin(
-                    get_tx,
-                    prev_txid,
-                    prev_vout,
-                    own_addresses,
-                    set(visited_utxos),
-                    depth + 1,
-                    wallet=wallet,
-                    cache_dir=cache_dir,
-                    fetch_address_utxos=fetch_address_utxos,
-                    cache_source=cache_source,
-                    progress=progress,
-                    alle_eigenen_inputs=alle_eigenen_inputs,
-                    memo=memo,
-                    stop_before_ts=stop_before_ts,
-                    on_teilstand=on_teilstand,
-                )
+                child_key = prev_ref
+                child_depth = depth + 1
+                if child_key in visited_utxos or child_depth > MAX_TRACE_DEPTH:
+                    child = {
+                        "type": "cycle",
+                        "utxo": child_key,
+                        "sources": [],
+                    }
+                elif child_key in memo:
+                    child = memo[child_key]
+                elif hop_budget is not None and hop_budget <= 1:
+                    child = _pending_stub(
+                        prev_txid,
+                        prev_vout,
+                        depth=child_depth,
+                        visited_utxos=visited_utxos,
+                    )
+                else:
+                    rest_budget = (
+                        hop_budget - 1 if hop_budget is not None else None
+                    )
+                    child = trace_utxo_origin(
+                        get_tx,
+                        prev_txid,
+                        prev_vout,
+                        own_addresses,
+                        set(visited_utxos),
+                        child_depth,
+                        wallet=wallet,
+                        cache_dir=cache_dir,
+                        fetch_address_utxos=fetch_address_utxos,
+                        cache_source=cache_source,
+                        progress=progress,
+                        alle_eigenen_inputs=alle_eigenen_inputs,
+                        memo=memo,
+                        stop_before_ts=stop_before_ts,
+                        on_teilstand=on_teilstand,
+                        hop_budget=rest_budget,
+                    )
                 node["sources"].append({
                     "type": "internal",
                     "address": own_addr,
@@ -762,14 +817,15 @@ def _origin_hat_luecken(node: dict | None) -> bool:
     True wenn der Rohbaum noch kein volles extern/Coinbase-Ende hat.
 
     Entspricht der UI-Semantik „unvollständig“: error/unknown/cycle,
-    leere Sources, tax_horizon, external_unresolved, lückige interne Kinder.
+    leere Sources, tax_horizon, external_unresolved, lückige interne Kinder,
+    ``pending``-Stubs einer unfertigen Hop-Schicht.
     """
     if not isinstance(node, dict):
         return True
     if node.get("tax_horizon"):
         return True
     typ = node.get("type")
-    if typ in ("error", "unknown", "cycle"):
+    if typ in ("error", "unknown", "cycle", ORIGIN_PENDING):
         return True
     if node.get("coinjoin_noise_skipped") and node.get("tx_class"):
         # Absichtliches CJ-Ende ohne Peer-Externals.
@@ -779,6 +835,19 @@ def _origin_hat_luecken(node: dict | None) -> bool:
         # Root ohne Sources (und kein CJ-Skip) = Lücke.
         return typ not in ("external", "coinbase")
     return any(_quelle_hat_luecke(src) for src in quellen)
+
+
+def _hat_pending(node: dict | None) -> bool:
+    """Ob der Rohbaum noch ``pending``-Stubs einer unfertigen Schicht hat."""
+    if not isinstance(node, dict):
+        return False
+    if _ist_pending(node):
+        return True
+    for src in node.get("sources") or []:
+        if isinstance(src, dict) and src.get("type") == "internal":
+            if _hat_pending(src.get("trace")):
+                return True
+    return False
 
 
 def hat_brauchbaren_teilfortschritt(node: dict | None) -> bool:
@@ -822,6 +891,60 @@ def _seed_memo_fertige_unterbaeume(node: dict | None, memo: dict) -> None:
             _seed_memo_fertige_unterbaeume(src.get("trace"), memo)
 
 
+def _expand_luecken_knoten(
+    node: dict,
+    get_tx,
+    own_addresses: set,
+    *,
+    wallet: WalletContext | None = None,
+    cache_dir: Path | None = None,
+    fetch_address_utxos=None,
+    cache_source: str | None = None,
+    progress: _EphemeralProgress | None = None,
+    alle_eigenen_inputs: bool = False,
+    memo: dict | None = None,
+    on_teilstand=None,
+    hop_budget: int | None = None,
+    alle_eigenen_override: bool | None = None,
+) -> dict | None:
+    """Einen Lücken-Knoten einmal ``trace_utxo_origin`` (optional hop_budget)."""
+    ref = _knoten_txid_vout(node)
+    if not ref:
+        return node
+    txid, vout = ref
+    visited: set | None = None
+    depth = 0
+    if _ist_pending(node):
+        visited = set(node.get("pending_path") or [])
+        try:
+            depth = int(node.get("depth") or 0)
+        except (TypeError, ValueError):
+            depth = 0
+    elif memo is not None:
+        memo.pop(f"{txid}:{vout}", None)
+    eigene = (
+        True if alle_eigenen_override else alle_eigenen_inputs
+    )
+    return trace_utxo_origin(
+        get_tx,
+        txid,
+        vout,
+        own_addresses,
+        visited,
+        depth,
+        wallet=wallet,
+        cache_dir=cache_dir,
+        fetch_address_utxos=fetch_address_utxos,
+        cache_source=cache_source,
+        progress=progress,
+        alle_eigenen_inputs=eigene,
+        memo=memo,
+        stop_before_ts=None,
+        on_teilstand=on_teilstand,
+        hop_budget=hop_budget,
+    )
+
+
 def vertiefe_herkunft_luecken(
     node: dict | None,
     get_tx,
@@ -835,6 +958,7 @@ def vertiefe_herkunft_luecken(
     alle_eigenen_inputs: bool = False,
     memo: dict | None = None,
     on_teilstand=None,
+    hop_budget: int | None = None,
 ) -> dict | None:
     """
     Setzt einen unvollständigen Herkunfts-Rohbaum fort.
@@ -842,6 +966,8 @@ def vertiefe_herkunft_luecken(
     * Fertige Zweige (extern/Coinbase, vollständige interne Teilbäume) bleiben.
     * ``tax_horizon``, ``error``, leere Sources und lückige interne Kinder
       werden gezielt nachgezogen — kein Komplett-Neulauf ab der Wurzel.
+    * ``hop_budget=1``: nur die nächste Schicht (pending-Blätter), nicht
+      den Rest des Baums in die Tiefe.
     """
     if not isinstance(node, dict):
         return node
@@ -854,13 +980,28 @@ def vertiefe_herkunft_luecken(
     if not _origin_hat_luecken(node):
         return node
 
-    # Steuer-Horizont oder reiner Fehler-/Leer-Knoten: diesen Hop neu laufen.
-    if node.get("tax_horizon") or node.get("type") in ("error", "unknown", "cycle"):
+    walk_kw = dict(
+        wallet=wallet,
+        cache_dir=cache_dir,
+        fetch_address_utxos=fetch_address_utxos,
+        cache_source=cache_source,
+        progress=progress,
+        alle_eigenen_inputs=alle_eigenen_inputs,
+        memo=memo,
+        on_teilstand=on_teilstand,
+        hop_budget=hop_budget,
+    )
+
+    # pending / Steuer-Horizont / Fehler-/Leer-Knoten: diesen Hop neu laufen.
+    if (
+        _ist_pending(node)
+        or node.get("tax_horizon")
+        or node.get("type") in ("error", "unknown", "cycle")
+    ):
         ref = _knoten_txid_vout(node)
         if not ref:
             return node
         txid, vout = ref
-        memo.pop(f"{txid}:{vout}", None)
         if progress:
             try:
                 progress.update(
@@ -868,43 +1009,14 @@ def vertiefe_herkunft_luecken(
                 )
             except Exception:
                 pass
-        return trace_utxo_origin(
-            get_tx,
-            txid,
-            vout,
-            own_addresses,
-            wallet=wallet,
-            cache_dir=cache_dir,
-            fetch_address_utxos=fetch_address_utxos,
-            cache_source=cache_source,
-            progress=progress,
-            alle_eigenen_inputs=alle_eigenen_inputs,
-            memo=memo,
-            stop_before_ts=None,
-            on_teilstand=on_teilstand,
+        return _expand_luecken_knoten(
+            node, get_tx, own_addresses, **walk_kw,
         )
 
     quellen = node.get("sources")
     if not isinstance(quellen, list) or not quellen:
-        ref = _knoten_txid_vout(node)
-        if not ref:
-            return node
-        txid, vout = ref
-        memo.pop(f"{txid}:{vout}", None)
-        return trace_utxo_origin(
-            get_tx,
-            txid,
-            vout,
-            own_addresses,
-            wallet=wallet,
-            cache_dir=cache_dir,
-            fetch_address_utxos=fetch_address_utxos,
-            cache_source=cache_source,
-            progress=progress,
-            alle_eigenen_inputs=alle_eigenen_inputs,
-            memo=memo,
-            stop_before_ts=None,
-            on_teilstand=on_teilstand,
+        return _expand_luecken_knoten(
+            node, get_tx, own_addresses, **walk_kw,
         )
 
     # Ganze Node neu, wenn gebündelte unresolved-Eingänge mit Opt-in.
@@ -912,25 +1024,10 @@ def vertiefe_herkunft_luecken(
         isinstance(s, dict) and s.get("type") == "external_unresolved"
         for s in quellen
     ):
-        ref = _knoten_txid_vout(node)
-        if ref:
-            txid, vout = ref
-            memo.pop(f"{txid}:{vout}", None)
-            return trace_utxo_origin(
-                get_tx,
-                txid,
-                vout,
-                own_addresses,
-                wallet=wallet,
-                cache_dir=cache_dir,
-                fetch_address_utxos=fetch_address_utxos,
-                cache_source=cache_source,
-                progress=progress,
-                alle_eigenen_inputs=True,
-                memo=memo,
-                stop_before_ts=None,
-                on_teilstand=on_teilstand,
-            )
+        return _expand_luecken_knoten(
+            node, get_tx, own_addresses,
+            **{**walk_kw, "alle_eigenen_override": True},
+        )
 
     neu_quellen: list = []
     geaendert = False
@@ -954,6 +1051,7 @@ def vertiefe_herkunft_luecken(
                     alle_eigenen_inputs=alle_eigenen_inputs,
                     memo=memo,
                     on_teilstand=on_teilstand,
+                    hop_budget=hop_budget,
                 )
                 if frisch is not kind:
                     src = dict(src)
@@ -1000,6 +1098,7 @@ def vertiefe_herkunft_luecken(
                     memo=memo,
                     stop_before_ts=None,
                     on_teilstand=on_teilstand,
+                    hop_budget=hop_budget,
                 )
                 # error-Source → internal oder external ersetzen
                 own_addr = None

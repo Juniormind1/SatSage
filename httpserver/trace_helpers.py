@@ -264,6 +264,7 @@ def _trace_ein_utxo_tief(
         if abbruch and abbruch():
             raise Cancelled()
 
+    roh = None
     if folge_tx or folge_bundled:
         _check_abbruch()
         if folge_bundled:
@@ -367,6 +368,7 @@ def _trace_ein_utxo_tief(
         resolve_bundled=folge_bundled,
         merke_tx_oriented_done=folge_tx,
         resume_origin=resume_origin,
+        origin_tree=roh if isinstance(roh, dict) else None,
     )
     return ergebnis
 

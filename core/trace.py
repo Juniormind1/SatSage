@@ -936,6 +936,8 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
         )
         if quelle.get("input_count"):
             knoten["input_count"] = int(quelle.get("input_count") or 0)
+    elif typ == "pending":
+        knoten["note"] = "Hop erkannt — nächste Schicht folgt."
     elif typ == "unknown":
         knoten["note"] = (
             quelle.get("error")
@@ -1109,6 +1111,7 @@ def trace_utxo(
     merke_tx_oriented_done: bool = False,
     stop_before_ts: int | None = None,
     resume_origin: dict | None = None,
+    origin_tree: dict | None = None,
     on_teilstand=None,
 ) -> dict:
     """
@@ -1134,6 +1137,10 @@ def trace_utxo(
     *resume_origin*: gespeicherter Analyse-Rohbaum. Bei vollem Lauf werden
     Lücken nachgezogen (tax_horizon, error-Prevouts, unvollständige interne
     Zweige) — fertige Äste bleiben erhalten (kein Komplett-Neulauf).
+
+    *origin_tree*: fertiger oder teilweiser Rohbaum. Überspringt den Walk
+    und schreibt nur UI-Baum plus Caches — für den hop-weisen Wald, der
+    den Rohbaum schon hat.
 
     *on_teilstand*: optional ``callable(dict)``. Bekommt nur, was am
     unfertigen Baum schon feststeht (siehe
@@ -1169,7 +1176,18 @@ def trace_utxo(
         except Exception:
             pass
 
-    if (
+    if origin_tree is not None and isinstance(origin_tree, dict):
+        roh = origin_tree
+    elif (
+        resume_origin
+        and isinstance(resume_origin, dict)
+        and stop_before_ts is None
+        and not utxo_origin._origin_hat_luecken(resume_origin)
+        and not utxo_origin._hat_tax_horizon(resume_origin)
+    ):
+        # Wald / zweiter Pass: Rohbaum ist schon vollständig.
+        roh = resume_origin
+    elif (
         resume_origin
         and isinstance(resume_origin, dict)
         and stop_before_ts is None
