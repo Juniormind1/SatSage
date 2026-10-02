@@ -793,15 +793,12 @@ def _gespeicherter_baum(
     baum = gespeichert["baum"] or {}
     if isinstance(baum, dict):
         baum = dict(baum)
-        # Alte Bäume: externe Blätter ohne time_label nachziehen (Tx-Cache).
-        # Kein lokales ``import trace as trace_mod`` — sonst UnboundLocalError
-        # auf dem Modul-Import weiter unten (Python-Scoping).
+        # Alte Bäume: fehlende Zeiten aus Tx-/Header-Cache; unvollständig
+        # nachziehen. Kein lokales ``import trace as trace_mod``.
         try:
-            kinder0 = baum.get("children") or []
-            if kinder0:
-                trace_mod._anreichere_externe_zeiten(
-                    kinder0, state.immutable_cache_dir,
-                )
+            trace_mod.baum_zeiten_nachziehen(
+                baum, state.immutable_cache_dir, txid=txid, vout=vout,
+            )
         except Exception:
             pass
         # Vollständigkeit und Done-Flag frisch aus den Blättern — nicht dem
@@ -1019,11 +1016,10 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 if isinstance(baum, dict) and baum.get("found"):
                     baum = dict(baum)
                     try:
-                        kinder = baum.get("children") or []
-                        if kinder:
-                            trace_mod._anreichere_externe_zeiten(
-                                kinder, state.immutable_cache_dir,
-                            )
+                        trace_mod.baum_zeiten_nachziehen(
+                            baum, state.immutable_cache_dir,
+                            txid=txid, vout=vout,
+                        )
                         baum.update(trace_mod.folge_meta(baum))
                     except Exception:
                         pass
@@ -1217,11 +1213,10 @@ def api_trace(state: AppState, payload: dict) -> dict:
             if isinstance(baum, dict) and baum.get("found"):
                 baum = dict(baum)
                 try:
-                    kinder = baum.get("children") or []
-                    if kinder:
-                        trace_mod._anreichere_externe_zeiten(
-                            kinder, state.immutable_cache_dir,
-                        )
+                    trace_mod.baum_zeiten_nachziehen(
+                        baum, state.immutable_cache_dir,
+                        txid=txid, vout=vout,
+                    )
                     baum.update(trace_mod.folge_meta(baum))
                 except Exception:
                     pass

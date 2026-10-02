@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Lot-Ring:** Fehlende Zeiten an Herkunfts-Enden kommen wie im Overlay aus Tx- und Header-Cache. Unvollständige Bäume in `immutable_cache` werden nachgezogen, vollständige bleiben unverändert. Ein ganz grüner Lot-Ring färbt den Punkt grün.
 - **Herkunft tracen:** Der Massenlauf geht hop-weise über alle offenen UTXOs. Kurze Ketten sind nach der ersten Runde fertig und sichtbar; Remix-Nüsse laufen in späteren Runden weiter, ohne die anderen zu blockieren.
 - **Einstellungen · Walletnamen in Berichten:** Neue Karte. Häkchen „Echte Walletnamen in externen Berichten verwenden“ aus: HTML- und CSV-Export nutzen einen gemeinsamen Namen (Vorgabe Eigenverwahrung), den man darunter einträgt. Die Oberfläche behält die echten Walletnamen. An: Export wie bisher mit den Namen aus den Wallet-Einstellungen.
 - **Wallet-Watch:** Reconnect, Subscribe und die übrigen Watch-Zeilen stehen im Web-Log, nicht nur im Terminal. Ein toter LAN-Indexer gilt nach 8 s als weg (nicht erst nach 60 s). Fehlt er beim Start, versucht der Watcher weiter alle 15 s, statt aufzugeben. Die Subscribe-Session beginnt mit ``server.version``; ohne diesen Handshake bleibt libbitcoin stumm, und ``headers.subscribe`` läuft ins Timeout, obwohl der Indexer erreichbar ist. Nach dem Handshake liest der Watcher die Cache-Adressen (fehlender ``xpub_cache``-Import).

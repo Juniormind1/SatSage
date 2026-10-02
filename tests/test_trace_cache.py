@@ -90,6 +90,97 @@ class TestRundlauf(TraceCacheBasis):
             trace_cache.speichern(txid("a1"), 0, BAUM, None, EIGENE)
         )
 
+    def test_vervollstaendigen_behaelt_fingerabdruck(self):
+        trace_cache.speichern(txid("a1"), 0, BAUM, self.dir, EIGENE)
+        geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        erstellt = geladen["erstellt_ts"]
+        baum = geladen["baum"]
+        baum["children"][0]["time_label"] = "01.01.2020 12:00:00"
+        baum["children"][0]["block_time"] = 1_577_880_000
+        self.assertIsNotNone(
+            trace_cache.vervollstaendigen(
+                txid("a1"), 0, baum, self.dir,
+            )
+        )
+        danach = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        self.assertEqual(danach["erstellt_ts"], erstellt)
+        self.assertFalse(danach["veraltet"])
+        self.assertEqual(
+            danach["baum"]["children"][0]["block_time"], 1_577_880_000,
+        )
+
+    def test_vervollstaendigen_legt_keine_neue_datei_an(self):
+        baum = dict(BAUM)
+        self.assertIsNone(
+            trace_cache.vervollstaendigen(txid("a1"), 0, baum, self.dir)
+        )
+        self.assertFalse(trace_cache.vorhanden(txid("a1"), 0, self.dir))
+
+
+class TestBaumZeitenNachziehen(TraceCacheBasis):
+
+    def test_tx_cache_schreibt_zeit_in_den_baum(self):
+        from core import xpub_cache
+        from core.trace import baum_zeiten_nachziehen
+
+        baum = {
+            "found": True,
+            "root": {"id": "0", "txid": txid("a1"), "vout": 0, "amount_sats": 1000},
+            "children": [{
+                "id": "0.0",
+                "type": "external",
+                "from_utxo": f"{txid('e1')}:0",
+                "amount_sats": 1000,
+                "time_label": "",
+                "children": [],
+            }],
+        }
+        trace_cache.speichern(txid("a1"), 0, baum, self.dir, EIGENE)
+        ts = 1_577_880_000
+        xpub_cache.save_cached_tx(txid("e1"), {
+            "txid": txid("e1"),
+            "status": {
+                "confirmed": True,
+                "block_height": 800_000,
+                "block_time": ts,
+            },
+        }, self.dir, "test")
+        n = baum_zeiten_nachziehen(
+            baum, self.dir, txid=txid("a1"), vout=0,
+        )
+        self.assertEqual(n, 1)
+        self.assertEqual(baum["children"][0]["block_time"], ts)
+        geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        self.assertEqual(geladen["baum"]["children"][0]["block_time"], ts)
+        self.assertFalse(geladen["veraltet"])
+
+    def test_vollstaendig_schreibt_nicht(self):
+        from core.trace import baum_zeiten_nachziehen
+
+        baum = {
+            "found": True,
+            "root": {
+                "id": "0", "txid": txid("a1"), "vout": 0, "amount_sats": 1000,
+                "time_label": "01.01.2020 12:00:00", "block_time": 1_577_880_000,
+            },
+            "children": [{
+                "id": "0.0",
+                "type": "external",
+                "from_utxo": f"{txid('e1')}:0",
+                "time_label": "01.01.2020 12:00:00",
+                "block_time": 1_577_880_000,
+                "children": [],
+            }],
+        }
+        trace_cache.speichern(txid("a1"), 0, baum, self.dir, EIGENE)
+        pfad = trace_cache.pfad(txid("a1"), 0, self.dir)
+        vorher = pfad.read_bytes()
+        self.assertEqual(
+            baum_zeiten_nachziehen(baum, self.dir, txid=txid("a1"), vout=0),
+            0,
+        )
+        self.assertEqual(pfad.read_bytes(), vorher)
+
 
 class TestKnotenTabelle(TraceCacheBasis):
     """ISSUES P2 Schritt 6: Rauten stehen nur einmal in der Datei (DAG)."""

@@ -1356,6 +1356,71 @@ class TestLotSummen(unittest.TestCase):
         self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 500)
         self.assertFalse(offensiv["eintraege"][0]["erfuellt"])
 
+    def test_undatiertes_ende_wird_aus_tx_cache_gruen(self):
+        from core import xpub_cache
+
+        self._speichern("e5", [
+            self._extern("c1", 500, "01.01.2020 12:00:00"),
+            self._extern("c2", 500, ""),
+        ])
+        xpub_cache.save_cached_tx(txid("c2"), {
+            "txid": txid("c2"),
+            "status": {
+                "confirmed": True,
+                "block_height": 800_000,
+                "block_time": zeitstempel("01.01.2020 12:00"),
+            },
+        }, self.cache, "test")
+        defensiv = self._aus("e5")
+        e = defensiv["eintraege"][0]
+        self.assertEqual(
+            (e["sats_gruen"], e["sats_orange"], e["sats_grau"]),
+            (1000, 0, 0),
+        )
+        self.assertTrue(e["erfuellt"])
+        from core import trace_cache
+
+        geladen = trace_cache.laden(txid("e5"), 0, self.cache)
+        kind = geladen["baum"]["children"][1]
+        self.assertTrue(kind.get("block_time"))
+        self.assertTrue(kind.get("time_label"))
+
+    def test_undatiertes_ende_wird_aus_header_cache_gruen(self):
+        from core import xpub_cache
+
+        self._speichern("f6", [{
+            "type": "external",
+            "from_utxo": f"{txid('aa')}:0",
+            "amount_sats": 1000,
+            "time_label": "",
+            "block_height": 800_001,
+            "children": [],
+        }])
+        xpub_cache.save_cached_block_time(
+            800_001, zeitstempel("01.03.2019 12:00"), self.cache, "test",
+        )
+        defensiv = self._aus("f6")
+        e = defensiv["eintraege"][0]
+        self.assertEqual(
+            (e["sats_gruen"], e["sats_orange"], e["sats_grau"]),
+            (1000, 0, 0),
+        )
+        self.assertTrue(e["erfuellt"])
+
+    def test_vollstaendiger_baum_wird_nicht_ueberschrieben(self):
+        from core import trace_cache
+
+        self._speichern("b2", [
+            self._extern("g1", 600, "01.03.2019 12:00:00"),
+            self._extern("g2", 400, "01.06.2020 12:00:00"),
+        ])
+        pfad = trace_cache.pfad(txid("b2"), 0, self.cache)
+        vorher = pfad.read_bytes()
+        mtime = pfad.stat().st_mtime_ns
+        self._aus("b2")
+        self.assertEqual(pfad.read_bytes(), vorher)
+        self.assertEqual(pfad.stat().st_mtime_ns, mtime)
+
 
 if __name__ == "__main__":
     unittest.main()

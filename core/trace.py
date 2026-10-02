@@ -6,6 +6,7 @@ Root-``trace_engine`` re-exportiert den Walk.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -708,69 +709,157 @@ def _setze_externe_zeit(knoten: dict, quelle: dict | None = None) -> None:
         pass
 
 
+_BLOCK_HOEHE_RE = re.compile(r"Block\s+([\d.,]+)")
+#: Unfertige Walk-Stubs — keine Output-Zeit nachziehen.
+_ZEIT_AUSLASSEN = frozenset({"pending", "external_unresolved"})
+
+
+def _knoten_blockhoehe(knoten: dict) -> int | None:
+    """Blockhöhe am Knoten: Feld, sonst „Block N“ im Label."""
+    hoehe = knoten.get("block_height")
+    if hoehe:
+        try:
+            n = int(hoehe)
+            return n if n > 0 else None
+        except (TypeError, ValueError):
+            pass
+    treffer = _BLOCK_HOEHE_RE.search(str(knoten.get("time_label") or ""))
+    if not treffer:
+        return None
+    try:
+        n = int(re.sub(r"[.,]", "", treffer.group(1)))
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def _zeit_aus_tx_cache(
+    from_utxo: str,
+    immutable: Path | None,
+) -> tuple[int | None, str]:
+    """Blockzeit der Prevout-Tx aus dem Tx-Cache (inkl. Header-Nachzug)."""
+    if not immutable or not from_utxo or ":" not in str(from_utxo):
+        return None, ""
+    try:
+        txid, _vout = str(from_utxo).rsplit(":", 1)
+        txid = xpub_cache._normalize_txid(txid)
+    except Exception:
+        return None, ""
+    tx = xpub_cache.load_cached_tx(txid, immutable)
+    if not isinstance(tx, dict):
+        return None, ""
+    ts = utxo_report._tx_block_time(tx)
+    if ts is None:
+        return None, ""
+    return int(ts), utxo_report._format_tx_time(tx)
+
+
+def _knoten_zeit_fuellen(
+    knoten: dict,
+    immutable: Path | str | None,
+) -> bool:
+    """
+    Fehlende Zeit an einem Knoten aus Feldern, Tx- oder Header-Cache.
+
+    Rückgabe True, wenn Label oder Blockzeit neu gesetzt wurde.
+    """
+    if not isinstance(knoten, dict):
+        return False
+    if knoten.get("type") in _ZEIT_AUSLASSEN:
+        return False
+    vorher_label = bool(knoten.get("time_label"))
+    vorher_ts = bool(knoten.get("block_time"))
+    if vorher_label and vorher_ts:
+        return False
+    cache: Path | None = None
+    if immutable:
+        try:
+            cache = Path(immutable)
+        except TypeError:
+            cache = None
+    _setze_externe_zeit(knoten)
+    if not (knoten.get("time_label") and knoten.get("block_time")):
+        ts, label = _zeit_aus_tx_cache(knoten.get("from_utxo") or "", cache)
+        if label and not knoten.get("time_label"):
+            knoten["time_label"] = label
+        if ts:
+            knoten["block_time"] = int(ts)
+            knoten["time_ts"] = int(ts)
+    if not (knoten.get("time_label") and knoten.get("block_time")):
+        hoehe = _knoten_blockhoehe(knoten)
+        ts = (
+            xpub_cache.load_cached_block_time(hoehe, cache)
+            if hoehe and cache is not None else None
+        )
+        if ts:
+            knoten["block_time"] = int(ts)
+            knoten["time_ts"] = int(ts)
+            if not knoten.get("time_label"):
+                knoten["time_label"] = _format_time_ts(ts)
+    return (
+        bool(knoten.get("time_label")) != vorher_label
+        or bool(knoten.get("block_time")) != vorher_ts
+    )
+
+
 def _anreichere_externe_zeiten(
     knoten_liste: list,
     immutable_cache_dir: Path | str | None = None,
-) -> None:
+) -> int:
     """
-    Nachträglich Zeiten an externe Blätter hängen (alte Caches ohne time_label).
+    Nachträglich Zeiten an Blätter hängen (alte Caches ohne time_label).
 
-    Reihenfolge: vorhandenes time_ts → Tx-Cache zum from_utxo.
+    Reihenfolge: vorhandenes time_ts → Tx-Cache zum from_utxo → Header-Cache
+    zur Blockhöhe. Rückgabe: Zahl der Knoten, an denen etwas nachgetragen wurde.
     """
-    if not knoten_liste:
-        return
-    immutable: Path | None = None
-    if immutable_cache_dir:
-        try:
-            immutable = Path(immutable_cache_dir)
-        except TypeError:
-            immutable = None
-
-    def _aus_tx_cache(from_utxo: str) -> tuple[int | None, str]:
-        if not immutable or not from_utxo or ":" not in str(from_utxo):
-            return None, ""
-        try:
-            txid, _vout = str(from_utxo).rsplit(":", 1)
-            txid = xpub_cache._normalize_txid(txid)
-        except Exception:
-            return None, ""
-        pfad = immutable / "tx" / f"{txid}.json"
-        if not pfad.is_file():
-            return None, ""
-        try:
-            roh = json.loads(pfad.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return None, ""
-        if not isinstance(roh, dict):
-            return None, ""
-        # Flatfile oft {txid, source, tx: {...}} — Zeit sitzt im inneren tx.
-        tx = roh.get("tx") if isinstance(roh.get("tx"), dict) else roh
-        if not isinstance(tx, dict):
-            return None, ""
-        ts = utxo_report._tx_block_time(tx)
-        if ts is None:
-            return None, ""
-        return int(ts), utxo_report._format_tx_time(tx)
+    n = 0
 
     def _walk(knoten: dict) -> None:
+        nonlocal n
         if not isinstance(knoten, dict):
             return
-        if knoten.get("type") == "external":
-            if not (knoten.get("time_label") and knoten.get("block_time")):
-                _setze_externe_zeit(knoten)
-            if not knoten.get("time_label") and not knoten.get("block_time"):
-                ts, label = _aus_tx_cache(knoten.get("from_utxo") or "")
-                if ts or label:
-                    if label:
-                        knoten["time_label"] = label
-                    if ts:
-                        knoten["block_time"] = ts
-                        knoten["time_ts"] = ts
+        if _knoten_zeit_fuellen(knoten, immutable_cache_dir):
+            n += 1
         for kind in knoten.get("children") or []:
             _walk(kind)
 
-    for knoten in knoten_liste:
+    for knoten in knoten_liste or []:
         _walk(knoten)
+    return n
+
+
+def baum_zeiten_nachziehen(
+    baum: dict | None,
+    immutable_cache_dir: Path | str | None,
+    *,
+    txid: str | None = None,
+    vout: int | None = None,
+) -> int:
+    """
+    Fehlende Zeiten im Herkunftsbaum aus Tx-/Header-Cache füllen.
+
+    Unvollständige Bäume werden in ``immutable_cache`` nachgezogen.
+    Vollständige bleiben unangetastet (kein Schreiben).
+    """
+    if not isinstance(baum, dict):
+        return 0
+    n = 0
+    wurzel = baum.get("root")
+    if isinstance(wurzel, dict) and _knoten_zeit_fuellen(
+        wurzel, immutable_cache_dir,
+    ):
+        n += 1
+    n += _anreichere_externe_zeiten(
+        baum.get("children") or [], immutable_cache_dir,
+    )
+    if n > 0 and txid and vout is not None and immutable_cache_dir:
+        try:
+            trace_cache.vervollstaendigen(
+                txid, int(vout), baum, immutable_cache_dir,
+            )
+        except (OSError, TypeError, ValueError):
+            pass
+    return n
 
 
 def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:

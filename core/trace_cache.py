@@ -2,8 +2,11 @@
 Gespeicherte Herkunftsbäume.
 
 Die Vorgeschichte eines bestätigten Outputs ändert sich nie. Ein einmal
-gebauter Baum bleibt deshalb gültig und muss beim nächsten Seitenaufruf nicht
-neu erhoben werden — das spart den Job, die Node-Verbindung und den Walk.
+**vollständiger** Baum bleibt deshalb gültig und muss beim nächsten
+Seitenaufruf nicht neu erhoben werden — das spart den Job, die
+Node-Verbindung und den Walk. Unvollständige Blätter (fehlende Zeiten)
+dürfen aus Tx- und Header-Cache nachgezogen werden; vollständige Dateien
+bleiben unangetastet.
 
 **Warum ein eigener Cache neben ``utxo_ingress``.** Dort liegt die
 Zusammenfassung, die die Steuerauswertung braucht: rund ein Dutzend Felder je
@@ -374,6 +377,61 @@ def _schreibe_meta(
     tmp.replace(ziel_meta)
 
 
+def _schreibe_nutzlast(
+    ziel: Path,
+    txid: str,
+    vout: int,
+    baum: dict,
+    *,
+    erstellt_ts: int,
+    fingerprint: str,
+    anzahl: int,
+    immutable_cache_dir: Path | str | None,
+) -> Path | None:
+    """Schreibt Baumdatei + Meta. Fingerabdruck und Erstellzeit kommen vom Aufrufer."""
+    if not xpub_cache.cache_disk_write_allowed(ziel.parent):
+        return None
+    nutzlast = {
+        "version": VERSION,
+        "txid": xpub_cache._normalize_txid(txid),
+        "vout": int(vout),
+        "erstellt_ts": int(erstellt_ts),
+        "adressen_fingerprint": fingerprint or "",
+        "adressen_anzahl": int(anzahl or 0),
+        "baum": baum,
+    }
+    # Knotentabelle (DAG); nur wenn der Rückweg exakt denselben Baum ergibt,
+    # sonst bleibt es beim alten Format — lieber groß als falsch.
+    tabelle = _baum_als_knoten(baum)
+    if tabelle is not None:
+        nutzlast["version"] = VERSION_KNOTEN
+        nutzlast.update(tabelle)
+    try:
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ziel.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(nutzlast, ensure_ascii=False), encoding="utf-8"
+        )
+        tmp.replace(ziel)
+        meta = meta_pfad(txid, vout, immutable_cache_dir)
+        if meta is not None:
+            try:
+                _schreibe_meta(
+                    meta,
+                    txid=txid,
+                    vout=vout,
+                    erstellt_ts=int(erstellt_ts),
+                    adressen_fingerprint=fingerprint or "",
+                    adressen_anzahl=int(anzahl or 0),
+                    baum=baum,
+                )
+            except OSError:
+                pass
+    except OSError:
+        return None
+    return ziel
+
+
 def speichern(
     txid: str,
     vout: int,
@@ -394,53 +452,50 @@ def speichern(
     ziel = pfad(txid, vout, immutable_cache_dir)
     if ziel is None or not baum or not baum.get("found"):
         return None
+    return _schreibe_nutzlast(
+        ziel, txid, vout, baum,
+        erstellt_ts=int(time.time()),
+        fingerprint=fingerabdruck(adressen),
+        anzahl=len(adressen) if adressen else 0,
+        immutable_cache_dir=immutable_cache_dir,
+    )
 
-    fp = fingerabdruck(adressen)
-    n_addr = len(adressen) if adressen else 0
-    erstellt = int(time.time())
-    nutzlast = {
-        "version": VERSION,
-        "txid": xpub_cache._normalize_txid(txid),
-        "vout": int(vout),
-        "erstellt_ts": erstellt,
-        "adressen_fingerprint": fp,
-        "adressen_anzahl": n_addr,
-        "baum": baum,
-    }
-    # Knotentabelle (DAG); nur wenn der Rückweg exakt denselben Baum ergibt,
-    # sonst bleibt es beim alten Format — lieber groß als falsch.
-    tabelle = _baum_als_knoten(baum)
-    if tabelle is not None:
-        nutzlast["version"] = VERSION_KNOTEN
-        nutzlast.update(tabelle)
 
-    if not xpub_cache.cache_disk_write_allowed(ziel.parent):
+def vervollstaendigen(
+    txid: str,
+    vout: int,
+    baum: dict | None,
+    immutable_cache_dir: Path | str | None,
+) -> Path | None:
+    """
+    Schreibt fehlende Zeiten in einen bestehenden Herkunftsbaum.
+
+    Legt keine neue Datei an. Fingerabdruck und Erstellzeit bleiben.
+    Vollständige Bäume gehören nicht hierher — der Aufrufer schreibt nur
+    nach festgestellter Unvollständigkeit.
+    """
+    ziel = pfad(txid, vout, immutable_cache_dir)
+    if ziel is None or not ziel.is_file() or not baum or not baum.get("found"):
         return None
-
     try:
-        ziel.parent.mkdir(parents=True, exist_ok=True)
-        tmp = ziel.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(nutzlast, ensure_ascii=False), encoding="utf-8"
-        )
-        tmp.replace(ziel)
-        meta = meta_pfad(txid, vout, immutable_cache_dir)
-        if meta is not None:
-            try:
-                _schreibe_meta(
-                    meta,
-                    txid=txid,
-                    vout=vout,
-                    erstellt_ts=erstellt,
-                    adressen_fingerprint=fp,
-                    adressen_anzahl=n_addr,
-                    baum=baum,
-                )
-            except OSError:
-                pass
-    except OSError:
+        daten = json.loads(ziel.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    return ziel
+    if not isinstance(daten, dict) or daten.get("version") not in (
+        VERSION, VERSION_KNOTEN,
+    ):
+        return None
+    if daten.get("txid") != xpub_cache._normalize_txid(txid):
+        return None
+    if int(daten.get("vout", -1)) != int(vout):
+        return None
+    return _schreibe_nutzlast(
+        ziel, txid, vout, baum,
+        erstellt_ts=int(daten.get("erstellt_ts", 0) or 0),
+        fingerprint=str(daten.get("adressen_fingerprint") or ""),
+        anzahl=int(daten.get("adressen_anzahl", 0) or 0),
+        immutable_cache_dir=immutable_cache_dir,
+    )
 
 
 def laden(

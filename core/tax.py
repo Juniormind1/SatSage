@@ -1042,6 +1042,8 @@ def _lot_aus_cache(eintrag: Eingang, skala, frist_pos, cache: Path | None) -> di
         return None
     from core import herkunftsnetz
     from core import trace_cache
+    from core import xpub_cache
+    from core.trace import baum_zeiten_nachziehen
 
     try:
         geladen = trace_cache.laden(eintrag.txid, int(eintrag.vout), cache)
@@ -1052,7 +1054,14 @@ def _lot_aus_cache(eintrag: Eingang, skala, frist_pos, cache: Path | None) -> di
         return None
     key = f"{eintrag.txid}:{int(eintrag.vout)}"
     try:
-        netz = herkunftsnetz.flach(baum, key, skala)
+        baum_zeiten_nachziehen(
+            baum, cache, txid=eintrag.txid, vout=int(eintrag.vout),
+        )
+
+        def block_zeit(hoehe: int) -> int | None:
+            return xpub_cache.load_cached_block_time(hoehe, cache)
+
+        netz = herkunftsnetz.flach(baum, key, skala, block_zeit=block_zeit)
         return herkunftsnetz.lot_mischung(
             netz.get("vorfahren"), frist_pos, key,
         )
