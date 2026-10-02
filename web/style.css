@@ -2577,7 +2577,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   box-sizing: border-box;
 }
 .achse-punkt.klickbar { cursor: pointer; }
-/* Laufender Trace: „?“ über dem Punkt. Nach Abschluss kurz „!“. */
+/* „?“ solange noch Hops laufen. „!“ nur nach vollem Baum, kurz. */
 .achse-punkt.trace-frage::after,
 .achse-punkt.trace-fertig::after {
   content: "?";

@@ -3089,11 +3089,16 @@ async function herkunftAllerUtxos(ziele = {
   let refreshUm = 0;
   let refreshLaeuft = false;
   let abbruchWunsch = false;
-  let zuletztFertig = "";
 
-  const fertig = (meldung, art) => {
+  const fertig = (meldung, art, jobStand) => {
     clearInterval(timer);
-    if (typeof traceFrageAus === "function") traceFrageAus();
+    if (jobStand && jobStand.result && typeof traceMarkenAusJob === "function") {
+      traceMarkenAusJob(jobStand.result);
+    }
+    // Abbruch und Fehler: „?“ weg. Fertige volle Bäume behalten ihr „!“.
+    if (art !== "gut" && typeof traceFragenLeeren === "function") {
+      traceFragenLeeren();
+    }
     Zustand.herkunftAlleLaeuft = false;
     merkeScanJobBeendet(jobId);
     if (knopf) knopf.disabled = false;
@@ -3200,19 +3205,14 @@ async function herkunftAllerUtxos(ziele = {
       const zahl = job.result?.verfolgt;
       const juengste = job.result?.juengste_sats;
       const live = job.result?.live;
-      const fertigKey = job.result?.fertig ? String(job.result.fertig) : "";
       if (typeof zahl === "number" && zahl !== zuletztVerfolgt) {
         zaehleGraueKlaerungHerunter(zahl);
       }
-      if (fertigKey && fertigKey !== zuletztFertig && typeof traceAusrufeAn === "function") {
-        zuletztFertig = fertigKey;
-        traceAusrufeAn(fertigKey);
-      }
-      if (live && live.key && typeof traceFrageAn === "function") {
-        traceFrageAn(live.key);
-      }
       if (live && typeof wendeLivePunktAn === "function") {
         wendeLivePunktAn(live);
+      }
+      if (typeof traceMarkenAusJob === "function") {
+        traceMarkenAusJob(job.result);
       }
       let standText = übersetzeLogText(job.message || t("common.runningEllipsis"));
       if (typeof juengste === "number" && juengste > 0) {
@@ -3242,12 +3242,12 @@ async function herkunftAllerUtxos(ziele = {
       }
 
       if (job.status === "done") {
-        fertig(job.message || "Herkunft ermittelt.", "gut");
+        fertig(job.message || "Herkunft ermittelt.", "gut", job);
       } else if (job.status === "cancelled") {
         fertig("Abgebrochen — bereits ermittelte Herkunft bleibt erhalten.",
-               "warn");
+               "warn", job);
       } else {
-        fertig(job.error || "Analyse fehlgeschlagen.", "krit");
+        fertig(job.error || "Analyse fehlgeschlagen.", "krit", job);
       }
     } catch (fehler) {
       fertig(fehler.message, "krit");

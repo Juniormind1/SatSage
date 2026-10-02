@@ -866,10 +866,15 @@ function zeichneScanPunkte(liste) {
   return dazu;
 }
 
-/** „?“ am laufenden Punkt, „!“ kurz nach seinem Abschluss. Überlebt den Redraw. */
+/** „?“ solange dieser Lauf noch Hops hat. „!“ nur nach vollem Baum, 1,6 s. */
+const TRACE_AUSRUF_MS = 1600;
 const TracePunktMarke = {
-  frage: "",
+  fragen: new Set(),
   ausrufe: new Map(),
+  /** Vollständig, aber der Punkt liegt noch nicht auf der endgültigen X. */
+  warten: new Map(),
+  /** „!“ für diesen Key in diesem Auftritt schon gestartet. */
+  ausrufGestartet: new Set(),
 };
 
 function tracePunktImPlot(key) {
@@ -888,27 +893,96 @@ function setzeTraceMarke(key, art) {
   if (art === "fertig") punkt.classList.add("trace-fertig");
 }
 
-/** Dieses UTXO wird gerade getracet. Der vorige Punkt wechselt auf „!“. */
-function traceFrageAn(key) {
-  const neu = String(key || "");
-  if (!neu) return;
-  if (TracePunktMarke.frage && TracePunktMarke.frage !== neu) {
-    traceAusrufeAn(TracePunktMarke.frage);
-  }
-  const timer = TracePunktMarke.ausrufe.get(neu);
-  if (timer) {
-    clearTimeout(timer);
-    TracePunktMarke.ausrufe.delete(neu);
-  }
-  TracePunktMarke.frage = neu;
-  setzeTraceMarke(neu, "frage");
+/** Anschaffungszeit, die der Dotplot für diesen Abschluss zeichnet. */
+function traceSollTs(info) {
+  const art = (typeof steuerEinstellungen === "function"
+    && steuerEinstellungen().anschaffung === "aelteste")
+    ? "aelteste"
+    : "juengste";
+  const jung = Number(info && info.time_ts || 0);
+  const alt = Number(info && info.oldest_time_ts || 0);
+  if (art === "aelteste" && alt > 0) return alt;
+  return jung;
 }
 
-/** Trace dieses UTXO ist durch: „!“ bleibt kurz, dann weg. */
+/** Daten-% der Live-Verschiebung zurück in Unix-Sekunden. */
+function traceTsAusDatenPos(pos) {
+  const strahl = ZeitstrahlAnsicht.daten && ZeitstrahlAnsicht.daten.zeitstrahl;
+  if (!strahl || !strahl.von || !strahl.bis) return 0;
+  const von = parseDeDatum(strahl.von);
+  const bis = parseDeDatum(strahl.bis);
+  if (!von || !bis) return 0;
+  const ms = bis.getTime() - von.getTime();
+  if (!(ms > 0) || !Number.isFinite(pos)) return 0;
+  return Math.round((von.getTime() + (pos / 100) * ms) / 1000);
+}
+
+/** Zeit, die der Punkt gerade zeigt: Live-X, sonst das gezeichnete Datum. */
+function traceGezeichneteZeit(punkt) {
+  if (punkt.dataset.livePos != null && punkt.dataset.livePos !== "") {
+    const pos = Number(punkt.dataset.livePos);
+    const ts = traceTsAusDatenPos(pos);
+    if (ts > 0) return ts;
+  }
+  return Number(punkt.dataset.eventTs || 0);
+}
+
+function tracePunktIstEndgueltig(key, info) {
+  const punkt = tracePunktImPlot(key);
+  if (!punkt || punkt.classList.contains("geister")) return false;
+  const soll = traceSollTs(info);
+  if (!(soll > 0)) {
+    const gezeichnet = Number(punkt.dataset.gezeichnetUm || 0);
+    return punkt.dataset.steuerPunkt === "1"
+      && gezeichnet > 0
+      && gezeichnet >= Number(info.seit || 0);
+  }
+  const ist = traceGezeichneteZeit(punkt);
+  return ist > 0 && Math.abs(ist - soll) <= 1;
+}
+
+/** Alle UTXOs, für die dieser Lauf noch Hops hat. Ein „!“ entsteht hier nicht. */
+function traceFragenSetzen(keys) {
+  const neu = new Set();
+  for (const roh of keys || []) {
+    const key = String(roh || "");
+    if (key) neu.add(key);
+  }
+  for (const alt of [...TracePunktMarke.fragen]) {
+    if (neu.has(alt)) continue;
+    TracePunktMarke.fragen.delete(alt);
+    const punkt = tracePunktImPlot(alt);
+    if (punkt) punkt.classList.remove("trace-frage");
+  }
+  for (const key of neu) {
+    const timer = TracePunktMarke.ausrufe.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      TracePunktMarke.ausrufe.delete(key);
+    }
+    TracePunktMarke.warten.delete(key);
+    TracePunktMarke.ausrufGestartet.delete(key);
+    TracePunktMarke.fragen.add(key);
+    setzeTraceMarke(key, "frage");
+  }
+}
+
+/** Abbruch oder Fehler: offene „?“ weg, ohne sie zu „!“ zu machen. */
+function traceFragenLeeren() {
+  for (const key of [...TracePunktMarke.fragen]) {
+    const punkt = tracePunktImPlot(key);
+    if (punkt) punkt.classList.remove("trace-frage");
+  }
+  TracePunktMarke.fragen.clear();
+}
+
+/** Voller Baum: „!“ für 1,6 s. Nimmt ein noch stehendes „?“ dieses Punkts weg. */
 function traceAusrufeAn(key) {
   const ziel = String(key || "");
   if (!ziel) return;
-  if (TracePunktMarke.frage === ziel) TracePunktMarke.frage = "";
+  TracePunktMarke.fragen.delete(ziel);
+  TracePunktMarke.warten.delete(ziel);
+  TracePunktMarke.ausrufGestartet.add(ziel);
   setzeTraceMarke(ziel, "fertig");
   const alt = TracePunktMarke.ausrufe.get(ziel);
   if (alt) clearTimeout(alt);
@@ -916,18 +990,52 @@ function traceAusrufeAn(key) {
     TracePunktMarke.ausrufe.delete(ziel);
     const punkt = tracePunktImPlot(ziel);
     if (punkt) punkt.classList.remove("trace-fertig", "trace-frage");
-  }, 1600));
+  }, TRACE_AUSRUF_MS));
 }
 
-function traceFrageAus() {
-  if (TracePunktMarke.frage) traceAusrufeAn(TracePunktMarke.frage);
+function traceVollstaendigMerken(liste) {
+  const jetzt = Date.now();
+  for (const roh of liste || []) {
+    const key = String(roh && roh.key || "");
+    if (!key || TracePunktMarke.ausrufGestartet.has(key)) continue;
+    if (!TracePunktMarke.warten.has(key)) {
+      TracePunktMarke.warten.set(key, {
+        time_ts: Number(roh.time_ts || 0),
+        oldest_time_ts: Number(roh.oldest_time_ts || 0),
+        seit: jetzt,
+      });
+    }
+  }
+  traceWartenPruefen();
+}
+
+/** „!“ starten, sobald der Punkt auf der endgültigen X-Position liegt. */
+function traceWartenPruefen() {
+  for (const [key, info] of [...TracePunktMarke.warten.entries()]) {
+    if (TracePunktMarke.fragen.has(key)) continue;
+    if (!tracePunktIstEndgueltig(key, info)) continue;
+    traceAusrufeAn(key);
+  }
+}
+
+/** Job-Stand: offene Keys → „?“, vollständig abgeschlossene → „!“ sobald die X stimmt. */
+function traceMarkenAusJob(result) {
+  if (!result) return;
+  if (Array.isArray(result.vollstaendig_keys)) {
+    traceVollstaendigMerken(result.vollstaendig_keys);
+  }
+  if (Array.isArray(result.offen_keys)) {
+    traceFragenSetzen(result.offen_keys);
+  }
+  traceWartenPruefen();
 }
 
 function traceMarkenNachZeichnen() {
-  if (TracePunktMarke.frage) setzeTraceMarke(TracePunktMarke.frage, "frage");
+  for (const key of TracePunktMarke.fragen) setzeTraceMarke(key, "frage");
   for (const key of TracePunktMarke.ausrufe.keys()) {
     setzeTraceMarke(key, "fertig");
   }
+  traceWartenPruefen();
 }
 
 /**
@@ -1596,6 +1704,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     }
   }
 
+  const steuerPunktGezeichnetUm = Date.now();
   for (const eintrag of strahl.events) {
     const sicht = zeitstrahlSichtPos(eintrag.pos);
     if (sicht < -5 || sicht > 105) continue;
@@ -1635,6 +1744,8 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     punkt.dataset.timeLabel = eintrag.datum || "";
     const punktTs = Number(eintrag.time_ts || 0) || tsAusDeDatumMittag(eintrag.datum);
     if (punktTs) punkt.dataset.eventTs = String(punktTs);
+    punkt.dataset.steuerPunkt = "1";
+    punkt.dataset.gezeichnetUm = String(steuerPunktGezeichnetUm);
     punkt.dataset.filterLabels = [
       eintrag.wallet, eintrag.txid, lage,
     ].filter(Boolean).join(" ");
@@ -1713,10 +1824,10 @@ function zeichneZeitstrahl(daten, optionen = {}) {
   }
   // Ephemerer Overlay (Herkunftsnetz) über dem neu gezeichneten Bestand.
   if (typeof herkunftsnetzZeichnen === "function") herkunftsnetzZeichnen();
-  traceMarkenNachZeichnen();
   if (ScanPunktStand.offen.size && typeof zeichneScanPunkte === "function") {
     zeichneScanPunkte([...ScanPunktStand.offen.values()]);
   }
+  traceMarkenNachZeichnen();
 }
 
 /**

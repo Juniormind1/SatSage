@@ -206,6 +206,20 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         ).start()
         gesamt = len(offen)
         try:
+            # Vor dem Verbinden: der Plot setzt „?“ auf jeden UTXO dieses Laufs.
+            job.result = {
+                "verfolgt": 0,
+                "fehlgeschlagen": 0,
+                "offen": gesamt,
+                "juengste_sats": 0,
+                "vollstaendig_ok": 0,
+                "steuer_ok": 0,
+                "vollstaendig": vollstaendig,
+                "modus": modus,
+                "partial": True,
+                "offen_keys": [f"{tx}:{vo}" for tx, vo in offen],
+                "vollstaendig_keys": [],
+            }
             if modus == "tief" and wallet_name:
                 stand.phase(
                     f"Herkunft vollständig für „{wallet_name}“ "
@@ -240,7 +254,54 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
 
             live_key = ""
             live_stand: dict | None = None
-            fertig_key = ""
+            # Noch Hops in diesem Lauf — der Plot setzt dort „?“.
+            # Vollständige Bäume sammeln sich, auch wenn ein Poll dazwischen liegt.
+            offen_sicht: list[tuple[str, int]] = list(offen)
+            voll_marken: list[dict] = []
+
+            def _plot_zeiten(ergebnis: dict) -> tuple[int, int]:
+                """Jüngstes und ältestes Extern-Datum, wie es der Dotplot wählt."""
+                try:
+                    ts = int(ergebnis.get("juengste_sats_ts") or 0)
+                except (TypeError, ValueError):
+                    ts = 0
+                alt = 0
+                roh = ergebnis.get("origin_tree")
+                if isinstance(roh, dict):
+                    from core import utxo_ingress_report
+
+                    aeltester = utxo_ingress_report._oldest_external_ingress(roh)
+                    if isinstance(aeltester, dict):
+                        try:
+                            alt = int(aeltester.get("time_ts") or 0)
+                        except (TypeError, ValueError):
+                            alt = 0
+                if alt <= 0:
+                    alt = ts
+                return ts, alt
+
+            def _merke_voll(key: tuple[str, int], ergebnis) -> None:
+                if not isinstance(ergebnis, dict) or not ergebnis.get(
+                    "verfolgt_vollstaendig"
+                ):
+                    return
+                schluessel = f"{key[0]}:{key[1]}"
+                if any(eintrag.get("key") == schluessel for eintrag in voll_marken):
+                    return
+                ts, alt = _plot_zeiten(ergebnis)
+                voll_marken.append({
+                    "key": schluessel,
+                    "time_ts": ts,
+                    "oldest_time_ts": alt,
+                })
+
+            def _marker(stand: dict) -> None:
+                stand["offen_keys"] = [
+                    f"{tx}:{vo}" for tx, vo in offen_sicht
+                ]
+                stand["vollstaendig_keys"] = [
+                    dict(eintrag) for eintrag in voll_marken
+                ]
 
             def _zwischenstand() -> None:
                 stand = {
@@ -254,7 +315,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     "modus": modus,
                     "partial": True,
                 }
-                # Laufendes UTXO: key ab dem ersten Hop, Datum nur wenn fest.
+                # Laufendes UTXO: Datum nur für die Live-Verschiebung.
+                # „?“ kommt aus offen_keys, nicht aus diesem einen Key.
                 if live_key:
                     live = {"key": live_key}
                     if isinstance(live_stand, dict) and live_stand.get("time_ts"):
@@ -263,9 +325,10 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                             live_stand.get("oldest_time_ts") or 0
                         )
                     stand["live"] = live
-                if fertig_key:
-                    stand["fertig"] = fertig_key
+                _marker(stand)
                 job.result = stand
+
+            _zwischenstand()
 
             def _live(stand: dict) -> None:
                 nonlocal live_stand
@@ -356,7 +419,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             for txid, vout in offen:
                 baeume[(txid, vout)] = _resume_origin(txid, vout)
 
-            offen_keys = list(baeume.keys())
+            offen_sicht = list(baeume.keys())
+            _zwischenstand()
             runde = 0
             max_runden = wald_max_runden()
 
@@ -367,22 +431,31 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 live_stand = None
                 _zwischenstand()
 
-            while offen_keys:
+            def _nimm_raus(key: tuple[str, int]) -> None:
+                nonlocal offen_sicht, live_key, live_stand
+                offen_sicht = [k for k in offen_sicht if k != key]
+                if live_key == f"{key[0]}:{key[1]}":
+                    live_key = ""
+                    live_stand = None
+
+            while offen_sicht:
                 job.raise_if_cancelled()
                 runde += 1
                 if runde > max_runden:
-                    for key in list(offen_keys):
+                    for key in list(offen_sicht):
                         txid, vout = key
                         tree = baeume.get(key)
                         if isinstance(tree, dict):
                             try:
-                                _persist(txid, vout, tree)
+                                _merke_voll(key, _persist(txid, vout, tree))
                             except Cancelled:
                                 raise
                             except Exception:
                                 fehler += 1
+                        _nimm_raus(key)
+                        _zwischenstand()
                     break
-                rest = len(offen_keys)
+                rest = len(offen_sicht)
                 if modus == "tief":
                     text = (
                         f"Herkunft vollständig — Runde {runde}"
@@ -405,7 +478,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
 
                 weiter, fertig_jetzt = wald_schicht(
                     baeume,
-                    offen_keys,
+                    offen_sicht,
                     fetchers["get_tx"],
                     eigene,
                     wallet=wallet_ctx,
@@ -425,6 +498,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 for key in fertig_jetzt:
                     job.raise_if_cancelled()
                     txid, vout = key
+                    # „?“ bleibt, bis das Schreiben durch ist. Danach nur
+                    # „!“, wenn der Baum wirklich vollständig ist.
                     live_key = f"{txid}:{vout}"
                     tree = baeume.get(key)
                     try:
@@ -439,18 +514,13 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                                 steuer_ok_n += 1
                             if ergebnis.get("juengste_sats_ts"):
                                 juengste += 1
-                        fertig_key = live_key
-                        live_key = ""
-                        live_stand = None
-                        _zwischenstand()
+                        _merke_voll(key, ergebnis)
                     except Cancelled:
                         raise
                     except Exception:
                         fehler += 1
-                        fertig_key = live_key
-                        live_key = ""
-                        live_stand = None
-                        _zwischenstand()
+                    _nimm_raus(key)
+                    _zwischenstand()
 
                 for key in weiter:
                     tree = baeume.get(key)
@@ -474,7 +544,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     except Exception:
                         pass
 
-                offen_keys = weiter
+                offen_sicht = list(weiter)
+                _zwischenstand()
 
             if modus == "tief":
                 fertig_text = (
@@ -497,6 +568,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             stand.phase(fertig_text)
             live_key = ""
             live_stand = None
+            offen_sicht = []
             _zwischenstand()
             return {
                 "verfolgt": fertig,
@@ -507,6 +579,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 "steuer_ok": steuer_ok_n,
                 "vollstaendig": vollstaendig,
                 "modus": modus,
+                "offen_keys": [],
+                "vollstaendig_keys": [dict(eintrag) for eintrag in voll_marken],
                 "partial": False,
             }
         finally:

@@ -151,7 +151,7 @@ class TestLiveWaehrendTrace(unittest.TestCase):
 
 class TestJobLiveFeld(unittest.TestCase):
     def test_zwischenstand_traegt_live_key(self):
-        """Der Job-Poll liefert key + time_ts, sobald ein Hop feststeht."""
+        """Der Job-Poll liefert die offene Menge und die vollen Abschlüsse."""
         from pathlib import Path
 
         from httpserver.api import trace as trace_api
@@ -160,5 +160,17 @@ class TestJobLiveFeld(unittest.TestCase):
         self.assertIn('"live"', quelle)
         self.assertIn("on_teilstand=_live", quelle)
         self.assertIn("live_key", quelle)
-        self.assertIn('"fertig"', quelle)
-        self.assertIn("fertig_key", quelle)
+        self.assertIn("offen_keys", quelle)
+        self.assertIn("vollstaendig_keys", quelle)
+        self.assertNotIn("fertig_key", quelle)
+        herkunft = (
+            Path(__file__).resolve().parents[1] / "web" / "views" / "herkunft.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("traceMarkenAusJob", herkunft)
+        self.assertNotIn("traceFrageAn", herkunft)
+        plot = (
+            Path(__file__).resolve().parents[1] / "web" / "views" / "steuerjahr.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function traceFragenSetzen", plot)
+        self.assertIn("function traceWartenPruefen", plot)
+        self.assertIn("TRACE_AUSRUF_MS = 1600", plot)
