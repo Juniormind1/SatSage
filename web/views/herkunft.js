@@ -1530,7 +1530,9 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
       zweig.append(hinweisZeile(t("trace.incompleteEmpty")));
       zeichneFolgeBand(ergebnis, zweig, utxo, klapp);
     }
-    aktualisiereLotDonut(zweig.closest(".utxo-wurzel"), zweig, ergebnis.children);
+    aktualisiereLotDonut(
+      zweig.closest(".utxo-wurzel"), zweig, ergebnis.children, lotZeitTs(ergebnis.root),
+    );
     return;
   }
 
@@ -1558,7 +1560,9 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   const quelle = ergebnis.source ? `Quelle: ${ergebnis.source}. ` : "";
   fuss.textContent = quelle + vorbehalt;
   zweig.append(fuss);
-  aktualisiereLotDonut(zweig.closest(".utxo-wurzel"), zweig, ergebnis.children);
+  aktualisiereLotDonut(
+    zweig.closest(".utxo-wurzel"), zweig, ergebnis.children, lotZeitTs(ergebnis.root),
+  );
 }
 
 /**
@@ -1581,12 +1585,40 @@ function lotTeilbaumBetrag(knoten, gesehen) {
   return summe > 0 ? summe : lotBetrag(knoten);
 }
 
-function lotMischungAusBaum(kinder) {
+/** Blockzeit des Knotens, sonst das Datum im time_label. 0 = keine Zeit. */
+function lotZeitTs(knoten) {
+  if (!knoten || typeof knoten !== "object") return 0;
+  const ts = Number(knoten.time_ts || knoten.block_time);
+  if (Number.isFinite(ts) && ts > 0) return ts;
+  const m = String(knoten.time_label || "").match(
+    /(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/,
+  );
+  if (!m) return 0;
+  const zeit = new Date(
+    Number(m[3]), Number(m[2]) - 1, Number(m[1]),
+    Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0),
+  );
+  const unix = Math.floor(zeit.getTime() / 1000);
+  return Number.isFinite(unix) && unix > 0 ? unix : 0;
+}
+
+/** Engste Obergrenze: eigene Zeit des Hops, sonst die der Vorfahren. */
+function lotObergrenze(bisher, knoten) {
+  const ts = lotZeitTs(knoten);
+  const alt = Number(bisher) || 0;
+  if (!(ts > 0)) return alt;
+  if (!(alt > 0)) return ts;
+  return Math.min(alt, ts);
+}
+
+function lotMischungAusBaum(kinder, startObergrenze) {
   if (!Array.isArray(kinder) || !kinder.length) return null;
+  const start = Number(startObergrenze) || 0;
   const gesehen = new Set();
   const starts = kinder.map((knoten) => ({
     knoten,
     gewicht: lotTeilbaumBetrag(knoten, gesehen),
+    obergrenze: start,
   }));
   let summe = starts.reduce((s, e) => s + e.gewicht, 0);
   if (!(summe > 0)) {
@@ -1597,7 +1629,7 @@ function lotMischungAusBaum(kinder) {
   const stapel = [...starts];
   const besucht = new Set();
   while (stapel.length) {
-    const { knoten, gewicht } = stapel.pop();
+    const { knoten, gewicht, obergrenze } = stapel.pop();
     if (!knoten || typeof knoten !== "object" || !(gewicht > 0)) continue;
     if (besucht.has(knoten)) continue;
     besucht.add(knoten);
@@ -1610,25 +1642,33 @@ function lotMischungAusBaum(kinder) {
       const gesehenKind = new Set();
       const teile = eigene.map((k) => lotTeilbaumBetrag(k, gesehenKind));
       const teilSumme = teile.reduce((s, w) => s + w, 0);
+      const grenze = lotObergrenze(obergrenze, knoten);
       eigene.forEach((k, i) => {
         const anteil = teilSumme > 0 ? teile[i] / teilSumme : 1 / eigene.length;
-        if (anteil > 0) stapel.push({ knoten: k, gewicht: gewicht * anteil });
+        if (anteil > 0) {
+          stapel.push({ knoten: k, gewicht: gewicht * anteil, obergrenze: grenze });
+        }
       });
       continue;
     }
-    acc[lotFarbeBlatt(knoten)] += gewicht;
+    acc[lotFarbeBlatt(knoten, obergrenze)] += gewicht;
   }
   summe = acc.gruen + acc.orange + acc.grau;
   return summe > 0 ? acc : null;
 }
 
-/** Grün außerhalb der Frist, orange innerhalb, grau ohne Datum oder unaufgelöst. */
-function lotFarbeBlatt(knoten) {
+/**
+ * Grün außerhalb der Frist, orange innerhalb, grau ohne Datum oder unaufgelöst.
+ * Liegt ein Nachfolger schon sicher außerhalb, zählt das undatierte Blatt grün.
+ */
+function lotFarbeBlatt(knoten, obergrenze) {
   const typ = knoten && knoten.type;
   if (typ !== "external" && typ !== "coinbase") return "grau";
-  const ts = Number(knoten.time_ts);
-  if (!Number.isFinite(ts) || ts <= 0) return "grau";
-  return lotFristErfuellt(ts) ? "gruen" : "orange";
+  const ts = lotZeitTs(knoten);
+  if (ts > 0) return lotFristErfuellt(ts) ? "gruen" : "orange";
+  const grenze = Number(obergrenze);
+  if (grenze > 0 && lotFristErfuellt(grenze)) return "gruen";
+  return "grau";
 }
 
 /**
@@ -1749,11 +1789,12 @@ function wurzelLotPunkt(wurzel) {
  * *kinder* optional — sonst der beim Zeichnen gemerkte Baum, sonst DOM.
  * Seitenweise Wurzeln holen den vollen Cache-Baum einmal nur für die Mischung.
  */
-function aktualisiereLotDonut(wurzel, zweig, kinder) {
+function aktualisiereLotDonut(wurzel, zweig, kinder, startObergrenze) {
   const punkt = wurzelLotPunkt(wurzel);
   if (!punkt || !wurzel || !zweig) return;
   // Merken, auch solange der Zweig zu ist — Aufklappen malt daraus.
   if (Array.isArray(kinder)) zweig._lotKinder = kinder;
+  if (startObergrenze) zweig._lotObergrenze = Number(startObergrenze) || 0;
   if (!wurzel.classList.contains("herkunft-offen") || zweig.hidden) {
     entferneLotDonut(punkt);
     return;
@@ -1763,8 +1804,9 @@ function aktualisiereLotDonut(wurzel, zweig, kinder) {
     return;
   }
   const quelle = Array.isArray(kinder) ? kinder : zweig._lotKinder;
+  const grenze = Number(zweig._lotObergrenze) || 0;
   if (Array.isArray(quelle) && lotKinderVollstaendig(quelle)) {
-    const mischung = lotMischungAusBaum(quelle);
+    const mischung = lotMischungAusBaum(quelle, grenze);
     if (mischung) setzeLotDonut(punkt, mischung);
     else entferneLotDonut(punkt);
     return;
@@ -1777,8 +1819,14 @@ function aktualisiereLotDonut(wurzel, zweig, kinder) {
         const voll = g && g.vorhanden && g.ergebnis && g.ergebnis.children;
         if (!Array.isArray(voll)) return;
         zweig._lotKinder = voll;
+        const wurzelZeit = g.ergebnis && g.ergebnis.root
+          ? lotZeitTs(g.ergebnis.root)
+          : 0;
+        if (wurzelZeit) zweig._lotObergrenze = wurzelZeit;
         if (wurzel.classList.contains("herkunft-offen") && !zweig.hidden) {
-          const mischung = lotMischungAusBaum(voll);
+          const mischung = lotMischungAusBaum(
+            voll, Number(zweig._lotObergrenze) || 0,
+          );
           if (mischung) setzeLotDonut(punkt, mischung);
         }
       })
@@ -1787,7 +1835,7 @@ function aktualisiereLotDonut(wurzel, zweig, kinder) {
     return;
   }
   if (Array.isArray(quelle)) {
-    const mischung = lotMischungAusBaum(quelle);
+    const mischung = lotMischungAusBaum(quelle, grenze);
     if (mischung) setzeLotDonut(punkt, mischung);
     else entferneLotDonut(punkt);
   }
@@ -2895,6 +2943,9 @@ function steuerAbfrageFuerKlaeren() {
 
 /** Steuerjahr-Stand mit grau_keys und gelb_keys. Fehlende Listen neu holen. */
 async function steuerStandFuerKlaeren() {
+  if (Zustand.steuerLots) {
+    try { await Zustand.steuerLots; } catch (_) { /* vorläufige Schlüssel */ }
+  }
   let daten = Zustand.steuer;
   const hatGrau = daten && Array.isArray(daten.grau_keys);
   const hatGelb = daten && (
@@ -2912,11 +2963,23 @@ function grauKeysAus(daten) {
 
 function gelbKeysAus(daten) {
   if (!daten) return [];
-  if (Array.isArray(daten.gelb_keys)) return daten.gelb_keys;
-  const liste = daten.eintraege || [];
-  return liste
-    .filter((e) => e.geprueft && !e.erfuellt)
-    .map((e) => `${e.txid}:${e.vout}`);
+  const keys = new Set();
+  if (Array.isArray(daten.gelb_keys)) {
+    for (const key of daten.gelb_keys) {
+      if (key) keys.add(String(key));
+    }
+  } else {
+    for (const e of daten.eintraege || []) {
+      if (e.geprueft && !e.erfuellt) keys.add(`${e.txid}:${e.vout}`);
+    }
+  }
+  // Graue Lot-Anteile auch in Punkten außerhalb der Haltefrist.
+  for (const e of daten.eintraege || []) {
+    if (Number(e.sats_ohne_datum) > 0 && e.txid) {
+      keys.add(`${e.txid}:${e.vout}`);
+    }
+  }
+  return [...keys];
 }
 
 function zeigeKeinGelbZumKlaeren() {
@@ -2959,6 +3022,7 @@ function starteGelbKlaerung(keys, uebernommen) {
     // voll bis extern/Coinbase — nicht nur Steuer-Horizont
     steuer: false,
     gelbVertiefen: true,
+    graueAnteile: true,
     uebernommen,
     keinPauschalScan: true,
   });
@@ -3023,7 +3087,9 @@ async function herkunftGrauUtxos() {
 async function herkunftGelbUtxos() {
   // Nach dem UTXO-Scan ungescannter Portfolios: derselbe Grau-Lauf wie der
   // graue Knopf. Erst wenn der gut durch ist, die gelben Schlüssel.
-  // Gelb (geprueft && !erfuellt) läuft gründlich bis extern/Coinbase.
+  // Gelb (geprüft und Frist offen) und jeder Punkt mit grauem Lot-Anteil,
+  // auch links der Haltefrist. Der Lauf geht bis extern/Coinbase und zieht
+  // fehlende Blockzeiten undatierter Blätter nach.
   return klaerenNachUngescannten(async () => {
     const daten = await steuerStandFuerKlaeren();
     const grau = grauKeysAus(daten);
@@ -3057,6 +3123,7 @@ async function herkunftAllerUtxos(ziele = {
   steuer: false,
   gelbVertiefen: false,
   erzwingen: false,
+  graueAnteile: false,
 }) {
   // Selector-String oder bereits aufgelöstes Element (Zeilen-„klären“).
   const knopf = typeof ziele.knopf === "string"
@@ -3134,6 +3201,7 @@ async function herkunftAllerUtxos(ziele = {
       modus: "voll",
       utxo_keys: ziele.utxo_keys || null,
       erzwingen: Boolean(ziele.erzwingen),
+      graue_anteile: Boolean(ziele.graueAnteile),
     };
     let antwort = await api("/trace/alle", {
       methode: "POST",

@@ -333,12 +333,97 @@ function herkunftsnetzFarbwert(name) {
   return fallback;
 }
 
+/** Früheste datierte Nachfolger-Zeit. Der Eingang kann nicht jünger sein. */
+function herkunftsnetzObergrenze(key, daten) {
+  const nach = new Map();
+  const zeiten = new Map();
+  for (const kante of (daten && daten.kanten) || []) {
+    if (!kante || !kante.von || !kante.nach) continue;
+    const liste = nach.get(kante.von) || [];
+    liste.push(String(kante.nach));
+    nach.set(String(kante.von), liste);
+  }
+  for (const v of (daten && daten.vorfahren) || []) {
+    const ts = Number(v && v.time_ts);
+    if (v && v.key && Number.isFinite(ts) && ts > 0) zeiten.set(String(v.key), ts);
+  }
+  let beste = null;
+  const schlange = [...(nach.get(String(key)) || [])];
+  const gesehen = new Set();
+  while (schlange.length) {
+    const nxt = schlange.pop();
+    if (!nxt || gesehen.has(nxt)) continue;
+    gesehen.add(nxt);
+    const ts = zeiten.get(nxt) || 0;
+    if (ts > 0 && (beste === null || ts < beste)) beste = ts;
+    for (const weiter of nach.get(nxt) || []) schlange.push(weiter);
+  }
+  return beste;
+}
+
+/** Stichtag der geladenen Auswertung, sonst der Einstellung. Leer = keine Regel. */
+function herkunftsnetzStichtagIso() {
+  const daten = (typeof ZeitstrahlAnsicht !== "undefined" && ZeitstrahlAnsicht.daten) || {};
+  const regel = String(daten.stichtag_regel || "").trim();
+  const de = regel.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (de) return `${de[3]}-${de[2]}-${de[1]}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(regel)) return regel;
+  const steuer = typeof steuerEinstellungen === "function" ? steuerEinstellungen() : {};
+  const iso = String(steuer.stichtag_iso || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : "";
+}
+
+/**
+ * Obergrenze liegt außerhalb der Haltefrist des geladenen Steuerjahres
+ * und, falls gesetzt, nicht nach dem Stichtag. Dieselbe Entscheidung wie
+ * ``haltefrist_entscheidung``, gegen ``bezug_ts`` — nicht gegen jetzt.
+ */
+function herkunftsnetzSicherAusserhalb(timeTs) {
+  const ts = Number(timeTs);
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+  const daten = (typeof ZeitstrahlAnsicht !== "undefined" && ZeitstrahlAnsicht.daten) || {};
+  const bezug = Number(daten.bezug_ts);
+  if (!Number.isFinite(bezug) || bezug <= 0) return false;
+  const anschaffung = new Date(ts * 1000);
+  const iso = herkunftsnetzStichtagIso();
+  if (iso) {
+    const monat = String(anschaffung.getMonth() + 1).padStart(2, "0");
+    const tag = String(anschaffung.getDate()).padStart(2, "0");
+    if (`${anschaffung.getFullYear()}-${monat}-${tag}` > iso) return false;
+  }
+  const jahre = Number(daten.haltefrist_jahre);
+  const fristJahre = Number.isFinite(jahre) ? jahre : 1;
+  if (fristJahre <= 0) return true;
+  const monat = anschaffung.getMonth();
+  const ziel = new Date(
+    anschaffung.getFullYear() + fristJahre,
+    monat,
+    anschaffung.getDate(),
+    anschaffung.getHours(),
+    anschaffung.getMinutes(),
+    anschaffung.getSeconds(),
+  );
+  const ende = ziel.getMonth() === monat
+    ? ziel
+    : new Date(
+      anschaffung.getFullYear() + fristJahre,
+      monat,
+      28,
+      anschaffung.getHours(),
+      anschaffung.getMinutes(),
+      anschaffung.getSeconds(),
+    );
+  return ende.getTime() / 1000 <= bezug;
+}
+
 /**
  * Lose des Fokus aus den Endknoten des Netzes, gewichtet mit anteil_sats.
  *
  * Grün: Output-Zeit links der Fristgrenze. Orange: rechts davon.
  * Datierte Bündel zählen mit ihrem jüngsten Eingang. Grau: ohne Datum,
  * Lücke oder Horizont. Eigene Zwischenhops zählen nicht.
+ * Ein undatiertes Ende zählt grün, wenn ein Nachfolger schon außerhalb
+ * der Haltefrist und nicht nach dem Stichtag liegt.
  */
 function herkunftsnetzLotMischung(daten) {
   const vorfahren = (daten && daten.vorfahren) || [];
@@ -359,10 +444,41 @@ function herkunftsnetzLotMischung(daten) {
       && Number.isFinite(frist)
     ) {
       farbe = pos < frist ? "gruen" : "orange";
+    } else if (
+      pos === null
+      && herkunftsnetzSicherAusserhalb(herkunftsnetzObergrenze(v.key, daten))
+    ) {
+      farbe = "gruen";
     }
     acc[farbe] += gewicht;
   }
   return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
+}
+
+/** Drei Zeilen für den Hover des Lot-Rings. Kleine Anteile bleiben sichtbar. */
+function herkunftsnetzLotZeilen(mischung) {
+  const summe = mischung.gruen + mischung.orange + mischung.grau;
+  if (!(summe > 0)) return [];
+  return [
+    t("tax.netzLotGruen", { pct: herkunftsnetzProzent(mischung.gruen / summe) }),
+    t("tax.netzLotGelb", { pct: herkunftsnetzProzent(mischung.orange / summe) }),
+    t("tax.netzLotGrau", { pct: herkunftsnetzProzent(mischung.grau / summe) }),
+  ];
+}
+
+function setzeAchseLotTooltip(punkt, mischung) {
+  const tip = punkt.querySelector(".achse-punkt-tip");
+  if (!tip) return;
+  if (tip.dataset.lotBasis === undefined) tip.dataset.lotBasis = tip.textContent;
+  const zeilen = herkunftsnetzLotZeilen(mischung);
+  tip.textContent = [tip.dataset.lotBasis, ...zeilen].filter(Boolean).join("\n");
+}
+
+function entferneAchseLotTooltip(punkt) {
+  const tip = punkt.querySelector(".achse-punkt-tip");
+  if (!tip || tip.dataset.lotBasis === undefined) return;
+  tip.textContent = tip.dataset.lotBasis;
+  delete tip.dataset.lotBasis;
 }
 
 /** Doughnut auf dem angeklickten Bestandspunkt. Kein title, kein aria-label. */
@@ -379,10 +495,12 @@ function setzeAchseLotDonut(punkt, daten) {
   punkt.classList.add("achse-lot");
   punkt.style.background = "";
   if (vorher) punkt.style.background = vorher;
+  setzeAchseLotTooltip(punkt, mischung);
 }
 
 function entferneAchseLotDonut(punkt) {
   if (!punkt || !punkt.classList.contains("achse-lot")) return;
+  entferneAchseLotTooltip(punkt);
   punkt.classList.remove("achse-lot", "lot-donut");
   delete punkt.dataset.lotGruen;
   delete punkt.dataset.lotOrange;

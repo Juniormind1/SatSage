@@ -210,34 +210,68 @@ def api_tax(
 _STEUER_FENSTER_CACHE = None
 
 
-def _steuer_auswertung_gecacht(state: AppState, query: dict, sprache: str) -> dict:
+def _lots_gewuenscht(query: dict) -> bool:
+    """``lots=0``: Punkte ohne Bäume. Sonst die volle Lot-Rechnung."""
+    roh = str((query.get("lots") or ["1"])[0] or "1").strip().lower()
+    return roh not in ("0", "false", "nein")
+
+
+def _steuer_cache_holen() -> Any:
     global _STEUER_FENSTER_CACHE
+    if _STEUER_FENSTER_CACHE is None:
+        from core import listen_fenster as lf
+
+        _STEUER_FENSTER_CACHE = lf.KleinCache(2)
+    return _STEUER_FENSTER_CACHE
+
+
+def _steuer_cache_schluessel(state: AppState, query: dict, sprache: str):
     import datetime
 
-    from core import listen_fenster as lf
     from httpserver.api.listen_fenster import cache_abdruck
+
+    return (
+        tuple((query.get(k) or [None])[0]
+              for k in ("jahr", "frist", "stichtag", "anschaffung")),
+        sprache,
+        datetime.date.today().isoformat(),
+        cache_abdruck(state, preise=True),
+    )
+
+
+def _steuer_auswertung_gecacht(state: AppState, query: dict, sprache: str) -> dict:
     from server import _steuer_auswertung
 
-    if _STEUER_FENSTER_CACHE is None:
-        _STEUER_FENSTER_CACHE = lf.KleinCache(2)
-    def schluessel():
-        return (
-            tuple((query.get(k) or [None])[0]
-                  for k in ("jahr", "frist", "stichtag", "anschaffung")),
-            sprache,
-            datetime.date.today().isoformat(),
-            cache_abdruck(state, preise=True),
-        )
-
-    vorher = schluessel()
-    auswertung = _STEUER_FENSTER_CACHE.hole(vorher)
-    if auswertung is None:
-        auswertung = _steuer_auswertung(state, query, lang=sprache)
-        auswertung.pop("_objekte", None)
-        # Die Rechnung kann eigene Adressen aus den Caches nachladen — der
-        # Stand danach ist der, den die nächste Anfrage sieht.
-        _STEUER_FENSTER_CACHE.lege(schluessel(), auswertung)
+    cache = _steuer_cache_holen()
+    schluessel = _steuer_cache_schluessel(state, query, sprache)
+    vorhanden = cache.hole(schluessel)
+    mit_lots = _lots_gewuenscht(query)
+    # Eine fertige Lot-Rechnung gilt auch für lots=0. Eine vorläufige
+    # Antwort wird nicht still zur vollen Rechnung, das macht der Strom.
+    if vorhanden is not None and (vorhanden.get("_lots") or not mit_lots):
+        return vorhanden
+    auswertung = _steuer_auswertung(state, query, lang=sprache, mit_lots=mit_lots)
+    auswertung.pop("_objekte", None)
+    auswertung["_lots"] = bool(mit_lots)
+    # Die Rechnung kann eigene Adressen aus den Caches nachladen — der
+    # Stand danach ist der, den die nächste Anfrage sieht. Eine inzwischen
+    # fertige Lot-Rechnung bleibt stehen.
+    cache.lege_ausser_wenn(
+        schluessel, auswertung, lambda alt: bool(alt.get("_lots")),
+    )
     return auswertung
+
+
+def steuer_auswertung_merken(
+    state: AppState, query: dict, sprache: str, auswertung: dict,
+) -> None:
+    """Voller Lot-Lauf ersetzt die vorläufige Auswertung desselben Jahres."""
+    cache = _steuer_cache_holen()
+    schluessel = _steuer_cache_schluessel(state, query, sprache)
+    gespeichert = dict(auswertung)
+    gespeichert.pop("_objekte", None)
+    gespeichert["_lots"] = True
+    cache.lege(schluessel, gespeichert)
 
 
 def api_tax_herkunftsnetz(

@@ -191,24 +191,51 @@ def fenster(auswertung: dict, *, teil: str = "alle", offset: int = 0, limit: int
             "abgaenge_fenster": ab_teil(lim_ab, 0),
         }
 
-    antwort = {k: v for k, v in auswertung.items() if k not in ("eintraege", "abgaenge", "_objekte")}
+    antwort = {
+        k: v for k, v in auswertung.items()
+        if k not in ("eintraege", "abgaenge", "_objekte", "_lots")
+    }
     antwort["seitenweise"] = True
     antwort["teil"] = "alle"
     antwort["steuer_gruppen"] = {name: g_teil(name, limit, 0) for name in ("erfuellt", "offen")}
     antwort["abgaenge_fenster"] = ab_teil(lim_ab, 0)
-    antwort["kennzahlen_ts"] = {
+    antwort["kennzahlen_ts"] = kennzahlen_ts(auswertung)
+    antwort.update(klaeren_keys(auswertung))
+    # True, sobald die Lot-Anteile aus den Bäumen in dieser Auswertung stehen.
+    antwort["lots_fertig"] = bool(auswertung.get("_lots"))
+    return antwort
+
+
+def kennzahlen_ts(auswertung: dict) -> dict:
+    """Gemeinsamer Bewertungstag je Scorecard-Menge. Leer → kein Fiat."""
+    alle = list(auswertung.get("eintraege") or [])
+    return {
         "gesamt": gemeinsamer_ts(alle),
-        "erfuellt": gemeinsamer_ts(gruppen["erfuellt"]),
-        "offen": gemeinsamer_ts(gruppen["offen"]),
+        "erfuellt": gemeinsamer_ts([e for e in alle if e.get("erfuellt")]),
+        "offen": gemeinsamer_ts([e for e in alle if not e.get("erfuellt")]),
         "ungeprueft": gemeinsamer_ts([e for e in alle if not e.get("geprueft")]),
     }
-    # „klären“ braucht alle Schlüssel, nicht nur die Seite.
-    # Gelb: analysiert, Frist offen. Grau: noch keine Herkunftsanalyse.
-    antwort["gelb_keys"] = [f"{e.get('txid')}:{e.get('vout')}" for e in alle
-                            if e.get("geprueft") and not e.get("erfuellt")]
-    antwort["grau_keys"] = [f"{e.get('txid')}:{e.get('vout')}" for e in alle
-                            if not e.get("geprueft")]
-    return antwort
+
+
+def klaeren_keys(auswertung: dict) -> dict:
+    """Schlüssel für den gelben und den grauen Knopf, über alle UTXOs.
+
+    Gelb: analysiert und Frist offen, plus jeder Punkt mit undatiertem
+    Lot-Anteil — auch wenn er schon außerhalb der Haltefrist grün ist.
+    Grau: noch keine Herkunftsanalyse.
+    """
+    alle = list(auswertung.get("eintraege") or [])
+    return {
+        "gelb_keys": [
+            f"{e.get('txid')}:{e.get('vout')}" for e in alle
+            if (e.get("geprueft") and not e.get("erfuellt"))
+            or int(e.get("sats_ohne_datum") or 0) > 0
+        ],
+        "grau_keys": [
+            f"{e.get('txid')}:{e.get('vout')}" for e in alle
+            if not e.get("geprueft")
+        ],
+    }
 
 
 # --- Bericht Sat-Geschichte: Kandidatenlisten seitenweise --------------------

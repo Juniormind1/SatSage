@@ -177,7 +177,10 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         offen = _trace_offen_basis(
             state, utxos, eigene_jetzt,
             erzwingen=bool(roh.get("erzwingen")),
+            graue_anteile=bool(roh.get("graue_anteile")),
         )
+
+    graue_anteile = bool(roh.get("graue_anteile"))
 
     if not offen:
         return {
@@ -376,7 +379,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             def _persist(txid: str, vout: int, tree: dict | None):
                 fetch_addr = fetchers.get("fetch_address_utxos")
                 if modus == "tief":
-                    return _trace_ein_utxo_tief(
+                    ergebnis = _trace_ein_utxo_tief(
                         get_tx=fetchers["get_tx"],
                         txid=txid,
                         vout=vout,
@@ -393,20 +396,34 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                         resume_origin=tree,
                         on_teilstand=_live,
                     )
-                return trace_mod.trace_utxo(
-                    fetchers["get_tx"], txid, vout, eigene,
-                    wallet=wallet_ctx,
-                    cache_dir=state.cache_dir,
-                    immutable_cache_dir=state.immutable_cache_dir,
-                    fetch_address_utxos=fetch_addr,
-                    cache_source=quelle,
-                    progress=job.progress,
-                    stop_before_ts=(
-                        stop_before_ts if modus == "steuer" else None
-                    ),
-                    origin_tree=tree if isinstance(tree, dict) else None,
-                    on_teilstand=_live,
-                )
+                else:
+                    ergebnis = trace_mod.trace_utxo(
+                        fetchers["get_tx"], txid, vout, eigene,
+                        wallet=wallet_ctx,
+                        cache_dir=state.cache_dir,
+                        immutable_cache_dir=state.immutable_cache_dir,
+                        fetch_address_utxos=fetch_addr,
+                        cache_source=quelle,
+                        progress=job.progress,
+                        stop_before_ts=(
+                            stop_before_ts if modus == "steuer" else None
+                        ),
+                        origin_tree=tree if isinstance(tree, dict) else None,
+                        on_teilstand=_live,
+                    )
+                if graue_anteile:
+                    from core.trace import externe_blockzeiten_speichern
+
+                    try:
+                        externe_blockzeiten_speichern(
+                            txid, vout, fetchers["get_tx"],
+                            state.immutable_cache_dir,
+                        )
+                    except Cancelled:
+                        raise
+                    except Exception:
+                        pass
+                return ergebnis
 
             from core.trace_wald import wald_max_runden, wald_schicht
 
@@ -416,8 +433,41 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
 
             baeume: dict[tuple[str, int], dict | None] = {}
             memo: dict = {}
+            nur_zeiten: list[tuple[str, int]] = []
             for txid, vout in offen:
+                kopf = trace_cache.kopf(
+                    txid, vout, state.immutable_cache_dir, eigene_jetzt,
+                )
+                if (
+                    graue_anteile
+                    and isinstance(kopf, dict)
+                    and kopf.get("vollstaendig")
+                    and not kopf.get("veraltet")
+                ):
+                    nur_zeiten.append((txid, vout))
+                    continue
                 baeume[(txid, vout)] = _resume_origin(txid, vout)
+
+            if graue_anteile and nur_zeiten:
+                from core.trace import externe_blockzeiten_speichern
+
+                stand.phase(
+                    f"Blockzeiten für {len(nur_zeiten)} UTXOs mit grauem Anteil…"
+                )
+                for txid, vout in nur_zeiten:
+                    job.raise_if_cancelled()
+                    try:
+                        externe_blockzeiten_speichern(
+                            txid, vout, fetchers["get_tx"],
+                            state.immutable_cache_dir,
+                        )
+                        fertig += 1
+                        voll_ok += 1
+                    except Cancelled:
+                        raise
+                    except Exception:
+                        fehler += 1
+                _zwischenstand()
 
             offen_sicht = list(baeume.keys())
             _zwischenstand()

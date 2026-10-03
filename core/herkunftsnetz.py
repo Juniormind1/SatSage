@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from core.tax import _minus_monate, _y_log_prozent
@@ -142,10 +142,71 @@ def output_zeit(
     return None
 
 
+def _pos(wert) -> float | None:
+    try:
+        pos = float(wert)
+    except (TypeError, ValueError):
+        return None
+    if pos != pos or pos in (float("inf"), float("-inf")):
+        return None
+    return pos
+
+
+def _obergrenze_ts(
+    key: str,
+    nach: dict[str, list[str]],
+    zeiten: dict[str, int],
+) -> int | None:
+    """Früheste datierte Nachfolger-Zeit. Der Eingang kann nicht jünger sein."""
+    beste: int | None = None
+    schlange = list(nach.get(key) or [])
+    gesehen: set[str] = set()
+    while schlange:
+        nxt = schlange.pop()
+        if not nxt or nxt in gesehen:
+            continue
+        gesehen.add(nxt)
+        ts = zeiten.get(nxt) or 0
+        if ts > 0 and (beste is None or ts < beste):
+            beste = ts
+        schlange.extend(nach.get(nxt) or [])
+    return beste
+
+
+def _sicher_ausserhalb(
+    time_ts: int | None,
+    *,
+    bezug: datetime | None,
+    jahre: int,
+    stichtag: date | None,
+) -> bool:
+    """
+    Obergrenze liegt außerhalb der Haltefrist und, falls gesetzt, nicht
+    nach dem Stichtag. Dann ist der undatierte Eingang ebenfalls sicher.
+    """
+    if not time_ts or bezug is None:
+        return False
+    try:
+        anschaffung = datetime.fromtimestamp(int(time_ts))
+    except (TypeError, ValueError, OSError, OverflowError):
+        return False
+    from core.tax import haltefrist_entscheidung
+
+    _ende, erfuellt, neu = haltefrist_entscheidung(
+        anschaffung, bezug, int(jahre or 0), stichtag,
+    )
+    return bool(erfuellt) and not neu
+
+
 def lot_mischung(
     vorfahren: list[dict] | None,
     frist_pos,
     fokus_key: str = "",
+    *,
+    kanten: list[dict] | None = None,
+    bezug: datetime | None = None,
+    jahre: int = 1,
+    stichtag: date | None = None,
 ) -> dict | None:
     """
     Lose des Fokus aus den Endknoten, gewichtet mit ``anteil_sats``.
@@ -156,16 +217,34 @@ def lot_mischung(
     (``pos_output < frist_pos``). Orange, wenn es darauf oder rechts liegt.
     Das Bündeldatum ist die jüngste bekannte Output-Zeit seiner Eingänge.
     Grau ohne Datum, ohne Fristposition, oder bei Lücke und Horizont.
+    Ein undatiertes Ende zählt trotzdem grün, wenn ein Nachfolger schon
+    außerhalb der Haltefrist und nicht nach dem Stichtag liegt — der
+    Eingang kann nicht jünger sein als diese Ausgabe.
     Eigene Zwischenhops und der Fokus zählen nicht.
+    ``sats_ohne_datum`` bleibt der undatierte Anteil, auch wenn er als
+    Grün gezählt wird.
     """
     acc = {"sats_gruen": 0.0, "sats_orange": 0.0, "sats_grau": 0.0}
-    try:
-        frist = float(frist_pos)
-    except (TypeError, ValueError):
-        frist = None
-    else:
-        if frist != frist or frist in (float("inf"), float("-inf")):
-            frist = None
+    ohne_datum = 0.0
+    frist = _pos(frist_pos)
+    nach: dict[str, list[str]] = {}
+    zeiten: dict[str, int] = {}
+    for kante in kanten or []:
+        if not isinstance(kante, dict):
+            continue
+        von = str(kante.get("von") or "")
+        ziel = str(kante.get("nach") or "")
+        if von and ziel:
+            nach.setdefault(von, []).append(ziel)
+    for v in vorfahren or []:
+        if not isinstance(v, dict):
+            continue
+        try:
+            ts = int(v.get("time_ts") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if v.get("key") and ts > 0:
+            zeiten[str(v["key"])] = ts
     for v in vorfahren or []:
         if not isinstance(v, dict) or not v.get("ende"):
             continue
@@ -178,23 +257,26 @@ def lot_mischung(
         if gewicht <= 0:
             continue
         farbe = "sats_grau"
-        try:
-            pos = float(v.get("pos_output"))
-        except (TypeError, ValueError):
-            pos = None
-        else:
-            if pos != pos or pos in (float("inf"), float("-inf")):
-                pos = None
+        pos = _pos(v.get("pos_output"))
         if (
             v.get("typ") in (TYP_FREMD, TYP_COINBASE, TYP_BUENDEL)
             and pos is not None
             and frist is not None
         ):
             farbe = "sats_gruen" if pos < frist else "sats_orange"
+        elif pos is None and _sicher_ausserhalb(
+            _obergrenze_ts(str(v.get("key") or ""), nach, zeiten),
+            bezug=bezug, jahre=jahre, stichtag=stichtag,
+        ):
+            farbe = "sats_gruen"
+        if pos is None:
+            ohne_datum += gewicht
         acc[farbe] += gewicht
     if acc["sats_gruen"] + acc["sats_orange"] + acc["sats_grau"] <= 0:
         return None
-    return {name: int(round(wert)) for name, wert in acc.items()}
+    aus = {name: int(round(wert)) for name, wert in acc.items()}
+    aus["sats_ohne_datum"] = int(round(ohne_datum))
+    return aus
 
 
 def _typ(knoten: dict) -> str:
@@ -256,10 +338,11 @@ def flach(
 
     def zeitfelder(zeit: datetime | None) -> dict:
         if zeit is None:
-            return {"pos_output": None, "zeit": ""}
+            return {"pos_output": None, "zeit": "", "time_ts": None}
         return {
             "pos_output": skala.pos(zeit),
             "zeit": zeit.strftime("%d.%m.%Y %H:%M"),
+            "time_ts": int(zeit.timestamp()),
         }
 
     def neu(key: str, eintrag: dict, anteil: float) -> None:

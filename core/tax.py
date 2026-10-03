@@ -705,6 +705,8 @@ class Eingang:
     sats_gruen: int | None = None
     sats_orange: int | None = None
     sats_grau: int | None = None
+    #: Undatierte Enden, auch wenn ein Nachfolger sie als Grün zählt.
+    sats_ohne_datum: int | None = None
 
     @property
     def geprueft(self) -> bool:
@@ -746,6 +748,7 @@ class Eingang:
             "sats_gruen": self.sats_gruen,
             "sats_orange": self.sats_orange,
             "sats_grau": self.sats_grau,
+            "sats_ohne_datum": self.sats_ohne_datum,
         }
 
 
@@ -772,6 +775,8 @@ def auswerten(
     immutable_cache_dir: Path | None = None,
     jetzt: datetime | None = None,
     lang: str | None = None,
+    mit_lots: bool = True,
+    on_lot=None,
 ) -> dict:
     """
     Wertet die Eingänge bis zum Bezugsdatum des Steuerjahres aus.
@@ -782,6 +787,10 @@ def auswerten(
     *anschaffung*: ``juengste`` (defensiv) oder ``aelteste`` (offensiv).
 
     *jetzt* dient dem Test; im Betrieb bleibt es leer.
+
+    *mit_lots*: False lässt die Punkte auf dem einen Anschaffungsdatum.
+    Die Bäume liest erst der zweite Lauf; *on_lot* bekommt jeden Punkt,
+    sobald sein Lot feststeht.
     """
     modus = parse_anschaffung(anschaffung)
     ende, laufend = bezugsdatum(jahr, jetzt)
@@ -1027,7 +1036,10 @@ def auswerten(
         "hinweise": hinweise,
         "_objekte": eintraege,
     }
-    _lot_segmente_eintragen(ergebnis, eintraege, immutable_cache_dir)
+    if mit_lots:
+        _lot_segmente_eintragen(
+            ergebnis, eintraege, immutable_cache_dir, on_lot=on_lot,
+        )
     return ergebnis
 
 
@@ -1040,7 +1052,16 @@ def _ganz_gruen(seg: dict) -> bool:
     )
 
 
-def _lot_aus_cache(eintrag: Eingang, skala, frist_pos, cache: Path | None) -> dict | None:
+def _lot_aus_cache(
+    eintrag: Eingang,
+    skala,
+    frist_pos,
+    cache: Path | None,
+    *,
+    bezug: datetime | None = None,
+    jahre: int = 1,
+    stichtag: date | None = None,
+) -> dict | None:
     """Endknoten des gespeicherten Baums, dieselbe Mischung wie der Lot-Ring."""
     if skala is None or cache is None:
         return None
@@ -1068,58 +1089,19 @@ def _lot_aus_cache(eintrag: Eingang, skala, frist_pos, cache: Path | None) -> di
         netz = herkunftsnetz.flach(baum, key, skala, block_zeit=block_zeit)
         return herkunftsnetz.lot_mischung(
             netz.get("vorfahren"), frist_pos, key,
+            kanten=netz.get("kanten"),
+            bezug=bezug,
+            jahre=jahre,
+            stichtag=stichtag,
         )
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return None
 
 
-def _lot_segmente_eintragen(
-    ergebnis: dict,
-    objekte: list[Eingang],
-    cache: Path | None,
-) -> None:
-    """
-    Schreibt ``sats_gruen`` / ``sats_orange`` / ``sats_grau`` in Einträge
-    und Zeitstrahl.
-
-    Mit Herkunftsnetz gilt für beide Lesarten: ganz grün nur wenn Grau und
-    Orange null sind. Offensiv addiert in den Steuerjahr-Summen nur den
-    grünen Anteil, nicht den ganzen UTXO nach dem ältesten Datum.
-    Neuvermögen bleibt unfrei, Halten hebt den Stichtag nicht auf.
-    """
-    from core import herkunftsnetz
-
+def _lot_kennzahlen_nachziehen(ergebnis: dict) -> None:
+    """Scorecard und Geister-Saldo aus den aktuellen Lot-Anteilen."""
     strahl = ergebnis.get("zeitstrahl") or {}
-    events = {
-        e.get("key"): e for e in (strahl.get("events") or []) if e.get("key")
-    }
-    skala = herkunftsnetz.skala_aus_auswertung(ergebnis)
-    frist = strahl.get("frist_pos")
     modus = ergebnis.get("anschaffung") or STANDARD_ANSCHAFFUNG
-    nach_key = {f"{e.txid}:{int(e.vout)}": e for e in objekte}
-
-    for eintrag in ergebnis.get("eintraege") or []:
-        key = f"{eintrag.get('txid')}:{int(eintrag.get('vout') or 0)}"
-        objekt = nach_key.get(key)
-        seg = _lot_aus_cache(objekt, skala, frist, cache) if objekt else None
-        if seg:
-            eintrag["sats_gruen"] = seg["sats_gruen"]
-            eintrag["sats_orange"] = seg["sats_orange"]
-            eintrag["sats_grau"] = seg["sats_grau"]
-            ganz = _ganz_gruen(seg) and not eintrag.get("neuvermoegen")
-            eintrag["erfuellt"] = ganz
-        if objekt is not None:
-            objekt.sats_gruen = eintrag.get("sats_gruen")
-            objekt.sats_orange = eintrag.get("sats_orange")
-            objekt.sats_grau = eintrag.get("sats_grau")
-            objekt.erfuellt = bool(eintrag.get("erfuellt"))
-        event = events.get(key)
-        if event is not None:
-            event["erfuellt"] = bool(eintrag.get("erfuellt"))
-            event["sats_gruen"] = eintrag.get("sats_gruen")
-            event["sats_orange"] = eintrag.get("sats_orange")
-            event["sats_grau"] = eintrag.get("sats_grau")
-
     eintraege = ergebnis.get("eintraege") or []
     erfuellt = [e for e in eintraege if e.get("erfuellt")]
     offen = [e for e in eintraege if not e.get("erfuellt")]
@@ -1153,6 +1135,92 @@ def _lot_segmente_eintragen(
             naechste = tag
     kennzahlen["naechste_frist"] = naechste.strftime("%d.%m.%Y") if naechste else ""
     _geister_aus_events(strahl, modus)
+
+
+def _lot_zeile(eintrag: dict, ergebnis: dict) -> dict:
+    """Eine NDJSON-Zeile: dieser Punkt und der Stand der Summen danach."""
+    geist = (ergebnis.get("zeitstrahl") or {}).get("geister_saldo")
+    return {
+        "key": f"{eintrag.get('txid')}:{int(eintrag.get('vout') or 0)}",
+        "erfuellt": bool(eintrag.get("erfuellt")),
+        "sats_gruen": eintrag.get("sats_gruen"),
+        "sats_orange": eintrag.get("sats_orange"),
+        "sats_grau": eintrag.get("sats_grau"),
+        "sats_ohne_datum": eintrag.get("sats_ohne_datum"),
+        "kennzahlen": dict(ergebnis.get("kennzahlen") or {}),
+        "geister_saldo": dict(geist) if isinstance(geist, dict) else None,
+    }
+
+
+def _lot_segmente_eintragen(
+    ergebnis: dict,
+    objekte: list[Eingang],
+    cache: Path | None,
+    *,
+    on_lot=None,
+) -> None:
+    """
+    Schreibt ``sats_gruen`` / ``sats_orange`` / ``sats_grau`` in Einträge
+    und Zeitstrahl.
+
+    Mit Herkunftsnetz gilt für beide Lesarten: ganz grün nur wenn Grau und
+    Orange null sind. Offensiv addiert in den Steuerjahr-Summen nur den
+    grünen Anteil, nicht den ganzen UTXO nach dem ältesten Datum.
+    Neuvermögen bleibt unfrei, Halten hebt den Stichtag nicht auf.
+    """
+    from core import herkunftsnetz
+
+    strahl = ergebnis.get("zeitstrahl") or {}
+    events = {
+        e.get("key"): e for e in (strahl.get("events") or []) if e.get("key")
+    }
+    skala = herkunftsnetz.skala_aus_auswertung(ergebnis)
+    frist = strahl.get("frist_pos")
+    try:
+        bezug = datetime.fromtimestamp(float(ergebnis.get("bezug_ts") or 0))
+    except (TypeError, ValueError, OSError, OverflowError):
+        bezug = None
+    if bezug is not None and bezug.year < 2009:
+        bezug = None
+    jahre = int(ergebnis.get("haltefrist_jahre") or 0)
+    try:
+        stichtag_lot = parse_stichtag(str(ergebnis.get("stichtag_regel") or ""))
+    except ValueError:
+        stichtag_lot = None
+    nach_key = {f"{e.txid}:{int(e.vout)}": e for e in objekte}
+
+    for eintrag in ergebnis.get("eintraege") or []:
+        key = f"{eintrag.get('txid')}:{int(eintrag.get('vout') or 0)}"
+        objekt = nach_key.get(key)
+        seg = _lot_aus_cache(
+            objekt, skala, frist, cache,
+            bezug=bezug, jahre=jahre, stichtag=stichtag_lot,
+        ) if objekt else None
+        if seg:
+            eintrag["sats_gruen"] = seg["sats_gruen"]
+            eintrag["sats_orange"] = seg["sats_orange"]
+            eintrag["sats_grau"] = seg["sats_grau"]
+            eintrag["sats_ohne_datum"] = seg.get("sats_ohne_datum")
+            ganz = _ganz_gruen(seg) and not eintrag.get("neuvermoegen")
+            eintrag["erfuellt"] = ganz
+        if objekt is not None:
+            objekt.sats_gruen = eintrag.get("sats_gruen")
+            objekt.sats_orange = eintrag.get("sats_orange")
+            objekt.sats_grau = eintrag.get("sats_grau")
+            objekt.sats_ohne_datum = eintrag.get("sats_ohne_datum")
+            objekt.erfuellt = bool(eintrag.get("erfuellt"))
+        event = events.get(key)
+        if event is not None:
+            event["erfuellt"] = bool(eintrag.get("erfuellt"))
+            event["sats_gruen"] = eintrag.get("sats_gruen")
+            event["sats_orange"] = eintrag.get("sats_orange")
+            event["sats_grau"] = eintrag.get("sats_grau")
+            event["sats_ohne_datum"] = eintrag.get("sats_ohne_datum")
+        if on_lot is not None and seg:
+            _lot_kennzahlen_nachziehen(ergebnis)
+            on_lot(_lot_zeile(eintrag, ergebnis))
+
+    _lot_kennzahlen_nachziehen(ergebnis)
 
 
 def _geister_aus_events(strahl: dict, modus: str) -> None:

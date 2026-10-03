@@ -97,3 +97,35 @@ class TestLeereAchseJs(unittest.TestCase):
 
     def test_ohne_rahmen_bleibt_die_karte_verborgen(self):
         self.assertTrue(_node()["weg"])
+
+    def test_rahmen_ohne_server_ist_der_leere_plot(self):
+        aus = subprocess.run(
+            ["node"],
+            input=STUB + PREAMBLE + STEUER + r"""
+const strahl = steuerLeererZeitstrahl(1, "");
+console.log(JSON.stringify({
+  vorhanden: strahl.vorhanden,
+  leer: strahl.leer,
+  events: strahl.events.length,
+  max: strahl.max_sats,
+  min: strahl.y_min_sats,
+  ticks: strahl.ticks.length,
+  von: strahl.von,
+  bis: strahl.bis,
+}));
+""",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if aus.returncode != 0:
+            raise AssertionError(aus.stderr or aus.stdout)
+        rahmen = json.loads(aus.stdout)
+        self.assertTrue(rahmen["vorhanden"])
+        self.assertTrue(rahmen["leer"])
+        self.assertEqual(rahmen["events"], 0)
+        self.assertEqual(rahmen["max"], 1_000_000)
+        self.assertEqual(rahmen["min"], 1000)
+        self.assertEqual(rahmen["ticks"], 5)
+        self.assertRegex(rahmen["von"], r"^\d{2}\.\d{2}\.\d{4}$")
+        self.assertRegex(rahmen["bis"], r"^\d{2}\.\d{2}\.\d{4}$")

@@ -445,6 +445,19 @@ class KleinCache:
             while len(self._daten) > self._groesse:
                 self._daten.popitem(last=False)
 
+    def lege_ausser_wenn(self, schluessel, wert, behalten) -> bool:
+        """Legt *wert*, außer *behalten(bisher)* ist wahr. True wenn gelegt."""
+        with self._lock:
+            alt = self._daten.get(schluessel)
+            if alt is not None and behalten(alt):
+                self._daten.move_to_end(schluessel)
+                return False
+            self._daten[schluessel] = wert
+            self._daten.move_to_end(schluessel)
+            while len(self._daten) > self._groesse:
+                self._daten.popitem(last=False)
+            return True
+
     def leeren(self) -> None:
         with self._lock:
             self._daten.clear()

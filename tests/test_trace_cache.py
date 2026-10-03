@@ -182,6 +182,77 @@ class TestBaumZeitenNachziehen(TraceCacheBasis):
         self.assertEqual(pfad.read_bytes(), vorher)
 
 
+class TestExterneBlockzeiten(TraceCacheBasis):
+    """Gelb zieht fehlende Blockzeiten externer Blätter nach, ohne den Walk."""
+
+    def _baum(self, **blatt):
+        kind = {
+            "id": "0.0",
+            "type": "external",
+            "from_utxo": f"{txid('e1')}:0",
+            "amount_sats": 1000,
+            "time_label": "",
+            "children": [],
+        }
+        kind.update(blatt)
+        return {
+            "found": True,
+            "root": {"id": "0", "txid": txid("a1"), "vout": 0, "amount_sats": 1000},
+            "children": [kind],
+        }
+
+    def test_fehlende_tx_wird_datiert_und_gespeichert(self):
+        from core.trace import externe_blockzeiten_speichern, hat_extern_ohne_zeit
+
+        baum = self._baum()
+        trace_cache.speichern(txid("a1"), 0, baum, self.dir, EIGENE)
+        self.assertTrue(hat_extern_ohne_zeit(baum))
+        ts = 1_579_564_800
+
+        def get_tx(tx_id):
+            self.assertEqual(tx_id, txid("e1"))
+            return {
+                "txid": tx_id,
+                "status": {"confirmed": True, "block_height": 613_836, "block_time": ts},
+            }
+
+        n = externe_blockzeiten_speichern(txid("a1"), 0, get_tx, self.dir)
+        self.assertEqual(n, 1)
+        geladen = trace_cache.laden(txid("a1"), 0, self.dir, EIGENE)
+        kind = geladen["baum"]["children"][0]
+        self.assertEqual(kind["block_time"], ts)
+        self.assertTrue(kind["time_label"])
+        self.assertFalse(hat_extern_ohne_zeit(geladen["baum"]))
+
+    def test_mindesthoehe_setzt_kein_datum(self):
+        from core.trace import externe_blockzeiten_nachziehen
+
+        baum = self._baum()
+
+        def get_tx(_tx_id):
+            return {
+                "status": {
+                    "confirmed": False,
+                    "mindesthoehe": True,
+                    "block_time": 1_700_000_000,
+                },
+            }
+
+        self.assertEqual(externe_blockzeiten_nachziehen(baum, get_tx), 0)
+        self.assertFalse(baum["children"][0].get("block_time"))
+
+    def test_interner_knoten_ohne_datum_bleibt(self):
+        from core.trace import externe_blockzeiten_nachziehen, hat_extern_ohne_zeit
+
+        baum = self._baum(type="internal")
+        self.assertFalse(hat_extern_ohne_zeit(baum))
+
+        def get_tx(_tx_id):
+            return {"status": {"confirmed": True, "block_time": 1_579_564_800}}
+
+        self.assertEqual(externe_blockzeiten_nachziehen(baum, get_tx), 0)
+
+
 class TestKnotenTabelle(TraceCacheBasis):
     """ISSUES P2 Schritt 6: Rauten stehen nur einmal in der Datei (DAG)."""
 

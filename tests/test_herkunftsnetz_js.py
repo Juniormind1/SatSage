@@ -147,6 +147,9 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("eigene Vorgänger nach Output-Zeit", de["tax.netzHint"])
         self.assertIn("tax.netzJump", schluessel)
         self.assertIn("tax.netzJumpTitle", schluessel)
+        self.assertIn("tax.netzLotGruen", schluessel)
+        self.assertIn("tax.netzLotGelb", schluessel)
+        self.assertIn("tax.netzLotGrau", schluessel)
         self.assertNotIn("tax.netzJumpMissing", schluessel)
 
 
@@ -192,6 +195,37 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertIn("netz-ueber-achse", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["fremdKlasse"])
         self.assertIn("netz-vor-frist", r["vorFrist"])
+
+    def test_lot_ring_tooltip_nennt_drei_farben(self):
+        r = _node("""
+          globalThis.setzeLotDonut = (punkt) => { punkt.classList.add("lot-donut"); };
+          const tip = new El("span");
+          tip.className = "achse-punkt-tip";
+          tip.textContent = "04.03.2021\\n2,00 BTC";
+          pA.append(tip);
+          ZeitstrahlAnsicht.daten = { zeitstrahl: { frist_pos: 83.5, events: [] } };
+          setzeAchseLotDonut(pA, {
+            fokus_key: "x",
+            vorfahren: [
+              { key: "x", ende: true, anteil_sats: 200000000, typ: "eigen" },
+              { key: "a", ende: true, anteil_sats: 199763897, typ: "fremd", pos_output: 8 },
+              { key: "b", ende: true, anteil_sats: 236100, typ: "fremd", pos_output: null },
+            ],
+          });
+          const mit = tip.textContent;
+          entferneAchseLotDonut(pA);
+          console.log(JSON.stringify({ mit, ohne: tip.textContent }));
+        """)
+        zeilen = r["mit"].split("\n")
+        self.assertEqual(zeilen[0], "04.03.2021")
+        self.assertEqual(zeilen[1], "2,00 BTC")
+        self.assertIn("tax.netzLotGruen", zeilen[2])
+        self.assertIn("99,9 %", zeilen[2])
+        self.assertIn("tax.netzLotGelb", zeilen[3])
+        self.assertIn("0,0 %", zeilen[3])
+        self.assertIn("tax.netzLotGrau", zeilen[4])
+        self.assertIn("0,12 %", zeilen[4])
+        self.assertEqual(r["ohne"], "04.03.2021\n2,00 BTC")
 
     def test_grauer_punkt_oeffnet_herkunft_aufgeklappt(self):
         """Ohne Herkunft gibt es kein Netz. Der Klick öffnet den Trace aufgeklappt."""
@@ -347,6 +381,57 @@ console.log(JSON.stringify({ m, bund, ring }));
         self.assertEqual(r["m"], {"gruen": 0, "orange": 70, "grau": 30})
         self.assertEqual(r["bund"], {"gruen": 40, "orange": 25, "grau": 35})
         self.assertNotEqual(r["ring"], "gut")
+
+    def test_undatiertes_ende_mit_altem_nachfolger_ist_gruen(self):
+        text = (WEB / "views" / "herkunftsnetz.js").read_text(encoding="utf-8")
+        start = text.index("function herkunftsnetzPos(")
+        ende = text.index("function herkunftsnetzSpringbar(")
+        aus = subprocess.run(
+            ["node", "-e", text[start:ende] + """
+const hop = Math.floor(new Date(2020, 0, 21, 12).getTime() / 1000);
+const jung = Math.floor(new Date(2026, 7, 1, 12).getTime() / 1000);
+const nachStichtag = Math.floor(new Date(2021, 5, 1, 12).getTime() / 1000);
+const bezug = Math.floor(new Date(2026, 9, 3, 12).getTime() / 1000);
+function misch(timeTs, stichtag) {
+  ZeitstrahlAnsicht = { daten: {
+    zeitstrahl: { frist_pos: 40 },
+    bezug_ts: bezug,
+    haltefrist_jahre: 1,
+    stichtag_regel: stichtag,
+  } };
+  return herkunftsnetzLotMischung({
+    fokus_key: "f",
+    vorfahren: [
+      { key: "hop", ende: false, typ: "eigen", anteil_sats: 0, time_ts: timeTs },
+      { key: "grau", ende: true, typ: "fremd", anteil_sats: 200, pos_output: null },
+      { key: "alt", ende: true, typ: "fremd", anteil_sats: 800, pos_output: 10 },
+    ],
+    kanten: [{ von: "grau", nach: "hop" }],
+  });
+}
+console.log(JSON.stringify({
+  alt: misch(hop, ""),
+  jung: misch(jung, ""),
+  nach: misch(nachStichtag, "28.02.2021"),
+  vor: misch(hop, "28.02.2021"),
+  ohneKante: herkunftsnetzLotMischung({
+    fokus_key: "f",
+    vorfahren: [
+      { key: "grau", ende: true, typ: "fremd", anteil_sats: 200, pos_output: null },
+    ],
+  }),
+}));
+"""],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(aus.returncode, 0, aus.stderr)
+        r = json.loads(aus.stdout)
+        self.assertEqual(r["alt"], {"gruen": 1000, "orange": 0, "grau": 0})
+        self.assertEqual(r["jung"]["grau"], 200)
+        self.assertEqual(r["jung"]["gruen"], 800)
+        self.assertEqual(r["nach"]["grau"], 200)
+        self.assertEqual(r["vor"], {"gruen": 1000, "orange": 0, "grau": 0})
+        self.assertEqual(r["ohneKante"], {"gruen": 0, "orange": 0, "grau": 200})
 
     def test_x_labels_verdichten_sich_bis_auf_tage(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")

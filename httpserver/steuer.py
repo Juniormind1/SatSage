@@ -159,7 +159,12 @@ def _steuer_grundlage(state: AppState) -> tuple[list[dict], list[str]]:
 
 
 def _steuer_auswertung(
-    state: AppState, query: dict, lang: str | None = None,
+    state: AppState,
+    query: dict,
+    lang: str | None = None,
+    *,
+    mit_lots: bool = True,
+    on_lot=None,
 ) -> dict:
     from server import (
         ApiError,
@@ -203,6 +208,8 @@ def _steuer_auswertung(
         wallet=state.wallet_ctx,
         immutable_cache_dir=state.immutable_cache_dir,
         lang=lang,
+        mit_lots=mit_lots,
+        on_lot=on_lot,
     )
     auswertung["verfuegbare_jahre"] = jahre
     auswertung["ohne_verlauf"] = ohne_verlauf

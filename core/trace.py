@@ -828,6 +828,147 @@ def _anreichere_externe_zeiten(
     return n
 
 
+def _echte_blockzeit(tx: dict | None) -> int | None:
+    """Bestätigte Blockzeit. Mempool-Untergrenze (Tip) ist kein Datum."""
+    if not isinstance(tx, dict):
+        return None
+    status = tx.get("status") if isinstance(tx.get("status"), dict) else {}
+    if status.get("mindesthoehe"):
+        return None
+    from core.utxo_report import _tx_block_time
+
+    ts = _tx_block_time(tx)
+    try:
+        wert = int(ts or 0)
+    except (TypeError, ValueError):
+        return None
+    return wert if wert > 0 else None
+
+
+def _knoten_ohne_datum(knoten: dict) -> bool:
+    for feld in ("block_time", "time_ts"):
+        try:
+            if int(knoten.get(feld) or 0) > 0:
+                return False
+        except (TypeError, ValueError):
+            pass
+    return not str(knoten.get("time_label") or knoten.get("time") or "").strip()
+
+
+def hat_extern_ohne_zeit(baum: dict | None) -> bool:
+    """True, wenn ein externes Blatt Tx kennt, aber keine Blockzeit hat."""
+    if not isinstance(baum, dict):
+        return False
+
+    def walk(knoten) -> bool:
+        if not isinstance(knoten, dict):
+            return False
+        if (
+            knoten.get("type") == "external"
+            and _knoten_ohne_datum(knoten)
+            and ":" in str(knoten.get("from_utxo") or "")
+        ):
+            return True
+        for kind in knoten.get("children") or []:
+            if walk(kind):
+                return True
+        for src in knoten.get("sources") or []:
+            if walk(src):
+                return True
+        trace = knoten.get("trace")
+        if isinstance(trace, dict) and walk(trace):
+            return True
+        return False
+
+    if isinstance(baum.get("root"), dict) and walk(baum["root"]):
+        return True
+    for kind in baum.get("children") or []:
+        if walk(kind):
+            return True
+    origin = baum.get("origin_tree")
+    return isinstance(origin, dict) and walk(origin)
+
+
+def externe_blockzeiten_nachziehen(baum: dict | None, get_tx) -> int:
+    """
+    Holt fehlende Blockzeiten externer Blätter und schreibt sie in den Baum.
+
+    ``get_tx`` trifft erst den Cache und fragt sonst die Quelle. Eine
+    Mempool-Untergrenze wird nicht als Datum übernommen.
+    """
+    if not isinstance(baum, dict) or not callable(get_tx):
+        return 0
+    geaendert = 0
+
+    def setzen(knoten: dict, ts: int) -> None:
+        knoten["time_ts"] = ts
+        knoten["block_time"] = ts
+        label = _format_time_ts(ts)
+        if label and not str(knoten.get("time_label") or "").strip():
+            knoten["time_label"] = label
+        if label and not str(knoten.get("time") or "").strip():
+            knoten["time"] = label
+
+    def hol(knoten: dict) -> None:
+        nonlocal geaendert
+        if knoten.get("type") != "external" or not _knoten_ohne_datum(knoten):
+            return
+        ref = str(knoten.get("from_utxo") or "")
+        if ":" not in ref:
+            return
+        try:
+            tx = get_tx(ref.rsplit(":", 1)[0])
+        except Exception:
+            return
+        ts = _echte_blockzeit(tx)
+        if not ts:
+            return
+        setzen(knoten, ts)
+        geaendert += 1
+
+    def walk(knoten) -> None:
+        if not isinstance(knoten, dict):
+            return
+        hol(knoten)
+        for kind in knoten.get("children") or []:
+            walk(kind)
+        for src in knoten.get("sources") or []:
+            walk(src)
+        trace = knoten.get("trace")
+        if isinstance(trace, dict):
+            walk(trace)
+
+    if isinstance(baum.get("root"), dict):
+        walk(baum["root"])
+    for kind in baum.get("children") or []:
+        walk(kind)
+    origin = baum.get("origin_tree")
+    if isinstance(origin, dict):
+        walk(origin)
+    return geaendert
+
+
+def externe_blockzeiten_speichern(
+    txid: str,
+    vout: int,
+    get_tx,
+    immutable_cache_dir,
+) -> int:
+    """Liest den Herkunftsbaum, zieht externe Blockzeiten nach, speichert."""
+    from core import trace_cache
+
+    geladen = trace_cache.laden(txid, int(vout), immutable_cache_dir)
+    if not geladen or not isinstance(geladen.get("baum"), dict):
+        return 0
+    baum = geladen["baum"]
+    if not baum.get("found"):
+        return 0
+    n = externe_blockzeiten_nachziehen(baum, get_tx)
+    if n:
+        trace_cache.vervollstaendigen(txid, int(vout), baum, immutable_cache_dir)
+    return n
+
+
 def baum_zeiten_nachziehen(
     baum: dict | None,
     immutable_cache_dir: Path | str | None,

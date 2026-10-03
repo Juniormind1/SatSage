@@ -56,6 +56,13 @@ class TestFenster(unittest.TestCase):
         self.assertIsNone(r["kennzahlen_ts"]["gesamt"])
         self.assertEqual(len(r["gelb_keys"]), 9)
         self.assertEqual(len(r["grau_keys"]), 0)
+        self.assertFalse(r["lots_fertig"])
+        fertig = sf.fenster(
+            {**auswertung(self.e, self.a), "_lots": True},
+            limit=4, limit_abgaenge=6,
+        )
+        self.assertTrue(fertig["lots_fertig"])
+        self.assertNotIn("_lots", fertig)
 
     def test_teil_seite_ohne_rest(self):
         r = sf.fenster(auswertung(self.e, self.a), teil="offen", offset=4, limit=4)

@@ -33,13 +33,17 @@ def _ensure_server_names() -> None:
     _BOUND = True
 
 
+class _StromZu(Exception):
+    """Der Browser hat den NDJSON-Strom geschlossen."""
+
+
 class HandlerSseMixin:
     def _will_ndjson(self) -> bool:
         _ensure_server_names()
         accept = (self.headers.get("Accept") or "").lower()
         return "application/x-ndjson" in accept
 
-    def _ndjson_zeile(self, obj: dict) -> None:
+    def _ndjson_zeile(self, obj: dict) -> bool:
         _ensure_server_names()
         # HTTP/1.0 ohne Content-Length: der Körper endet mit der Verbindung.
         # flush(), damit die Oberfläche die Zeile sieht, noch während Tor startet.
@@ -49,8 +53,67 @@ class HandlerSseMixin:
             self.wfile.flush()
         except Exception as exc:
             if _client_weg(exc):
+                return False
+            raise
+        return True
+
+    def _stream_tax_lots(self, query: dict) -> None:
+        """Lot-Farben Punkt für Punkt, nachdem der Plot schon steht."""
+        _ensure_server_names()
+        from core.steuer_fenster import kennzahlen_ts, klaeren_keys
+        from httpserver.api.tax import steuer_auswertung_merken
+        from server import _steuer_auswertung, _ui_lang_fuer_web
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+        except Exception as exc:
+            if _client_weg(exc):
                 return
             raise
+
+        client_lang = self.headers.get("X-Satsage-Lang")
+        accept = self.headers.get("Accept-Language")
+        if client_lang is None and accept is None:
+            sprache = "de"
+        else:
+            sprache = _ui_lang_fuer_web(
+                self.state.env().values(), accept, client_lang,
+            )
+
+        def on_lot(zeile: dict) -> None:
+            if not self._ndjson_zeile(zeile):
+                raise _StromZu()
+
+        try:
+            auswertung = _steuer_auswertung(
+                self.state, query, lang=sprache, mit_lots=True, on_lot=on_lot,
+            )
+            steuer_auswertung_merken(self.state, query, sprache, auswertung)
+            strahl = auswertung.get("zeitstrahl") or {}
+            self._ndjson_zeile({
+                "done": True,
+                "lots_fertig": True,
+                "kennzahlen": auswertung.get("kennzahlen") or {},
+                "kennzahlen_ts": kennzahlen_ts(auswertung),
+                "geister_saldo": strahl.get("geister_saldo"),
+                **klaeren_keys(auswertung),
+            })
+        except _StromZu:
+            return
+        except Exception as exc:
+            if _shutdown_rauschen(exc) or _client_weg(exc) or _server_faehrt_runter(self.state):
+                return
+            LOGGER.exception("Steuer-Lots fehlgeschlagen")
+            try:
+                self._ndjson_zeile({"error": "Interner Serverfehler.", "done": True})
+            except Exception as exc2:
+                if _client_weg(exc2) or _shutdown_rauschen(exc2):
+                    return
 
     def _stream_boot_log(self) -> None:
         _ensure_server_names()

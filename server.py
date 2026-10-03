@@ -1434,6 +1434,9 @@ class Handler(
                 if pfad == "/api/boot-log" and methode == "GET" and self._will_ndjson():
                     self._stream_boot_log()
                     return
+                if pfad == "/api/tax/lots" and methode == "GET":
+                    self._stream_tax_lots(query)
+                    return
                 # Wallet-Suche: bewusst normales JSON (logs[] in der Antwort).
                 # NDJSON-Stream endete unter WebKit mit „Load failed“.
                 self._json(*self._api(methode, pfad, query))

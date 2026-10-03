@@ -1218,7 +1218,10 @@ class TestLotSegmente(unittest.TestCase):
             self._ende("b", "fremd", 500, 80),
         ])
         self.assertEqual(
-            seg, {"sats_gruen": 500, "sats_orange": 500, "sats_grau": 0},
+            seg, {
+                "sats_gruen": 500, "sats_orange": 500, "sats_grau": 0,
+                "sats_ohne_datum": 0,
+            },
         )
 
     def test_alles_gruen(self):
@@ -1243,7 +1246,10 @@ class TestLotSegmente(unittest.TestCase):
             self._ende("c", "buendel", 200, 80),
         ])
         self.assertEqual(
-            seg, {"sats_gruen": 800, "sats_orange": 200, "sats_grau": 0},
+            seg, {
+                "sats_gruen": 800, "sats_orange": 200, "sats_grau": 0,
+                "sats_ohne_datum": 0,
+            },
         )
 
     def test_buendel_ohne_datum_bleibt_grau(self):
@@ -1252,8 +1258,109 @@ class TestLotSegmente(unittest.TestCase):
             self._ende("b", "buendel", 500, None),
         ])
         self.assertEqual(
-            seg, {"sats_gruen": 500, "sats_orange": 0, "sats_grau": 500},
+            seg, {
+                "sats_gruen": 500, "sats_orange": 0, "sats_grau": 500,
+                "sats_ohne_datum": 500,
+            },
         )
+
+    def test_undatiertes_ende_mit_nachfolger_ausserhalb_ist_gruen(self):
+        from datetime import datetime
+
+        from core.herkunftsnetz import lot_mischung
+
+        hop = int(datetime(2020, 1, 21, 12).timestamp())
+        seg = lot_mischung(
+            [
+                {
+                    "key": "hop", "ende": False, "typ": "eigen",
+                    "anteil_sats": 0, "time_ts": hop,
+                },
+                self._ende("grau", "fremd", 200, None),
+                self._ende("alt", "fremd", 800, 10),
+            ],
+            self.FRIST,
+            "fokus:0",
+            kanten=[{"von": "grau", "nach": "hop"}],
+            bezug=datetime(2026, 10, 3),
+            jahre=1,
+        )
+        self.assertEqual(seg["sats_gruen"], 1000)
+        self.assertEqual(seg["sats_grau"], 0)
+        self.assertEqual(seg["sats_ohne_datum"], 200)
+
+    def test_nachfolger_innerhalb_der_frist_bleibt_grau(self):
+        from datetime import datetime
+
+        from core.herkunftsnetz import lot_mischung
+
+        hop = int(datetime(2026, 8, 1, 12).timestamp())
+        seg = lot_mischung(
+            [
+                {
+                    "key": "hop", "ende": False, "typ": "eigen",
+                    "anteil_sats": 0, "time_ts": hop,
+                },
+                self._ende("grau", "fremd", 200, None),
+            ],
+            self.FRIST,
+            "fokus:0",
+            kanten=[{"von": "grau", "nach": "hop"}],
+            bezug=datetime(2026, 10, 3),
+            jahre=1,
+        )
+        self.assertEqual(seg["sats_grau"], 200)
+        self.assertEqual(seg["sats_gruen"], 0)
+        self.assertEqual(seg["sats_ohne_datum"], 200)
+
+    def test_nachfolger_nach_stichtag_bleibt_grau(self):
+        from datetime import date, datetime
+
+        from core.herkunftsnetz import lot_mischung
+
+        hop = int(datetime(2021, 6, 1, 12).timestamp())
+        seg = lot_mischung(
+            [
+                {
+                    "key": "hop", "ende": False, "typ": "eigen",
+                    "anteil_sats": 0, "time_ts": hop,
+                },
+                self._ende("grau", "fremd", 200, None),
+            ],
+            self.FRIST,
+            "fokus:0",
+            kanten=[{"von": "grau", "nach": "hop"}],
+            bezug=datetime(2026, 10, 3),
+            jahre=1,
+            stichtag=date(2021, 2, 28),
+        )
+        self.assertEqual(seg["sats_grau"], 200)
+        self.assertEqual(seg["sats_ohne_datum"], 200)
+
+    def test_nachfolger_vor_stichtag_und_ausserhalb_ist_gruen(self):
+        from datetime import date, datetime
+
+        from core.herkunftsnetz import lot_mischung
+
+        hop = int(datetime(2020, 1, 21, 12).timestamp())
+        seg = lot_mischung(
+            [
+                {
+                    "key": "hop", "ende": False, "typ": "eigen",
+                    "anteil_sats": 0, "time_ts": hop,
+                },
+                self._ende("grau", "fremd", 200, None),
+            ],
+            self.FRIST,
+            "fokus:0",
+            kanten=[{"von": "grau", "nach": "hop"}],
+            bezug=datetime(2026, 10, 3),
+            jahre=1,
+            stichtag=date(2021, 2, 28),
+        )
+        self.assertEqual(seg["sats_gruen"], 200)
+        self.assertEqual(seg["sats_grau"], 0)
+        self.assertEqual(seg["sats_ohne_datum"], 200)
 
     def test_hinweis_nennt_den_lot_anteil(self):
         from core import i18n
@@ -1316,6 +1423,28 @@ class TestLotSummen(unittest.TestCase):
             immutable_cache_dir=self.cache,
             **kw,
         )
+
+    def test_ohne_lots_faerbt_nicht_aus_dem_baum(self):
+        self._speichern("a0", [
+            self._extern("e1", 500, "01.01.2020 12:00:00"),
+            self._extern("e2", 500, "01.06.2026 12:00:00"),
+        ])
+        roh = self._aus("a0", mit_lots=False)
+        punkt = roh["eintraege"][0]
+        self.assertIsNone(punkt["sats_gruen"])
+        self.assertIsNone(punkt["sats_ohne_datum"])
+        self.assertTrue(punkt["erfuellt"])
+        self.assertEqual(len(roh["zeitstrahl"]["events"]), 1)
+
+    def test_on_lot_meldet_jeden_baum(self):
+        self._speichern("a0b", [
+            self._extern("e1", 1000, "01.01.2020 12:00:00"),
+        ])
+        zeilen = []
+        self._aus("a0b", on_lot=zeilen.append)
+        self.assertEqual(len(zeilen), 1)
+        self.assertEqual(zeilen[0]["sats_gruen"], 1000)
+        self.assertIn("erfuellt_count", zeilen[0]["kennzahlen"])
 
     def test_offensiv_50_50_addiert_nur_gruen(self):
         self._speichern("a1", [
@@ -1458,6 +1587,48 @@ class TestLotSummen(unittest.TestCase):
         self._aus("b2")
         self.assertEqual(pfad.read_bytes(), vorher)
         self.assertEqual(pfad.stat().st_mtime_ns, mtime)
+
+    def test_undatiertes_blatt_mit_altem_hop_zaehlt_gruen(self):
+        self._speichern("a9", [{
+            "type": "internal",
+            "from_utxo": f"{txid('c9')}:0",
+            "amount_sats": 1000,
+            "time_label": "21.01.2020 12:00:00",
+            "children": [{
+                "type": "external",
+                "from_utxo": f"{txid('d9')}:0",
+                "amount_sats": 1000,
+                "time_label": "",
+                "children": [],
+            }],
+        }])
+        e = self._aus("a9")["eintraege"][0]
+        self.assertEqual(
+            (e["sats_gruen"], e["sats_orange"], e["sats_grau"]),
+            (1000, 0, 0),
+        )
+        self.assertEqual(e["sats_ohne_datum"], 1000)
+        self.assertTrue(e["erfuellt"])
+
+    def test_undatiertes_blatt_mit_jungem_hop_bleibt_grau(self):
+        self._speichern("b9", [{
+            "type": "internal",
+            "from_utxo": f"{txid('e8')}:0",
+            "amount_sats": 1000,
+            "time_label": "01.08.2026 12:00:00",
+            "children": [{
+                "type": "external",
+                "from_utxo": f"{txid('f8')}:0",
+                "amount_sats": 1000,
+                "time_label": "",
+                "children": [],
+            }],
+        }])
+        e = self._aus("b9")["eintraege"][0]
+        self.assertEqual(e["sats_grau"], 1000)
+        self.assertEqual(e["sats_gruen"], 0)
+        self.assertEqual(e["sats_ohne_datum"], 1000)
+        self.assertFalse(e["erfuellt"])
 
 
 if __name__ == "__main__":

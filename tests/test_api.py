@@ -2366,6 +2366,41 @@ class TestHerkunftVollstaendig(ApiTestBasis):
         offen = server._trace_offen_basis(self.state, utxos, eigene)
         self.assertIn((txid("c3"), 0), {(t, v) for t, v in offen})
 
+    def test_graue_anteile_oeffnen_vollen_baum_ohne_blockzeit(self):
+        """Gelb: voller Baum mit Ingress, aber externes Blatt ohne Zeit."""
+        from core import trace_cache
+
+        main.save_xpub_utxo_cache(
+            BIP84_ZPUB,
+            [utxo(100_000, BIP84_RECEIVE_0, marker="d4", vout=0)],
+            self.cache,
+            "test",
+        )
+        voll = {
+            "found": True,
+            "children": [{
+                "type": "external",
+                "from_utxo": f"{txid('e9')}:0",
+                "time_label": "",
+                "children": [],
+            }],
+            "summary": {"external_count": 1, "unresolved_inputs": 0},
+        }
+        eigene = {BIP84_RECEIVE_0}
+        trace_cache.speichern(txid("d4"), 0, voll, self.immutable, eigene)
+        main.save_utxo_ingress_cache(
+            txid("d4"), 0, {"external_time_ts": 1_600_000_000}, self.immutable,
+        )
+        utxos = server._utxos_fuer_trace(
+            self.state, wallet_id=self.wallet_id(BIP84_ZPUB),
+        )
+        ohne = server._trace_offen_basis(self.state, utxos, eigene)
+        self.assertNotIn((txid("d4"), 0), {(t, v) for t, v in ohne})
+        mit = server._trace_offen_basis(
+            self.state, utxos, eigene, graue_anteile=True,
+        )
+        self.assertIn((txid("d4"), 0), {(t, v) for t, v in mit})
+
 
 class TestGespeicherterBaum(ApiTestBasis):
     """

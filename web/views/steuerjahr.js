@@ -99,28 +99,261 @@ function steuerEinstellungen() {
   return Zustand.config?.steuer || {};
 }
 
+function plusJahreDatum(datum, jahre) {
+  const ziel = new Date(datum.getTime());
+  ziel.setFullYear(ziel.getFullYear() + jahre);
+  // 29. Februar im Nicht-Schaltjahr: Python legt den Tag auf den 28.
+  if (ziel.getMonth() !== datum.getMonth()) ziel.setDate(0);
+  return ziel;
+}
+
+function mittagDatum(datum) {
+  return new Date(datum.getFullYear(), datum.getMonth(), datum.getDate(), 12, 0, 0, 0);
+}
+
+function parseStichtagDatum(text) {
+  const roh = String(text || "").trim();
+  let m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(roh);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12, 0, 0, 0);
+  m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(roh);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+  return null;
+}
+
+function datumDeKurz(datum) {
+  const tag = String(datum.getDate()).padStart(2, "0");
+  const monat = String(datum.getMonth() + 1).padStart(2, "0");
+  return `${tag}.${monat}.${datum.getFullYear()}`;
+}
+
+/** Dieselbe leere Achse wie core/tax.leerer_zeitstrahl, ohne Server-Runde. */
+function steuerLeererZeitstrahl(haltefristJahre, stichtagText) {
+  const bis = mittagDatum(new Date());
+  const stichtag = parseStichtagDatum(stichtagText);
+  const jahre = Math.max(0, Number(haltefristJahre) || 0);
+  let von;
+  if (stichtag && stichtag < bis) {
+    const s = mittagDatum(stichtag);
+    von = new Date(s.getTime() - (bis.getTime() - s.getTime()));
+  } else {
+    von = plusJahreDatum(bis, -jahre * 2);
+  }
+  if (von >= bis) von = new Date(bis.getTime() - 86400000);
+  const spanne = bis.getTime() - von.getTime();
+  const prozent = (zeit) => Math.max(0, Math.min(100, (zeit.getTime() - von.getTime()) / spanne * 100));
+  const frist = jahre > 0 ? plusJahreDatum(bis, -jahre) : null;
+  let fristPos = null;
+  let fristDatum = "";
+  if (frist && von <= frist && frist <= bis) {
+    fristPos = Math.round(prozent(frist) * 1000) / 1000;
+    fristDatum = datumDeKurz(frist);
+  }
+  const ticks = [];
+  for (let i = 0; i <= 4; i += 1) {
+    const zeit = new Date(von.getTime() + spanne * i / 4);
+    ticks.push({
+      pos: Math.round(i / 4 * 100 * 1000) / 1000,
+      label: `${String(zeit.getMonth() + 1).padStart(2, "0")}/${zeit.getFullYear()}`,
+    });
+  }
+  return {
+    vorhanden: true,
+    leer: true,
+    von: datumDeKurz(von),
+    bis: datumDeKurz(bis),
+    frist_pos: fristPos,
+    frist_datum: fristDatum,
+    events: [],
+    geister_saldo: null,
+    ticks,
+    max_sats: 1000000,
+    y_min_sats: 1000,
+    y_scale: "log",
+    verdeckt: 0,
+  };
+}
+
+function zeichneSteuerLeerenRahmen() {
+  const fristFeld = $("#frist-wahl");
+  const frist = Number(fristFeld && fristFeld.value)
+    || Number(steuerEinstellungen().haltefrist_jahre)
+    || 0;
+  const stichtag = steuerEinstellungen().stichtag || "";
+  zeichneZeitstrahl({
+    zeitstrahl: steuerLeererZeitstrahl(frist, stichtag),
+    stichtag_regel: stichtag,
+    laufend: true,
+  });
+}
+
+function steuerPunktFarbe(eintrag) {
+  if (eintrag.erfuellt) return "erfuellt";
+  if (eintrag.geprueft) return "offen";
+  return "ungeprueft";
+}
+
+function steuerGelbKeySetzen(key, event) {
+  if (!Zustand.steuer) return;
+  const liste = Array.isArray(Zustand.steuer.gelb_keys)
+    ? Zustand.steuer.gelb_keys
+    : (Zustand.steuer.gelb_keys = []);
+  const gelb = (event.geprueft && !event.erfuellt)
+    || Number(event.sats_ohne_datum || 0) > 0;
+  const idx = liste.indexOf(key);
+  if (gelb && idx < 0) liste.push(key);
+  if (!gelb && idx >= 0) liste.splice(idx, 1);
+}
+
+let steuerLotUiTimer = null;
+
+function steuerLotUiPlanen() {
+  if (steuerLotUiTimer) return;
+  steuerLotUiTimer = setTimeout(() => {
+    steuerLotUiTimer = null;
+    if (!Zustand.steuer) return;
+    zeichneSteuerScorecards(Zustand.steuer);
+    const strahl = Zustand.steuer.zeitstrahl;
+    if (strahl) zeichneZeitstrahlGeister(strahl);
+  }, 80);
+}
+
+function steuerLotZeile(zeile) {
+  const daten = Zustand.steuer;
+  const strahl = daten && daten.zeitstrahl;
+  if (!strahl || !zeile || !zeile.key) return;
+  const event = (strahl.events || []).find((e) => e.key === zeile.key);
+  if (!event) return;
+  event.erfuellt = Boolean(zeile.erfuellt);
+  event.sats_gruen = zeile.sats_gruen;
+  event.sats_orange = zeile.sats_orange;
+  event.sats_grau = zeile.sats_grau;
+  event.sats_ohne_datum = zeile.sats_ohne_datum;
+  if (zeile.kennzahlen) daten.kennzahlen = zeile.kennzahlen;
+  if ("geister_saldo" in zeile) strahl.geister_saldo = zeile.geister_saldo;
+  steuerGelbKeySetzen(zeile.key, event);
+  const punkt = tracePunktImPlot(zeile.key);
+  if (punkt) {
+    punkt.classList.remove("ungeprueft", "offen", "erfuellt");
+    punkt.classList.add(steuerPunktFarbe(event));
+  }
+  steuerLotUiPlanen();
+}
+
+function steuerLotsAbschluss(obj) {
+  const daten = Zustand.steuer;
+  if (!daten) return;
+  daten.lots_fertig = true;
+  if (obj.kennzahlen) daten.kennzahlen = obj.kennzahlen;
+  if (obj.kennzahlen_ts) daten.kennzahlen_ts = obj.kennzahlen_ts;
+  if (Array.isArray(obj.gelb_keys)) daten.gelb_keys = obj.gelb_keys;
+  if (Array.isArray(obj.grau_keys)) daten.grau_keys = obj.grau_keys;
+  if (daten.zeitstrahl && "geister_saldo" in obj) {
+    daten.zeitstrahl.geister_saldo = obj.geister_saldo;
+  }
+  if (steuerLotUiTimer) {
+    clearTimeout(steuerLotUiTimer);
+    steuerLotUiTimer = null;
+  }
+  zeichneSteuerScorecards(daten);
+  if (daten.zeitstrahl) zeichneZeitstrahlGeister(daten.zeitstrahl);
+  if (typeof ladeSteuerSeitenNeu === "function") {
+    ladeSteuerSeitenNeu().catch(() => {});
+  }
+}
+
+/** Bäume nach dem ersten Plot. Jede Zeile färbt einen Punkt nach. */
+async function steuerLotsNachziehen(lauf) {
+  const daten = Zustand.steuer;
+  if (!daten || !daten._abfrage) return;
+  const ctrl = new AbortController();
+  Zustand.steuerLotsAbbruch = ctrl;
+  let antwort;
+  try {
+    antwort = await fetch(`/api/tax/lots${daten._abfrage}`, {
+      credentials: "same-origin",
+      referrerPolicy: "same-origin",
+      headers: {
+        ...(typeof tokenKopf === "function" ? tokenKopf() : {}),
+        ...(typeof sprachKopf === "function" ? sprachKopf() : {}),
+        Accept: "application/x-ndjson",
+      },
+      signal: ctrl.signal,
+    });
+  } catch (_) {
+    return;
+  }
+  if (!antwort.ok || !antwort.body) return;
+  const leser = antwort.body.getReader();
+  const decoder = new TextDecoder();
+  let puffer = "";
+  const nimm = (obj) => {
+    if (lauf !== Zustand.steuerPlotLauf || !obj) return;
+    if (obj.done) {
+      if (!obj.error) steuerLotsAbschluss(obj);
+      return;
+    }
+    if (obj.key) steuerLotZeile(obj);
+  };
+  try {
+    while (true) {
+      const gelesen = await leser.read();
+      if (gelesen.done) break;
+      puffer += decoder.decode(gelesen.value, { stream: true });
+      const zeilen = puffer.split("\n");
+      puffer = zeilen.pop();
+      for (const zeile of zeilen) {
+        if (!zeile.trim()) continue;
+        try { nimm(JSON.parse(zeile)); } catch (_) { /* halbe Zeile */ }
+      }
+    }
+    if (puffer.trim()) {
+      try { nimm(JSON.parse(puffer)); } catch (_) { /* Ende ohne Zeile */ }
+    }
+  } catch (_) {
+    /* Abbruch beim Jahreswechsel */
+  }
+}
+
 async function ladeSteuerjahr() {
+  Zustand.steuerPlotLauf = (Zustand.steuerPlotLauf || 0) + 1;
+  const lauf = Zustand.steuerPlotLauf;
+  if (Zustand.steuerLotsAbbruch) {
+    Zustand.steuerLotsAbbruch.abort();
+    Zustand.steuerLotsAbbruch = null;
+  }
   const jahr = $("#jahr-wahl").value;
   const frist = $("#frist-wahl").value;
   const stichtag = steuerEinstellungen().stichtag || "";
   const abfrage =
     `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
     `&stichtag=${encodeURIComponent(stichtag)}`;
+  // Achse sofort, auch wenn der Cache noch gelesen wird. Liegt schon ein
+  // Plot, bleibt er stehen, bis die neuen Punkte da sind.
+  const karte = $("#zeitstrahl-karte");
+  if (!karte || karte.hidden) zeichneSteuerLeerenRahmen();
   // Seitenweise (ISSUES P2): Summen, Kennzahlen und Zeitstrahl über alles,
   // Zeilen nur im Fenster — die erste Anfrage bringt je Liste zwei Seiten.
+  // lots=0: Punkte aus UTXO und Ingress, Bäume folgen im Strom.
   const filter = steuerFilterParameter();
   const p = new URLSearchParams(filter);
   p.set("seite", "1");
   p.set("limit", String(2 * pagerGroesse("steuerjahr")));
   p.set("limit_abgaenge", String(2 * pagerGroesse("abgaenge")));
   p.set("lang", uiSprache());
+  p.set("lots", "0");
 
   try {
     const daten = await api(`/tax${abfrage}&${p}`);
+    if (lauf !== Zustand.steuerPlotLauf) return;
     daten._abfrage = abfrage;
     daten._q = filter.toString();
     Zustand.steuer = daten;
     zeichneSteuerjahr(daten);
+    if (daten.lots_fertig) {
+      Zustand.steuerLots = Promise.resolve();
+    } else {
+      Zustand.steuerLots = steuerLotsNachziehen(lauf);
+    }
   } catch (fehler) {
     const kasten = $("#steuer-meldung");
     kasten.className = "hinweis hinweis-krit";
@@ -167,6 +400,7 @@ async function ladeSteuerSeitenNeu() {
   p.set("limit", String(2 * pagerGroesse("steuerjahr")));
   p.set("limit_abgaenge", String(2 * pagerGroesse("abgaenge")));
   p.set("lang", uiSprache());
+  p.set("lots", "0");
   const neu = await api(`/tax${daten._abfrage}&${p}`);
   if (lauf !== Zustand.steuerZeilenLauf || Zustand.steuer !== daten) return;
   daten.steuer_gruppen = neu.steuer_gruppen;
@@ -500,6 +734,7 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
         utxo_keys: [key],
         steuer: false,
         gelbVertiefen: true,
+        graueAnteile: true,
       });
     });
     grundlage.append(klaeren);
@@ -609,7 +844,7 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten, fenster = 
     };
     const neueQuelle = (vorab) => neueSeitenQuelle({
       groesse: pagerGroesse("steuerjahr"),
-      laden: (o, l) => api(`/tax${daten._abfrage}&${steuerSeitenParameter(teil, o, l, daten._q)}`),
+      laden: (o, l) => api(`/tax${daten._abfrage}&${steuerSeitenParameter(teil, o, l, daten._q)}&lots=0`),
       auszug,
       vorab,
     });
@@ -1609,6 +1844,38 @@ function bindeZeitstrahlInteraktion() {
  * X und Y kommen als Prozentwerte aus core/tax.zeitstrahl — hier wird
  * gezeichnet und das X-Fenster (Pan/Zoom) angewendet. Y ist log1p.
  */
+/** Grüner Ring „sats vor Haltefrist“. Ersetzt nur diese Gruppe. */
+function zeichneZeitstrahlGeister(strahl) {
+  const spur = $("#achse-spur");
+  if (!spur || !strahl) return;
+  const alt = spur.querySelector(".achse-geister");
+  if (alt) alt.remove();
+  const geist = strahl.geister_saldo;
+  if (!geist || Number(geist.value_sats || 0) <= 0) return;
+  const gSicht = zeitstrahlSichtPos(geist.pos);
+  if (gSicht < -5 || gSicht > 105) return;
+  const gruppe = document.createElement("div");
+  gruppe.className = "achse-geister";
+  gruppe.style.left = `${gSicht}%`;
+  const gLabel = document.createElement("span");
+  gLabel.className = "achse-geister-label";
+  const saldoText = formatZeitstrahlBetrag(geist.value_sats);
+  gLabel.textContent = t("tax.satsBeforeHolding", { saldo: saldoText })
+    !== "tax.satsBeforeHolding"
+    ? t("tax.satsBeforeHolding", { saldo: saldoText })
+    : `sats vor Haltefrist: ${saldoText}`;
+  const ring = document.createElement("span");
+  ring.className = "achse-punkt geister erfuellt";
+  const d = geisterSaldoDurchmesserPx(
+    geist.value_sats,
+    strahl.max_sats || geist.value_sats,
+  );
+  ring.style.width = `${d}px`;
+  ring.style.height = `${d}px`;
+  gruppe.append(gLabel, ring);
+  spur.append(gruppe);
+}
+
 function zeichneZeitstrahl(daten, optionen = {}) {
   const karte = $("#zeitstrahl-karte");
   const strahl = daten.zeitstrahl;
@@ -1675,34 +1942,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     }
   }
 
-  // Sats vor Haltefrist: ein grüner Ring auf y=0 an der Fristgrenze,
-  // Label horizontal links davon, knapp über der X-Achse.
-  const geist = strahl.geister_saldo;
-  if (geist && Number(geist.value_sats || 0) > 0) {
-    const gSicht = zeitstrahlSichtPos(geist.pos);
-    if (gSicht >= -5 && gSicht <= 105) {
-      const gruppe = document.createElement("div");
-      gruppe.className = "achse-geister";
-      gruppe.style.left = `${gSicht}%`;
-      const gLabel = document.createElement("span");
-      gLabel.className = "achse-geister-label";
-      const saldoText = formatZeitstrahlBetrag(geist.value_sats);
-      gLabel.textContent = t("tax.satsBeforeHolding", { saldo: saldoText })
-        !== "tax.satsBeforeHolding"
-        ? t("tax.satsBeforeHolding", { saldo: saldoText })
-        : `sats vor Haltefrist: ${saldoText}`;
-      const ring = document.createElement("span");
-      ring.className = "achse-punkt geister erfuellt";
-      const d = geisterSaldoDurchmesserPx(
-        geist.value_sats,
-        strahl.max_sats || geist.value_sats,
-      );
-      ring.style.width = `${d}px`;
-      ring.style.height = `${d}px`;
-      gruppe.append(gLabel, ring);
-      spur.append(gruppe);
-    }
-  }
+  zeichneZeitstrahlGeister(strahl);
 
   const steuerPunktGezeichnetUm = Date.now();
   for (const eintrag of strahl.events) {
@@ -1906,7 +2146,7 @@ function zeichneAbgaenge(daten) {
   };
   const neueQuelle = (vorab) => neueSeitenQuelle({
     groesse: pagerGroesse("abgaenge"),
-    laden: (o, l) => api(`/tax${daten._abfrage}&${steuerSeitenParameter("abgaenge", o, l, daten._q)}`),
+    laden: (o, l) => api(`/tax${daten._abfrage}&${steuerSeitenParameter("abgaenge", o, l, daten._q)}&lots=0`),
     auszug,
     vorab,
   });

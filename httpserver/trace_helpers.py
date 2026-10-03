@@ -108,12 +108,24 @@ def _trace_offen_steuer(
     return offen
 
 
+def _baum_hat_extern_ohne_zeit(state: AppState, txid: str, vout: int) -> bool:
+    """Gespeicherter Baum mit externem Blatt ohne Blockzeit."""
+    from core.trace import hat_extern_ohne_zeit
+    from server import trace_cache
+
+    geladen = trace_cache.laden(txid, vout, state.immutable_cache_dir)
+    if not geladen:
+        return False
+    return hat_extern_ohne_zeit(geladen.get("baum"))
+
+
 def _trace_offen_basis(
     state: AppState,
     utxos: list[dict],
     eigene_jetzt,
     *,
     erzwingen: bool = False,
+    graue_anteile: bool = False,
 ) -> list[tuple[str, int]]:
     """
     Herkunft tracen: UTXOs ohne **vollen** Baum bis extern/Coinbase.
@@ -155,8 +167,13 @@ def _trace_offen_basis(
         if kopf.get("vollstaendig"):
             # Voller Baum ohne Anschaffungsstempel: Steuerjahr bleibt grau.
             # „Herkünfte UTXOs“ muss genau diese noch einmal laufen lassen.
+            # Gelb zieht zusätzlich externe Blätter ohne Blockzeit nach,
+            # auch wenn der Punkt schon außerhalb der Haltefrist liegt.
             from server import main
 
+            if graue_anteile and _baum_hat_extern_ohne_zeit(state, txid, vout):
+                offen.append(key)
+                continue
             if _ingress_veraltet(
                 main.load_utxo_ingress_cache(
                     txid, vout, state.immutable_cache_dir
