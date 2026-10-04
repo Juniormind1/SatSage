@@ -232,11 +232,12 @@ Beim Speichern neuer UTXO-/Verlaufs-/Ingress-/…-Einträge: `btc_eur` / `btc_us
 
 ## Auswerten · Tools · Adresse nachschlagen
 
-**Stand:** 2026-09-17 · **offen** · Idee / später · UI
+**Stand:** 2026-10-04 · **erledigt** · **abgenommen**
+**Umgesetzt:** Tools · „Adresse prüfen“. Leitet aus den hinterlegten Wallets ab, ob die Adresse dazu gehört, ohne Guthaben und ohne Verlauf. Maintainer: funktioniert, abgenommen 2026-10-04.
 
 Aufwand: **gering–mittel** (eine Tools-Ansicht)
 
-Unter **Auswerten → Tools**: Adresse eingeben → Wallet-Zuordnung, Verwendung, Trace-Link oder Explorer. Kein 0.9.6-Blocker.
+Unter **Auswerten → Tools**: Adresse eingeben → Wallet-Zuordnung. Kein 0.9.6-Blocker.
 
 ---
 ---
@@ -303,7 +304,7 @@ Aufwand: **gering–mittel** (ein Feld + Sichtbarkeitslogik; kein Backend)
 - Filtert, **was im Hauptbereich gerade** an Listen/Bäumen angezeigt wird: nur **Treffer-Zeilen** bleiben sichtbar.
 - Match case-insensitive auf Daten der Zeile (Adresse, TxID, Labels, Datumstexte, Wallet-Name, Mix-/Börsen-Hinweise, …) — ideal aus dem **Datenobjekt**, nicht nur DOM-Kurztext.
 - **Bäume/Gruppen:** Zeile oder Vorfahr sichtbar, wenn sie selbst oder ein Nachkomme matcht; Treffer-Gruppen bei Bedarf aufklappen.
-- Debounce; leerer Begriff = alles wie heute. Optional Chip „Suche: … ×“.
+- Debounce; leerer Begriff = alles wie heute.
 
 ### Aktiv nur wenn filterbar
 
@@ -320,6 +321,7 @@ Strukturfilter (Datumsbereich, Volumen `</>`/zwischen, nur Coinjoins, nur Börse
 - Filter pro Sammelzeile / pro Gruppenkopf als erster Wurf  
 - Server-seitige Suche  
 - Einstellungen/Datenquellen-Formulare durchsuchen  
+- Chip „Suche: … ×“ (2026-10-04 verworfen). Das Feld zeigt den Begriff und löscht ihn mit Esc und dem nativen Kreuz.  
 
 Kein 0.9.6-Blocker.
 

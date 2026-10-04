@@ -715,14 +715,60 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletMempoolNachStart = null;
 
   // Pending über eigenen Electrs — blockiert den Erst-Paint nicht.
+  // Dieselbe Liste noch einmal zu zeichnen lässt die Donuts flackern.
+  // Neu malen nur, wenn der Mempool-Stand die Zeilen ändert.
   quelle.seite(0)
     .then((seite) => {
       if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
       if (Zustand.walletQuelle !== quelle) return;
+      if (walletListeGleich(daten, seite.antwort)) {
+        merkeWalletPending(seite.antwort, wallet);
+        return;
+      }
       zeichneUtxos(seite.antwort, wallet, seite);
       aktualisiereScanAnzeige();
     })
     .catch(() => {});
+}
+
+/** Was der Mempool an einer Zeile ändert. */
+function walletUtxoStand(utxo) {
+  if (!utxo) return "";
+  return [
+    utxo.key || "",
+    utxo.spending_pending ? "1" : "0",
+    utxo.receive_pending ? "1" : "0",
+    utxo.spent ? "1" : "0",
+    utxo.value_sats ?? "",
+  ].join(":");
+}
+
+function walletGruppenStand(daten) {
+  const gruppen = (daten && daten.addresses) || [];
+  return gruppen.map((gruppe) => (
+    (gruppe.utxos || []).map(walletUtxoStand).join(",")
+  )).join("|");
+}
+
+/** Cache-Liste und Mempool-Nachzug zeigen dieselben Zeilen. */
+function walletListeGleich(vorher, nachher) {
+  if (!vorher || !nachher) return false;
+  if (Number(vorher.total_count) !== Number(nachher.total_count)) return false;
+  if (Number(vorher.total_sats) !== Number(nachher.total_sats)) return false;
+  return walletGruppenStand(vorher) === walletGruppenStand(nachher);
+}
+
+/** Pending-Zahlen in die Meta-Zeile, ohne die Adressliste neu zu malen. */
+function merkeWalletPending(daten, wallet) {
+  if (!daten || !wallet || !wallet.id) return;
+  const pendOut = Number(daten.pending_spending_count || 0);
+  const pendIn = Number(daten.pending_receive_count || 0);
+  const internOut = daten.pending_spending_internal ?? (daten.utxos || []).some(
+    (u) => u && u.spending_pending && u.spending_internal,
+  );
+  if (typeof meldePendingAenderung === "function") {
+    meldePendingAenderung(wallet.id, pendIn, pendOut, { internOut });
+  }
 }
 
 /** Anfrage-Parameter der Wallet-Liste (Seite, Sortierung, Kopf-Filter). */
@@ -1310,7 +1356,10 @@ function zeichneAdressGruppe(gruppe) {
     gemeinsam: gruppe.utxos || [],
   });
 
-  kopf.append(klapp, adresse, anzahl);
+  const ring = zeichneAdressLotDonut(gruppe);
+  kopf.append(klapp);
+  if (ring) kopf.append(ring);
+  kopf.append(adresse, anzahl);
   if (gruppe.utxos.some((u) => u.flagged)) {
     kopf.append(pille("krit", t("trace.listed")));
   }
@@ -1325,9 +1374,13 @@ function zeichneAdressGruppe(gruppe) {
   // Oberste Ebene bleibt zu — die Liste selbst ist Cache, aber die
   // Adressen sind die Übersicht, nicht der Inhalt.
   setzeKlapp(kopf, klapp, inhalt, false);
+  if (ring) ring.hidden = false;
 
   kopf.addEventListener("click", () => {
     setzeKlapp(kopf, klapp, inhalt, inhalt.hidden);
+    // Zugeklappt zeigt der Ring die Mischung der UTXOs. Aufgeklappt hat
+    // jede Zeile ihren eigenen Ring, der im Kopf wäre doppelt.
+    if (ring) ring.hidden = !inhalt.hidden;
   });
 
   // Der Verweis sitzt neben dem Knopf, nicht darin: Ein Link in einem Button
@@ -1341,6 +1394,35 @@ function zeichneAdressGruppe(gruppe) {
   block.dataset.address = gruppe.address || "";
   block.append(kopfzeile, inhalt);
   return block;
+}
+
+/**
+ * Ein Donut für die zugeklappte Adresse. Mehrere UTXOs mischen sich
+ * nach ihrem Betrag in denselben Ring.
+ */
+function zeichneAdressLotDonut(gruppe) {
+  const utxos = (gruppe.utxos || []).filter((u) => u && u.verfolgt && u.key);
+  if (!utxos.length || typeof ladeLotDonutZugeklappt !== "function") return null;
+  const punkt = document.createElement("span");
+  punkt.className = "knoten-punkt knoten-eigen adress-lot-donut";
+  punkt.setAttribute("aria-hidden", "true");
+  const teile = [];
+  let offen = utxos.length;
+  const mische = () => {
+    if (offen > 0) return;
+    if (typeof lotMischungGewichtet !== "function"
+      || typeof setzeLotDonut !== "function") return;
+    const mischung = lotMischungGewichtet(teile);
+    if (mischung) setzeLotDonut(punkt, mischung);
+  };
+  for (const utxo of utxos) {
+    ladeLotDonutZugeklappt(punkt, null, utxo.key, (mischung) => {
+      teile.push({ mischung, gewicht: Number(utxo.value_sats) || 0 });
+      offen -= 1;
+      mische();
+    });
+  }
+  return punkt;
 }
 
 /** Unix-Sekunden für Kopf-Filter (Ausgabe bevorzugt, sonst Ankunft). */
@@ -1479,7 +1561,13 @@ function zeichneUtxoZeile(utxo) {
     zeit.append(hoehe);
   }
 
-  zeile.append(betrag, kennung, zeit, haltedauerAnzeige(utxo.hold_days));
+  const punkt = document.createElement("span");
+  punkt.className = "knoten-punkt knoten-eigen";
+  punkt.setAttribute("aria-hidden", "true");
+  zeile.append(punkt, betrag, kennung, zeit, haltedauerAnzeige(utxo.hold_days));
+  if (utxo.verfolgt && utxo.key && typeof ladeLotDonutZugeklappt === "function") {
+    ladeLotDonutZugeklappt(zeile, null, utxo.key);
+  }
 
   if (utxo.flagged) {
     zeile.append(pille("krit", "gelistet"));

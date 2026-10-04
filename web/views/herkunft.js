@@ -726,7 +726,12 @@ function zeichneTraceAdressGruppe(gruppe) {
     ? `${zahlBasis}, ${ausgabeZusatz}`
     : zahlBasis;
 
-  kopf.append(klapp, adresse, wallet, anzahl);
+  const ring = typeof zeichneAdressLotDonut === "function"
+    ? zeichneAdressLotDonut(gruppe)
+    : null;
+  kopf.append(klapp);
+  if (ring) kopf.append(ring);
+  kopf.append(adresse, wallet, anzahl);
   if (gruppe.utxos.some((u) => u.flagged)) {
     kopf.append(pille("krit", t("trace.listed")));
   }
@@ -753,6 +758,7 @@ function zeichneTraceAdressGruppe(gruppe) {
   // Lazy: UTXO-Zeilen erst beim Aufklappen — sonst 30+ Wurzeln + Bäume sofort.
   let utxosGebaut = false;
   setzeKlapp(kopf, klapp, inhalt, false);
+  if (ring) ring.hidden = false;
 
   kopf.addEventListener("click", () => {
     const auf = inhalt.hidden;
@@ -763,6 +769,9 @@ function zeichneTraceAdressGruppe(gruppe) {
       utxosGebaut = true;
     }
     setzeKlapp(kopf, klapp, inhalt, auf);
+    // Zugeklappt zeigt der Ring die Mischung. Aufgeklappt hat jedes UTXO
+    // seinen eigenen Ring, der im Kopf wäre doppelt.
+    if (ring) ring.hidden = !inhalt.hidden;
     // Bäume bleiben zu — erst bei Klick aufs einzelne UTXO (oeffneZweig).
     if (kopfFilterAnsichtAktiv(Zustand.ansicht)) wendeKopfFilterAn();
   });
@@ -958,7 +967,10 @@ function zeichneTraceWurzel(utxo) {
 
   // Startet zu — auch mit gespeichertem Baum. Geladen wird er erst beim
   // Klick auf genau dieses UTXO (höchstens ein Baum im Speicher).
+  // Der Lot-Ring hängt nicht am Aufklappen: verfolgte UTXOs holen nur
+  // die Mischung, der Zweig bleibt leer.
   setzeKlapp(zeile, klapp, zweig, false);
+  if (utxo.verfolgt && utxo.key) ladeLotDonutZugeklappt(block, zweig, utxo.key);
 
   zeile.addEventListener("click", (ereignis) => {
     // Der zweite Klick eines Doppelklicks würde sonst gleich wieder
@@ -974,7 +986,6 @@ function zeichneTraceWurzel(utxo) {
       if (zweig.dataset.geladen === "ja") aktualisiereLotDonut(block, zweig);
     } else {
       block.classList.remove("herkunft-offen");
-      entferneLotDonut(punkt);
     }
     if (!auf) return; // nur zuklappen
     // Schon geladen: nur aufklappen, kein erneuter Cache-/Analyse-Lauf.
@@ -1006,7 +1017,7 @@ async function ladeGespeichertenZweig(utxo, zweig, klapp, ausJob = null) {
   if (!utxo || !utxo.key || !zweig) return false;
   zweig.dataset.geladen = "laeuft";
   delete zweig._lotKinder;
-  entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
+  // Ring der zugeklappten Zeile stehen lassen, bis der neue Baum ihn ersetzt.
   zweig.replaceChildren(hinweisZeile(t("common.looking")));
   try {
     const ziel = (ausJob && ausJob.target) || utxo.key;
@@ -1150,7 +1161,7 @@ async function starteZweigTrace(
   }
   if (typeof stoesseEmpfangScanPuls === "function") stoesseEmpfangScanPuls();
   delete zweig._lotKinder;
-  entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
+  if (force) entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
 
   const status = document.createElement("div");
   status.className = "zweig-status";
@@ -1491,7 +1502,7 @@ function gebeAnderenBaumFrei(zweig) {
   const wurzelAlt = alt.closest(".utxo-wurzel");
   const kopf = wurzelAlt?.querySelector(".utxo-kopf");
   if (wurzelAlt) wurzelAlt.classList.remove("herkunft-offen");
-  entferneLotDonut(wurzelLotPunkt(wurzelAlt));
+  // Der Ring der zugeklappten Zeile bleibt. Nur der offene Baum geht weg.
   setzeKlapp(kopf, kopf && kopf.querySelector(".klapp"), alt, false);
 }
 
@@ -1500,7 +1511,6 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   zweig.replaceChildren();
   delete zweig._lotKinder;
   const wurzelVorab = zweig.closest(".utxo-wurzel");
-  entferneLotDonut(wurzelLotPunkt(wurzelVorab));
 
   if (!ergebnis.found) {
     zweig.append(hinweisZeile(ergebnis.error || t("trace.none")));
@@ -1609,6 +1619,39 @@ function lotObergrenze(bisher, knoten) {
   if (!(ts > 0)) return alt;
   if (!(alt > 0)) return ts;
   return Math.min(alt, ts);
+}
+
+/** Mehrere Mischungen, gewichtet mit dem UTXO-Betrag. Ohne Betrag zählt jedes gleich. */
+function lotMischungGewichtet(teile) {
+  const acc = { gruen: 0, orange: 0, grau: 0 };
+  let hatGewicht = false;
+  for (const teil of teile || []) {
+    const mischung = teil && teil.mischung;
+    if (!mischung) continue;
+    const summe = mischung.gruen + mischung.orange + mischung.grau;
+    if (!(summe > 0)) continue;
+    const gewicht = Number(teil.gewicht) || 0;
+    if (gewicht > 0) hatGewicht = true;
+    const faktor = gewicht > 0 ? gewicht / summe : 1 / summe;
+    acc.gruen += mischung.gruen * faktor;
+    acc.orange += mischung.orange * faktor;
+    acc.grau += mischung.grau * faktor;
+  }
+  if (!hatGewicht) return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
+  // UTXOs ohne Betrag fallen heraus, sobald irgendeiner einen hat.
+  const neu = { gruen: 0, orange: 0, grau: 0 };
+  for (const teil of teile) {
+    const mischung = teil && teil.mischung;
+    if (!mischung) continue;
+    const summe = mischung.gruen + mischung.orange + mischung.grau;
+    const gewicht = Number(teil.gewicht) || 0;
+    if (!(summe > 0) || !(gewicht > 0)) continue;
+    const faktor = gewicht / summe;
+    neu.gruen += mischung.gruen * faktor;
+    neu.orange += mischung.orange * faktor;
+    neu.grau += mischung.grau * faktor;
+  }
+  return neu.gruen + neu.orange + neu.grau > 0 ? neu : null;
 }
 
 function lotMischungAusBaum(kinder, startObergrenze) {
@@ -1776,31 +1819,97 @@ function setzeLotDonut(punkt, mischung) {
   punkt.dataset.lotGruen = String(prozent.gruen);
   punkt.dataset.lotOrange = String(prozent.orange);
   punkt.dataset.lotGrau = String(prozent.grau);
+  punkt.title = lotDonutTitel(mischung);
+  punkt.removeAttribute("aria-hidden");
+}
+
+/** Echte Anteile, nicht die gerundeten Scheiben. Eine Nachkommastelle. */
+function lotDonutTitel(mischung) {
+  const summe = mischung.gruen + mischung.orange + mischung.grau;
+  if (!(summe > 0)) return "";
+  const zahl = (wert) => {
+    const anteil = (wert / summe) * 100;
+    const text = anteil.toLocaleString(
+      typeof formatLocale === "function" ? formatLocale() : "de-DE",
+      { minimumFractionDigits: 1, maximumFractionDigits: 1 },
+    );
+    return `${text} %`;
+  };
+  return `Grün ${zahl(mischung.gruen)} · Gelb ${zahl(mischung.orange)} · Grau ${zahl(mischung.grau)}`;
+}
+
+/** Mischung für die zugeklappte Zeile. Der Zweig selbst bleibt ungezeichnet. */
+function ladeLotDonutZugeklappt(wurzel, zweig, ziel, danach) {
+  const speicher = zweig || wurzel;
+  if (!wurzel || !speicher || !ziel) {
+    if (typeof danach === "function") danach(null);
+    return;
+  }
+  // Mehrere UTXOs teilen sich einen Ring: jeder Lauf braucht eigenen Speicher.
+  if (!zweig && typeof danach === "function") {
+    const lauf = {};
+    speicher._lotLaeufe = speicher._lotLaeufe || [];
+    speicher._lotLaeufe.push(lauf);
+    return holeLotMischung(ziel, lauf).then((mischung) => {
+      danach(mischung);
+    }).finally(() => {
+      const liste = speicher._lotLaeufe;
+      if (!liste) return;
+      const i = liste.indexOf(lauf);
+      if (i >= 0) liste.splice(i, 1);
+    });
+  }
+  if (speicher._lotLauf) return;
+  if (punktHatLotDonut(wurzelLotPunkt(wurzel))) return;
+  if (zweig) zweig.dataset.baumZiel = ziel;
+  speicher._lotLauf = holeLotMischung(ziel, speicher)
+    .then((mischung) => {
+      if (zweig && zweig.dataset.baumZiel !== ziel) return;
+      if (mischung) setzeLotDonut(wurzelLotPunkt(wurzel), mischung);
+    })
+    .finally(() => { delete speicher._lotLauf; });
+}
+
+function holeLotMischung(ziel, speicher) {
+  return api(`/trace?target=${encodeURIComponent(ziel)}`)
+    .then((g) => {
+      const voll = g && g.vorhanden && g.ergebnis && g.ergebnis.children;
+      if (!Array.isArray(voll)) return null;
+      speicher._lotKinder = voll;
+      const wurzelZeit = g.ergebnis && g.ergebnis.root
+        ? lotZeitTs(g.ergebnis.root)
+        : 0;
+      if (wurzelZeit) speicher._lotObergrenze = wurzelZeit;
+      return lotMischungAusBaum(voll, Number(speicher._lotObergrenze) || 0);
+    })
+    .catch(() => null);
+}
+
+function punktHatLotDonut(punkt) {
+  return Boolean(punkt && punkt.classList.contains("lot-donut"));
 }
 
 function wurzelLotPunkt(wurzel) {
-  return wurzel
-    ? wurzel.querySelector(":scope > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt")
-    : null;
+  if (!wurzel) return null;
+  if (wurzel.classList.contains("knoten-punkt")) return wurzel;
+  if (wurzel.classList.contains("utxo-zeile")) {
+    return wurzel.querySelector(":scope > .knoten-punkt");
+  }
+  return wurzel.querySelector(":scope > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt");
 }
 
 /**
- * Donut nur bei offener Wurzel und geladenem Zweig.
+ * Donut am Wurzelpunkt, sobald die Mischung da ist — auch zugeklappt.
  * *kinder* optional — sonst der beim Zeichnen gemerkte Baum, sonst DOM.
  * Seitenweise Wurzeln holen den vollen Cache-Baum einmal nur für die Mischung.
  */
 function aktualisiereLotDonut(wurzel, zweig, kinder, startObergrenze) {
   const punkt = wurzelLotPunkt(wurzel);
   if (!punkt || !wurzel || !zweig) return;
-  // Merken, auch solange der Zweig zu ist — Aufklappen malt daraus.
+  // Merken, auch solange der Zweig zu ist — Zuklappen lässt den Ring stehen.
   if (Array.isArray(kinder)) zweig._lotKinder = kinder;
   if (startObergrenze) zweig._lotObergrenze = Number(startObergrenze) || 0;
-  if (!wurzel.classList.contains("herkunft-offen") || zweig.hidden) {
-    entferneLotDonut(punkt);
-    return;
-  }
-  if (zweig.dataset.geladen !== "ja") {
-    entferneLotDonut(punkt);
+  if (zweig.dataset.geladen !== "ja" && !Array.isArray(zweig._lotKinder)) {
     return;
   }
   const quelle = Array.isArray(kinder) ? kinder : zweig._lotKinder;
@@ -1812,7 +1921,7 @@ function aktualisiereLotDonut(wurzel, zweig, kinder, startObergrenze) {
     return;
   }
   const ziel = zweig.dataset.baumZiel;
-  if (ziel && !zweig._lotLauf) {
+  if (ziel && !zweig._lotLauf && !punktHatLotDonut(punkt)) {
     zweig._lotLauf = api(`/trace?target=${encodeURIComponent(ziel)}`)
       .then((g) => {
         if (zweig.dataset.baumZiel !== ziel) return;
@@ -1823,12 +1932,10 @@ function aktualisiereLotDonut(wurzel, zweig, kinder, startObergrenze) {
           ? lotZeitTs(g.ergebnis.root)
           : 0;
         if (wurzelZeit) zweig._lotObergrenze = wurzelZeit;
-        if (wurzel.classList.contains("herkunft-offen") && !zweig.hidden) {
-          const mischung = lotMischungAusBaum(
-            voll, Number(zweig._lotObergrenze) || 0,
-          );
-          if (mischung) setzeLotDonut(punkt, mischung);
-        }
+        const mischung = lotMischungAusBaum(
+          voll, Number(zweig._lotObergrenze) || 0,
+        );
+        if (mischung) setzeLotDonut(punkt, mischung);
       })
       .catch(() => {})
       .finally(() => { delete zweig._lotLauf; });

@@ -38,9 +38,11 @@ html[data-theme="light"] {
      zusätzlich in der Form: eigen eckig, extern rund. */
   --eigen:      #157F3C;
   --fremd:      #E14A2B;
-  /* Haltefrist am Herkunfts-Donut — dieselben Achsenfarben wie Steuerjahr. */
+  /* Haltefrist am Herkunfts-Donut. Grün und Grau wie die Achse.
+     Orange im Hellen eigene Farbe: --warn ist für Text und liest sich
+     auf der hellen Fläche braun. Der Ring nimmt das Gelb aus Dark. */
   --lot-gruen:  var(--gut);
-  --lot-orange: var(--warn);
+  --lot-orange: #C2A249;
   --lot-grau:   var(--gedaempft);
 
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -2030,15 +2032,16 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   padding: 6px 0 2px;
 }
 .utxo-wurzel > .baum-knoten { align-items: center; }
-/* Offene Wurzel: nur dieser Punkt wird zum Lot-Donut. Kinder bleiben 7×7. */
-.utxo-wurzel.herkunft-offen .utxo-kopf {
+/* Lot-Donut am Wurzelpunkt, auch zugeklappt. Kinder bleiben 7×7. */
+.utxo-wurzel:has(> .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut) > .kopf-mit-verweis > .utxo-kopf {
   align-items: center;
 }
 /* Der Ring ist sichtbar ~32 px, die Box nur 7 px. Abstand gilt bis zum Rand. */
-.utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-info {
+.utxo-wurzel:has(> .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut) > .kopf-mit-verweis > .utxo-kopf > .knoten-info {
   margin-left: 18px;
 }
-.utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-punkt.lot-donut {
+.utxo-wurzel > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut,
+.utxo-zeile > .knoten-punkt.lot-donut {
   /* Layout bleibt 7×7, damit die Zeile so hoch bleibt wie vorher.
      Sichtbar ~32 px, das ist die Höhe von Pfeil plus Zeilenabstand. */
   position: relative;
@@ -2052,8 +2055,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   transform: scale(4.57);
   transform-origin: center;
 }
-/* Loch als eigene Fläche — kein mask, das in Edge am Inline-Verlauf verschwindet. */
-.utxo-wurzel.herkunft-offen .utxo-kopf > .knoten-punkt.lot-donut::after {
+/* Loch als eigene Fläche — kein mask, das in Edge am Inline-Verlauf verschwindet.
+   Immer die Seitenfläche, auch ohne Hover: inherit würde den Kuchen durchreichen. */
+.utxo-wurzel > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut::after,
+.utxo-zeile > .knoten-punkt.lot-donut::after {
   content: "";
   position: absolute;
   left: 30%;
@@ -2061,12 +2066,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   width: 40%;
   height: 40%;
   border-radius: 50%;
-  /* Zeile ist durchsichtig; Hover färbt den Knopf. Loch folgt dem Knopf. */
-  background: Canvas;
-  background: inherit;
+  background: var(--grund);
   pointer-events: none;
 }
-.utxo-wurzel.herkunft-offen .utxo-kopf:hover > .knoten-punkt.lot-donut::after {
+.utxo-wurzel > .kopf-mit-verweis > .utxo-kopf:hover > .knoten-punkt.lot-donut::after {
   background: var(--flaeche-2);
 }
 .utxo-zweig { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--linie); }
@@ -2199,6 +2202,36 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   white-space: nowrap;
 }
 .adress-betrag { margin-left: auto; }
+/* Ein Donut der zugeklappten Adresse, rechts vor dem Betrag.
+   Mehrere UTXOs sind darin nach Sats gewichtet. */
+.adress-kopf > .knoten-punkt.adress-lot-donut.lot-donut {
+  position: relative;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  /* Box bleibt 7 px, sichtbar ~32 px. Der Text braucht den Rest des Rands. */
+  margin-right: 14px;
+  border-radius: 50%;
+  flex: none;
+  box-sizing: border-box;
+  background: var(--lot-grau);
+  transform: scale(4.57);
+  transform-origin: center;
+}
+.adress-kopf > .knoten-punkt.adress-lot-donut.lot-donut::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 30%;
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  background: var(--grund);
+  pointer-events: none;
+}
+.adress-kopf:hover > .knoten-punkt.adress-lot-donut.lot-donut::after {
+  background: var(--flaeche-2);
+}
 .adress-utxos { padding: 0 13px 10px 40px; }
 .utxo-zeile {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -2206,6 +2239,11 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .utxo-zeile:last-child { border-bottom: 0; }
 .utxo-zeile .betrag { min-width: 110px; }
+/* Gleicher Ring wie Herkunft tracen. Die Box bleibt 7 px, der Abstand
+   reicht bis zum sichtbaren Rand, damit der Betrag nicht im Ring steht. */
+.utxo-zeile:has(> .knoten-punkt.lot-donut) > .betrag {
+  margin-left: 18px;
+}
 .ankunft-link {
   padding: 0; margin: 0; border: 0; background: none;
   font: inherit; color: var(--akzent); cursor: pointer;
