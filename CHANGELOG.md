@@ -9,7 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Regtest-Labor:** Die Labor-`bitcoin.conf` setzt `rpcwhitelistdefault=1`. Sobald eine `rpcwhitelist` für `satsage` existiert, gilt die Vorgabe sonst für jeden User, und `bitcoin`/`secret` (Healthcheck, Electrs, Szenarien) darf keine Methode mehr. Der Lauf auf `v0.9.9.5` ist daran vor dem ersten Test stehen geblieben.
+- **Regtest-Labor:** Die Labor-`bitcoin.conf` setzt `rpcwhitelistdefault=0`. Sobald eine `rpcwhitelist` für `satsage` existiert, sperrt Core jeden anderen User (die Vorgabe ist dann 1), und `bitcoin`/`secret` (Healthcheck, Electrs, Szenarien) darf keine Methode mehr. Der Lauf auf `v0.9.9.5` ist daran vor dem ersten Test stehen geblieben.
 
 ## [0.9.9.5] — 2026-10-04
 

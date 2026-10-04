@@ -10,14 +10,15 @@ if [ -n "${GID+x}" ] && [ "${GID}" != "0" ]; then
 fi
 
 # Zweiter Labor-User. Klartext-Passwort nur hier im Labor: lab-whitelist.
-# rpcwhitelistdefault muss stehen: sobald eine rpcwhitelist existiert, gilt
-# die Vorgabe sonst für jeden User, und bitcoin/secret (Electrs, Szenarien,
-# Healthcheck) darf keine Methode mehr. satsage bleibt auf den Lese-Methoden.
+# Sobald eine rpcwhitelist existiert, ist die Vorgabe für alle anderen User
+# „keine Methode“ (Core setzt rpcwhitelistdefault dann auf 1). 0 hebt das auf:
+# bitcoin/secret (Electrs, Szenarien, Healthcheck) darf weiter alles, satsage
+# bleibt auf den Lese-Methoden.
 mkdir -p /home/bitcoin/.bitcoin
 cat > /home/bitcoin/.bitcoin/bitcoin.conf << 'EOF'
 rpcauth=satsage:00112233445566778899aabbccddeeff$cb721729928b84fc5bfdcbc50eae8a6f12abca12e6036a7d57505d0ab2aff24c
 rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee
-rpcwhitelistdefault=1
+rpcwhitelistdefault=0
 EOF
 chmod 644 /home/bitcoin/.bitcoin/bitcoin.conf
 if id bitcoin >/dev/null 2>&1; then
