@@ -8,6 +8,8 @@ Gilt für alles unter `core/` **und** für die Root-Fassaden, die denselben Stof
 
 Zusätzlich zur Root-Verfassung ([`../AGENTS.md`](../AGENTS.md)). Bei Konflikt gewinnt Root-HART.
 
+Wissen nur aus Mainchain-Traces der xpubs und Fremdwallet-Exporten. Caches sparen Electrs-Abfragen. Eine eigene Buchhaltung (Extremfall: Losregister) verletzt [`../doc/user-profile-ux.md`](../doc/user-profile-ux.md) — das sagen, bevor es gebaut wird.
+
 ## Einstieg
 
 - **Hauptprogramm:** `main.py`

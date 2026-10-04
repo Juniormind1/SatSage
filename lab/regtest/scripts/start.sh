@@ -20,7 +20,7 @@ export SATSAGE_LAB_UID="${SATSAGE_LAB_UID:-$(id -u)}"
 export SATSAGE_LAB_GID="${SATSAGE_LAB_GID:-$(id -g)}"
 # bitcoind mit -rpcuser/-rpcpassword legt kein .cookie an — electrs braucht
 # aber CookieFile. Gleiche Credentials als Cookie schreiben, bevor electrs startet.
-"${COMPOSE[@]}" up -d bitcoind
+"${COMPOSE[@]}" up -d bitcoind bitcoind-nowallet
 echo "Warte auf bitcoind…"
 bereit=0
 for _ in $(seq 1 60); do
@@ -49,8 +49,25 @@ if [[ "${SATSAGE_LAB_SKIP_MEMPOOL:-}" == "1" ]]; then
 else
   "${COMPOSE[@]}" up -d electrs mempool-db mempool-api mempool-web
 fi
+echo "Warte auf bitcoind ohne Wallet…"
+nowallet=0
+for _ in $(seq 1 60); do
+  if "${COMPOSE[@]}" exec -T bitcoind-nowallet bitcoin-cli -regtest -rpcport=18445 \
+      -rpcuser="$RPCUSER" -rpcpassword="$RPCPASSWORD" getblockchaininfo \
+      >/dev/null 2>&1; then
+    nowallet=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$nowallet" != 1 ]]; then
+  echo "bitcoind ohne Wallet antwortet nicht." >&2
+  "${COMPOSE[@]}" logs --tail 40 bitcoind-nowallet >&2 || true
+  exit 1
+fi
 echo "Regtest gestartet:"
-echo "  RPC       127.0.0.1:18443"
+echo "  RPC       127.0.0.1:18443  (bitcoin/secret, plus satsage/lab-whitelist)"
+echo "  RPC       127.0.0.1:18445  (disablewallet)"
 echo "  Electrum  127.0.0.1:50001"
 if [[ "${SATSAGE_LAB_SKIP_MEMPOOL:-}" != "1" ]]; then
   echo "  Mempool   http://127.0.0.1:18080  (Explorer; Index braucht kurz)"

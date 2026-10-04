@@ -1,6 +1,14 @@
 # Nutzerprofil · UX (Maintainer-Hinweise an Assistenten)
 
-**Stand:** 2026-09-15
+**Stand:** 2026-10-04
+
+## Seltener Gast
+
+Die meisten öffnen SatSage nicht aus Spaß. Das Finanzamt stresst sie, und sie müssen Herkunftsnetze produzieren. Die Hauptwallets bleiben die Companions oder Sparrow, Wasabi, Specter oder eine andere Wallet-Software. SatSage ist der seltene Gast.
+
+Alles, was SatSage wissen muss, kommt aus Mainchain-Traces der xpubs und gegebenenfalls aus Fremdwallet-Importen, also deren Export-Dateien. Keine eigene Buchhaltung. Caches sparen nur teure Electrs-Abfragen.
+
+Braucht ein vom Entwickler gewünschtes Feature darüber hinaus Zusatzinformationen (Extremfall: eigene Los-Buchhaltung), ausdrücklich darauf hinweisen, dass diese Regel verletzt wird. Sie muss erst geändert werden, bevor das zulässig ist.
 
 ## Anfänger und fehleranfällige Interaktionen
 

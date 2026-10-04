@@ -2,8 +2,8 @@ name: Regtest-Labor Woche
 
 # Montags auf dev-juniormind, aber nur wenn seit dem letzten erfolgreichen
 # Labor-Lauf etwas am Prüfpfad lag. Ein stiller Dev-Zweig startet nichts.
-# Pfade = das, was verify_tx_classify.py und verify_sanctions_hops.py anfassen
-# (Lab, Klassifikation, Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
+# Pfade = das, was die Labor-Prüfungen anfassen (Allowlist, Klassifikation,
+# Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
 on:
   schedule:
     - cron: "17 6 * * 1"
@@ -39,6 +39,8 @@ jobs:
             main.py
             analyze.py
             sanctioned.py
+            core/bitcoind_rpc.py
+            core/wallet_discover.py
             core/tx_classify.py
             core/wallet_sanctions_check.py
             core/sanction_hops.py

@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Regtest-Labor:** Jeder Pull Request nach main prüft die Bitcoin-Core-Allowlist am laufenden Regtest-Node. `dumpwallet` verlässt den Client nicht. Ein Nutzer mit `rpcwhitelist` nur für Lese-Aufrufe sieht bei `listwallets` den Hinweis „rpcwhitelist?“. Ein Node ohne Wallet sieht „disablewallet?“ statt „nicht erreichbar“.
 - **Steuerjahr · Dotplot:** Ohne UTXOs bleibt die Fläche sichtbar. Rechts ist heute, links heute minus zweimal die Haltefrist. Liegt ein Stichtag in der Vergangenheit, sitzt er in der Mitte: dieselbe Spanne noch einmal davor. Die Betragsachse zeigt 1 000 bis 1 000 000 sats. Sobald UTXOs da sind, bauen die Achsen wieder aus den Daten.
 - **Steuerjahr · Lot-Ring:** Fehlende Zeiten an Herkunfts-Enden kommen wie im Overlay aus Tx- und Header-Cache. Unvollständige Bäume in `immutable_cache` werden nachgezogen, vollständige bleiben unverändert. Ein ganz grüner Lot-Ring färbt den Punkt grün.
 - **Herkunft tracen:** Der Massenlauf geht hop-weise über alle offenen UTXOs. Kurze Ketten sind nach der ersten Runde fertig und sichtbar; Remix-Nüsse laufen in späteren Runden weiter, ohne die anderen zu blockieren.

@@ -1,6 +1,6 @@
 # SatSage-Regtest-Labor
 
-Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
+Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
 
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 
-Endpunkte nur Loopback: RPC `127.0.0.1:18443` (user/pass `bitcoin`/`secret`), Electrum `127.0.0.1:50001` ohne SSL, GUI `127.0.0.1:8730/?t=…`.  
+Endpunkte nur Loopback: RPC `127.0.0.1:18443` (user/pass `bitcoin`/`secret`), Electrum `127.0.0.1:50001` ohne SSL, GUI `127.0.0.1:8730/?t=…`. Der Whitelist-User und der Node ohne Wallet gehören zum Docker-Labor, nicht zu diesem portablen Start.  
 Chain zurücksetzen: `stop_lab.ps1`, dann `lab/regtest/.data/` löschen (`.tools/` kann bleiben), erneut `start_lab.ps1`.
 
 **Scan findet 0 UTXOs:** SatSage teilt `WALLET_n_MAX_ADDRESSES` auf Empfang und Change (`//2`). Lab-Default ist 400 (je 200). Liegen Coins auf höheren Indizes (mehrfaches `run_scenarios` mit altem `getnewaddress`), Limit anheben oder `.data/` neu aufbauen. Szenarien nutzen feste `deriveaddresses`-Indizes und schieben den Keypool nicht mehr.
@@ -54,7 +54,7 @@ Die Token-URL steht danach in `.data/gui-url.txt` und öffnet sich im Browser. E
    ./scripts/generate_scenarios.py
    ```
 
-   Docker ist der bevorzugte Mac-Weg. RPC nur `127.0.0.1:18443`, Electrum `127.0.0.1:50001`, **mempool.space-Explorer** `http://127.0.0.1:18080` (nach dem Start kurz warten, bis der Index steht).
+   Docker ist der bevorzugte Mac-Weg. RPC nur `127.0.0.1:18443` (`bitcoin`/`secret`, dazu `satsage`/`lab-whitelist` mit enger `rpcwhitelist`) und `127.0.0.1:18445` (`disablewallet`). Electrum `127.0.0.1:50001`, **mempool.space-Explorer** `http://127.0.0.1:18080` (nach dem Start kurz warten, bis der Index steht).
 3. Die generierte Datei `lab/regtest/.data/.regtest.env` kann lokal als SatSage-Lab-Konfiguration verwendet werden (`MEMPOOL_URL` zeigt auf den lokalen Explorer). Die Platzhalter-Vorlage ist [`.regtest.env.example`](.regtest.env.example).
 4. Status und Logs:
 
@@ -128,6 +128,14 @@ Verify (Lab muss laufen):
 
 ```bash
 py -3 lab/regtest/scripts/verify_sanctions_hops.py
+```
+
+### Core-Allowlist (harte Regel, jeder PR nach main)
+
+`scripts/verify_rpc_allowlist.py` spricht den laufenden Labor-Node an. `dumpwallet` und `listdescriptors true` müssen im Client enden, ohne dass ein Socket aufgeht. `sendtoaddress` ist nur bei `NETWORK=regtest` überhaupt erlaubt und scheitert am Whitelist-User mit „rpcwhitelist?“. `listwallets` als `satsage` liefert denselben Hinweis. Port 18445 (`disablewallet`) liefert „disablewallet?“ statt „nicht erreichbar“. `bitcoin`/`secret` bleibt ohne Whitelist, sonst stehen Electrs und die Szenarien.
+
+```bash
+python3 lab/regtest/scripts/verify_rpc_allowlist.py
 ```
 
 ## Linux-Bot-Host

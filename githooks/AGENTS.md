@@ -6,7 +6,7 @@ Gilt beim Arbeiten an `githooks/` **und** bei jedem Commit/Push aus diesem Clone
 
 ## Branches
 
-- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung. Vor dem Merge und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket): Unittests grün und Regtest-Labor grün (Workflow `Regtest-Labor`, Core + Electrs, `verify_tx_classify.py` und `verify_sanctions_hops.py`). Wochenlauf auf `dev-juniormind` nur, wenn der Prüfpfad seit dem letzten grünen Labor geändert wurde.
+- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung. Vor dem Merge und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket): Unittests grün und Regtest-Labor grün (Workflow `Regtest-Labor`, Core + Electrs, `verify_rpc_allowlist.py`, `verify_tx_classify.py` und `verify_sanctions_hops.py`). Wochenlauf auf `dev-juniormind` nur, wenn der Prüfpfad seit dem letzten grünen Labor geändert wurde.
 - dev-juniormind — laufende Entwicklung von Juniormind1; hier committen/pushen für Work-in-Progress.
 - Andere Contributor-Branches/PRs: nach Review in main mergen, wenn stabil; nicht ungeprüft aus dev-* übernehmen.
 

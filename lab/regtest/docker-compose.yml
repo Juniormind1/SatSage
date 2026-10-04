@@ -39,6 +39,30 @@ services:
       timeout: 5s
       retries: 20
 
+  # Node ohne Wallet-RPC. Prüft den Hinweis „disablewallet?“ getrennt vom
+  # Labor-Node, dessen Wallets die Szenarien brauchen.
+  bitcoind-nowallet:
+    image: bitcoin/bitcoin:27.0
+    container_name: satsage-bitcoind-nowallet
+    ports:
+      - "127.0.0.1:18445:18445"
+    command:
+      - -regtest=1
+      - -server=1
+      - -listen=0
+      - -disablewallet=1
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcuser=bitcoin
+      - -rpcpassword=secret
+      - -rpcport=18445
+      - -printtoconsole=1
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcport=18445", "-rpcuser=bitcoin", "-rpcpassword=secret", "getblockchaininfo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   # Auth: bitcoind nutzt rpcuser/rpcpassword (kein Core-.cookie).
   # scripts/start.sh schreibt deshalb regtest/.cookie als user:pass für electrs.
   electrs:

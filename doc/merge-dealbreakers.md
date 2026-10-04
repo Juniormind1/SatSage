@@ -37,7 +37,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 
 **Präzisierung T3:** Gewollte Abfragen an vom Nutzer konfigurierte Datenquellen (Electrs/Fulcrum, BIP-158-Peers, Sanktions-Clearnet laut Design) sind kein Leak. Verboten ist Weitergabe an **andere** Endpoints / Telemetrie / Cloud ohne Opt-in.
 
-**Präzisierung T14:** Alle bitcoind-Aufrufe laufen durch `BitcoinRpcClient.call` (`core/bitcoind_rpc.py`). Dort prüft die Allowlist jede Methode vor Payload, Auth und Socket. Ein Verstoß wirft `RpcAllowlistError`, schreibt `RPC-ALLOWLIST-VERSTOSS` als ERROR ins Server-Log, setzt ein Prozess-Flag (Quellen-Status, `/api/health`, rote Kopfzeilen-Pille „Core-RPC gesperrt“) und fällt nie still auf Electrum/BIP-158 zurück. CI: `tests/test_rpc_allowlist.py` (Laufzeit) und `tests/test_rpc_allowlist_statisch.py` (AST-Scan aller `.py` außer `lab/`, `tests/`, `specter_plugin/scripts/`). Lab-Skripte dürfen mehr (regtest, eigener Node). Erweitern nur mit Maintainer-Freigabe und zusammen mit Doku und bitcoin.conf-Beispiel:
+**Präzisierung T14:** Alle bitcoind-Aufrufe laufen durch `BitcoinRpcClient.call` (`core/bitcoind_rpc.py`). Dort prüft die Allowlist jede Methode vor Payload, Auth und Socket. Ein Verstoß wirft `RpcAllowlistError`, schreibt `RPC-ALLOWLIST-VERSTOSS` als ERROR ins Server-Log, setzt ein Prozess-Flag (Quellen-Status, `/api/health`, rote Kopfzeilen-Pille „Core-RPC gesperrt“) und fällt nie still auf Electrum/BIP-158 zurück. CI: `tests/test_rpc_allowlist.py` (Laufzeit) und `tests/test_rpc_allowlist_statisch.py` (AST-Scan aller `.py` außer `lab/`, `tests/`, `specter_plugin/scripts/`). Zusätzlich am echten Regtest-Node, bei jedem Pull Request nach `main`: `lab/regtest/scripts/verify_rpc_allowlist.py` (Workflow `Regtest-Labor`, Dealbreaker Q6). Der Client stoppt `dumpwallet`, bevor ein Socket aufgeht. Ein Labor-User mit `rpcwhitelist` nur für die Lese-Methoden bekommt bei `listwallets` den Hinweis „rpcwhitelist?“. Ein zweiter Node mit `disablewallet` bekommt „disablewallet?“. Lab-Skripte dürfen mehr (regtest, eigener Node). Erweitern nur mit Maintainer-Freigabe und zusammen mit Doku und bitcoin.conf-Beispiel:
 
 - **A · Kern:** `getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`
 - **B · Core-Wallet-Import:** `listwallets`, `listwalletdir`, `loadwallet`, `listdescriptors` (nur ohne Parameter oder mit `false`)
@@ -65,7 +65,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | Q1 | **`tests/`-Suite rot** auf CI (Ubuntu `unittest discover`) | Hart |
-| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py` | Hart |
+| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py` | Hart |
 | Q2 | Suite „grün“ nur durch **unbegründete skips** / Aushebeln von Checks | Hart+Review |
 | Q3 | **Scope-Monster**: UI + Core-Scan + Packaging + Plugin in einem PR ohne Trennung | Weich |
 | Q4 | Neue Nutzertexte **nur Englisch / hart in `app.js`** statt Locales | Weich |

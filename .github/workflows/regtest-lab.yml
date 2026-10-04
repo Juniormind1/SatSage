@@ -2,8 +2,9 @@ name: Regtest-Labor
 
 # Wiederverwendbar. Auslöser: regtest-lab-dispatch.yml (Merge, Tag v*,
 # manuell), regtest-lab-weekly.yml (Montag, nur bei Delta am Prüfpfad),
-# Image-, Linux- und StartOS-Build. Core und Electrs, Szenarien,
-# Klassifikation und Sanktions-Hops. Der Explorer (mempool) bleibt aus.
+# Image-, Linux- und StartOS-Build. Core und Electrs, Allowlist gegen
+# den echten Node, Szenarien, Klassifikation und Sanktions-Hops.
+# Der Explorer (mempool) bleibt aus.
 on:
   workflow_call:
 
@@ -32,6 +33,11 @@ jobs:
         run: |
           chmod +x scripts/start.sh
           ./scripts/start.sh
+
+      - name: Core-Allowlist und rpcwhitelist
+        env:
+          NETWORK: regtest
+        run: python3 lab/regtest/scripts/verify_rpc_allowlist.py
 
       - name: Szenarien erzeugen
         working-directory: lab/regtest

@@ -70,7 +70,7 @@ Mehrdeutig heißt: ein Wort lässt mehrere Umsetzungen zu, eine Grenze oder ein 
 
 ## HART · Core-RPC nur aus der Allowlist
 
-Dealbreaker **T14**. Jeder bitcoind-Aufruf geht durch `BitcoinRpcClient.call` in `core/bitcoind_rpc.py`; erlaubt sind nur `RPC_KERN` (lesend), `RPC_WALLET_IMPORT` (`listdescriptors` nur ohne private Schlüssel) und `RPC_LAB_REGTEST` (nur `NETWORK=regtest`). Keine wallet-schreibenden/signierenden RPCs, kein Roh-JSON-RPC, kein `bitcoin-cli` im Produktivcode. `RpcAllowlistError` nie in einen Fallback verschlucken (`except RpcAllowlistError: raise` vor `except Exception`). Neue Methode = Maintainer-Freigabe + Doku (`.env.example`, Handbuch „Bitcoin Core absichern“, README) + Tests `tests/test_rpc_allowlist*.py`.
+Dealbreaker **T14**. Jeder bitcoind-Aufruf geht durch `BitcoinRpcClient.call` in `core/bitcoind_rpc.py`; erlaubt sind nur `RPC_KERN` (lesend), `RPC_WALLET_IMPORT` (`listdescriptors` nur ohne private Schlüssel) und `RPC_LAB_REGTEST` (nur `NETWORK=regtest`). Keine wallet-schreibenden/signierenden RPCs, kein Roh-JSON-RPC, kein `bitcoin-cli` im Produktivcode. `RpcAllowlistError` nie in einen Fallback verschlucken (`except RpcAllowlistError: raise` vor `except Exception`). Neue Methode = Maintainer-Freigabe + Doku (`.env.example`, Handbuch „Bitcoin Core absichern“, README) + Tests `tests/test_rpc_allowlist*.py`. Jeder Pull Request nach `main` prüft Allowlist und die Hinweise „rpcwhitelist?“ / „disablewallet?“ zusätzlich am Regtest-Node (`lab/regtest/scripts/verify_rpc_allowlist.py`, Dealbreaker Q6).
 
 ## Zweck
 
@@ -107,3 +107,4 @@ Root-Fassaden (`main.py`, `analyze.py`, `server.py`, …) haben keine eigene Dat
 - Tests, Fixtures und Beispiele nicht mit echten XPUBs, Seeds, xprv oder WIF.
 - Keine Seed-/xprv-/WIF-Eingabe (Dealbreaker **T1**). Lern-URLs nur Bitcoin-only (**T13**). Keine Telemetrie, kein Remote-JS (**T3/T6**).
 - Merge-Kriterien: [`doc/merge-dealbreakers.md`](doc/merge-dealbreakers.md). UI-Sprache Deutsch. `VERSION` bumpt nur der Maintainer. Nicht automatisch committen oder pushen.
+- Nutzerprofil: seltener Gast, Wissen nur aus Mainchain-Traces der xpubs und Fremdwallet-Exporten. Caches sparen Electrs-Abfragen, sie sind keine Buchhaltung. Verlangt ein Feature mehr (Extremfall: eigene Los-Buchhaltung), das als Regelbruch sagen und [`doc/user-profile-ux.md`](doc/user-profile-ux.md) erst ändern lassen.

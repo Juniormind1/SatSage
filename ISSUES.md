@@ -20,47 +20,49 @@ SatSage liest von Bitcoin Core nur. Bisher konnte der RPC-Nutzer aber alles, was
 - **Node-Seite:** HTTP 403 mit leerem Body wird zu „Node verweigert Methode X (HTTP 403) – rpcwhitelist?“. Die Wallet-Suche nennt bei `-32601` „disablewallet?“ statt „nicht erreichbar“.
 - **Merge-Regel T14** (hart) in `doc/merge-dealbreakers.md` und `AGENTS.md`; AST-Test `tests/test_rpc_allowlist_statisch.py` prüft jeden `.call("…")` im Produktivcode und dass die Doku-Liste zur Konstante passt.
 - **Doku:** `rpcauth` + `rpcwhitelist` + `rpcwhitelistdefault=0`, `rpcbind`/`rpcallowip`, `disablewallet` (ganzer Node, Core-Import entfällt), kein TLS im LAN; StartOS/Umbrel nur als Hinweis. In `.env.example`, Handbuch, README, `packaging/instructions.md`, `doc/START9-hardening.md`.
-- **Regtest-Lab** einmal real geprüft: GUI mit `rpcauth`-User und `rpcwhitelist` (nur A) läuft, `dumpwallet` blockt der Client (erreicht den Node nicht), `listwallets` lehnt der Node mit 403 ab.
+- **Regtest-Lab:** `lab/regtest/scripts/verify_rpc_allowlist.py` läuft im Workflow `Regtest-Labor` bei jedem Pull Request nach `main` (Dealbreaker Q6). `dumpwallet` blockt der Client (kein Socket). `listwallets` als Whitelist-User `satsage` lehnt der Node ab, die Wallet-Suche sagt „rpcwhitelist?“. Ein zweiter Node mit `disablewallet` sagt „disablewallet?“.
 
 **Offen:** Abnahme durch den Maintainer. Auf StartOS und Umbrel teilt sich SatSage Cookie bzw. User mit anderen Diensten, dort greift nur die Client-Allowlist; eigener `rpcauth`-User wäre Sache der Plattform. Verwandt: Sonderfall `rpcbind` nur auf LAN-IP im Abschnitt „Erledigt: Lokal Bitcoin Core erkennen“.
 
 ---
 
-## Steuerjahr · Herkunftsnetz als Overlay, dann Interpreter / Register
+## Steuerjahr · Herkunftsnetz als Overlay
 
-**Stand:** 2026-09-27 · **offen** · Produkt / UI / Trace
-**Schritt 1:** umgesetzt 2026-09-28 (Maintainer-Abnahme offen) — Issue bleibt offen für das Zielbild.
+**Stand:** 2026-10-04 · **Schritt 1 abgenommen** · Zielbild **verworfen**
+**Schritt 1:** umgesetzt 2026-09-28, **abgenommen** 2026-10-04.
+**Zielbild:** Losregister und FIFO-Buchhaltung **verworfen** 2026-10-04. Keine eigene Buchhaltung jenseits der Chain. Die Lesart liegt in der globalen Einstellung defensiv/offensiv (`STEUER_ANSCHAFFUNG`), auf dem On-Chain-Trace.
 **Ort:** Steuerjahr-Zeitstrahl (`core/tax.py` `zeitstrahl()`, `web/app.js` `#achse-spur`); Trace nur als Datenquelle (`utxo_trace` / Ingress-Cache)
 **Aufwand Schritt 1:** **mittel** (UI-Overlay + vorhandener On-Demand-Trace; kein Backend-Umbau)
-**Aufwand Zielbild:** hoch — nicht dieser Issue
-
-### Zielbild (Richtung, nicht dieser Sprint)
+### Zielbild — verworfen (2026-10-04)
 
 SatSage bleibt On-Chain-Beobachter und On-Chain-Beleg, kein Gutachten.
-Langfristig zwei zusätzliche Rollen, klar getrennt von der defensiven UTXO-Farbe:
+Eine eigene Buchhaltung jenseits der Chain ist verworfen. Dazu gehören
+das Losregister (Restmenge nach Abgang, Fee und Change) und der
+Verbrauchsregel-Interpreter (FIFO, älteste offene Lose zuerst).
 
-1. **Verbrauchsregel-Interpreter** — dieselbe Spend-Tx lesbar unter
-   defensiv (jüngster Extern färbt den Input) und unter
-   FIFO / Einzelbetrachtung (älteste offene Lose zuerst).
-2. **Losregister** — Herkunftsäste plus Restmenge nach Abgang, Fee und Change.
+Was gilt, ist die globale Einstellung **defensiv / offensiv**
+(`STEUER_ANSCHAFFUNG`), angewandt auf denselben On-Chain-Trace:
 
-Der Herkunftsbaum ist der Rohstoff für Lose, nicht schon das Register:
-der Trace zeigt, *welche Äste in den Output liefen*; das Register erst,
-*wie viel davon noch offen ist*. Coin-Control erst ganz am Ende, und nur
-über heutige Unspents plus offene Lose — nie über verbrauchte Hops.
+- **Defensiv** (Vorgabe): der UTXO ist nur ganz grün, wenn kein grauer
+  und kein oranger Lot-Anteil bleibt. Maßgeblich ist der jüngste externe
+  Zufluss.
+- **Offensiv:** in der Summe zählt nur der grüne Lot-Anteil (fremde oder
+  Coinbase-Enden links der Fristgrenze), nicht ein ältestes Datum für
+  den ganzen UTXO.
 
-Konsolidierung auf ein neues XPUB setzt die Frist nicht zurück. Sie
-zerstört nur die getrennte Ausgebbarkeit der alten UTXOs.
+Der Trace zeigt, welche Äste in den Output liefen. Eine Fortschreibung,
+wie viel davon nach einem Abgang noch offen ist, gibt es nicht.
 
 ### Nicht in diesem Issue
 
-Lose, FIFO-Rechnung, Restmengen, Coin-Control, Abgangs-X,
+Lose, FIFO-Rechnung, Restmengen, Coin-Control und Abgangs-X sind mit
+der Buchhaltung jenseits der Chain verworfen. Weiter nicht hier:
 Punkte links vom Klick löschen, Graph-DB, HTML/CSV-Overlay,
 Default beim Öffnen der Ansicht.
 
 ### Schritt 1 — Oneshot: Herkunftsnetz temporär überlagern
 
-> **Umgesetzt (2026-09-28, Maintainer-Abnahme offen):** `GET /api/tax/herkunftsnetz?key=txid:vout&jahr=&frist=&stichtag=`
+> **Umgesetzt (2026-09-28), abgenommen (2026-10-04):** `GET /api/tax/herkunftsnetz?key=txid:vout&jahr=&frist=&stichtag=`
 > (`core/herkunftsnetz.py`, `httpserver/api/tax.py`) liefert nur das flache Netz aus dem einen gespeicherten Baum;
 > Overlay in `web/views/herkunftsnetz.js`. `zeitstrahl()` unverändert (Auswertung trägt zusätzlich `bezug_ts` für die exakte Skala).
 > Fehlender Baum: Steuer-Horizont-Lauf über `/api/trace/alle` mit `baum_noetig`. HTML-Report des Punkts jetzt in der Hinweiszeile.
