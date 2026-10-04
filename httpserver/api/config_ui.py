@@ -145,6 +145,7 @@ def api_config(
         "local_only": _ist_local_only(state),
         "ui_theme": _ui_theme_aus_env(werte),
         "lernhinweise_plebs": _lernhinweise_plebs_aus_env(werte),
+        "fifo_strategie": _fifo_strategie_aus_env(werte),
         "network": (werte.get("NETWORK") or "main").strip().lower() or "main",
         "managed_by": state.managed_by,
         "managed_hint": _managed_hint(state, werte),
@@ -194,6 +195,33 @@ def api_save_ui_theme(state: AppState, payload: dict) -> dict:
     except OSError as exc:
         raise ApiError(500, "Interner Serverfehler.") from exc
     return {"saved": True, "ui_theme": theme}
+
+
+def _fifo_strategie_aus_env(werte: dict) -> str:
+    """``FIFO_STRATEGIE`` — Coin-Auswahl im FIFO-Spend; Default ``wechselgeld``."""
+    from core.coin_auswahl import STANDARD_STRATEGIE, STRATEGIEN
+
+    roh = str((werte or {}).get("FIFO_STRATEGIE") or "").strip().lower()
+    return roh if roh in STRATEGIEN else STANDARD_STRATEGIE
+
+
+def api_save_fifo_strategie(state: AppState, payload: dict) -> dict:
+    """Speichert die Auswahl-Strategie des FIFO-Spend in der .env (``FIFO_STRATEGIE``)."""
+    from core.coin_auswahl import STRATEGIEN
+    from server import (
+        ApiError,
+    )
+
+    roh = str((payload or {}).get("fifo_strategie") or "").strip().lower()
+    if roh not in STRATEGIEN:
+        raise ApiError(400, f"„fifo_strategie“ muss {', '.join(STRATEGIEN)} sein.")
+    env = state.env()
+    env.apply({"FIFO_STRATEGIE": roh})
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    return {"saved": True, "fifo_strategie": roh}
 
 
 def api_save_lernhinweise_plebs(state: AppState, payload: dict) -> dict:

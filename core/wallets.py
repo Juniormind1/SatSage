@@ -14,6 +14,7 @@ from core.derivation import (
     _encoders_for_xpub,
     _hdkey_for_xpub,
     derive_addresses,
+    script_address,
 )
 
 #: Typen, die beim Erkennen durchprobiert werden. 'auto' ist kein Kandidat.
@@ -360,7 +361,7 @@ def _receive_addresses(xpub: str, script_type: str, count: int) -> list[str]:
     adressen: list[str] = []
     for index in range(count):
         try:
-            adressen.append(encoder(hd.derive([0, index]).key).address())
+            adressen.append(script_address(encoder(hd.derive([0, index]).key)))
         except Exception:
             break
     return adressen

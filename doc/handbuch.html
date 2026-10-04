@@ -1746,9 +1746,9 @@ manipuliertes Programm nichts.</p>
 <pre><code># Eigener RPC-User nur für SatSage. Salt und Hash erzeugt
 # share/rpcauth/rpcauth.py satsage — das Passwort steht nur in der SatSage-.env
 rpcauth=satsage:&lt;salt&gt;$&lt;hash&gt;
-rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee
 # Mit Core-Wallet-Import („Wallets suchen“) stattdessen diese Zeile:
-# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,listwallets,listwalletdir,loadwallet,listdescriptors
+# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee,listwallets,listwalletdir,loadwallet,listdescriptors
 # Andere RPC-User (Electrs, Sparrow, Cookie …) behalten vollen Zugriff:
 rpcwhitelistdefault=0
 # RPC nur lokal; zweite Zeile nur, wenn SatSage auf einem anderen Rechner läuft
@@ -1792,7 +1792,9 @@ rpcallowip=127.0.0.1
 <p><strong>Allowlist in SatSage.</strong> Erlaubt sind nur
 <code>getblockchaininfo</code>, <code>getblockhash</code>,
 <code>getblockheader</code>, <code>getblock</code>,
-<code>getrawtransaction</code> und <code>scantxoutset</code>; für den
+<code>getrawtransaction</code>, <code>scantxoutset</code> und
+<code>estimatesmartfee</code> (Gebührenvorschlag fürs FIFO-Spend, seit
+2026-10-04 freigegeben); für den
 Core-Wallet-Import zusätzlich <code>listwallets</code>,
 <code>listwalletdir</code>, <code>loadwallet</code> und
 <code>listdescriptors</code> (nur öffentliche Deskriptoren, nie mit privaten
@@ -2030,6 +2032,10 @@ Header mitschicken kann.</p>
     <tr><td><code>POST /api/config/deskriptor</code></td>
         <td>Deskriptor oder Wallet-Export prüfen; liefert Skripttyp, Schlüssel und erste Adresse</td></tr>
     <tr><td><code>POST /api/trace/alle</code></td><td>Herkunft aller offenen UTXOs (Job)</td></tr>
+    <tr><td><code>GET /api/fee/suggestion?betrag=&amp;inputs=</code></td><td>Gebührenvorschlag fürs FIFO-Spend in sat/vB: <code>estimatesmartfee</code> (nächster Block) + höchstens 1 sat/vB, über 0,1 % des Betrags 1 sat/vB; ohne Schätzung 1 sat/vB (<code>quelle</code> <code>schaetzung</code>/<code>deckel</code>/<code>fallback</code>)</td></tr>
+    <tr><td><code>POST /api/psbt/auswahl</code></td><td>Coin-Auswahl fürs FIFO-Spend (Vorschau, keine PSBT, kein Schlüsselmaterial): Körper <code>betrag</code>, <code>modus</code>, <code>strategie</code> (<code>wechselgeld</code>/<code>gebuehr</code>/<code>aelteste</code>/<code>staub</code>), <code>utxos</code> (Zeitstrahl-Punkte), <code>pending</code>; Antwort: grüne Inputs (<code>txid:vout</code>, Betrag, grüner Anteil) mit dem kleinsten Wechselgeld, Gebühr nach der Fee-Regel, Wechselgeld bzw. Staub in der Gebühr</td></tr>
+    <tr><td><code>PUT /api/config/fifo-strategie</code></td><td>Speichert die Auswahl-Strategie des FIFO-Spend (<code>FIFO_STRATEGIE</code> in der <code>.env</code>)</td></tr>
+    <tr><td><code>GET /api/address/owner?addr=</code></td><td>Zieladresse fürs FIFO-Spend: gültig, im laufenden Netz, zu welchem Wallet? (<code>status</code> <code>meine</code>/<code>fremd</code>/<code>falsches_netz</code>/<code>ungueltig</code>, bei <code>meine</code> der Wallet-Name) — lokal, ohne Schlüsselmaterial</td></tr>
     <tr><td><code>POST /api/tools/adresse</code></td><td>Gehört die Adresse zu einem Wallet? (<code>address</code>) — lokal, auch unbenutzt</td></tr>
     <tr><td><code>GET /api/tax</code></td><td>Steuerjahr-Auswertung (<code>?jahr=2026&amp;frist=1</code>)</td></tr>
     <tr><td><code>GET /api/tax/export.csv</code></td><td>CSV-Download</td></tr>

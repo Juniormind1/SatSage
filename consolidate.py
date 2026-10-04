@@ -61,7 +61,7 @@ def resolve_address_derivation(
                 try:
                     child = hd.derive([change, i])
                     sc = encoder(child.key)
-                    if sc.address() == address:
+                    if m._script_address(sc) == address:
                         return change, i, child, sc
                 except Exception:
                     break
@@ -80,7 +80,7 @@ def first_receive_address(xpub: str) -> tuple[str, int, HDKey, object] | None:
         try:
             child = hd.derive([0, 0])
             sc = encoder(child.key)
-            return sc.address(), 0, child, sc
+            return m._script_address(sc), 0, child, sc
         except Exception:
             continue
     return None

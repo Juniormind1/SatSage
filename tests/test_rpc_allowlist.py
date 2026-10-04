@@ -30,6 +30,8 @@ from core.bitcoind_rpc import (
 )
 from core.outbound_policy import OutboundPolicyError
 
+WURZEL = Path(__file__).resolve().parent.parent
+
 _TXID = "ab" * 32
 
 
@@ -87,7 +89,7 @@ class TestAllowlistKonstanten(unittest.TestCase):
         self.assertEqual(
             set(RPC_KERN),
             {"getblockchaininfo", "getblockhash", "getblockheader", "getblock",
-             "getrawtransaction", "scantxoutset"},
+             "getrawtransaction", "scantxoutset", "estimatesmartfee"},
         )
         self.assertEqual(
             set(RPC_WALLET_IMPORT),
@@ -105,6 +107,15 @@ class TestAllowlistKonstanten(unittest.TestCase):
             "setban", "addnode", "walletpassphrase", "encryptwallet", "backupwallet",
         }
         self.assertFalse(verboten & ALLE_RPC_METHODEN)
+
+    def test_estimatesmartfee_lesend_freigegeben(self):
+        """Gebührenvorschlag FIFO-Spend — Maintainer-Freigabe 2026-10-04, auch im Mainnet."""
+        rpc.pruefe_rpc_methode("estimatesmartfee", [1], network="main")
+        self.assertIn("estimatesmartfee", ERLAUBTE_RPC_METHODEN)
+        quelle = Path(rpc.__file__).read_text(encoding="utf-8")
+        self.assertIn("Freigabe Maintainer 2026-10-04", quelle)
+        for doku in (".env.example", "README.md", "doc/handbuch.html", "doc/merge-dealbreakers.md"):
+            self.assertIn("estimatesmartfee", (WURZEL / doku).read_text(encoding="utf-8"), doku)
 
     def test_exception_ist_outbound_policy_error(self):
         self.assertTrue(issubclass(RpcAllowlistError, OutboundPolicyError))

@@ -18,11 +18,26 @@ _hdkey_by_xpub: dict[str, HDKey] = {}
 DEFAULT_MAX_ADDRESSES = 50
 
 
+def chain_network():
+    """
+    Aktuell konfiguriertes Adress-Netz (embit-Netz-Dict, None = Mainnet).
+
+    Zur Laufzeit lesen, nie ``from core.derivation import _CHAIN_NETWORK``:
+    ein Wert-Import friert den Stand beim Import ein (``None``/main) und
+    sieht ``set_chain_network("regtest")`` danach nicht mehr.
+    """
+    return _CHAIN_NETWORK
+
+
 def _script_address(sc) -> str:
     """Bech32/Base58-Adresse im konfigurierten Chain-Netz."""
     if _CHAIN_NETWORK is None:
         return sc.address()
     return sc.address(_CHAIN_NETWORK)
+
+
+#: Öffentlicher Name für Module außerhalb der Ableitung (Tx-Parser, Scanner).
+script_address = _script_address
 
 
 SCRIPT_TYPE_CHOICES = ("auto", "legacy", "nested", "segwit", "taproot")

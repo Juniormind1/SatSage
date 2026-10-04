@@ -14,6 +14,7 @@ from embit.bip32 import HDKey
 from embit.script import address_to_scriptpubkey
 
 from core.bip158_filter import MatchedOutput, ScanProgress
+from core.derivation import script_address
 from core.bip158_scan import (
     DEFAULT_GAP_LIMIT,
     DEFAULT_MAX_ADDRESSES,
@@ -115,7 +116,7 @@ def derive_script_pubkeys_from_xpub(
                     sc = encoder(child.key)
                     spk = bytes(sc.data)
                     try:
-                        addr = sc.address()
+                        addr = script_address(sc)
                     except Exception:
                         addr = None
                     result[spk] = addr
@@ -384,7 +385,7 @@ def _embit_tx_to_dict(
     vouts: list[dict[str, Any]] = []
     for n, vout in enumerate(tx.vout):
         try:
-            addr = vout.script_pubkey.address()
+            addr = script_address(vout.script_pubkey)
         except Exception:
             addr = None
         vouts.append({

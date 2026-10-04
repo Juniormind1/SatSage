@@ -993,6 +993,7 @@ from httpserver.api.config_ui import (  # noqa: E402
     api_save_start_sync,
     api_save_status_mail,
     api_save_ui_lang,
+    api_save_fifo_strategie,
     api_save_ui_theme,
     registriere_status_mail_hook,
     _ui_theme_aus_env,
@@ -1060,7 +1061,10 @@ from httpserver.api.tax import (  # noqa: E402
 )
 
 
+from httpserver.api.psbt import api_psbt_auswahl  # noqa: E402
 from httpserver.api.tools import (  # noqa: E402
+    api_address_owner,
+    api_fee_suggestion,
     api_tools_adresse,
     api_tools_cache_suche,
     api_tools_schatzsuche,
@@ -1554,6 +1558,8 @@ class Handler(
             return 200, api_save_ui_lang(state, self._body())
         if teile == ["config", "ui-theme"] and methode == "PUT":
             return 200, api_save_ui_theme(state, self._body())
+        if teile == ["config", "fifo-strategie"] and methode == "PUT":
+            return 200, api_save_fifo_strategie(state, self._body())
         if teile == ["config", "lernhinweise-plebs"] and methode == "PUT":
             return 200, api_save_lernhinweise_plebs(state, self._body())
         if teile == ["config", "steuer"] and methode == "PUT":
@@ -1634,6 +1640,12 @@ class Handler(
             return 200, api_llm_context(state, teile[2:], query)
         if teile == ["llm", "chat"] and methode == "POST":
             return 200, api_llm_chat(state, self._body())
+        if teile == ["address", "owner"] and methode == "GET":
+            return 200, api_address_owner(state, query)
+        if teile == ["fee", "suggestion"] and methode == "GET":
+            return 200, api_fee_suggestion(state, query)
+        if teile == ["psbt", "auswahl"] and methode == "POST":
+            return 200, api_psbt_auswahl(state, self._body(max_bytes=8 * 1024 * 1024))
         if teile == ["tools", "adresse"] and methode == "POST":
             return 200, api_tools_adresse(state, self._body())
         if teile == ["tools", "cache-suche"] and methode == "POST":

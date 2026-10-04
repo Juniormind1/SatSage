@@ -233,7 +233,7 @@ FULCRUM_TOR_PROXY=127.0.0.1:9150
 
 ```ini
 rpcauth=satsage:<salt>$<hash>
-rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee
 rpcwhitelistdefault=0
 ```
 
