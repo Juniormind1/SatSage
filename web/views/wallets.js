@@ -1416,10 +1416,88 @@ function fifoBetragText(sats) {
   return formatSatcomma(sats);
 }
 
-/** Höchstbetrag fürs Eingabefeld, exakt in sats; null = gerade keiner. */
-function fifoSpendMax(stand) {
+/** Grünes Maximum ohne Gebühr (Summe der grünen Beiträge), exakt in sats; null = keiner. */
+function fifoSpendBrutto(stand) {
   if (!stand || stand.zustand !== "fertig" || !stand.werte || stand.unvollstaendig) return null;
   return Number(stand.werte[stand.modus]) || 0;
+}
+
+/**
+ * Höchstbetrag fürs Eingabefeld, exakt in sats; null = gerade keiner.
+ *
+ * Netto: grünes Maximum minus Gebühr bei der aktuellen Rate (Gebührenfeld,
+ * sonst Schätzung) — vom Server (``POST /api/psbt/max``), derselben Rechnung
+ * wie die PSBT. Der angezeigte Wert lässt sich also genau so senden, +1 nicht.
+ * Solange der Server noch rechnet oder nicht erreichbar ist: das Brutto-
+ * Maximum (der Tooltip sagt es).
+ */
+function fifoSpendMax(stand) {
+  const brutto = fifoSpendBrutto(stand);
+  if (brutto === null) return null;
+  const netto = fifoNettoAktuell(stand);
+  return netto ? Math.min(brutto, Number(netto.max_netto_sats) || 0) : brutto;
+}
+
+/** Eingaben, von denen das Netto-Maximum abhängt. */
+function fifoNettoSchluessel(stand) {
+  const ziel = Zustand.fifoZielErgebnis || {};
+  const adresse = ["meine", "fremd", "keine_wallets"].includes(ziel.status) ? (ziel.address || "") : "";
+  const pending = [...fifoPendingInfo(Zustand._walletUtxoDaten).keys].sort().join(",");
+  return [stand && stand.schluessel, Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
+}
+
+/** Fertiges Netto-Maximum zum aktuellen Stand, sonst null. */
+function fifoNettoAktuell(stand) {
+  const netto = Zustand.fifoNetto;
+  if (!stand || !netto || netto.zustand !== "fertig" || netto.schluessel !== fifoNettoSchluessel(stand)) {
+    return null;
+  }
+  return netto;
+}
+
+/** Wartezeit, bevor eine geänderte Gebühr/Adresse das Netto-Maximum neu holt. */
+const FIFO_NETTO_ENTPRELLEN_MS = 250;
+
+/** Netto-Maximum beim Server holen, wenn sich Stand, Gebühr oder Ziel geändert haben. */
+function planeFifoNetto() {
+  const stand = Zustand.fifoSpend;
+  if (fifoSpendBrutto(stand) === null) return;
+  const schluessel = fifoNettoSchluessel(stand);
+  const alt = Zustand.fifoNetto;
+  if (alt && alt.schluessel === schluessel) return;
+  const lauf = { schluessel, zustand: "laedt" };
+  Zustand.fifoNetto = lauf;
+  clearTimeout(Zustand.fifoNettoTimer);
+  Zustand.fifoNettoTimer = setTimeout(() => {
+    const ziel = Zustand.fifoZielErgebnis || {};
+    const koerper = { wallet_id: String(stand.walletId || "") };
+    if (Zustand.fifoZielFeeMilli > 0) koerper.fee = fifoMilliText(Zustand.fifoZielFeeMilli);
+    if (["meine", "fremd", "keine_wallets"].includes(ziel.status) && ziel.address) {
+      koerper.adresse = ziel.address;
+    }
+    Promise.resolve()
+      .then(() => api("/psbt/max", { methode: "POST", daten: koerper }))
+      .then((v) => {
+        if (Zustand.fifoNetto !== lauf) return;
+        if (v && v.status === "max" && Number.isFinite(Number(v.max_netto_sats))) {
+          lauf.max_netto_sats = Number(v.max_netto_sats);
+          lauf.max_netto_fee_sats = Number(v.max_netto_fee_sats) || 0;
+          lauf.max_netto_inputs = Number(v.max_netto_inputs) || 0;
+          lauf.sat_vb = v.sat_vb;
+          lauf.zustand = "fertig";
+        } else {
+          lauf.zustand = "fehler";
+        }
+      })
+      .catch((fehler) => {
+        if (Zustand.fifoNetto !== lauf) return;
+        lauf.zustand = "fehler";
+        lauf.fehler = (fehler && fehler.message) || String(fehler || "");
+      })
+      .then(() => {
+        if (Zustand.fifoNetto === lauf && Zustand.fifoSpend === stand) zeichneFifoSpend(stand);
+      });
+  }, FIFO_NETTO_ENTPRELLEN_MS);
 }
 
 /** Text, Tooltip und Eingabegrenze aus dem gemerkten Stand. */
@@ -1452,6 +1530,17 @@ function zeichneFifoSpend(stand) {
       t("wallet.fifoSpendTitleExact", { sats: formatZahl(max) }),
       t("wallet.fifoSpendTitleBasis"),
     ];
+    const netto = fifoNettoAktuell(stand);
+    if (netto) {
+      teile.push(t("wallet.fifoSpendTitleNet", {
+        fee: formatZahl(netto.max_netto_fee_sats || 0),
+        rate: formatZahl(netto.sat_vb || 0),
+        inputs: netto.max_netto_inputs || 0,
+        brutto: formatZahl(fifoSpendBrutto(stand) || 0),
+      }));
+    } else {
+      teile.push(t("wallet.fifoSpendTitleGross"));
+    }
     const abzug = stand.werte.abzug;
     if (abzug && abzug.anzahl > 0) {
       teile.push(t("wallet.fifoSpendTitleMempool", {
@@ -1486,6 +1575,7 @@ function zeichneFifoSpend(stand) {
     if (!fokus) fifoBetragNeuSchreiben(feld);
     pruefeFifoSpendBetrag();
   }
+  planeFifoNetto();
 }
 
 /** Ganze sats in 3er-Gruppen mit U+202F (``12 345 678``), ohne Einheit. */
@@ -1752,6 +1842,8 @@ function zeigeFifoZielAdresse(erg) {
     marke.title = label ? titel : "";
   }
   aktualisiereFifoPsbtErzeugen();
+  // Zieltyp (P2WPKH/P2TR/P2WSH) ändert die Gebühr und damit das Netto-Maximum.
+  planeFifoNetto();
 }
 
 /** Entprellt: erst nach der Tipp-Pause fragen; späte Antworten verwerfen. */
@@ -1803,8 +1895,10 @@ function pruefeFifoZielFee() {
   feld.classList.toggle("ungueltig", !ok);
   if (ok) feld.removeAttribute("aria-invalid");
   else feld.setAttribute("aria-invalid", "true");
+  const feeAlt = Zustand.fifoZielFeeMilli;
   Zustand.fifoZielFeeMilli = milli;
   aktualisiereFifoPsbtErzeugen();
+  if (feeAlt !== milli) planeFifoNetto();
   if (!ok) {
     feld.title = t("wallet.fifoTargetFeeInvalid");
     return;

@@ -562,3 +562,66 @@ def auswahl_vorschau(
     if basis is None:
         erg["grund"] = fehler or "keine Schätzung"
     return erg
+
+
+def netto_max(
+    kand: list[Kandidat],
+    *,
+    basis_rate: Any,
+    groessen: Groessen | None = None,
+) -> dict:
+    """
+    Größter Betrag, den ``waehle`` bei dieser Rate noch deckt — das
+    Netto-Maximum (grünes Maximum minus Gebühr). ``max_netto_sats`` + 1 ist
+    nie gedeckt.
+
+    Kandidaten wie in ``waehle`` (Beitrag > eigene Input-Gebühr). Geprüft
+    werden zwei Mengen: alle nutzbaren und nur die ganz grünen (ohne
+    gemischten Input entfällt eventuell der Wechselgeld-Output). Jede
+    Teilmenge mit weniger Inputs deckt weniger, weil jeder nutzbare Input mehr
+    beiträgt, als er kostet. Je Menge kommen die Randfälle von ``_bewerte``
+    in Frage (ohne Wechselgeld, mit Wechselgeld, Staubgrenzen); der größte
+    gedeckte gewinnt, danach wird nach oben nachgeprüft.
+    """
+    kosten = _Kosten(basis_rate, groessen or Groessen())
+    nutzbar = [k for k in kand if k.beitrag > kosten.input_kosten()]
+    if not nutzbar and not isinstance(basis_rate, FesteRate):
+        nutzbar = [k for k in kand if k.beitrag > VBYTES_INPUT * MIN_SAT_VB]
+    mengen = [nutzbar, [k for k in nutzbar if k.wert == k.beitrag]]
+    beste = {"max_netto_sats": 0, "inputs": 0, "outputs": 0, "vsize": 0, "fee_sats": 0,
+             "brutto_sats": sum(k.beitrag for k in nutzbar)}
+    gesehen: set[int] = set()
+    for menge in mengen:
+        if not menge or len(menge) in gesehen:
+            continue
+        gesehen.add(len(menge))
+        n = len(menge)
+        g = sum(k.beitrag for k in menge)
+        w = sum(k.wert for k in menge)
+
+        def gedeckt(b: int) -> bool:
+            return b > 0 and _bewerte(n, g, w, b, kosten) is not None
+
+        fee1 = kosten.gebuehr(kosten.groessen.vsize(n, 1), g)[0]
+        fee2 = kosten.gebuehr(kosten.groessen.vsize(n, 2), g)[0]
+        kandidat = [b for b in (g - fee1, w - fee1, g - fee2, w - fee2 - STAUB_SATS,
+                                w - fee2 - STAUB_HART_SATS) if gedeckt(b)]
+        if kandidat:
+            b = max(kandidat)
+            schritte = 0
+            while gedeckt(b + 1) and schritte < 1_000_000:
+                b += 1
+                schritte += 1
+        else:
+            lo, hi, b = 1, g, 0
+            while lo <= hi:  # Rückfall (Rate mit Deckel): größter gedeckter Betrag
+                mitte = (lo + hi) // 2
+                if gedeckt(mitte):
+                    b, lo = mitte, mitte + 1
+                else:
+                    hi = mitte - 1
+        if b > beste["max_netto_sats"]:
+            l = _bewerte(n, g, w, b, kosten)
+            beste.update({"max_netto_sats": b, "inputs": n, "outputs": l["outputs"],
+                          "vsize": l["vsize"], "fee_sats": l["fee"]})
+    return beste

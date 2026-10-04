@@ -1502,7 +1502,10 @@ class TestLotSummen(unittest.TestCase):
         self.assertEqual(e["sats_grau"], 0)
         self.assertFalse(e["erfuellt"])
         self.assertEqual(ergebnis["kennzahlen"]["erfuellt_sats"], 0)
-        self.assertEqual(e["datum"], "01.01.2019")
+        # Datum aus dem einzigen Los (Option A), nicht der Ingress-Stempel
+        # 01.01.2019 — sonst stünde ein ganz oranger UTXO mit erfüllter Frist da.
+        self.assertEqual(e["datum"], "01.06.2026")
+        self.assertTrue(e["datum_aus_losen"])
 
     def test_graues_ende(self):
         self._speichern("d4", [

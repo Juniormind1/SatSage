@@ -1061,7 +1061,7 @@ from httpserver.api.tax import (  # noqa: E402
 )
 
 
-from httpserver.api.psbt import api_psbt_auswahl, api_psbt_erzeugen  # noqa: E402
+from httpserver.api.psbt import api_psbt_auswahl, api_psbt_erzeugen, api_psbt_max  # noqa: E402
 from httpserver.api.tools import (  # noqa: E402
     api_address_owner,
     api_fee_suggestion,
@@ -1648,6 +1648,8 @@ class Handler(
             return 200, api_psbt_auswahl(state, self._body(max_bytes=8 * 1024 * 1024))
         if teile == ["psbt", "erzeugen"] and methode == "POST":
             return 200, api_psbt_erzeugen(state, self._body(max_bytes=64 * 1024))
+        if teile == ["psbt", "max"] and methode == "POST":
+            return 200, api_psbt_max(state, self._body(max_bytes=64 * 1024))
         if teile == ["tools", "adresse"] and methode == "POST":
             return 200, api_tools_adresse(state, self._body())
         if teile == ["tools", "cache-suche"] and methode == "POST":

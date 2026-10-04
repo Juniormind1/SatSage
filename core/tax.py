@@ -1039,6 +1039,7 @@ def auswerten(
     if mit_lots:
         _lot_segmente_eintragen(
             ergebnis, eintraege, immutable_cache_dir, on_lot=on_lot,
+            wallet=wallet,
         )
     return ergebnis
 
@@ -1061,8 +1062,14 @@ def _lot_aus_cache(
     bezug: datetime | None = None,
     jahre: int = 1,
     stichtag: date | None = None,
+    fifo=None,
 ) -> dict | None:
-    """Endknoten des gespeicherten Baums, dieselbe Mischung wie der Lot-Ring."""
+    """
+    Endknoten des gespeicherten Baums, dieselbe Mischung wie der Lot-Ring.
+
+    *fifo*: ``herkunftsnetz.FifoKontext`` — Anteile FIFO je Output; ohne
+    ihn anteilig.
+    """
     if skala is None or cache is None:
         return None
     from core import herkunftsnetz
@@ -1086,14 +1093,22 @@ def _lot_aus_cache(
         def block_zeit(hoehe: int) -> int | None:
             return xpub_cache.load_cached_block_time(hoehe, cache)
 
-        netz = herkunftsnetz.flach(baum, key, skala, block_zeit=block_zeit)
-        return herkunftsnetz.lot_mischung(
+        netz = herkunftsnetz.flach(
+            baum, key, skala, block_zeit=block_zeit, fifo=fifo,
+        )
+        seg = herkunftsnetz.lot_mischung(
             netz.get("vorfahren"), frist_pos, key,
             kanten=netz.get("kanten"),
             bezug=bezug,
             jahre=jahre,
             stichtag=stichtag,
         )
+        if seg and netz.get("anteilig"):
+            # Anteilig gemischt: die Los-Daten sind nicht FIFO-genau, das
+            # Datum bleibt beim Ingress-Stempel über den ganzen Baum.
+            seg.pop("lot_von_ts", None)
+            seg.pop("lot_bis_ts", None)
+        return seg
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return None
 
@@ -1137,10 +1152,10 @@ def _lot_kennzahlen_nachziehen(ergebnis: dict) -> None:
     _geister_aus_events(strahl, modus)
 
 
-def _lot_zeile(eintrag: dict, ergebnis: dict) -> dict:
+def _lot_zeile(eintrag: dict, ergebnis: dict, event: dict | None = None) -> dict:
     """Eine NDJSON-Zeile: dieser Punkt und der Stand der Summen danach."""
     geist = (ergebnis.get("zeitstrahl") or {}).get("geister_saldo")
-    return {
+    zeile = {
         "key": f"{eintrag.get('txid')}:{int(eintrag.get('vout') or 0)}",
         "erfuellt": bool(eintrag.get("erfuellt")),
         "sats_gruen": eintrag.get("sats_gruen"),
@@ -1150,6 +1165,82 @@ def _lot_zeile(eintrag: dict, ergebnis: dict) -> dict:
         "kennzahlen": dict(ergebnis.get("kennzahlen") or {}),
         "geister_saldo": dict(geist) if isinstance(geist, dict) else None,
     }
+    if eintrag.get("datum_aus_losen"):
+        # Datum aus den FIFO-Losen: der Punkt rückt an sein Los-Datum.
+        zeile.update({
+            "datum_aus_losen": True,
+            "datum": eintrag.get("datum"),
+            "time_ts": eintrag.get("time_ts"),
+            "frist_ende": eintrag.get("frist_ende"),
+            "neuvermoegen": bool(eintrag.get("neuvermoegen")),
+            "pos": (event or {}).get("pos"),
+        })
+    return zeile
+
+
+def _datum_aus_losen(
+    eintrag: dict,
+    objekt: "Eingang | None",
+    event: dict | None,
+    los_ts: int,
+    *,
+    bezug: datetime,
+    jahre: int,
+    stichtag: date | None,
+    skala,
+) -> bool:
+    """
+    Anschaffungsdatum aus den FIFO-Losen des UTXO (ISSUES „Herkunft · FIFO
+    je Output“, Option A): Frist, Haltedauer, Neuvermögen und die
+    Punkt-Position folgen. True, wenn sich das Datum geändert hat.
+    """
+    try:
+        zeit = datetime.fromtimestamp(int(los_ts))
+    except (TypeError, ValueError, OSError, OverflowError):
+        return False
+    eintrag["datum_aus_losen"] = True
+    if event is not None:
+        event["datum_aus_losen"] = True
+    if int(eintrag.get("time_ts") or 0) == int(los_ts):
+        return False
+    frist_ende, _erfuellt, neu = haltefrist_entscheidung(zeit, bezug, jahre, stichtag)
+    tage = max(0, (bezug - zeit).days)
+    eintrag.update({
+        "datum": zeit.strftime("%d.%m.%Y"),
+        "zeit": zeit.strftime("%H:%M:%S"),
+        "time_ts": int(los_ts),
+        "frist_ende": frist_ende.strftime("%d.%m.%Y") if frist_ende else "",
+        "haltedauer_tage": tage,
+        "neuvermoegen": neu,
+    })
+    if objekt is not None:
+        objekt.zeitpunkt = zeit
+        objekt.frist_ende = frist_ende
+        objekt.haltedauer_tage = tage
+        objekt.neuvermoegen = neu
+    if event is not None:
+        event.update({
+            "datum": eintrag["datum"],
+            "time_ts": int(los_ts),
+            "neuvermoegen": neu,
+        })
+        if skala is not None:
+            event["pos"] = round(max(0.0, min(100.0, skala.pos(zeit))), 3)
+    return True
+
+
+def _nach_datum_ordnen(ergebnis: dict, objekte: list) -> None:
+    """Nach geänderten Los-Daten: Reihenfolge und ``aeltere_sats`` neu."""
+    schluessel = lambda e: (int(e.get("time_ts") or 0), str(e.get("txid") or ""), int(e.get("vout") or 0))  # noqa: E731
+    ergebnis.get("eintraege", []).sort(key=schluessel)
+    objekte.sort(key=lambda e: (e.zeitpunkt, e.txid, e.vout))
+    strahl = ergebnis.get("zeitstrahl") or {}
+    events = strahl.get("events") or []
+    events.sort(key=schluessel)
+    aeltere = 0
+    for e in events:
+        e["aeltere_sats"] = aeltere
+        aeltere += int(e.get("value_sats") or 0)
 
 
 def _lot_segmente_eintragen(
@@ -1158,15 +1249,24 @@ def _lot_segmente_eintragen(
     cache: Path | None,
     *,
     on_lot=None,
+    wallet=None,
 ) -> None:
     """
     Schreibt ``sats_gruen`` / ``sats_orange`` / ``sats_grau`` in Einträge
     und Zeitstrahl.
 
+    Mit *wallet* (``WalletContext``) verteilt jeder eigene Hop FIFO je
+    Output (``core.fifo_lots``), sonst anteilig.
+
     Mit Herkunftsnetz gilt für beide Lesarten: ganz grün nur wenn Grau und
     Orange null sind. Offensiv addiert in den Steuerjahr-Summen nur den
     grünen Anteil, nicht den ganzen UTXO nach dem ältesten Datum.
     Neuvermögen bleibt unfrei, Halten hebt den Stichtag nicht auf.
+
+    Datum (Option A, 2026-10-04): Ist der Baum FIFO-genau verteilt und jedes
+    Los datiert, kommt das Anschaffungsdatum aus den Losen im UTXO —
+    ``juengste`` das jüngste, ``aelteste`` das älteste Los. Anteilig
+    gemischte Bäume behalten den Ingress-Stempel.
     """
     from core import herkunftsnetz
 
@@ -1188,14 +1288,24 @@ def _lot_segmente_eintragen(
     except ValueError:
         stichtag_lot = None
     nach_key = {f"{e.txid}:{int(e.vout)}": e for e in objekte}
+    fifo = herkunftsnetz.FifoKontext.aus_cache(cache, wallet) if cache else None
+    aelteste = (ergebnis.get("anschaffung") or STANDARD_ANSCHAFFUNG) == ANSCHAFFUNG_AELTESTE
+    umsortieren = False
 
     for eintrag in ergebnis.get("eintraege") or []:
         key = f"{eintrag.get('txid')}:{int(eintrag.get('vout') or 0)}"
         objekt = nach_key.get(key)
+        event = events.get(key)
         seg = _lot_aus_cache(
             objekt, skala, frist, cache,
-            bezug=bezug, jahre=jahre, stichtag=stichtag_lot,
+            bezug=bezug, jahre=jahre, stichtag=stichtag_lot, fifo=fifo,
         ) if objekt else None
+        los_ts = (seg or {}).get("lot_von_ts" if aelteste else "lot_bis_ts")
+        if los_ts and bezug is not None:
+            umsortieren = _datum_aus_losen(
+                eintrag, objekt, event, int(los_ts),
+                bezug=bezug, jahre=jahre, stichtag=stichtag_lot, skala=skala,
+            ) or umsortieren
         if seg:
             eintrag["sats_gruen"] = seg["sats_gruen"]
             eintrag["sats_orange"] = seg["sats_orange"]
@@ -1209,7 +1319,6 @@ def _lot_segmente_eintragen(
             objekt.sats_grau = eintrag.get("sats_grau")
             objekt.sats_ohne_datum = eintrag.get("sats_ohne_datum")
             objekt.erfuellt = bool(eintrag.get("erfuellt"))
-        event = events.get(key)
         if event is not None:
             event["erfuellt"] = bool(eintrag.get("erfuellt"))
             event["sats_gruen"] = eintrag.get("sats_gruen")
@@ -1218,8 +1327,10 @@ def _lot_segmente_eintragen(
             event["sats_ohne_datum"] = eintrag.get("sats_ohne_datum")
         if on_lot is not None and seg:
             _lot_kennzahlen_nachziehen(ergebnis)
-            on_lot(_lot_zeile(eintrag, ergebnis))
+            on_lot(_lot_zeile(eintrag, ergebnis, event))
 
+    if umsortieren:
+        _nach_datum_ordnen(ergebnis, objekte)
     _lot_kennzahlen_nachziehen(ergebnis)
 
 

@@ -1193,6 +1193,8 @@
   "wallet.fifoSpendTitleOffensive": "FIFO-Spend · offensiv: Summe der grünen Lot-Anteile der UTXOs dieses Wallets, auch aus grün/gelb gemischten UTXOs (ihr Gelb geht im Wechselgeld zurück). Gelbe Anteile zählen nicht; UTXOs mit grauem Anteil zählen gar nicht (nie Input). Stand heute ({betrag}).",
   "wallet.fifoSpendTitleBasis": "Rein aus dem aktuellen Herkunfts-Trace je UTXO, keine Losbuchhaltung.",
   "wallet.fifoSpendTitleExact": "Genau {sats} sats.",
+  "wallet.fifoSpendTitleNet": "Netto: abzüglich {fee} sats Gebühr bei {rate} sat/vB ({inputs} Inputs) — grünes Maximum brutto {brutto} sats. Genau dieser Betrag lässt sich senden, 1 sat mehr nicht.",
+  "wallet.fifoSpendTitleGross": "Gebühr noch nicht abgezogen (Netto-Maximum wird berechnet oder ist gerade nicht verfügbar).",
   "wallet.fifoSpendTitleMempool": "{count} UTXO(s) werden gerade im Mempool ausgegeben – {betrag} grün abgezogen.",
   "wallet.fifoSpendMempoolIncompleteTitle": "Mempool-Stand dieses Wallets unvollständig – grüne sats gerade nicht sicher bestimmbar.",
   "wallet.fifoSpendTitleUnchecked": "{count} UTXO(s) ohne ausgewertete Herkunft zählen nicht mit.",

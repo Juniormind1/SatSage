@@ -1193,6 +1193,8 @@
   "wallet.fifoSpendTitleOffensive": "FIFO spend · offensive: sum of the green lot shares of this wallet's UTXOs, including green/yellow mixed UTXOs (their yellow returns in the change). Yellow shares do not count; UTXOs with any grey share do not count at all (never an input). As of today ({betrag}).",
   "wallet.fifoSpendTitleBasis": "Purely from the current origin trace per UTXO, no lot accounting.",
   "wallet.fifoSpendTitleExact": "Exactly {sats} sats.",
+  "wallet.fifoSpendTitleNet": "Net: minus {fee} sats fee at {rate} sat/vB ({inputs} inputs) — gross green maximum {brutto} sats. Exactly this amount can be sent, 1 sat more cannot.",
+  "wallet.fifoSpendTitleGross": "Fee not yet deducted (net maximum is being calculated or is unavailable right now).",
   "wallet.fifoSpendTitleMempool": "{count} UTXO(s) are being spent in the mempool – {betrag} green deducted.",
   "wallet.fifoSpendMempoolIncompleteTitle": "Mempool state of this wallet incomplete – green sats cannot be determined reliably right now.",
   "wallet.fifoSpendTitleUnchecked": "{count} UTXO(s) without analysed origin are not counted.",

@@ -276,6 +276,72 @@ class TestErzeuge(unittest.TestCase):
         self.assertEqual((erg["fee_sats"], erg["wechselgeld_sats"]), (628, 0))
         self.assertEqual(lab.erzeuge(summe - 627)["status"], "nicht_gedeckt")
         self.assertEqual(lab.erzeuge(summe + 1)["status"], "ueber_max")
+        # Netto-Maximum (grünes Maximum minus Gebühr): genau das, was noch geht.
+        m = pb.erzeuge(**self._args(lab, 0), nur_max=True)
+        self.assertEqual((m["status"], m["max_netto_sats"], m["max_netto_fee_sats"]),
+                         ("max", summe - 628, 628))
+        self.assertEqual(m["max_sats"], summe)
+
+    @staticmethod
+    def _args(lab, betrag, **ueber):
+        return {**dict(xpub=XPUB, typ=lab.typ, herkunft=pb.herkunft_fuer(XPUB), netz=NET,
+                       max_index=100, utxos=lab.utxos, pending=(), modus="defensiv",
+                       strategie="wechselgeld", betrag=betrag, fee_milli=2000, ziel_adresse=ZIEL,
+                       ziel_status="fremd", roh_tx_holen=lab.roh.get, hoehe=HOEHE,
+                       rng=random.Random(1)), **ueber}
+
+    def test_netto_max_ohne_ziel_und_taproot(self):
+        lab = Lab()
+        lab.utxo(0, 1, 700_000)
+        lab.utxo(0, 2, 300_000)
+        ohne = pb.erzeuge(**{**self._args(lab, 0), "ziel_adresse": "", "ziel_status": ""}, nur_max=True)
+        self.assertTrue(ohne["ziel_angenommen"])
+        mit = pb.erzeuge(**self._args(lab, 0), nur_max=True)
+        self.assertEqual(ohne["max_netto_sats"], mit["max_netto_sats"])  # P2WPKH wie Wechsel
+        tr = pb.erzeuge(**{**self._args(lab, 0), "ziel_adresse": ZIEL_TR}, nur_max=True)
+        self.assertEqual(mit["max_netto_sats"] - tr["max_netto_sats"], 2 * 12)  # +12 vB
+        for erg, ziel in ((mit, ZIEL), (tr, ZIEL_TR)):
+            m = erg["max_netto_sats"]
+            self.assertEqual(lab.erzeuge(m, ziel=ziel)["status"], "ok")
+            self.assertEqual(lab.erzeuge(m + 1, ziel=ziel)["status"], "nicht_gedeckt")
+
+    def test_offensiv_fifo_zwei_gemischte_wie_t5c(self):
+        """Lab-Fall T5c: zwei gemischte Inputs — Ziel ganz grün, Wechsel ganz gelb."""
+        lab = Lab()
+        lab.utxo(0, 1, 29_468_066 + 68_379_304, gelb=68_379_304, zeit=10)
+        lab.utxo(0, 2, 1_723_934 + 18_028_117, gelb=18_028_117, zeit=20)
+        m = pb.erzeuge(**self._args(lab, 0, modus="offensiv"), nur_max=True)
+        self.assertEqual((m["max_netto_sats"], m["max_netto_fee_sats"]), (31_191_582, 418))
+        erg = lab.erzeuge(31_191_582, modus="offensiv")
+        self.assertEqual((erg["status"], erg["fee_sats"], len(erg["inputs"])), ("ok", 418, 2))
+        ziel = next(o for o in erg["outputs"] if o["rolle"] == "ziel")
+        wechsel = next(o for o in erg["outputs"] if o["rolle"] == "wechsel")
+        self.assertEqual((ziel["sats_gruen"], ziel["sats_gelb"]), (31_191_582, 0))
+        self.assertEqual((wechsel["sats_gruen"], wechsel["sats_gelb"]), (0, 86_407_421))
+        self.assertEqual(lab.erzeuge(31_191_583, modus="offensiv")["status"], "nicht_gedeckt")
+
+    def test_ziel_im_selben_wallet_zaehlt_als_rueckfluss(self):
+        """Umbuchung ins eigene Wallet: Gebühr zuerst, dann beide Outputs nach vout."""
+        from core import fifo_lots as fl
+
+        lab = Lab()
+        lab.utxo(0, 1, 1_000_000, gelb=600_000)
+        eigen = _adresse(0, 50)
+        erg = pb.erzeuge(**{**self._args(lab, 150_000, modus="offensiv"), "ziel_adresse": eigen,
+                            "ziel_status": "meine", "ziel_wallet": "Test"}, quelle_wallet="Test")
+        self.assertEqual(erg["status"], "ok")
+        rest = 400_000 - erg["fee_sats"]
+        erwartet = []
+        for o in erg["outputs"]:
+            gruen = min(rest, o["value_sats"])
+            rest -= gruen
+            erwartet.append((gruen, o["value_sats"] - gruen))
+        self.assertEqual([(o["sats_gruen"], o["sats_gelb"]) for o in erg["outputs"]], erwartet)
+        # Fremd (oder anderes Wallet) verlässt das Wallet: Ziel zuerst.
+        fremd = lab.erzeuge(150_000, modus="offensiv")
+        ziel = next(o for o in fremd["outputs"] if o["rolle"] == "ziel")
+        self.assertEqual(ziel["sats_gruen"], 150_000)
+        self.assertTrue(fl.GEBUEHR)
 
     def test_ausschluesse(self):
         lab = Lab()
@@ -703,6 +769,23 @@ class TestServerPruefung(unittest.TestCase):
     def test_route_in_server(self):
         text = (Path(__file__).resolve().parent.parent / "server.py").read_text(encoding="utf-8")
         self.assertIn('teile == ["psbt", "erzeugen"] and methode == "POST"', text)
+        self.assertIn('teile == ["psbt", "max"] and methode == "POST"', text)
+
+    def test_netto_max_endpunkt(self):
+        """``POST /api/psbt/max``: Netto-Maximum geht genau, + 1 nicht mehr."""
+        erg = self._rufe({}, nur_max=True)
+        self.assertEqual(erg["status"], "max")
+        self.assertEqual(erg["max_sats"], 600_000)
+        m = erg["max_netto_sats"]
+        self.assertEqual(m, 600_000 - erg["max_netto_fee_sats"])
+        self.assertEqual(self._rufe({"betrag": m})["status"], "ok")
+        self.assertEqual(self._rufe({"betrag": m + 1})["status"], "nicht_gedeckt")
+        # Höhere Rate: kleineres Maximum; ohne Adresse: Größe der Wechseladresse.
+        self.assertLess(self._rufe({"fee": "5"}, nur_max=True)["max_netto_sats"], m)
+        ohne = self._rufe({"adresse": ""}, nur_max=True)
+        self.assertTrue(ohne["ziel_angenommen"])
+        for x in self.geheim:
+            self.assertNotIn(x, str(erg))
 
 
 class TestServerPruefungMultisig(TestServerPruefung):

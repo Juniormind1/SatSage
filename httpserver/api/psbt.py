@@ -169,7 +169,45 @@ def api_psbt_erzeugen(state: Any, payload: dict | None) -> dict:
     return _erzeugen(state, payload)
 
 
-def _erzeugen(state: Any, payload: dict | None, *, einstellungen: dict | None = None) -> dict:
+def api_psbt_max(state: Any, payload: dict | None) -> dict:
+    """
+    ``POST /api/psbt/max`` — Netto-Maximum für die FIFO-Spend-Kopfzeile.
+
+    Körper: ``wallet_id``, optional ``fee`` (sat/vB wie im Gebührenfeld; ohne
+    gilt die Schätzung mit Puffer, sonst 1 sat/vB) und ``adresse`` (ohne gilt
+    die Größe der eigenen Wechseladresse). Bestand, Lot-Anteile und Mempool
+    wie ``POST /api/psbt/erzeugen``; ``max_netto_sats`` ist der größte Betrag,
+    den die PSBT bei dieser Rate deckt — ``max_netto_sats`` + 1 nicht mehr.
+    Baut nichts.
+    """
+    return _erzeugen(state, payload, nur_max=True)
+
+
+def _max_fee_text(state: Any) -> str:
+    """Gebühr fürs Netto-Maximum ohne Eingabe: Schätzung + Puffer, sonst 1 sat/vB."""
+    from core.bitcoind_rpc import stelle_core_client_bereit, stelle_utxo_core_client_bereit
+    from core.fee_vorschlag import btc_kvb_zu_sat_vb, rate_mit_puffer, schaetzung_holen
+
+    env = state.env().values()
+
+    def fabrik():
+        return (
+            stelle_core_client_bereit(env, timeout=5.0)
+            or stelle_utxo_core_client_bereit(env, timeout=5.0)
+        )
+
+    try:
+        feerate, _fehler = schaetzung_holen(fabrik)
+        rate = rate_mit_puffer(btc_kvb_zu_sat_vb(feerate) if feerate is not None else None)
+    except Exception:
+        rate = None
+    return str(rate or 1)
+
+
+def _erzeugen(
+    state: Any, payload: dict | None, *, einstellungen: dict | None = None,
+    nur_max: bool = False,
+) -> dict:
     from core import tax as tax_mod
     from core.adresse_werkzeug import pruefe_zieladresse
     from core.bitcoind_rpc import stelle_core_client_bereit, stelle_utxo_core_client_bereit
@@ -203,9 +241,14 @@ def _erzeugen(state: Any, payload: dict | None, *, einstellungen: dict | None = 
         betrag = int(koerper.get("betrag") or 0)
     except (TypeError, ValueError):
         raise ApiError(400, "„betrag“ ist keine ganze Zahl.")
-    if betrag <= 0 or betrag > 21_000_000 * 100_000_000:
+    if nur_max:
+        betrag = 0
+    elif betrag <= 0 or betrag > 21_000_000 * 100_000_000:
         raise ApiError(400, "Betrag außerhalb des Bereichs.")
-    fee_milli = psbt_bau.fee_text_zu_milli(koerper.get("fee"))
+    fee_roh = koerper.get("fee")
+    if nur_max and not str(fee_roh or "").strip():
+        fee_roh = _max_fee_text(state)
+    fee_milli = psbt_bau.fee_text_zu_milli(fee_roh)
     if fee_milli is None:
         raise ApiError(400, "Gebühr ungültig (sat/vB, mehr als 0 bis 10 000, höchstens 3 Nachkommastellen).")
     strategie = str(koerper.get("strategie") or STANDARD_STRATEGIE).strip().lower()
@@ -219,9 +262,12 @@ def _erzeugen(state: Any, payload: dict | None, *, einstellungen: dict | None = 
     roh_adresse = str(koerper.get("adresse") or "")
     if len(roh_adresse) > 200:
         raise ApiError(400, "Adresse zu lang.")
-    ziel = pruefe_zieladresse(state.wallet_ctx, roh_adresse)
-    if ziel.get("status") not in ("meine", "fremd", "keine_wallets"):
-        raise ApiError(400, "Zieladresse ungültig oder im falschen Netz.")
+    if nur_max and not roh_adresse.strip():
+        ziel = {"address": "", "status": "", "wallet": ""}
+    else:
+        ziel = pruefe_zieladresse(state.wallet_ctx, roh_adresse)
+        if ziel.get("status") not in ("meine", "fremd", "keine_wallets"):
+            raise ApiError(400, "Zieladresse ungültig oder im falschen Netz.")
 
     env = state.env().values()
     einst = einstellungen or tax_mod.lese_steuer_einstellungen(env)
@@ -285,6 +331,24 @@ def _erzeugen(state: Any, payload: dict | None, *, einstellungen: dict | None = 
             herkunft = psbt_bau.herkunft_fuer(entry.xpub, entry.descriptor)
         except Exception:
             raise ApiError(400, "XPUB nicht lesbar.")
+
+    if nur_max:
+        try:
+            erg = psbt_bau.erzeuge(
+                xpub=entry.xpub, typ=typ, herkunft=herkunft, netz=netz, max_index=0,
+                utxos=utxos, pending=pending, modus=modus, strategie=strategie,
+                betrag=0, fee_milli=fee_milli, ziel_adresse=ziel["address"],
+                ziel_status=ziel["status"], multisig=multisig, nur_max=True,
+            )
+        except psbt_bau.PsbtFehler as exc:
+            raise ApiError(422, str(exc))
+        erg.update({
+            "wallet": entry.display_name,
+            "wallet_id": wallets_mod.eintrag_id(entry),
+            "mempool_geprueft": mempool_geprueft,
+            "fee_milli": fee_milli,
+        })
+        return erg
 
     core = None
     try:
@@ -363,7 +427,7 @@ def _erzeugen(state: Any, payload: dict | None, *, einstellungen: dict | None = 
             bekannte_adressen=bekannt,
             hat_history=hat_history if electrum is not None else None,
             roh_tx_holen=roh_tx_holen, hoehe=hoehe, nur_inputs=nur,
-            multisig=multisig,
+            multisig=multisig, quelle_wallet=str(entry.display_name or ""),
         )
     except psbt_bau.PsbtFehler as exc:
         raise ApiError(422, str(exc))

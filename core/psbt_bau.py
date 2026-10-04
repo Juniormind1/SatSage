@@ -699,9 +699,20 @@ def erzeuge(
     nur_inputs: Iterable[str] | None = None,
     rng: random.Random | None = None,
     multisig: MultisigPolitik | None = None,
+    quelle_wallet: str = "",
+    nur_max: bool = False,
 ) -> dict:
     """
     Auswahl neu rechnen und PSBT bauen. *utxos* aus ``zusammenfuehren``.
+
+    ``max_netto_sats``: größter Betrag, der bei dieser Rate und diesem Ziel
+    gedeckt ist (grünes Maximum minus Gebühr, ``coin_auswahl.netto_max``).
+    *nur_max*: nur die Maxima rechnen (``status`` ``max``), keine PSBT; ohne
+    Zieladresse gilt die Größe der eigenen Wechseladresse.
+
+    Lot-Anteile je Output: FIFO je Output (``core.fifo_lots``), dieselbe
+    Funktion wie die Herkunftsverfolgung. *quelle_wallet* (Anzeigename):
+    ein Ziel im selben Wallet zählt wie Wechselgeld.
 
     Multisig: *multisig* aus dem Deskriptor; *xpub*, *typ* und *herkunft*
     zählen dann nicht.
@@ -717,21 +728,24 @@ def erzeuge(
         FesteRate,
         Groessen,
         kandidaten,
+        netto_max,
         waehle,
     )
+    from core import fifo_lots
 
     if multisig is not None:
         typ = multisig.typ
     elif typ not in UNTERSTUETZTE_SKRIPTE:
         raise PsbtFehler(f"Skripttyp {typ!r} wird für PSBTs noch nicht unterstützt.")
-    if ziel_status not in ("meine", "fremd", "keine_wallets"):
+    ohne_ziel = nur_max and not ziel_adresse
+    if not ohne_ziel and ziel_status not in ("meine", "fremd", "keine_wallets"):
         raise PsbtFehler("Zieladresse ungültig oder im falschen Netz.")
     if not 0 < int(fee_milli) <= MAX_FEE_MILLI:
         raise PsbtFehler("Gebühr außerhalb des Bereichs.")
-    if int(betrag) < MIN_ZIEL_SATS:
+    if not nur_max and int(betrag) < MIN_ZIEL_SATS:
         raise PsbtFehler(f"Betrag unter der Staubgrenze ({MIN_ZIEL_SATS} sats).")
     modus = "offensiv" if modus == "offensiv" else "defensiv"
-    ziel_spk = address_to_scriptpubkey(ziel_adresse).data
+    ziel_spk = None if ohne_ziel else address_to_scriptpubkey(ziel_adresse).data
 
     if multisig is not None:
         hd = None
@@ -754,12 +768,26 @@ def erzeuge(
         def wechsel_spk_an(i: int):
             return ableiten(hd, typ, 1, i)[1]
     wechsel_probe = wechsel_spk_an(0).data
+    if ziel_spk is None:
+        ziel_spk = wechsel_probe
 
     nutzbar = [u for u in utxos if u.get("bestaetigt", True)]
     kand = kandidaten(nutzbar, modus=modus, pending=pending)
     max_sats = sum(k.beitrag for k in kand)
+    groessen = Groessen(
+        input_vb=input_vb,
+        ziel_vb=output_vbytes(ziel_spk),
+        wechsel_vb=output_vbytes(wechsel_probe),
+        basis_vb=10 if typ == "legacy" else 10.5,
+    )
+    netto = netto_max(kand, basis_rate=FesteRate(int(fee_milli)), groessen=groessen)
     basis = {"modus": modus, "strategie": strategie, "betrag_sats": int(betrag),
-             "max_sats": max_sats, "kandidaten": len(kand)}
+             "max_sats": max_sats, "max_netto_sats": netto["max_netto_sats"],
+             "max_netto_fee_sats": netto["fee_sats"], "max_netto_inputs": netto["inputs"],
+             "kandidaten": len(kand)}
+    if nur_max:
+        return {**basis, "status": "max", "sat_vb": FesteRate(int(fee_milli)).sat_vb,
+                "ziel_angenommen": ohne_ziel}
     if nur_inputs is not None:
         zulaessig = {k.key for k in kand}
         fehlt = [str(k).strip().lower() for k in nur_inputs
@@ -770,12 +798,6 @@ def erzeuge(
     if int(betrag) > max_sats:
         return {**basis, "status": "ueber_max"}
 
-    groessen = Groessen(
-        input_vb=input_vb,
-        ziel_vb=output_vbytes(ziel_spk),
-        wechsel_vb=output_vbytes(wechsel_probe),
-        basis_vb=10 if typ == "legacy" else 10.5,
-    )
     auswahl = waehle(kand, betrag=int(betrag), basis_rate=FesteRate(int(fee_milli)),
                      strategie=strategie, groessen=groessen, nur=nur_inputs)
     if auswahl.get("status") != "ok":
@@ -834,20 +856,30 @@ def erzeuge(
     psbt, reihe = baue_psbt(xpub=xpub, typ=typ, herkunft=herkunft, eingaenge=eingaenge,
                             ausgaenge=ausgaenge, locktime=locktime, rng=rng, multisig=multisig)
 
+    # Lot-Anteile je Output: FIFO je Output — dieselbe Verteilung wie die
+    # Herkunftsverfolgung nach dem Senden (core.fifo_lots).
+    ziel_bleibt = bool(ziel_status == "meine" and quelle_wallet and ziel_wallet == quelle_wallet)
+    lose = fifo_lots.klassen_lose(
+        (beitrag[u["key"]], e.wert - beitrag[u["key"]], 0) for e, u in zip(eingaenge, gewaehlt)
+    )
+    verteilt = fifo_lots.verteilen(lose, fifo_lots.verbraucher(
+        ((n, a.wert, a.rolle == "wechsel" or ziel_bleibt) for n, a in enumerate(reihe)), fee,
+    ))
     outputs = []
-    for a in reihe:
+    for n, a in enumerate(reihe):
+        anteil = fifo_lots.klassen_summen(verteilt.get(fifo_lots.output_schluessel(n), []))
         if a.rolle == "ziel":
             outputs.append({
                 "rolle": "ziel", "adresse": ziel_adresse, "value_sats": a.wert,
                 "farbe": "gruen" if ziel_status == "meine" else "gelb",
                 "wallet": ziel_wallet if ziel_status == "meine" else "",
-                "sats_gruen": a.wert, "sats_gelb": 0,
+                "sats_gruen": anteil["sats_gruen"], "sats_gelb": anteil["sats_gelb"],
             })
         else:
             outputs.append({
                 "rolle": "wechsel", "adresse": wechsel_adresse, "value_sats": a.wert,
                 "farbe": "gruen", "pfad": pfad_text(*a.pfad),
-                "sats_gruen": a.wert - nicht_gruen, "sats_gelb": nicht_gruen,
+                "sats_gruen": anteil["sats_gruen"], "sats_gelb": anteil["sats_gelb"],
             })
     inputs = []
     for e, u in zip(eingaenge, gewaehlt):

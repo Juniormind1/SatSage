@@ -332,7 +332,13 @@ def api_tax_herkunftsnetz(
     def block_zeit(hoehe: int) -> int | None:
         return xpub_cache.load_cached_block_time(hoehe, state.immutable_cache_dir)
 
-    netz = herkunftsnetz.flach(baum, fokus_key, skala, block_zeit=block_zeit)
+    # Dieselben Anteile wie der Lot-Ring der Auswertung: FIFO je Output.
+    netz = herkunftsnetz.flach(
+        baum, fokus_key, skala, block_zeit=block_zeit,
+        fifo=herkunftsnetz.FifoKontext.aus_cache(
+            state.immutable_cache_dir, getattr(state, "wallet_ctx", None),
+        ),
+    )
     from core import wallets as wallets_mod
 
     namen = {

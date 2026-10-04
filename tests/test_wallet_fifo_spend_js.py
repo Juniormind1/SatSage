@@ -156,6 +156,9 @@ let feeAntwort = () => ({ status: "ok", quelle: "schaetzung", sat_vb: 4, schaetz
 let adressAntwort = () => ({ status: "fremd", netz: "regtest" });
 const configAufrufe = [];
 let configFehler = null;
+const nettoAufrufe = [];
+// Standard: Server rechnet kein Netto-Maximum — die Zeile bleibt beim Brutto.
+let nettoAntwort = () => { throw new Error("kein Netto"); };
 async function api(pfad, opts = {}) {
   if (pfad === "/config/fifo-strategie") {
     configAufrufe.push({ methode: opts.methode, daten: opts.daten });
@@ -173,6 +176,12 @@ async function api(pfad, opts = {}) {
     const daten = JSON.parse(JSON.stringify(opts.daten));
     psbtAufrufe.push(daten);
     return psbtAntwort(daten);
+  }
+  if (pfad === "/psbt/max") {
+    if (opts.methode !== "POST") throw new Error("POST erwartet");
+    const daten = JSON.parse(JSON.stringify(opts.daten));
+    nettoAufrufe.push(daten);
+    return nettoAntwort(daten);
   }
   if (pfad.startsWith("/address/owner?")) {
     const addr = new URLSearchParams(pfad.split("?")[1]).get("addr");
@@ -206,7 +215,11 @@ _FUNKTIONEN = [
     "function formatSatcomma(",
     "function fifoBetragMitFiat(",
     "function fifoBetragText(",
+    "function fifoSpendBrutto(",
     "function fifoSpendMax(",
+    "function fifoNettoSchluessel(",
+    "function fifoNettoAktuell(",
+    "function planeFifoNetto(",
     "function fifoGrueneSats(",
     "function fifoSpendAbfrage(",
     "function holeFifoSpendAuswertung(",
@@ -256,7 +269,7 @@ def _node(skript: str) -> dict:
     konst = [z for z in WALLETS.splitlines()
              if z.startswith(("const FIFO_SATCOMMA_LUECKE", "const FIFO_MAX_SATS",
                               "const FIFO_ZIEL_ENTPRELLEN_MS", "const FIFO_FEE_ENTPRELLEN_MS",
-                              "const FIFO_STRATEGIEN"))]
+                              "const FIFO_STRATEGIEN", "const FIFO_NETTO_ENTPRELLEN_MS"))]
     teile = [_STUB, *konst] + [_funktion(WALLETS, k) for k in _FUNKTIONEN]
     code = (
         "\n".join(teile)
@@ -758,6 +771,67 @@ class TestFifoLeiste(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node fehlt")
+class TestFifoNettoMax(unittest.TestCase):
+    """Kopfzeile und Betragsprüfung nehmen das Netto-Maximum (Gebühr abgezogen)."""
+
+    def test_netto_ersetzt_brutto_und_plus_eins_ist_ungueltig(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV } };
+          nettoAntwort = (d) => ({ status: "max", max_netto_sats: 49718, max_netto_fee_sats: 282,
+            max_netto_inputs: 1, sat_vb: 2, max_sats: 50000 });
+          aktualisiereFifoSpend("w1"); await warte();
+          const vorher = els["#fifo-spend-betrag"].dataset.max;
+          await new Promise((r) => setTimeout(r, FIFO_NETTO_ENTPRELLEN_MS + 30));
+          const feld = els["#fifo-spend-betrag"];
+          const probe = (v) => { feld.value = v; pruefeFifoSpendBetrag();
+            return feld.classList.contains("ungueltig"); };
+          process.stdout.write(JSON.stringify({
+            vorher, nachher: feld.dataset.max, aufrufe: nettoAufrufe,
+            text: els["#fifo-spend-text"].textContent, titel: els["#fifo-spend-text"].title,
+            genau: probe("49718"), plusEins: probe("49719"),
+          }));
+        """)
+        self.assertEqual(erg["vorher"], "50000")       # Brutto, solange der Server rechnet
+        self.assertEqual(erg["nachher"], "49718")      # Netto
+        self.assertEqual(erg["aufrufe"], [{"wallet_id": "w1"}])  # ohne Gebühr: Server-Schätzung
+        self.assertIn(f"49{NB}718", erg["text"])
+        self.assertFalse(erg["genau"])
+        self.assertTrue(erg["plusEins"])
+
+    def test_gebuehr_aendert_netto(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV } };
+          nettoAntwort = (d) => {
+            const rate = d.fee ? Number(d.fee) : 1;
+            return { status: "max", max_netto_sats: 50000 - 110 * rate, max_netto_fee_sats: 110 * rate,
+              max_netto_inputs: 1, sat_vb: rate };
+          };
+          aktualisiereFifoSpend("w1"); await warte();
+          await new Promise((r) => setTimeout(r, FIFO_NETTO_ENTPRELLEN_MS + 30));
+          const eins = els["#fifo-spend-betrag"].dataset.max;
+          const fee = els["#fifo-ziel-fee"];
+          fee.value = "5"; pruefeFifoZielFee();
+          await new Promise((r) => setTimeout(r, FIFO_NETTO_ENTPRELLEN_MS + 30));
+          process.stdout.write(JSON.stringify({ eins, fuenf: els["#fifo-spend-betrag"].dataset.max,
+            letzte: nettoAufrufe[nettoAufrufe.length - 1] }));
+        """)
+        self.assertEqual(erg["eins"], "49890")
+        self.assertEqual(erg["fuenf"], "49450")
+        self.assertEqual(erg["letzte"], {"wallet_id": "w1", "fee": "5"})
+
+    def test_server_fehler_bleibt_brutto(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV } };
+          aktualisiereFifoSpend("w1"); await warte();
+          await new Promise((r) => setTimeout(r, FIFO_NETTO_ENTPRELLEN_MS + 30));
+          process.stdout.write(JSON.stringify({ max: els["#fifo-spend-betrag"].dataset.max,
+            titel: els["#fifo-spend-text"].title }));
+        """)
+        self.assertEqual(erg["max"], "50000")
+        self.assertIn("wallet.fifoSpendTitleGross", erg["titel"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node fehlt")
 class TestFifoZielZeile(unittest.TestCase):
 
     def test_psbt_frage_nur_mit_gueltigem_betrag_und_klappt_auf(self):
@@ -1254,6 +1328,8 @@ class TestFifoStatisch(unittest.TestCase):
         "wallet.fifoSpendTitleOffensive",
         "wallet.fifoSpendTitleBasis",
         "wallet.fifoSpendTitleExact",
+        "wallet.fifoSpendTitleNet",
+        "wallet.fifoSpendTitleGross",
         "wallet.fifoSpendTitleMempool",
         "wallet.fifoSpendMempoolIncompleteTitle",
         "wallet.fifoSpendTitleUnchecked",
@@ -1436,9 +1512,10 @@ class TestFifoStatisch(unittest.TestCase):
     def test_kein_versand_kein_signieren(self):
         teil = WALLETS[WALLETS.index("/* --- wallet-fifo-spend --- */"):]
         teil = teil[:teil.index("Zeigt den Abgleich gegen die Sanktionslisten")]
-        # Schreibaufrufe: Auswahl-Vorschau und PSBT-Erzeugung (POST, ohne Schlüssel)
-        # und die Strategie-Einstellung (PUT). Kein Signier- oder Sende-Endpunkt.
-        self.assertEqual(sorted(re.findall(r'methode:\s*"(\w+)"', teil)), ["POST", "POST", "PUT"])
+        # Schreibaufrufe: Auswahl-Vorschau, Netto-Maximum und PSBT-Erzeugung (POST,
+        # ohne Schlüssel) und die Strategie-Einstellung (PUT). Kein Signier- oder Sende-Endpunkt.
+        self.assertEqual(sorted(re.findall(r'methode:\s*"(\w+)"', teil)), ["POST", "POST", "POST", "PUT"])
+        self.assertIn('api("/psbt/max", { methode: "POST"', teil)
         self.assertIn('api("/config/fifo-strategie", { methode: "PUT"', teil)
         self.assertIn('api("/psbt/auswahl", { methode: "POST"', teil)
         self.assertIn('api("/psbt/erzeugen", { methode: "POST"', teil)
