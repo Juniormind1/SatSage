@@ -968,15 +968,50 @@ def api_trace_gespeichert(state: AppState, query: dict) -> dict:
     if gespeichert is None:
         return {"vorhanden": False}
     ergebnis = gespeichert["baum"]
+    lot_fifo = _lot_ring_fifo(state, ergebnis, f"{txid}:{int(vout)}")
     if lf.query_text(query, "seite") == "1":
         ergebnis = trace_knoten.seitenweise(ergebnis, lf.query_int(query, "limit", 10))
-    return {
+    antwort = {
         "vorhanden": True,
         "erstellt_ts": gespeichert["erstellt_ts"],
         "veraltet": gespeichert["veraltet"],
         "adressen_seither": gespeichert["adressen_seither"],
         "ergebnis": ergebnis,
     }
+    if lot_fifo:
+        antwort["lot_fifo"] = lot_fifo
+    return antwort
+
+
+def _lot_ring_fifo(state: AppState, baum: dict, fokus_key: str) -> dict | None:
+    """
+    Lot-Ring (grün/orange/grau in sats) wie im Steuerjahr: FIFO je Output.
+
+    Die Ringe in Herkunft und Wallet-Liste mischten bisher die Blätter des
+    Baums anteilig im Browser — bei FIFO-Verschiebungen und hinter einem
+    CoinJoin wich das vom Steuerjahr ab. Fehler → None (der Browser rechnet
+    dann wie bisher selbst).
+    """
+    try:
+        from core import herkunftsnetz, xpub_cache
+        from core.tax import lese_steuer_einstellungen, parse_stichtag
+
+        einstellungen = lese_steuer_einstellungen(state.env().values())
+
+        def block_zeit(hoehe: int) -> int | None:
+            return xpub_cache.load_cached_block_time(hoehe, state.immutable_cache_dir)
+
+        return herkunftsnetz.lot_ring(
+            baum, fokus_key,
+            fifo=herkunftsnetz.FifoKontext.aus_cache(
+                state.immutable_cache_dir, getattr(state, "wallet_ctx", None),
+            ),
+            block_zeit=block_zeit,
+            jahre=int(einstellungen.get("haltefrist_jahre") or 0),
+            stichtag=parse_stichtag(einstellungen.get("stichtag_iso") or ""),
+        )
+    except Exception:
+        return None
 
 
 def api_trace_knoten(state: AppState, query: dict) -> dict:

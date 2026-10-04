@@ -539,11 +539,12 @@ class TestDatumAusLosen(unittest.TestCase):
         self._tx(name, [(f"{name}{i}", 0) for i in range(len(lose))], [(sum(s for s, _ in lose), adresse)])
         return self._eigen(name, sum(s for s, _ in lose), datum, adresse, kinder)
 
-    def _utxo(self, name, vout, sats, datum, adresse, kinder, stempel):
+    def _utxo(self, name, vout, sats, datum, adresse, kinder, stempel, **root):
         trace_cache.speichern(txid(name), vout, {
             "found": True,
             "root": {"txid": txid(name), "vout": vout, "amount_sats": sats, "address": adresse,
-                     "wallet": self.WALLET[adresse], "time_label": f"{datum} 12:00:00", "type": "utxo"},
+                     "wallet": self.WALLET[adresse], "time_label": f"{datum} 12:00:00", "type": "utxo",
+                     **root},
             "children": kinder,
         }, self.cache)
         ordner = self.cache / main.UTXO_INGRESS_CACHE_SUBDIR
@@ -744,3 +745,147 @@ console.log(JSON.stringify({ ohne, mit: aufrufe, ev: daten.zeitstrahl.events[0] 
         self.assertEqual(r["mit"], [["neu", True]])
         self.assertEqual((r["ev"]["datum"], r["ev"]["time_ts"], r["ev"]["pos"], r["ev"]["datum_aus_losen"]),
                          ("03.06.2024", 1, 40, True))
+
+
+class TestWhirlpoolPostmix(TestDatumAusLosen):
+    """
+    Promo-Lab 2026-10-04 (Höhe 648): Whirlpool-tx0 035d4a2f… und Mix 7296934f….
+
+    tx0: Eingänge grün 086dca…:0 24 421 152 (02.10.2025) und gelb bfd896…:0
+    84 287 666 (Los 07.05.2026); Outputs Premix 1 000 250 (vout 0, HS Alpha),
+    Koordinator 50 000 (vout 1, extern), Wechselgeld 107 658 088 (vout 2, HS Alpha).
+    Mix: 5 Eingänge (Premix an vin 2, sonst fremde Remixer), 5 × 1 000 000;
+    Postmix vout 4 an HS Alpha. Vor dem Fix endete die Herkunft des Postmix als
+    Bündel an der Output-Zeit des Premix (04.10.2026) → ganz gelb.
+    """
+
+    def _premix(self):
+        gruen = self._eigen("08", 24_421_152, "02.10.2025", "alpha0",
+                            [self._ende("ed", 24_441_152, "02.10.2025")])
+        gelb = self._eigen("bf", 84_287_666, "12.06.2026", "alpha4", [
+            self._eigen("fb", 105_359_935, "07.05.2026", "alpha5",
+                        [self._ende("7a", 105_379_935, "07.05.2026")])])
+        return [gruen, gelb]
+
+    def _lab(self, mit_mix_tx=True):
+        self._tx("08", [("ed", 1)], [(24_421_152, "alpha0")])
+        self._tx("fb", [("7a", 0)], [(105_359_935, "alpha5")])
+        self._tx("bf", [("fb", 0)], [(84_287_666, "alpha4"), (21_071_987, "fremd-p")])
+        self._tx("35", [("08", 0), ("bf", 0)],
+                 [(1_000_250, "alpha1"), (50_000, "koordinator"), (107_658_088, "alpha2")])
+        if mit_mix_tx:
+            self._tx("72", [("43", 0), ("43", 1), ("35", 0), ("43", 2), ("43", 3)],
+                     [(1_000_000, f"remix{i}") for i in range(4)] + [(1_000_000, "alpha3")])
+        premix = self._eigen("35", 1_000_250, "03.10.2026", "alpha1", self._premix())
+        postmix = self._utxo("72", 4, 1_000_000, "03.10.2026", "alpha3", [premix],
+                             ("07.05.2026", "02.10.2025"), tx_class="whirlpool")
+        wechsel = self._utxo("35", 2, 107_658_088, "03.10.2026", "alpha2", self._premix(),
+                             ("07.05.2026", "02.10.2025"))
+        for u in (postmix, wechsel):
+            u["status"]["block_time"] = _ts("03.10.2026")
+        # Ein alter UTXO wie im Lab, damit die Fristgrenze auf der Achse liegt.
+        alt = self._utxo("d0", 0, 1_000, "01.01.2024", "alpha6",
+                         [self._ende("dd", 1_000, "01.01.2024")], ("01.01.2024", "01.01.2024"))
+        return [postmix, wechsel, alt]
+
+    def test_postmix_gruen_aus_dem_premix_los(self):
+        mx, t0 = k("72")[:2], k("35")[:2]
+        self._fall(self._lab(), {
+            "juengste": {f"{mx}:4": ("02.10.2025", 1_000_000, 0, True),
+                         f"{t0}:2": ("07.05.2026", 23_370_422, 84_287_666, False)},
+            "aelteste": {f"{mx}:4": ("02.10.2025", 1_000_000, 0, True),
+                         f"{t0}:2": ("02.10.2025", 23_370_422, 84_287_666, False)},
+        })
+
+    def test_herkunft_laeuft_durch_den_mix(self):
+        """Kein Bündel: Premix und seine Vorfahren tragen den Anteil, Abfluss 250 aus dem ältesten Los."""
+        self._lab()
+        baum = trace_cache.laden(txid("72"), 4, self.cache)["baum"]
+        fifo = hn.FifoKontext.aus_cache(self.cache, self.ctx)
+        r = hn.flach(baum, k("72", 4), SKALA, fifo=fifo)
+        kn = {v["key"]: v for v in r["vorfahren"]}
+        self.assertNotIn(f"buendel:{k('72', 4)}", kn)
+        self.assertEqual(kn[k("35")]["anteil_sats"], 1_000_000)
+        self.assertEqual(kn[k("ed")]["anteil_sats"], 1_000_000)
+        self.assertNotIn(k("7a"), kn)
+        self.assertFalse(r["anteilig"])
+
+    def test_lot_ring_der_herkunft_wie_im_steuerjahr(self):
+        """``GET /api/trace`` → ``lot_fifo``: derselbe Ring (FIFO) für Herkunft und Wallet-Liste."""
+        self._lab()
+        fifo = hn.FifoKontext.aus_cache(self.cache, self.ctx)
+        jetzt = datetime(2026, 10, 4, 12, 0)
+        post = hn.lot_ring(trace_cache.laden(txid("72"), 4, self.cache)["baum"], k("72", 4),
+                           fifo=fifo, jahre=1, jetzt=jetzt)
+        self.assertEqual((post["sats_gruen"], post["sats_orange"], post["sats_grau"]), (1_000_000, 0, 0))
+        wechsel = hn.lot_ring(trace_cache.laden(txid("35"), 2, self.cache)["baum"], k("35", 2),
+                              fifo=fifo, jahre=1, jetzt=jetzt)
+        self.assertEqual((wechsel["sats_gruen"], wechsel["sats_orange"]), (23_370_422, 84_287_666))
+        # Anteilig (ohne FIFO-Kontext) wären es beim Wechselgeld andere Zahlen.
+        anteilig = hn.lot_ring(trace_cache.laden(txid("35"), 2, self.cache)["baum"], k("35", 2),
+                               fifo=None, jahre=1, jetzt=jetzt)
+        self.assertNotEqual(anteilig["sats_gruen"], 23_370_422)
+        self.assertIsNone(hn.lot_ring({"found": False}, k("35", 2)))
+
+    def test_ohne_mix_tx_anteilig_ueber_eigene_eingaenge(self):
+        """Mix-Tx nicht im Cache: anteilig über den Premix — der ist ganz grün, also bleibt der Postmix grün."""
+        mx = k("72")[:2]
+        ist, _erg = self._werte(self._lab(mit_mix_tx=False), "juengste")
+        e = ist[f"{mx}:4"]
+        self.assertEqual((e["sats_gruen"], e["sats_orange"]), (1_000_000, 0))
+
+
+class TestCoinjoinHop(unittest.TestCase):
+    """``_fifo_coinjoin_hop``: nur eigene Ein- und Ausgänge, Abfluss vor dem Wechselgeld."""
+
+    WALLET = {"a0": "A", "a1": "A", "a2": "A", "b0": "B"}
+
+    def _ctx(self, txs):
+        return hn.FifoKontext(tx=lambda t: txs.get(t), wallet=lambda a: self.WALLET.get(a))
+
+    def _kind(self, name, sats, adresse):
+        return ({"type": "internal", "from_utxo": k(name), "amount_sats": sats, "address": adresse},
+                k(name), hn.TYP_EIGEN)
+
+    def test_zwei_eigene_outputs_nach_vout_abfluss_zuerst(self):
+        # Eigene Eingänge 600 (alt) + 400 (jung); eigene Outputs vout 1 (450) und vout 3 (500);
+        # Abfluss 50 (Gebühren) nimmt das älteste Los zuerst.
+        txs = {txid("cj"): tx([("f0", 0), ("e0", 0), ("e1", 0)],
+                               [(500, "x"), (450, "a1"), (500, "y"), (500, "a2")])}
+        kinder = [self._kind("e0", 600, "a0"), self._kind("e1", 400, "a0")]
+        eingang = [[L(600, 1, (), ("alt",))], [L(400, 2, (), ("jung",))]]
+        v1 = hn._fifo_coinjoin_hop(self._ctx(txs), k("cj", 1), 450, kinder, eingang)
+        v3 = hn._fifo_coinjoin_hop(self._ctx(txs), k("cj", 3), 500, kinder, eingang)
+        self.assertEqual(marken(v1), [(("alt",), 450)])
+        self.assertEqual(marken(v3), [(("alt",), 100), (("jung",), 400)])
+
+    def test_anderes_eigenes_wallet_vor_dem_abfluss(self):
+        txs = {txid("cj"): tx([("e0", 0), ("e1", 0)], [(300, "b0"), (650, "a1")])}
+        kinder = [self._kind("e0", 500, "a0"), self._kind("e1", 500, "a0")]
+        eingang = [[L(500, 1, (), ("alt",))], [L(500, 2, (), ("jung",))]]
+        self.assertEqual(marken(hn._fifo_coinjoin_hop(self._ctx(txs), k("cj", 0), 300, kinder, eingang)),
+                         [(("alt",), 300)])
+        # Abfluss 50 nach dem Output an B, dann der Rest an A.
+        self.assertEqual(marken(hn._fifo_coinjoin_hop(self._ctx(txs), k("cj", 1), 650, kinder, eingang)),
+                         [(("alt",), 150), (("jung",), 500)])
+
+    def test_eigene_outputs_groesser_als_eigene_eingaenge_fallback(self):
+        txs = {txid("cj"): tx([("e0", 0), ("f0", 0)], [(600, "a1"), (400, "x")])}
+        kinder = [self._kind("e0", 500, "a0")]
+        self.assertIsNone(hn._fifo_coinjoin_hop(self._ctx(txs), k("cj", 0), 600, kinder, [[L(500, 1)]]))
+        self.assertFalse(hn._coinjoin_eigen({"tx_class": "whirlpool", "amount_sats": 600},
+                                            [kinder[0][0]], k("cj", 0), self._ctx(txs)))
+
+    def test_eingang_nicht_in_der_tx_kein_coinjoin_pfad(self):
+        txs = {txid("cj"): tx([("f0", 0)], [(400, "a1")])}
+        kind = self._kind("e0", 500, "a0")
+        self.assertIsNone(hn._fifo_coinjoin_hop(self._ctx(txs), k("cj", 0), 400, [kind], [[L(500, 1)]]))
+        self.assertFalse(hn._coinjoin_eigen({"tx_class": "whirlpool", "amount_sats": 400},
+                                            [kind[0]], k("cj", 0), self._ctx(txs)))
+
+    def test_kein_coinjoin_bleibt_normaler_hop(self):
+        kind = self._kind("e0", 500, "a0")[0]
+        self.assertFalse(hn._coinjoin_eigen({"tx_class": "fan_out_own", "amount_sats": 400},
+                                            [kind], k("cj", 0), None))
+        self.assertTrue(hn._coinjoin_eigen({"tx_class": "wabisabi", "amount_sats": 400},
+                                           [kind], k("cj", 0), None))

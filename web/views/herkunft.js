@@ -1021,6 +1021,8 @@ async function ladeGespeichertenZweig(utxo, zweig, klapp, ausJob = null) {
   if (!utxo || !utxo.key || !zweig) return false;
   zweig.dataset.geladen = "laeuft";
   delete zweig._lotKinder;
+  delete zweig._lotFifo;
+  delete zweig._lotFifoZiel;
   // Ring der zugeklappten Zeile stehen lassen, bis der neue Baum ihn ersetzt.
   zweig.replaceChildren(hinweisZeile(t("common.looking")));
   try {
@@ -1165,6 +1167,8 @@ async function starteZweigTrace(
   }
   if (typeof stoesseEmpfangScanPuls === "function") stoesseEmpfangScanPuls();
   delete zweig._lotKinder;
+  delete zweig._lotFifo;
+  delete zweig._lotFifoZiel;
   if (force) entferneLotDonut(wurzelLotPunkt(zweig.closest(".utxo-wurzel")));
 
   const status = document.createElement("div");
@@ -1501,6 +1505,8 @@ function gebeAnderenBaumFrei(zweig) {
   alt.replaceChildren();
   alt.dataset.geladen = "";
   delete alt._lotKinder;
+  delete alt._lotFifo;
+  delete alt._lotFifoZiel;
   delete alt.dataset.teilbaum;
   delete alt.dataset.baumZiel;
   const wurzelAlt = alt.closest(".utxo-wurzel");
@@ -1514,6 +1520,8 @@ function zeichneZweig(ergebnis, zweig, utxo = null, klapp = null) {
   gebeAnderenBaumFrei(zweig);
   zweig.replaceChildren();
   delete zweig._lotKinder;
+  delete zweig._lotFifo;
+  delete zweig._lotFifoZiel;
   const wurzelVorab = zweig.closest(".utxo-wurzel");
 
   if (!ergebnis.found) {
@@ -1884,9 +1892,28 @@ function holeLotMischung(ziel, speicher) {
         ? lotZeitTs(g.ergebnis.root)
         : 0;
       if (wurzelZeit) speicher._lotObergrenze = wurzelZeit;
+      const fifo = lotFifoAusAntwort(g);
+      if (fifo) return fifo;
       return lotMischungAusBaum(voll, Number(speicher._lotObergrenze) || 0);
     })
     .catch(() => null);
+}
+
+/**
+ * ``lot_fifo`` aus ``GET /api/trace`` → {gruen, orange, grau}. Der Server
+ * rechnet FIFO je Output (auch durch eigene CoinJoins); fehlt das Feld,
+ * mischt der Browser die Blätter wie bisher anteilig.
+ */
+function lotFifoAusAntwort(g) {
+  const m = g && g.lot_fifo;
+  if (!m || typeof m !== "object") return null;
+  const ring = {
+    gruen: Number(m.sats_gruen) || 0,
+    orange: Number(m.sats_orange) || 0,
+    grau: Number(m.sats_grau) || 0,
+  };
+  if (!(ring.gruen + ring.orange + ring.grau > 0)) return null;
+  return ring;
 }
 
 function punktHatLotDonut(punkt) {
@@ -1918,13 +1945,40 @@ function aktualisiereLotDonut(wurzel, zweig, kinder, startObergrenze) {
   }
   const quelle = Array.isArray(kinder) ? kinder : zweig._lotKinder;
   const grenze = Number(zweig._lotObergrenze) || 0;
+  const ziel = zweig.dataset.baumZiel;
+  if (ziel && zweig._lotFifo && zweig._lotFifoZiel === ziel) {
+    setzeLotDonut(punkt, zweig._lotFifo);
+    return;
+  }
+  if (ziel && !zweig._lotLauf && zweig._lotFifoZiel !== ziel) {
+    // Einmal je Baum den Server-Ring holen (FIFO); bis dahin bzw. ohne ihn anteilig.
+    zweig._lotFifoZiel = ziel;
+    zweig._lotLauf = api(`/trace?target=${encodeURIComponent(ziel)}`)
+      .then((g) => {
+        if (zweig.dataset.baumZiel !== ziel) return;
+        const fifo = lotFifoAusAntwort(g);
+        if (fifo) {
+          zweig._lotFifo = fifo;
+          setzeLotDonut(punkt, fifo);
+          return;
+        }
+        const voll = g && g.vorhanden && g.ergebnis && g.ergebnis.children;
+        if (!Array.isArray(voll) || punktHatLotDonut(punkt)) return;
+        zweig._lotKinder = voll;
+        const wurzelZeit = g.ergebnis && g.ergebnis.root ? lotZeitTs(g.ergebnis.root) : 0;
+        if (wurzelZeit) zweig._lotObergrenze = wurzelZeit;
+        const mischung = lotMischungAusBaum(voll, Number(zweig._lotObergrenze) || 0);
+        if (mischung) setzeLotDonut(punkt, mischung);
+      })
+      .catch(() => {})
+      .finally(() => { delete zweig._lotLauf; });
+  }
   if (Array.isArray(quelle) && lotKinderVollstaendig(quelle)) {
     const mischung = lotMischungAusBaum(quelle, grenze);
     if (mischung) setzeLotDonut(punkt, mischung);
     else entferneLotDonut(punkt);
     return;
   }
-  const ziel = zweig.dataset.baumZiel;
   if (ziel && !zweig._lotLauf && !punktHatLotDonut(punkt)) {
     zweig._lotLauf = api(`/trace?target=${encodeURIComponent(ziel)}`)
       .then((g) => {
@@ -1936,7 +1990,7 @@ function aktualisiereLotDonut(wurzel, zweig, kinder, startObergrenze) {
           ? lotZeitTs(g.ergebnis.root)
           : 0;
         if (wurzelZeit) zweig._lotObergrenze = wurzelZeit;
-        const mischung = lotMischungAusBaum(
+        const mischung = lotFifoAusAntwort(g) || lotMischungAusBaum(
           voll, Number(zweig._lotObergrenze) || 0,
         );
         if (mischung) setzeLotDonut(punkt, mischung);
@@ -1997,6 +2051,8 @@ async function starteTrace() {
     if (zweig) {
       zweig.dataset.geladen = "";
       delete zweig._lotKinder;
+      delete zweig._lotFifo;
+      delete zweig._lotFifoZiel;
       zweig.replaceChildren();
       entferneLotDonut(wurzelLotPunkt(block));
       const zeile = block.querySelector(".utxo-kopf");

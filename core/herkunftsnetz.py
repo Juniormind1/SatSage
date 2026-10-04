@@ -300,6 +300,49 @@ def lot_mischung(
     return aus
 
 
+def lot_ring(
+    baum: dict,
+    fokus_key: str,
+    *,
+    fifo: "FifoKontext | None" = None,
+    block_zeit: Callable[[int], int | None] | None = None,
+    jahre: int = 1,
+    stichtag: date | None = None,
+    jetzt: datetime | None = None,
+) -> dict | None:
+    """
+    Lot-Ring eines UTXO ohne Steuer-Auswertung (Herkunft, Wallet-Liste).
+
+    Dieselbe Rechnung wie der Ring im Steuerjahr — ``flach`` (FIFO je
+    Output mit *fifo*) und ``lot_mischung`` —, nur mit einer eigenen Achse
+    vom Genesis-Block bis *jetzt* und der Fristgrenze *jetzt* − *jahre*.
+    Liefert ``sats_gruen``/``sats_orange``/``sats_grau`` (+ ``anteilig``).
+    """
+    from core.tax import plus_jahre
+
+    if not isinstance(baum, dict) or not baum.get("found") or not baum.get("root"):
+        return None
+    jetzt = jetzt or datetime.now()
+    skala = Skala(von=datetime(2009, 1, 3), bis=jetzt, hoechst=1)
+    if int(jahre or 0) > 0:
+        frist_pos = skala.pos(plus_jahre(jetzt, -int(jahre)))
+    else:
+        frist_pos = skala.pos(jetzt) + 1.0  # ohne Frist: alles Datierte grün
+    netz = flach(baum, fokus_key, skala, block_zeit=block_zeit, fifo=fifo)
+    seg = lot_mischung(
+        netz.get("vorfahren"), frist_pos, fokus_key,
+        kanten=netz.get("kanten"), bezug=jetzt, jahre=int(jahre or 0), stichtag=stichtag,
+    )
+    if not seg:
+        return None
+    return {
+        "sats_gruen": seg["sats_gruen"],
+        "sats_orange": seg["sats_orange"],
+        "sats_grau": seg["sats_grau"],
+        "anteilig": bool(netz.get("anteilig")),
+    }
+
+
 def _typ(knoten: dict) -> str:
     typ = knoten.get("type")
     if typ == "internal":
@@ -331,6 +374,48 @@ def _buendeln(eltern: dict, kinder: list[dict]) -> bool:
     if len(kinder) > FULL_RESOLUTION_INPUT_LIMIT:
         return True
     return any(k.get("type") == "external_unresolved" for k in kinder)
+
+
+def _coinjoin_eigen(
+    eltern: dict,
+    kinder: list[dict],
+    eltern_key: str,
+    fifo: "FifoKontext | None",
+) -> bool:
+    """
+    CoinJoin, der nicht gebündelt wird: Seine Eingänge im Baum sind alle
+    eigen und aufgelöst (die Verfolgung hinter einem CoinJoin folgt nur den
+    eigenen Eingängen), und sie decken die eigenen Outputs der Tx.
+
+    Dann finanzieren die eigenen Eingänge die eigenen Outputs (die fremden
+    Teilnehmer ihre eigenen); die Herkunft läuft durch den CoinJoin weiter
+    zu den Losen der eigenen Eingänge (``_fifo_coinjoin_hop``), statt an
+    deren Output-Zeit als Bündel zu enden. Ohne Tx im Cache zählt der
+    Fokus-Output selbst als „eigene Outputs“.
+    """
+    if str(eltern.get("tx_class") or "") not in COINJOIN_KINDS:
+        return False
+    if not kinder or len(kinder) > FULL_RESOLUTION_INPUT_LIMIT:
+        return False
+    for kind in kinder:
+        if kind.get("type") == "external_unresolved":
+            return False
+        if _typ(kind) not in (TYP_EIGEN, TYP_HORIZONT):
+            return False
+        if not str(kind.get("from_utxo") or "").strip():
+            return False
+    summe_ein = sum(int(k.get("amount_sats") or 0) for k in kinder)
+    eigen_aus = int(eltern.get("amount_sats") or 0)
+    outpoint = _schluessel_outpoint(eltern_key)
+    tx = fifo.tx(outpoint[0]) if fifo is not None and outpoint else None
+    if isinstance(tx, dict):
+        index = _vin_index(tx)
+        if any(str(k.get("from_utxo")).strip().lower() not in index for k in kinder):
+            return False
+        eigen_aus = sum(
+            wert for _n, wert, adresse in _tx_ausgaenge(tx) if fifo.wallet(adresse)
+        )
+    return eigen_aus > 0 and summe_ein >= eigen_aus
 
 
 @dataclass(frozen=True)
@@ -460,11 +545,76 @@ def _fifo_hop(
     gebuehr = summe_ein - sum(a[1] for a in ausgaenge)
     if gebuehr < 0:
         return None
-    reihe = fifo_lots.verbraucher(
+    verteilt = fifo_lots.je_output(
+        lose,
         ((n, wert, fifo.wallet(adresse) in sender) for n, wert, adresse in ausgaenge),
         gebuehr,
     )
-    verteilt = fifo_lots.verteilen(fifo_lots.ordnen(lose), reihe)
+    return verteilt.get(fifo_lots.output_schluessel(outpoint[1]), [])
+
+
+def _fifo_coinjoin_hop(
+    fifo: FifoKontext | None,
+    key: str,
+    sats: int,
+    kinder: list[tuple[dict, str, str]],
+    eingang: list[list[fifo_lots.Los]],
+) -> list[fifo_lots.Los] | None:
+    """
+    Lose eines eigenen CoinJoin-Outputs (Whirlpool-Mix, WabiSabi, …).
+
+    Die eigenen Eingänge (*kinder*) finanzieren nur die eigenen Outputs; die
+    fremden Ein- und Ausgänge gehören den anderen Teilnehmern und bleiben
+    außen vor. Die Lose der eigenen Eingänge laufen FIFO (älteste zuerst)
+    durch dieselbe Verbraucher-Regel wie jeder Hop (``fifo_lots``): eigene
+    Outputs an ein anderes eigenes Wallet nach vout, dann der Abfluss
+    (eigene Eingänge − eigene Outputs = Koordinator- und Mining-Gebühr,
+    verlässt das Wallet), dann die Outputs zurück an ein Wallet der Eingänge
+    nach vout. Mehrere Rückflüsse (WabiSabi mit mehreren eigenen Outputs):
+    defensiv das jüngste verbliebene Los für jeden (``fifo_lots.je_output``).
+    None = Fallback anteilig über die eigenen Eingänge.
+    """
+    if fifo is None:
+        return None
+    outpoint = _schluessel_outpoint(key)
+    if outpoint is None:
+        return None
+    tx = fifo.tx(outpoint[0])
+    if not isinstance(tx, dict):
+        return None
+    ausgaenge = _tx_ausgaenge(tx)
+    eigener = [a for a in ausgaenge if a[0] == outpoint[1]]
+    if not eigener or eigener[0][1] != int(sats):
+        return None
+    index = _vin_index(tx)
+    sender: set[str] = set()
+    summe_ein = 0
+    lose: list[fifo_lots.Los] = []
+    for pos, ((kind, ckey, _typ), kind_lose) in enumerate(zip(kinder, eingang)):
+        vin_pos = index.get(str(ckey).lower())
+        if vin_pos is None:
+            return None
+        wallet = fifo.wallet(str(kind.get("address") or ""))
+        if wallet:
+            sender.add(wallet)
+        summe_ein += int(kind.get("amount_sats") or 0)
+        lose.extend(
+            fifo_lots.Los(sats=l.sats, zeit=l.zeit, rang=(vin_pos,) + l.rang, marke=l.marke)
+            for l in kind_lose
+        )
+    if not sender:
+        return None
+    eigene = []
+    for n, wert, adresse in ausgaenge:
+        wallet = fifo.wallet(adresse)
+        if wallet:
+            eigene.append((n, wert, wallet in sender))
+    if outpoint[1] not in {n for n, _w, _z in eigene}:
+        return None
+    abfluss = summe_ein - sum(w for _n, w, _z in eigene)
+    if abfluss < 0:
+        return None
+    verteilt = fifo_lots.je_output(lose, eigene, abfluss)
     return verteilt.get(fifo_lots.output_schluessel(outpoint[1]), [])
 
 
@@ -500,7 +650,10 @@ def flach(
 
     Anteile: mit *fifo* FIFO je Output (``core.fifo_lots``) an jedem Hop,
     dessen Eingänge alle eigen und aufgelöst sind und dessen Tx im Cache
-    liegt; sonst anteilig (pro rata). Vorfahren ohne Anteil am Fokus fallen
+    liegt; sonst anteilig (pro rata). Ein CoinJoin, dessen Eingänge im Baum
+    alle eigen sind und die eigenen Outputs decken, wird nicht gebündelt:
+    Die Herkunft läuft zu den Losen der eigenen Eingänge weiter
+    (``_coinjoin_eigen``, ``_fifo_coinjoin_hop``). Vorfahren ohne Anteil am Fokus fallen
     weg. ``anteilig`` sagt, ob ein anteiliger Hop (mit Losen verschiedener
     Zeit) oder ein Bündel zum Fokus beiträgt.
     """
@@ -514,7 +667,7 @@ def flach(
     reihenfolge: list[str] = []
     eigen_kante: dict[tuple[str, str], bool] = {}
     #: id(Instanz) → (Schlüssel, Plan); Plan None = Ende,
-    #: ("buendel", key) oder ("kinder", [(kind, key, typ, marker)]).
+    #: ("buendel", key) oder ("kinder", [(kind, key, typ, marker)], coinjoin).
     instanz: dict[int, tuple[str, tuple | None]] = {}
     #: Hops, die anteilig verteilt haben und dabei Lose verschiedener Zeit
     #: mischten, und Bündel — dort ist kein Los-Datum belastbar.
@@ -566,8 +719,10 @@ def flach(
         if not kinder:
             continue
         voll = len(knoten) >= max_knoten
-        gekappt = gekappt or (voll and not _buendeln(eltern, kinder))
-        if voll or _buendeln(eltern, kinder):
+        coinjoin = _coinjoin_eigen(eltern, kinder, eltern_key, fifo)
+        buendeln = _buendeln(eltern, kinder) and not coinjoin
+        gekappt = gekappt or (voll and not buendeln)
+        if voll or buendeln:
             bkey = _buendel(
                 kinder, eltern_key, 0.0, tiefe + 1, fokus_sats,
                 neu=neu, kante=kante, zeitfelder=zeitfelder, skala=skala,
@@ -607,7 +762,7 @@ def flach(
             plan.append((kind, key, typ, False))
             if typ == TYP_EIGEN and enkel:
                 schlange.append((kind, key, tiefe + 1))
-        instanz[id(eltern)] = (eltern_key, ("kinder", plan))
+        instanz[id(eltern)] = (eltern_key, ("kinder", plan, coinjoin))
 
     # 2) Lose von unten: jeder Hop gibt seinem Output FIFO (oder anteilig)
     #    Lose seiner Eingänge weiter. ``marke`` = Pfad der Schlüssel.
@@ -631,7 +786,8 @@ def flach(
                 l if l.zeit is not None else fifo_lots.Los(l.sats, zeit_hop, l.rang, l.marke)
                 for l in kind_lose
             ])
-        ergebnis = _fifo_hop(fifo, key, int(sats), echte, eingang)
+        hop = _fifo_coinjoin_hop if plan[2] else _fifo_hop
+        ergebnis = hop(fifo, key, int(sats), echte, eingang)
         if ergebnis is None:
             if len({l.zeit for kl in eingang for l in kl}) > 1:
                 anteilig_keys.add(key)

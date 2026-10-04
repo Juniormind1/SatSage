@@ -185,10 +185,20 @@ class TestFlach(unittest.TestCase):
         self.assertEqual(kanten(r)[(f"buendel:{k('f0')}", k("f0"))], n * 10)
 
     def test_coinjoin_und_abgebrochene_aufloesung_buendeln(self):
+        # CoinJoin mit nur eigenen, deckenden Eingängen: kein Bündel mehr —
+        # die Herkunft läuft zu den eigenen Eingängen weiter (Postmix-Fix).
         cj = baum(500, [intern("a1", 250, "01.01.2024 00:00:00"),
                         intern("a2", 250, "01.01.2024 00:00:00")],
                   tx_class="whirlpool")
-        self.assertEqual([v["typ"] for v in netz(cj)["vorfahren"]], ["eigen", "buendel"])
+        self.assertEqual([v["typ"] for v in netz(cj)["vorfahren"]], ["eigen", "eigen", "eigen"])
+        # Ein fremder Eingang im Baum oder eigene Eingänge, die den Output
+        # nicht decken: weiter ein Bündel.
+        cj_fremd = baum(500, [intern("a1", 250, "01.01.2024 00:00:00"),
+                              extern("e1", 250, "01.01.2024 00:00:00")],
+                        tx_class="whirlpool")
+        self.assertEqual([v["typ"] for v in netz(cj_fremd)["vorfahren"]], ["eigen", "buendel"])
+        cj_knapp = baum(500, [intern("a1", 300, "01.01.2024 00:00:00")], tx_class="wabisabi")
+        self.assertEqual([v["typ"] for v in netz(cj_knapp)["vorfahren"]], ["eigen", "buendel"])
         abbruch = baum(500, [
             intern("a1", 500, "01.01.2024 00:00:00"),
             {"type": "external_unresolved", "input_count": 30, "amount_sats": 0,

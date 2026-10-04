@@ -862,9 +862,9 @@ def erzeuge(
     lose = fifo_lots.klassen_lose(
         (beitrag[u["key"]], e.wert - beitrag[u["key"]], 0) for e, u in zip(eingaenge, gewaehlt)
     )
-    verteilt = fifo_lots.verteilen(lose, fifo_lots.verbraucher(
-        ((n, a.wert, a.rolle == "wechsel" or ziel_bleibt) for n, a in enumerate(reihe)), fee,
-    ))
+    verteilt = fifo_lots.je_output(
+        lose, ((n, a.wert, a.rolle == "wechsel" or ziel_bleibt) for n, a in enumerate(reihe)), fee,
+    )
     outputs = []
     for n, a in enumerate(reihe):
         anteil = fifo_lots.klassen_summen(verteilt.get(fifo_lots.output_schluessel(n), []))
