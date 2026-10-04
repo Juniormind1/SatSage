@@ -559,7 +559,10 @@ class TestOberflaeche(unittest.TestCase):
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""
         self.assertIn('id="einrichtung-weiter"', self.html)
-        self.assertIn('oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets")', self.einrichtung_js)
+        # Ziel aus der Schritt-ID, nicht aus dem übersetzten Titel (en „Add a wallet“).
+        self.assertIn("oeffneVerwaltung(ziel)", self.einrichtung_js)
+        self.assertIn('offen("wallets") || !offen("node") ? "wallets" : "datenquellen"', self.einrichtung_js)
+        self.assertNotIn('startsWith("Wallets")', self.einrichtung_js)
 
     def test_verwaltung_ist_aufgeteilt(self):
         """Wallets, Einstellungen und Datenquellen sind eigene Ansichten."""
@@ -596,20 +599,36 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('oeffnen.addEventListener("click", zeigeEinrichtung)', self.einrichtung_js)
 
     def test_begruessung_nennt_header_download_und_electrs(self):
-        """Sonst startet der erste XPUB-Scan ohne Vorwarnung in den Header-Sync."""
-        self.assertIn("Block-Header", self.html)
-        self.assertIn("SegWit", self.html)
-        self.assertIn("August 2017", self.html)
-        self.assertIn("einmalig", self.html)
-        self.assertIn("electrs", self.html)
-        self.assertIn("Hintergrund", self.html)
+        """Sonst startet der erste XPUB-Scan ohne Vorwarnung in den Header-Sync.
+
+        Der Dialog bleibt kurz: die Erklärung steht im Handbuch, der Dialog
+        verlinkt sie (neuer Tab), der Schritt „Node“ nennt den Header-Download.
+        """
+        handbuch = (WEB.parent / "doc" / "handbuch.html").read_text(encoding="utf-8")
+        start = handbuch.find('id="erste-einrichtung"')
+        self.assertGreater(start, 0)
+        abschnitt = handbuch[start:handbuch.find("<h4>", start + 10)]
+        for wort in ("Block-Header", "SegWit", "August 2017", "einmalig", "electrs",
+                     "Hintergrund", "<code>.env</code>", 'href="#datenquellen"',
+                     'href="#wallets"', 'href="#explorer"'):
+            self.assertIn(wort, abschnitt)
         self.assertIn("folgeHeaderJob", self.js)
         self.assertIn("sichereHeaderVorab", self.js)
         self.assertIn("header_job_id", self.js)
         self.assertIn('"/headers"', self.js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
-        self.assertIn("erspart den einmaligen Block-Header-Download", de)
-        self.assertIn('t("setup.step.electrumText")', self.einrichtung_js)
+        self.assertIn("Ohne: Compact Filter (einmalig Block-Header)", de)
+        self.assertIn('t("setup.step.nodeText")', self.einrichtung_js)
+        dialog = self.html[self.html.find('id="einrichtung"'):self.html.find('id="privatsphaere-warnung"')]
+        link = re.search(r'<a [^>]*href="/handbuch\.html#erste-einrichtung"[^>]*>', dialog)
+        self.assertIsNotNone(link)
+        self.assertIn('target="_blank"', link.group(0))
+        self.assertIn('rel="noopener"', link.group(0))
+        self.assertIn('data-i18n="dialog.setup.handbook"', link.group(0))
+        # Kein Aufklapp-Text und kein .env-Pfad mehr im Dialog.
+        self.assertNotIn("<details", dialog)
+        self.assertNotIn("einrichtung-pfad", dialog)
+        self.assertNotIn("August 2017", dialog)
 
     def test_alle_knoepfe_haben_einen_hilfetext(self):
         """Im Rest der Oberfläche hat jeder Knopf einen — hier auch."""
@@ -854,16 +873,35 @@ class TestOberflaeche(unittest.TestCase):
         )
 
     def test_drei_schritte_werden_beschrieben(self):
+        """Node (empfohlen), Block-Explorer (optional), zuletzt Wallet (Pflicht)."""
         abschnitt = re.search(r"function einrichtungsSchritte\(.*?\n}",
                               self.einrichtung_js, re.S).group(0)
-        keys = re.findall(r't\("(setup\.step\.[^"]+)"', abschnitt)
-        self.assertIn("setup.step.wallets", keys)
-        self.assertIn("setup.step.electrum", keys)
-        self.assertIn("setup.step.explorer", keys)
-        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
-        self.assertIn("Wallets eintragen", de)
-        self.assertIn("Eigener Electrum-Server", de)
-        self.assertIn("Block-Explorer", de)
+        ids = re.findall(r'id: "([a-z]+)"', abschnitt)
+        self.assertEqual(ids, ["node", "explorer", "wallets"])
+        keys = re.findall(r't\("(setup\.step\.[^".]+)"', abschnitt)
+        self.assertEqual([k for k in keys if not k.endswith(("Text", "Stand", "None", "notSet"))],
+                         ["setup.step.node", "setup.step.explorer", "setup.step.wallets"])
+        # Nur der Explorer ist optional und hält die Einrichtung nicht offen.
+        self.assertEqual(abschnitt.count("optional: true"), 1)
+        self.assertLess(abschnitt.index('id: "explorer"'), abschnitt.index("optional: true"))
+        self.assertLess(abschnitt.index("optional: true"), abschnitt.index('id: "wallets"'))
+        self.assertIn("!s.erledigt && !s.optional", self.einrichtung_js)
+        import json
+        for code in ("de", "en"):
+            kat = json.loads((WEB / "locales" / f"{code}.json").read_text(encoding="utf-8"))
+            for k in ("setup.step.electrum", "setup.step.core", "setup.step.coreText",
+                      "setup.step.electrumText", "setup.step.bip158Text"):
+                self.assertNotIn(k, kat)
+            # Jeder Schritt eine Zeile, Einleitung ein Satz.
+            for k in ("setup.step.nodeText", "setup.step.explorerText", "setup.step.walletsText",
+                      "dialog.setup.intro1"):
+                self.assertLessEqual(len(kat[k].split()), 20, (code, k))
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertEqual(de["setup.step.node"], "Node verbinden (empfohlen)")
+        self.assertEqual(de["setup.step.explorer"], "Block-Explorer eintragen")
+        self.assertEqual(de["setup.step.wallets"], "Wallet eintragen")
+        self.assertEqual(de["dialog.setup.intro1"],
+                         "SatSage liest nur öffentliche Schlüssel und kann nichts ausgeben.")
 
     def test_explorer_pfeil_faerbt_nach_netz(self):
         """Grün im eigenen Netz, Gelb bei öffentlichem/fremdem Explorer."""

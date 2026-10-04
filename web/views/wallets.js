@@ -1635,7 +1635,7 @@ function formatiereFifoSpendBetrag() {
   pruefeFifoSpendBetrag();
 }
 
-// --- Ziel-Zeile: „Senden ▸/▾“ klappt auf, Zieladresse live, Gebühr, „PSBT!“ (folgt) ---
+// --- Ziel-Zeile: „Senden ▸/▾“ klappt auf, Zieladresse live, Gebühr, „PSBT“ erzeugt die Datei ---
 
 /** Netznamen fürs Tooltip. */
 function fifoNetzName(netz) {
@@ -1653,6 +1653,7 @@ function fifoZielZeigen(offen) {
     knopf.setAttribute("aria-expanded", offen ? "true" : "false");
     setzeText(knopf, t(offen ? "wallet.fifoSpendPsbtExpanded" : "wallet.fifoSpendPsbtOpen"));
   }
+  zeigeFifoPsbtErgebnis(Zustand.fifoPsbtErgebnis || null);
   if (offen) {
     const wahl = $("#fifo-ziel-strategie");
     if (wahl) wahl.value = fifoStrategie();
@@ -1685,6 +1686,7 @@ function aktualisiereFifoPsbtKnopf() {
   if (huelle) huelle.title = titel;
   // Status-Label neben der Adresse in der aktuellen Sprache nachziehen.
   if (Zustand.fifoZielErgebnis) zeigeFifoZielAdresse(Zustand.fifoZielErgebnis);
+  aktualisiereFifoPsbtErzeugen();
 }
 
 function fifoZielUmschalten() {
@@ -1749,6 +1751,7 @@ function zeigeFifoZielAdresse(erg) {
     marke.dataset.zustand = zustand;
     marke.title = label ? titel : "";
   }
+  aktualisiereFifoPsbtErzeugen();
 }
 
 /** Entprellt: erst nach der Tipp-Pause fragen; späte Antworten verwerfen. */
@@ -1801,6 +1804,7 @@ function pruefeFifoZielFee() {
   if (ok) feld.removeAttribute("aria-invalid");
   else feld.setAttribute("aria-invalid", "true");
   Zustand.fifoZielFeeMilli = milli;
+  aktualisiereFifoPsbtErzeugen();
   if (!ok) {
     feld.title = t("wallet.fifoTargetFeeInvalid");
     return;
@@ -1861,6 +1865,8 @@ function fifoAuswahlKoerper(stand, sats) {
     strategie: fifoStrategie(),
     utxos,
     pending,
+    // Nur für die vbytes (Multisig-Inputs sind größer) — kein Bestand vom Server.
+    wallet_id: id,
   };
 }
 
@@ -1984,6 +1990,215 @@ function fifoFeeVerlassen() {
   pruefeFifoZielFee();
 }
 
+// --- „PSBT“: Server baut die PSBT (BIP174 v0) neu aus eigenem Bestand, Datei-Download ---
+
+/** Wallet der FIFO-Zeile aus der Konfiguration (Name). */
+function fifoAktuellesWallet() {
+  const id = String((Zustand.fifoSpend && Zustand.fifoSpend.walletId) || Zustand.walletId || "");
+  return ((Zustand.config && Zustand.config.wallets) || []).find((w) => String(w.id) === id) || null;
+}
+
+/** Warum „PSBT“ gesperrt ist (Katalog-Schlüssel) — null heißt bereit. */
+function fifoPsbtSperre() {
+  // Multisig (wsh/sh-wsh sortedmulti) baut der Server wie Single-Sig; was er
+  // nicht kann (Taproot, Miniscript), meldet er mit Grund.
+  const sats = Zustand.fifoSpendBetragSats;
+  if (!(sats > 0) || fifoSpendMax(Zustand.fifoSpend) === null) return "wallet.fifoSpendPsbtNeedsAmount";
+  const ziel = Zustand.fifoZielErgebnis;
+  if (!ziel || !["meine", "fremd", "keine_wallets"].includes(ziel.status)) return "wallet.fifoPsbtNeedsAddress";
+  if (!(Zustand.fifoZielFeeMilli > 0)) return "wallet.fifoPsbtNeedsFee";
+  if (Zustand.fifoPsbtLaeuft) return "wallet.fifoPsbtBusy";
+  return null;
+}
+
+/** Eingaben, zu denen ein gezeigtes Ergebnis gehört — ändert sich eine, verschwindet es. */
+function fifoPsbtSchluessel() {
+  const stand = Zustand.fifoSpend || {};
+  const ziel = Zustand.fifoZielErgebnis || {};
+  return [stand.walletId || "", Zustand.fifoSpendBetragSats || "", ziel.address || "",
+    Zustand.fifoZielFeeMilli || "", fifoStrategie()].join("|");
+}
+
+/** „PSBT“ freigeben oder sperren; Tooltip nennt den Grund. */
+function aktualisiereFifoPsbtErzeugen() {
+  const knopf = $("#fifo-ziel-psbt");
+  if (!knopf) return;
+  const sperre = fifoPsbtSperre();
+  knopf.disabled = sperre !== null;
+  const titel = t(sperre || "wallet.fifoSpendPsbtTitle");
+  knopf.title = titel;
+  const huelle = $("#fifo-ziel-psbt-huelle");
+  if (huelle) huelle.title = titel;
+  const alt = Zustand.fifoPsbtErgebnis;
+  if (alt && !Zustand.fifoPsbtLaeuft && alt.schluessel !== fifoPsbtSchluessel()) {
+    Zustand.fifoPsbtErgebnis = null;
+    zeigeFifoPsbtErgebnis(null);
+  }
+}
+
+/** milli-sat/vB als Text mit Punkt — der Server liest ihn wie das Feld. */
+function fifoMilliText(milli) {
+  const n = Math.max(0, Math.floor(Number(milli) || 0));
+  const rest = n % 1000;
+  return rest ? `${Math.floor(n / 1000)}.${String(rest).padStart(3, "0").replace(/0+$/, "")}` : String(n / 1000);
+}
+
+/**
+ * Körper für ``POST /api/psbt/erzeugen``: nur Wunsch und Ziel. Bestand,
+ * Lot-Anteile, Mempool, Maximum und Auswahl rechnet der Server selbst.
+ */
+function fifoPsbtKoerper() {
+  const stand = Zustand.fifoSpend || {};
+  const ziel = Zustand.fifoZielErgebnis || {};
+  const feld = $("#fifo-ziel-adresse");
+  return {
+    wallet_id: String(stand.walletId || ""),
+    betrag: Zustand.fifoSpendBetragSats,
+    adresse: ziel.address || String((feld && feld.value) || "").trim(),
+    fee: fifoMilliText(Zustand.fifoZielFeeMilli),
+    strategie: fifoStrategie(),
+    modus: stand.modus === "offensiv" ? "offensiv" : "defensiv",
+    lang: typeof uiSprache === "function" ? uiSprache() : "de",
+  };
+}
+
+/** ``<wallet>-<yyyymmdd-hhmm>.psbt`` in lokaler Zeit; Sonderzeichen werden „-“. */
+function fifoPsbtDateiname(name, jetzt) {
+  const d = jetzt || new Date();
+  const z = (n) => String(n).padStart(2, "0");
+  const stempel = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+  const sauber = String(name || "").trim().replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^[-.]+|-+$/g, "");
+  return `${sauber || "wallet"}-${stempel}.psbt`;
+}
+
+/** Base64 → Binärdatei herunterladen (kein Server-Pfad, kein Zwischenspeicher). */
+function fifoPsbtHerunterladen(b64, dateiname) {
+  const roh = atob(b64);
+  const bytes = new Uint8Array(roh.length);
+  for (let i = 0; i < roh.length; i += 1) bytes[i] = roh.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = dateiname;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** Kurze Übersicht: Inputs, Outputs mit Farbe und Grün/Gelb-Anteil, Gebühr, RBF. */
+function fifoPsbtZusammenfassung(erg, datei) {
+  const zeilen = [t(erg.ohne_wechselgeld ? "wallet.fifoPsbtSummaryNoChange" : "wallet.fifoPsbtSummary", {
+    datei: datei || "", inputs: (erg.inputs || []).length, fee: formatZahl(erg.fee_sats),
+    rate: formatZahl(erg.sat_vb), vsize: formatZahl(erg.vsize),
+  })];
+  for (const o of erg.outputs || []) {
+    const farbe = o.farbe === "gruen"
+      ? (o.wallet || t("wallet.fifoPsbtOwnWallet"))
+      : t("wallet.fifoTargetStatusExternal");
+    zeilen.push(t(o.rolle === "wechsel" ? "wallet.fifoPsbtOutputChange" : "wallet.fifoPsbtOutputTarget", {
+      betrag: formatZahl(o.value_sats), adresse: o.adresse || "", farbe,
+      gruen: formatZahl(o.sats_gruen), gelb: formatZahl(o.sats_gelb),
+    }));
+  }
+  zeilen.push(t("wallet.fifoPsbtRbf", { locktime: erg.locktime || 0 }));
+  if (erg.multisig) {
+    zeilen.push(t("wallet.fifoPsbtMultisigInfo", {
+      m: erg.multisig.m, n: erg.multisig.n,
+      fps: (erg.multisig.fingerprints || []).join(", "),
+    }));
+  }
+  if (erg.herkunft && erg.herkunft.quelle === "xpub") zeilen.push(t("wallet.fifoPsbtFingerprintXpub"));
+  if (erg.mempool_geprueft === false) zeilen.push(t("wallet.fifoPsbtMempoolUnchecked"));
+  return zeilen;
+}
+
+/** Text für Antworten ohne PSBT (Auswahl nicht möglich). */
+function fifoPsbtStatusText(erg) {
+  const v = erg || {};
+  if (v.status === "ueber_max") return t("wallet.fifoPsbtOverMax", { max: formatZahl(v.max_sats || 0) });
+  if (v.status === "unzulaessig") return t("wallet.fifoPsbtNotEligible");
+  const auswahl = fifoAuswahlText(v);
+  return auswahl.length ? auswahl[0] : t("wallet.fifoPsbtFailed", { msg: v.status || "?" });
+}
+
+/** Ergebnis-Kasten unter der Ziel-Zeile (nur sichtbar, wenn die Zeile offen ist). */
+function zeigeFifoPsbtErgebnis(e) {
+  const kasten = $("#fifo-psbt-ergebnis");
+  const text = $("#fifo-psbt-text");
+  if (!kasten || !text) return;
+  const zeile = $("#fifo-spend-ziel");
+  const kopieren = $("#fifo-psbt-kopieren");
+  if (!e || (zeile && zeile.hidden)) {
+    kasten.hidden = true;
+    return;
+  }
+  let zeilen;
+  let zustand;
+  if (e.laedt) {
+    zeilen = [t("wallet.fifoPsbtBusy")];
+    zustand = "laedt";
+  } else if (e.fehler) {
+    zeilen = [t("wallet.fifoPsbtFailed", { msg: e.fehler })];
+    zustand = "fehler";
+  } else if (e.erg && e.erg.status === "ok") {
+    zeilen = fifoPsbtZusammenfassung(e.erg, e.datei);
+    zustand = "ok";
+  } else {
+    zeilen = [fifoPsbtStatusText(e.erg)];
+    zustand = "fehler";
+  }
+  kasten.hidden = false;
+  kasten.dataset.zustand = zustand;
+  text.textContent = zeilen.join("\n");
+  if (kopieren) {
+    kopieren.hidden = zustand !== "ok";
+    kopieren.textContent = t("wallet.fifoPsbtCopy");
+  }
+}
+
+/** Klick auf „PSBT“: erzeugen lassen, Datei herunterladen, Übersicht zeigen. */
+function fifoPsbtErzeugen() {
+  if (fifoPsbtSperre() !== null) return Promise.resolve();
+  const koerper = fifoPsbtKoerper();
+  const schluessel = fifoPsbtSchluessel();
+  const wallet = fifoAktuellesWallet();
+  Zustand.fifoPsbtLaeuft = true;
+  Zustand.fifoPsbtErgebnis = { schluessel, laedt: true };
+  aktualisiereFifoPsbtErzeugen();
+  zeigeFifoPsbtErgebnis(Zustand.fifoPsbtErgebnis);
+  return api("/psbt/erzeugen", { methode: "POST", daten: koerper })
+    .then((erg) => {
+      let datei = "";
+      if (erg && erg.status === "ok" && erg.psbt_base64) {
+        datei = fifoPsbtDateiname(erg.wallet || (wallet && wallet.name), new Date());
+        fifoPsbtHerunterladen(erg.psbt_base64, datei);
+      }
+      Zustand.fifoPsbtErgebnis = { schluessel, erg, datei };
+    })
+    .catch((fehler) => {
+      Zustand.fifoPsbtErgebnis = { schluessel, fehler: (fehler && fehler.message) || String(fehler || "") };
+    })
+    .finally(() => {
+      Zustand.fifoPsbtLaeuft = false;
+      zeigeFifoPsbtErgebnis(Zustand.fifoPsbtErgebnis);
+      aktualisiereFifoPsbtErzeugen();
+    });
+}
+
+/** Base64 der zuletzt erzeugten PSBT in die Zwischenablage. */
+function fifoPsbtKopieren() {
+  const e = Zustand.fifoPsbtErgebnis;
+  const knopf = $("#fifo-psbt-kopieren");
+  const b64 = e && e.erg && e.erg.psbt_base64;
+  if (!b64 || !knopf) return Promise.resolve(false);
+  return Promise.resolve(kopiereInZwischenablage(b64)).then((ok) => {
+    knopf.textContent = t(ok ? "wallet.fifoPsbtCopied" : "wallet.fifoPsbtCopyFailed");
+    return ok;
+  });
+}
+
 function bindeFifoSpend() {
   const feld = $("#fifo-spend-betrag");
   if (!feld || feld.dataset.gebunden) return;
@@ -2010,6 +2225,11 @@ function bindeFifoSpend() {
     fee.addEventListener("input", fifoFeeEingabe);
     fee.addEventListener("blur", fifoFeeVerlassen);
   }
+  // „PSBT“: Server baut die PSBT ohne Unterschrift; nichts geht ins Netz.
+  const erzeugen = $("#fifo-ziel-psbt");
+  if (erzeugen) erzeugen.addEventListener("click", fifoPsbtErzeugen);
+  const kopieren = $("#fifo-psbt-kopieren");
+  if (kopieren) kopieren.addEventListener("click", fifoPsbtKopieren);
   if (adresse) zeigeFifoZielAdresse(null);
   if (fee) pruefeFifoZielFee();
   aktualisiereFifoPsbtKnopf();

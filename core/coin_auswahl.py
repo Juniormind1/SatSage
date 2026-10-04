@@ -62,6 +62,13 @@ gewinnt (``budget_erschoepft``).
   Gesamtgebühr höchstens 0,1 % des Betrags ist und die Rate nicht auf
   1 sat/vB fällt; sie gehen ins Wechselgeld (``aufraeumen_*``).
 
+**Feste Rate (PSBT, ``FesteRate``).** Für die echte PSBT gilt die Rate aus
+dem Gebührenfeld (milli-sat/vB, bis 3 Nachkommastellen): Gebühr =
+``ceil(milli · vsize / 1000)``. Der 0,1-%-Deckel senkt diese Rate nie — er
+bleibt nur die Grenze dafür, ob Staub in die Gebühr gehen darf.
+``Groessen`` setzt die vbytes je Input und je Output (Skripttyp des Wallets,
+Ziel- und Wechseladresse); ohne Angabe gilt die Schätzformel oben.
+
 Deterministisch, ohne Zufall. Kein Schlüsselmaterial.
 """
 from __future__ import annotations
@@ -69,7 +76,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from core.fee_vorschlag import MIN_SAT_VB, VBYTES_INPUT, vsize_schaetzung
+import math
+
+from core.fee_vorschlag import MIN_SAT_VB, VBYTES_INPUT
 
 #: Unter dieser Grenze ist Wechselgeld Staub (P2PKH-Staubgrenze, konservativ).
 STAUB_SATS = 546
@@ -154,6 +163,65 @@ def kandidaten(
     return aus
 
 
+@dataclass(frozen=True)
+class FesteRate:
+    """Vom Nutzer gesetzte Rate in milli-sat/vB (1000 = 1 sat/vB)."""
+
+    milli: int
+
+    def gebuehr(self, vsize: int) -> int:
+        return -(-self.milli * vsize // 1000)
+
+    @property
+    def sat_vb(self) -> float | int:
+        return self.milli // 1000 if self.milli % 1000 == 0 else self.milli / 1000
+
+
+@dataclass(frozen=True)
+class Groessen:
+    """vbytes je Input/Output; Vorgabe = ``fee_vorschlag.vsize_schaetzung``."""
+
+    input_vb: float = VBYTES_INPUT
+    ziel_vb: int = 31
+    wechsel_vb: int = 31
+    basis_vb: float = 10.5
+
+    def vsize(self, inputs: int, outputs: int) -> int:
+        roh = self.basis_vb + self.input_vb * inputs + self.ziel_vb
+        if outputs >= 2:
+            roh += self.wechsel_vb
+        return int(math.ceil(roh))
+
+
+@dataclass(frozen=True)
+class _Kosten:
+    """Rate-Regel (Schätzung mit Deckel oder feste Rate) plus Größen."""
+
+    basis: Any
+    groessen: Groessen
+
+    def gebuehr(self, vsize: int, betrag: int) -> tuple[int, float | int, bool]:
+        """(Gebühr, sat/vB, Deckel griff) für diese vsize."""
+        if isinstance(self.basis, FesteRate):
+            return self.basis.gebuehr(vsize), self.basis.sat_vb, False
+        r, deckel = _rate(self.basis, vsize, betrag)
+        return r * vsize, r, deckel
+
+    def input_kosten(self) -> int:
+        """Gebühr eines zusätzlichen Inputs (Wirtschaftlichkeits-Grenze)."""
+        vb = int(math.ceil(self.groessen.input_vb))
+        if isinstance(self.basis, FesteRate):
+            return self.basis.gebuehr(vb)
+        return vb * (self.basis or MIN_SAT_VB)
+
+    def min_gebuehr(self, inputs: int) -> int:
+        """Untergrenze der Gebühr ohne Wechselgeld (für die Suche)."""
+        vs = self.groessen.vsize(inputs, 1)
+        if isinstance(self.basis, FesteRate):
+            return self.basis.gebuehr(vs)
+        return vs * MIN_SAT_VB
+
+
 def _rate(basis: int | None, vsize: int, betrag: int) -> tuple[int, bool]:
     """Rate für diese vsize nach der Fee-Regel; ``True`` = Deckel griff."""
     if basis is None:
@@ -163,18 +231,18 @@ def _rate(basis: int | None, vsize: int, betrag: int) -> tuple[int, bool]:
     return basis, False
 
 
-def _bewerte(n: int, gruen: int, wert: int, betrag: int, basis: int | None) -> dict | None:
+def _bewerte(n: int, gruen: int, wert: int, betrag: int, kosten: _Kosten) -> dict | None:
     """Beste Ausprägung (mit/ohne Wechselgeld) für n Inputs, sonst None."""
-    vs2 = vsize_schaetzung(n, 2)
-    r2, deckel2 = _rate(basis, vs2, betrag)
-    fee2 = r2 * vs2
+    if not isinstance(kosten, _Kosten):  # Rate direkt (int/None/FesteRate)
+        kosten = _Kosten(kosten, Groessen())
+    vs2 = kosten.groessen.vsize(n, 2)
+    fee2, r2, deckel2 = kosten.gebuehr(vs2, betrag)
     wechsel = wert - betrag - fee2
     if gruen >= betrag + fee2 and wechsel >= STAUB_SATS:
         return {"wechselgeld": wechsel, "outputs": 2, "vsize": vs2, "sat_vb": r2,
                 "fee": fee2, "deckel": deckel2, "staub": False, "staub_in_fee": 0}
-    vs1 = vsize_schaetzung(n, 1)
-    r1, deckel1 = _rate(basis, vs1, betrag)
-    fee1 = r1 * vs1
+    vs1 = kosten.groessen.vsize(n, 1)
+    fee1, r1, deckel1 = kosten.gebuehr(vs1, betrag)
     rest = wert - betrag - fee1
     if gruen < betrag + fee1 or rest < 0:
         return None
@@ -201,7 +269,7 @@ def _rang(loesung: dict, auswahl: tuple[Kandidat, ...]) -> tuple:
     )
 
 
-def _gier(kand: list[Kandidat], betrag: int, basis: int | None):
+def _gier(kand: list[Kandidat], betrag: int, kosten: _Kosten):
     gewaehlt: list[Kandidat] = []
     g = w = 0
     loesung = None
@@ -209,7 +277,7 @@ def _gier(kand: list[Kandidat], betrag: int, basis: int | None):
         gewaehlt.append(k)
         g += k.beitrag
         w += k.wert
-        loesung = _bewerte(len(gewaehlt), g, w, betrag, basis)
+        loesung = _bewerte(len(gewaehlt), g, w, betrag, kosten)
         if loesung is not None:
             break
     if loesung is None:
@@ -219,7 +287,7 @@ def _gier(kand: list[Kandidat], betrag: int, basis: int | None):
         probe = [x for x in gewaehlt if x is not k]
         if not probe:
             continue
-        neu = _bewerte(len(probe), g - k.beitrag, w - k.wert, betrag, basis)
+        neu = _bewerte(len(probe), g - k.beitrag, w - k.wert, betrag, kosten)
         if neu is not None and _rang(neu, tuple(probe)) < _rang(loesung, tuple(gewaehlt)):
             gewaehlt, loesung = probe, neu
             g -= k.beitrag
@@ -227,7 +295,7 @@ def _gier(kand: list[Kandidat], betrag: int, basis: int | None):
     return loesung, tuple(gewaehlt)
 
 
-def _bnb(nutzbar: list[Kandidat], betrag: int, basis: int | None, budget: int):
+def _bnb(nutzbar: list[Kandidat], betrag: int, kosten: _Kosten, budget: int):
     """Kleinstes Wechselgeld: (Lösung, Auswahl, Meta) — Lösung None = nicht gedeckt."""
     rest_gruen = [0] * (len(nutzbar) + 1)
     for i in range(len(nutzbar) - 1, -1, -1):
@@ -250,7 +318,7 @@ def _bnb(nutzbar: list[Kandidat], betrag: int, basis: int | None, budget: int):
             return
         n = len(pfad)
         if n:
-            loesung = _bewerte(n, g, w, betrag, basis)
+            loesung = _bewerte(n, g, w, betrag, kosten)
             if loesung is not None:
                 auswahl = tuple(pfad)
                 rang = _rang(loesung, auswahl)
@@ -260,7 +328,7 @@ def _bnb(nutzbar: list[Kandidat], betrag: int, basis: int | None, budget: int):
         if i >= len(nutzbar):
             return
         # Mindestgebühr mit einem weiteren Input (1 sat/vB, ohne Wechselgeld).
-        if g + rest_gruen[i] < betrag + vsize_schaetzung(n + 1, 1) * MIN_SAT_VB:
+        if g + rest_gruen[i] < betrag + kosten.min_gebuehr(n + 1):
             return
         if beste_rang is not None and beste_rang[0] == 0 and n + 1 > beste_rang[1]:
             return  # 0 sats Wechselgeld mit weniger Inputs ist nicht zu schlagen
@@ -281,7 +349,7 @@ def _bnb(nutzbar: list[Kandidat], betrag: int, basis: int | None, budget: int):
 
     methode = "bnb"
     if erschoepft:
-        gier = _gier(nutzbar, betrag, basis)
+        gier = _gier(nutzbar, betrag, kosten)
         if gier is not None:
             g_loesung, g_auswahl = gier
             g_rang = _rang(g_loesung, g_auswahl)
@@ -292,7 +360,7 @@ def _bnb(nutzbar: list[Kandidat], betrag: int, basis: int | None, budget: int):
     return beste, beste_auswahl, meta
 
 
-def _reihe(reihenfolge: list[Kandidat], betrag: int, basis: int | None):
+def _reihe(reihenfolge: list[Kandidat], betrag: int, kosten: _Kosten):
     """Der Reihe nach aufnehmen, bis Betrag + Gebühr gedeckt sind (kein Entfernen)."""
     gewaehlt: list[Kandidat] = []
     g = w = 0
@@ -300,7 +368,7 @@ def _reihe(reihenfolge: list[Kandidat], betrag: int, basis: int | None):
         gewaehlt.append(k)
         g += k.beitrag
         w += k.wert
-        loesung = _bewerte(len(gewaehlt), g, w, betrag, basis)
+        loesung = _bewerte(len(gewaehlt), g, w, betrag, kosten)
         if loesung is not None:
             return loesung, tuple(gewaehlt)
     return None, ()
@@ -310,7 +378,7 @@ def _im_deckel(loesung: dict, betrag: int) -> bool:
     return loesung["fee"] * 1000 <= betrag
 
 
-def _staub_dazu(nutzbar, basis_auswahl, basis_loesung, betrag, basis):
+def _staub_dazu(nutzbar, basis_auswahl, basis_loesung, betrag, kosten):
     """
     Kleine zulässige UTXOs (< ``STAUB_AUFRAEUMEN_SATS``, wirtschaftlich: Beitrag
     > 68 vB × Rate) zusätzlich einsammeln, kleinste zuerst (dann älter, Key),
@@ -332,7 +400,7 @@ def _staub_dazu(nutzbar, basis_auswahl, basis_loesung, betrag, basis):
     if not _im_deckel(basis_loesung, betrag):
         return loesung, tuple(auswahl), [], bool(klein)
     for k in klein:
-        neu = _bewerte(len(auswahl) + 1, g + k.beitrag, w + k.wert, betrag, basis)
+        neu = _bewerte(len(auswahl) + 1, g + k.beitrag, w + k.wert, betrag, kosten)
         if neu is None:
             continue  # z. B. Wechselgeld unter Relay-Staub — ein größerer kann passen
         if not _im_deckel(neu, betrag) or neu["sat_vb"] < loesung["sat_vb"]:
@@ -352,23 +420,42 @@ def waehle(
     kand: list[Kandidat],
     *,
     betrag: int,
-    basis_rate: int | None,
+    basis_rate: Any,
     budget: int = BUDGET_KNOTEN,
     strategie: str = STANDARD_STRATEGIE,
+    groessen: Groessen | None = None,
+    nur: Iterable[str] | None = None,
 ) -> dict:
     """
     Wählt Inputs nach *strategie* (siehe ``STRATEGIEN``).
 
-    *basis_rate*: Schätzung + Puffer in sat/vB, None = keine Schätzung.
+    *basis_rate*: Schätzung + Puffer in sat/vB, None = keine Schätzung, oder
+    ``FesteRate`` (Gebührenfeld der PSBT; kein Deckel auf die Rate).
+    *groessen*: vbytes je Input/Output (Standard: Schätzformel).
+    *nur*: Coin-Control — genau diese Kandidaten (``txid:vout``), keine Suche.
+    Nicht zulässige Schlüssel liefern ``status`` ``unzulaessig``.
     """
     strategie = strategie if strategie in STRATEGIEN else STANDARD_STRATEGIE
     betrag = _int(betrag)
+    kosten = _Kosten(basis_rate, groessen or Groessen())
     ergebnis: dict[str, Any] = {"betrag_sats": betrag, "kandidaten": len(kand), "strategie": strategie}
     if betrag <= 0:
         return {**ergebnis, "status": "kein_betrag"}
-    rate_max = basis_rate or MIN_SAT_VB
-    nutzbar = [k for k in kand if k.beitrag > VBYTES_INPUT * rate_max] or [
-        k for k in kand if k.beitrag > VBYTES_INPUT * MIN_SAT_VB]
+    if nur is not None:
+        wunsch = list(dict.fromkeys(str(k or "").strip().lower() for k in nur if k))
+        nach_key = {k.key: k for k in kand}
+        fehlt = [k for k in wunsch if k not in nach_key]
+        ergebnis["strategie"] = "coin_control"
+        if not wunsch or fehlt:
+            return {**ergebnis, "status": "unzulaessig", "unzulaessig": fehlt}
+        auswahl = tuple(nach_key[k] for k in wunsch)
+        beste = _bewerte(len(auswahl), sum(k.beitrag for k in auswahl),
+                         sum(k.wert for k in auswahl), betrag, kosten)
+        ergebnis.update({"methode": "coin_control", "budget_erschoepft": False})
+        return _ergebnis(ergebnis, beste, auswahl, auswahl, "coin_control", [], False)
+    nutzbar = [k for k in kand if k.beitrag > kosten.input_kosten()]
+    if not nutzbar and not isinstance(basis_rate, FesteRate):
+        nutzbar = [k for k in kand if k.beitrag > VBYTES_INPUT * MIN_SAT_VB]
     nutzbar.sort(key=lambda k: (-k.beitrag, k.zeit, k.key))
     if not nutzbar:
         return {**ergebnis, "status": "keine_kandidaten"}
@@ -376,17 +463,21 @@ def waehle(
     dazu: list[Kandidat] = []
     begrenzt = False
     if strategie == "gebuehr":
-        beste, auswahl = _reihe(nutzbar, betrag, basis_rate)
+        beste, auswahl = _reihe(nutzbar, betrag, kosten)
         ergebnis.update({"methode": "groesste_zuerst", "budget_erschoepft": False})
     elif strategie == "aelteste":
         alt_zuerst = sorted(nutzbar, key=lambda k: (k.zeit, k.key))
-        beste, auswahl = _reihe(alt_zuerst, betrag, basis_rate)
+        beste, auswahl = _reihe(alt_zuerst, betrag, kosten)
         ergebnis.update({"methode": "aelteste_zuerst", "budget_erschoepft": False})
     else:
-        beste, auswahl, meta = _bnb(nutzbar, betrag, basis_rate, budget)
+        beste, auswahl, meta = _bnb(nutzbar, betrag, kosten, budget)
         ergebnis.update(meta)
         if beste is not None and strategie == "staub":
-            beste, auswahl, dazu, begrenzt = _staub_dazu(nutzbar, auswahl, beste, betrag, basis_rate)
+            beste, auswahl, dazu, begrenzt = _staub_dazu(nutzbar, auswahl, beste, betrag, kosten)
+    return _ergebnis(ergebnis, beste, auswahl, nutzbar, strategie, dazu, begrenzt)
+
+
+def _ergebnis(ergebnis, beste, auswahl, nutzbar, strategie, dazu, begrenzt) -> dict:
     if beste is None:
         return {**ergebnis, "status": "nicht_gedeckt",
                 "gruen_verfuegbar_sats": sum(k.beitrag for k in nutzbar)}
@@ -436,12 +527,14 @@ def auswahl_vorschau(
     fehler: str | None = None,
     budget: int = BUDGET_KNOTEN,
     strategie: str = STANDARD_STRATEGIE,
+    groessen: "Groessen | None" = None,
 ) -> dict:
     """
     Kandidaten filtern, Rate nach der Fee-Regel bestimmen, Auswahl suchen.
 
     ``quelle`` wie beim Gebührenvorschlag: ``schaetzung``, ``deckel`` oder
     ``fallback`` (keine Schätzung, 1 sat/vB; ``grund`` sagt warum).
+    *groessen*: vbytes des Wallets (Multisig), sonst die Schätzformel.
     """
     from core.fee_vorschlag import btc_kvb_zu_sat_vb, rate_mit_puffer
 
@@ -449,7 +542,8 @@ def auswahl_vorschau(
     schaetzung = btc_kvb_zu_sat_vb(feerate_btc_kvb) if feerate_btc_kvb is not None else None
     basis = rate_mit_puffer(schaetzung)
     kand = kandidaten(utxos, modus=modus, pending=pending)
-    erg = waehle(kand, betrag=betrag, basis_rate=basis, budget=budget, strategie=strategie)
+    erg = waehle(kand, betrag=betrag, basis_rate=basis, budget=budget, strategie=strategie,
+                 groessen=groessen)
     if basis is None:
         quelle = "fallback"
     elif erg.get("deckel"):

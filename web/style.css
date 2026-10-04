@@ -198,6 +198,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .schritt.erledigt { border-left-color: var(--gut); }
 .schritt.offen    { border-left-color: var(--warn); }
+.schritt.optional { border-left-color: var(--linie); }
 .schritt-kopf {
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
   margin-bottom: 4px;
@@ -205,6 +206,10 @@ button, input, select { font: inherit; color: inherit; }
 .schritt-text { margin: 0; font-size: 13px; color: var(--gedaempft); }
 
 .einrichtung-knoepfe { display: flex; gap: 9px; flex-wrap: wrap; }
+/* Einrichtung: statt Erklärtext nur der Verweis ins Handbuch. */
+.einrichtung-karte > p.einrichtung-handbuch { margin: 0 0 14px; font-size: 13px; }
+.einrichtung-handbuch a { color: var(--akzent); text-decoration: none; }
+.einrichtung-handbuch a:hover { text-decoration: underline; }
 
 #onchain-hinweis .einrichtung-karte > p {
   color: var(--text);
@@ -1592,7 +1597,7 @@ input[type="text"].fifo-spend-betrag.ungueltig {
   border-color: var(--krit); background: var(--krit-bg); color: var(--krit);
   outline-color: var(--krit);
 }
-/* Ziel-Zeile unter der FIFO-Kopfzeile: Adresse + Status, Gebühr, „PSBT!“. */
+/* Ziel-Zeile unter der FIFO-Kopfzeile: Adresse + Status, Gebühr, „PSBT“. */
 .fifo-spend-ziel {
   display: flex; align-items: center; gap: 6px 8px;
   padding: 7px 13px; background: var(--flaeche-2);
@@ -1639,6 +1644,22 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   border-color: var(--krit); background: var(--krit-bg); color: var(--krit);
   outline-color: var(--krit);
 }
+/* Ergebnis von „PSBT“: Übersicht (mehrzeilig) + Base64 kopieren. */
+.fifo-psbt-ergebnis {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 13px 8px; background: var(--flaeche-2);
+  border-bottom: 1px solid var(--linie);
+  font-size: 11px;
+}
+.fifo-psbt-ergebnis[hidden] { display: none; }
+.fifo-psbt-text {
+  flex: 1 1 auto; min-width: 0; white-space: pre-line; overflow-wrap: anywhere;
+  font-family: var(--mono); color: var(--text);
+}
+.fifo-psbt-ergebnis[data-zustand="laedt"] .fifo-psbt-text { color: var(--blass); }
+.fifo-psbt-ergebnis[data-zustand="fehler"] .fifo-psbt-text { color: var(--krit); }
+.fifo-psbt-ergebnis .knopf { flex: 0 0 auto; margin-left: 0; }
+.fifo-psbt-ergebnis .knopf[hidden] { display: none; }
 @media (max-width: 720px) {
   .fifo-spend { flex-basis: 100%; }
   .fifo-spend-text { white-space: normal; text-align: right; }

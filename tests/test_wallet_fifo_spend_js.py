@@ -75,6 +75,13 @@ const katalog = {
   "wallet.fifoSpendAmountInvalidFormat": "Format ungültig, mehr als 0 bis {max}.",
   "wallet.fifoSpendAmountInvalidRange": "Bereich: mehr als 0 bis {max}.",
   "wallet.fifoSpendUnavailableTitle": "Grüne sats gerade nicht verfügbar: {msg}",
+  "wallet.fifoPsbtSummary": "{datei}: {inputs} Input(s), Gebühr {fee} sats ({rate} sat/vB, {vsize} vB)",
+  "wallet.fifoPsbtOutputTarget": "Ziel {betrag} → {adresse} ({farbe}) grün {gruen} / gelb {gelb}",
+  "wallet.fifoPsbtOutputChange": "Wechselgeld {betrag} → {adresse} ({farbe}) grün {gruen} / gelb {gelb}",
+  "wallet.fifoPsbtRbf": "RBF, nLockTime {locktime}",
+  "wallet.fifoPsbtMultisigInfo": "Multisig {m}/{n}: {fps}",
+  "wallet.fifoPsbtOverMax": "Über Maximum ({max})",
+  "wallet.fifoPsbtFailed": "PSBT nicht erzeugt: {msg}",
 };
 const t = (k, v = {}) => (katalog[k] || k).replace(/\{(\w+)\}/g, (_, n) => String(v[n] ?? ""));
 const formatZahl = (n) => Number(n || 0).toLocaleString("de-DE");
@@ -109,7 +116,29 @@ const els = {
   "#fifo-ziel-status": mkEl(),
   "#fifo-ziel-strategie": mkEl(),
   "#fifo-ziel-fee": mkEl(),
+  "#fifo-ziel-psbt": mkEl(),
+  "#fifo-ziel-psbt-huelle": mkEl(),
+  "#fifo-psbt-ergebnis": mkEl(),
+  "#fifo-psbt-text": mkEl(),
+  "#fifo-psbt-kopieren": mkEl(),
 };
+const downloads = [];
+const document = {
+  body: { appendChild() {} },
+  createElement() {
+    const a = { click() { downloads.push({ name: a.download, href: a.href }); }, remove() {} };
+    return a;
+  },
+};
+let kopiert = null;
+async function kopiereInZwischenablage(text) { kopiert = text; return true; }
+const psbtAufrufe = [];
+let psbtAntwort = () => ({ status: "ok", wallet: "HS Alpha", psbt_base64: "cHNidP8BAA==",
+  inputs: [{ key: "aa:0" }], outputs: [
+    { rolle: "ziel", value_sats: 30000, adresse: "bcrt1qfremd", farbe: "gelb", sats_gruen: 30000, sats_gelb: 0 },
+    { rolle: "wechsel", value_sats: 19718, adresse: "bcrt1qwechsel", farbe: "gruen", sats_gruen: 19718, sats_gelb: 0 },
+  ], fee_sats: 282, sat_vb: 2, vsize: 141, locktime: 646, ohne_wechselgeld: false,
+  herkunft: { quelle: "xpub" }, mempool_geprueft: true });
 const $ = (sel) => els[sel] || null;
 function setzeText(el, text) { el.textContent = text; }
 const Zustand = {
@@ -138,6 +167,12 @@ async function api(pfad, opts = {}) {
     const daten = JSON.parse(JSON.stringify(opts.daten));
     feeAufrufe.push(daten);
     return feeAntwort(daten);
+  }
+  if (pfad === "/psbt/erzeugen") {
+    if (opts.methode !== "POST") throw new Error("POST erwartet");
+    const daten = JSON.parse(JSON.stringify(opts.daten));
+    psbtAufrufe.push(daten);
+    return psbtAntwort(daten);
   }
   if (pfad.startsWith("/address/owner?")) {
     const addr = new URLSearchParams(pfad.split("?")[1]).get("addr");
@@ -201,6 +236,19 @@ _FUNKTIONEN = [
     "function planeFifoFeeVorschlag(",
     "function fifoFeeEingabe(",
     "function fifoFeeVerlassen(",
+    "function fifoAktuellesWallet(",
+    "function fifoPsbtSperre(",
+    "function fifoPsbtSchluessel(",
+    "function aktualisiereFifoPsbtErzeugen(",
+    "function fifoMilliText(",
+    "function fifoPsbtKoerper(",
+    "function fifoPsbtDateiname(",
+    "function fifoPsbtHerunterladen(",
+    "function fifoPsbtZusammenfassung(",
+    "function fifoPsbtStatusText(",
+    "function zeigeFifoPsbtErgebnis(",
+    "function fifoPsbtErzeugen(",
+    "function fifoPsbtKopieren(",
 ]
 
 
@@ -954,9 +1002,11 @@ class TestFifoGebuehrVorschlag(unittest.TestCase):
           process.stdout.write(JSON.stringify({
             betrag: k.betrag, modus: k.modus, pending: k.pending, keys: k.utxos.map((u) => u.key),
             def: fifoAuswahlKoerper({ modus: "x", walletId: "w1", events: EV }, 1).modus,
+            wallet_id: k.wallet_id,
           }));
         """)
         self.assertEqual(erg["betrag"], 1234)
+        self.assertEqual(erg["wallet_id"], "w1")        # nur für die vbytes (Multisig)
         self.assertEqual(erg["modus"], "offensiv")
         self.assertEqual(erg["pending"], ["aa:0"])
         self.assertNotIn("ff:0", erg["keys"])          # anderes Wallet
@@ -1051,6 +1101,148 @@ class TestFifoGebuehrVorschlag(unittest.TestCase):
                                         "Aufräumen 2 / 13.000", "Aufräumen begrenzt"])
 
 
+@unittest.skipUnless(shutil.which("node"), "node fehlt")
+class TestFifoPsbtErzeugen(unittest.TestCase):
+
+    _BEREIT = r"""
+          Zustand.config.wallets = [{ id: "w1", name: "HS Alpha", is_multisig: false },
+                                    { id: "w2", name: "HS Multi", is_multisig: true }];
+          antwort = { zeitstrahl: { events: EV } };
+          aktualisiereFifoSpend("w1"); await warte();   // defensiv max 50 000 sats
+          const betrag = els["#fifo-spend-betrag"], fee = els["#fifo-ziel-fee"];
+          const adresse = els["#fifo-ziel-adresse"], psbt = els["#fifo-ziel-psbt"];
+          const huelle = els["#fifo-ziel-psbt-huelle"], kasten = els["#fifo-psbt-ergebnis"];
+          const pause = (ms = 500) => new Promise((r) => setTimeout(r, ms));
+          adressAntwort = (a) => (a === "bcrt1qkaputt" ? { status: "ungueltig", netz: "regtest" }
+            : a === "bcrt1qeigen" ? { status: "meine", wallet: "HS Beta", netz: "regtest" }
+            : { status: "fremd", netz: "regtest" });
+    """
+
+    def test_freigabe_nur_mit_betrag_adresse_und_gebuehr(self):
+        erg = _node(self._BEREIT + r"""
+          const zustand = () => [psbt.disabled, psbt.title, huelle.title];
+          const aus = { start: zustand() };
+          betrag.value = "30000"; pruefeFifoSpendBetrag(); fifoZielUmschalten();
+          aus.ohneAdresse = zustand();
+          adresse.value = "bcrt1qkaputt"; pruefeFifoZielAdresse(); await pause();
+          aus.rot = zustand();
+          adresse.value = "bcrt1qfremd"; pruefeFifoZielAdresse(); await pause();
+          aus.gelb = zustand();   // Gebühr kam als Vorschlag (4 sat/vB)
+          fee.value = "abc"; fifoFeeEingabe(); aus.ohneFee = zustand();
+          fee.value = "2,5"; fifoFeeEingabe(); aus.mitFee = zustand();
+          adresse.value = "bcrt1qeigen"; pruefeFifoZielAdresse(); await pause();
+          aus.gruen = zustand();
+          betrag.value = "50001"; pruefeFifoSpendBetrag(); aus.ueberMax = psbt.disabled;
+          betrag.value = "30000"; pruefeFifoSpendBetrag();
+          Zustand.fifoSpend.walletId = "w2"; aktualisiereFifoPsbtErzeugen();
+          aus.multisig = zustand();
+          process.stdout.write(JSON.stringify(aus));
+        """)
+        self.assertTrue(erg["start"][0])
+        self.assertEqual(erg["ohneAdresse"][:2], [True, "wallet.fifoPsbtNeedsAddress"])
+        self.assertEqual(erg["rot"][:2], [True, "wallet.fifoPsbtNeedsAddress"])
+        self.assertEqual(erg["gelb"][:2], [False, "wallet.fifoSpendPsbtTitle"])
+        self.assertEqual(erg["ohneFee"][:2], [True, "wallet.fifoPsbtNeedsFee"])
+        self.assertFalse(erg["mitFee"][0])
+        self.assertFalse(erg["gruen"][0])
+        self.assertTrue(erg["ueberMax"])
+        # Multisig: frei wie Single-Sig (der Server baut wsh/sh-wsh sortedmulti).
+        self.assertEqual(erg["multisig"], [False, "wallet.fifoSpendPsbtTitle", "wallet.fifoSpendPsbtTitle"])
+
+    def test_klick_sendet_nur_wunsch_laedt_datei_und_zeigt_uebersicht(self):
+        erg = _node(self._BEREIT + r"""
+          betrag.value = "30000"; pruefeFifoSpendBetrag(); fifoZielUmschalten();
+          adresse.value = "bcrt1qfremd"; pruefeFifoZielAdresse(); await pause();
+          fee.value = "2,5"; fifoFeeEingabe();
+          const laeuft = fifoPsbtErzeugen();
+          const waehrend = { gesperrt: psbt.disabled, zustand: kasten.dataset.zustand, sichtbar: !kasten.hidden };
+          await laeuft;
+          const aus = { waehrend, aufrufe: psbtAufrufe, downloads, text: els["#fifo-psbt-text"].textContent,
+            zustand: kasten.dataset.zustand, kopierenSichtbar: !els["#fifo-psbt-kopieren"].hidden,
+            frei: !psbt.disabled };
+          aus.kopiertOk = await fifoPsbtKopieren(); aus.kopiert = kopiert;
+          aus.kopierText = els["#fifo-psbt-kopieren"].textContent;
+          // Andere Gebühr → altes Ergebnis passt nicht mehr und verschwindet.
+          fee.value = "3"; fifoFeeEingabe(); aus.nachAenderung = kasten.hidden;
+          process.stdout.write(JSON.stringify(aus));
+        """)
+        self.assertTrue(erg["waehrend"]["gesperrt"])
+        self.assertEqual(erg["waehrend"]["zustand"], "laedt")
+        self.assertEqual(len(erg["aufrufe"]), 1)
+        koerper = erg["aufrufe"][0]
+        self.assertEqual(koerper, {"wallet_id": "w1", "betrag": 30000, "adresse": "bcrt1qfremd",
+                                   "fee": "2.5", "strategie": "wechselgeld", "modus": "defensiv",
+                                   "lang": koerper.get("lang")})
+        self.assertNotIn("utxos", koerper)
+        self.assertEqual(len(erg["downloads"]), 1)
+        self.assertRegex(erg["downloads"][0]["name"], r"^HS-Alpha-\d{8}-\d{4}\.psbt$")
+        self.assertTrue(erg["downloads"][0]["href"].startswith("blob:"))
+        text = erg["text"]
+        self.assertIn("1 Input(s), Gebühr 282 sats (2 sat/vB, 141 vB)", text)
+        self.assertIn("Ziel 30.000 → bcrt1qfremd (extern) grün 30.000 / gelb 0", text)
+        self.assertIn("Wechselgeld 19.718 → bcrt1qwechsel (wallet.fifoPsbtOwnWallet)", text)
+        self.assertIn("RBF, nLockTime 646", text)
+        self.assertIn("wallet.fifoPsbtFingerprintXpub", text)
+        self.assertEqual(erg["zustand"], "ok")
+        self.assertTrue(erg["kopierenSichtbar"])
+        self.assertTrue(erg["frei"])
+        self.assertTrue(erg["kopiertOk"])
+        self.assertEqual(erg["kopiert"], "cHNidP8BAA==")
+        self.assertEqual(erg["kopierText"], "wallet.fifoPsbtCopied")
+        self.assertTrue(erg["nachAenderung"])
+
+    def test_uebersicht_multisig_nennt_cosigner(self):
+        erg = _node(self._BEREIT + r"""
+          const ms = { status: "ok", inputs: [{}, {}], outputs: [], fee_sats: 314, sat_vb: 1, vsize: 314,
+            locktime: 700, herkunft: { quelle: "deskriptor" },
+            multisig: { m: 2, n: 3, skript: "wsh", fingerprints: ["919aea07", "e08c7fa9", "1af8622e"] } };
+          const ohne = { ...ms, multisig: null, herkunft: { quelle: "xpub" } };
+          process.stdout.write(JSON.stringify({ ms: fifoPsbtZusammenfassung(ms, "HS-Multi.psbt"),
+            ohne: fifoPsbtZusammenfassung(ohne, "x.psbt") }));
+        """)
+        self.assertEqual(erg["ms"][-1], "Multisig 2/3: 919aea07, e08c7fa9, 1af8622e")
+        self.assertNotIn("wallet.fifoPsbtFingerprintXpub", erg["ms"])
+        self.assertFalse(any(z.startswith("Multisig") for z in erg["ohne"]))
+        self.assertIn("wallet.fifoPsbtFingerprintXpub", erg["ohne"])
+
+    def test_ohne_psbt_kein_download_und_fehlertext(self):
+        erg = _node(self._BEREIT + r"""
+          betrag.value = "30000"; pruefeFifoSpendBetrag(); fifoZielUmschalten();
+          adresse.value = "bcrt1qfremd"; pruefeFifoZielAdresse(); await pause();
+          const text = els["#fifo-psbt-text"], kopieren = els["#fifo-psbt-kopieren"];
+          psbtAntwort = () => ({ status: "ueber_max", max_sats: 25000 });
+          await fifoPsbtErzeugen();
+          const aus = { max: text.textContent, maxZustand: kasten.dataset.zustand, maxKopieren: kopieren.hidden };
+          psbtAntwort = () => { throw new Error("Server sagt nein"); };
+          await fifoPsbtErzeugen();
+          aus.fehler = text.textContent; aus.fehlerZustand = kasten.dataset.zustand;
+          aus.downloads = downloads.length; aus.kopieren = await fifoPsbtKopieren();
+          process.stdout.write(JSON.stringify(aus));
+        """)
+        self.assertEqual(erg["max"], "Über Maximum (25.000)")
+        self.assertEqual(erg["maxZustand"], "fehler")
+        self.assertTrue(erg["maxKopieren"])
+        self.assertEqual(erg["fehler"], "PSBT nicht erzeugt: Server sagt nein")
+        self.assertEqual(erg["fehlerZustand"], "fehler")
+        self.assertEqual(erg["downloads"], 0)
+        self.assertFalse(erg["kopieren"])
+
+    def test_dateiname_und_fee_text(self):
+        erg = _node(r"""
+          const d = new Date(2026, 9, 4, 9, 5);
+          process.stdout.write(JSON.stringify({
+            normal: fifoPsbtDateiname("HS Alpha", d), umlaut: fifoPsbtDateiname("Spar/Bücher: 2026!", d),
+            leer: fifoPsbtDateiname("  ", d), punkt: fifoPsbtDateiname("..x", d),
+            m: [fifoMilliText(1000), fifoMilliText(2500), fifoMilliText(125), fifoMilliText(10000000), fifoMilliText(1010)],
+          }));
+        """)
+        self.assertEqual(erg["normal"], "HS-Alpha-20261004-0905.psbt")
+        self.assertEqual(erg["umlaut"], "Spar-Bücher-2026-20261004-0905.psbt")
+        self.assertEqual(erg["leer"], "wallet-20261004-0905.psbt")
+        self.assertEqual(erg["punkt"], "x-20261004-0905.psbt")
+        self.assertEqual(erg["m"], ["1", "2.5", "0.125", "10000", "1.01"])
+
+
 class TestFifoStatisch(unittest.TestCase):
 
     SCHLUESSEL = (
@@ -1121,6 +1313,25 @@ class TestFifoStatisch(unittest.TestCase):
         "wallet.fifoTargetSelectionCleanup",
         "wallet.fifoTargetSelectionCleanupLimited",
         "wallet.fifoTargetSelectionNonGreen",
+        "wallet.fifoPsbtNeedsAddress",
+        "wallet.fifoPsbtNeedsFee",
+        "wallet.fifoPsbtMultisigInfo",
+        "wallet.fifoPsbtBusy",
+        "wallet.fifoPsbtSummary",
+        "wallet.fifoPsbtSummaryNoChange",
+        "wallet.fifoPsbtOutputTarget",
+        "wallet.fifoPsbtOutputChange",
+        "wallet.fifoPsbtOwnWallet",
+        "wallet.fifoPsbtRbf",
+        "wallet.fifoPsbtFingerprintXpub",
+        "wallet.fifoPsbtMempoolUnchecked",
+        "wallet.fifoPsbtOverMax",
+        "wallet.fifoPsbtNotEligible",
+        "wallet.fifoPsbtFailed",
+        "wallet.fifoPsbtCopy",
+        "wallet.fifoPsbtCopied",
+        "wallet.fifoPsbtCopyFailed",
+        "wallet.fifoPsbtResultAria",
     )
 
     def test_kataloge_de_en(self):
@@ -1134,14 +1345,15 @@ class TestFifoStatisch(unittest.TestCase):
         self.assertEqual(de["wallet.fifoSpendOffensive"], "offensiv max {n} grün ausgebbar")
         self.assertEqual(en["wallet.fifoSpendDefensive"], "defensive: max {n} green spendable")
         self.assertEqual(en["wallet.fifoSpendOffensive"], "offensive: max {n} green spendable")
-        self.assertEqual(de["wallet.fifoSpendPsbtTitle"], "PSBT-Erzeugung folgt")
-        # Aufklapp-Knopf je Sprache: „Senden ▸/▾“ bzw. „Send ▸/▾“; „PSBT!“ bleibt.
+        self.assertTrue(de["wallet.fifoSpendPsbtTitle"].startswith("Unsignierte PSBT (BIP174)"))
+        self.assertIn("signiert und sendet nichts", de["wallet.fifoSpendPsbtTitle"])
+        # Aufklapp-Knopf je Sprache: „Senden ▸/▾“ bzw. „Send ▸/▾“; „PSBT“ bleibt.
         self.assertEqual((de["wallet.fifoSpendPsbtOpen"], de["wallet.fifoSpendPsbtExpanded"]),
                          ("Senden \u25b8", "Senden \u25be"))
         self.assertEqual((en["wallet.fifoSpendPsbtOpen"], en["wallet.fifoSpendPsbtExpanded"]),
                          ("Send \u25b8", "Send \u25be"))
         for code in (de, en):
-            self.assertEqual(code["wallet.fifoTargetPsbt"], "PSBT!")
+            self.assertEqual(code["wallet.fifoTargetPsbt"], "PSBT")
         self.assertEqual(de["wallet.fifoTargetStatusExternal"], "extern")
         self.assertEqual(en["wallet.fifoTargetStatusExternal"], "external")
         self.assertEqual(de["wallet.fifoTargetStatusInvalid"], "ungültig")
@@ -1210,24 +1422,34 @@ class TestFifoStatisch(unittest.TestCase):
         fee = re.search(r'<input[^>]*id="fifo-ziel-fee"[^>]*>', ziel, re.S).group(0)
         self.assertIn('inputmode="decimal"', fee)
         self.assertIn('data-i18n="wallet.fifoTargetFeeUnit"', ziel)
-        fertig = re.search(r'<button[^>]*id="fifo-ziel-psbt"[^>]*>PSBT!</button>', ziel, re.S).group(0)
+        fertig = re.search(r'<button[^>]*id="fifo-ziel-psbt"[^>]*>PSBT</button>', ziel, re.S).group(0)
         self.assertIn("disabled", fertig)
         self.assertIn('data-i18n-title="wallet.fifoSpendPsbtTitle"', fertig)
+        self.assertIn('id="fifo-ziel-psbt-huelle"', ziel)
+        # Ergebnis-Kasten unter der Ziel-Zeile, vor der UTXO-Liste.
+        self.assertLess(HTML.index('id="fifo-spend-ziel"'), HTML.index('id="fifo-psbt-ergebnis"'))
+        self.assertLess(HTML.index('id="fifo-psbt-ergebnis"'), HTML.index('id="adress-koerper"'))
+        self.assertIn('id="fifo-psbt-kopieren"', ziel)
         # Sortier-Info lebt im Sortierfeld weiter (sichtbarer Wert + Tooltip).
         self.assertIn('id="sort-wahl" data-i18n-title="wallet.sortTitle"', HTML)
 
     def test_kein_versand_kein_signieren(self):
         teil = WALLETS[WALLETS.index("/* --- wallet-fifo-spend --- */"):]
         teil = teil[:teil.index("Zeigt den Abgleich gegen die Sanktionslisten")]
-        # Schreibaufrufe: Auswahl-Vorschau (POST, ohne Schlüssel) und die Strategie-Einstellung (PUT).
-        self.assertEqual(sorted(re.findall(r'methode:\s*"(\w+)"', teil)), ["POST", "PUT"])
+        # Schreibaufrufe: Auswahl-Vorschau und PSBT-Erzeugung (POST, ohne Schlüssel)
+        # und die Strategie-Einstellung (PUT). Kein Signier- oder Sende-Endpunkt.
+        self.assertEqual(sorted(re.findall(r'methode:\s*"(\w+)"', teil)), ["POST", "POST", "PUT"])
         self.assertIn('api("/config/fifo-strategie", { methode: "PUT"', teil)
         self.assertIn('api("/psbt/auswahl", { methode: "POST"', teil)
+        self.assertIn('api("/psbt/erzeugen", { methode: "POST"', teil)
         self.assertNotRegex(teil.lower(), r"sign(?!et)|broadcast|sendraw")  # Signet ist ein Netzname
-        # Einziger Klick: „Senden ▸“ klappt die Ziel-Zeile auf.
+        # Klicks: „Senden ▸“ klappt auf, „PSBT“ erzeugt, „Base64 kopieren“.
         klicks = re.findall(r'addEventListener\("click",\s*(\w+)', teil)
-        self.assertEqual(klicks, ["fifoZielUmschalten"])
-        self.assertNotIn("fifo-ziel-psbt", teil)   # „PSBT!“ hat noch keinen Handler
+        self.assertEqual(klicks, ["fifoZielUmschalten", "fifoPsbtErzeugen", "fifoPsbtKopieren"])
+        # Der Körper trägt keine UTXOs/Lot-Anteile — der Server rechnet selbst.
+        koerper = teil[teil.index("function fifoPsbtKoerper("):teil.index("function fifoPsbtDateiname(")]
+        self.assertNotIn("utxos", koerper)
+        self.assertNotIn("sats_gruen", koerper)
 
     def test_einstellungen_hook_und_css_theme(self):
         self.assertIn("aktualisiereFifoSpend()", EINST)

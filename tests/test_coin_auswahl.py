@@ -488,3 +488,25 @@ class TestEinstellung(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFesteRate(unittest.TestCase):
+    """PSBT: Rate aus dem Gebührenfeld — kein Deckel auf die Rate, Bruchteile erlaubt."""
+
+    def test_bruchteil_und_aufrunden(self):
+        r = ca.FesteRate(1500)
+        self.assertEqual(r.gebuehr(141), 212)
+        self.assertEqual(r.sat_vb, 1.5)
+        self.assertEqual(ca.FesteRate(2000).sat_vb, 2)
+
+    def test_deckel_senkt_feste_rate_nicht(self):
+        kand = ca.kandidaten([u("a:0", 1_000_000)], modus="defensiv")
+        vorschau = ca.waehle(kand, betrag=50_000, basis_rate=20)
+        self.assertEqual(vorschau["sat_vb"], 1)  # Vorschau: Deckel griff
+        fest = ca.waehle(kand, betrag=50_000, basis_rate=ca.FesteRate(20_000))
+        self.assertEqual((fest["sat_vb"], fest["fee_sats"], fest["deckel"]), (20, 20 * 141, False))
+
+    def test_groessen(self):
+        g = ca.Groessen(input_vb=91, ziel_vb=43, wechsel_vb=32)
+        self.assertEqual(g.vsize(2, 2), 268)  # ceil(10,5 + 182 + 43 + 32)
+        self.assertEqual(ca.Groessen().vsize(1, 2), 141)
