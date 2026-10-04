@@ -69,7 +69,7 @@ Erstes `make x86` zieht das Python-Image und kann mehrere Minuten dauern. ARM: M
 
 ### Version
 
-StartOS-Version steht in `packaging/startos/versions/current.ts` und folgt dem App-Release: `VERSION` + `:0` (jetzt `0.9.9:0`). `scripts/build_startos_s9pk` bricht ab, wenn die beiden auseinanderlaufen. Vor einem Update-Sideload die alte Version in `versions/` behalten, sonst scheitert die Migration auf Geräten mit dem vorherigen Paket.
+StartOS-Version steht in `packaging/startos/versions/current.ts` und folgt dem App-Release: `VERSION` + `:0` (jetzt `0.9.9.5:0`). `scripts/build_startos_s9pk` bricht ab, wenn die beiden auseinanderlaufen. Vor einem Update-Sideload die alte Version in `versions/` behalten, sonst scheitert die Migration auf Geräten mit dem vorherigen Paket.
 
 ---
 
