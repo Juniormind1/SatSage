@@ -132,7 +132,7 @@ py -3 lab/regtest/scripts/verify_sanctions_hops.py
 
 ### Core-Allowlist (harte Regel, jeder PR nach main)
 
-`scripts/verify_rpc_allowlist.py` spricht den laufenden Labor-Node an. `dumpwallet` und `listdescriptors true` müssen im Client enden, ohne dass ein Socket aufgeht. `sendtoaddress` ist nur bei `NETWORK=regtest` überhaupt erlaubt und scheitert am Whitelist-User mit „rpcwhitelist?“. `listwallets` als `satsage` liefert denselben Hinweis. Port 18445 (`disablewallet`) liefert „disablewallet?“ statt „nicht erreichbar“. `bitcoin`/`secret` bleibt ohne Whitelist, sonst stehen Electrs und die Szenarien.
+`scripts/verify_rpc_allowlist.py` spricht den laufenden Labor-Node an. `dumpwallet` und `listdescriptors true` müssen im Client enden, ohne dass ein Socket aufgeht. `sendtoaddress` ist nur bei `NETWORK=regtest` überhaupt erlaubt und scheitert am Whitelist-User mit „rpcwhitelist?“. `listwallets` als `satsage` liefert denselben Hinweis. Port 18445 (`disablewallet`) liefert „disablewallet?“ statt „nicht erreichbar“. `bitcoin`/`secret` bleibt ohne Whitelist (`rpcwhitelistdefault=1` in der Labor-`bitcoin.conf`), sonst stehen Electrs, Healthcheck und die Szenarien.
 
 ```bash
 python3 lab/regtest/scripts/verify_rpc_allowlist.py
