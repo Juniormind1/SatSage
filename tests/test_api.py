@@ -412,6 +412,26 @@ class TestWalletsSpeichern(ApiTestBasis):
 
 class TestUtxoListe(ApiTestBasis):
 
+    def setUp(self):
+        super().setUp()
+        # Eigener Node „aus“ wie 192.0.2.1 im Leeren, aber ohne den echten
+        # Verbindungs-Timeout (~8 s je Anfrage bei 10 s Client-Timeout —
+        # das machte test_mit_cache unter Last wackelig).
+        from unittest import mock
+        patcher = mock.patch.object(server, "_eigener_fulcrum_client", return_value=None)
+        self.node = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_node_aus_wird_nur_einmal_gefragt(self):
+        """Nach einem Fehlschlag pausiert der Mempool-Abgleich (MEMPOOL_NODE_PAUSE_S)."""
+        main.save_xpub_utxo_cache(BIP84_ZPUB, [utxo(84_000_000)], self.cache, 50)
+        kennung = self.wallet_id(BIP84_ZPUB)
+        for _ in range(2):
+            status, körper = self.anfrage(f"/api/wallets/{kennung}/utxos")
+            self.assertEqual(status, 200)
+            self.assertEqual(körper["total_count"], 1)
+        self.assertEqual(self.node.call_count, 1)
+
     def test_ohne_cache(self):
         kennung = self.wallet_id(BIP84_ZPUB)
         status, körper = self.anfrage(f"/api/wallets/{kennung}/utxos")

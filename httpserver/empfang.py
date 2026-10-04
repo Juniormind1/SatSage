@@ -6,6 +6,13 @@ Keine HTTP-Handler; Fassade bleibt in server.py für Late-Imports.
 from __future__ import annotations
 
 import threading
+import time
+
+#: Nach einem gescheiterten Verbindungsversuch zum eigenen Node (Fulcrum/
+#: Electrs) fragt der Mempool-Abgleich so lange nicht neu nach (Sekunden).
+#: Sonst wartet bei abgeschaltetem Node jede UTXO-Ansicht den vollen
+#: Verbindungs-Timeout (~8 s) ab.
+MEMPOOL_NODE_PAUSE_S = 45.0
 
 def _sortierung(query: dict) -> str:
     roh = (query.get("sort") or ["betrag"])[0]
@@ -450,6 +457,55 @@ def _verlauf_anhang_fuer_xpub(
         "hat_verlauf": bool(gespeichert),
     }
 
+def _node_schluessel(werte: dict) -> tuple:
+    """Endpunkt-Einstellungen des eigenen Nodes — neue Werte beenden die Pause."""
+    return tuple(sorted(
+        (str(k), str(v)) for k, v in (werte or {}).items()
+        if str(k).startswith(("FULCRUM_", "ELECTRS_"))
+    ))
+
+
+def _mempool_node_client(state: AppState):
+    """
+    Eigener Node für den Mempool-Abgleich, mit Pause nach einem Fehlschlag.
+
+    Scheitert die Verbindung, wird ``MEMPOOL_NODE_PAUSE_S`` lang nicht neu
+    verbunden (je Endpunkt-Einstellung). Geloggt wird einmal pro Ausfall und
+    einmal, wenn der Node wieder antwortet.
+    """
+    from server import LOGGER, _eigener_fulcrum_client
+
+    werte = state.env().values() or {}
+    konfiguriert = bool(
+        (werte.get("FULCRUM_HOST") or "").strip()
+        or (werte.get("FULCRUM_TOR") or "").strip()
+    )
+    schluessel = _node_schluessel(werte)
+    pause = getattr(state, "_mempool_node_pause", None)
+    jetzt = time.monotonic()
+    if (
+        pause is not None
+        and pause[0] == schluessel
+        and jetzt < pause[1]
+        and getattr(state, "_empfang_fulcrum", None) is None
+    ):
+        return None
+    client = _eigener_fulcrum_client(state)
+    if client is None:
+        if konfiguriert:
+            if pause is None or pause[0] != schluessel:
+                LOGGER.info(
+                    "Mempool-Abgleich: eigener Node nicht erreichbar — "
+                    "nächster Versuch frühestens in %.0f s.", MEMPOOL_NODE_PAUSE_S,
+                )
+            state._mempool_node_pause = (schluessel, jetzt + MEMPOOL_NODE_PAUSE_S)
+        return None
+    if pause is not None:
+        LOGGER.info("Mempool-Abgleich: eigener Node wieder erreichbar.")
+        state._mempool_node_pause = None
+    return client
+
+
 def _mit_mempool_pending(
     state: AppState,
     gecacht: list[dict],
@@ -477,11 +533,10 @@ def _mit_mempool_pending(
         main,
         utxos_mod,
         _eigene_adressen,
-        _eigener_fulcrum_client,
         _verlauf_anhang_fuer_xpub,
     )
 
-    client = _eigener_fulcrum_client(state)
+    client = _mempool_node_client(state)
     if client is None:
         return gecacht, anhang
 

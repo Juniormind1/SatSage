@@ -81,7 +81,9 @@ const nachErstem = {
   gesamt: kasten.querySelector('[data-score="gesamt"] .kennzahl-zahl').textContent,
   offen: kasten.querySelector('[data-score="offen"] .kennzahl-zahl').textContent,
   punkte: spur.querySelectorAll(".achse-punkt").length,
-  keys: Zustand.steuer.grau_keys,
+  // Kopie: zeichneScanPunkte ergänzt grau_keys an Ort und Stelle, ohne
+  // Kopie stünde hier beim Ausgeben schon der Stand nach dem zweiten Punkt.
+  keys: [...Zustand.steuer.grau_keys],
 };
 const gruenNachher = kasten.querySelector('[data-score="erfuellt"]');
 const grauKarte = kasten.querySelector('[data-score="ungeprueft"]');

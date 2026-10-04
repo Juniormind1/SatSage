@@ -9,10 +9,13 @@ from fulcrum import (
     fetch_address_history_fulcrum,
 )
 from tests.fixtures import core_tx, core_vin, core_vout, txid
-from tests.test_fulcrum_verlauf import FakeFulcrumClient
+from tests.test_fulcrum_verlauf import FakeFulcrumClient, isoliere_header_caches
 
 
 class HrpMismatchVerlaufTest(unittest.TestCase):
+    def setUp(self):
+        isoliere_header_caches(self)
+
     def test_regtest_vout_address_matches_mainnet_query_address(self):
         # Same witness program: bc1 (query) vs bcrt1 (chain).
         from embit.ec import PrivateKey
