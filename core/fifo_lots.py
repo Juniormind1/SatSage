@@ -23,12 +23,11 @@ Lose aller Eingänge werden gemeinsam geordnet:
 3. den Outputs zurück an ein Wallet der Eingänge (Wechselgeld), nach ``vout``
    aufsteigend — sie behalten den Rest.
 
-**Mehrere Rückflüsse (defensiv, Entscheidung User 2026-10-04).** Gehen zwei
-oder mehr Outputs zurück an ein Wallet der Eingänge (tx0 mit Premix und
-Wechselgeld, WabiSabi mit mehreren eigenen Outputs, Umbuchung ins selbe
-Wallet), bekommt jeder davon seinen ganzen Betrag im jüngsten Los, das nach
-Zahlungen und Gebühr übrig bleibt (``je_output``). Die Tx-Zeit ist dabei nie
-das Anschaffungsdatum: Die Lose kommen aus den echten Eingängen.
+**Mehrere Rückflüsse.** Gehen zwei oder mehr Outputs zurück an ein Wallet der
+Eingänge (tx0 mit Premix und Wechselgeld, WabiSabi mit mehreren eigenen
+Outputs, Umbuchung ins selbe Wallet), laufen sie nach ``vout`` aufsteigend
+durch dieselben Lose (``je_output``). Die Tx-Zeit ist dabei nie das
+Anschaffungsdatum: Die Lose kommen aus den echten Eingängen.
 
 Ein Los, das nicht ganz in einen Verbraucher passt, wird geteilt; beide Teile
 behalten Zeit und Herkunft. Mit ganzzahligen sats rechnet die Verteilung exakt
@@ -124,61 +123,19 @@ def verteilen(
     return aus
 
 
-def _zeit_schluessel(los: Los) -> float:
-    return ZEIT_UNBEKANNT if los.zeit is None else float(los.zeit)
-
-
-def _aufteilen(junge: list[Los], bedarf: float) -> list[Los]:
-    """*bedarf* sats anteilig auf *junge*; ganzzahlig exakt, wenn alles ganzzahlig ist."""
-    gesamt = summe(junge)
-    if bedarf <= 0 or gesamt <= 0:
-        return []
-    ganz = float(bedarf).is_integer() and all(float(l.sats).is_integer() for l in junge)
-    aus: list[Los] = []
-    kum = 0.0
-    vorher = 0
-    for l in junge:
-        kum += l.sats
-        if ganz:
-            bis = int(bedarf) * int(kum) // int(gesamt)
-            teil: float = bis - vorher
-            vorher = bis
-        else:
-            teil = l.sats * bedarf / gesamt
-        if teil > 0:
-            aus.append(replace(l, sats=teil))
-    return aus
-
-
 def je_output(
     lose: Iterable[Los],
     ausgaenge: Iterable[tuple[int, float, bool]],
     gebuehr: float,
 ) -> dict[Hashable, list[Los]]:
     """
-    FIFO je Output samt der defensiven Regel für mehrere Rückflüsse.
+    FIFO je Output.
 
-    *ausgaenge* wie bei ``verbraucher``. Erst ``verteilen`` wie immer (Outputs,
-    die das Wallet verlassen, und die Gebühr nehmen die ältesten Lose). Gehen
-    **zwei oder mehr** Outputs zurück an ein Wallet der Eingänge, gibt es
-    zwischen ihnen keine fachliche Reihenfolge (die vout-Folge ist Zufall):
-    Dann bekommt jeder von ihnen seinen ganzen Betrag im **jüngsten** Los, das
-    nach Zahlungen und Gebühr übrig bleibt (ohne Zeit = jüngstes) — im Zweifel
-    gelb (Entscheidung User 2026-10-04). Genau ein Rückfluss: unverändert.
+    *ausgaenge* wie bei ``verbraucher``. Outputs, die das Wallet verlassen, und
+    die Gebühr nehmen die ältesten Lose; die Rückflüsse danach, nach ``vout``
+    aufsteigend — auch wenn es mehrere sind.
     """
-    liste = list(ausgaenge)
-    verteilt = verteilen(ordnen(lose), verbraucher(liste, gebuehr))
-    zurueck = [output_schluessel(n) for n, _s, z in liste if z]
-    if len(zurueck) < 2:
-        return verteilt
-    rest = [l for k in zurueck for l in verteilt.get(k, [])]
-    if not rest:
-        return verteilt
-    juengste = max(_zeit_schluessel(l) for l in rest)
-    junge = ordnen(l for l in rest if _zeit_schluessel(l) == juengste)
-    for k in zurueck:
-        verteilt[k] = _aufteilen(junge, summe(verteilt.get(k, [])))
-    return verteilt
+    return verteilen(ordnen(lose), verbraucher(ausgaenge, gebuehr))
 
 
 def summe(lose: Iterable[Los]) -> float:

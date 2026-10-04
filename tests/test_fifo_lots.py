@@ -169,11 +169,9 @@ class TestPlanGleichSpur(unittest.TestCase):
                 self.assertEqual(fl.klassen_summen(plan[schluessel]), fl.klassen_summen(spur[schluessel]))
 
     def test_eine_funktion_fuer_beide(self):
-        self.assertIn("fifo_lots.verteilen", inspect.getsource(psbt_bau.erzeuge))
-        self.assertIn("fifo_lots.verbraucher", inspect.getsource(psbt_bau.erzeuge))
+        self.assertIn("fifo_lots.je_output", inspect.getsource(psbt_bau.erzeuge))
         quelle = inspect.getsource(hn._fifo_hop)
-        self.assertIn("fifo_lots.verteilen", quelle)
-        self.assertIn("fifo_lots.verbraucher", quelle)
+        self.assertIn("fifo_lots.je_output", quelle)
 
 
 # --- Herkunftsnetz mit FIFO-Kontext -----------------------------------------

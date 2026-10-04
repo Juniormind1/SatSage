@@ -570,8 +570,8 @@ def _fifo_coinjoin_hop(
     Outputs an ein anderes eigenes Wallet nach vout, dann der Abfluss
     (eigene Eingänge − eigene Outputs = Koordinator- und Mining-Gebühr,
     verlässt das Wallet), dann die Outputs zurück an ein Wallet der Eingänge
-    nach vout. Mehrere Rückflüsse (WabiSabi mit mehreren eigenen Outputs):
-    defensiv das jüngste verbliebene Los für jeden (``fifo_lots.je_output``).
+    nach vout. Mehrere Rückflüsse (WabiSabi mit mehreren eigenen Outputs)
+    laufen in derselben ``vout``-Folge (``fifo_lots.je_output``).
     None = Fallback anteilig über die eigenen Eingänge.
     """
     if fifo is None:
