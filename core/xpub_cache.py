@@ -1368,6 +1368,21 @@ def utxo_cache_frisch_genug(
         grund = "UTXO-Cache frisch — Gap-Scan übersprungen"
     return alle, grund
 
+def normalisiere_scan_end_je_chain(wert) -> dict[int, int]:
+    """``{"0": n, "1": m}`` aus dem Cache → ``{0: n, 1: m}``; Unbrauchbares fällt weg."""
+    aus: dict[int, int] = {}
+    if not isinstance(wert, dict):
+        return aus
+    for k, v in wert.items():
+        try:
+            kette, ende = int(k), int(v)
+        except (TypeError, ValueError):
+            continue
+        if kette in (0, 1) and ende >= 0:
+            aus[kette] = ende
+    return aus
+
+
 def save_xpub_utxo_cache(
     xpub: str,
     utxos: list[dict],
@@ -1381,9 +1396,16 @@ def save_xpub_utxo_cache(
     bip158_fullscan_ok: bool | None = None,
     extra_scanned: list[str] | None = None,
     derived_addresses: list[str] | None = None,
+    scan_end_je_chain: dict | None = None,
 ) -> Path:
     """
     Speichert UTXOs eines XPUB als JSON-Flatfile.
+
+    *scan_end_je_chain* (``{0: n, 1: m}``): Scan-Ende je Chain (Empfang/
+    Change) — erster Index, den der Gap-Walk dieser Chain nicht mehr
+    geprüft hat. Der Tip-Nachzug rechnet sein Rückwärtsfenster damit je
+    Chain. Fehlt der Wert, bleibt ein gespeicherter erhalten (Nutzung wächst
+    nur, ein alter Wert ist höchstens zu klein, das Fenster also größer).
 
     *first_seen* hält fest, wann das Wallet zum ersten Mal benutzt wurde
     (``{"height": …, "time_ts": …}``). Fehlt der Wert, wird ein bereits
@@ -1465,6 +1487,12 @@ def save_xpub_utxo_cache(
             pass
     if scan_tip_height is not None:
         payload["scan_tip_height"] = int(scan_tip_height)
+    je_chain = scan_end_je_chain
+    if je_chain is None:
+        je_chain = roh_bisher.get("scan_end_je_chain")
+    je_chain = normalisiere_scan_end_je_chain(je_chain)
+    if je_chain:
+        payload["scan_end_je_chain"] = {str(k): v for k, v in sorted(je_chain.items())}
     if bip158_fullscan_ok is not None:
         payload["bip158_fullscan_ok"] = bool(bip158_fullscan_ok)
     elif "bip158_fullscan_ok" in roh_bisher:

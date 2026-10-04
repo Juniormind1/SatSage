@@ -48,6 +48,7 @@ from core.xpub_cache import (
     load_xpub_verlauf_cache,
     load_xpub_verlauf_scan_meta,
     merke_bip158_verlauf,
+    normalisiere_scan_end_je_chain,
     save_xpub_utxo_cache,
     save_xpub_verlauf_cache,
     schreibe_utxo_zwischenstand,
@@ -141,10 +142,17 @@ def discover_wallet_scan_addresses(
     fulcrum=None,
     on_progress=None,
     on_utxos_update=None,
+    start_je_chain: dict | None = None,
+    enden_je_chain: dict | None = None,
 ) -> tuple[set[str], int]:
     """
     Gap-Scan (Fulcrum): Adressen mit Historie (+ Gap-Puffer).
     Rückgabe: (adressen, scan_end_index für Light-Rescan).
+
+    *start_je_chain* (``{0: i, 1: j}``) setzt den Start je Chain (sonst
+    *start_index* für beide). In *enden_je_chain* (Dict, wird befüllt)
+    steht danach je Chain der erste nicht mehr geprüfte Index — bzw. der
+    Start, wenn diese Chain ab dort nichts Benutztes fand.
     """
     if fulcrum is not None:
         from core.fulcrum_wallet import collect_used_chain_indices_fulcrum
@@ -166,9 +174,12 @@ def discover_wallet_scan_addresses(
         for change, label in ((0, "Empfang"), (1, "Change")):
             if is_list_abort_requested():
                 break
+            start_c = start_index
+            if start_je_chain and start_je_chain.get(change) is not None:
+                start_c = max(0, int(start_je_chain[change]))
             print(
                 f"  Gap-Scan {label}-Chain "
-                f"(ab Index #{start_index}, max #{max_index_per_chain - 1})...",
+                f"(ab Index #{start_c}, max #{max_index_per_chain - 1})...",
                 flush=True,
             )
             if on_progress:
@@ -180,12 +191,14 @@ def discover_wallet_scan_addresses(
                 max_index_per_chain,
                 gap_limit,
                 derive_addresses_at_index,
-                start_index=start_index,
+                start_index=start_c,
                 on_progress=on_progress,
                 on_utxos_update=_kette_utxos if on_utxos_update else None,
                 kette=label,
             )
             scan_end_index = max(scan_end_index, next_index)
+            if enden_je_chain is not None:
+                enden_je_chain[change] = int(next_index) if used else start_c
             indices_to_derive: set[int] = set(used)
             if used:
                 last_used = max(used)
@@ -1012,9 +1025,11 @@ def _scan_xpub_utxos(
     scan_end_index = start_index + max_addresses // 2
     scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
     use_gap_scan = start_index == 0 and (fulcrum is not None)
+    enden_je_chain: dict[int, int] | None = None
     if use_gap_scan:
         if on_progress:
             on_progress(f"Suche benutzte Adressen von {label}…")
+        enden_je_chain = {}
         addresses, scan_end_index = discover_wallet_scan_addresses(
             xpub,
             fulcrum=fulcrum,
@@ -1022,7 +1037,10 @@ def _scan_xpub_utxos(
             start_index=start_index,
             on_progress=on_progress,
             on_utxos_update=_melde_utxos,
+            enden_je_chain=enden_je_chain,
         )
+        if len(enden_je_chain) < 2:
+            enden_je_chain = None  # Abbruch mitten im Walk: nichts festschreiben
         print(
             f"\nScanne XPUB {label} "
             f"(Gap-Scan bis Index #{scan_end_index - 1} pro Chain, "
@@ -1136,6 +1154,7 @@ def _scan_xpub_utxos(
         ),
         scan_tip_height=tip_hoehe,
         bip158_fullscan_ok=full_ok,
+        scan_end_je_chain=enden_je_chain,
     )
     print(
         f"  → {len(utxos)} UTXO(s) gecacht in {cache_path.name}",
@@ -1157,6 +1176,51 @@ def _adressen_bis_index(xpub: str, end_index: int) -> set[str]:
             if addr:
                 addresses.add(addr)
     return addresses
+
+
+def _scan_enden_je_chain(
+    xpub: str,
+    entry: dict,
+    scan_end: int,
+    bekannte_adressen: set,
+    gap_limit: int,
+) -> dict[int, int]:
+    """
+    Scan-Ende je Chain (0 = Empfang, 1 = Change) für den Tip-Nachzug.
+
+    Gespeichert (``scan_end_je_chain``, seit dem Fix je Chain) → so nehmen.
+    Alter Cache ohne den Wert: höchster Index dieser Chain mit bekanntem
+    UTXO + Gap-Limit + 1, höchstens das gemeinsame ``scan_end`` (ohne
+    bekannten UTXO auf der Chain: Gap-Limit). Die Schätzung ist höchstens
+    zu klein — dann wird mehr geprüft, nie weniger.
+    """
+    gespeichert = normalisiere_scan_end_je_chain(
+        (entry.get("raw") or {}).get("scan_end_je_chain")
+    )
+    enden: dict[int, int] = {}
+    for kette in (0, 1):
+        if kette in gespeichert:
+            enden[kette] = gespeichert[kette]
+            continue
+        letzter = -1
+        for i in range(max(0, int(scan_end))):
+            if any(a in bekannte_adressen for a in derive_addresses_at_index(xpub, kette, i)):
+                letzter = i
+        enden[kette] = min(int(scan_end), letzter + gap_limit + 1)
+    return enden
+
+
+def _rueckwaerts_fenster_je_chain(
+    xpub: str, enden: dict[int, int], gap_limit: int,
+) -> dict[str, tuple[int, int]]:
+    """Adresse → (Chain, Index) für [Ende − Gap-Limit, Ende) je Chain."""
+    fenster: dict[str, tuple[int, int]] = {}
+    for kette in (0, 1):
+        ende = max(0, int(enden.get(kette) or 0))
+        for i in range(max(0, ende - gap_limit), ende):
+            for addr in derive_addresses_at_index(xpub, kette, i):
+                fenster.setdefault(addr, (kette, i))
+    return fenster
 
 
 def sync_xpub_zum_tip(
@@ -1346,11 +1410,23 @@ def sync_xpub_zum_tip(
     new_end = scan_end
     extra_utxos: list[dict] = []
     extra_window: list[dict] = []
+    enden_neu: dict[int, int] | None = None  # None = gespeicherten Wert behalten
 
     if not nur_bekannte and fulcrum is not None:
         scan_cap = _scan_index_cap_per_chain(xpub, wallet, xpub_max)
+        # Scan-Ende je Chain: Empfang und Change wachsen unterschiedlich weit
+        # (z. B. Empfang bis #121, Change bis #17). Ein gemeinsames Ende
+        # hätte das Rückwärtsfenster der Change-Chain über ihren letzten
+        # benutzten Index hinausgeschoben — neues Wechselgeld blieb unsichtbar.
+        enden = _scan_enden_je_chain(
+            xpub, entry, scan_end, addrs_cache, UTXO_SCAN_GAP_LIMIT,
+        )
         if on_progress:
-            on_progress(f"{label}: Gap ab Index #{scan_end}…")
+            on_progress(
+                f"{label}: Gap ab Index #{enden[0]} (Empfang) / "
+                f"#{enden[1]} (Change)…"
+            )
+        walk_enden: dict[int, int] = {}
         try:
             extra_addrs, walked_end = discover_wallet_scan_addresses(
                 xpub,
@@ -1359,9 +1435,14 @@ def sync_xpub_zum_tip(
                 start_index=scan_end,
                 gap_limit=UTXO_SCAN_GAP_LIMIT,
                 on_progress=on_progress,
+                start_je_chain=enden,
+                enden_je_chain=walk_enden,
             )
         except ValueError:
             extra_addrs, walked_end = set(), scan_end
+        enden_neu = {
+            c: max(enden[c], int(walk_enden.get(c, enden[c]))) for c in (0, 1)
+        }
         neu = set(extra_addrs) - addrs_cache
         if neu:
             if on_progress:
@@ -1374,16 +1455,13 @@ def sync_xpub_zum_tip(
                 on_progress=on_progress,
             )
             new_end = max(scan_end, int(walked_end))
-        # Rückwärts-Gap: Empfänge auf zuvor leeren Indizes können unterhalb
-        # des bisherigen Scan-Endes liegen (Empfang und Change).
-        window_start = max(0, scan_end - UTXO_SCAN_GAP_LIMIT)
-        if window_start < scan_end and (fetch_address_utxos or fetch_addresses_utxos):
-            window_addrs = derive_addresses(
-                xpub,
-                max_addresses=(scan_end - window_start) * 2,
-                start_index=window_start,
+        # Rückwärts-Gap je Chain: Empfänge auf zuvor leeren Indizes liegen
+        # unterhalb des Scan-Endes DIESER Chain — [Ende − Gap-Limit, Ende).
+        if fetch_address_utxos or fetch_addresses_utxos:
+            fenster = _rueckwaerts_fenster_je_chain(
+                xpub, enden, UTXO_SCAN_GAP_LIMIT,
             )
-            neu_window = window_addrs - addrs_cache - set(extra_addrs)
+            neu_window = set(fenster) - addrs_cache - set(extra_addrs)
             if neu_window:
                 extra_window = _fetch_address_batch_utxos(
                     neu_window,
@@ -1392,6 +1470,16 @@ def sync_xpub_zum_tip(
                     progress_label=f"Rückwärts-Gap {label}",
                     on_progress=on_progress,
                 )
+                for u in extra_window:
+                    treffer = fenster.get(u.get("address"))
+                    if treffer is None:
+                        continue
+                    kette, index = treffer
+                    enden_neu[kette] = max(
+                        enden_neu[kette],
+                        min(index + UTXO_SCAN_GAP_LIMIT + 1, scan_cap),
+                    )
+        new_end = max(new_end, *enden_neu.values())
     elif not nur_bekannte:
         lookahead = max(BIP44_GAP_LIMIT, SALDEN_CHECK_LOOKAHEAD)
         if on_progress:
@@ -1428,6 +1516,7 @@ def sync_xpub_zum_tip(
         scan_end_index=new_end,
         max_addresses=xpub_max,
         scan_tip_height=tip_fuer_cache,
+        scan_end_je_chain=enden_neu,
     )
     print(
         f"  → {label}: {len(merged)} UTXO(s) (vorher {old_n}), "
