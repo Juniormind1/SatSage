@@ -308,7 +308,10 @@ class TestDatenquelleImJobLog(unittest.TestCase):
         self.job = Job(id="q", kind="rescan", label="Quelle")
         self.stand = Fortschritt(self.job)
         self.addCleanup(self.stand.close)
-        self.args = SimpleNamespace(bip158_start=None)
+        # Wie AppState.args_namespace: rpchost/fulcrum_host sind immer gesetzt
+        # (None = nicht per CLI). Seit c3828ad prüft die Kette vorab, ob ein
+        # eigener Indexer konfiguriert ist, und liest dafür args.rpchost.
+        self.args = SimpleNamespace(bip158_start=None, rpchost=None, fulcrum_host=None)
 
     def zeilen(self):
         return self.job.as_dict()["log"]
@@ -469,6 +472,8 @@ class TestOnionLatenzGate(unittest.TestCase):
             rpc_only=False,
             oeffentliche_electrum=True,
             bip158_start=None,
+            rpchost=None,       # wie AppState.args_namespace (siehe oben)
+            fulcrum_host=None,
         )
         self.env = {"OEFFENTLICHE_ELECTRUM": "1"}
 

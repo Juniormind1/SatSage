@@ -47,8 +47,11 @@ class TestBootLog(ApiTestBasis):
         self.state._context_bereit.clear()
         _, koerper = self.anfrage("/api/jobs?recent_s=3")
         job = next(j for j in koerper["jobs"] if j["kind"] == "wallet_context")
-        self.assertEqual(job["log"][1], "Leite Adressen ab…")
-        self.assertEqual(job["log_wallets"][1], "Cold Storage")
+        # Erste Zeile ist seit e17a070 die Code-Kennung des Laufs (siehe oben).
+        self.assertTrue(job["log"][0].startswith("Code "))
+        self.assertEqual(job["log"][-2:], ["Bereite 1 Wallet vor…", "Leite Adressen ab…"])
+        self.assertEqual(job["log_wallets"][-2:], ["", "Cold Storage"])
+        self.assertEqual(job["message"], "Leite Adressen ab…")
         self.state._context_bereit.set()
 
     def test_config_wartet_nicht_auf_cache_waehrend_vorbereitung(self):
@@ -71,6 +74,20 @@ class TestBootLog(ApiTestBasis):
         self.assertGreaterEqual(len(staende), 1)
         self.assertIn("id", staende[0])
         self.assertIn("name", staende[0])
+
+    def test_strom_nach_der_vorbereitung_endet_sofort(self):
+        """Wer nach dem Start verbindet, bekommt „done“ sofort, nicht nach 30 s."""
+        self.state.reload(hintergrund=True)
+        self.assertTrue(self.state.warte_auf_context(timeout=10))
+        url = f"http://127.0.0.1:{self.port}/api/boot-log"
+        req = urllib.request.Request(url)
+        req.add_header("X-Satsage-Token", self.state.token)
+        req.add_header("Accept", "application/x-ndjson")
+        start = time.monotonic()
+        with urllib.request.urlopen(req, timeout=15) as antwort:
+            zeilen = [json.loads(z) for z in antwort.read().decode().splitlines() if z.strip()]
+        self.assertLess(time.monotonic() - start, 5)
+        self.assertEqual(zeilen[-1], {"done": True, "context_bereit": True})
 
     def test_wallet_ansicht_wartet_nicht_auf_den_cache_der_anderen(self):
         """Die Ansicht nimmt den Kontext, sobald die Adressen stehen."""

@@ -1150,17 +1150,15 @@ function zeichneUtxos(daten, wallet, seite = null) {
   zeichneSanktionsBefund(daten.sanctions);
 
   const gruppen = seite ? seite.items : (daten.addresses || []);
+  // UTXOs, nicht Adressen: eine Adresse kann mehrere UTXOs tragen. Die
+  // Sortierung steht sichtbar im Sortier-Feld daneben (mit Tooltip).
   setzeText(
     $("#adress-zusatz"),
     hatUtxos
-      ? t("wallet.addressCountWithBalance", {
-          count: seite ? (daten.adressen_count ?? seite.total) : gruppen.length,
-          sort: ($("#sort-wahl")?.value === "datum")
-            ? t("wallet.sortNewestFirst")
-            : t("wallet.sortLargestFirst"),
-        })
+      ? t("wallet.utxoCount", { count: formatZahl(Number(daten.total_count) || 0) })
       : t("wallet.addressCountNoBalance"),
   );
+  aktualisiereFifoSpend(hatUtxos ? (daten.wallet_id || (wallet && wallet.id) || Zustand.walletId) : null);
 
   const koerper = $("#adress-koerper");
   koerper.replaceChildren();
@@ -1190,6 +1188,1153 @@ function zeichneUtxos(daten, wallet, seite = null) {
   $("#adress-liste").hidden = false;
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
+}
+
+/* --- wallet-fifo-spend --- */
+// ---------------------------------------------------------------------------
+// FIFO-Spend (Schritt 1: nur Anzeige, PSBT folgt)
+//
+// Keine Losbuchhaltung: Die grünen sats kommen aus derselben Steuerjahr-
+// Auswertung wie Scorecards und Lot-Ringe (core/tax.py, laufendes Jahr =
+// Stand heute), gefiltert auf dieses Wallet. Je UTXO zählt der aktuelle
+// Trace; ohne ausgewerteten Baum zählt ein UTXO nicht als grün.
+// ---------------------------------------------------------------------------
+
+/** Lesart aus den Einstellungen: ``aelteste`` = offensiv, sonst defensiv. */
+function fifoSpendModus() {
+  const steuer = typeof steuerEinstellungen === "function" ? steuerEinstellungen() : {};
+  return steuer && steuer.anschaffung === "aelteste" ? "offensiv" : "defensiv";
+}
+
+/** ``txid:vout`` in Kleinschrift — Trace, Steuer und Wallet-Liste schreiben es gleich. */
+function fifoUtxoKey(obj) {
+  if (!obj) return "";
+  const roh = obj.key || (obj.txid !== undefined ? `${obj.txid}:${Number(obj.vout) || 0}` : "");
+  return String(roh || "").trim().toLowerCase();
+}
+
+/**
+ * Grüne sats eines Wallets aus den Zeitstrahl-Punkten der Steuerauswertung.
+ *
+ * defensiv: ganze UTXOs ohne grauen und ohne orangen Lot-Anteil.
+ * offensiv: die grünen Lot-Anteile (je UTXO höchstens sein Betrag), auch aus
+ *   grün/gelb gemischten UTXOs — deren Gelb geht ins Wechselgeld.
+ * UTXOs mit grauem Anteil zählen in keinem Modus (nie Input).
+ * Punkte ohne Lot-Anteile (kein Baum) und Neuvermögen zählen nicht.
+ * *pending*: Schlüssel der UTXOs, die gerade im Mempool ausgegeben werden.
+ * Ihr grüner Anteil fällt heraus und steht in ``abzug``.
+ */
+function fifoGrueneSats(events, walletId, pending) {
+  const aus = {
+    defensiv: 0, offensiv: 0, anzahl: 0, ohneHerkunft: 0,
+    abzug: { defensiv: 0, offensiv: 0, anzahl: 0 },
+  };
+  const id = String(walletId || "");
+  if (!id) return aus;
+  const unterwegs = new Set();
+  for (const k of pending || []) {
+    const key = String(k || "").trim().toLowerCase();
+    if (key) unterwegs.add(key);
+  }
+  for (const e of events || []) {
+    if (!e || String(e.wallet_id || "") !== id) continue;
+    aus.anzahl += 1;
+    const imMempool = unterwegs.size > 0 && unterwegs.has(fifoUtxoKey(e));
+    if (imMempool) aus.abzug.anzahl += 1;
+    if (e.sats_gruen === null || e.sats_gruen === undefined) {
+      if (!imMempool) aus.ohneHerkunft += 1;
+      continue;
+    }
+    if (e.neuvermoegen) continue;
+    const wert = Math.max(0, Math.floor(Number(e.value_sats) || 0));
+    const gruen = Math.min(wert, Math.max(0, Math.floor(Number(e.sats_gruen) || 0)));
+    // Ein UTXO mit grauem Anteil ist nie Input (beide Modi) — auch sein
+    // grüner Teil zählt nicht. Offensiv zählt der grüne Teil grün/gelb
+    // gemischter UTXOs (Gelb kommt im Wechselgeld zurück, core/coin_auswahl.py).
+    if (Number(e.sats_grau) > 0) continue;
+    const ganz = gruen > 0 && !(Number(e.sats_orange) > 0);
+    const ziel = imMempool ? aus.abzug : aus;
+    ziel.offensiv += gruen;
+    if (ganz) ziel.defensiv += wert;
+  }
+  return aus;
+}
+
+/**
+ * Mempool-Ausgaben dieses Wallets aus der Wallet-Antwort.
+ *
+ * ``pending_spending_keys`` gilt für den ganzen Bestand. Fehlt das Feld
+ * (älterer Server), bleiben nur die markierten Zeilen der Seite; reichen die
+ * nicht an ``pending_spending_count``, ist der Stand unvollständig.
+ */
+function fifoPendingInfo(daten) {
+  const keys = new Set();
+  if (!daten) return { keys, vollstaendig: true };
+  if (Array.isArray(daten.pending_spending_keys)) {
+    for (const k of daten.pending_spending_keys) {
+      const key = String(k || "").trim().toLowerCase();
+      if (key) keys.add(key);
+    }
+  } else {
+    const zeilen = [...(daten.utxos || [])];
+    for (const g of daten.addresses || []) zeilen.push(...((g && g.utxos) || []));
+    for (const u of zeilen) {
+      if (u && u.spending_pending) {
+        const key = fifoUtxoKey(u);
+        if (key) keys.add(key);
+      }
+    }
+  }
+  const erwartet = Number(daten.pending_spending_count || 0);
+  return { keys, vollstaendig: keys.size >= erwartet };
+}
+
+/** Dieselbe Abfrage wie die Steuerjahr-Ansicht, damit der Server-Cache greift. */
+function fifoSpendAbfrage() {
+  const steuer = typeof steuerEinstellungen === "function" ? steuerEinstellungen() : {};
+  const jahr = String(new Date().getFullYear());
+  const frist = steuer.haltefrist_jahre ?? 1;
+  const abfrage =
+    `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
+    `&stichtag=${encodeURIComponent(steuer.stichtag || "")}`;
+  const p = new URLSearchParams();
+  p.set("seite", "1");
+  p.set("teil", "alle");
+  p.set("limit", "0");
+  p.set("limit_abgaenge", "0");
+  p.set("lang", typeof uiSprache === "function" ? uiSprache() : "de");
+  return `${abfrage}&${p}`;
+}
+
+/** Eine laufende Auswertung teilen sich alle Wallets — sie liefert alle Punkte. */
+function holeFifoSpendAuswertung(abfrage) {
+  const lauf = Zustand.fifoSpendLauf;
+  if (lauf && lauf.abfrage === abfrage) return lauf.promise;
+  const promise = api(`/tax${abfrage}`).finally(() => {
+    if (Zustand.fifoSpendLauf && Zustand.fifoSpendLauf.promise === promise) {
+      Zustand.fifoSpendLauf = null;
+    }
+  });
+  Zustand.fifoSpendLauf = { abfrage, promise };
+  return promise;
+}
+
+/**
+ * Leiste neu zeichnen und bei Bedarf nachladen.
+ *
+ * *walletId* null: Leiste weg (kein Bestand). Ohne Argument: das offene
+ * Wallet (Einstellung geändert, Sprache gewechselt). Der Mempool-Abzug
+ * rechnet bei jedem Zeichnen neu aus der gerade gezeigten Wallet-Antwort.
+ */
+function aktualisiereFifoSpend(walletId) {
+  const leiste = $("#fifo-spend");
+  if (!leiste) return;
+  if (walletId === undefined) {
+    // Außerhalb der Wallet-Ansicht nichts holen: zeigeWallet zeichnet beim
+    // Zurückkommen ohnehin neu, mit der dann gültigen Lesart.
+    if (Zustand.ansicht !== "wallet" || leiste.hidden) return;
+  }
+  const id = walletId === undefined ? Zustand.walletId : walletId;
+  const stand = Zustand.fifoSpend || null;
+  if (!id) {
+    leiste.hidden = true;
+    fifoZielZeigen(false);
+    return;
+  }
+  leiste.hidden = false;
+  const modus = fifoSpendModus();
+  const abfrage = fifoSpendAbfrage();
+  const ladeGen = Zustand.walletLadeGen || 0;
+  const schluessel = `${id}|${ladeGen}|${abfrage}|${modus}`;
+  // Anderes Wallet: Betrag sofort leeren — er gehört zum vorigen Wallet.
+  if (!stand || stand.walletId !== id) {
+    const feld = $("#fifo-spend-betrag");
+    if (feld) feld.value = "";
+  }
+  if (stand && stand.schluessel === schluessel && stand.zustand !== "start") {
+    zeichneFifoSpend(stand);
+    return;
+  }
+  const neu = {
+    schluessel, walletId: id, modus, zustand: "laedt", events: null, werte: null, fehler: "",
+  };
+  Zustand.fifoSpend = neu;
+  // Während des Starts wartet die Auswertung auf den Wallet-Kontext und
+  // hielte eine Verbindung. holeWalletMempoolNachStart zeichnet danach neu.
+  if (typeof walletMempoolErlaubt === "function" && !walletMempoolErlaubt()) {
+    neu.zustand = "start";
+    zeichneFifoSpend(neu);
+    return;
+  }
+  zeichneFifoSpend(neu);
+  holeFifoSpendAuswertung(abfrage)
+    .then((antwort) => {
+      if (Zustand.fifoSpend !== neu) return;
+      const alle = (antwort && antwort.zeitstrahl && antwort.zeitstrahl.events) || [];
+      neu.events = alle.filter((e) => e && String(e.wallet_id || "") === String(id));
+      neu.zustand = "fertig";
+      zeichneFifoSpend(neu);
+    })
+    .catch((fehler) => {
+      if (Zustand.fifoSpend !== neu) return;
+      neu.events = null;
+      neu.zustand = "fehler";
+      neu.fehler = (fehler && fehler.message) || String(fehler || "");
+      zeichneFifoSpend(neu);
+    });
+}
+
+/** Schmales geschütztes Leerzeichen (U+202F) als Gruppentrenner der Satcomma-Schreibweise. */
+const FIFO_SATCOMMA_LUECKE = "\u202F";
+
+/**
+ * Satcomma nur für die FIFO-Spend-Zeile: BTC mit allen 8 Nachkommastellen,
+ * Nachkommastellen 2-3-3 gruppiert, ganze BTC in 3er-Gruppen, Trenner U+202F.
+ * Dezimalzeichen nach UI-Sprache (de ``,``, en ``.``). Exakt, ohne Rundung.
+ * Die übrige App behält ``formatSatsBasis``.
+ */
+function formatSatcomma(sats, sprache) {
+  const lang = String(
+    sprache || (typeof uiSprache === "function" ? uiSprache() : "de") || "de",
+  ).toLowerCase();
+  const dezimal = lang.startsWith("en") ? "." : ",";
+  const n = Math.max(0, Math.round(Number(sats) || 0));
+  const ganz = String(Math.floor(n / 1e8)).replace(/\B(?=(\d{3})+(?!\d))/g, FIFO_SATCOMMA_LUECKE);
+  const rest = String(n % 1e8).padStart(8, "0");
+  const nachkomma = [rest.slice(0, 2), rest.slice(2, 5), rest.slice(5, 8)].join(FIFO_SATCOMMA_LUECKE);
+  return `${ganz}${dezimal}${nachkomma} BTC`;
+}
+
+/** Satcomma, dazu der Spot-Fiatwert, falls ein Kurs da ist. */
+function fifoBetragMitFiat(sats) {
+  const fiat = typeof formatEurAusSats === "function" ? formatEurAusSats(Number(sats) || 0) : null;
+  return fiat ? `${fifoBetragText(sats)} ≈ ${fiat}` : fifoBetragText(sats);
+}
+
+/** Betrag in der FIFO-Spend-Zeile (Anzeige und Tooltip). */
+function fifoBetragText(sats) {
+  return formatSatcomma(sats);
+}
+
+/** Grünes Maximum ohne Gebühr (Summe der grünen Beiträge), exakt in sats; null = keiner. */
+function fifoSpendBrutto(stand) {
+  if (!stand || stand.zustand !== "fertig" || !stand.werte || stand.unvollstaendig) return null;
+  return Number(stand.werte[stand.modus]) || 0;
+}
+
+/**
+ * Höchstbetrag fürs Eingabefeld, exakt in sats; null = gerade keiner.
+ *
+ * Netto: grünes Maximum minus Gebühr bei der aktuellen Rate (Gebührenfeld,
+ * sonst Schätzung) — vom Server (``POST /api/psbt/max``), derselben Rechnung
+ * wie die PSBT. Der angezeigte Wert lässt sich also genau so senden, +1 nicht.
+ * Solange der Server noch rechnet oder nicht erreichbar ist: das Brutto-
+ * Maximum (der Tooltip sagt es).
+ */
+function fifoSpendMax(stand) {
+  const brutto = fifoSpendBrutto(stand);
+  if (brutto === null) return null;
+  const netto = fifoNettoAktuell(stand);
+  return netto ? Math.min(brutto, Number(netto.max_netto_sats) || 0) : brutto;
+}
+
+/** Eingaben, von denen das Netto-Maximum abhängt. */
+function fifoNettoSchluessel(stand) {
+  const ziel = Zustand.fifoZielErgebnis || {};
+  const adresse = ["meine", "fremd", "keine_wallets"].includes(ziel.status) ? (ziel.address || "") : "";
+  const pending = [...fifoPendingInfo(Zustand._walletUtxoDaten).keys].sort().join(",");
+  return [stand && stand.schluessel, Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
+}
+
+/** Fertiges Netto-Maximum zum aktuellen Stand, sonst null. */
+function fifoNettoAktuell(stand) {
+  const netto = Zustand.fifoNetto;
+  if (!stand || !netto || netto.zustand !== "fertig" || netto.schluessel !== fifoNettoSchluessel(stand)) {
+    return null;
+  }
+  return netto;
+}
+
+/** Wartezeit, bevor eine geänderte Gebühr/Adresse das Netto-Maximum neu holt. */
+const FIFO_NETTO_ENTPRELLEN_MS = 250;
+
+/** Netto-Maximum beim Server holen, wenn sich Stand, Gebühr oder Ziel geändert haben. */
+function planeFifoNetto() {
+  const stand = Zustand.fifoSpend;
+  if (fifoSpendBrutto(stand) === null) return;
+  const schluessel = fifoNettoSchluessel(stand);
+  const alt = Zustand.fifoNetto;
+  if (alt && alt.schluessel === schluessel) return;
+  const lauf = { schluessel, zustand: "laedt" };
+  Zustand.fifoNetto = lauf;
+  clearTimeout(Zustand.fifoNettoTimer);
+  Zustand.fifoNettoTimer = setTimeout(() => {
+    const ziel = Zustand.fifoZielErgebnis || {};
+    const koerper = { wallet_id: String(stand.walletId || "") };
+    if (Zustand.fifoZielFeeMilli > 0) koerper.fee = fifoMilliText(Zustand.fifoZielFeeMilli);
+    if (["meine", "fremd", "keine_wallets"].includes(ziel.status) && ziel.address) {
+      koerper.adresse = ziel.address;
+    }
+    Promise.resolve()
+      .then(() => api("/psbt/max", { methode: "POST", daten: koerper }))
+      .then((v) => {
+        if (Zustand.fifoNetto !== lauf) return;
+        if (v && v.status === "max" && Number.isFinite(Number(v.max_netto_sats))) {
+          lauf.max_netto_sats = Number(v.max_netto_sats);
+          lauf.max_netto_fee_sats = Number(v.max_netto_fee_sats) || 0;
+          lauf.max_netto_inputs = Number(v.max_netto_inputs) || 0;
+          lauf.sat_vb = v.sat_vb;
+          lauf.zustand = "fertig";
+        } else {
+          lauf.zustand = "fehler";
+        }
+      })
+      .catch((fehler) => {
+        if (Zustand.fifoNetto !== lauf) return;
+        lauf.zustand = "fehler";
+        lauf.fehler = (fehler && fehler.message) || String(fehler || "");
+      })
+      .then(() => {
+        if (Zustand.fifoNetto === lauf && Zustand.fifoSpend === stand) zeichneFifoSpend(stand);
+      });
+  }, FIFO_NETTO_ENTPRELLEN_MS);
+}
+
+/** Text, Tooltip und Eingabegrenze aus dem gemerkten Stand. */
+function zeichneFifoSpend(stand) {
+  const text = $("#fifo-spend-text");
+  const feld = $("#fifo-spend-betrag");
+  if (!text || !stand) return;
+  stand.unvollstaendig = false;
+  if (stand.zustand === "fertig") {
+    const mempool = fifoPendingInfo(Zustand._walletUtxoDaten);
+    stand.unvollstaendig = !mempool.vollstaendig;
+    stand.werte = fifoGrueneSats(stand.events, stand.walletId, mempool.keys);
+  }
+  const max = fifoSpendMax(stand);
+  let zahl = "—";
+  if (max !== null) zahl = fifoBetragText(max);
+  else if (stand.zustand === "laedt" || stand.zustand === "start") zahl = "…";
+  const schluessel = stand.modus === "offensiv"
+    ? "wallet.fifoSpendOffensive"
+    : "wallet.fifoSpendDefensive";
+  setzeText(text, t(schluessel, { n: zahl }));
+  text.dataset.modus = stand.modus;
+  text.dataset.zustand = max !== null ? "fertig" : (stand.unvollstaendig ? "fehler" : stand.zustand);
+  let titel;
+  if (max !== null) {
+    const teile = [
+      t(stand.modus === "offensiv"
+        ? "wallet.fifoSpendTitleOffensive"
+        : "wallet.fifoSpendTitleDefensive", { betrag: fifoBetragMitFiat(max) }),
+      t("wallet.fifoSpendTitleExact", { sats: formatZahl(max) }),
+      t("wallet.fifoSpendTitleBasis"),
+    ];
+    const netto = fifoNettoAktuell(stand);
+    if (netto) {
+      teile.push(t("wallet.fifoSpendTitleNet", {
+        fee: formatZahl(netto.max_netto_fee_sats || 0),
+        rate: formatZahl(netto.sat_vb || 0),
+        inputs: netto.max_netto_inputs || 0,
+        brutto: formatZahl(fifoSpendBrutto(stand) || 0),
+      }));
+    } else {
+      teile.push(t("wallet.fifoSpendTitleGross"));
+    }
+    const abzug = stand.werte.abzug;
+    if (abzug && abzug.anzahl > 0) {
+      teile.push(t("wallet.fifoSpendTitleMempool", {
+        count: abzug.anzahl,
+        betrag: fifoBetragText(abzug[stand.modus]),
+      }));
+    }
+    if (stand.werte.ohneHerkunft > 0) {
+      teile.push(t("wallet.fifoSpendTitleUnchecked", { count: stand.werte.ohneHerkunft }));
+    }
+    titel = teile.join("\n");
+  } else if (stand.unvollstaendig) {
+    titel = t("wallet.fifoSpendMempoolIncompleteTitle");
+  } else if (stand.zustand === "start") {
+    titel = t("wallet.fifoSpendWaitStartTitle");
+  } else if (stand.zustand === "fehler") {
+    titel = t("wallet.fifoSpendUnavailableTitle", { msg: stand.fehler || "?" });
+  } else {
+    titel = t("wallet.fifoSpendLoadingTitle");
+  }
+  text.title = titel;
+  if (feld) {
+    feld.disabled = max === null;
+    if (max !== null) {
+      feld.dataset.max = String(max);
+    } else {
+      delete feld.dataset.max;
+      feld.title = "";
+    }
+    // Sprache gewechselt / neu gezeichnet: nicht fokussierte Eingabe neu setzen.
+    const fokus = typeof document !== "undefined" && document.activeElement === feld;
+    if (!fokus) fifoBetragNeuSchreiben(feld);
+    pruefeFifoSpendBetrag();
+  }
+  planeFifoNetto();
+}
+
+/** Ganze sats in 3er-Gruppen mit U+202F (``12 345 678``), ohne Einheit. */
+function fifoSatsGruppiert(sats) {
+  const n = Math.max(0, Math.round(Number(sats) || 0));
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, FIFO_SATCOMMA_LUECKE);
+}
+
+/**
+ * Feldtext ohne Einheit — die erkannte Einheit steht als Label daneben.
+ * ``sats``: ``12 345 678``; ``btc``: Satcomma ``1,01 000 000`` (Dezimalzeichen
+ * nach UI-Sprache).
+ */
+function fifoBetragFeldText(sats, einheit, sprache) {
+  if (einheit === "sats") return fifoSatsGruppiert(sats);
+  return formatSatcomma(sats, sprache).replace(/ BTC$/, "");
+}
+
+/** Höchstens 21 Mio. BTC — hält die sats im sicheren Ganzzahlbereich. */
+const FIFO_MAX_SATS = 21000000 * 1e8;
+
+/**
+ * Eingabe im Betragsfeld exakt in ganze sats, ohne Gleitkomma-Rundung.
+ *
+ * Regeln, unabhängig von der UI-Sprache:
+ * - Leerzeichen jeder Art (auch U+202F und U+00A0) zählen nicht.
+ * - Ohne ``,`` und ohne ``.``: ganze sats (``12 345 678`` = 12 345 678 sats).
+ * - Mit ``,`` oder ``.``: BTC. Genau EIN Trenner, er ist das Dezimalzeichen;
+ *   zwei oder mehr (``1.000,5``, ``1.000.000``) sind ungültig — es werden
+ *   keine Tausenderpunkte geraten. Höchstens 8 Nachkommastellen, mehr ist
+ *   ungültig (keine Rundung).
+ * - Eine angehängte Einheit „sats“/„sat“ bzw. „BTC“ (eingefügt) legt die
+ *   Einheit fest; „sats“ mit Trenner ist ungültig.
+ * - Sonst nur Ziffern: kein Vorzeichen, kein Exponent; höchstens 21 Mio. BTC.
+ *
+ * Ganz- und Nachkommateil werden als Zeichenketten getrennt und als ganze
+ * Zahlen zusammengesetzt. Die eigene Ausgabe (``fifoBetragFeldText``) wird
+ * in beiden Einheiten und beiden Sprachen wieder gelesen.
+ * Rückgabe: ``{ leer: true }`` oder ``{ einheit: "sats"|"btc", sats }`` bzw.
+ * ``{ einheit, fehler: "format" }``.
+ */
+function fifoBetragZuSats(roh) {
+  let text = String(roh ?? "").replace(/[\s\u00A0\u2007\u2009\u202F]+/g, "");
+  if (!text) return { leer: true };
+  let einheit = /[.,]/.test(text) ? "btc" : "sats";
+  const angehaengt = text.match(/(sats?|btc)$/i);
+  if (angehaengt) {
+    einheit = angehaengt[1].toLowerCase() === "btc" ? "btc" : "sats";
+    text = text.slice(0, -angehaengt[1].length);
+  }
+  const fehler = { einheit, fehler: "format" };
+  if (!/[0-9]/.test(text)) return fehler;
+  if (einheit === "sats") {
+    if (!/^[0-9]+$/.test(text)) return fehler;
+    const ziffern = text.replace(/^0+/, "") || "0";
+    if (ziffern.length > 16 || Number(ziffern) > FIFO_MAX_SATS) return fehler;
+    return { einheit, sats: Number(ziffern) };
+  }
+  if (!/^[0-9]*[.,]?[0-9]*$/.test(text)) return fehler;
+  const [ganzRoh, nachkomma = ""] = text.split(/[.,]/);
+  if (nachkomma.length > 8) return fehler;
+  const ganz = ganzRoh.replace(/^0+/, "") || "0";
+  if (ganz.length > 8 || Number(ganz) > 21000000) return fehler;
+  const sats = Number(ganz) * 1e8 + Number(nachkomma.padEnd(8, "0"));
+  if (sats > FIFO_MAX_SATS) return fehler;
+  return { einheit, sats };
+}
+
+/**
+ * Prüft die Eingabe gegen 0 < sats ≤ max.
+ * Status ``leer`` (nicht rot), ``ok``, ``format`` oder ``bereich``.
+ * Ohne max (gesperrt) zählt nur das Format.
+ */
+function fifoSpendBetragPruefen(roh, max) {
+  const p = fifoBetragZuSats(roh);
+  if (p.leer) return { status: "leer", sats: null, einheit: null };
+  if (p.fehler) return { status: "format", sats: null, einheit: p.einheit };
+  const grenze = max === null || max === undefined ? null : Number(max);
+  if (p.sats <= 0 || (grenze !== null && p.sats > grenze)) {
+    return { status: "bereich", sats: p.sats, einheit: p.einheit };
+  }
+  return { status: "ok", sats: p.sats, einheit: p.einheit };
+}
+
+/** Nur leer oder 0 < sats ≤ max ist gültig. */
+function fifoSpendBetragGueltig(roh, max) {
+  const status = fifoSpendBetragPruefen(roh, max).status;
+  return status === "leer" || status === "ok";
+}
+
+/**
+ * Markiert das Feld und zeigt die erkannte Einheit live daneben. Der gültige
+ * Betrag liegt in ganzen sats für die PSBT bereit.
+ */
+function pruefeFifoSpendBetrag() {
+  const feld = $("#fifo-spend-betrag");
+  if (!feld) return;
+  const max = fifoSpendMax(Zustand.fifoSpend);
+  const erg = fifoSpendBetragPruefen(feld.value, max);
+  const ok = erg.status === "leer" || erg.status === "ok";
+  feld.classList.toggle("ungueltig", !ok);
+  Zustand.fifoSpendBetragSats = erg.status === "ok" ? erg.sats : null;
+  if (erg.status === "ok") feld.dataset.sats = String(erg.sats);
+  else delete feld.dataset.sats;
+  const label = $("#fifo-spend-einheit");
+  if (label) {
+    setzeText(label, erg.einheit === "btc"
+      ? t("wallet.fifoSpendUnitBtc")
+      : (erg.einheit === "sats" ? t("wallet.fifoSpendUnitSats") : ""));
+    label.dataset.einheit = erg.einheit || "";
+  }
+  const grenze = max === null
+    ? "—"
+    : `${fifoBetragText(max)} (${fifoSatsGruppiert(max)} sats)`;
+  if (ok) {
+    feld.removeAttribute("aria-invalid");
+    if (max !== null) {
+      const teile = [t("wallet.fifoSpendAmountTitle", { max: grenze })];
+      if (erg.status === "ok") {
+        teile.push(t("wallet.fifoSpendAmountSats", {
+          sats: fifoSatsGruppiert(erg.sats), btc: fifoBetragText(erg.sats),
+        }));
+      }
+      feld.title = teile.join("\n");
+    }
+  } else {
+    feld.setAttribute("aria-invalid", "true");
+    feld.title = t(erg.status === "bereich"
+      ? "wallet.fifoSpendAmountInvalidRange"
+      : "wallet.fifoSpendAmountInvalidFormat", { max: grenze });
+  }
+  aktualisiereFifoPsbtKnopf();
+  planeFifoFeeVorschlag();
+}
+
+/** Lesbare Eingabe in ihrer Einheit neu schreiben (sats gruppiert, BTC Satcomma). */
+function fifoBetragNeuSchreiben(feld) {
+  const p = fifoBetragZuSats(feld.value);
+  if (p.sats !== undefined) feld.value = fifoBetragFeldText(p.sats, p.einheit);
+}
+
+/** Beim Verlassen und mit Enter. */
+function formatiereFifoSpendBetrag() {
+  const feld = $("#fifo-spend-betrag");
+  if (!feld) return;
+  fifoBetragNeuSchreiben(feld);
+  pruefeFifoSpendBetrag();
+}
+
+// --- Ziel-Zeile: „Senden ▸/▾“ klappt auf, Zieladresse live, Gebühr, „PSBT“ erzeugt die Datei ---
+
+/** Netznamen fürs Tooltip. */
+function fifoNetzName(netz) {
+  const namen = { main: "Mainnet", test: "Testnet", regtest: "Regtest", signet: "Signet" };
+  return namen[String(netz || "")] || String(netz || "?");
+}
+
+/** Ziel-Zeile auf- oder zuklappen; der Knopf trägt aria-expanded. */
+function fifoZielZeigen(offen) {
+  const zeile = $("#fifo-spend-ziel");
+  const knopf = $("#fifo-spend-psbt");
+  if (zeile) zeile.hidden = !offen;
+  if (knopf) {
+    // Aufklapp-Dreieck: ▸ zu, ▾ auf — Text und aria-expanded schalten gemeinsam.
+    knopf.setAttribute("aria-expanded", offen ? "true" : "false");
+    setzeText(knopf, t(offen ? "wallet.fifoSpendPsbtExpanded" : "wallet.fifoSpendPsbtOpen"));
+  }
+  zeigeFifoPsbtErgebnis(Zustand.fifoPsbtErgebnis || null);
+  if (offen) {
+    const wahl = $("#fifo-ziel-strategie");
+    if (wahl) wahl.value = fifoStrategie();
+    const adresse = $("#fifo-ziel-adresse");
+    if (adresse && typeof adresse.focus === "function") adresse.focus();
+    planeFifoFeeVorschlag();
+  }
+}
+
+/**
+ * „Senden ▸“ nur mit gültigem Betrag (0 < sats ≤ max). Wird der Betrag leer
+ * oder ungültig, klappt die Ziel-Zeile zu — Adresse und Gebühr bleiben stehen.
+ */
+function aktualisiereFifoPsbtKnopf() {
+  const knopf = $("#fifo-spend-psbt");
+  if (!knopf) return;
+  const zeile = $("#fifo-spend-ziel");
+  const bereit = Zustand.fifoSpendBetragSats !== null && Zustand.fifoSpendBetragSats !== undefined
+    && fifoSpendMax(Zustand.fifoSpend) !== null;
+  knopf.disabled = !bereit;
+  const offen = Boolean(zeile && !zeile.hidden);
+  if (!bereit && offen) fifoZielZeigen(false);
+  // Nach einem Sprachwechsel setzt data-i18n wieder „▸“ — hier zum Zustand passend.
+  setzeText(knopf, t(zeile && !zeile.hidden ? "wallet.fifoSpendPsbtExpanded" : "wallet.fifoSpendPsbtOpen"));
+  const titel = !bereit
+    ? t("wallet.fifoSpendPsbtNeedsAmount")
+    : t(zeile && !zeile.hidden ? "wallet.fifoSpendPsbtClose" : "wallet.fifoSpendPsbtOpenTitle");
+  knopf.title = titel;
+  const huelle = $("#fifo-spend-psbt-huelle");
+  if (huelle) huelle.title = titel;
+  // Status-Label neben der Adresse in der aktuellen Sprache nachziehen.
+  if (Zustand.fifoZielErgebnis) zeigeFifoZielAdresse(Zustand.fifoZielErgebnis);
+  aktualisiereFifoPsbtErzeugen();
+}
+
+function fifoZielUmschalten() {
+  const knopf = $("#fifo-spend-psbt");
+  const zeile = $("#fifo-spend-ziel");
+  if (!knopf || knopf.disabled || !zeile) return;
+  fifoZielZeigen(zeile.hidden);
+  aktualisiereFifoPsbtKnopf();
+}
+
+/** Wartezeit nach dem letzten Tastendruck, bevor der Server die Adresse prüft. */
+const FIFO_ZIEL_ENTPRELLEN_MS = 300;
+
+/**
+ * Farbe, Status-Label und Tooltip der Zieladresse aus der Server-Antwort.
+ * grün = eigenes Wallet (Label: Wallet-Name), gelb = gültig im laufenden
+ * Netz, aber fremd („extern“), rot = keine Adresse („ungültig“) oder falsches
+ * Netz („falsches Netz“). Leer = kein Label; prüfend = „…“.
+ * Der Tooltip beginnt mit der vollen Adresse — das Feld kann schmaler sein.
+ */
+function zeigeFifoZielAdresse(erg) {
+  const feld = $("#fifo-ziel-adresse");
+  if (!feld) return;
+  const status = (erg && erg.status) || "";
+  let zustand = "";
+  let label = "";
+  let titel = t("wallet.fifoTargetAddressTitle");
+  if (status === "meine") {
+    zustand = "gruen";
+    label = erg.wallet || "?";
+    titel = t("wallet.fifoTargetMine", { wallet: erg.wallet || "?" });
+  } else if (status === "fremd" || status === "keine_wallets") {
+    zustand = "gelb";
+    label = t("wallet.fifoTargetStatusExternal");
+    titel = t("wallet.fifoTargetExternal", { netz: fifoNetzName(erg.netz) });
+  } else if (status === "falsches_netz") {
+    zustand = "rot";
+    label = t("wallet.fifoTargetStatusWrongNetwork");
+    titel = t("wallet.fifoTargetWrongNetwork", {
+      adressNetz: (erg.adress_netze || []).map(fifoNetzName).join(" / ") || "?",
+      netz: fifoNetzName(erg.netz),
+    });
+  } else if (status === "ungueltig") {
+    zustand = "rot";
+    label = t("wallet.fifoTargetStatusInvalid");
+    titel = t("wallet.fifoTargetInvalid");
+  } else if (status === "pruefe") {
+    zustand = "pruefe";
+    label = t("wallet.fifoTargetStatusChecking");
+    titel = t("wallet.fifoTargetChecking");
+  } else if (status === "fehler") {
+    titel = t("wallet.fifoTargetUnavailable", { msg: (erg && erg.msg) || "?" });
+  }
+  feld.dataset.zustand = zustand;
+  if (zustand === "rot") feld.setAttribute("aria-invalid", "true");
+  else feld.removeAttribute("aria-invalid");
+  const adresse = String(feld.value || "").trim();
+  feld.title = adresse && status ? `${adresse}\n${titel}` : titel;
+  const marke = $("#fifo-ziel-status");
+  if (marke) {
+    marke.textContent = label;
+    marke.dataset.zustand = zustand;
+    marke.title = label ? titel : "";
+  }
+  aktualisiereFifoPsbtErzeugen();
+  // Zieltyp (P2WPKH/P2TR/P2WSH) ändert die Gebühr und damit das Netto-Maximum.
+  planeFifoNetto();
+}
+
+/** Entprellt: erst nach der Tipp-Pause fragen; späte Antworten verwerfen. */
+function pruefeFifoZielAdresse() {
+  const feld = $("#fifo-ziel-adresse");
+  if (!feld) return;
+  clearTimeout(Zustand.fifoZielTimer);
+  const roh = String(feld.value || "").trim();
+  const lauf = (Zustand.fifoZielLauf || 0) + 1;
+  Zustand.fifoZielLauf = lauf;
+  Zustand.fifoZielErgebnis = null;
+  if (!roh) {
+    zeigeFifoZielAdresse(null);
+    return;
+  }
+  zeigeFifoZielAdresse({ status: "pruefe" });
+  Zustand.fifoZielTimer = setTimeout(async () => {
+    let erg;
+    try {
+      erg = await api(`/address/owner?addr=${encodeURIComponent(roh)}`);
+    } catch (fehler) {
+      erg = { status: "fehler", msg: (fehler && fehler.message) || String(fehler || "") };
+    }
+    if (Zustand.fifoZielLauf !== lauf) return;
+    Zustand.fifoZielErgebnis = erg;
+    zeigeFifoZielAdresse(erg);
+  }, FIFO_ZIEL_ENTPRELLEN_MS);
+}
+
+/**
+ * Gebühr in sat/vB: Komma oder Punkt, höchstens 3 Nachkommastellen,
+ * mehr als 0 bis 10 000. Rückgabe in milli-sat/vB (ganzzahlig) oder null.
+ */
+function fifoFeeZuMilli(roh) {
+  const text = String(roh ?? "").replace(/[\s\u00A0\u202F]+/g, "").replace(/sat\/?vb$/i, "");
+  if (!/^[0-9]*[.,]?[0-9]*$/.test(text) || !/[0-9]/.test(text)) return null;
+  const [ganz, nach = ""] = text.split(/[.,]/);
+  if (nach.length > 3) return null;
+  const milli = Number(ganz || "0") * 1000 + Number(nach.padEnd(3, "0"));
+  return milli > 0 && milli <= 10000 * 1000 ? milli : null;
+}
+
+function pruefeFifoZielFee() {
+  const feld = $("#fifo-ziel-fee");
+  if (!feld) return;
+  const leer = !String(feld.value || "").trim();
+  const milli = leer ? null : fifoFeeZuMilli(feld.value);
+  const ok = leer || milli !== null;
+  feld.classList.toggle("ungueltig", !ok);
+  if (ok) feld.removeAttribute("aria-invalid");
+  else feld.setAttribute("aria-invalid", "true");
+  const feeAlt = Zustand.fifoZielFeeMilli;
+  Zustand.fifoZielFeeMilli = milli;
+  aktualisiereFifoPsbtErzeugen();
+  if (feeAlt !== milli) planeFifoNetto();
+  if (!ok) {
+    feld.title = t("wallet.fifoTargetFeeInvalid");
+    return;
+  }
+  const teile = [];
+  const vorschlag = Zustand.fifoFeeVorschlag;
+  if (Zustand.fifoFeeLaedt) teile.push(t("wallet.fifoTargetFeeLoading"));
+  else if (vorschlag) teile.push(fifoFeeVorschlagText(vorschlag));
+  if (feld.dataset.vonHand === "1") teile.push(t("wallet.fifoTargetFeeOwn"));
+  teile.push(t("wallet.fifoTargetFeeTitle"));
+  feld.title = teile.join("\n");
+}
+
+/** Auswahl-Strategien (``core/coin_auswahl.STRATEGIEN``), erste = Standard. */
+const FIFO_STRATEGIEN = ["wechselgeld", "gebuehr", "aelteste", "staub"];
+
+/** Gespeicherte Strategie aus der Konfiguration (``FIFO_STRATEGIE``). */
+function fifoStrategie() {
+  const roh = String((Zustand.config && Zustand.config.fifo_strategie) || "").trim().toLowerCase();
+  return FIFO_STRATEGIEN.includes(roh) ? roh : FIFO_STRATEGIEN[0];
+}
+
+/** Dropdown neu gewählt: merken, speichern, Vorschlag mit neuer Input-Zahl holen. */
+function fifoStrategieWechsel() {
+  const wahl = $("#fifo-ziel-strategie");
+  if (!wahl) return Promise.resolve();
+  const neu = FIFO_STRATEGIEN.includes(wahl.value) ? wahl.value : FIFO_STRATEGIEN[0];
+  if (Zustand.config) Zustand.config.fifo_strategie = neu;
+  wahl.title = t("wallet.fifoStrategyTitle");
+  planeFifoFeeVorschlag();
+  return api("/config/fifo-strategie", { methode: "PUT", daten: { fifo_strategie: neu } })
+    .catch((fehler) => {
+      wahl.title = [t("wallet.fifoStrategySaveFailed", { msg: (fehler && fehler.message) || "?" }),
+        t("wallet.fifoStrategyTitle")].join("\n");
+    });
+}
+
+/**
+ * Körper für ``POST /api/psbt/auswahl``: die Zeitstrahl-Punkte dieses Wallets
+ * (nur Beträge und Lot-Anteile) plus Mempool-Schlüssel. Welche UTXOs zulässig
+ * sind und welche Kombination gewinnt, entscheidet ``core/coin_auswahl.py``.
+ */
+function fifoAuswahlKoerper(stand, sats) {
+  const utxos = [];
+  const id = String((stand && stand.walletId) || "");
+  for (const e of (stand && stand.events) || []) {
+    if (!e || (id && String(e.wallet_id || "") !== id)) continue;
+    utxos.push({
+      key: fifoUtxoKey(e), txid: e.txid, vout: e.vout, value_sats: e.value_sats,
+      sats_gruen: e.sats_gruen, sats_orange: e.sats_orange, sats_grau: e.sats_grau,
+      neuvermoegen: !!e.neuvermoegen, time_ts: e.time_ts,
+    });
+  }
+  const pending = [...fifoPendingInfo(Zustand._walletUtxoDaten).keys];
+  return {
+    betrag: sats,
+    modus: (stand && stand.modus) === "offensiv" ? "offensiv" : "defensiv",
+    strategie: fifoStrategie(),
+    utxos,
+    pending,
+    // Nur für die vbytes (Multisig-Inputs sind größer) — kein Bestand vom Server.
+    wallet_id: id,
+  };
+}
+
+/** Tooltip-Zeilen zur Coin-Auswahl: Inputs, Wechselgeld, Staub. */
+function fifoAuswahlText(v) {
+  if (!v || !v.status) return [];
+  if (v.status === "keine_kandidaten") return [t("wallet.fifoTargetSelectionNone")];
+  if (v.status === "nicht_gedeckt") {
+    return [t("wallet.fifoTargetSelectionShort", { gruen: formatZahl(v.gruen_verfuegbar_sats || 0) })];
+  }
+  if (v.status !== "ok") return [];
+  const namen = { wechselgeld: "Change", gebuehr: "Fee", aelteste: "Oldest", staub: "Dust" };
+  const werte = {
+    inputs: v.anzahl_inputs, gruen: formatZahl(v.summe_gruen_sats),
+    wechsel: formatZahl(v.wechselgeld_sats),
+    strategie: t(`wallet.fifoStrategy${namen[v.strategie] || "Change"}`),
+  };
+  const zeilen = [t(v.ohne_wechselgeld ? "wallet.fifoTargetSelectionNoChange" : "wallet.fifoTargetSelection", werte)];
+  if (v.wechselgeld_nicht_gruen_sats > 0) {
+    zeilen.push(t("wallet.fifoTargetSelectionNonGreen", {
+      n: v.gemischte_inputs || 0, sats: formatZahl(v.wechselgeld_nicht_gruen_sats),
+    }));
+  }
+  if (v.ohne_wechselgeld && v.staub_in_gebuehr_sats > 0) {
+    zeilen.push(t("wallet.fifoTargetSelectionDustFee", { staub: formatZahl(v.staub_in_gebuehr_sats) }));
+  }
+  if (v.staub_wechselgeld) zeilen.push(t("wallet.fifoTargetSelectionDustKept"));
+  if (v.aufraeumen_anzahl > 0) {
+    zeilen.push(t("wallet.fifoTargetSelectionCleanup", {
+      n: v.aufraeumen_anzahl, sats: formatZahl(v.aufraeumen_sats),
+    }));
+  }
+  if (v.aufraeumen_begrenzt) zeilen.push(t("wallet.fifoTargetSelectionCleanupLimited"));
+  if (v.methode === "greedy") zeilen.push(t("wallet.fifoTargetSelectionGreedy"));
+  return zeilen;
+}
+
+/** Tooltip-Zeile zum Vorschlag (Schätzung, Deckel oder Fallback) samt Auswahl. */
+function fifoFeeVorschlagText(v) {
+  if (!v) return "";
+  let zeile;
+  if (v.quelle === "schaetzung") {
+    zeile = t("wallet.fifoTargetFeeSuggested", {
+      rate: formatZahl(v.sat_vb), schaetzung: formatZahl(v.schaetzung_sat_vb),
+      vsize: formatZahl(v.vsize), inputs: v.anzahl_inputs ?? v.inputs,
+      outputs: v.outputs ?? 2, fee: formatZahl(v.fee_sats),
+    });
+  } else if (v.quelle === "deckel") {
+    zeile = t("wallet.fifoTargetFeeCapped", {
+      rate: formatZahl(v.rate_ohne_deckel), fee: formatZahl(v.fee_ohne_deckel),
+      vsize: formatZahl(v.vsize),
+    });
+  } else {
+    zeile = t("wallet.fifoTargetFeeFallback", { grund: v.grund || "?" });
+  }
+  return [zeile, ...fifoAuswahlText(v)].join("\n");
+}
+
+/** Wartezeit, bevor ein geänderter Betrag einen neuen Vorschlag holt. */
+const FIFO_FEE_ENTPRELLEN_MS = 400;
+
+/**
+ * Gebührenvorschlag holen, wenn die Ziel-Zeile offen und der Betrag gültig
+ * ist. Ein von Hand gesetzter Wert wird nie überschrieben; erst ein leeres
+ * Feld nimmt wieder den Vorschlag.
+ */
+function planeFifoFeeVorschlag() {
+  const zeile = $("#fifo-spend-ziel");
+  const sats = Zustand.fifoSpendBetragSats;
+  if (!zeile || zeile.hidden || !(sats > 0)) return;
+  const stand = Zustand.fifoSpend || {};
+  const koerper = fifoAuswahlKoerper(stand, sats);
+  // Neu fragen bei anderem Betrag, Modus, Wallet oder Bestand (inkl. Mempool).
+  const schluessel = [sats, koerper.modus, koerper.strategie, stand.walletId || "", koerper.utxos.length,
+    koerper.pending.slice().sort().join(",")].join("|");
+  if (Zustand.fifoFeeSchluessel === schluessel) return;
+  Zustand.fifoFeeSchluessel = schluessel;
+  clearTimeout(Zustand.fifoFeeTimer);
+  const lauf = (Zustand.fifoFeeLauf || 0) + 1;
+  Zustand.fifoFeeLauf = lauf;
+  Zustand.fifoFeeLaedt = true;
+  pruefeFifoZielFee();
+  Zustand.fifoFeeTimer = setTimeout(async () => {
+    let v;
+    try {
+      v = await api("/psbt/auswahl", { methode: "POST", daten: koerper });
+    } catch (fehler) {
+      v = { quelle: "fallback", sat_vb: 1, grund: (fehler && fehler.message) || String(fehler || "") };
+    }
+    if (Zustand.fifoFeeLauf !== lauf) return;
+    Zustand.fifoFeeLaedt = false;
+    Zustand.fifoFeeVorschlag = v;
+    const feld = $("#fifo-ziel-fee");
+    if (feld && feld.dataset.vonHand !== "1" && v && v.sat_vb) {
+      feld.value = String(v.sat_vb);
+      feld.dataset.vorschlag = "1";
+    }
+    pruefeFifoZielFee();
+  }, FIFO_FEE_ENTPRELLEN_MS);
+}
+
+/** Tippen im Gebührenfeld: ab jetzt eigener Wert — leer heißt zurück zum Vorschlag. */
+function fifoFeeEingabe() {
+  const feld = $("#fifo-ziel-fee");
+  if (!feld) return;
+  const leer = !String(feld.value || "").trim();
+  feld.dataset.vonHand = leer ? "" : "1";
+  delete feld.dataset.vorschlag;
+  // Nicht sofort zurückschreiben, damit Löschen geht — fifoFeeVerlassen füllt nach.
+  pruefeFifoZielFee();
+}
+
+/** Leeres Gebührenfeld beim Verlassen wieder mit dem Vorschlag füllen. */
+function fifoFeeVerlassen() {
+  const feld = $("#fifo-ziel-fee");
+  const v = Zustand.fifoFeeVorschlag;
+  if (!feld || String(feld.value || "").trim() || !v || !v.sat_vb) return;
+  feld.value = String(v.sat_vb);
+  feld.dataset.vonHand = "";
+  feld.dataset.vorschlag = "1";
+  pruefeFifoZielFee();
+}
+
+// --- „PSBT“: Server baut die PSBT (BIP174 v0) neu aus eigenem Bestand, Datei-Download ---
+
+/** Wallet der FIFO-Zeile aus der Konfiguration (Name). */
+function fifoAktuellesWallet() {
+  const id = String((Zustand.fifoSpend && Zustand.fifoSpend.walletId) || Zustand.walletId || "");
+  return ((Zustand.config && Zustand.config.wallets) || []).find((w) => String(w.id) === id) || null;
+}
+
+/** Warum „PSBT“ gesperrt ist (Katalog-Schlüssel) — null heißt bereit. */
+function fifoPsbtSperre() {
+  // Multisig (wsh/sh-wsh sortedmulti) baut der Server wie Single-Sig; was er
+  // nicht kann (Taproot, Miniscript), meldet er mit Grund.
+  const sats = Zustand.fifoSpendBetragSats;
+  if (!(sats > 0) || fifoSpendMax(Zustand.fifoSpend) === null) return "wallet.fifoSpendPsbtNeedsAmount";
+  const ziel = Zustand.fifoZielErgebnis;
+  if (!ziel || !["meine", "fremd", "keine_wallets"].includes(ziel.status)) return "wallet.fifoPsbtNeedsAddress";
+  if (!(Zustand.fifoZielFeeMilli > 0)) return "wallet.fifoPsbtNeedsFee";
+  if (Zustand.fifoPsbtLaeuft) return "wallet.fifoPsbtBusy";
+  return null;
+}
+
+/** Eingaben, zu denen ein gezeigtes Ergebnis gehört — ändert sich eine, verschwindet es. */
+function fifoPsbtSchluessel() {
+  const stand = Zustand.fifoSpend || {};
+  const ziel = Zustand.fifoZielErgebnis || {};
+  return [stand.walletId || "", Zustand.fifoSpendBetragSats || "", ziel.address || "",
+    Zustand.fifoZielFeeMilli || "", fifoStrategie()].join("|");
+}
+
+/** „PSBT“ freigeben oder sperren; Tooltip nennt den Grund. */
+function aktualisiereFifoPsbtErzeugen() {
+  const knopf = $("#fifo-ziel-psbt");
+  if (!knopf) return;
+  const sperre = fifoPsbtSperre();
+  knopf.disabled = sperre !== null;
+  const titel = t(sperre || "wallet.fifoSpendPsbtTitle");
+  knopf.title = titel;
+  const huelle = $("#fifo-ziel-psbt-huelle");
+  if (huelle) huelle.title = titel;
+  const alt = Zustand.fifoPsbtErgebnis;
+  if (alt && !Zustand.fifoPsbtLaeuft && alt.schluessel !== fifoPsbtSchluessel()) {
+    Zustand.fifoPsbtErgebnis = null;
+    zeigeFifoPsbtErgebnis(null);
+  }
+}
+
+/** milli-sat/vB als Text mit Punkt — der Server liest ihn wie das Feld. */
+function fifoMilliText(milli) {
+  const n = Math.max(0, Math.floor(Number(milli) || 0));
+  const rest = n % 1000;
+  return rest ? `${Math.floor(n / 1000)}.${String(rest).padStart(3, "0").replace(/0+$/, "")}` : String(n / 1000);
+}
+
+/**
+ * Körper für ``POST /api/psbt/erzeugen``: nur Wunsch und Ziel. Bestand,
+ * Lot-Anteile, Mempool, Maximum und Auswahl rechnet der Server selbst.
+ */
+function fifoPsbtKoerper() {
+  const stand = Zustand.fifoSpend || {};
+  const ziel = Zustand.fifoZielErgebnis || {};
+  const feld = $("#fifo-ziel-adresse");
+  return {
+    wallet_id: String(stand.walletId || ""),
+    betrag: Zustand.fifoSpendBetragSats,
+    adresse: ziel.address || String((feld && feld.value) || "").trim(),
+    fee: fifoMilliText(Zustand.fifoZielFeeMilli),
+    strategie: fifoStrategie(),
+    modus: stand.modus === "offensiv" ? "offensiv" : "defensiv",
+    lang: typeof uiSprache === "function" ? uiSprache() : "de",
+  };
+}
+
+/** ``<wallet>-<yyyymmdd-hhmm>.psbt`` in lokaler Zeit; Sonderzeichen werden „-“. */
+function fifoPsbtDateiname(name, jetzt) {
+  const d = jetzt || new Date();
+  const z = (n) => String(n).padStart(2, "0");
+  const stempel = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+  const sauber = String(name || "").trim().replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^[-.]+|-+$/g, "");
+  return `${sauber || "wallet"}-${stempel}.psbt`;
+}
+
+/** Base64 → Binärdatei herunterladen (kein Server-Pfad, kein Zwischenspeicher). */
+function fifoPsbtHerunterladen(b64, dateiname) {
+  const roh = atob(b64);
+  const bytes = new Uint8Array(roh.length);
+  for (let i = 0; i < roh.length; i += 1) bytes[i] = roh.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = dateiname;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** Kurze Übersicht: Inputs, Outputs mit Farbe und Grün/Gelb-Anteil, Gebühr, RBF. */
+function fifoPsbtZusammenfassung(erg, datei) {
+  const zeilen = [t(erg.ohne_wechselgeld ? "wallet.fifoPsbtSummaryNoChange" : "wallet.fifoPsbtSummary", {
+    datei: datei || "", inputs: (erg.inputs || []).length, fee: formatZahl(erg.fee_sats),
+    rate: formatZahl(erg.sat_vb), vsize: formatZahl(erg.vsize),
+  })];
+  for (const o of erg.outputs || []) {
+    const farbe = o.farbe === "gruen"
+      ? (o.wallet || t("wallet.fifoPsbtOwnWallet"))
+      : t("wallet.fifoTargetStatusExternal");
+    zeilen.push(t(o.rolle === "wechsel" ? "wallet.fifoPsbtOutputChange" : "wallet.fifoPsbtOutputTarget", {
+      betrag: formatZahl(o.value_sats), adresse: o.adresse || "", farbe,
+      gruen: formatZahl(o.sats_gruen), gelb: formatZahl(o.sats_gelb),
+    }));
+  }
+  zeilen.push(t("wallet.fifoPsbtRbf", { locktime: erg.locktime || 0 }));
+  if (erg.multisig) {
+    zeilen.push(t("wallet.fifoPsbtMultisigInfo", {
+      m: erg.multisig.m, n: erg.multisig.n,
+      fps: (erg.multisig.fingerprints || []).join(", "),
+    }));
+  }
+  if (erg.herkunft && erg.herkunft.quelle === "xpub") zeilen.push(t("wallet.fifoPsbtFingerprintXpub"));
+  if (erg.mempool_geprueft === false) zeilen.push(t("wallet.fifoPsbtMempoolUnchecked"));
+  return zeilen;
+}
+
+/** Text für Antworten ohne PSBT (Auswahl nicht möglich). */
+function fifoPsbtStatusText(erg) {
+  const v = erg || {};
+  if (v.status === "ueber_max") return t("wallet.fifoPsbtOverMax", { max: formatZahl(v.max_sats || 0) });
+  if (v.status === "unzulaessig") return t("wallet.fifoPsbtNotEligible");
+  const auswahl = fifoAuswahlText(v);
+  return auswahl.length ? auswahl[0] : t("wallet.fifoPsbtFailed", { msg: v.status || "?" });
+}
+
+/** Ergebnis-Kasten unter der Ziel-Zeile (nur sichtbar, wenn die Zeile offen ist). */
+function zeigeFifoPsbtErgebnis(e) {
+  const kasten = $("#fifo-psbt-ergebnis");
+  const text = $("#fifo-psbt-text");
+  if (!kasten || !text) return;
+  const zeile = $("#fifo-spend-ziel");
+  const kopieren = $("#fifo-psbt-kopieren");
+  if (!e || (zeile && zeile.hidden)) {
+    kasten.hidden = true;
+    return;
+  }
+  let zeilen;
+  let zustand;
+  if (e.laedt) {
+    zeilen = [t("wallet.fifoPsbtBusy")];
+    zustand = "laedt";
+  } else if (e.fehler) {
+    zeilen = [t("wallet.fifoPsbtFailed", { msg: e.fehler })];
+    zustand = "fehler";
+  } else if (e.erg && e.erg.status === "ok") {
+    zeilen = fifoPsbtZusammenfassung(e.erg, e.datei);
+    zustand = "ok";
+  } else {
+    zeilen = [fifoPsbtStatusText(e.erg)];
+    zustand = "fehler";
+  }
+  kasten.hidden = false;
+  kasten.dataset.zustand = zustand;
+  text.textContent = zeilen.join("\n");
+  if (kopieren) {
+    kopieren.hidden = zustand !== "ok";
+    kopieren.textContent = t("wallet.fifoPsbtCopy");
+  }
+}
+
+/** Klick auf „PSBT“: erzeugen lassen, Datei herunterladen, Übersicht zeigen. */
+function fifoPsbtErzeugen() {
+  if (fifoPsbtSperre() !== null) return Promise.resolve();
+  const koerper = fifoPsbtKoerper();
+  const schluessel = fifoPsbtSchluessel();
+  const wallet = fifoAktuellesWallet();
+  Zustand.fifoPsbtLaeuft = true;
+  Zustand.fifoPsbtErgebnis = { schluessel, laedt: true };
+  aktualisiereFifoPsbtErzeugen();
+  zeigeFifoPsbtErgebnis(Zustand.fifoPsbtErgebnis);
+  return api("/psbt/erzeugen", { methode: "POST", daten: koerper })
+    .then((erg) => {
+      let datei = "";
+      if (erg && erg.status === "ok" && erg.psbt_base64) {
+        datei = fifoPsbtDateiname(erg.wallet || (wallet && wallet.name), new Date());
+        fifoPsbtHerunterladen(erg.psbt_base64, datei);
+      }
+      Zustand.fifoPsbtErgebnis = { schluessel, erg, datei };
+    })
+    .catch((fehler) => {
+      Zustand.fifoPsbtErgebnis = { schluessel, fehler: (fehler && fehler.message) || String(fehler || "") };
+    })
+    .finally(() => {
+      Zustand.fifoPsbtLaeuft = false;
+      zeigeFifoPsbtErgebnis(Zustand.fifoPsbtErgebnis);
+      aktualisiereFifoPsbtErzeugen();
+    });
+}
+
+/** Base64 der zuletzt erzeugten PSBT in die Zwischenablage. */
+function fifoPsbtKopieren() {
+  const e = Zustand.fifoPsbtErgebnis;
+  const knopf = $("#fifo-psbt-kopieren");
+  const b64 = e && e.erg && e.erg.psbt_base64;
+  if (!b64 || !knopf) return Promise.resolve(false);
+  return Promise.resolve(kopiereInZwischenablage(b64)).then((ok) => {
+    knopf.textContent = t(ok ? "wallet.fifoPsbtCopied" : "wallet.fifoPsbtCopyFailed");
+    return ok;
+  });
+}
+
+function bindeFifoSpend() {
+  const feld = $("#fifo-spend-betrag");
+  if (!feld || feld.dataset.gebunden) return;
+  feld.dataset.gebunden = "1";
+  feld.addEventListener("input", pruefeFifoSpendBetrag);
+  feld.addEventListener("blur", formatiereFifoSpendBetrag);
+  feld.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || ev.isComposing) return;
+    ev.preventDefault();
+    formatiereFifoSpendBetrag();
+  });
+  // „Senden ▸/▾“ klappt nur die Ziel-Zeile auf — keine PSBT, keine Unterschrift, kein Versand.
+  const knopf = $("#fifo-spend-psbt");
+  if (knopf) knopf.addEventListener("click", fifoZielUmschalten);
+  const adresse = $("#fifo-ziel-adresse");
+  if (adresse) adresse.addEventListener("input", pruefeFifoZielAdresse);
+  const strategie = $("#fifo-ziel-strategie");
+  if (strategie) {
+    strategie.value = fifoStrategie();
+    strategie.addEventListener("change", fifoStrategieWechsel);
+  }
+  const fee = $("#fifo-ziel-fee");
+  if (fee) {
+    fee.addEventListener("input", fifoFeeEingabe);
+    fee.addEventListener("blur", fifoFeeVerlassen);
+  }
+  // „PSBT“: Server baut die PSBT ohne Unterschrift; nichts geht ins Netz.
+  const erzeugen = $("#fifo-ziel-psbt");
+  if (erzeugen) erzeugen.addEventListener("click", fifoPsbtErzeugen);
+  const kopieren = $("#fifo-psbt-kopieren");
+  if (kopieren) kopieren.addEventListener("click", fifoPsbtKopieren);
+  if (adresse) zeigeFifoZielAdresse(null);
+  if (fee) pruefeFifoZielFee();
+  aktualisiereFifoPsbtKnopf();
+}
+
+if (typeof document !== "undefined" && document.addEventListener) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindeFifoSpend);
+  } else {
+    bindeFifoSpend();
+  }
 }
 
 /**

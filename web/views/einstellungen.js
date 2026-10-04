@@ -312,6 +312,8 @@ function zeichneSteuerEinstellungen() {
   }
   zeichnePersonEinstellungen();
   zeichneBerichtWalletEinstellungen();
+  // FIFO-Spend-Leiste der Wallet-Ansicht: Text hängt an defensiv/offensiv.
+  if (typeof aktualisiereFifoSpend === "function") aktualisiereFifoSpend();
 }
 
 function personEinstellungen() {

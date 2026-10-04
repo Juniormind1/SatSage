@@ -6,6 +6,7 @@ from typing import Any
 from embit.script import Script, address_to_scriptpubkey
 from embit.transaction import Transaction
 
+from core.derivation import script_address
 from core.fulcrum_client import (
     TOR_RPC_BATCH_SIZE,
     FulcrumClient,
@@ -254,7 +255,9 @@ def _script_pubkey_to_dict(script: Script) -> dict:
     if script_type:
         spk["type"] = script_type
     try:
-        spk["address"] = script.address()
+        # Im konfigurierten Netz (regtest: bcrt1…), sonst erkennt der Trace
+        # eigene Vorgänger-Adressen nicht und bricht nach einer Ebene ab.
+        spk["address"] = script_address(script)
     except ValueError:
         pass
     return spk

@@ -254,10 +254,13 @@ def _steuer_auswertung_gecacht(state: AppState, query: dict, sprache: str) -> di
     auswertung.pop("_objekte", None)
     auswertung["_lots"] = bool(mit_lots)
     # Die Rechnung kann eigene Adressen aus den Caches nachladen — der
-    # Stand danach ist der, den die nächste Anfrage sieht. Eine inzwischen
-    # fertige Lot-Rechnung bleibt stehen.
+    # Stand danach ist der, den die nächste Anfrage sieht: darum der
+    # Schlüssel *nach* der Rechnung (seit 9139b88 lag hier der alte, und
+    # das erste Blättern rechnete das Jahr ein zweites Mal). Eine
+    # inzwischen fertige Lot-Rechnung bleibt stehen.
     cache.lege_ausser_wenn(
-        schluessel, auswertung, lambda alt: bool(alt.get("_lots")),
+        _steuer_cache_schluessel(state, query, sprache), auswertung,
+        lambda alt: bool(alt.get("_lots")),
     )
     return auswertung
 
@@ -329,7 +332,13 @@ def api_tax_herkunftsnetz(
     def block_zeit(hoehe: int) -> int | None:
         return xpub_cache.load_cached_block_time(hoehe, state.immutable_cache_dir)
 
-    netz = herkunftsnetz.flach(baum, fokus_key, skala, block_zeit=block_zeit)
+    # Dieselben Anteile wie der Lot-Ring der Auswertung: FIFO je Output.
+    netz = herkunftsnetz.flach(
+        baum, fokus_key, skala, block_zeit=block_zeit,
+        fifo=herkunftsnetz.FifoKontext.aus_cache(
+            state.immutable_cache_dir, getattr(state, "wallet_ctx", None),
+        ),
+    )
     from core import wallets as wallets_mod
 
     namen = {

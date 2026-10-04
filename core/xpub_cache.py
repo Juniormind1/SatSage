@@ -18,10 +18,11 @@ from pathlib import Path
 
 from core.derivation import (
     DEFAULT_MAX_ADDRESSES,
-    _CHAIN_NETWORK,
+    chain_network,
     derive_addresses,
     derive_descriptor_addresses,
     ist_deskriptor,
+    script_address,
 )
 from core.paths import app_dir
 
@@ -255,6 +256,32 @@ def _trage_blockzeit_ein(tx: dict, zeit: int) -> None:
     tx["blocktime"] = int(zeit)
 
 
+def _vout_adressen_ins_netz(tx: dict) -> None:
+    """
+    Kodiert ``vout[].scriptPubKey.address`` im aktiven Alt-Netz neu (in place).
+
+    Ältere Stände legten aus Roh-Hex geparste Txs (Fulcrum/Electrs ohne
+    verbose) mit Mainnet-HRP ab — auch auf regtest/testnet/signet
+    (``bc1…`` statt ``bcrt1…``/``tb1…``). Solche Flatfiles würden den Trace
+    weiter nach einer Ebene abbrechen lassen. Maßgeblich ist das
+    scriptPubKey-Hex; Mainnet (Netz ``None``) bleibt unangetastet.
+    """
+    if chain_network() is None:
+        return
+    from embit.script import Script
+
+    for vout in tx.get("vout") or []:
+        spk = vout.get("scriptPubKey") if isinstance(vout, dict) else None
+        if not isinstance(spk, dict) or not spk.get("address") or not spk.get("hex"):
+            continue
+        try:
+            neu = script_address(Script(bytes.fromhex(str(spk["hex"]))))
+        except Exception:
+            continue
+        if neu and neu != spk["address"]:
+            spk["address"] = neu
+
+
 def load_cached_tx(txid: str, cache_root: Path | None = None) -> dict | None:
     """Lädt eine gecachte Transaktion (RAM → Flatfile).
 
@@ -281,6 +308,7 @@ def load_cached_tx(txid: str, cache_root: Path | None = None) -> dict | None:
     tx = data.get("tx")
     if not isinstance(tx, dict) or _tx_ist_nur_untergrenze(tx):
         return None
+    _vout_adressen_ins_netz(tx)
     if _tx_blockzeit(tx) is None:
         hoehe = _tx_bestaetigte_hoehe(tx)
         zeit = load_cached_block_time(hoehe, root) if hoehe else None
@@ -331,9 +359,11 @@ def save_cached_tx(
 
 def _block_header_network_tag() -> str:
     """Unterscheidet Mainnet/Regtest — Höhe 130 ist nicht dieselbe Chain."""
-    if _CHAIN_NETWORK is None:
+    # Zur Laufzeit lesen: set_chain_network() setzt das Netz erst nach dem Import.
+    net = chain_network()
+    if net is None:
         return "main"
-    name = str(_CHAIN_NETWORK.get("name") or "main").strip().lower()
+    name = str(net.get("name") or "main").strip().lower()
     if "regtest" in name:
         return "regtest"
     if "signet" in name:

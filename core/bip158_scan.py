@@ -23,6 +23,7 @@ from core.bip158_filter import (
     ScanResult,
     _CoreBasicFilterMatcher,
 )
+from core.derivation import script_address
 
 logger = logging.getLogger(__name__)
 
@@ -652,7 +653,7 @@ def _ausgaben_ziele(tx) -> list[dict]:
         if sats <= 0:
             continue
         try:
-            addr = vout.script_pubkey.address()
+            addr = script_address(vout.script_pubkey)
         except Exception:
             addr = None
         if not addr:

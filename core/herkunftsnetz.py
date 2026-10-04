@@ -16,9 +16,13 @@ diesen Knoten läuft. 100 % liegen auf der Höhe des Fokus. ``value_sats``
 bleibt der volle Nennwert für den Tooltip. X wird nicht geklemmt: Vorfahren
 dürfen älter als der Achsenbeginn sein; die Oberfläche setzt sie an den Rand.
 
-Anteile: Jeder Hop verteilt seinen Anteil anteilig (pro rata) auf die
-aufgelösten Eingänge seiner Erzeuger-Tx. So summieren sich die Kanten in
-einen Knoten zu dessen Anteil am gewählten Output.
+Anteile: FIFO je Output (``core.fifo_lots``, Entscheidung Maintainer
+2026-10-04). An jedem eigenen Hop werden die Lose aller Eingänge nach
+Anschaffungszeit geordnet; was das Wallet verlässt (fremde Outputs, andere
+eigene Wallets, Gebühr) nimmt die ältesten, das Wechselgeld behält den Rest.
+Hops mit fremden oder ungeklärten Eingängen, ohne Tx im Cache oder ohne
+Wallet-Kontext verteilen wie bisher anteilig (pro rata). So summieren sich
+die Kanten in einen Knoten zu dessen Anteil am gewählten Output.
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable
 
+from core import fifo_lots
 from core.tax import _minus_monate, _y_log_prozent
 from core.trace import FULL_RESOLUTION_INPUT_LIMIT
 from core.tx_classify import COINJOIN_KINDS
@@ -223,9 +228,14 @@ def lot_mischung(
     Eigene Zwischenhops und der Fokus zählen nicht.
     ``sats_ohne_datum`` bleibt der undatierte Anteil, auch wenn er als
     Grün gezählt wird.
+    ``lot_von_ts``/``lot_bis_ts``: ältestes/jüngstes Los (Unix) — nur, wenn
+    jedes Ende mit Anteil ein datiertes Fremd- oder Coinbase-Ende ist,
+    sonst fehlen beide.
     """
     acc = {"sats_gruen": 0.0, "sats_orange": 0.0, "sats_grau": 0.0}
     ohne_datum = 0.0
+    los_zeiten: list[int] = []
+    los_datiert = True
     frist = _pos(frist_pos)
     nach: dict[str, list[str]] = {}
     zeiten: dict[str, int] = {}
@@ -256,6 +266,14 @@ def lot_mischung(
             continue
         if gewicht <= 0:
             continue
+        try:
+            los_ts = int(v.get("time_ts") or 0)
+        except (TypeError, ValueError):
+            los_ts = 0
+        if v.get("typ") in (TYP_FREMD, TYP_COINBASE) and los_ts > 0:
+            los_zeiten.append(los_ts)
+        else:
+            los_datiert = False
         farbe = "sats_grau"
         pos = _pos(v.get("pos_output"))
         if (
@@ -276,6 +294,9 @@ def lot_mischung(
         return None
     aus = {name: int(round(wert)) for name, wert in acc.items()}
     aus["sats_ohne_datum"] = int(round(ohne_datum))
+    if los_datiert and los_zeiten:
+        aus["lot_von_ts"] = min(los_zeiten)
+        aus["lot_bis_ts"] = max(los_zeiten)
     return aus
 
 
@@ -312,6 +333,153 @@ def _buendeln(eltern: dict, kinder: list[dict]) -> bool:
     return any(k.get("type") == "external_unresolved" for k in kinder)
 
 
+@dataclass(frozen=True)
+class FifoKontext:
+    """
+    Woher ``flach`` die Erzeuger-Txs und die Wallet-Zuordnung nimmt.
+
+    *tx*: Tx aus dem Cache (RPC- oder Esplora-Form) oder None.
+    *wallet*: Anzeigename des eigenen Wallets einer Adresse oder None — nur
+    bekannter Bestand (``WalletContext.own_label``), keine XPUB-Suche.
+    """
+
+    tx: Callable[[str], dict | None]
+    wallet: Callable[[str], str | None]
+
+    @classmethod
+    def aus_cache(cls, cache, wallet_ctx) -> "FifoKontext | None":
+        """Tx-Flatfile-Cache plus ``WalletContext`` — ohne Wallet-Kontext None."""
+        if wallet_ctx is None:
+            return None
+        from core import xpub_cache
+
+        label = getattr(wallet_ctx, "own_label", None)
+        zuordnung = getattr(wallet_ctx, "address_to_wallet", None)
+
+        def wallet(adresse: str) -> str | None:
+            if not adresse:
+                return None
+            if callable(label):
+                treffer = label(adresse)
+                if treffer:
+                    return treffer
+            if isinstance(zuordnung, dict):
+                return zuordnung.get(adresse)
+            return None
+
+        def tx(txid: str) -> dict | None:
+            try:
+                return xpub_cache.load_cached_tx(txid, cache)
+            except Exception:
+                return None
+
+        return cls(tx=tx, wallet=wallet)
+
+
+def _schluessel_outpoint(key: str) -> tuple[str, int] | None:
+    txid, _, vout = str(key or "").rpartition(":")
+    if len(txid) != 64:
+        return None
+    try:
+        return txid.lower(), int(vout)
+    except ValueError:
+        return None
+
+
+def _tx_ausgaenge(tx: dict) -> list[tuple[int, int, str]]:
+    from core.utxo_report import _extract_addresses, _extract_value_sats
+
+    aus = []
+    for pos, v in enumerate(tx.get("vout") or []):
+        if not isinstance(v, dict):
+            return []
+        try:
+            n = int(v.get("n", pos))
+            wert = int(_extract_value_sats(v))
+        except (TypeError, ValueError):
+            return []
+        adressen = _extract_addresses(v) or [""]
+        aus.append((n, wert, str(adressen[0] or "")))
+    return aus
+
+
+def _vin_index(tx: dict) -> dict[str, int]:
+    aus: dict[str, int] = {}
+    for pos, vin in enumerate(tx.get("vin") or []):
+        if isinstance(vin, dict) and vin.get("txid") is not None:
+            aus[f"{str(vin['txid']).lower()}:{int(vin.get('vout') or 0)}"] = pos
+    return aus
+
+
+def _fifo_hop(
+    fifo: FifoKontext | None,
+    key: str,
+    sats: int,
+    kinder: list[tuple[dict, str, str]],
+    eingang: list[list[fifo_lots.Los]],
+) -> list[fifo_lots.Los] | None:
+    """
+    Lose, die der Output *key* aus seiner Erzeuger-Tx bekommt (FIFO je
+    Output, ``core.fifo_lots``). None = Fallback anteilig: kein Kontext, Tx
+    nicht im Cache, fremde/ungeklärte Eingänge, Eingänge nicht vollständig
+    aufgelöst oder Beträge passen nicht zusammen.
+    """
+    if fifo is None:
+        return None
+    outpoint = _schluessel_outpoint(key)
+    if outpoint is None:
+        return None
+    if any(typ not in (TYP_EIGEN, TYP_HORIZONT) for _k, _s, typ in kinder):
+        return None
+    tx = fifo.tx(outpoint[0])
+    if not isinstance(tx, dict):
+        return None
+    vins = tx.get("vin") or []
+    if len(vins) != len(kinder):
+        return None
+    ausgaenge = _tx_ausgaenge(tx)
+    eigener = [a for a in ausgaenge if a[0] == outpoint[1]]
+    if not eigener or eigener[0][1] != int(sats):
+        return None
+    index = _vin_index(tx)
+    sender: set[str] = set()
+    summe_ein = 0
+    lose: list[fifo_lots.Los] = []
+    for pos, ((kind, ckey, _typ), kind_lose) in enumerate(zip(kinder, eingang)):
+        wallet = fifo.wallet(str(kind.get("address") or ""))
+        if wallet:
+            sender.add(wallet)
+        summe_ein += int(kind.get("amount_sats") or 0)
+        vin_pos = index.get(str(ckey).lower(), pos)
+        lose.extend(
+            fifo_lots.Los(sats=l.sats, zeit=l.zeit, rang=(vin_pos,) + l.rang, marke=l.marke)
+            for l in kind_lose
+        )
+    if not sender:
+        return None
+    gebuehr = summe_ein - sum(a[1] for a in ausgaenge)
+    if gebuehr < 0:
+        return None
+    reihe = fifo_lots.verbraucher(
+        ((n, wert, fifo.wallet(adresse) in sender) for n, wert, adresse in ausgaenge),
+        gebuehr,
+    )
+    verteilt = fifo_lots.verteilen(fifo_lots.ordnen(lose), reihe)
+    return verteilt.get(fifo_lots.output_schluessel(outpoint[1]), [])
+
+
+def _skaliere(lose: list[fifo_lots.Los], ziel: float) -> list[fifo_lots.Los]:
+    """Anteilig auf *ziel* sats (Fallback ohne FIFO)."""
+    gesamt = sum(l.sats for l in lose)
+    if gesamt > 0:
+        f = ziel / gesamt
+        return [fifo_lots.Los(l.sats * f, l.zeit, l.rang, l.marke) for l in lose]
+    if not lose:
+        return []
+    je = ziel / len(lose)
+    return [fifo_lots.Los(je, l.zeit, l.rang, l.marke) for l in lose]
+
+
 def flach(
     baum: dict,
     fokus_key: str,
@@ -319,22 +487,38 @@ def flach(
     *,
     block_zeit: Callable[[int], int | None] | None = None,
     max_knoten: int = MAX_KNOTEN,
+    fifo: FifoKontext | None = None,
 ) -> dict:
     """
     Flaches Herkunftsnetz des Fokus-UTXO aus dem gespeicherten UI-Baum.
 
     ``vorfahren`` enthält den Fokus selbst (``tiefe`` 0, Layer B an seiner
-    Output-Zeit) und alle Vorfahren; ``kanten`` laufen vom Eingang (``von``)
-    zum Output, den er mitfinanziert (``nach``). ``sats`` ist der Anteil am
-    Fokus-Output. Fremd/Coinbase/Bündel/Horizont sind Endknoten (``ende``).
+    Output-Zeit) und alle Vorfahren mit Anteil; ``kanten`` laufen vom Eingang
+    (``von``) zum Output, den er mitfinanziert (``nach``). ``sats`` ist der
+    Anteil am Fokus-Output. Fremd/Coinbase/Bündel/Horizont sind Endknoten
+    (``ende``).
+
+    Anteile: mit *fifo* FIFO je Output (``core.fifo_lots``) an jedem Hop,
+    dessen Eingänge alle eigen und aufgelöst sind und dessen Tx im Cache
+    liegt; sonst anteilig (pro rata). Vorfahren ohne Anteil am Fokus fallen
+    weg. ``anteilig`` sagt, ob ein anteiliger Hop (mit Losen verschiedener
+    Zeit) oder ein Bündel zum Fokus beiträgt.
     """
+    import sys
+
     wurzel = dict(baum.get("root") or {})
     wurzel["children"] = baum.get("children") or []
     fokus_sats = int(wurzel.get("amount_sats") or 0)
 
     knoten: dict[str, dict] = {}
-    kanten: dict[tuple[str, str], float] = {}
     reihenfolge: list[str] = []
+    eigen_kante: dict[tuple[str, str], bool] = {}
+    #: id(Instanz) → (Schlüssel, Plan); Plan None = Ende,
+    #: ("buendel", key) oder ("kinder", [(kind, key, typ, marker)]).
+    instanz: dict[int, tuple[str, tuple | None]] = {}
+    #: Hops, die anteilig verteilt haben und dabei Lose verschiedener Zeit
+    #: mischten, und Bündel — dort ist kein Los-Datum belastbar.
+    anteilig_keys: set[str] = set()
 
     def zeitfelder(zeit: datetime | None) -> dict:
         if zeit is None:
@@ -345,23 +529,18 @@ def flach(
             "time_ts": int(zeit.timestamp()),
         }
 
-    def neu(key: str, eintrag: dict, anteil: float) -> None:
+    def neu(key: str, eintrag: dict, _anteil: float = 0.0) -> None:
         if key in knoten:
             alt = knoten[key]
-            alt["anteil_sats"] += anteil
             alt["tiefe"] = min(alt["tiefe"], eintrag["tiefe"])
-            alt["y"] = y_aus_beitrag(skala, alt["anteil_sats"])
             return
-        eintrag["anteil_sats"] = anteil
+        eintrag["anteil_sats"] = 0.0
         knoten[key] = eintrag
         reihenfolge.append(key)
 
-    def kante(von: str, nach: str, sats: float, eigen: bool) -> None:
+    def kante(von: str, nach: str, _sats: float, eigen: bool) -> None:
         schluessel = (von, nach)
-        kanten[schluessel] = kanten.get(schluessel, 0.0) + sats
         eigen_kante[schluessel] = eigen_kante.get(schluessel, True) and eigen
-
-    eigen_kante: dict[tuple[str, str], bool] = {}
 
     zeit0 = output_zeit(wurzel, block_zeit)
     neu(fokus_key, {
@@ -375,25 +554,28 @@ def flach(
         "tiefe": 0,
         "n": 0,
         **zeitfelder(zeit0),
-    }, float(fokus_sats))
+    })
+    instanz[id(wurzel)] = (fokus_key, None)
 
+    # 1) Struktur: Knoten, Kanten, Bündel — Breitensuche wie bisher.
     gekappt = False
-    schlange: deque = deque([(wurzel, fokus_key, float(fokus_sats), 0)])
+    schlange: deque = deque([(wurzel, fokus_key, 0)])
     while schlange:
-        eltern, eltern_key, anteil, tiefe = schlange.popleft()
+        eltern, eltern_key, tiefe = schlange.popleft()
         kinder = [k for k in (eltern.get("children") or []) if isinstance(k, dict)]
         if not kinder:
             continue
         voll = len(knoten) >= max_knoten
         gekappt = gekappt or (voll and not _buendeln(eltern, kinder))
         if voll or _buendeln(eltern, kinder):
-            _buendel(
-                kinder, eltern_key, anteil, tiefe + 1, fokus_sats,
+            bkey = _buendel(
+                kinder, eltern_key, 0.0, tiefe + 1, fokus_sats,
                 neu=neu, kante=kante, zeitfelder=zeitfelder, skala=skala,
                 block_zeit=block_zeit,
             )
+            instanz[id(eltern)] = (eltern_key, ("buendel", bkey))
             continue
-        summe = sum(int(k.get("amount_sats") or 0) for k in kinder)
+        plan: list[tuple[dict, str, str, bool]] = []
         for nummer, kind in enumerate(kinder):
             typ = _typ(kind)
             key = _schluessel(kind, typ, eltern_key, nummer)
@@ -402,11 +584,9 @@ def flach(
                 # kein eigener Knoten, der Hop endet hier.
                 knoten[key]["ende"] = True
                 knoten[key]["abbruch"] = typ
+                plan.append((kind, key, typ, True))
                 continue
             sats = int(kind.get("amount_sats") or 0)
-            teil = (
-                anteil * sats / summe if summe > 0 else anteil / len(kinder)
-            )
             eigen = typ in (TYP_EIGEN, TYP_HORIZONT)
             enkel = kind.get("children") or []
             ende = typ != TYP_EIGEN or not enkel
@@ -414,21 +594,83 @@ def flach(
                 "key": key,
                 "typ": typ,
                 "value_sats": sats,
-                "y": y_aus_beitrag(skala, teil),
+                "y": 0.0,
                 "wallet": kind.get("wallet") or "",
                 "eigen": eigen,
                 "ende": ende,
                 "tiefe": tiefe + 1,
                 "n": 0,
                 **zeitfelder(output_zeit(kind, block_zeit)),
-            }, teil)
-            kante(key, eltern_key, teil, eigen)
+            })
+            kante(key, eltern_key, 0.0, eigen)
+            instanz[id(kind)] = (key, None)
+            plan.append((kind, key, typ, False))
             if typ == TYP_EIGEN and enkel:
-                schlange.append((kind, key, teil, tiefe + 1))
+                schlange.append((kind, key, tiefe + 1))
+        instanz[id(eltern)] = (eltern_key, ("kinder", plan))
+
+    # 2) Lose von unten: jeder Hop gibt seinem Output FIFO (oder anteilig)
+    #    Lose seiner Eingänge weiter. ``marke`` = Pfad der Schlüssel.
+    def lose(inst: dict, sats: float) -> list[fifo_lots.Los]:
+        key, plan = instanz[id(inst)]
+        zeit_hop = knoten[key].get("time_ts")
+        if plan is None:
+            return [fifo_lots.Los(sats, zeit_hop, (), (key,))]
+        if plan[0] == "buendel":
+            bkey = plan[1]
+            anteilig_keys.add(bkey)
+            return [fifo_lots.Los(sats, knoten[bkey].get("time_ts"), (), (bkey, key))]
+        echte = [(k, ck, typ) for k, ck, typ, marker in plan[1] if not marker]
+        if not echte:
+            return [fifo_lots.Los(sats, zeit_hop, (), (key,))]
+        eingang = []
+        for kind, _ck, _typ in echte:
+            kind_lose = lose(kind, int(kind.get("amount_sats") or 0))
+            # Ohne eigene Zeit: frühestens so alt wie dieser Hop (Obergrenze).
+            eingang.append([
+                l if l.zeit is not None else fifo_lots.Los(l.sats, zeit_hop, l.rang, l.marke)
+                for l in kind_lose
+            ])
+        ergebnis = _fifo_hop(fifo, key, int(sats), echte, eingang)
+        if ergebnis is None:
+            if len({l.zeit for kl in eingang for l in kl}) > 1:
+                anteilig_keys.add(key)
+            alle = [k for k, *_r in plan[1]]
+            summe = sum(int(k.get("amount_sats") or 0) for k in alle)
+            ergebnis = []
+            for pos, ((kind, _ck, _typ), kind_lose) in enumerate(zip(echte, eingang)):
+                c = int(kind.get("amount_sats") or 0)
+                ziel = sats * c / summe if summe > 0 else sats / len(alle)
+                ergebnis.extend(
+                    fifo_lots.Los(l.sats, l.zeit, (pos,) + l.rang, l.marke)
+                    for l in _skaliere(kind_lose, ziel)
+                )
+        return [fifo_lots.Los(l.sats, l.zeit, l.rang, l.marke + (key,)) for l in ergebnis]
+
+    alt = sys.getrecursionlimit()
+    sys.setrecursionlimit(max(alt, 4 * len(knoten) + 200))
+    try:
+        fokus_lose = lose(wurzel, float(fokus_sats))
+    finally:
+        sys.setrecursionlimit(alt)
+
+    # 3) Anteile und Kanten aus den Pfaden der Lose.
+    kanten: dict[tuple[str, str], float] = {}
+    for l in fokus_lose:
+        pfad = l.marke
+        for k in set(pfad):
+            knoten[k]["anteil_sats"] += l.sats
+        for von, nach in zip(pfad, pfad[1:]):
+            kanten[(von, nach)] = kanten.get((von, nach), 0.0) + l.sats
+    knoten[fokus_key]["anteil_sats"] = float(fokus_sats)
 
     vorfahren = []
     for key in reihenfolge:
         eintrag = knoten[key]
+        if key != fokus_key and eintrag["anteil_sats"] <= 0:
+            continue
+        if key != fokus_key:
+            eintrag["y"] = y_aus_beitrag(skala, eintrag["anteil_sats"])
         eintrag["anteil_sats"] = int(round(eintrag["anteil_sats"]))
         vorfahren.append(eintrag)
     return {
@@ -445,17 +687,23 @@ def flach(
             for (von, nach), sats in kanten.items()
         ],
         "gekappt": gekappt,
+        # True: ein Hop mit Anteil am Fokus hat anteilig (pro rata) Lose
+        # verschiedener Zeit gemischt oder ein Bündel trägt bei — die
+        # Los-Daten des Fokus sind dann nicht FIFO-genau.
+        "anteilig": any(
+            knoten[k]["anteil_sats"] > 0 for k in anteilig_keys if k in knoten
+        ),
     }
 
 
 def _buendel(
     kinder, eltern_key, anteil, tiefe, fokus_sats, *,
     neu, kante, zeitfelder, skala, block_zeit,
-) -> None:
+) -> str:
     """Alle Eingänge eines Hops als ein Endknoten „n Eingänge“.
 
     Das Lot nimmt die jüngste bekannte Eingangszeit. Fehlt jede Zeit, bleibt
-    der Knoten ohne Position und damit grau.
+    der Knoten ohne Position und damit grau. Liefert den Bündel-Schlüssel.
     """
     anzahl = 0
     sats = 0
@@ -489,3 +737,4 @@ def _buendel(
         **felder,
     }, anteil)
     kante(key, eltern_key, anteil, eigen)
+    return key

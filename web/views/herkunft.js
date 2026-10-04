@@ -304,19 +304,23 @@ async function springeImHerkunftsbaum(zweig, sprung) {
     }
   }
   const vorab = typeof Herkunftsnetz !== "undefined" && Herkunftsnetz.baum;
-  const baumSchonDa = Boolean(
-    vorab && vorab.key === baumZiel && vorab.stand === "da" && vorab.wert,
-  );
-  if (!baumSchonDa && pfad && baumZiel && zweig.dataset.baumZiel) {
+  let vollerBaum = vorab && vorab.key === baumZiel && vorab.stand === "da" && vorab.wert
+    ? vorab.wert
+    : null;
+  if (!vollerBaum && pfad && baumZiel && zweig.dataset.baumZiel) {
+    // Vorladen noch nicht fertig: den gespeicherten Baum einmal selbst holen.
+    // Kein „Alles aufklappen“ — gezeichnet wird nur der Pfad zum Ziel
+    // (Lazy, ISSUES P2; ein Monster-Baum soll nicht ganz ins DOM).
     try {
-      await expandiereBaumAlles(zweig);
+      const g = await api(`/trace?target=${encodeURIComponent(baumZiel)}`);
+      if (g && g.vorhanden && g.ergebnis) vollerBaum = g.ergebnis;
     } catch (_) { /* Suche läuft danach über die gezeichneten Zeilen. */ }
   }
-  if (baumSchonDa && zweig.dataset.baumZiel) {
+  if (vollerBaum && zweig.dataset.baumZiel && zweig.dataset.baumZiel === baumZiel) {
     const ebene = zweig.querySelector(":scope > .baum-ebene");
-    if (ebene && Array.isArray(vorab.wert.children)) {
+    if (ebene && Array.isArray(vollerBaum.children)) {
       delete zweig.dataset.baumZiel;
-      ebene.replaceChildren(zeichneKnotenListe(vorab.wert.children, ebene._elternWallet));
+      ebene.replaceChildren(zeichneKnotenListe(vollerBaum.children, ebene._elternWallet));
     }
   }
   if (pfad && !zweig.dataset.baumZiel) {

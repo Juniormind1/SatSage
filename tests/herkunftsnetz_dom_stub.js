@@ -30,7 +30,7 @@ class El {
     while (el && !e.gestoppt) { for (const fn of el.handlers[typ] || []) fn(e); el = el.parent; }
     return e;
   }
-  matches(sel) { return sel.split(",").some((s) => passt(this, s.trim())); }
+  matches(sel) { return sel.split(",").some((s) => passtKette(this, s.trim())); }
   closest(sel) { let el = this; while (el) { if (el.matches && el.matches(sel)) return el; el = el.parent; } return null; }
   querySelectorAll(sel) {
     const aus = [];
@@ -38,6 +38,20 @@ class El {
     lauf(this); return aus;
   }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+}
+// Nachfahren-Kombinator (``[data-score="x"] .zahl``): das letzte Glied passt
+// auf *el*, die vorderen der Reihe nach auf Vorfahren. Selektoren mit ``>``
+// bleiben beim alten, nachsichtigen Abgleich nur des letzten Elements.
+function passtKette(el, s) {
+  const glieder = s.includes(">") ? [s] : (s.match(/(?:[^\s"]+|"[^"]*")+/g) || [s]);
+  if (!passt(el, glieder[glieder.length - 1])) return false;
+  let vorfahr = el.parent;
+  for (let i = glieder.length - 2; i >= 0; i -= 1) {
+    while (vorfahr && !passt(vorfahr, glieder[i])) vorfahr = vorfahr.parent;
+    if (!vorfahr) return false;
+    vorfahr = vorfahr.parent;
+  }
+  return true;
 }
 function passt(el, s) {
   let rest = s;

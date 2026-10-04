@@ -34,7 +34,9 @@ LOGGER = logging.getLogger("satsage.rpc")
 # Neue Methode? Nur nach Maintainer-Freigabe, zusammen mit Doku
 # (.env.example, doc/handbuch.html, README) und tests/test_rpc_allowlist.py.
 
-#: A · Kern — nur lesend, Kette und UTXO-Set.
+#: A · Kern — nur lesend, Kette, UTXO-Set und Gebührenschätzung.
+#: ``estimatesmartfee``: Gebührenvorschlag fürs FIFO-Spend (nur lesend,
+#: keine Wallet). Freigabe Maintainer 2026-10-04.
 RPC_KERN: tuple[str, ...] = (
     "getblockchaininfo",
     "getblockhash",
@@ -42,6 +44,7 @@ RPC_KERN: tuple[str, ...] = (
     "getblock",
     "getrawtransaction",
     "scantxoutset",
+    "estimatesmartfee",
 )
 
 #: B · Core-Wallet-Import („Wallets suchen“): öffentliche Deskriptoren lesen.
@@ -744,7 +747,9 @@ def _unspent_to_utxo(u: dict) -> dict | None:
         try:
             from embit.script import Script
 
-            address = Script(bytes.fromhex(spk)).address()
+            from core.derivation import script_address
+
+            address = script_address(Script(bytes.fromhex(spk)))
         except Exception:
             address = None
     status: dict[str, Any] = {
@@ -1156,10 +1161,12 @@ def _embit_tx_to_analyze_dict(tx) -> dict:
             vins.append({"is_coinbase": True})
         else:
             vins.append({"txid": bytes(vin.txid).hex(), "vout": int(vin.vout)})
+    from core.derivation import script_address
+
     vouts = []
     for n, vout in enumerate(tx.vout):
         try:
-            addr = vout.script_pubkey.address()
+            addr = script_address(vout.script_pubkey)
         except Exception:
             addr = None
         vouts.append({

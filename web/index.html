@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=0.9.9-alterklaeren">
+  <link rel="stylesheet" href="/style.css?v=0.9.9-psbt">
 </head>
 <body>
 
@@ -41,7 +41,7 @@
   <div class="einrichtung-karte" role="dialog" aria-modal="true"
        aria-labelledby="onchain-hinweis-titel">
     <h1 id="onchain-hinweis-titel" data-i18n="dialog.onchain.title">Hinweis zum On-Chain-Beleg</h1>
-    <p id="einrichtung-onchain-text" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+    <p id="einrichtung-onchain-text" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
     <label class="check-zeile" for="einrichtung-onchain-nicht-nochmal">
       <input type="checkbox" id="einrichtung-onchain-nicht-nochmal">
       <span data-i18n="dialog.onchain.dontShow">Nicht nochmal anzeigen</span>
@@ -64,34 +64,23 @@
   <div class="einrichtung-karte" role="dialog" aria-modal="true"
        aria-labelledby="einrichtung-titel">
     <h1 id="einrichtung-titel" data-i18n="dialog.setup.title">Erste Einrichtung</h1>
-    <p data-i18n="dialog.setup.intro1">
-      SatSage liest deine Wallets über ihre öffentlichen Schlüssel — es kennt
-      keine privaten Schlüssel und kann nichts ausgeben. Drei Dinge gehören
-      eingerichtet, bevor die Auswertung etwas anzeigen kann.
-    </p>
-    <p data-i18n="dialog.setup.intro2">
-      Beim ersten Compact-Filter-Scan des ersten XPUBs müssen die Block-Header
-      ab SegWit (August 2017) geladen werden. Das ist einmalig: danach liegen
-      sie lokal für alle Wallets. Der Download läuft im Hintergrund schon
-      jetzt — du kannst den Server ohne Wallet laufen lassen, bis die Header
-      da sind. Ein eigener Electrum-Server (electrs oder Fulcrum) im LAN
-      erspart diesen Schritt; Electrs im LAN ist für den UTXO-Bestand
-      typischerweise der schnellste Weg.
-    </p>
+    <p data-i18n="dialog.setup.intro1">SatSage liest nur öffentliche Schlüssel und kann nichts ausgeben.</p>
 
     <ol id="einrichtung-schritte" class="einrichtung-liste"></ol>
 
-    <p class="klein" data-i18n-html="dialog.setup.written">
-      Alles wird nach <span id="einrichtung-pfad" class="mono">.env</span>
-      geschrieben und bleibt auf diesem Rechner.
+    <p class="klein einrichtung-handbuch">
+      <a href="/handbuch.html#erste-einrichtung" target="_blank" rel="noopener"
+         data-i18n="dialog.setup.handbook"
+         data-i18n-title="dialog.setup.handbookTitle"
+         title="Öffnet das Handbuch in einem neuen Tab: Block-Header-Download, Datenquellen, .env.">Mehr dazu im Handbuch</a>
     </p>
 
     <div class="einrichtung-knoepfe">
       <button type="button" id="einrichtung-weiter" class="knopf knopf-primaer"
               data-i18n="dialog.setup.continue"
               data-i18n-title="dialog.setup.continueTitle"
-              title="Öffnet Wallets oder Datenquellen — je nachdem, was noch fehlt.">
-        Weiter zur Verwaltung
+              title="Öffnet die Wallet-Verwaltung: xpub, zpub oder Deskriptor eintragen.">
+        Wallet eintragen
       </button>
       <button type="button" id="einrichtung-spaeter" class="knopf"
               data-i18n="dialog.setup.later"
@@ -398,6 +387,57 @@
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="wallet.addresses">Adressen</span>
             <span id="adress-zusatz" class="karte-zusatz"></span>
+            <!-- FIFO-Spend: grüne sats aus dem aktuellen Trace je UTXO (keine Losbuchhaltung). PSBT folgt. -->
+            <div id="fifo-spend" class="fifo-spend" role="group"
+                 data-i18n-aria-label="wallet.fifoSpendAria" aria-label="FIFO-Spend" hidden>
+              <span id="fifo-spend-text" class="fifo-spend-text"></span>
+              <!-- Ohne Komma/Punkt ganze sats, mit Komma oder Punkt BTC; intern ganze sats.
+                   Die erkannte Einheit steht live daneben. -->
+              <input type="text" id="fifo-spend-betrag" class="fifo-spend-betrag"
+                     inputmode="decimal" autocomplete="off" spellcheck="false" disabled
+                     data-i18n-placeholder="wallet.fifoSpendAmountPlaceholder" placeholder="sats oder BTC">
+              <span id="fifo-spend-einheit" class="fifo-spend-einheit" aria-live="polite"></span>
+              <!-- Aufklapp-Dreieck: „Senden ▸“ zu, „Senden ▾“ auf (en „Send ▸/▾“) (aria-expanded); klappt die Ziel-Zeile auf, nur mit gültigem Betrag. Text und Tooltip setzt wallets.js. -->
+              <span id="fifo-spend-psbt-huelle" class="fifo-spend-psbt-huelle">
+                <button type="button" id="fifo-spend-psbt" class="knopf knopf-klein" disabled
+                        aria-expanded="false" aria-controls="fifo-spend-ziel"
+                        data-i18n="wallet.fifoSpendPsbtOpen">Senden ▸</button>
+              </span>
+            </div>
+          </div>
+          <!-- Ziel-Zeile direkt unter der FIFO-Kopfzeile: Zieladresse (live geprüft), Gebühr, „PSBT“ (Download). -->
+          <div id="fifo-spend-ziel" class="fifo-spend-ziel" role="group"
+               data-i18n-aria-label="wallet.fifoTargetAria" aria-label="PSBT-Ziel" hidden>
+            <input type="text" id="fifo-ziel-adresse" class="fifo-ziel-adresse"
+                   autocomplete="off" spellcheck="false" autocapitalize="off"
+                   data-i18n-placeholder="wallet.fifoTargetAddressPlaceholder" placeholder="Zieladresse">
+            <!-- Status direkt neben der Adresse: Wallet-Name (grün), „extern“ (gelb), „ungültig“/„falsches Netz“ (rot). -->
+            <span id="fifo-ziel-status" class="fifo-ziel-status" aria-live="polite"></span>
+            <!-- Auswahl-Strategie der Coin-Auswahl; gespeichert als FIFO_STRATEGIE (Einstellungen). -->
+            <select id="fifo-ziel-strategie" class="fifo-ziel-strategie"
+                    data-i18n-title="wallet.fifoStrategyTitle" title="Auswahl-Strategie"
+                    data-i18n-aria-label="wallet.fifoStrategyAria" aria-label="Auswahl-Strategie">
+              <option value="wechselgeld" data-i18n="wallet.fifoStrategyChange">Wenig Wechselgeld</option>
+              <option value="gebuehr" data-i18n="wallet.fifoStrategyFee">Wenig Gebühr</option>
+              <option value="aelteste" data-i18n="wallet.fifoStrategyOldest">Älteste zuerst</option>
+              <option value="staub" data-i18n="wallet.fifoStrategyDust">Staub aufräumen</option>
+            </select>
+            <input type="text" id="fifo-ziel-fee" class="fifo-ziel-fee"
+                   inputmode="decimal" autocomplete="off" spellcheck="false"
+                   data-i18n-placeholder="wallet.fifoTargetFeePlaceholder" placeholder="Gebühr">
+            <span class="fifo-spend-einheit" data-i18n="wallet.fifoTargetFeeUnit">sat/vB</span>
+            <span id="fifo-ziel-psbt-huelle" class="fifo-spend-psbt-huelle" data-i18n-title="wallet.fifoSpendPsbtTitle" title="PSBT erzeugen">
+              <button type="button" id="fifo-ziel-psbt" class="knopf knopf-klein" disabled
+                      data-i18n="wallet.fifoTargetPsbt" data-i18n-title="wallet.fifoSpendPsbtTitle"
+                      title="PSBT erzeugen">PSBT</button>
+            </span>
+          </div>
+          <!-- Ergebnis von „PSBT“: kurze Übersicht und Base64 kopieren (Datei kommt als Download). -->
+          <div id="fifo-psbt-ergebnis" class="fifo-psbt-ergebnis" role="status" aria-live="polite"
+               data-i18n-aria-label="wallet.fifoPsbtResultAria" aria-label="PSBT-Ergebnis" hidden>
+            <span id="fifo-psbt-text" class="fifo-psbt-text"></span>
+            <button type="button" id="fifo-psbt-kopieren" class="knopf knopf-klein"
+                    data-i18n="wallet.fifoPsbtCopy" hidden>Base64 kopieren</button>
           </div>
           <div id="adress-koerper"></div>
           <div id="wallet-ausgegeben"></div>
@@ -642,7 +682,7 @@
               UTXOs nach Haltefrist. Keine Steuerberatung — die
               Angaben sind vor der Verwendung selbst zu prüfen.
             </p>
-            <p class="meta" id="steuer-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+            <p class="meta" id="steuer-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
             <p class="meta" data-i18n-html="tax.metaHtml">
               <strong>Historien</strong> holt <em>welche</em>
               Beträge es je gab, auch längst ausgegebene — erst damit werden
@@ -1209,7 +1249,7 @@
             Anschaffungen danach (Neuvermögen) werden nicht durch Halten steuerfrei.
             Andere europäische Länder haben keinen vergleichbaren Cutoff.
           </p>
-          <p class="meta steuer-einstellungen-hinweis" id="frist-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+          <p class="meta steuer-einstellungen-hinweis" id="frist-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
         </div>
 
         <div class="karte">
@@ -1866,12 +1906,12 @@
 <script src="/app.js?v=0.9.9-mempool"></script>
 <script src="/mempool_links.js?v=0.9.9"></script>
 <script src="/views/pager.js?v=0.9.9"></script>
-<script src="/views/einstellungen.js?v=0.9.9"></script>
+<script src="/views/einstellungen.js?v=0.9.9-fifospend"></script>
 <script src="/views/datenquellen.js?v=0.9.9-pubconn"></script>
 <script src="/views/sanktionen.js?v=0.9.9"></script>
 <script src="/views/einrichtung.js?v=0.9.9"></script>
 <script src="/views/adress_labels.js?v=0.9.9"></script>
-<script src="/views/wallets.js?v=0.9.9-lotstill"></script>
+<script src="/views/wallets.js?v=0.9.9-psbt"></script>
 <script src="/views/herkunft.js?v=0.9.9-lotkopf"></script>
 <script src="/views/steuerjahr.js?v=0.9.9-plotsofort"></script>
 <script src="/views/herkunftsnetz.js?v=0.9.9-grauklapp"></script>

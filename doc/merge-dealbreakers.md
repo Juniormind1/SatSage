@@ -39,7 +39,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 
 **Präzisierung T14:** Alle bitcoind-Aufrufe laufen durch `BitcoinRpcClient.call` (`core/bitcoind_rpc.py`). Dort prüft die Allowlist jede Methode vor Payload, Auth und Socket. Ein Verstoß wirft `RpcAllowlistError`, schreibt `RPC-ALLOWLIST-VERSTOSS` als ERROR ins Server-Log, setzt ein Prozess-Flag (Quellen-Status, `/api/health`, rote Kopfzeilen-Pille „Core-RPC gesperrt“) und fällt nie still auf Electrum/BIP-158 zurück. CI: `tests/test_rpc_allowlist.py` (Laufzeit) und `tests/test_rpc_allowlist_statisch.py` (AST-Scan aller `.py` außer `lab/`, `tests/`, `specter_plugin/scripts/`). Zusätzlich am echten Regtest-Node, bei jedem Pull Request nach `main`: `lab/regtest/scripts/verify_rpc_allowlist.py` (Workflow `Regtest-Labor`, Dealbreaker Q6). Der Client stoppt `dumpwallet`, bevor ein Socket aufgeht. Ein Labor-User mit `rpcwhitelist` nur für die Lese-Methoden bekommt bei `listwallets` den Hinweis „rpcwhitelist?“. Ein zweiter Node mit `disablewallet` bekommt „disablewallet?“. Lab-Skripte dürfen mehr (regtest, eigener Node). Erweitern nur mit Maintainer-Freigabe und zusammen mit Doku und bitcoin.conf-Beispiel:
 
-- **A · Kern:** `getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`
+- **A · Kern:** `getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`, `estimatesmartfee` (Gebührenvorschlag FIFO-Spend, Freigabe Maintainer 2026-10-04)
 - **B · Core-Wallet-Import:** `listwallets`, `listwalletdir`, `loadwallet`, `listdescriptors` (nur ohne Parameter oder mit `false`)
 - **C · Lab-Faucet, nur bei NETWORK=regtest:** `sendtoaddress`
 

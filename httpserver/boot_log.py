@@ -17,7 +17,8 @@ class BootLog:
         self._lock = threading.Lock()
         self._zeilen: list[dict] = []
         self._seq = 0
-        self._fertig = False
+        #: Vorbereitung durch (``fertig()``). Seit d3f85c8 endet damit nur der
+        #: Start-Strom, Job-Zeilen kommen weiter in den Puffer.
         self._bereit = False
         self._hoerer: list[Callable[[dict], None]] = []
         self._ereignis = threading.Event()
@@ -48,8 +49,9 @@ class BootLog:
             self._ereignis.set()
 
     def stand(self) -> tuple[list[dict], bool]:
+        """(Zeilen, Vorbereitung durch)."""
         with self._lock:
-            return list(self._zeilen), self._fertig
+            return list(self._zeilen), self._bereit
 
     def abonniere(self, fn: Callable[[dict], None]) -> Callable[[], None]:
         """Hängt *fn* an neue Zeilen. Nach der Vorbereitung ohne Rückspiel."""
@@ -74,7 +76,9 @@ class BootLog:
     def warte(self, timeout: float) -> bool:
         """True, sobald eine neue Zeile da ist oder die Vorbereitung fertig ist."""
         with self._lock:
-            if self._fertig:
+            if self._bereit:
+                # Sonst wartete ein Strom, der erst nach der Vorbereitung
+                # kommt, die volle Frist auf sein „done“.
                 return True
             self._ereignis.clear()
         return self._ereignis.wait(timeout)

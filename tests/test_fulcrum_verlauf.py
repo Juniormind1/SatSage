@@ -3,11 +3,17 @@ fetch_address_history_fulcrum / fetch_wallet_history_fulcrum: vollständige
 Adress-Historie inkl. ausgegebener Outputs über einen Electrum-Server.
 
 Ein Fake-Client ersetzt die echte Netzwerkverbindung — die Tests laufen ohne
-Verbindung und ohne echte Wallet-Daten. Alle Höhen bleiben 0 (unconfirmed),
-damit die Blockzeit-Anreicherung (die auf main.IMMUTABLE_CACHE_DIR zugreifen
-würde) gar nicht erst anläuft.
+Verbindung und ohne echte Wallet-Daten. Alle Höhen bleiben 0 (unconfirmed).
+Seit 49a35da (2026-10-01) bekommt ein unbestätigter Output trotzdem eine
+Mindesthöhe: den Chain-Tip samt dessen Blockzeit (``mindesthoehe``), damit
+Höhe 0 nicht als „sehr alt“ im Cache landet. Der Fake liefert dafür
+``headers.subscribe`` und ``block.header``; der Blockzeit-Cache auf der
+Platte zeigt in ein temporäres Verzeichnis (``isoliere_header_caches``).
 """
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from fulcrum import (
     _fetch_address_utxos_from_history,
@@ -27,12 +33,43 @@ TXID_AUSGABE = txid("b1")
 TXID_FREMDE_VORGAENGER_TX = txid("00")
 
 
+#: Chain-Tip des Fakes und die Blockzeit, die jeder seiner Header trägt.
+FAKE_TIP = 700_000
+FAKE_HEADER_ZEIT = 1_759_000_000
+
+
+def fake_header_hex(zeit: int = FAKE_HEADER_ZEIT) -> str:
+    """80-Byte-Header, Timestamp an Offset 68 (little endian), sonst Nullen."""
+    return ("00" * 68) + zeit.to_bytes(4, "little").hex() + ("00" * 8)
+
+
+def isoliere_header_caches(testfall: unittest.TestCase) -> None:
+    """
+    Tip-/Header-Caches des Moduls leeren und den Blockzeit-Cache auf der
+    Platte in ein Temp-Verzeichnis legen — sonst schriebe der Test in den
+    echten ``immutable_cache`` und Tests sähen Zeiten voneinander.
+    """
+    from core import fulcrum_history as fh
+
+    for cache in (fh._HEADER_TIME_CACHE, fh._TIP_HEIGHT_CACHE, fh._TX_HEIGHT_CACHE):
+        alt = dict(cache)
+        cache.clear()
+        testfall.addCleanup(lambda c=cache, a=alt: (c.clear(), c.update(a)))
+    tmp = tempfile.TemporaryDirectory()
+    testfall.addCleanup(tmp.cleanup)
+    patcher = mock.patch("core.xpub_cache.IMMUTABLE_CACHE_DIR", Path(tmp.name))
+    patcher.start()
+    testfall.addCleanup(patcher.stop)
+
+
 class FakeFulcrumClient:
     """Minimaler Ersatz für FulcrumClient.request() — keine echte Verbindung."""
 
-    def __init__(self, history_by_scripthash: dict, tx_by_id: dict):
+    def __init__(self, history_by_scripthash: dict, tx_by_id: dict, tip: int = FAKE_TIP):
         self._history = history_by_scripthash
         self._txs = tx_by_id
+        self._tip = tip
+        self.header_hoehen: list[int] = []
 
     def tor_batch_sinnvoll(self, n_calls: int) -> bool:
         return False
@@ -43,6 +80,11 @@ class FakeFulcrumClient:
             return self._history.get(params[0], [])
         if method == "blockchain.transaction.get":
             return self._txs[params[0]]
+        if method == "blockchain.headers.subscribe":
+            return {"height": self._tip, "hex": fake_header_hex()}
+        if method == "blockchain.block.header":
+            self.header_hoehen.append(int(params[0]))
+            return fake_header_hex() if 0 <= int(params[0]) <= self._tip else None
         raise AssertionError(f"unerwartete Methode in Test: {method}")
 
 
@@ -71,6 +113,7 @@ class TestVinTxidReihenfolge(unittest.TestCase):
 
 class VerlaufTest(unittest.TestCase):
     def setUp(self):
+        isoliere_header_caches(self)
         self.adresse = EXTERN_A
         self.scripthash = address_to_scripthash(self.adresse)
 
@@ -137,6 +180,19 @@ class VerlaufTest(unittest.TestCase):
         unspent = by_txid[TXID_EMPFANG_UNSPENT.lower()]
         self.assertFalse(unspent["spent"])
         self.assertIsNone(unspent["spent_txid"])
+
+    def test_unbestaetigt_traegt_tip_als_mindesthoehe(self):
+        """49a35da: Höhe 0 heißt „frühestens im aktuellen Tip“, nicht „sehr alt“."""
+        eintraege = fetch_address_history_fulcrum(
+            self.client, self.adresse, self.scripthash
+        )
+        for e in eintraege:
+            self.assertEqual(e["status"], {
+                "confirmed": False, "block_height": FAKE_TIP,
+                "mindesthoehe": True, "block_time": FAKE_HEADER_ZEIT,
+            })
+        # Tip aus headers.subscribe, nur bestätigt per block.header — keine Binärsuche.
+        self.assertEqual(set(self.client.header_hoehen), {FAKE_TIP})
 
     def test_unspent_ableitung_filtert_ausgegebene(self):
         """Fallback-Pfad für Server ohne listunspent liefert weiterhin nur

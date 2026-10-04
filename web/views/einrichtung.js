@@ -1,7 +1,7 @@
 /** Einrichtung-UI — aus app.js extrahiert (Modularisierung Slice 2).
  * Klassisches Script: Globals aus app.js (Zustand, api, t, $, pille, meldung, …).
  * Kein import/export. Laden nach app.js, vor boot.js.
- * Navigation nach „Weiter“ nutzt oeffneVerwaltung/brauchtDatenquellenZuerst (chrome_nav.js).
+ * Navigation nach „Weiter“ nutzt oeffneVerwaltung (chrome_nav.js), Ziel aus der Schritt-ID.
  */
 
 // ---------------------------------------------------------------------------
@@ -11,20 +11,45 @@
 /** Merker, dass der Hinweis schon einmal gezeigt wurde — er soll nicht nerven. */
 const EINRICHTUNG_MERKER = "xpq-einrichtung-gesehen";
 
+/** Quellen, die als „eigener Node“ zählen (Electrum-Server oder Bitcoin Core). */
+const EINRICHTUNG_NODE_QUELLEN = ["own_fulcrum", "own_core", "own_utxo_core"];
+
 /**
- * Die drei Dinge, ohne die das Werkzeug nichts oder nur wenig zeigen kann.
+ * Die Schritte der Einrichtung in Anzeige-Reihenfolge: eigener Node
+ * (empfohlen; ohne ihn greifen Compact Filter), Block-Explorer (optional,
+ * hält die Einrichtung nicht offen) und zuletzt das Wallet (Pflicht).
  *
  * Der Stand wird aus der Konfiguration abgeleitet, nicht gespeichert: Wer
  * etwas in der .env von Hand einträgt, sieht es hier sofort als erledigt.
+ * ``id`` ist sprachunabhängig (Navigation), ``titel`` nur Anzeige;
+ * ``optional`` zählt nicht als offen.
  */
 function einrichtungsSchritte(config) {
   const wallets = config?.wallets || [];
-  const electrum = (config?.sources || []).find((q) => q.key === "own_fulcrum");
-  const core = (config?.sources || []).find((q) => q.key === "own_core");
+  const quellen = config?.sources || [];
   const mempool = config?.mempool || {};
+  const node = EINRICHTUNG_NODE_QUELLEN
+    .map((key) => quellen.find((q) => q.key === key))
+    .find((q) => q?.configured);
 
   return [
     {
+      id: "node",
+      titel: t("setup.step.node"),
+      erledigt: Boolean(node),
+      stand: node ? node.detail : t("setup.step.notSet"),
+      text: t("setup.step.nodeText"),
+    },
+    {
+      id: "explorer",
+      optional: true,
+      titel: t("setup.step.explorer"),
+      erledigt: Boolean(mempool.configured),
+      stand: mempool.configured ? mempool.host : t("setup.step.notSet"),
+      text: t("setup.step.explorerText"),
+    },
+    {
+      id: "wallets",
       titel: t("setup.step.wallets"),
       erledigt: wallets.length > 0,
       stand: wallets.length
@@ -32,25 +57,23 @@ function einrichtungsSchritte(config) {
         : t("setup.step.walletsNone"),
       text: t("setup.step.walletsText"),
     },
-    {
-      titel: t("setup.step.electrum"),
-      erledigt: Boolean(electrum?.configured),
-      stand: electrum?.configured ? electrum.detail : t("setup.step.notSet"),
-      text: t("setup.step.electrumText"),
-    },
-    {
-      titel: t("setup.step.core"),
-      erledigt: Boolean(core?.configured),
-      stand: core?.configured ? core.detail : t("setup.step.notSet"),
-      text: t("setup.step.coreText"),
-    },
-    {
-      titel: t("setup.step.explorer"),
-      erledigt: Boolean(mempool.configured),
-      stand: mempool.configured ? mempool.host : t("setup.step.notSet"),
-      text: t("setup.step.explorerText"),
-    },
   ];
+}
+
+/** Wohin der Hauptknopf führt: erst Wallets, dann Datenquellen. */
+function einrichtungsZiel(config) {
+  const schritte = einrichtungsSchritte(config);
+  const offen = (id) => !schritte.find((s) => s.id === id)?.erledigt;
+  return offen("wallets") || !offen("node") ? "wallets" : "datenquellen";
+}
+
+/** Beschriftung des Hauptknopfs passend zum Ziel. */
+function zeichneEinrichtungKnopf() {
+  const knopf = $("#einrichtung-weiter");
+  if (!knopf) return;
+  const node = einrichtungsZiel(Zustand.config) === "datenquellen";
+  knopf.textContent = t(node ? "dialog.setup.continueNode" : "dialog.setup.continue");
+  knopf.title = t(node ? "dialog.setup.continueNodeTitle" : "dialog.setup.continueTitle");
 }
 
 function zeichneEinrichtung() {
@@ -59,13 +82,16 @@ function zeichneEinrichtung() {
 
   for (const schritt of einrichtungsSchritte(Zustand.config)) {
     const punkt = document.createElement("li");
-    punkt.className = schritt.erledigt ? "schritt erledigt" : "schritt offen";
+    punkt.className = schritt.erledigt
+      ? "schritt erledigt"
+      : (schritt.optional ? "schritt optional" : "schritt offen");
+    punkt.dataset.schritt = schritt.id;
 
     const kopf = document.createElement("div");
     kopf.className = "schritt-kopf";
     const titel = document.createElement("strong");
     titel.textContent = schritt.titel;
-    kopf.append(titel, pille(schritt.erledigt ? "gut" : "warn", schritt.stand));
+    kopf.append(titel, pille(schritt.erledigt ? "gut" : (schritt.optional ? "neutral" : "warn"), schritt.stand));
 
     const text = document.createElement("p");
     text.className = "schritt-text";
@@ -75,7 +101,7 @@ function zeichneEinrichtung() {
     liste.append(punkt);
   }
 
-  setzeText($("#einrichtung-pfad"), Zustand.config?.env_path || ".env");
+  zeichneEinrichtungKnopf();
   fuellOnchainHinweisTexte();
 }
 
@@ -101,7 +127,7 @@ function einrichtungNochOffen() {
     /* siehe schliesseEinrichtung */
   }
   if (gesehen) return false;
-  return einrichtungsSchritte(Zustand.config).some((s) => !s.erledigt);
+  return einrichtungsSchritte(Zustand.config).some((s) => !s.erledigt && !s.optional);
 }
 
 async function merkeOnchainHinweisWennGewuenscht() {
@@ -194,14 +220,10 @@ function bindeEinrichtungUi() {
   const weiter = $("#einrichtung-weiter");
   if (weiter) {
     weiter.addEventListener("click", () => {
+      // Ziel aus der Schritt-ID, nicht aus dem (übersetzten) Titel.
+      const ziel = einrichtungsZiel(Zustand.config);
       schliesseEinrichtung();
-      if (brauchtDatenquellenZuerst()) {
-        oeffneVerwaltung("datenquellen");
-        return;
-      }
-      const schritte = einrichtungsSchritte(Zustand.config);
-      const walletsOk = schritte.find((s) => s.titel.startsWith("Wallets"))?.erledigt;
-      oeffneVerwaltung(walletsOk ? "datenquellen" : "wallets");
+      oeffneVerwaltung(ziel);
     });
   }
 

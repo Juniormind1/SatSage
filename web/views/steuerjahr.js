@@ -228,6 +228,19 @@ function steuerLotZeile(zeile) {
   event.sats_orange = zeile.sats_orange;
   event.sats_grau = zeile.sats_grau;
   event.sats_ohne_datum = zeile.sats_ohne_datum;
+  if (zeile.datum_aus_losen) {
+    // Datum aus den FIFO-Losen (ISSUES „Herkunft · FIFO je Output“): der
+    // Punkt rückt an sein Los-Datum; neu gezeichnet wird zum Abschluss.
+    event.datum_aus_losen = true;
+    if (zeile.datum) event.datum = zeile.datum;
+    if (zeile.time_ts) event.time_ts = zeile.time_ts;
+    if ("neuvermoegen" in zeile) event.neuvermoegen = Boolean(zeile.neuvermoegen);
+    const pos = zeile.pos === null || zeile.pos === undefined ? NaN : Number(zeile.pos);
+    if (Number.isFinite(pos) && pos !== event.pos) {
+      event.pos = pos;
+      daten._losDatumBewegt = true;
+    }
+  }
   if (zeile.kennzahlen) daten.kennzahlen = zeile.kennzahlen;
   if ("geister_saldo" in zeile) strahl.geister_saldo = zeile.geister_saldo;
   steuerGelbKeySetzen(zeile.key, event);
@@ -255,7 +268,12 @@ function steuerLotsAbschluss(obj) {
     steuerLotUiTimer = null;
   }
   zeichneSteuerScorecards(daten);
-  if (daten.zeitstrahl) zeichneZeitstrahlGeister(daten.zeitstrahl);
+  if (daten._losDatumBewegt && daten.zeitstrahl && ZeitstrahlAnsicht.daten === daten) {
+    daten._losDatumBewegt = false;
+    zeichneZeitstrahl(daten, { fensterBehalten: true });
+  } else if (daten.zeitstrahl) {
+    zeichneZeitstrahlGeister(daten.zeitstrahl);
+  }
   if (typeof ladeSteuerSeitenNeu === "function") {
     ladeSteuerSeitenNeu().catch(() => {});
   }

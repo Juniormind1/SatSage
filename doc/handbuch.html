@@ -261,7 +261,7 @@ On-Chain-Haltedauer ablesen.</p>
 
 <div class="hinweis acht">
   <div class="kopf">Was das ist — und was nicht</div>
-  <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm.</p>
+  <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
 </div>
 
 <p>Es gibt zwei Bedienwege, die dieselbe <code>.env</code> und dieselben Caches
@@ -476,6 +476,45 @@ fertiges <code>manylinux</code>-Wheel mit.</p>
 <code>server.py</code> starten, die ausgegebene Adresse öffnen, unter
 <strong>Einstellungen</strong> die Wallets eintragen. Alternativ
 <code>.env</code> direkt bearbeiten.</p>
+
+<h4 id="erste-einrichtung">Erste Einrichtung in der Oberfläche</h4>
+
+<p>Beim ersten Start erscheint zuerst der <strong>Hinweis zum On-Chain-Beleg</strong>
+(mit „Nicht nochmal anzeigen“ dauerhaft bestätigt), danach – solange etwas
+fehlt – der Dialog <strong>Erste Einrichtung</strong>. SatSage liest nur
+öffentliche Schlüssel und kann nichts ausgeben. Der Dialog zeigt drei Schritte;
+der Stand kommt aus der Konfiguration, wer die <code>.env</code> von Hand
+füllt, sieht die Schritte sofort als erledigt:</p>
+
+<ul>
+  <li><strong>Node verbinden (empfohlen):</strong> eigener Electrum-Server
+      (Fulcrum, electrs, ElectrumX) oder Bitcoin Core im eigenen Netz – schneller
+      und privat. Ohne eigenen Node laufen die Abfragen über Compact Filter
+      (BIP-158), siehe <a href="#datenquellen">Datenquellen und Privatsphäre</a>.</li>
+  <li><strong>Block-Explorer eintragen (optional):</strong> eigene
+      mempool.space-Instanz für Links zu UTXOs und Adressen, siehe
+      <a href="#explorer">Block-Explorer</a>. Fehlt er, bleibt die Einrichtung
+      trotzdem erledigt; ohne Eintrag gibt es bewusst keine Verweise nach außen.</li>
+  <li><strong>Wallet eintragen (Pflicht):</strong> xpub, zpub o. ä. oder – bei
+      Multisig – der Wallet-Deskriptor, siehe <a href="#wallets">Wallets verwalten</a>.
+      Der Hauptknopf „Wallet eintragen“ öffnet die Wallets; ist schon ein Wallet
+      da, aber kein Node, heißt er „Node eintragen“ und öffnet die Datenquellen.
+      „Erst umsehen“ schließt den Dialog; unter Einstellungen → „Einrichtung“
+      ist er wieder erreichbar.</li>
+</ul>
+
+<p><strong>Block-Header:</strong> Beim ersten Compact-Filter-Scan des ersten
+XPUBs müssen die Block-Header ab SegWit (August 2017) geladen werden. Das ist
+einmalig: danach liegen sie lokal für alle Wallets. Der Download läuft schon
+beim Start im Hintergrund – der Server kann ohne Wallet laufen, bis die Header
+da sind. Ein eigener Electrum-Server (electrs oder Fulcrum) im LAN erspart
+diesen Schritt; electrs im LAN ist für den UTXO-Bestand typischerweise der
+schnellste Weg.</p>
+
+<p><strong>Speicherort:</strong> Alles, was die Oberfläche einträgt, wird in die
+<code>.env</code> geschrieben (Pfad oben in Wallets und Datenquellen, siehe
+<a href="#konfiguration">Konfiguration</a>) und bleibt auf diesem Rechner.
+Kommentare und übrige Einträge bleiben erhalten.</p>
 
 <h4>Übersicht der Startbefehle</h4>
 <div class="tabelle">
@@ -1173,6 +1212,35 @@ für den ganzen UTXO. Ein Bündel mit Datum zählt wie ein Zufluss an seinem
 jüngsten Eingang. Ohne Datum bleibt es grau. Default bleibt defensiv. Der
 Report kennzeichnet den Modus.</p>
 
+<p><strong>Wie sich die Lose einer Transaktion verteilen (FIFO je Output).</strong>
+Gibt ein Wallet mehrere Lose zusammen aus, bekommen die Outputs, die das Wallet
+verlassen, die <em>ältesten</em> Lose zuerst; das Wechselgeld behält den Rest.
+Die Reihenfolge ist:</p>
+<ol>
+  <li>Zahlungen an fremde Adressen und an <em>andere</em> eigene Wallets, nach
+      Output-Nummer (<code>vout</code>);</li>
+  <li>die Gebühr;</li>
+  <li>das Wechselgeld zurück ins selbe Wallet, nach Output-Nummer.</li>
+</ol>
+<p>Die Lose aller Eingänge stehen dabei in einer gemeinsamen Reihe, nach
+Anschaffung geordnet, älteste zuerst. Ein Los ohne Datum zählt mit dem Datum der
+Transaktion, die es ausgibt. Bei gleichem Datum entscheidet die Reihenfolge der
+Eingänge. Ein Los, das nicht ganz passt, wird geteilt; gerechnet wird in ganzen
+sats. Weil grüne Lose immer älter sind als orange, kommen Zahlung und Gebühr aus
+grünen sats. Eine Umbuchung in ein anderes eigenes Wallet behält so ihre Farbe.
+Hat eine Transaktion fremde Eingänge oder ist sie ein CoinJoin oder eine große
+Sammel-Transaktion, bleibt es bei der anteiligen Verteilung. Dasselbe gilt, wenn
+SatSage die Transaktion nicht im Cache hat. Die PSBT im FIFO-Spend nutzt dieselbe
+Regel: Ihre Grün/Orange-Anteile stimmen nach dem Senden mit der Herkunft
+überein.</p>
+<p>Auch das Anschaffungsdatum kommt aus diesen Losen: Bei „jüngste“ zählt das
+jüngste, bei „älteste“ das älteste Los, das per FIFO in diesem UTXO steckt.
+Datum, Farbe und „erfüllt“ passen so zusammen; Frist-Ende und Haltedauer folgen.
+Im Zeitstrahl steht ein Punkt zuerst am Datum aus dem Herkunftsbaum und rückt
+nach dem Lot-Lauf an sein Los-Datum. Wo SatSage anteilig verteilt (fremde
+Eingänge, CoinJoin, undatierte Enden), gilt weiter der jüngste bzw. älteste
+externe Zufluss im ganzen Herkunftsbaum.</p>
+
 <p>In der Herkunftsansicht können nach dem ersten Trace optional
 <strong>Herkunftslücken geschlossen</strong> werden (ein Knopf, Confirm,
 abbruchbar): übrige eigene Eingänge großer Sammel-Txs und eigene
@@ -1287,7 +1355,7 @@ das weitergegeben wird.</p>
 
 <div class="hinweis acht">
   <div class="kopf">Keine Steuerberatung</div>
-  <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Dieser Hinweis steht auch in jedem Export.</p>
+  <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden. Dieser Hinweis steht auch in jedem Export.</p>
 </div>
 
 <a class="zurueck" href="#">↑ nach oben</a>
@@ -1746,9 +1814,9 @@ manipuliertes Programm nichts.</p>
 <pre><code># Eigener RPC-User nur für SatSage. Salt und Hash erzeugt
 # share/rpcauth/rpcauth.py satsage — das Passwort steht nur in der SatSage-.env
 rpcauth=satsage:&lt;salt&gt;$&lt;hash&gt;
-rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee
 # Mit Core-Wallet-Import („Wallets suchen“) stattdessen diese Zeile:
-# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,listwallets,listwalletdir,loadwallet,listdescriptors
+# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee,listwallets,listwalletdir,loadwallet,listdescriptors
 # Andere RPC-User (Electrs, Sparrow, Cookie …) behalten vollen Zugriff:
 rpcwhitelistdefault=0
 # RPC nur lokal; zweite Zeile nur, wenn SatSage auf einem anderen Rechner läuft
@@ -1792,7 +1860,9 @@ rpcallowip=127.0.0.1
 <p><strong>Allowlist in SatSage.</strong> Erlaubt sind nur
 <code>getblockchaininfo</code>, <code>getblockhash</code>,
 <code>getblockheader</code>, <code>getblock</code>,
-<code>getrawtransaction</code> und <code>scantxoutset</code>; für den
+<code>getrawtransaction</code>, <code>scantxoutset</code> und
+<code>estimatesmartfee</code> (Gebührenvorschlag fürs FIFO-Spend, seit
+2026-10-04 freigegeben); für den
 Core-Wallet-Import zusätzlich <code>listwallets</code>,
 <code>listwalletdir</code>, <code>loadwallet</code> und
 <code>listdescriptors</code> (nur öffentliche Deskriptoren, nie mit privaten
@@ -2030,6 +2100,12 @@ Header mitschicken kann.</p>
     <tr><td><code>POST /api/config/deskriptor</code></td>
         <td>Deskriptor oder Wallet-Export prüfen; liefert Skripttyp, Schlüssel und erste Adresse</td></tr>
     <tr><td><code>POST /api/trace/alle</code></td><td>Herkunft aller offenen UTXOs (Job)</td></tr>
+    <tr><td><code>GET /api/fee/suggestion?betrag=&amp;inputs=</code></td><td>Gebührenvorschlag fürs FIFO-Spend in sat/vB: <code>estimatesmartfee</code> (nächster Block) + höchstens 1 sat/vB, über 0,1 % des Betrags 1 sat/vB; ohne Schätzung 1 sat/vB (<code>quelle</code> <code>schaetzung</code>/<code>deckel</code>/<code>fallback</code>)</td></tr>
+    <tr><td><code>POST /api/psbt/auswahl</code></td><td>Coin-Auswahl fürs FIFO-Spend (Vorschau, keine PSBT, kein Schlüsselmaterial): Körper <code>betrag</code>, <code>modus</code>, <code>strategie</code> (<code>wechselgeld</code>/<code>gebuehr</code>/<code>aelteste</code>/<code>staub</code>), <code>utxos</code> (Zeitstrahl-Punkte), <code>pending</code>; Antwort: grüne Inputs (<code>txid:vout</code>, Betrag, grüner Anteil) mit dem kleinsten Wechselgeld, Gebühr nach der Fee-Regel, Wechselgeld bzw. Staub in der Gebühr</td></tr>
+    <tr><td><code>POST /api/psbt/erzeugen</code></td><td>Unsignierte PSBT (BIP174 v0) fürs FIFO-Spend, Knopf „PSBT“: Körper <code>wallet_id</code>, <code>betrag</code>, <code>adresse</code>, <code>fee</code> (sat/vB), <code>strategie</code>, optional <code>modus</code>, <code>nur_inputs</code>; der Server prüft Bestand, Mempool, Lot-Anteile, Maximum und Auswahl neu. Wechselgeld an die nächste unbenutzte interne Adresse, <code>bip32_derivation</code> an Inputs und Wechselgeld, RBF (nSequence <code>0xfffffffd</code>), nLockTime = Blockhöhe. Antwort: <code>psbt_base64</code> und Übersicht. SatSage signiert und sendet nichts; Multisig noch nicht.</td></tr>
+    <tr><td><code>POST /api/psbt/max</code></td><td>Netto-Maximum fürs FIFO-Spend (Kopfzeile „max … grün ausgebbar“): Körper <code>wallet_id</code>, optional <code>fee</code> (sat/vB; ohne: Schätzung mit Puffer, sonst 1) und <code>adresse</code> (ohne: Größe der eigenen Wechseladresse). Bestand, Lot-Anteile und Mempool wie bei <code>/api/psbt/erzeugen</code>. Antwort: <code>max_netto_sats</code> (grünes Maximum minus Gebühr, genau sendbar, 1 sat mehr nicht), <code>max_netto_fee_sats</code>, <code>max_netto_inputs</code>, <code>max_sats</code> (brutto). Baut nichts.</td></tr>
+    <tr><td><code>PUT /api/config/fifo-strategie</code></td><td>Speichert die Auswahl-Strategie des FIFO-Spend (<code>FIFO_STRATEGIE</code> in der <code>.env</code>)</td></tr>
+    <tr><td><code>GET /api/address/owner?addr=</code></td><td>Zieladresse fürs FIFO-Spend: gültig, im laufenden Netz, zu welchem Wallet? (<code>status</code> <code>meine</code>/<code>fremd</code>/<code>falsches_netz</code>/<code>ungueltig</code>, bei <code>meine</code> der Wallet-Name) — lokal, ohne Schlüsselmaterial</td></tr>
     <tr><td><code>POST /api/tools/adresse</code></td><td>Gehört die Adresse zu einem Wallet? (<code>address</code>) — lokal, auch unbenutzt</td></tr>
     <tr><td><code>GET /api/tax</code></td><td>Steuerjahr-Auswertung (<code>?jahr=2026&amp;frist=1</code>)</td></tr>
     <tr><td><code>GET /api/tax/export.csv</code></td><td>CSV-Download</td></tr>

@@ -23,6 +23,65 @@ def api_tools_adresse(state: Any, payload: dict | None) -> dict:
     )
 
 
+def api_address_owner(state: Any, query: dict | None) -> dict:
+    """
+    Zieladresse fürs FIFO-Spend live prüfen (``GET /api/address/owner?addr=``).
+
+    Gültig, im laufenden Netz, zu welchem Wallet? Nur Status und
+    Wallet-Name — kein Schlüsselmaterial. Netz zur Laufzeit gelesen.
+    """
+    from core.adresse_werkzeug import pruefe_zieladresse
+    from server import ApiError
+
+    werte = (query or {}).get("addr") or [""]
+    roh = str(werte[0] if isinstance(werte, (list, tuple)) else werte)
+    if len(roh) > 200:
+        raise ApiError(400, "Adresse zu lang.")
+    if not state.context_bereit():
+        raise ApiError(409, "Wallets werden noch vorbereitet. Einen Moment.")
+    return pruefe_zieladresse(state.wallet_ctx, roh)
+
+
+def _query_int(query: dict | None, name: str, standard: int) -> int:
+    werte = (query or {}).get(name) or [""]
+    roh = str(werte[0] if isinstance(werte, (list, tuple)) else werte).strip()
+    try:
+        return int(roh) if roh else standard
+    except ValueError:
+        from server import ApiError
+
+        raise ApiError(400, f"„{name}“ ist keine ganze Zahl.")
+
+
+def api_fee_suggestion(state: Any, query: dict | None) -> dict:
+    """
+    Gebührenvorschlag fürs FIFO-Spend (``GET /api/fee/suggestion?betrag=&inputs=``).
+
+    ``estimatesmartfee`` (conf_target 1) am verbundenen Core, Regel in
+    ``core/fee_vorschlag.py``. Ohne Schätzung 1 sat/vB mit ``quelle=fallback``.
+    """
+    from core.bitcoind_rpc import stelle_core_client_bereit, stelle_utxo_core_client_bereit
+    from core.fee_vorschlag import gebuehr_vorschlag, schaetzung_holen
+    from server import ApiError
+
+    betrag = _query_int(query, "betrag", 0)
+    inputs = _query_int(query, "inputs", 1)
+    if betrag < 0 or betrag > 21_000_000 * 100_000_000:
+        raise ApiError(400, "Betrag außerhalb des Bereichs.")
+    if inputs < 1 or inputs > 10_000:
+        raise ApiError(400, "Inputs außerhalb des Bereichs.")
+    env = state.env().values()
+
+    def fabrik():
+        return (
+            stelle_core_client_bereit(env, timeout=5.0)
+            or stelle_utxo_core_client_bereit(env, timeout=5.0)
+        )
+
+    feerate, fehler = schaetzung_holen(fabrik)
+    return gebuehr_vorschlag(feerate, betrag_sats=betrag, inputs=inputs, fehler=fehler)
+
+
 def api_tools_cache_suche(state: Any, payload: dict | None = None) -> dict:
     """
     Durchsucht UTXO- und Verlaufs-Cache aller Wallets.
