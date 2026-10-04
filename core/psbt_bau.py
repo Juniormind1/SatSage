@@ -738,7 +738,7 @@ def erzeuge(
     elif typ not in UNTERSTUETZTE_SKRIPTE:
         raise PsbtFehler(f"Skripttyp {typ!r} wird für PSBTs noch nicht unterstützt.")
     ohne_ziel = nur_max and not ziel_adresse
-    if not ohne_ziel and ziel_status not in ("meine", "fremd", "keine_wallets"):
+    if not ohne_ziel and ziel_status not in ("meine", "fremd", "keine_wallets", "sanktioniert"):
         raise PsbtFehler("Zieladresse ungültig oder im falschen Netz.")
     if not 0 < int(fee_milli) <= MAX_FEE_MILLI:
         raise PsbtFehler("Gebühr außerhalb des Bereichs.")

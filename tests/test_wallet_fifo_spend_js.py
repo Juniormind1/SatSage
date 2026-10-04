@@ -48,6 +48,10 @@ const katalog = {
   "wallet.fifoSpendPsbtExpanded": "Senden \u25be",
   "wallet.fifoTargetMine": "Eigenes Wallet: „{wallet}“.",
   "wallet.fifoTargetExternal": "Gültige {netz}-Adresse, extern.",
+  "wallet.fifoTargetExchange": "Bekannte Börsenadresse: „{exchange}“ ({netz}).",
+  "wallet.fifoTargetSanctioned": "Steht auf einer Sanktionsliste: „{label}“.",
+  "wallet.fifoTargetStatusSanctioned": "Sanktion",
+  "wallet.fifoPsbtSanctionConfirm": "Willst Du wirklich an die sanktionierte Adresse {label} senden?",
   "wallet.fifoTargetWrongNetwork": "Adresse für {adressNetz} – SatSage läuft im {netz}.",
   "wallet.fifoTargetUnavailable": "Prüfung gerade nicht möglich: {msg}",
   "wallet.fifoTargetFeeSuggested": "Vorschlag {rate} sat/vB (Schätzung {schaetzung}, {vsize} vB, {inputs} Inputs, {fee} sats)",
@@ -880,6 +884,8 @@ class TestFifoZielZeile(unittest.TestCase):
           const antworten = {
             "bcrt1qeigen": { status: "meine", wallet: "HS Beta", netz: "regtest" },
             "bcrt1qfremd": { status: "fremd", netz: "regtest" },
+            "bcrt1qkraken": { status: "fremd", netz: "regtest", exchange: "Kraken" },
+            "bcrt1qofac": { status: "sanktioniert", netz: "regtest", sanction: "Beispiel Person" },
             "bc1qmain": { status: "falsches_netz", netz: "regtest", adress_netze: ["main"] },
             "kaputt": { status: "ungueltig", netz: "regtest" },
           };
@@ -895,6 +901,9 @@ class TestFifoZielZeile(unittest.TestCase):
           const lab = () => [marke.textContent, marke.dataset.zustand];
           aus.gruen = feld.dataset.zustand; aus.gruenTitel = feld.title; aus.gruenLabel = lab();
           await tippe("bcrt1qfremd"); aus.gelb = feld.dataset.zustand; aus.gelbTitel = feld.title; aus.gelbLabel = lab();
+          await tippe("bcrt1qkraken"); aus.boerse = feld.dataset.zustand; aus.boerseTitel = feld.title; aus.boerseLabel = lab();
+          await tippe("bcrt1qofac"); aus.sanktion = feld.dataset.zustand; aus.sanktionTitel = feld.title; aus.sanktionLabel = lab();
+          aus.sanktionAria = feld.getAttribute("aria-invalid");
           await tippe("bc1qmain"); aus.netz = feld.dataset.zustand; aus.netzTitel = feld.title; aus.netzLabel = lab();
           aus.netzAria = feld.getAttribute("aria-invalid");
           await tippe("kaputt"); aus.rot = feld.dataset.zustand; aus.rotLabel = lab();
@@ -910,13 +919,20 @@ class TestFifoZielZeile(unittest.TestCase):
         self.assertIn("HS Beta", erg["gruenTitel"])
         self.assertEqual(erg["gelb"], "gelb")
         self.assertIn("Regtest", erg["gelbTitel"])
+        self.assertEqual(erg["boerse"], "gelb")
+        self.assertEqual(erg["boerseLabel"], ["Kraken", "gelb"])
+        self.assertIn("Kraken", erg["boerseTitel"])
+        self.assertEqual(erg["sanktion"], "rot")
+        self.assertEqual(erg["sanktionLabel"], ["Beispiel Person", "rot"])
+        self.assertIn("Beispiel Person", erg["sanktionTitel"])
+        self.assertEqual(erg["sanktionAria"], "true")
         self.assertEqual(erg["netz"], "rot")
         self.assertIn("Mainnet", erg["netzTitel"])
         self.assertEqual(erg["netzAria"], "true")
         self.assertEqual(erg["rot"], "rot")
         self.assertEqual(erg["leer"], "")
         self.assertIsNone(erg["leerAria"])
-        self.assertEqual(erg["n"], 4)   # leeres Feld fragt nicht
+        self.assertEqual(erg["n"], 6)   # leeres Feld fragt nicht; Börse und Sanktion zählen mit
         # Status-Label neben dem Feld; Tooltip beginnt mit der vollen Adresse.
         self.assertEqual(erg["gruenLabel"], ["HS Beta", "gruen"])
         self.assertEqual(erg["gelbLabel"], ["extern", "gelb"])
@@ -1265,6 +1281,35 @@ class TestFifoPsbtErzeugen(unittest.TestCase):
         self.assertEqual(erg["kopierText"], "wallet.fifoPsbtCopied")
         self.assertTrue(erg["nachAenderung"])
 
+    def test_sanktion_fragt_vor_dem_erzeugen(self):
+        erg = _node(self._BEREIT + r"""
+          betrag.value = "30000"; pruefeFifoSpendBetrag(); fifoZielUmschalten();
+          adresse.value = "bcrt1qofac";
+          adressAntwort = () => ({ status: "sanktioniert", netz: "regtest", sanction: "Beispiel Person", address: "bcrt1qofac" });
+          pruefeFifoZielAdresse(); await pause();
+          fee.value = "2,5"; fifoFeeEingabe();
+          const fragen = [];
+          globalThis.confirm = (text) => { fragen.push(text); return false; };
+          await fifoPsbtErzeugen();
+          const abbruch = { fragen: fragen.slice(), aufrufe: psbtAufrufe.length, downloads: downloads.length };
+          globalThis.confirm = (text) => { fragen.push(text); return true; };
+          await fifoPsbtErzeugen();
+          process.stdout.write(JSON.stringify({
+            frei: !psbt.disabled, rot: adresse.dataset.zustand,
+            abbruch, danach: { fragen, aufrufe: psbtAufrufe.length, downloads: downloads.length },
+          }));
+        """)
+        self.assertTrue(erg["frei"])
+        self.assertEqual(erg["rot"], "rot")
+        self.assertEqual(erg["abbruch"]["fragen"], [
+            "Willst Du wirklich an die sanktionierte Adresse Beispiel Person senden?",
+        ])
+        self.assertEqual(erg["abbruch"]["aufrufe"], 0)
+        self.assertEqual(erg["abbruch"]["downloads"], 0)
+        self.assertEqual(len(erg["danach"]["fragen"]), 2)
+        self.assertEqual(erg["danach"]["aufrufe"], 1)
+        self.assertEqual(erg["danach"]["downloads"], 1)
+
     def test_uebersicht_multisig_nennt_cosigner(self):
         erg = _node(self._BEREIT + r"""
           const ms = { status: "ok", inputs: [{}, {}], outputs: [], fee_sats: 314, sat_vb: 1, vsize: 314,
@@ -1354,6 +1399,10 @@ class TestFifoStatisch(unittest.TestCase):
         "wallet.fifoTargetAddressTitle",
         "wallet.fifoTargetMine",
         "wallet.fifoTargetExternal",
+        "wallet.fifoTargetExchange",
+        "wallet.fifoTargetSanctioned",
+        "wallet.fifoTargetStatusSanctioned",
+        "wallet.fifoPsbtSanctionConfirm",
         "wallet.fifoTargetWrongNetwork",
         "wallet.fifoTargetInvalid",
         "wallet.fifoTargetChecking",
@@ -1430,6 +1479,10 @@ class TestFifoStatisch(unittest.TestCase):
                          ("Send \u25b8", "Send \u25be"))
         for code in (de, en):
             self.assertEqual(code["wallet.fifoTargetPsbt"], "PSBT")
+        self.assertIn("{exchange}", de["wallet.fifoTargetExchange"])
+        self.assertIn("{exchange}", en["wallet.fifoTargetExchange"])
+        self.assertIn("{label}", de["wallet.fifoPsbtSanctionConfirm"])
+        self.assertIn("{label}", en["wallet.fifoPsbtSanctionConfirm"])
         self.assertEqual(de["wallet.fifoTargetStatusExternal"], "extern")
         self.assertEqual(en["wallet.fifoTargetStatusExternal"], "external")
         self.assertEqual(de["wallet.fifoTargetStatusInvalid"], "ungültig")

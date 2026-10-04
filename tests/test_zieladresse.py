@@ -128,6 +128,99 @@ class TestZieladresse(unittest.TestCase):
         self.assertNotIn("pub", text.lower())
         self.assertEqual(set(erg), {"status", "address", "art", "netz", "wallet"})
 
+    def test_boerse_gelb_mit_namen(self):
+        """Fremde Adresse aus Börsen-CSV: Status bleibt fremd, Name in exchange."""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from core import exchange_reports as boerse
+
+        main.set_chain_network("main")
+        with tempfile.TemporaryDirectory() as tmp:
+            ordner = Path(tmp)
+            (ordner / "kraken.json").write_text(json.dumps({
+                "version": boerse.VERSION,
+                "name": "Kraken",
+                "addresses": {P2TR_MAIN: {"roles": ["deposit"]}},
+                "txids": {},
+            }), encoding="utf-8")
+            boerse.setze_verzeichnis(ordner)
+            boerse._lookup_cache.clear()
+            try:
+                erg = pruefe_zieladresse(self._ctx(), P2TR_MAIN)
+            finally:
+                boerse.setze_verzeichnis(None)
+                boerse._lookup_cache.clear()
+        self.assertEqual(erg["status"], "fremd")
+        self.assertEqual(erg["exchange"], "Kraken")
+        self.assertNotIn("wallet", erg)
+
+    def test_eigenes_wallet_schlaegt_boerse(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from core import exchange_reports as boerse
+
+        main.set_chain_network("main")
+        with tempfile.TemporaryDirectory() as tmp:
+            ordner = Path(tmp)
+            (ordner / "boerse.json").write_text(json.dumps({
+                "version": boerse.VERSION,
+                "name": "Kraken",
+                "addresses": {BIP84_RECEIVE_0: {"roles": ["withdrawal"]}},
+                "txids": {},
+            }), encoding="utf-8")
+            boerse.setze_verzeichnis(ordner)
+            boerse._lookup_cache.clear()
+            try:
+                erg = pruefe_zieladresse(self._ctx(), BIP84_RECEIVE_0)
+            finally:
+                boerse.setze_verzeichnis(None)
+                boerse._lookup_cache.clear()
+        self.assertEqual(erg["status"], "meine")
+        self.assertNotIn("exchange", erg)
+
+    def test_sanktion_rot_mit_bezeichnung(self):
+        """Gelistete Adresse: eigener Status, Bezeichnung aus dem Index."""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        import sanctioned
+
+        main.set_chain_network("main")
+        with tempfile.TemporaryDirectory() as tmp:
+            ordner = Path(tmp)
+            (ordner / "sanctioned_addresses_XBT.json").write_text(
+                json.dumps([P2PKH_MAIN]), encoding="utf-8")
+            (ordner / "sanctioned_address_index.json").write_text(
+                json.dumps({P2PKH_MAIN: {"person": "Beispiel Person"}}),
+                encoding="utf-8")
+            alt = sanctioned.SANCTIONED_CACHE_DIR
+            sanctioned.SANCTIONED_CACHE_DIR = ordner
+            try:
+                erg = pruefe_zieladresse(self._ctx(), P2PKH_MAIN)
+            finally:
+                sanctioned.SANCTIONED_CACHE_DIR = alt
+        self.assertEqual(erg["status"], "sanktioniert")
+        self.assertEqual(erg["sanction"], "Beispiel Person")
+        self.assertNotIn("wallet", erg)
+        self.assertNotIn("exchange", erg)
+
+    def test_ohne_sanktionsliste_kein_treffer(self):
+        main.set_chain_network("main")
+        erg = pruefe_zieladresse(self._ctx(), P2PKH_MAIN)
+        self.assertEqual(erg["status"], "fremd")
+        self.assertNotIn("sanction", erg)
+
+    def test_unbekannte_adresse_ohne_exchange(self):
+        main.set_chain_network("main")
+        erg = pruefe_zieladresse(self._ctx(), P2PKH_MAIN)
+        self.assertEqual(erg["status"], "fremd")
+        self.assertNotIn("exchange", erg)
+
     def test_api(self):
         main.set_chain_network("main")
         state = _State(self._ctx())

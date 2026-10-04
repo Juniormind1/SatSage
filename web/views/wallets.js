@@ -1441,7 +1441,7 @@ function fifoSpendMax(stand) {
 /** Eingaben, von denen das Netto-Maximum abhängt. */
 function fifoNettoSchluessel(stand) {
   const ziel = Zustand.fifoZielErgebnis || {};
-  const adresse = ["meine", "fremd", "keine_wallets"].includes(ziel.status) ? (ziel.address || "") : "";
+  const adresse = ["meine", "fremd", "keine_wallets", "sanktioniert"].includes(ziel.status) ? (ziel.address || "") : "";
   const pending = [...fifoPendingInfo(Zustand._walletUtxoDaten).keys].sort().join(",");
   return [stand && stand.schluessel, Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
 }
@@ -1472,7 +1472,7 @@ function planeFifoNetto() {
     const ziel = Zustand.fifoZielErgebnis || {};
     const koerper = { wallet_id: String(stand.walletId || "") };
     if (Zustand.fifoZielFeeMilli > 0) koerper.fee = fifoMilliText(Zustand.fifoZielFeeMilli);
-    if (["meine", "fremd", "keine_wallets"].includes(ziel.status) && ziel.address) {
+    if (["meine", "fremd", "keine_wallets", "sanktioniert"].includes(ziel.status) && ziel.address) {
       koerper.adresse = ziel.address;
     }
     Promise.resolve()
@@ -1793,8 +1793,9 @@ const FIFO_ZIEL_ENTPRELLEN_MS = 300;
 /**
  * Farbe, Status-Label und Tooltip der Zieladresse aus der Server-Antwort.
  * grün = eigenes Wallet (Label: Wallet-Name), gelb = gültig im laufenden
- * Netz, aber fremd („extern“), rot = keine Adresse („ungültig“) oder falsches
- * Netz („falsches Netz“). Leer = kein Label; prüfend = „…“.
+ * Netz, aber fremd („extern“, bei bekannter Börse deren Name), rot = keine
+ * Adresse („ungültig“), falsches Netz („falsches Netz“) oder Sanktionsliste
+ * (Bezeichnung). Leer = kein Label; prüfend = „…“.
  * Der Tooltip beginnt mit der vollen Adresse — das Feld kann schmaler sein.
  */
 function zeigeFifoZielAdresse(erg) {
@@ -1808,10 +1809,17 @@ function zeigeFifoZielAdresse(erg) {
     zustand = "gruen";
     label = erg.wallet || "?";
     titel = t("wallet.fifoTargetMine", { wallet: erg.wallet || "?" });
+  } else if (status === "sanktioniert") {
+    zustand = "rot";
+    label = String((erg && erg.sanction) || "").trim() || t("wallet.fifoTargetStatusSanctioned");
+    titel = t("wallet.fifoTargetSanctioned", { label: label });
   } else if (status === "fremd" || status === "keine_wallets") {
     zustand = "gelb";
-    label = t("wallet.fifoTargetStatusExternal");
-    titel = t("wallet.fifoTargetExternal", { netz: fifoNetzName(erg.netz) });
+    const boerse = String((erg && erg.exchange) || "").trim();
+    label = boerse || t("wallet.fifoTargetStatusExternal");
+    titel = boerse
+      ? t("wallet.fifoTargetExchange", { exchange: boerse, netz: fifoNetzName(erg.netz) })
+      : t("wallet.fifoTargetExternal", { netz: fifoNetzName(erg.netz) });
   } else if (status === "falsches_netz") {
     zustand = "rot";
     label = t("wallet.fifoTargetStatusWrongNetwork");
@@ -2099,7 +2107,7 @@ function fifoPsbtSperre() {
   const sats = Zustand.fifoSpendBetragSats;
   if (!(sats > 0) || fifoSpendMax(Zustand.fifoSpend) === null) return "wallet.fifoSpendPsbtNeedsAmount";
   const ziel = Zustand.fifoZielErgebnis;
-  if (!ziel || !["meine", "fremd", "keine_wallets"].includes(ziel.status)) return "wallet.fifoPsbtNeedsAddress";
+  if (!ziel || !["meine", "fremd", "keine_wallets", "sanktioniert"].includes(ziel.status)) return "wallet.fifoPsbtNeedsAddress";
   if (!(Zustand.fifoZielFeeMilli > 0)) return "wallet.fifoPsbtNeedsFee";
   if (Zustand.fifoPsbtLaeuft) return "wallet.fifoPsbtBusy";
   return null;
@@ -2255,6 +2263,11 @@ function zeigeFifoPsbtErgebnis(e) {
 /** Klick auf „PSBT“: erzeugen lassen, Datei herunterladen, Übersicht zeigen. */
 function fifoPsbtErzeugen() {
   if (fifoPsbtSperre() !== null) return Promise.resolve();
+  const ziel = Zustand.fifoZielErgebnis || {};
+  if (ziel.status === "sanktioniert") {
+    const label = String(ziel.sanction || "").trim() || t("wallet.fifoTargetStatusSanctioned");
+    if (!globalThis.confirm(t("wallet.fifoPsbtSanctionConfirm", { label }))) return Promise.resolve();
+  }
   const koerper = fifoPsbtKoerper();
   const schluessel = fifoPsbtSchluessel();
   const wallet = fifoAktuellesWallet();

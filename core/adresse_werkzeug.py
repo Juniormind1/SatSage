@@ -167,4 +167,72 @@ def pruefe_zieladresse(wallet: Any, text: str, netz: str | None = None) -> dict:
     name = wallet.resolve_address(adresse)
     if name:
         return {**basis, "status": "meine", "wallet": str(name)}
+    sanktion = _sanktion_der_adresse(adresse)
+    if sanktion:
+        # Rot, aber gültig: die PSBT darf entstehen, die Oberfläche fragt nach.
+        return {**basis, "status": "sanktioniert", "sanction": sanktion}
+    boerse = _boerse_der_adresse(adresse)
+    if boerse:
+        return {**basis, "status": "fremd", "exchange": boerse}
     return {**basis, "status": "fremd"}
+
+
+def _sanktion_der_adresse(adresse: str) -> str:
+    """
+    Bezeichnung einer gelisteten Adresse, sonst leer.
+
+    Lokaler Sanktions-Index, kein Chain-Lookup. Fehlt der Cache, bleibt das
+    Feld leer — „nicht geprüft“ ist kein Treffer. Bech32-Varianten (Groß-/
+    Kleinschreibung) treffen denselben Eintrag.
+    """
+    try:
+        from core.sanctions import lade_adressen, treffer_details
+    except Exception:
+        return ""
+    try:
+        gelistet = lade_adressen()
+    except Exception:
+        return ""
+    if not gelistet:
+        return ""
+    treffer = adresse if adresse in gelistet else ""
+    if not treffer and adresse.lower().startswith(_BECH32_ANFAENGE):
+        klein = adresse.lower()
+        treffer = next((a for a in gelistet if a.lower() == klein), "")
+    if not treffer:
+        return ""
+    try:
+        details = treffer_details(treffer)
+    except Exception:
+        details = {}
+    name = str((details or {}).get("person") or "").strip()
+    return name or treffer
+
+
+def _boerse_der_adresse(adresse: str) -> str:
+    """
+    Börsenname aus Nutzer-Börsen-CSV oder Label-Bestand, sonst leer.
+
+    Dieselbe Reihenfolge wie die Herkunftsbeschriftung
+    (``labels.beschrifte``): der importierte Klarname schlägt den historischen
+    Katalog. Nur Kategorie Börse — Mixer, Darknet und übrige Dienste bleiben
+    unbenannt. Lokale Dateien, kein Chain-Lookup.
+    """
+    try:
+        import labels
+    except Exception:
+        return ""
+    try:
+        treffer = labels.beschrifte(adresse)
+    except Exception:
+        return ""
+    if not isinstance(treffer, dict):
+        return ""
+    name = str(treffer.get("name") or "").strip()
+    if not name:
+        return ""
+    if treffer.get("kategorie") == "exchange" or treffer.get("nutzer_import"):
+        return name
+    if treffer.get("kategorie_label") == "Börse" or treffer.get("quelle") == "Börsen-CSV":
+        return name
+    return ""
