@@ -289,6 +289,21 @@ class TestFensterApi(ApiTestBasis):
         self.assertTrue(körper["has_cache"])
         self.assertIn("sanctions", körper)
 
+    def test_pending_spending_keys_ueber_den_ganzen_bestand(self):
+        """FIFO-Spend zieht Mempool-Ausgaben ab: Schlüssel über den Bestand, nicht nur das Fenster."""
+        bestand = [dict(u) for u in self.bestand]
+        bestand[6]["spending_pending"] = True   # kleinster Betrag, nicht auf Seite 1
+        main.save_xpub_utxo_cache(BIP84_ZPUB, bestand, self.cache, 6)
+        kennung = self.wallet_id(BIP84_ZPUB)
+        _, körper = self.anfrage(
+            f"/api/wallets/{kennung}/utxos?mempool=0&seite=1&modus=gruppen&limit=1")
+        self.assertEqual(körper["pending_spending_count"], 1)
+        self.assertEqual(körper["pending_spending_keys"], [f"{txid('06')}:6"])
+        main.save_xpub_utxo_cache(BIP84_ZPUB, self.bestand, self.cache, 6)
+        _, ohne = self.anfrage(
+            f"/api/wallets/{kennung}/utxos?mempool=0&seite=1&modus=gruppen&limit=1")
+        self.assertEqual(ohne["pending_spending_keys"], [])
+
     def test_verlauf_seite_ohne_mempool_rundlauf(self):
         """Aufklappen darf keinen Electrs-Check anstoßen, auch ohne mempool=0."""
         from unittest import mock

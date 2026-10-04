@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=0.9.9-alterklaeren">
+  <link rel="stylesheet" href="/style.css?v=0.9.9-fifospend">
 </head>
 <body>
 
@@ -398,6 +398,18 @@
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="wallet.addresses">Adressen</span>
             <span id="adress-zusatz" class="karte-zusatz"></span>
+            <!-- FIFO-Spend: grüne sats aus dem aktuellen Trace je UTXO (keine Losbuchhaltung). PSBT folgt. -->
+            <div id="fifo-spend" class="fifo-spend" role="group"
+                 data-i18n-aria-label="wallet.fifoSpendAria" aria-label="FIFO-Spend" hidden>
+              <span id="fifo-spend-text" class="fifo-spend-text"></span>
+              <input type="number" id="fifo-spend-betrag" class="fifo-spend-betrag"
+                     min="1" step="1" inputmode="numeric" disabled
+                     data-i18n-placeholder="wallet.fifoSpendAmountPlaceholder" placeholder="Betrag in sats">
+              <span class="fifo-spend-psbt-huelle" data-i18n-title="wallet.fifoSpendPsbtTitle" title="PSBT-Erzeugung folgt">
+                <button type="button" id="fifo-spend-psbt" class="knopf knopf-klein" disabled
+                        data-i18n="wallet.fifoSpendPsbt" data-i18n-title="wallet.fifoSpendPsbtTitle" title="PSBT-Erzeugung folgt">PSBT</button>
+              </span>
+            </div>
           </div>
           <div id="adress-koerper"></div>
           <div id="wallet-ausgegeben"></div>
@@ -1866,12 +1878,12 @@
 <script src="/app.js?v=0.9.9-mempool"></script>
 <script src="/mempool_links.js?v=0.9.9"></script>
 <script src="/views/pager.js?v=0.9.9"></script>
-<script src="/views/einstellungen.js?v=0.9.9"></script>
+<script src="/views/einstellungen.js?v=0.9.9-fifospend"></script>
 <script src="/views/datenquellen.js?v=0.9.9-pubconn"></script>
 <script src="/views/sanktionen.js?v=0.9.9"></script>
 <script src="/views/einrichtung.js?v=0.9.9"></script>
 <script src="/views/adress_labels.js?v=0.9.9"></script>
-<script src="/views/wallets.js?v=0.9.9-lotstill"></script>
+<script src="/views/wallets.js?v=0.9.9-fifosatcomma"></script>
 <script src="/views/herkunft.js?v=0.9.9-lotkopf"></script>
 <script src="/views/steuerjahr.js?v=0.9.9-plotsofort"></script>
 <script src="/views/herkunftsnetz.js?v=0.9.9-grauklapp"></script>

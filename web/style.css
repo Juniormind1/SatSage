@@ -1562,6 +1562,32 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 }
 .karte-zusatz { font-size: 11px; color: var(--blass); }
 .karte-kopf .knopf { margin-left: auto; }
+/* FIFO-Spend in der Kopfzeile der UTXO-Liste: rechtsbündig, bricht schmal
+   als ganze Leiste unter Titel und Zahl um (eigene Zeile, weiter rechts). */
+.fifo-spend {
+  display: inline-flex; align-items: center; flex-wrap: wrap;
+  justify-content: flex-end; gap: 6px 8px;
+  margin-left: auto; min-width: 0;
+}
+.fifo-spend[hidden] { display: none; }
+.fifo-spend-text {
+  font-family: var(--mono); font-size: 11px; color: var(--gedaempft);
+  white-space: nowrap;
+}
+.fifo-spend-text[data-zustand="fertig"] { color: var(--text); }
+.fifo-spend-text[data-zustand="fehler"] { color: var(--blass); }
+.karte-kopf .fifo-spend .knopf { margin-left: 0; }
+.fifo-spend-psbt-huelle { display: inline-flex; }
+input[type="number"].fifo-spend-betrag { width: 130px; padding: 3px 7px; font-size: 11px; }
+input[type="number"].fifo-spend-betrag:disabled { opacity: .55; cursor: not-allowed; }
+input[type="number"].fifo-spend-betrag.ungueltig {
+  border-color: var(--krit); background: var(--krit-bg); color: var(--krit);
+  outline-color: var(--krit);
+}
+@media (max-width: 720px) {
+  .fifo-spend { flex-basis: 100%; }
+  .fifo-spend-text { white-space: normal; text-align: right; }
+}
 .karte-fuss {
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
   padding: 11px 13px; background: var(--flaeche-2);
@@ -2036,35 +2062,38 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .utxo-wurzel:has(> .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut) > .kopf-mit-verweis > .utxo-kopf {
   align-items: center;
 }
-/* Der Ring ist sichtbar ~32 px, die Box nur 7 px. Abstand gilt bis zum Rand. */
+/* Der Ring ist 32 px. Der Text beginnt am sichtbaren Rand, nicht an der Box. */
 .utxo-wurzel:has(> .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut) > .kopf-mit-verweis > .utxo-kopf > .knoten-info {
-  margin-left: 18px;
+  margin-left: 0;
 }
 .utxo-wurzel > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut,
 .utxo-zeile > .knoten-punkt.lot-donut {
-  /* Layout bleibt 7×7, damit die Zeile so hoch bleibt wie vorher.
-     Sichtbar ~32 px, das ist die Höhe von Pfeil plus Zeilenabstand. */
+  /* Echte 32 px, nicht scale() auf der 7-px-Box. Safari rastert Prozent-Kinder
+     auf einer skalierten Box auf Subpixel und schiebt das Loch aus der Mitte.
+     Negativer Rand hält die Zeilenhöhe: der Ring ragt in den alten Abstand. */
   position: relative;
   z-index: 1;
-  width: 7px;
-  height: 7px;
+  width: 32px;
+  height: 32px;
+  margin: -12px -12px -13px;
   border-radius: 50%;
   flex: none;
   box-sizing: border-box;
   background: var(--lot-grau);
-  transform: scale(4.57);
-  transform-origin: center;
 }
 /* Loch als eigene Fläche — kein mask, das in Edge am Inline-Verlauf verschwindet.
-   Immer die Seitenfläche, auch ohne Hover: inherit würde den Kuchen durchreichen. */
+   Immer die Seitenfläche, auch ohne Hover: inherit würde den Kuchen durchreichen.
+   translate(-50%, -50%) statt left/top in Prozent: Safari rundet 30 % von 32 px
+   auf 9 px und 40 % auf 13 px, das Loch sitzt dann eine Ecke daneben. */
 .utxo-wurzel > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut::after,
 .utxo-zeile > .knoten-punkt.lot-donut::after {
   content: "";
   position: absolute;
-  left: 30%;
-  top: 30%;
-  width: 40%;
-  height: 40%;
+  left: 50%;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%);
   border-radius: 50%;
   background: var(--grund);
   pointer-events: none;
@@ -2207,24 +2236,23 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .adress-kopf > .knoten-punkt.adress-lot-donut.lot-donut {
   position: relative;
   z-index: 1;
-  width: 7px;
-  height: 7px;
-  /* Box bleibt 7 px, sichtbar ~32 px. Der Text braucht den Rest des Rands. */
-  margin-right: 14px;
+  width: 32px;
+  height: 32px;
+  /* Zeile bleibt so hoch wie der Kopf ohne Donut. Rechts bleibt die Lücke. */
+  margin: -5px -10px -6px 0;
   border-radius: 50%;
   flex: none;
   box-sizing: border-box;
   background: var(--lot-grau);
-  transform: scale(4.57);
-  transform-origin: center;
 }
 .adress-kopf > .knoten-punkt.adress-lot-donut.lot-donut::after {
   content: "";
   position: absolute;
-  left: 30%;
-  top: 30%;
-  width: 40%;
-  height: 40%;
+  left: 50%;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%);
   border-radius: 50%;
   background: var(--grund);
   pointer-events: none;
@@ -2239,10 +2267,10 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .utxo-zeile:last-child { border-bottom: 0; }
 .utxo-zeile .betrag { min-width: 110px; }
-/* Gleicher Ring wie Herkunft tracen. Die Box bleibt 7 px, der Abstand
-   reicht bis zum sichtbaren Rand, damit der Betrag nicht im Ring steht. */
+/* Gleicher Ring wie Herkunft tracen. Die negative Seitenmargin frisst die
+   Flex-Lücke; dieser Abstand stellt den alten Rand zum Betrag wieder her. */
 .utxo-zeile:has(> .knoten-punkt.lot-donut) > .betrag {
-  margin-left: 18px;
+  margin-left: 12px;
 }
 .ankunft-link {
   padding: 0; margin: 0; border: 0; background: none;

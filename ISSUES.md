@@ -60,6 +60,10 @@ der Buchhaltung jenseits der Chain verworfen. Weiter nicht hier:
 Punkte links vom Klick löschen, Graph-DB, HTML/CSV-Overlay,
 Default beim Öffnen der Ansicht.
 
+Klarstellung (Maintainer, 2026-10-04): „Coin-Control“ meint hier nur
+Coin-Control als Teil der Losbuchhaltung. UTXO-Auswahl für eine PSBT
+ist gewollt, siehe „Wallet · FIFO-Spend (PSBT)“.
+
 ### Schritt 1 — Oneshot: Herkunftsnetz temporär überlagern
 
 > **Umgesetzt (2026-09-28), abgenommen (2026-10-04):** `GET /api/tax/herkunftsnetz?key=txid:vout&jahr=&frist=&stichtag=`
@@ -135,6 +139,26 @@ Vorschlag nur für die GUI:
   ]
 }
 ```
+
+---
+
+## Wallet · FIFO-Spend (PSBT)
+
+**Stand:** 2026-10-04 · **offen** · Schritt 1 (GUI) umgesetzt, Abnahme offen · PSBT-Logik offen · UI
+**Ort:** Wallet-Ansicht, Kopfzeile der UTXO-Liste (`web/index.html` `#fifo-spend`, `web/views/wallets.js` Abschnitt `wallet-fifo-spend`)
+Aufwand: **gering** (Schritt 1) · **mittel** (PSBT)
+
+**Schritt 1 umgesetzt:** Die Kopfzeile zeigt „n UTXOs“ (UTXO-Zahl, bisher Adressen mit Guthaben). Rechts daneben „defensiv/offensiv max <Betrag> grün ausgebbar“ (Betrag nur hier in Satcomma-Schreibweise: BTC mit 8 Nachkommastellen, gruppiert 2-3-3 mit U+202F, z. B. „0,02 345 678 BTC“; die übrige App bleibt bei `formatSatsBasis`), ein Betragsfeld in ganzen sats (max = exakter Wert, ungültig rot) und ein gesperrter Knopf „PSBT“ („PSBT-Erzeugung folgt“). <n> kommt aus der bestehenden Steuerauswertung des laufenden Jahres (`/api/tax?seite=1`, Zeitstrahl-Punkte mit Lot-Anteilen, gefiltert auf das Wallet): defensiv die Summe der ganz grünen UTXOs, offensiv die Summe der grünen Lot-Anteile. UTXOs ohne ausgewerteten Herkunftsbaum zählen nicht.
+
+**Keine Losbuchhaltung:** Die Auswahl entsteht rein aus dem aktuellen Trace je UTXO. Es gibt keine Fortschreibung von Losen, Restmengen oder Verbrauchsreihenfolge (siehe „Steuerjahr · Herkunftsnetz“, Zielbild verworfen).
+
+**Regel Mempool:** UTXOs, die gerade im Mempool ausgegeben werden (`spending_pending`), zählen nicht zu den grünen sats, weder defensiv noch offensiv. Die Wallet-Antwort liefert dafür `pending_spending_keys` über den ganzen Bestand; der Tooltip nennt Anzahl und abgezogenen grünen Betrag. Ist der Mempool-Stand unvollständig, zeigt die Leiste „—“ und sperrt das Feld.
+
+**Entscheidung Maintainer 2026-10-04:** „Coin-Control … verworfen“ im Herkunftsnetz-Issue bezog sich nur auf die Losbuchhaltung. UTXO-Auswahl (Coin-Control) für die PSBT ist ausdrücklich gewollt.
+
+**Offen:** Abnahme Schritt 1. PSBT-Logik (Auswahl der grünen UTXOs für den Betrag, Change, Fee, Export) ist nicht gebaut; nichts wird gesendet oder signiert. Noch festzulegen: welche Reihenfolge „FIFO“ bei der Auswahl meint.
+
+---
 
 ## StartOS · Passwort anzeigen und bei laufendem Dienst rotieren
 

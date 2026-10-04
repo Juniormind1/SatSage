@@ -179,6 +179,11 @@ def fenster_antwort(
         "total_count": len(gesammelt),
         "total_sats": sum(lf.wert(u) for u in gesammelt if not u.get("spending_pending")),
         "pending_spending_count": sum(1 for u in gesammelt if u.get("spending_pending")),
+        # Über den ganzen Bestand, nicht nur das Fenster: Die FIFO-Spend-Leiste
+        # zieht diese UTXOs von den grünen sats ab (Funds unterwegs).
+        "pending_spending_keys": sorted(
+            utxos_mod.utxo_key(u) for u in gesammelt if u.get("spending_pending")
+        ),
         "pending_receive_count": sum(1 for u in gesammelt if u.get("receive_pending")),
         "pending_spending_internal": any(
             u.get("spending_pending") and u.get("spending_internal") for u in gesammelt
