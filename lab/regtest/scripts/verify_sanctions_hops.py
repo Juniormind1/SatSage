@@ -82,14 +82,18 @@ def main() -> int:
         expect_at = chain.get("expect_hit_at_hops")
         start = chain["start_address"]
         for depth in depths:
-            hits, checked, _abort, _coinjoins = check_wallet_utxos_sanctions(
-                get_tx,
-                [utxo],
-                set(),
-                listed,
-                max_hops=depth,
-                abort_on_hit=False,
-            )
+            try:
+                hits, checked, _abort, _coinjoins = check_wallet_utxos_sanctions(
+                    get_tx,
+                    [utxo],
+                    set(),
+                    listed,
+                    max_hops=depth,
+                    abort_on_hit=False,
+                )
+            except Exception as exc:
+                print(f"FEHLER {chain['name']} max_hops={depth}: {type(exc).__name__}: {exc}")
+                return 1
             hit_addrs = {h["address"] for h in hits}
             should_hit = expect_at is not None and depth >= int(expect_at)
             got_hit = start in hit_addrs

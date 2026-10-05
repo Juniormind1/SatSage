@@ -9,7 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Regtest-Labor:** Electrs läuft mit derselben UID wie bitcoind und bekommt Schreibrecht auf sein Datenverzeichnis. Der Datadir ist 700 und nur lesend eingehängt; sonst darf Electrs die Cookie-Datei nicht öffnen, und der Runner legt das DB-Verzeichnis als root an. Der Runner legt es als root an, RocksDB scheitert sonst mit „Permission denied“ und der Index kommt nie. Die Labor-`bitcoin.conf` setzt `rpcwhitelistdefault=0`. Sobald eine `rpcwhitelist` für `satsage` existiert, sperrt Core jeden anderen User (die Vorgabe ist dann 1), und `bitcoin`/`secret` (Healthcheck, Electrs, Szenarien) darf keine Methode mehr. Der Lauf auf `v0.9.9.5` ist daran vor dem ersten Test stehen geblieben.
+- **Regtest-Labor:** Die Sanktions-Hop-Prüfung gibt den ersten Fehler aus, statt ihn als „kein Treffer“ zu wiederholen. Electrs läuft mit derselben UID wie bitcoind und bekommt Schreibrecht auf sein Datenverzeichnis. Der Datadir ist 700 und nur lesend eingehängt; sonst darf Electrs die Cookie-Datei nicht öffnen, und der Runner legt das DB-Verzeichnis als root an. Der Runner legt es als root an, RocksDB scheitert sonst mit „Permission denied“ und der Index kommt nie. Die Labor-`bitcoin.conf` setzt `rpcwhitelistdefault=0`. Sobald eine `rpcwhitelist` für `satsage` existiert, sperrt Core jeden anderen User (die Vorgabe ist dann 1), und `bitcoin`/`secret` (Healthcheck, Electrs, Szenarien) darf keine Methode mehr. Der Lauf auf `v0.9.9.5` ist daran vor dem ersten Test stehen geblieben.
 
 ## [0.9.9.5] — 2026-10-04
 
