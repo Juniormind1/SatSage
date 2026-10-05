@@ -13,6 +13,9 @@ MSG
   exit 2
 fi
 mkdir -p "$ROOT/.data/bitcoin" "$ROOT/.data/electrs"
+# Der Runner legt .data als root an. electrs schreibt als eigener User und
+# bekommt sonst „Permission denied“ auf seinem DB-Verzeichnis (CI).
+chmod 777 "$ROOT/.data/electrs"
 # bitcoin/bitcoin chownt den Bind-Mount auf den Container-User. Ohne passende
 # UID/GID gehört .data/bitcoin danach UID 101 (Mode 700) und der Host darf
 # dort nichts mehr anlegen — auf GitHub-Runnern sofort, lokal oft unsichtbar.
