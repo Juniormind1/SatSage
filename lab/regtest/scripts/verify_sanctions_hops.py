@@ -52,6 +52,10 @@ def main() -> int:
     werte = _load_env(ENV_PATH)
     for k, v in werte.items():
         os.environ.setdefault(k, v)
+    # Der Roh-Parser kodiert Adressen im gesetzten Netz. Ohne das hier
+    # bleibt es Mainnet (bc1…), die Laborliste trägt bcrt1…, und jeder
+    # Treffer geht daneben.
+    satsage_main.set_chain_network(os.environ.get("NETWORK") or "regtest")
 
     listed, _meta = load_sanctioned_xbt_addresses(cache_dir=SANCTIONS_DIR)
     if not listed:
@@ -82,28 +86,20 @@ def main() -> int:
         expect_at = chain.get("expect_hit_at_hops")
         start = chain["start_address"]
         for depth in depths:
-            gesehen: set[str] = set()
-            try:
-                hits, checked, _abort, _coinjoins = check_wallet_utxos_sanctions(
-                    get_tx,
-                    [utxo],
-                    set(),
-                    listed,
-                    max_hops=depth,
-                    abort_on_hit=False,
-                    gesehene_adressen=gesehen,
-                )
-            except Exception as exc:
-                print(f"FEHLER {chain['name']} max_hops={depth}: {type(exc).__name__}: {exc}")
-                return 1
+            hits, checked, _abort, _coinjoins = check_wallet_utxos_sanctions(
+                get_tx,
+                [utxo],
+                set(),
+                listed,
+                max_hops=depth,
+                abort_on_hit=False,
+            )
             hit_addrs = {h["address"] for h in hits}
             should_hit = expect_at is not None and depth >= int(expect_at)
             got_hit = start in hit_addrs
             ok = got_hit is should_hit
             if not ok:
                 failures += 1
-                print(f"  start={start} gesehen={sorted(gesehen)[:6]}")
-                return 1
             print(
                 f"{'OK' if ok else 'FAIL'} {chain['name']} max_hops={depth} "
                 f"expect_hit={should_hit} got={got_hit} checked={checked} "
