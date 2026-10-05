@@ -68,6 +68,9 @@ services:
   electrs:
     image: getumbrel/electrs:v0.10.9
     container_name: satsage-electrs-regtest
+    # Dieselbe UID wie bitcoind. Der Datadir ist 700 und nur lesend
+    # eingehängt; sonst darf electrs die Cookie-Datei nicht öffnen.
+    user: "${SATSAGE_LAB_UID:-1000}:${SATSAGE_LAB_GID:-1000}"
     depends_on:
       bitcoind:
         condition: service_healthy
