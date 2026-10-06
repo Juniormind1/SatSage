@@ -1729,6 +1729,10 @@ input[type="text"].fifo-spend-betrag:disabled { opacity: .55; cursor: not-allowe
 .fifo-spend-einheit {
   margin-left: -4px; min-width: 4ch; font-family: var(--mono); font-size: 10px; color: var(--blass);
 }
+.fifo-spend-max {
+  padding: 2px 7px; font-size: 11px; font-family: var(--mono);
+}
+.fifo-spend-max[hidden] { display: none; }
 input[type="text"].fifo-spend-betrag.ungueltig {
   border-color: var(--krit); background: var(--krit-bg); color: var(--krit);
   outline-color: var(--krit);

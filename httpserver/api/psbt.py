@@ -14,7 +14,8 @@ def api_psbt_auswahl(state: Any, payload: dict | None) -> dict:
     welche Gebühr? Körper: ``betrag`` (sats), ``modus`` (defensiv/offensiv),
     ``utxos`` (Zeitstrahl-Punkte des Wallets), ``pending`` (Schlüssel der
     Mempool-Ausgaben), ``strategie`` (wechselgeld/gebuehr/aelteste/staub,
-    Standard wechselgeld), optional ``wallet_id`` (nur für die vbytes: bei
+    Standard wechselgeld), optional ``eigenes_ziel`` (Gesamtsaldo, gelb/grau
+    erlaubt), optional ``wallet_id`` (nur für die vbytes: bei
     Multisig M-von-N-Inputs und P2WSH-Wechselgeld). Regel und Suche:
     ``core/coin_auswahl.py``.
 
@@ -65,6 +66,7 @@ def api_psbt_auswahl(state: Any, payload: dict | None) -> dict:
         fehler=fehler,
         strategie=strategie,
         groessen=groessen,
+        eigenes_ziel=bool(koerper.get("eigenes_ziel")),
     )
 
 
@@ -317,7 +319,8 @@ def _erzeugen(
         e for e in ((auswertung.get("zeitstrahl") or {}).get("events") or [])
         if isinstance(e, dict) and str(e.get("wallet_id") or "") in ids
     ]
-    utxos = psbt_bau.zusammenfuehren(gecacht, punkte)
+    eigenes_ziel = str(ziel.get("status") or "") == "meine"
+    utxos = psbt_bau.zusammenfuehren(gecacht, punkte, eigenes_ziel=eigenes_ziel)
 
     netz = chain_network()
     if multisig is not None:

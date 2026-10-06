@@ -638,11 +638,18 @@ def _bestaetigt(u: dict) -> bool:
     return True
 
 
-def zusammenfuehren(wallet_utxos: Iterable[dict], lot_punkte: Iterable[dict]) -> list[dict]:
+def zusammenfuehren(
+    wallet_utxos: Iterable[dict], lot_punkte: Iterable[dict],
+    *, eigenes_ziel: bool = False,
+) -> list[dict]:
     """
     Echter UTXO-Bestand (Cache + Mempool-Abgleich) × Lot-Anteile der
     Steuerauswertung. Nur UTXOs, die es in beiden gibt, mit Betrag aus dem
     Bestand; unbestätigte fallen weg. Kein Wert vom Browser.
+
+    *eigenes_ziel*: Bestand ohne Lot-Punkt bleibt drin (Gesamtsaldo an ein
+    hinterlegtes eigenes Wallet); Lose fehlen dann, die Auswahl nimmt den
+    ganzen Betrag.
     """
     lots: dict[str, dict] = {}
     for e in lot_punkte or ():
@@ -659,7 +666,19 @@ def zusammenfuehren(wallet_utxos: Iterable[dict], lot_punkte: Iterable[dict]) ->
         key = f"{txid}:{vout}"
         lot = lots.get(key)
         wert = int(u.get("value_sats", u.get("value")) or 0)
-        if lot is None or wert <= 0:
+        if wert <= 0:
+            continue
+        if lot is None:
+            if not eigenes_ziel:
+                continue
+            aus.append({
+                "key": key, "txid": txid, "vout": vout, "value_sats": wert,
+                "address": str(u.get("address") or ""),
+                "sats_gruen": None, "sats_orange": 0, "sats_grau": wert,
+                "neuvermoegen": False, "time_ts": None,
+                "spending_pending": bool(u.get("spending_pending")),
+                "bestaetigt": _bestaetigt(u),
+            })
             continue
         lot_wert = int(lot.get("value_sats") or 0)
         if lot_wert and lot_wert != wert:
@@ -674,6 +693,17 @@ def zusammenfuehren(wallet_utxos: Iterable[dict], lot_punkte: Iterable[dict]) ->
             "bestaetigt": _bestaetigt(u),
         })
     return aus
+
+
+def _lot_klassen(u: dict) -> tuple[int, int, int]:
+    """Grün/Gelb/Grau eines Inputs für die PSBT-Vorschau (ganze sats)."""
+    wert = int(u.get("value_sats") or 0)
+    if u.get("sats_gruen") is None:
+        return (0, 0, wert)
+    gruen = min(wert, int(u.get("sats_gruen") or 0))
+    grau = min(wert - gruen, int(u.get("sats_grau") or 0))
+    gelb = max(0, wert - gruen - grau)
+    return (gruen, gelb, grau)
 
 
 def erzeuge(
@@ -772,7 +802,8 @@ def erzeuge(
         ziel_spk = wechsel_probe
 
     nutzbar = [u for u in utxos if u.get("bestaetigt", True)]
-    kand = kandidaten(nutzbar, modus=modus, pending=pending)
+    eigenes_ziel = ziel_status == "meine"
+    kand = kandidaten(nutzbar, modus=modus, pending=pending, eigenes_ziel=eigenes_ziel)
     max_sats = sum(k.beitrag for k in kand)
     groessen = Groessen(
         input_vb=input_vb,
@@ -839,17 +870,20 @@ def erzeuge(
         fee = mindest
         wechsel = summe - int(betrag) - fee
         grenze = STAUB_HART_SATS
-        if wechsel < max(grenze, nicht_gruen):
+        if eigenes_ziel:
+            if wechsel < grenze:
+                raise PsbtFehler("Wechselgeld unter der Staubgrenze.")
+        elif wechsel < max(grenze, nicht_gruen):
             raise PsbtFehler("Wechselgeld deckt den nicht grünen Anteil nicht.")
         ausgaenge[1].wert = wechsel
     else:
         wechsel = 0
         fee = summe - int(betrag)
-        if nicht_gruen:
+        if nicht_gruen and not eigenes_ziel:
             raise PsbtFehler("Ohne Wechselgeld ginge nicht grünes Guthaben in die Gebühr.")
         if fee < mindest:
             raise PsbtFehler("Gebühr unter der gewählten Rate.")
-    if summe_gruen < int(betrag) + fee:
+    if not eigenes_ziel and summe_gruen < int(betrag) + fee:
         raise PsbtFehler("Gebühr wäre nicht aus grünen sats bezahlt.")
 
     locktime = int(hoehe) if hoehe and int(hoehe) > 0 else 0
@@ -860,7 +894,8 @@ def erzeuge(
     # Herkunftsverfolgung nach dem Senden (core.fifo_lots).
     ziel_bleibt = bool(ziel_status == "meine" and quelle_wallet and ziel_wallet == quelle_wallet)
     lose = fifo_lots.klassen_lose(
-        (beitrag[u["key"]], e.wert - beitrag[u["key"]], 0) for e, u in zip(eingaenge, gewaehlt)
+        _lot_klassen(u) if eigenes_ziel else (beitrag[u["key"]], e.wert - beitrag[u["key"]], 0)
+        for e, u in zip(eingaenge, gewaehlt)
     )
     verteilt = fifo_lots.je_output(
         lose, ((n, a.wert, a.rolle == "wechsel" or ziel_bleibt) for n, a in enumerate(reihe)), fee,
