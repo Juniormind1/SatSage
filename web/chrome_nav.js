@@ -811,10 +811,10 @@ function kopfPillenUmgebrochen() {
     const unten = sichtbare[sichtbare.length - 1].getBoundingClientRect().top;
     if (unten - oben > 8) return true;
   }
-  const marke = kopf.querySelector(".marke");
+  const start = kopf.querySelector(".kopf-start") || kopf.querySelector(".marke");
   const quelle = kopf.querySelector(".quelle");
-  if (marke && quelle) {
-    if (quelle.getBoundingClientRect().top - marke.getBoundingClientRect().top > 8) {
+  if (start && quelle) {
+    if (quelle.getBoundingClientRect().top - start.getBoundingClientRect().top > 8) {
       return true;
     }
   }

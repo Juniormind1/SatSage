@@ -1623,16 +1623,12 @@ function zeichneKopfStatus(quellen) {
     let beStufe;
     let beTitle;
     if (!mp.configured) {
-      beLabel = t("header.blockExplorer") !== "header.blockExplorer"
-        ? t("header.blockExplorer")
-        : "Block-Explorer";
+      beLabel = t("header.blockExplorer");
       beStufe = "neutral";
-      beTitle = t("header.blockExplorerNoneTitle") !== "header.blockExplorerNoneTitle"
-        ? t("header.blockExplorerNoneTitle")
-        : t("header.blockExplorerNoneTitle");
+      beTitle = t("header.blockExplorerNoneTitle");
     } else if (!(mp.local || mp.stufe === "lokal")) {
       beLabel = t("header.blockExplorerPublic");
-      beStufe = "warn";
+      beStufe = "krit";
       beTitle = t("header.blockExplorerPublicTitle");
     } else if (mp.reachable === false) {
       beLabel = t("header.blockExplorerUnreachable");
@@ -1641,14 +1637,10 @@ function zeichneKopfStatus(quellen) {
       if (mp.host) beTitle += ` (${mp.host})`;
       if (mp.probeReason) beTitle += ` — ${mp.probeReason}`;
     } else if (mp.local || mp.stufe === "lokal") {
-      beLabel = t("header.blockExplorerPrivate") !== "header.blockExplorerPrivate"
-        ? t("header.blockExplorerPrivate")
-        : t("header.blockExplorerPrivate");
+      beLabel = t("header.blockExplorerPrivate");
       // Noch kein Test: grau. Grün erst, wenn der kurze Abruf klappt.
       beStufe = mp.reachable === true ? "gut" : "neutral";
-      beTitle = t("header.blockExplorerPrivateTitle") !== "header.blockExplorerPrivateTitle"
-        ? t("header.blockExplorerPrivateTitle")
-        : `Eigener/LAN-Explorer${mp.host ? `: ${mp.host}` : ""} — Aufrufe bleiben bei dir.`;
+      beTitle = t("header.blockExplorerPrivateTitle");
     }
     eintraege.push({
       key: "mempool",
@@ -2361,8 +2353,6 @@ function formatKursTooltip(preis) {
 }
 
 function zeichneKursPille() {
-  const pillen = $("#quelle-pillen") || $("#quelle-status");
-  if (!pillen) return;
   const preis = Zustand.kurs;
   const stufe = preis && Number(preis.amount) > 0 ? "gut" : "neutral";
   const neu = pille(stufe, formatKursLabel(preis));
@@ -2376,9 +2366,11 @@ function zeichneKursPille() {
     if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
     return;
   }
-  const llm = $("#llm-pille");
-  if (llm) pillen.insertBefore(neu, llm);
-  else pillen.append(neu);
+  const ziel = document.querySelector(".kopf-end")
+    || $("#quelle-pillen")
+    || $("#quelle-status");
+  if (!ziel) return;
+  ziel.append(neu);
   if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
 }
 
