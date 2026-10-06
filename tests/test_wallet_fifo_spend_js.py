@@ -238,6 +238,7 @@ _FUNKTIONEN = [
     "function pruefeFifoSpendBetrag(",
     "function formatiereFifoSpendBetrag(",
     "function fifoNetzName(",
+    "function fifoZielZeileOffen(",
     "function fifoZielZeigen(",
     "function aktualisiereFifoPsbtKnopf(",
     "function fifoZielUmschalten(",
@@ -251,6 +252,8 @@ _FUNKTIONEN = [
     "function fifoAuswahlText(",
     "function fifoFeeVorschlagText(",
     "function planeFifoFeeVorschlag(",
+    "function fifoZielAnteile(",
+    "function fifoAuswahlAktuell(",
     "function fifoFeeEingabe(",
     "function fifoFeeVerlassen(",
     "function fifoAktuellesWallet(",
@@ -1192,6 +1195,55 @@ class TestFifoGebuehrVorschlag(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node fehlt")
+class TestFifoAuswahlListe(unittest.TestCase):
+
+    def test_zielanteile_fuellen_aelteste_zuerst(self):
+        erg = _node(r"""
+          const inputs = [
+            { key: "aa:0", sats_gruen: 50000 },
+            { key: "bb:1", sats_gruen: 30000 },
+            { key: "cc:2", sats_gruen: 20000 },
+          ];
+          process.stdout.write(JSON.stringify({
+            teil: fifoZielAnteile(inputs, 60000).map((a) => a.ziel_sats),
+            voll: fifoZielAnteile(inputs, 40000).map((a) => a.ziel_sats),
+            leer: fifoZielAnteile(inputs, 0).map((a) => a.ziel_sats),
+            staub: fifoZielAnteile(inputs, 100000).map((a) => a.ziel_sats),
+          }));
+        """)
+        self.assertEqual(erg["teil"], [50000, 10000, 0])
+        self.assertEqual(erg["voll"], [40000, 0, 0])
+        self.assertEqual(erg["leer"], [0, 0, 0])
+        self.assertEqual(erg["staub"], [50000, 30000, 20000])
+
+    def test_zielzeile_offen_und_auswahl_aktuell(self):
+        erg = _node(r"""
+          const aus = { zu: fifoZielZeileOffen() };
+          els["#fifo-spend-ziel"].hidden = false;
+          aus.auf = fifoZielZeileOffen();
+          Zustand.fifoSpendBetragSats = 40000;
+          Zustand.fifoFeeLaedt = false;
+          Zustand.fifoFeeVorschlag = { status: "ok", inputs: [{ key: "aa:0", sats_gruen: 50000 }] };
+          aus.ok = Boolean(fifoAuswahlAktuell());
+          Zustand.fifoFeeLaedt = true;
+          aus.laedt = fifoAuswahlAktuell();
+          Zustand.fifoFeeLaedt = false;
+          Zustand.fifoFeeVorschlag = { status: "nicht_gedeckt", inputs: [] };
+          aus.kurz = fifoAuswahlAktuell();
+          els["#fifo-spend-ziel"].hidden = true;
+          Zustand.fifoFeeVorschlag = { status: "ok", inputs: [{ key: "aa:0" }] };
+          aus.zuWieder = Boolean(fifoAuswahlAktuell());
+          process.stdout.write(JSON.stringify(aus));
+        """)
+        self.assertFalse(erg["zu"])
+        self.assertTrue(erg["auf"])
+        self.assertTrue(erg["ok"])
+        self.assertIsNone(erg["laedt"])
+        self.assertIsNone(erg["kurz"])
+        self.assertFalse(erg["zuWieder"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node fehlt")
 class TestFifoPsbtErzeugen(unittest.TestCase):
 
     _BEREIT = r"""
@@ -1457,6 +1509,9 @@ class TestFifoStatisch(unittest.TestCase):
         "wallet.fifoPsbtCopied",
         "wallet.fifoPsbtCopyFailed",
         "wallet.fifoPsbtResultAria",
+        "wallet.fifoChangeRow",
+        "wallet.fifoChangeRowTitle",
+        "wallet.fifoUtxoToDestTitle",
     )
 
     def test_kataloge_de_en(self):
@@ -1483,6 +1538,8 @@ class TestFifoStatisch(unittest.TestCase):
         self.assertIn("{exchange}", en["wallet.fifoTargetExchange"])
         self.assertIn("{label}", de["wallet.fifoPsbtSanctionConfirm"])
         self.assertIn("{label}", en["wallet.fifoPsbtSanctionConfirm"])
+        self.assertEqual(de["wallet.fifoChangeRow"], "Change")
+        self.assertEqual(en["wallet.fifoChangeRow"], "Change")
         self.assertEqual(de["wallet.fifoTargetStatusExternal"], "extern")
         self.assertEqual(en["wallet.fifoTargetStatusExternal"], "external")
         self.assertEqual(de["wallet.fifoTargetStatusInvalid"], "ungültig")
@@ -1591,6 +1648,26 @@ class TestFifoStatisch(unittest.TestCase):
         self.assertIn("flex: 0 1 calc(64ch", adr)
         for farbe in ("gruen", "gelb", "rot"):
             self.assertIn(f'.fifo-ziel-status[data-zustand="{farbe}"]', CSS)
+        self.assertIn(".fifo-auswahl-liste", CSS)
+        self.assertIn("fifo-betrag-gruen", CSS)
+        self.assertIn("fifo-betrag-gelb", CSS)
+        self.assertIn("var(--lot-gruen)", CSS[CSS.index(".fifo-auswahl-liste"):])
+        self.assertIn("var(--lot-orange)", CSS[CSS.index(".fifo-change-zeile"):])
+
+    def test_sende_vorschau_haengt_an_zielzeile_und_auswahl(self):
+        teil = WALLETS[WALLETS.index("/* --- wallet-fifo-spend --- */"):]
+        self.assertIn("function fifoZielAnteile(", teil)
+        self.assertIn("function aktualisiereFifoAuswahlListe(", teil)
+        self.assertIn("fifo-change-zeile", teil)
+        self.assertIn("wallet.fifoChangeRow", teil)
+        zeige = teil[teil.index("function fifoZielZeigen("):teil.index("function aktualisiereFifoPsbtKnopf(")]
+        self.assertIn("aktualisiereFifoAuswahlListe()", zeige)
+        vorschlag = teil[teil.index("function planeFifoFeeVorschlag("):teil.index("function fifoZielAnteile(")]
+        self.assertIn("aktualisiereFifoAuswahlListe()", vorschlag)
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        kopf = app[app.index("function aktualisiereKopfFilterFuerAnsicht("):][:900]
+        self.assertIn("fifoZielZeileOffen", kopf)
+        self.assertIn("header.filterTitleFifoSpend", kopf)
 
 
 if __name__ == "__main__":

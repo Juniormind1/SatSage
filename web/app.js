@@ -1782,6 +1782,19 @@ function kopfFilterGelesen() {
 }
 
 function aktualisiereKopfFilterFuerAnsicht() {
+  if (
+    Zustand.ansicht === "wallet"
+    && typeof fifoZielZeileOffen === "function"
+    && fifoZielZeileOffen()
+  ) {
+    setzeKopfFilterAktiv(false);
+    const feld = $("#kopf-filter");
+    if (feld) {
+      feld.title = t("header.filterTitleFifoSpend");
+      feld.setAttribute("data-i18n-title", "header.filterTitleFifoSpend");
+    }
+    return;
+  }
   setzeKopfFilterAktiv(kopfFilterAnsichtAktiv(Zustand.ansicht));
 }
 

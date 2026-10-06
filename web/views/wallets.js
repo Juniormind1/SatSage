@@ -1036,9 +1036,11 @@ async function zeigeWalletSeite(offset) {
   if (Zustand.walletQuelle !== quelle) return;
   const koerper = $("#adress-koerper");
   koerper.replaceChildren();
+  Zustand._walletUtxoSeite = seite;
   for (const gruppe of seite.items) koerper.append(zeichneAdressGruppe(gruppe));
   koerper.append(walletPager(seite));
   wendeKopfFilterAn();
+  if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
 }
 
 function walletPager(seite) {
@@ -1067,6 +1069,7 @@ function zeigeLeer(titel, text) {
 function zeichneUtxos(daten, wallet, seite = null) {
   // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
   Zustand._walletUtxoDaten = daten || null;
+  Zustand._walletUtxoSeite = seite;
   const hatVerlauf = Boolean(daten.hat_verlauf);
   const hatUtxos = Boolean(daten.has_cache && daten.total_count);
 
@@ -1211,6 +1214,7 @@ function zeichneUtxos(daten, wallet, seite = null) {
   $("#adress-liste").hidden = false;
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
+  if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
 }
 
 /* --- wallet-fifo-spend --- */
@@ -1756,6 +1760,12 @@ function fifoNetzName(netz) {
   return namen[String(netz || "")] || String(netz || "?");
 }
 
+/** Ziel-Zeile sichtbar? (Senden ▾). */
+function fifoZielZeileOffen() {
+  const zeile = $("#fifo-spend-ziel");
+  return Boolean(zeile && !zeile.hidden);
+}
+
 /** Ziel-Zeile auf- oder zuklappen; der Knopf trägt aria-expanded. */
 function fifoZielZeigen(offen) {
   const zeile = $("#fifo-spend-ziel");
@@ -1774,6 +1784,7 @@ function fifoZielZeigen(offen) {
     if (adresse && typeof adresse.focus === "function") adresse.focus();
     planeFifoFeeVorschlag();
   }
+  if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
 }
 
 /**
@@ -2090,7 +2101,178 @@ function planeFifoFeeVorschlag() {
       feld.dataset.vorschlag = "1";
     }
     pruefeFifoZielFee();
+    if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
   }, FIFO_FEE_ENTPRELLEN_MS);
+}
+
+/**
+ * Anteil jedes ausgewählten Inputs am Zielbetrag: die Coin-Auswahl liefert
+ * die Inputs bereits älteste zuerst. Grün (``sats_gruen``) füllt nacheinander
+ * den Betrag an die Zieladresse; Rest (Gebühr, Wechselgeld) steht nicht in
+ * der UTXO-Zeile.
+ */
+function fifoZielAnteile(inputs, betrag) {
+  let rest = Math.max(0, Math.floor(Number(betrag) || 0));
+  const aus = [];
+  for (const inp of inputs || []) {
+    const gruen = Math.max(0, Math.floor(Number(inp && inp.sats_gruen) || 0));
+    const ziel = Math.min(gruen, rest);
+    rest -= ziel;
+    aus.push({ input: inp, ziel_sats: ziel });
+  }
+  return aus;
+}
+
+/** Fertige Coin-Auswahl zur offenen Ziel-Zeile, sonst null. */
+function fifoAuswahlAktuell() {
+  if (!fifoZielZeileOffen()) return null;
+  const v = Zustand.fifoFeeVorschlag;
+  if (!v || v.status !== "ok" || !Array.isArray(v.inputs)) return null;
+  if (!(Zustand.fifoSpendBetragSats > 0)) return null;
+  // Erste Antwort abwarten; eine schon gezeigte Vorschau bleibt während des
+  // Nachladens stehen (Strategiewechsel), statt kurz die ganze Liste zu zeigen.
+  if (Zustand.fifoFeeLaedt && !Zustand.fifoAuswahlListeAktiv) return null;
+  return v;
+}
+
+/** UTXO der aktuellen Wallet-Seite zum Schlüssel. */
+function fifoUtxoAusBestand(key) {
+  const k = String(key || "");
+  if (!k) return null;
+  const daten = Zustand._walletUtxoDaten;
+  if (!daten) return null;
+  const trifft = (u) => u && fifoUtxoKey(u) === k;
+  for (const u of daten.utxos || []) {
+    if (trifft(u)) return u;
+  }
+  for (const g of daten.addresses || []) {
+    for (const u of (g && g.utxos) || []) {
+      if (trifft(u)) return u;
+    }
+  }
+  const seite = Zustand._walletUtxoSeite;
+  for (const g of (seite && seite.items) || []) {
+    if (trifft(g)) return g;
+    for (const u of (g && g.utxos) || []) {
+      if (trifft(u)) return u;
+    }
+  }
+  return null;
+}
+
+/** Zeilen-Objekt: Bestand, sonst Steuer-Punkt, sonst die Auswahl-Antwort. */
+function fifoUtxoFuerAuswahl(input) {
+  const key = fifoUtxoKey(input);
+  const bestand = fifoUtxoAusBestand(key);
+  if (bestand) return bestand;
+  const stand = Zustand.fifoSpend;
+  for (const e of (stand && stand.events) || []) {
+    if (fifoUtxoKey(e) !== key) continue;
+    return {
+      key: e.key || key,
+      txid: e.txid,
+      vout: e.vout,
+      value_sats: e.value_sats,
+      address: e.address,
+      time_label: e.datum,
+      block_time: e.time_ts,
+    };
+  }
+  return {
+    key,
+    txid: input && input.txid,
+    vout: input && input.vout,
+    value_sats: input && input.value_sats,
+    block_time: input && input.time_ts,
+  };
+}
+
+/** UTXO-Saldo durch die Sats an die Zieladresse ersetzen (grün). */
+function setzeFifoUtxoZielBetrag(zeile, sats) {
+  if (!zeile) return;
+  const betrag = zeile.querySelector(":scope > .betrag");
+  if (!betrag) return;
+  betrag.classList.add("fifo-betrag-gruen");
+  const n = Math.max(0, Math.floor(Number(sats) || 0));
+  if (typeof setzeSatsBetrag === "function") setzeSatsBetrag(betrag, n);
+  else betrag.textContent = typeof formatSats === "function" ? formatSats(n) : String(n);
+  betrag.title = t("wallet.fifoUtxoToDestTitle", {
+    sats: typeof formatZahl === "function" ? formatZahl(n) : String(n),
+  });
+}
+
+/** Eine Zeile unter den Inputs: Wechselgeld in Gelb. */
+function zeichneFifoChangeZeile(sats) {
+  const zeile = document.createElement("div");
+  zeile.className = "utxo-zeile fifo-change-zeile";
+  zeile.dataset.rolle = "wechsel";
+  const n = Math.max(0, Math.floor(Number(sats) || 0));
+  const betrag = document.createElement("span");
+  betrag.className = "betrag fifo-betrag-gelb";
+  if (typeof setzeSatsBetrag === "function") setzeSatsBetrag(betrag, n);
+  else betrag.textContent = typeof formatSats === "function" ? formatSats(n) : String(n);
+  betrag.title = t("wallet.fifoChangeRowTitle", {
+    sats: typeof formatZahl === "function" ? formatZahl(n) : String(n),
+  });
+  const name = document.createElement("span");
+  name.className = "fifo-change-label";
+  name.textContent = t("wallet.fifoChangeRow");
+  zeile.append(betrag, name);
+  return zeile;
+}
+
+/** ``#adress-koerper`` durch die ausgewählten Inputs ersetzen; Pager weg. */
+function zeichneFifoAuswahlListe(v) {
+  const koerper = $("#adress-koerper");
+  if (!koerper || typeof zeichneUtxoZeile !== "function") return;
+  const anteile = fifoZielAnteile(v.inputs, Zustand.fifoSpendBetragSats);
+  const liste = document.createElement("div");
+  liste.className = "fifo-auswahl-liste";
+  for (const a of anteile) {
+    const zeile = zeichneUtxoZeile(fifoUtxoFuerAuswahl(a.input));
+    setzeFifoUtxoZielBetrag(zeile, a.ziel_sats);
+    liste.append(zeile);
+  }
+  liste.append(zeichneFifoChangeZeile(v.wechselgeld_sats));
+  koerper.replaceChildren(liste);
+  Zustand.fifoAuswahlListeAktiv = true;
+  const zusatz = $("#adress-zusatz");
+  if (zusatz) {
+    setzeText(zusatz, t("wallet.utxoCount", {
+      count: typeof formatZahl === "function" ? formatZahl(anteile.length) : String(anteile.length),
+    }));
+  }
+}
+
+/** Bestand inkl. Pager, wie vor der Sende-Vorschau. */
+function stelleWalletUtxoListeWiederHer() {
+  if (typeof zeichneUtxos !== "function") return;
+  const daten = Zustand._walletUtxoDaten;
+  if (!daten) return;
+  const id = Zustand.walletId;
+  const wallet = ((Zustand.config && Zustand.config.wallets) || []).find(
+    (w) => String(w.id) === String(id),
+  );
+  zeichneUtxos(daten, wallet, Zustand._walletUtxoSeite);
+}
+
+/**
+ * Offene Ziel-Zeile + fertige Auswahl: nur die Inputs, Ziel-Sats grün,
+ * Change gelb. Sonst die normale UTXO-Liste. Kopf-Filter folgt der Zeile.
+ */
+function aktualisiereFifoAuswahlListe() {
+  if (typeof aktualisiereKopfFilterFuerAnsicht === "function") {
+    aktualisiereKopfFilterFuerAnsicht();
+  }
+  const v = fifoAuswahlAktuell();
+  if (v) {
+    zeichneFifoAuswahlListe(v);
+    return;
+  }
+  if (Zustand.fifoAuswahlListeAktiv) {
+    Zustand.fifoAuswahlListeAktiv = false;
+    stelleWalletUtxoListeWiederHer();
+  }
 }
 
 /** Tippen im Gebührenfeld: ab jetzt eigener Wert — leer heißt zurück zum Vorschlag. */

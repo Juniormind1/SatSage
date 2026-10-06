@@ -27,7 +27,7 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten. Hooks ersetzen diese Prüfung nicht.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). `pre-push` fährt die Unit-Suite nur bei Push nach `main` (inkl. Hart-Tests, `SATSAGE_HARD_TESTS=1`); `dev-juniormind` bleibt ohne Suite. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten. Hooks ersetzen diese Prüfung nicht.
 
 **Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 

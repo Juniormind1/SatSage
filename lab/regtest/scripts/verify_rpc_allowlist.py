@@ -13,15 +13,25 @@ Der Client muss ``dumpwallet`` verwerfen, bevor ein Socket aufgeht.
 """
 from __future__ import annotations
 
-import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parent
+HERE = SCRIPTS.parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(SCRIPTS))
+
+from infra_check import (  # noqa: E402
+    abbrechen,
+    brauche,
+    darf_docker_starten,
+    hinweis_kein_docker,
+    hinweis_nowallet,
+    port_offen,
+)
 
 from core.bitcoind_rpc import (  # noqa: E402
     BitcoinRpcClient,
@@ -57,35 +67,34 @@ def _client(user: str, password: str, port: int, network: str = "regtest") -> Bi
     )
 
 
-def _port_offen(port: int) -> bool:
-    try:
-        with socket.create_connection((HOST, port), 1.0):
-            return True
-    except OSError:
+def _nowallet_holen() -> bool:
+    if port_offen(PORT_OHNE_WALLET):
+        return True
+    if not darf_docker_starten():
+        code = abbrechen(hinweis_nowallet() + "\n" + hinweis_kein_docker())
+        if code != 0:
+            raise SystemExit(code)
         return False
-
-
-def _warte(port: int, sekunden: int = 60) -> None:
-    for _ in range(sekunden):
-        if _port_offen(port):
-            return
-        time.sleep(1)
-    raise SystemExit(f"Nichts hört auf {HOST}:{port}.")
-
-
-def _nowallet_holen() -> None:
-    if _port_offen(PORT_OHNE_WALLET):
-        return
     compose = HERE / "docker-compose.yml"
     if not compose.is_file():
-        raise SystemExit("bitcoind ohne Wallet fehlt, und es gibt kein docker-compose.yml.")
+        code = abbrechen(hinweis_nowallet())
+        if code != 0:
+            raise SystemExit(code)
+        return False
     print("Starte bitcoind-nowallet…")
     subprocess.run(
         ["docker", "compose", "-f", str(compose), "up", "-d", "bitcoind-nowallet"],
         check=True,
         cwd=HERE,
     )
-    _warte(PORT_OHNE_WALLET)
+    for _ in range(40):
+        if port_offen(PORT_OHNE_WALLET):
+            return True
+        time.sleep(1)
+    code = abbrechen(hinweis_nowallet())
+    if code != 0:
+        raise SystemExit(code)
+    return False
 
 
 def _ohne_socket(aktion) -> None:
@@ -197,8 +206,10 @@ def _offen_darf_listwallets() -> None:
 
 
 def main() -> None:
-    _warte(PORT_OFFEN)
-    _nowallet_holen()
+    fehl = brauche("bitcoind")
+    if fehl is not None:
+        raise SystemExit(fehl)
+    nowallet = _nowallet_holen()
     print("Core-Allowlist am Regtest-Node")
     _kette(USER_OFFEN, PASS_OFFEN)
     _kette(USER_LISTE, PASS_LISTE)
@@ -234,7 +245,10 @@ def main() -> None:
         raise SystemExit("sendtoaddress lief trotz rpcwhitelist durch.")
     print("  sendtoaddress im Regtest erlaubt, Node-Whitelist lehnt ab")
     _whitelist_verweigert()
-    _ohne_wallet()
+    if nowallet:
+        _ohne_wallet()
+    else:
+        print("  disablewallet-Node übersprungen")
     print("Core-Allowlist grün")
 
 

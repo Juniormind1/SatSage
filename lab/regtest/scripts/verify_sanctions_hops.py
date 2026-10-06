@@ -12,13 +12,17 @@ import os
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parent
+HERE = SCRIPTS.parent
 REPO = HERE.parents[1]
 REPORT = HERE / ".data" / "scenario-report-sanctions.json"
 SANCTIONS_DIR = HERE / ".data" / "sanctioned_cache"
 ENV_PATH = HERE / ".data" / ".regtest.env"
 
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(SCRIPTS))
+
+from infra_check import brauche, hinweis_electrs  # noqa: E402
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -38,6 +42,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--depths", default="1,3,10,25,100")
     args = parser.parse_args()
+    fehl = brauche("bitcoind", "electrs")
+    if fehl is not None:
+        return fehl
     if not REPORT.is_file():
         print(f"Report fehlt: {REPORT}", file=sys.stderr)
         return 1
@@ -64,7 +71,7 @@ def main() -> int:
 
     client, quelle = satsage_main.resolve_sanctions_preferred_client(werte)
     if client is None:
-        print("Kein Electrum/Fulcrum für get_tx", file=sys.stderr)
+        print(hinweis_electrs(), file=sys.stderr)
         return 1
     cache_root = HERE / ".data" / "immutable_cache"
     cache_root.mkdir(parents=True, exist_ok=True)
