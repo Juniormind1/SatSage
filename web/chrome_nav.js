@@ -189,6 +189,7 @@ function zeigeAnsicht(name) {
   }
   zeichneNav();
   aktualisiereKopfFilterFuerAnsicht();
+  if (typeof schliesseNavWennUngepinnt === "function") schliesseNavWennUngepinnt();
 }
 
 function setzeEnvPfad(pfad) {
@@ -755,4 +756,238 @@ function aktualisiereSpeicherleiste() {
     const zeile = zeilen[index];
     if (zeile) setzeZeileAktualisieren(zeile, wallet);
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// Kompakte Navigation: Pillen umgebrochen → Overlay am linken Rand, pinbar
+// ---------------------------------------------------------------------------
+
+const NAV_PIN_MERKER = "satsage-nav-pin";
+let navKompaktGebunden = false;
+let navHoverTimer = 0;
+let navBeobachter = null;
+
+function navPinGemerkt() {
+  try {
+    return localStorage.getItem(NAV_PIN_MERKER) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function merkeNavPin(an) {
+  try {
+    localStorage.setItem(NAV_PIN_MERKER, an ? "1" : "0");
+  } catch (_) {
+    /* ohne Speicher bleibt die Sitzung */
+  }
+}
+
+function navInEinbettung() {
+  try {
+    return window.self !== window.top;
+  } catch (_) {
+    return true;
+  }
+}
+
+function navKompaktErzwungen() {
+  // Start9-Dienst-UI und jedes iframe (StartOS/Specter/Umbrel) haben wenig Breite.
+  if (navInEinbettung()) return true;
+  return Zustand.config?.managed_by === "start9";
+}
+
+function kopfPillenUmgebrochen() {
+  const app = document.getElementById("app");
+  const kopf = document.querySelector(".kopf");
+  const pillen = document.getElementById("quelle-pillen");
+  if (!app || app.hidden || !kopf || !pillen) return false;
+  const sichtbare = Array.from(pillen.children).filter(
+    (el) => el.getClientRects().length > 0,
+  );
+  if (sichtbare.length >= 2) {
+    const oben = sichtbare[0].getBoundingClientRect().top;
+    const unten = sichtbare[sichtbare.length - 1].getBoundingClientRect().top;
+    if (unten - oben > 8) return true;
+  }
+  const marke = kopf.querySelector(".marke");
+  const quelle = kopf.querySelector(".quelle");
+  if (marke && quelle) {
+    if (quelle.getBoundingClientRect().top - marke.getBoundingClientRect().top > 8) {
+      return true;
+    }
+  }
+  return kopf.scrollHeight - kopf.clientHeight > 6;
+}
+
+function navIstOffen() {
+  const app = document.getElementById("app");
+  return Boolean(app && app.classList.contains("nav-offen"));
+}
+
+function navIstGepinnt() {
+  const app = document.getElementById("app");
+  return Boolean(app && app.classList.contains("nav-gepinnt"));
+}
+
+function navIstKompakt() {
+  const app = document.getElementById("app");
+  return Boolean(app && app.classList.contains("nav-kompakt"));
+}
+
+function setzeNavOffen(an) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.classList.toggle("nav-offen", Boolean(an));
+  aktualisiereNavWerkzeuge();
+}
+
+function setzeNavPin(an) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const pin = Boolean(an);
+  app.classList.toggle("nav-gepinnt", pin);
+  merkeNavPin(pin);
+  if (pin) app.classList.add("nav-offen");
+  aktualisiereNavKompakt();
+}
+
+function aktualisiereNavWerkzeuge() {
+  const toggle = document.getElementById("nav-toggle");
+  const pin = document.getElementById("nav-pin");
+  const rand = document.getElementById("nav-rand");
+  const kompakt = navIstKompakt();
+  const offen = navIstOffen() || navIstGepinnt();
+  const gepinnt = navIstGepinnt();
+  if (toggle) {
+    toggle.hidden = !kompakt;
+    toggle.setAttribute("aria-expanded", offen ? "true" : "false");
+    toggle.tabIndex = kompakt ? 0 : -1;
+    const titel = offen ? t("nav.toggleHideTitle") : t("nav.toggleTitle");
+    toggle.title = titel;
+    toggle.setAttribute("aria-label", t("nav.toggleAria"));
+    toggle.setAttribute("data-i18n-title", offen ? "nav.toggleHideTitle" : "nav.toggleTitle");
+  }
+  if (pin) {
+    pin.setAttribute("aria-pressed", gepinnt ? "true" : "false");
+    pin.title = gepinnt ? t("nav.unpinTitle") : t("nav.pinTitle");
+    pin.setAttribute("aria-label", gepinnt ? t("nav.unpinAria") : t("nav.pinAria"));
+    pin.setAttribute("data-i18n-title", gepinnt ? "nav.unpinTitle" : "nav.pinTitle");
+    pin.setAttribute("data-i18n-aria-label", gepinnt ? "nav.unpinAria" : "nav.pinAria");
+  }
+  if (rand) {
+    rand.hidden = !kompakt || gepinnt;
+  }
+}
+
+function aktualisiereNavKompakt() {
+  const app = document.getElementById("app");
+  if (!app || app.hidden) return;
+  const umbruch = kopfPillenUmgebrochen();
+  const gepinnt = navPinGemerkt();
+  app.classList.toggle("nav-gepinnt", gepinnt);
+  const kompakt = umbruch || navKompaktErzwungen();
+  app.classList.toggle("nav-kompakt", kompakt);
+  if (!kompakt) {
+    app.classList.remove("nav-offen");
+  } else if (gepinnt) {
+    app.classList.add("nav-offen");
+  }
+  aktualisiereNavWerkzeuge();
+}
+
+function schliesseNavWennUngepinnt() {
+  if (!navIstKompakt() || navIstGepinnt()) return;
+  setzeNavOffen(false);
+}
+
+function navZeigerUeberLeiste(ziel) {
+  if (!ziel || typeof ziel.closest !== "function") return false;
+  return Boolean(
+    ziel.closest("#seitenleiste")
+    || ziel.closest("#nav-toggle")
+    || ziel.closest("#nav-rand")
+    || ziel.closest("#nav-pin"),
+  );
+}
+
+function bindeNavLeiste() {
+  if (navKompaktGebunden) {
+    aktualisiereNavKompakt();
+    return;
+  }
+  navKompaktGebunden = true;
+  const app = document.getElementById("app");
+  const toggle = document.getElementById("nav-toggle");
+  const pin = document.getElementById("nav-pin");
+  const rand = document.getElementById("nav-rand");
+  const leiste = document.getElementById("seitenleiste");
+  const kopf = document.querySelector(".kopf");
+  const pillen = document.getElementById("quelle-pillen");
+
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      if (!navIstKompakt()) return;
+      if (navIstGepinnt()) {
+        setzeNavPin(false);
+        setzeNavOffen(false);
+        return;
+      }
+      setzeNavOffen(!navIstOffen());
+    });
+  }
+  if (pin) {
+    pin.addEventListener("click", () => {
+      setzeNavPin(!navIstGepinnt());
+    });
+  }
+
+  const navHatFokus = () => navZeigerUeberLeiste(document.activeElement);
+  const hoverAn = () => {
+    if (!navIstKompakt() || navIstGepinnt()) return;
+    window.clearTimeout(navHoverTimer);
+    setzeNavOffen(true);
+  };
+  const hoverAus = () => {
+    if (!navIstKompakt() || navIstGepinnt()) return;
+    window.clearTimeout(navHoverTimer);
+    navHoverTimer = window.setTimeout(() => {
+      if (navIstGepinnt() || navHatFokus()) return;
+      setzeNavOffen(false);
+    }, 280);
+  };
+  if (rand) {
+    rand.addEventListener("pointerenter", hoverAn);
+    rand.addEventListener("pointerleave", hoverAus);
+  }
+  if (leiste) {
+    leiste.addEventListener("pointerenter", hoverAn);
+    leiste.addEventListener("pointerleave", hoverAus);
+    leiste.addEventListener("focusin", hoverAn);
+    leiste.addEventListener("focusout", hoverAus);
+  }
+  if (toggle) {
+    toggle.addEventListener("focus", hoverAn);
+  }
+
+  document.addEventListener("pointerdown", (ereignis) => {
+    if (!navIstKompakt() || navIstGepinnt() || !navIstOffen()) return;
+    if (navZeigerUeberLeiste(ereignis.target)) return;
+    setzeNavOffen(false);
+  });
+  document.addEventListener("keydown", (ereignis) => {
+    if (ereignis.key !== "Escape") return;
+    if (!navIstKompakt() || navIstGepinnt() || !navIstOffen()) return;
+    setzeNavOffen(false);
+  });
+
+  if (typeof ResizeObserver === "function") {
+    navBeobachter = new ResizeObserver(() => aktualisiereNavKompakt());
+    if (kopf) navBeobachter.observe(kopf);
+    if (pillen) navBeobachter.observe(pillen);
+    if (app) navBeobachter.observe(app);
+  }
+  window.addEventListener("resize", () => aktualisiereNavKompakt());
+  aktualisiereNavKompakt();
 }

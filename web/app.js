@@ -1735,6 +1735,7 @@ function zeichneKopfStatus(quellen) {
   zeichneLlmPille();
   zeichneRpcSperrePille();
   aktualisiereKopfFilterFuerAnsicht();
+  if (typeof aktualisiereNavKompakt === "function") aktualisiereNavKompakt();
   if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
   if (lernhinweiseAn()) {
     wendeAlleLernTooltipsAn().catch(() => {});
@@ -2527,6 +2528,7 @@ function zeichneLlmPille() {
   const alt = $("#llm-pille");
   if (alt) alt.replaceWith(neu);
   else pillen.append(neu);
+  setzeChatSichtbar();
 }
 
 function übersetzeLlmLabel(roh) {
@@ -2543,7 +2545,17 @@ function übersetzeLlmLabel(roh) {
   return text;
 }
 
+function setzeChatSichtbar() {
+  const s = Zustand.llmStatus || Zustand.config?.llm || {};
+  // Rot (offline) und Grau (aus / ungeprüft): kein Chat.
+  // Grün (lokal) und Gelb (remote, verbunden): Chat.
+  const an = s.pille === "gut" || s.pille === "warn";
+  const buehne = document.querySelector(".buehne");
+  if (buehne) buehne.classList.toggle("chat-an", an);
+}
+
 function zeichneChatAnbindung() {
+  setzeChatSichtbar();
   const kasten = $("#chat-anbindung");
   if (!kasten) return;
   const s = Zustand.llmStatus || Zustand.config?.llm || {};

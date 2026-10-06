@@ -476,6 +476,29 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
   }
 }
 
+function dockChatAn() {
+  return Boolean(document.querySelector(".buehne")?.classList.contains("chat-an"));
+}
+
+function setzeEmpfangSpaltePct(spalten, startPct, startX, clientX) {
+  const breite = spalten.getBoundingClientRect().width;
+  if (breite < 40) return;
+  // Nach rechts ziehen → QR-Spalte schmaler, bis das Quadrat an beide Ränder stößt.
+  const delta = ((startX - clientX) / breite) * 100;
+  const minPct = Math.max(4, (64 / breite) * 100);
+  const pct = Math.min(48, Math.max(minPct, startPct + delta));
+  spalten.style.setProperty("--dock-empfang-pct", `${Math.round(pct)}%`);
+}
+
+function merkeCssVar(schluessel, wert) {
+  if (!wert) return;
+  try {
+    localStorage.setItem(schluessel, wert);
+  } catch (_) {
+    /* gleichgültig */
+  }
+}
+
 function macheDockSpalter() {
   const spalter = $("#dock-spalter");
   const spalten = document.querySelector(".dock-spalten");
@@ -491,14 +514,7 @@ function macheDockSpalter() {
   let startX = 0;
   let startPct = 40;
   let zieht = false;
-
-  const merken = (wert) => {
-    try {
-      localStorage.setItem(DOCK_SPALTE_MERKER, wert);
-    } catch (_) {
-      /* gleichgültig */
-    }
-  };
+  let ziehtEmpfang = false;
 
   const beenden = (ereignis) => {
     if (!zieht) return;
@@ -508,8 +524,18 @@ function macheDockSpalter() {
     } catch (_) {
       /* Capture war schon weg */
     }
-    const wert = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
-    if (wert) merken(wert);
+    if (ziehtEmpfang) {
+      merkeCssVar(
+        EMPFANG_SPALTE_MERKER,
+        getComputedStyle(spalten).getPropertyValue("--dock-empfang-pct").trim(),
+      );
+    } else {
+      merkeCssVar(
+        DOCK_SPALTE_MERKER,
+        getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim(),
+      );
+    }
+    ziehtEmpfang = false;
   };
 
   spalter.addEventListener("pointerdown", (ereignis) => {
@@ -517,14 +543,24 @@ function macheDockSpalter() {
     const buehne = document.querySelector(".buehne");
     if (!buehne || !buehne.classList.contains("log-an")) return;
     zieht = true;
+    ziehtEmpfang = !dockChatAn();
     startX = ereignis.clientX;
-    const roh = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
-    startPct = Number.parseFloat(roh) || 40;
+    if (ziehtEmpfang) {
+      const roh = getComputedStyle(spalten).getPropertyValue("--dock-empfang-pct").trim();
+      startPct = Number.parseFloat(roh) || 28;
+    } else {
+      const roh = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
+      startPct = Number.parseFloat(roh) || 40;
+    }
     spalter.setPointerCapture(ereignis.pointerId);
     ereignis.preventDefault();
   });
   spalter.addEventListener("pointermove", (ereignis) => {
     if (!zieht) return;
+    if (ziehtEmpfang) {
+      setzeEmpfangSpaltePct(spalten, startPct, startX, ereignis.clientX);
+      return;
+    }
     const breite = spalten.getBoundingClientRect().width;
     if (breite < 40) return;
     const delta = ((ereignis.clientX - startX) / breite) * 100;
@@ -553,14 +589,6 @@ function macheEmpfangSpalter() {
   let startPct = 22;
   let zieht = false;
 
-  const merken = (wert) => {
-    try {
-      localStorage.setItem(EMPFANG_SPALTE_MERKER, wert);
-    } catch (_) {
-      /* gleichgültig */
-    }
-  };
-
   const beenden = (ereignis) => {
     if (!zieht) return;
     zieht = false;
@@ -569,10 +597,10 @@ function macheEmpfangSpalter() {
     } catch (_) {
       /* Capture war schon weg */
     }
-    const wert = getComputedStyle(spalten)
-      .getPropertyValue("--dock-empfang-pct")
-      .trim();
-    if (wert) merken(wert);
+    merkeCssVar(
+      EMPFANG_SPALTE_MERKER,
+      getComputedStyle(spalten).getPropertyValue("--dock-empfang-pct").trim(),
+    );
   };
 
   spalter.addEventListener("pointerdown", (ereignis) => {
@@ -588,12 +616,7 @@ function macheEmpfangSpalter() {
   });
   spalter.addEventListener("pointermove", (ereignis) => {
     if (!zieht) return;
-    const breite = spalten.getBoundingClientRect().width;
-    if (breite < 40) return;
-    // Nach rechts ziehen → QR schmaler; nach links → QR breiter (Anteil der Dock-Breite).
-    const delta = ((startX - ereignis.clientX) / breite) * 100;
-    const pct = Math.min(48, Math.max(12, startPct + delta));
-    spalten.style.setProperty("--dock-empfang-pct", `${Math.round(pct)}%`);
+    setzeEmpfangSpaltePct(spalten, startPct, startX, ereignis.clientX);
   });
   spalter.addEventListener("pointerup", beenden);
   spalter.addEventListener("pointercancel", beenden);

@@ -12,7 +12,8 @@
 
     <nav class="row" style="gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
         <a class="btn {% if active_tab == 'gui' %}action{% endif %}"
-           href="{{ url_for(service.id + '_endpoint.gui') }}">Oberfläche</a>
+           href="{{ url_for(service.id + '_endpoint.gui') }}"
+           target="_blank" rel="noopener">Oberfläche</a>
         <a class="btn {% if active_tab == 'index' %}action{% endif %}"
            href="{{ url_for(service.id + '_endpoint.index') }}">Übersicht</a>
         <a class="btn {% if active_tab == 'wallets' %}action{% endif %}"

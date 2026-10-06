@@ -1,4 +1,4 @@
-# Bitcoin Core Regtest für Specter + xPubQuery Plugin-Tests
+# Bitcoin Core Regtest für Specter + SatSage Plugin-Tests
 # Start: docker compose -f docker-compose.regtest.yml up -d
 services:
   bitcoind:

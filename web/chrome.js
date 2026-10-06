@@ -247,6 +247,7 @@ async function start() {
   macheLogZiehbar();
   macheDockSpalter();
   macheEmpfangSpalter();
+  if (typeof bindeNavLeiste === "function") bindeNavLeiste();
   setzeLernhinweiseDelegates();
   setzeEmpfangAnimDebug();
   setzeEmpfangLabSenden();
@@ -330,6 +331,7 @@ async function start() {
       if (typeof zeichneLlmPille === "function" && Zustand.llmStatus) {
         zeichneLlmPille();
       }
+      if (typeof aktualisiereNavWerkzeuge === "function") aktualisiereNavWerkzeuge();
       if (Zustand.ansicht === "wallet" && Zustand.walletId) {
         zeigeWallet(Zustand.walletId).catch(() => {});
       } else if (Zustand.ansicht === "steuerjahr" && typeof ladeSteuerjahr === "function") {

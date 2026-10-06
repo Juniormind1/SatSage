@@ -15,14 +15,15 @@ Specter Desktop (Flask)
  └── Extension satsage
       ├── bridge.py      # in-process: Specter → SatSageContext
       ├── gui_server.py  # startet server.py im Hintergrund (Daemon-Thread)
-      ├── controller.py  # /svc/satsage/ — iframe „Oberfläche“ + Legacy-Tabs
+      ├── controller.py  # /svc/satsage/ — „Oberfläche“ eigener Tab + Legacy-Tabs
       └── specter_session.py  # Analyse-Backend (Plaintext-Fallback)
 ```
 
-**Oberfläche:** Unter `/svc/satsage/gui` läuft dieselbe Web-GUI wie `py server.py`
-(iframe auf `http://127.0.0.1:<port>/?t=…`). Specter-Wallets werden in
+**Oberfläche:** Unter `/svc/satsage/gui` startet dieselbe Web-GUI wie `py server.py`
+(`http://127.0.0.1:<port>/?t=…`) **in einem eigenen Tab** — im Specter-iframe
+ist zu wenig Platz. Specter-Wallets werden in
 `specter_plugin/.specter_dev/satsage.env` gespiegelt (nicht die Repo-`.env`).
-Falls der Browser das iframe blockiert: Link „In neuem Tab öffnen“.
+iframe nur noch mit `?embed=1`.
 
 | Quelle | Was SatSage braucht | Wie geholt |
 |--------|----------------------|------------|
@@ -56,7 +57,7 @@ Browser: **http://127.0.0.1:25441**
 1. Node verbinden (Regtest: `localhost:18443`, User `bitcoin`, Pass `secret`)
 2. Device + Watch-Only-Wallet mit XPUB anlegen (oder Hot-Wallet im Regtest)
 3. **Plugins → SatSage** aktivieren
-4. Sidebar → **SatSage** → **Oberfläche** (volle Web-GUI per iframe; mind. 640px hoch, damit Log und Assistent unten Platz haben)
+4. Sidebar → **SatSage** → **Oberfläche** (volle Web-GUI in einem eigenen Tab)
 5. Optional: Übersicht / Wallets / klassische Analyse / `context.json`
 6. API-Probe: `./.venv/bin/python scripts/probe_api.py`
 

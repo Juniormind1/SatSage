@@ -86,11 +86,11 @@ Offline-Bridge ohne GUI:
 | Node verbunden | `node.host/port/chain` gesetzt (`regtest`) |
 | `unit_bridge.py` | exit 0; Secrets in Dump maskiert |
 
-### T-GUI — iframe / Tab
+### T-GUI — eigener Tab / iframe
 
 | Schritt | Erwartung |
 |---------|-----------|
-| Oberfläche öffnen | iframe oder „neuer Tab“ → GUI mit Token-URL auf `127.0.0.1:8730` |
+| Oberfläche öffnen | eigener Tab mit Token-URL auf `127.0.0.1:8730` (`?embed=1` = iframe) |
 | `satsage.env` | unter `.specter_dev/` mit `WALLET_*` aus Specter |
 | Wallet-Nav in GUI | übernommene Namen sichtbar |
 | UTXO-Cache | nach Seed `source=specter` oder nach Scan Bestand > 0 |

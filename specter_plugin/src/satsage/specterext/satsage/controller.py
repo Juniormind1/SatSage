@@ -36,11 +36,11 @@ def _session(force: bool = False):
 @login_required
 def gui():
     """
-    Volle Web-GUI (server.py + web/) per iframe.
+    Volle Web-GUI (server.py + web/).
 
-    Startet den lokalen GUI-Server bei Bedarf und speist Specter-Wallets ein.
-    Fallback-Link öffnet dieselbe URL in einem neuen Tab (falls CSP das
-    iframe blockiert).
+    Standard: Redirect auf die GUI-URL. Der Knopf „Oberfläche“ öffnet
+    ``/gui`` mit ``target=_blank``, damit Specter offen bleibt.
+    ``?embed=1`` behält das iframe im Specter-Fenster.
     """
     gui_info = None
     error = None
@@ -52,13 +52,19 @@ def gui():
         logger.exception("GUI-Server")
         error = str(exc)
 
+    gui_url = (gui_info or {}).get("url") or ""
+    embed = request.args.get("embed") == "1"
+    if gui_url and not error and not embed:
+        return redirect(gui_url)
+
     return render_template(
         "satsage/gui.jinja",
         service=SatsageService,
         gui=gui_info,
-        gui_url=(gui_info or {}).get("url") or "",
+        gui_url=gui_url,
         error=error,
         active_tab="gui",
+        embed=embed,
     )
 
 

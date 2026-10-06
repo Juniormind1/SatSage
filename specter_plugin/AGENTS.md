@@ -46,7 +46,7 @@ Session ist **gecacht** (`context_fingerprint` aus Node+Wallets); UTXOs werden b
 
 | Route | Funktion |
 |-------|----------|
-| `/svc/satsage/gui` | Volle Web-GUI (`server.py`+`web/`) per iframe; Specter-Wallets via `gui_server.py` |
+| `/svc/satsage/gui` | Volle Web-GUI (`server.py`+`web/`) in eigenem Tab (Redirect); `?embed=1` = iframe; Specter-Wallets via `gui_server.py` |
 | `/svc/satsage/` | Übersicht + Session-Info |
 | `/svc/satsage/wallets` | Wallet-Liste |
 | `/svc/satsage/wallet/<alias>` | Detail (UTXO/Tx-Preview) |
