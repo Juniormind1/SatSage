@@ -78,6 +78,13 @@ const katalog = {
   "wallet.fifoTargetStatusChecking": "…",
   "wallet.fifoSpendAmountInvalidFormat": "Format ungültig, mehr als 0 bis {max}.",
   "wallet.fifoSpendAmountInvalidRange": "Bereich: mehr als 0 bis {max}.",
+  "wallet.fifoSpendNoRate": "kein Kurs",
+  "wallet.fifoSpendStaleRate": "veralteter Kurs",
+  "wallet.fifoSpendNoRateTitle": "Kein Kurs",
+  "wallet.fifoSpendStaleRateTitle": "Kurs älter als ein Tag (Stand {stand}).",
+  "wallet.fifoSpendFiatTitle": "Fiat {waehrung}",
+  "wallet.fifoSpendUnitEur": "€",
+  "wallet.fifoSpendUnitUsd": "$",
   "wallet.fifoSpendUnavailableTitle": "Grüne sats gerade nicht verfügbar: {msg}",
   "wallet.fifoPsbtSummary": "{datei}: {inputs} Input(s), Gebühr {fee} sats ({rate} sat/vB, {vsize} vB)",
   "wallet.fifoPsbtOutputTarget": "Ziel {betrag} → {adresse} ({farbe}) grün {gruen} / gelb {gelb}",
@@ -93,6 +100,14 @@ const formatLocale = () => "de-DE";
 const formatSats = (n) => `${n} sats`;
 let SPRACHE = "de";
 const uiSprache = () => SPRACHE;
+const fiatWaehrung = () => SPRACHE === "en" ? "USD" : "EUR";
+function formatEurAusSats(sats) {
+  const kurs = Zustand.kurs;
+  if (!kurs || !(Number(kurs.amount) > 0)) return "";
+  const fiat = (Number(sats || 0) / 1e8) * Number(kurs.amount);
+  const n = fiat.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return String(kurs.currency || "EUR").toUpperCase() === "USD" ? `$${n}` : `${n} €`;
+}
 function mkEl() {
   const attrs = {};
   const klassen = new Set();
@@ -111,8 +126,11 @@ function mkEl() {
 const els = {
   "#fifo-spend": mkEl(),
   "#fifo-spend-text": mkEl(),
+  "#fifo-spend-gruen-fiat": mkEl(),
   "#fifo-spend-betrag": mkEl(),
   "#fifo-spend-einheit": mkEl(),
+  "#fifo-spend-fiat": mkEl(),
+  "#fifo-spend-fiat-einheit": mkEl(),
   "#fifo-spend-psbt": mkEl(),
   "#fifo-spend-psbt-huelle": mkEl(),
   "#fifo-spend-ziel": mkEl(),
@@ -129,6 +147,7 @@ const els = {
 const downloads = [];
 const document = {
   body: { appendChild() {} },
+  activeElement: null,
   createElement() {
     const a = { click() { downloads.push({ name: a.download, href: a.href }); }, remove() {} };
     return a;
@@ -218,6 +237,12 @@ _FUNKTIONEN = [
     "function fifoPendingInfo(",
     "function formatSatcomma(",
     "function fifoBetragMitFiat(",
+    "function fifoFeldFokus(",
+    "function fifoKursStand(",
+    "function fifoSatsZuFiatZahl(",
+    "function fifoFiatZuSats(",
+    "function fifoFiatZuZahl(",
+    "function fifoFiatFeldText(",
     "function fifoBetragText(",
     "function fifoSpendBrutto(",
     "function fifoSpendMax(",
@@ -229,6 +254,9 @@ _FUNKTIONEN = [
     "function holeFifoSpendAuswertung(",
     "function aktualisiereFifoSpend(",
     "function zeichneFifoSpend(",
+    "function zeichneFifoSpendGruenFiat(",
+    "function zeichneFifoSpendFiatEinheit(",
+    "function schreibeFifoSpendFiatAusSats(",
     "function fifoSatsGruppiert(",
     "function fifoBetragFeldText(",
     "function fifoBetragZuSats(",
@@ -237,6 +265,8 @@ _FUNKTIONEN = [
     "function fifoSpendBetragGueltig(",
     "function pruefeFifoSpendBetrag(",
     "function formatiereFifoSpendBetrag(",
+    "function pruefeFifoSpendFiat(",
+    "function formatiereFifoSpendFiat(",
     "function fifoNetzName(",
     "function fifoZielZeileOffen(",
     "function fifoZielZeigen(",
@@ -275,6 +305,7 @@ _FUNKTIONEN = [
 def _node(skript: str) -> dict:
     konst = [z for z in WALLETS.splitlines()
              if z.startswith(("const FIFO_SATCOMMA_LUECKE", "const FIFO_MAX_SATS",
+                              "const FIFO_KURS_MAX_ALTER_MS",
                               "const FIFO_ZIEL_ENTPRELLEN_MS", "const FIFO_FEE_ENTPRELLEN_MS",
                               "const FIFO_STRATEGIEN", "const FIFO_NETTO_ENTPRELLEN_MS"))]
     teile = [_STUB, *konst] + [_funktion(WALLETS, k) for k in _FUNKTIONEN]
@@ -775,6 +806,119 @@ class TestFifoLeiste(unittest.TestCase):
         self.assertNotIn("anschaffung", q)
         self.assertIn("jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}", STEUER)
         self.assertIn("&stichtag=${encodeURIComponent(stichtag)}", STEUER)
+
+    def test_gruen_fiat_kein_kurs_ok_veraltet(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV } };
+          aktualisiereFifoSpend("w1"); await warte();
+          const kein = {
+            text: els["#fifo-spend-gruen-fiat"].textContent,
+            zustand: els["#fifo-spend-gruen-fiat"].dataset.zustand,
+            einheit: els["#fifo-spend-fiat-einheit"].textContent,
+            fiatGesperrt: els["#fifo-spend-fiat"].disabled,
+          };
+          Zustand.kurs = { amount: 100000, currency: "EUR",
+            time: Math.floor(Date.now() / 1000),
+            day: new Date().toISOString().slice(0, 10) };
+          zeichneFifoSpend(Zustand.fifoSpend);
+          const ok = {
+            text: els["#fifo-spend-gruen-fiat"].textContent,
+            zustand: els["#fifo-spend-gruen-fiat"].dataset.zustand,
+            einheit: els["#fifo-spend-fiat-einheit"].textContent,
+            veraltetKlasse: els["#fifo-spend-fiat"].classList.contains("veraltet"),
+          };
+          Zustand.kurs = { amount: 100000, currency: "EUR",
+            time: Math.floor(Date.now() / 1000) - 3 * 86400, day: "2020-01-01",
+            warning: "letzter Kurs aus Historie" };
+          zeichneFifoSpend(Zustand.fifoSpend);
+          process.stdout.write(JSON.stringify({
+            kein, ok,
+            veraltet: els["#fifo-spend-gruen-fiat"].textContent,
+            veraltetZustand: els["#fifo-spend-gruen-fiat"].dataset.zustand,
+            veraltetEinheit: els["#fifo-spend-fiat-einheit"].textContent,
+            veraltetKlasse: els["#fifo-spend-fiat"].classList.contains("veraltet"),
+            veraltetTitel: els["#fifo-spend-gruen-fiat"].title,
+          }));
+        """)
+        self.assertEqual(erg["kein"]["text"], "kein Kurs")
+        self.assertEqual(erg["kein"]["zustand"], "kein")
+        self.assertEqual(erg["kein"]["einheit"], "kein Kurs")
+        self.assertTrue(erg["kein"]["fiatGesperrt"])
+        self.assertIn("€", erg["ok"]["text"])
+        self.assertEqual(erg["ok"]["zustand"], "ok")
+        self.assertEqual(erg["ok"]["einheit"], "€")
+        self.assertFalse(erg["ok"]["veraltetKlasse"])
+        self.assertIn("veralteter Kurs", erg["veraltet"])
+        self.assertEqual(erg["veraltetZustand"], "veraltet")
+        self.assertEqual(erg["veraltetEinheit"], "veralteter Kurs")
+        self.assertTrue(erg["veraltetKlasse"])
+        self.assertIn("2020-01-01", erg["veraltetTitel"])
+
+    def test_umrechnung_erst_beim_verlassen_eur_schreibt_sat(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV } };
+          Zustand.kurs = { amount: 100000, currency: "EUR",
+            time: Math.floor(Date.now() / 1000),
+            day: new Date().toISOString().slice(0, 10) };
+          aktualisiereFifoSpend("w1"); await warte();
+          const sat = els["#fifo-spend-betrag"], fiat = els["#fifo-spend-fiat"];
+          sat.value = "25000"; pruefeFifoSpendBetrag();
+          const waehrendTippen = fiat.value;
+          formatiereFifoSpendBetrag();
+          const nachSatBlur = { fiat: fiat.value, sats: Zustand.fifoSpendBetragSats };
+          fiat.value = "10,00"; pruefeFifoSpendFiat();
+          const waehrendEur = { sat: sat.value, sats: Zustand.fifoSpendBetragSats,
+                                rot: fiat.classList.contains("ungueltig") };
+          formatiereFifoSpendFiat();
+          process.stdout.write(JSON.stringify({
+            waehrendTippen, nachSatBlur, waehrendEur,
+            nachEurBlur: { sat: sat.value, sats: Zustand.fifoSpendBetragSats, fiat: fiat.value },
+          }));
+        """)
+        self.assertEqual(erg["waehrendTippen"], "")
+        self.assertEqual(erg["nachSatBlur"]["sats"], 25000)
+        self.assertTrue(erg["nachSatBlur"]["fiat"])
+        self.assertEqual(erg["waehrendEur"]["sats"], 25000)
+        self.assertEqual(erg["waehrendEur"]["sat"], f"25{NB}000")
+        self.assertFalse(erg["waehrendEur"]["rot"])
+        # 10 € bei 100 000 €/BTC = 10 000 sats; Coin-Auswahl liest das Sat-Feld.
+        self.assertEqual(erg["nachEurBlur"]["sats"], 10000)
+        self.assertEqual(erg["nachEurBlur"]["sat"], f"10{NB}000")
+
+    def test_eur_parser_und_leeres_feld_aendert_sats_nicht(self):
+        erg = _node(r"""
+          const f = (v) => { const p = fifoFiatZuZahl(v);
+            return p.leer ? "leer" : (p.fehler ? "format" : p.zahl); };
+          antwort = { zeitstrahl: { events: EV } };
+          Zustand.kurs = { amount: 100000, currency: "EUR",
+            time: Math.floor(Date.now() / 1000),
+            day: new Date().toISOString().slice(0, 10) };
+          aktualisiereFifoSpend("w1"); await warte();
+          const sat = els["#fifo-spend-betrag"], fiat = els["#fifo-spend-fiat"];
+          sat.value = "25000"; formatiereFifoSpendBetrag();
+          fiat.value = ""; formatiereFifoSpendFiat();
+          const leer = { sat: sat.value, sats: Zustand.fifoSpendBetragSats };
+          fiat.value = "1.000,5"; pruefeFifoSpendFiat();
+          const zweiTrenner = fiat.classList.contains("ungueltig");
+          const vorher = Zustand.fifoSpendBetragSats;
+          formatiereFifoSpendFiat();
+          process.stdout.write(JSON.stringify({
+            parser: { leer: f(""), euro: f("12,50 €"), punkt: f("12.5"), drei: f("1,234"),
+                      zwei: f("1.000,5"), null: f("0") },
+            leer, zweiTrenner, nachUngueltig: Zustand.fifoSpendBetragSats, vorher,
+            zuSats: fifoFiatZuSats(10),
+          }));
+        """)
+        self.assertEqual(erg["parser"]["leer"], "leer")
+        self.assertEqual(erg["parser"]["euro"], 12.5)
+        self.assertEqual(erg["parser"]["punkt"], 12.5)
+        self.assertEqual(erg["parser"]["drei"], "format")
+        self.assertEqual(erg["parser"]["zwei"], "format")
+        self.assertEqual(erg["parser"]["null"], 0)
+        self.assertEqual(erg["leer"]["sats"], 25000)
+        self.assertTrue(erg["zweiTrenner"])
+        self.assertEqual(erg["nachUngueltig"], 25000)
+        self.assertEqual(erg["zuSats"], 10000)
 
 
 @unittest.skipUnless(shutil.which("node"), "node fehlt")
@@ -1438,6 +1582,14 @@ class TestFifoStatisch(unittest.TestCase):
         "wallet.fifoSpendAmountSats",
         "wallet.fifoSpendAmountInvalidFormat",
         "wallet.fifoSpendAmountInvalidRange",
+        "wallet.fifoSpendFiatPlaceholder",
+        "wallet.fifoSpendUnitEur",
+        "wallet.fifoSpendUnitUsd",
+        "wallet.fifoSpendNoRate",
+        "wallet.fifoSpendStaleRate",
+        "wallet.fifoSpendNoRateTitle",
+        "wallet.fifoSpendStaleRateTitle",
+        "wallet.fifoSpendFiatTitle",
         "wallet.fifoSpendUnitSats",
         "wallet.fifoSpendUnitBtc",
         "wallet.fifoSpendPsbtOpen",
@@ -1551,6 +1703,10 @@ class TestFifoStatisch(unittest.TestCase):
             self.assertEqual(len(code["wallet.fifoStrategyTitle"].split("\n")), 5)
         self.assertEqual(de["wallet.fifoSpendAmountPlaceholder"], "sats oder BTC")
         self.assertEqual(en["wallet.fifoSpendAmountPlaceholder"], "sats or BTC")
+        self.assertEqual(de["wallet.fifoSpendNoRate"], "kein Kurs")
+        self.assertEqual(de["wallet.fifoSpendStaleRate"], "veralteter Kurs")
+        self.assertEqual(en["wallet.fifoSpendNoRate"], "no rate")
+        self.assertEqual(en["wallet.fifoSpendStaleRate"], "stale rate")
         self.assertNotIn("wallet.fifoSpendAmountInvalid", de)
         # Platzhalter in beiden Sprachen gleich.
         for k in self.SCHLUESSEL:
@@ -1587,7 +1743,15 @@ class TestFifoStatisch(unittest.TestCase):
         self.assertIn('inputmode="decimal"', feld)
         self.assertNotIn('type="number"', feld)
         self.assertIn('id="fifo-spend-einheit"', kopf)
+        self.assertIn('id="fifo-spend-gruen-fiat"', kopf)
+        self.assertIn('id="fifo-spend-fiat"', kopf)
+        self.assertIn('id="fifo-spend-fiat-einheit"', kopf)
+        self.assertLess(kopf.index('id="fifo-spend-text"'), kopf.index('id="fifo-spend-gruen-fiat"'))
+        self.assertLess(kopf.index('id="fifo-spend-betrag"'), kopf.index('id="fifo-spend-fiat"'))
         self.assertIn('data-i18n-placeholder="wallet.fifoSpendAmountPlaceholder"', feld)
+        fiat = re.search(r'<input[^>]*id="fifo-spend-fiat"[^>]*>', kopf, re.S).group(0)
+        self.assertIn('inputmode="decimal"', fiat)
+        self.assertIn('data-i18n-placeholder="wallet.fifoSpendFiatPlaceholder"', fiat)
         knopf = re.search(r'<button[^>]*id="fifo-spend-psbt"[^>]*>Senden ▸</button>', kopf, re.S).group(0)
         self.assertIn("disabled", knopf)
         self.assertIn('aria-controls="fifo-spend-ziel"', knopf)
@@ -1641,6 +1805,8 @@ class TestFifoStatisch(unittest.TestCase):
     def test_einstellungen_hook_und_css_theme(self):
         self.assertIn("aktualisiereFifoSpend()", EINST)
         self.assertIn(".fifo-spend-betrag.ungueltig", CSS)
+        self.assertIn(".fifo-spend-fiat.veraltet", CSS)
+        self.assertIn("fifo-spend-gruen-fiat", CSS)
         block = CSS[CSS.index(".fifo-spend {"):CSS.index("@media (max-width: 720px) {\n  .fifo-spend")]
         self.assertNotRegex(block, r"#[0-9A-Fa-f]{3,6}\b", "Farben nur über Theme-Variablen")
         # Adressfeld: Platz für bech32m (62 Zeichen, Regtest 64), darf schrumpfen (Text scrollt).

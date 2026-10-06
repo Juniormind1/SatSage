@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallet · FIFO-Spend · Euro-Feld:** Neben dem Sat-Feld steht ein EUR-Feld (Englisch: USD). Eingabe in sats/BTC rechnet beim Verlassen in Fiat um, Fiat-Eingabe schreibt beim Verlassen ganze sats ins Sat-Feld und stößt darüber die Coin-Auswahl an. Fürs Senden zählt nur das Sat-Feld. Neben den grünen ausgebbaren sats steht der Fiat-Betrag; fehlt der Kurs, steht „kein Kurs“, ist er älter als ein Tag „veralteter Kurs“ (gelb, mit Tooltip).
 - **Wallet · FIFO-Spend · Sende-Vorschau:** Klappt „Senden ▾“ die Ziel-Zeile auf, zeigt die UTXO-Liste nur noch die Inputs der gewählten Coin-Auswahl (auch von anderen Seiten, ohne Pager). Statt des UTXO-Saldos steht in Grün, wie viele Sats dieses UTXO an die Zieladresse gehen (älteste Inputs zuerst, Summe = eingegebener Betrag). Darunter eine Zeile „Change“ mit dem Wechselgeld in Gelb. Das Suchfeld oben ist inaktiv, solange die Ziel-Zeile offen ist.
 - **Tests · Hart-Dealbreaker:** T1 (keine Seed-Eingabe), T6 (kein Remote-JS), T13 (Lern-URLs), T9 (kein Broadcast, Faucet nur Regtest), Auth-Rest und CSRF am Loopback. Auf `dev-juniormind` optional, vor Merge nach `main` Pflicht. Labor-Prüfer erklären fehlendes bitcoind/Electrs auf Deutsch und starten auf Windows kein Docker.
 - **Lab-Faucet:** Der Endpunkt importierte `_LAB_FAUCET_WALLET` aus `server.py`, wo der Name nicht existiert — jeder Aufruf endete mit 500. Die Konstante liegt in `httpserver/api/wallets.py`; außerhalb von Regtest kommt 403.

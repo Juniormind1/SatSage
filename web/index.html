@@ -426,12 +426,18 @@
             <div id="fifo-spend" class="fifo-spend" role="group"
                  data-i18n-aria-label="wallet.fifoSpendAria" aria-label="FIFO-Spend" hidden>
               <span id="fifo-spend-text" class="fifo-spend-text"></span>
+              <span id="fifo-spend-gruen-fiat" class="fifo-spend-gruen-fiat" hidden></span>
               <!-- Ohne Komma/Punkt ganze sats, mit Komma oder Punkt BTC; intern ganze sats.
-                   Die erkannte Einheit steht live daneben. -->
+                   Die erkannte Einheit steht live daneben. EUR daneben: nur Umrechnung
+                   beim Verlassen, Spend und Coin-Auswahl nehmen das Sat-Feld. -->
               <input type="text" id="fifo-spend-betrag" class="fifo-spend-betrag"
                      inputmode="decimal" autocomplete="off" spellcheck="false" disabled
                      data-i18n-placeholder="wallet.fifoSpendAmountPlaceholder" placeholder="sats oder BTC">
               <span id="fifo-spend-einheit" class="fifo-spend-einheit" aria-live="polite"></span>
+              <input type="text" id="fifo-spend-fiat" class="fifo-spend-betrag fifo-spend-fiat"
+                     inputmode="decimal" autocomplete="off" spellcheck="false" disabled
+                     data-i18n-placeholder="wallet.fifoSpendFiatPlaceholder" placeholder="EUR">
+              <span id="fifo-spend-fiat-einheit" class="fifo-spend-einheit fifo-spend-fiat-einheit" aria-live="polite"></span>
               <!-- Aufklapp-Dreieck: „Senden ▸“ zu, „Senden ▾“ auf (en „Send ▸/▾“) (aria-expanded); klappt die Ziel-Zeile auf, nur mit gültigem Betrag. Text und Tooltip setzt wallets.js. -->
               <span id="fifo-spend-psbt-huelle" class="fifo-spend-psbt-huelle">
                 <button type="button" id="fifo-spend-psbt" class="knopf knopf-klein" disabled

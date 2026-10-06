@@ -1377,6 +1377,8 @@ function aktualisiereFifoSpend(walletId) {
   if (!stand || stand.walletId !== id) {
     const feld = $("#fifo-spend-betrag");
     if (feld) feld.value = "";
+    const fiat = $("#fifo-spend-fiat");
+    if (fiat) fiat.value = "";
   }
   if (stand && stand.schluessel === schluessel && stand.zustand !== "start") {
     zeichneFifoSpend(stand);
@@ -1413,6 +1415,8 @@ function aktualisiereFifoSpend(walletId) {
 
 /** Schmales geschütztes Leerzeichen (U+202F) als Gruppentrenner der Satcomma-Schreibweise. */
 const FIFO_SATCOMMA_LUECKE = "\u202F";
+/** Spotkurs älter als ein Tag gilt in der FIFO-Spend-Zeile als veraltet. */
+const FIFO_KURS_MAX_ALTER_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Satcomma nur für die FIFO-Spend-Zeile: BTC mit allen 8 Nachkommastellen,
@@ -1436,6 +1440,75 @@ function formatSatcomma(sats, sprache) {
 function fifoBetragMitFiat(sats) {
   const fiat = typeof formatEurAusSats === "function" ? formatEurAusSats(Number(sats) || 0) : null;
   return fiat ? `${fifoBetragText(sats)} ≈ ${fiat}` : fifoBetragText(sats);
+}
+
+/** true, wenn *feld* gerade den Tastaturfokus hat. */
+function fifoFeldFokus(feld) {
+  return typeof document !== "undefined" && !!feld && document.activeElement === feld;
+}
+
+/**
+ * Spotkurs für die FIFO-Spend-Zeile: ``ok``, ``kein`` oder ``veraltet``
+ * (Tagesdatum vor heute, Zeitstempel älter als ein Tag, oder Historie-Warnung).
+ */
+function fifoKursStand() {
+  const kurs = Zustand.kurs;
+  if (!kurs || !(Number(kurs.amount) > 0)) return { zustand: "kein", kurs: null };
+  const heute = new Date().toISOString().slice(0, 10);
+  let veraltet = false;
+  if (kurs.day && String(kurs.day) < heute) veraltet = true;
+  const ts = Number(kurs.time);
+  if (!veraltet && Number.isFinite(ts) && ts > 0) {
+    const ms = ts > 1e12 ? ts : ts * 1000;
+    if (Date.now() - ms > FIFO_KURS_MAX_ALTER_MS) veraltet = true;
+  }
+  if (!veraltet && kurs.warning && !(kurs.day && String(kurs.day) >= heute)) {
+    veraltet = true;
+  }
+  return { zustand: veraltet ? "veraltet" : "ok", kurs };
+}
+
+/** Fiat-Zahl zum Spotkurs, sonst null. */
+function fifoSatsZuFiatZahl(sats) {
+  const stand = fifoKursStand();
+  if (stand.zustand === "kein") return null;
+  return (Math.max(0, Number(sats) || 0) / 1e8) * Number(stand.kurs.amount);
+}
+
+/** Ganze sats aus einer Fiat-Zahl zum Spotkurs, sonst null. */
+function fifoFiatZuSats(zahl) {
+  const stand = fifoKursStand();
+  if (stand.zustand === "kein") return null;
+  const kurs = Number(stand.kurs.amount);
+  if (!(kurs > 0) || !Number.isFinite(zahl) || zahl < 0) return null;
+  const sats = Math.round((Number(zahl) * 1e8) / kurs);
+  if (!Number.isFinite(sats) || sats < 0 || sats > FIFO_MAX_SATS) return null;
+  return sats;
+}
+
+/**
+ * Fiat-Eingabe: Leerzeichen zählen nicht, genau ein Komma oder Punkt als
+ * Dezimalzeichen, höchstens 2 Nachkommastellen, optional €/EUR/$/USD.
+ */
+function fifoFiatZuZahl(roh) {
+  let text = String(roh ?? "").replace(/[\s\u00A0\u2007\u2009\u202F]+/g, "");
+  if (!text) return { leer: true };
+  text = text.replace(/(€|eur|\$|usd)$/i, "");
+  if (!text) return { leer: true };
+  if (!/[0-9]/.test(text) || !/^[0-9]*[.,]?[0-9]*$/.test(text)) return { fehler: "format" };
+  const teile = text.split(/[.,]/);
+  const nachkomma = teile.length > 1 ? teile[1] : "";
+  if (nachkomma.length > 2) return { fehler: "format" };
+  const zahl = Number(`${teile[0] || "0"}.${nachkomma}`);
+  if (!Number.isFinite(zahl) || zahl < 0) return { fehler: "format" };
+  return { zahl };
+}
+
+/** Fiat-Zahl fürs Eingabefeld (immer 2 Nachkommastellen, Locale-Trenner). */
+function fifoFiatFeldText(zahl) {
+  if (!Number.isFinite(zahl)) return "";
+  const locale = typeof formatLocale === "function" ? formatLocale() : "de-DE";
+  return zahl.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** Betrag in der FIFO-Spend-Zeile (Anzeige und Tooltip). */
@@ -1598,11 +1671,99 @@ function zeichneFifoSpend(stand) {
       feld.title = "";
     }
     // Sprache gewechselt / neu gezeichnet: nicht fokussierte Eingabe neu setzen.
-    const fokus = typeof document !== "undefined" && document.activeElement === feld;
-    if (!fokus) fifoBetragNeuSchreiben(feld);
+    if (!fifoFeldFokus(feld)) fifoBetragNeuSchreiben(feld);
     pruefeFifoSpendBetrag();
   }
+  zeichneFifoSpendGruenFiat(max);
+  zeichneFifoSpendFiatEinheit(max);
+  const fiatFeld = $("#fifo-spend-fiat");
+  if (fiatFeld && !fifoFeldFokus(fiatFeld) && !fifoFeldFokus(feld)) {
+    schreibeFifoSpendFiatAusSats();
+  }
   planeFifoNetto();
+}
+
+/** EUR der grünen ausgebbaren sats neben der Summe; ohne/veralteter Kurs als Hinweis. */
+function zeichneFifoSpendGruenFiat(max) {
+  const el = $("#fifo-spend-gruen-fiat");
+  if (!el) return;
+  if (max === null) {
+    el.hidden = true;
+    setzeText(el, "");
+    el.title = "";
+    el.dataset.zustand = "";
+    return;
+  }
+  el.hidden = false;
+  const stand = fifoKursStand();
+  if (stand.zustand === "kein") {
+    setzeText(el, t("wallet.fifoSpendNoRate"));
+    el.dataset.zustand = "kein";
+    el.title = t("wallet.fifoSpendNoRateTitle");
+    return;
+  }
+  const fiat = typeof formatEurAusSats === "function" ? formatEurAusSats(max) : "";
+  if (stand.zustand === "veraltet") {
+    const tag = stand.kurs.day || "";
+    setzeText(el, fiat
+      ? `≈ ${fiat} · ${t("wallet.fifoSpendStaleRate")}`
+      : t("wallet.fifoSpendStaleRate"));
+    el.dataset.zustand = "veraltet";
+    el.title = t("wallet.fifoSpendStaleRateTitle", { stand: tag || "?" });
+    return;
+  }
+  setzeText(el, fiat ? `≈ ${fiat}` : "");
+  el.dataset.zustand = "ok";
+  el.title = "";
+}
+
+/** Einheit und Sperre des Fiat-Felds: €/$, „kein Kurs“, „veralteter Kurs“. */
+function zeichneFifoSpendFiatEinheit(max) {
+  const label = $("#fifo-spend-fiat-einheit");
+  const feld = $("#fifo-spend-fiat");
+  if (!label || !feld) return;
+  const stand = fifoKursStand();
+  const satSperre = max === null;
+  feld.disabled = satSperre || stand.zustand === "kein";
+  feld.classList.toggle("veraltet", stand.zustand === "veraltet");
+  label.dataset.zustand = stand.zustand;
+  if (stand.zustand === "kein") {
+    setzeText(label, t("wallet.fifoSpendNoRate"));
+    const titel = t("wallet.fifoSpendNoRateTitle");
+    label.title = titel;
+    feld.title = titel;
+    return;
+  }
+  const w = String((stand.kurs && stand.kurs.currency) || (typeof fiatWaehrung === "function" ? fiatWaehrung() : "EUR")).toUpperCase();
+  if (stand.zustand === "veraltet") {
+    setzeText(label, t("wallet.fifoSpendStaleRate"));
+    const titel = t("wallet.fifoSpendStaleRateTitle", { stand: (stand.kurs && stand.kurs.day) || "?" });
+    label.title = titel;
+    feld.title = titel;
+    return;
+  }
+  setzeText(label, w === "USD" ? t("wallet.fifoSpendUnitUsd") : t("wallet.fifoSpendUnitEur"));
+  label.title = "";
+  feld.title = t("wallet.fifoSpendFiatTitle", { waehrung: w });
+}
+
+/** Fiat-Feld aus dem Sat-Feld füllen — nur Anzeige, keine Coin-Auswahl. */
+function schreibeFifoSpendFiatAusSats() {
+  const fiatFeld = $("#fifo-spend-fiat");
+  const satFeld = $("#fifo-spend-betrag");
+  if (!fiatFeld || fifoFeldFokus(fiatFeld)) return;
+  if (fifoKursStand().zustand === "kein") {
+    fiatFeld.value = "";
+    return;
+  }
+  const p = fifoBetragZuSats(satFeld && satFeld.value);
+  if (p.leer) {
+    fiatFeld.value = "";
+    return;
+  }
+  if (p.fehler || p.sats === undefined) return;
+  const zahl = fifoSatsZuFiatZahl(p.sats);
+  fiatFeld.value = zahl === null ? "" : fifoFiatFeldText(zahl);
 }
 
 /** Ganze sats in 3er-Gruppen mit U+202F (``12 345 678``), ohne Einheit. */
@@ -1744,12 +1905,60 @@ function fifoBetragNeuSchreiben(feld) {
   if (p.sats !== undefined) feld.value = fifoBetragFeldText(p.sats, p.einheit);
 }
 
-/** Beim Verlassen und mit Enter. */
+/** Beim Verlassen und mit Enter: Sat-Feld formatieren, dann EUR daraus setzen. */
 function formatiereFifoSpendBetrag() {
   const feld = $("#fifo-spend-betrag");
   if (!feld) return;
   fifoBetragNeuSchreiben(feld);
   pruefeFifoSpendBetrag();
+  if (!fifoFeldFokus($("#fifo-spend-fiat"))) schreibeFifoSpendFiatAusSats();
+}
+
+/**
+ * Fiat-Feld nur auf Format prüfen. Keine Coin-Auswahl — die hängt am Sat-Feld.
+ */
+function pruefeFifoSpendFiat() {
+  const feld = $("#fifo-spend-fiat");
+  if (!feld) return;
+  const p = fifoFiatZuZahl(feld.value);
+  const ok = !p.fehler;
+  feld.classList.toggle("ungueltig", !ok);
+  if (ok) feld.removeAttribute("aria-invalid");
+  else feld.setAttribute("aria-invalid", "true");
+}
+
+/**
+ * Beim Verlassen des Fiat-Felds: in ganze sats umrechnen, ins Sat-Feld
+ * schreiben. Spend und Coin-Auswahl lesen nur das Sat-Feld.
+ */
+function formatiereFifoSpendFiat() {
+  const fiatFeld = $("#fifo-spend-fiat");
+  const satFeld = $("#fifo-spend-betrag");
+  if (!fiatFeld || !satFeld) return;
+  const p = fifoFiatZuZahl(fiatFeld.value);
+  if (p.leer) {
+    fiatFeld.value = "";
+    pruefeFifoSpendFiat();
+    return;
+  }
+  if (p.fehler) {
+    pruefeFifoSpendFiat();
+    return;
+  }
+  if (!(p.zahl > 0)) {
+    fiatFeld.classList.toggle("ungueltig", true);
+    fiatFeld.setAttribute("aria-invalid", "true");
+    return;
+  }
+  const sats = fifoFiatZuSats(p.zahl);
+  if (sats === null) {
+    pruefeFifoSpendFiat();
+    return;
+  }
+  const bisher = fifoBetragZuSats(satFeld.value);
+  const einheit = bisher.einheit === "btc" ? "btc" : "sats";
+  satFeld.value = fifoBetragFeldText(sats, einheit);
+  formatiereFifoSpendBetrag();
 }
 
 // --- Ziel-Zeile: „Senden ▸/▾“ klappt auf, Zieladresse live, Gebühr, „PSBT“ erzeugt die Datei ---
@@ -2522,6 +2731,16 @@ function bindeFifoSpend() {
     ev.preventDefault();
     formatiereFifoSpendBetrag();
   });
+  const fiat = $("#fifo-spend-fiat");
+  if (fiat) {
+    fiat.addEventListener("input", pruefeFifoSpendFiat);
+    fiat.addEventListener("blur", formatiereFifoSpendFiat);
+    fiat.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.isComposing) return;
+      ev.preventDefault();
+      formatiereFifoSpendFiat();
+    });
+  }
   // „Senden ▸/▾“ klappt nur die Ziel-Zeile auf — keine PSBT, keine Unterschrift, kein Versand.
   const knopf = $("#fifo-spend-psbt");
   if (knopf) knopf.addEventListener("click", fifoZielUmschalten);

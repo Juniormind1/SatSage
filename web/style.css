@@ -1733,6 +1733,22 @@ input[type="text"].fifo-spend-betrag.ungueltig {
   border-color: var(--krit); background: var(--krit-bg); color: var(--krit);
   outline-color: var(--krit);
 }
+input[type="text"].fifo-spend-fiat { width: 88px; }
+.fifo-spend-gruen-fiat {
+  font-family: var(--mono); font-size: 11px; color: var(--gedaempft);
+  white-space: nowrap;
+}
+.fifo-spend-gruen-fiat[hidden] { display: none; }
+.fifo-spend-gruen-fiat[data-zustand="kein"],
+.fifo-spend-fiat-einheit[data-zustand="kein"] { color: var(--blass); }
+.fifo-spend-gruen-fiat[data-zustand="veraltet"],
+.fifo-spend-fiat-einheit[data-zustand="veraltet"] {
+  color: var(--warn); cursor: help;
+}
+input[type="text"].fifo-spend-fiat.veraltet {
+  border-color: var(--warn); background: var(--warn-bg); color: var(--warn);
+  outline-color: var(--warn);
+}
 /* Ziel-Zeile unter der FIFO-Kopfzeile: Adresse + Status, Gebühr, „PSBT“. */
 .fifo-spend-ziel {
   display: flex; align-items: center; gap: 6px 8px;
