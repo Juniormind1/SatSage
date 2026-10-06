@@ -1788,6 +1788,9 @@ const EmpfangPuls = (() => {
   let sonderQueue = [];
   let sonder = null; // { typ, t0, phase?, walletId? }
   const BTC_ORANGE = { r: 247, g: 147, b: 26 };
+  // 80er-Neon: Innenkante der Maske, Farbe wechselt mit jedem Atemzug.
+  const NEON_MAGENTA = { r: 255, g: 0, b: 255 };
+  const NEON_CYAN = { r: 0, g: 245, b: 255 };
 
   function wuerfleWortAtemRest() {
     return 2 + Math.floor(Math.random() * 3); // 2, 3 oder 4
@@ -2227,6 +2230,52 @@ const EmpfangPuls = (() => {
     ctx.restore();
   }
 
+  function neonFarbeFuerZyklus() {
+    return (maskeIx % 2 === 0) ? NEON_MAGENTA : NEON_CYAN;
+  }
+
+  /**
+   * Neon auf der Innenseite der Maskengrenze (Löcher und Innenkante).
+   * Außenpixel und Canvas-Rand bleiben dunkel. Kern = 255, Bloom fällt nach innen ab.
+   */
+  function neonInnenGlowKarte(innen, seite) {
+    const kern = new Uint8Array(seite * seite);
+    for (let y = 1, p = seite; y < seite - 1; y++) {
+      p = y * seite;
+      for (let x = 0; x < seite; x++, p++) {
+        if (!innen[p] || x === 0 || x === seite - 1) continue;
+        if (
+          !innen[p - 1] || !innen[p + 1]
+          || !innen[p - seite] || !innen[p + seite]
+        ) {
+          kern[p] = 1;
+        }
+      }
+    }
+    const glow = new Uint8Array(seite * seite);
+    const splat = [
+      [0, 0, 255],
+      [-1, 0, 150], [1, 0, 150], [0, -1, 150], [0, 1, 150],
+      [-1, -1, 95], [-1, 1, 95], [1, -1, 95], [1, 1, 95],
+      [-2, 0, 55], [2, 0, 55], [0, -2, 55], [0, 2, 55],
+    ];
+    for (let y = 0, p = 0; y < seite; y++) {
+      for (let x = 0; x < seite; x++, p++) {
+        if (!kern[p]) continue;
+        for (let s = 0; s < splat.length; s++) {
+          const nx = x + splat[s][0];
+          const ny = y + splat[s][1];
+          if (nx < 0 || ny < 0 || nx >= seite || ny >= seite) continue;
+          const np = ny * seite + nx;
+          if (!innen[np]) continue;
+          const v = splat[s][2];
+          if (v > glow[np]) glow[np] = v;
+        }
+      }
+    }
+    return glow;
+  }
+
   async function zeichneGlyphAtem(
     sichtQr,
     { art, orange = false, nurSchwarz = false, bScale } = {},
@@ -2236,7 +2285,6 @@ const EmpfangPuls = (() => {
     const seite = c.width;
     const dark = (typeof liesUiTheme === "function" ? liesUiTheme() : "dark") !== "light";
     const bg = dark ? 0 : 255;
-    const glow = dark ? 255 : 0;
     const aScale = Math.max(0, Math.min(1, sichtQr));
     // Herzschlag: Maske 10 %↔100 % mitskalieren (parallel zum Fade).
     const herzScale = 0.1 + 0.9 * aScale;
@@ -2289,7 +2337,7 @@ const EmpfangPuls = (() => {
     const od = out.data;
     const qd = qr ? qr.data : null;
     const innen = new Uint8Array(seite * seite);
-    // Innen-Karte in Canvas-Koordinaten (skalierte Maske → Glow-Rand).
+    // Innen-Karte in Canvas-Koordinaten (skalierte Maske → Neon-Innenkante).
     if (luma && !orange) {
       const inv = maskSeite > 0 ? lumaSeite / maskSeite : 1;
       for (let y = 0, p = 0; y < seite; y++) {
@@ -2302,6 +2350,8 @@ const EmpfangPuls = (() => {
         }
       }
     }
+    const neon = orange ? null : neonFarbeFuerZyklus();
+    const neonGlow = neon ? neonInnenGlowKarte(innen, seite) : null;
 
     for (let y = 0, p = 0; y < seite; y++) {
       for (let x = 0; x < seite; x++, p++) {
@@ -2339,22 +2389,17 @@ const EmpfangPuls = (() => {
             r = g = b = Math.round(qg * a + bg * (1 - a));
           }
         }
-        if (innen[p] && !orange) {
-          let rand = false;
-          if (x === 0 || y === 0 || x === seite - 1 || y === seite - 1) {
-            rand = true;
-          } else if (
-            !innen[p - 1] || !innen[p + 1]
-            || !innen[p - seite] || !innen[p + seite]
-          ) {
-            rand = true;
-          }
-          if (rand && aScale > 0.01) {
-            const glowA = aScale;
-            r = Math.round(glow * glowA + r * (1 - glowA));
-            g = Math.round(glow * glowA + g * (1 - glowA));
-            b = Math.round(glow * glowA + b * (1 - glowA));
-          }
+        const nv = neonGlow ? neonGlow[p] : 0;
+        if (nv && aScale > 0.01) {
+          const inf = nv / 255;
+          const glowA = inf * aScale;
+          const hot = inf > 0.85;
+          const nr = hot ? 255 : neon.r;
+          const ng = hot ? (neon.g > 128 ? 255 : 210) : neon.g;
+          const nb = hot ? 255 : neon.b;
+          r = Math.round(nr * glowA + r * (1 - glowA));
+          g = Math.round(ng * glowA + g * (1 - glowA));
+          b = Math.round(nb * glowA + b * (1 - glowA));
         }
         od[i] = r;
         od[i + 1] = g;
