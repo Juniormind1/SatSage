@@ -1146,15 +1146,17 @@ function setzeTraceMarke(key, art) {
   if (art === "fertig") punkt.classList.add("trace-fertig");
 }
 
-/** Anschaffungszeit, die der Dotplot für diesen Abschluss zeichnet. */
+/** Anschaffungszeit, die der Dotplot für diesen Abschluss zeichnet.
+ *  Während des Laufs immer der jüngste Stempel. Offensiv (ältester)
+ *  gilt erst, wenn der Baum vollständig ist — sonst läge der Punkt
+ *  links von seiner endgültigen X. */
 function traceSollTs(info) {
-  const art = (typeof steuerEinstellungen === "function"
-    && steuerEinstellungen().anschaffung === "aelteste")
-    ? "aelteste"
-    : "juengste";
   const jung = Number(info && info.time_ts || 0);
   const alt = Number(info && info.oldest_time_ts || 0);
-  if (art === "aelteste" && alt > 0) return alt;
+  const offensiv = typeof steuerEinstellungen === "function"
+    && steuerEinstellungen().anschaffung === "aelteste"
+    && info && info.vollstaendig;
+  if (offensiv && alt > 0) return alt;
   return jung;
 }
 
@@ -1255,6 +1257,7 @@ function traceVollstaendigMerken(liste) {
       TracePunktMarke.warten.set(key, {
         time_ts: Number(roh.time_ts || 0),
         oldest_time_ts: Number(roh.oldest_time_ts || 0),
+        vollstaendig: Boolean(roh.vollstaendig),
         seit: jetzt,
       });
     }
@@ -1294,15 +1297,15 @@ function traceMarkenNachZeichnen() {
 /**
  * Laufender Trace: Punkt nur verschieben, wenn das Datum schon feststeht.
  *
- * Defensiv wandert X nur nach rechts (jünger). Fest ist Gelb, sobald der
- * jüngste bekannte externe Zufluss innerhalb der Frist liegt. Offensiv
- * wandert X nur nach links; fest ist dann Grün. Alles andere wartet auf
- * den fertigen Trace — ein späterer Hop könnte die Farbe umkehren.
+ * Immer defensiv, auch bei offensiver Lesart: X wandert nur nach rechts
+ * (jünger). Fest ist Gelb, sobald der jüngste bekannte externe Zufluss
+ * innerhalb der Frist liegt. Der älteste Stempel gilt erst nach dem
+ * vollständigen Baum. Alles andere wartet — ein späterer Hop könnte
+ * jünger sein.
  */
 function wendeLivePunktAn(live) {
   if (!live || !live.key || Zustand.ansicht !== "steuerjahr") return false;
   const ts = Number(live.time_ts || 0);
-  const altTs = Number(live.oldest_time_ts || 0);
   if (!(ts > 0)) return false;
   const spur = $("#achse-spur");
   if (!spur) return false;
@@ -1318,10 +1321,10 @@ function wendeLivePunktAn(live) {
   const gesamtMs = bis.getTime() - von.getTime();
   if (!(gesamtMs > 0)) return false;
 
-  const anschaffung = (steuerEinstellungen().anschaffung || "juengste") === "aelteste"
-    ? "aelteste"
-    : "juengste";
-  const wirksamTs = anschaffung === "aelteste" ? (altTs || ts) : ts;
+  // Laufender Trace ist immer defensiv: der älteste Stempel kann noch
+  // nach rechts wandern, sobald ein jüngerer externer Zufluss kommt.
+  const anschaffung = "juengste";
+  const wirksamTs = ts;
   const fristJahre = Number(
     ($("#frist-wahl") && $("#frist-wahl").value)
     || steuerEinstellungen().haltefrist_jahre
@@ -1337,10 +1340,9 @@ function wendeLivePunktAn(live) {
   if (Number.isNaN(anschaffungDate.getTime())) return false;
 
   let erfuellt = false;
-  let neuvermoegen = false;
   if (stichtag && !Number.isNaN(stichtag.getTime())
       && anschaffungDate.getTime() > stichtag.getTime()) {
-    neuvermoegen = true;
+    erfuellt = false;
   } else if (!(fristJahre > 0)) {
     erfuellt = true;
   } else {
@@ -1348,10 +1350,9 @@ function wendeLivePunktAn(live) {
     fristEnde.setFullYear(fristEnde.getFullYear() + fristJahre);
     erfuellt = fristEnde.getTime() <= bezug.getTime();
   }
-  // Nur die Richtung, die ein späterer Hop nicht mehr umkehren kann.
-  const sicherGelb = anschaffung === "juengste" && !erfuellt;
-  const sicherGruen = anschaffung === "aelteste" && erfuellt;
-  if (!sicherGelb && !sicherGruen) return false;
+  // Defensiv: fest ist nur Gelb. Ein späterer Hop kann jünger sein und
+  // ein heute grünes Datum wieder in die Frist schieben.
+  if (erfuellt) return false;
 
   const pos = Math.max(
     0,
@@ -1359,22 +1360,21 @@ function wendeLivePunktAn(live) {
   );
   const bisher = Number(punkt.dataset.livePos);
   if (Number.isFinite(bisher)) {
-    const rueckwaerts = anschaffung === "juengste" ? pos < bisher - 0.05 : pos > bisher + 0.05;
-    if (rueckwaerts) return false;
+    if (pos < bisher - 0.05) return false;
   }
   punkt.dataset.livePos = String(pos);
   punkt.style.left = `${zeitstrahlSichtPos(pos)}%`;
   punkt.classList.remove("ungeprueft", "offen", "erfuellt");
-  punkt.classList.add(sicherGruen ? "erfuellt" : "offen");
+  punkt.classList.add("offen");
   punkt.classList.add("herkunft-offen-marke");
   const tip = punkt.querySelector(".achse-punkt-tip");
   if (tip) {
     const dd = String(anschaffungDate.getDate()).padStart(2, "0");
     const mm = String(anschaffungDate.getMonth() + 1).padStart(2, "0");
     const datum = `${dd}.${mm}.${anschaffungDate.getFullYear()}`;
-    const lage = sicherGruen
-      ? (t("tax.haltefristOut") !== "tax.haltefristOut" ? t("tax.haltefristOut") : "außerhalb Haltefrist")
-      : (t("tax.haltefristIn") !== "tax.haltefristIn" ? t("tax.haltefristIn") : "innerhalb Haltefrist");
+    const lage = t("tax.haltefristIn") !== "tax.haltefristIn"
+      ? t("tax.haltefristIn")
+      : "innerhalb Haltefrist";
     const wallet = punkt.dataset.wallet || "unbekannt";
     const betrag = punkt.dataset.valueSats
       ? formatZeitstrahlBetrag(Number(punkt.dataset.valueSats))

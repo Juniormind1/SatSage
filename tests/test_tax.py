@@ -530,12 +530,23 @@ class TestExternerZuflussDatum(unittest.TestCase):
         self.assertFalse(eintrag["untergrenze"])
 
     def test_offensiv_nimmt_aeltesten_zufluss(self):
-        """STEUER_ANSCHAFFUNG=aelteste: ältester externer Zufluss zählt."""
+        """STEUER_ANSCHAFFUNG=aelteste: ältester Zufluss, sobald der Baum vollständig ist."""
+        from core import trace_cache
+
         self.hinterlegen(
             "a1", 0,
             external_time_ts=zeitstempel("15.06.2022 12:00"),
             external_oldest_time_ts=zeitstempel("01.03.2021 12:00"),
         )
+        trace_cache.speichern(txid("a1"), 0, {
+            "found": True,
+            "root": {"txid": txid("a1"), "vout": 0, "type": "utxo"},
+            "children": [{
+                "type": "external", "from_utxo": f"{txid('e1')}:0",
+                "amount_sats": 1000, "time_label": "01.03.2021 12:00:00",
+                "children": [],
+            }],
+        }, self.cache)
         ergebnis = auswerten_zum_jahresende(
             [utxo(1000, "01.10.2026 12:00", marker="a1")],
             immutable_cache_dir=self.cache,
@@ -1455,6 +1466,7 @@ class TestLotSummen(unittest.TestCase):
         offensiv = self._aus("a1", anschaffung="aelteste")
         d = defensiv["eintraege"][0]
         o = offensiv["eintraege"][0]
+        # Vollständig: offensiv sitzt auf dem ältesten Stempel.
         self.assertEqual(
             (d["sats_gruen"], d["sats_orange"], d["sats_grau"]),
             (500, 500, 0),
@@ -1525,6 +1537,18 @@ class TestLotSummen(unittest.TestCase):
         self.assertEqual(defensiv["kennzahlen"]["erfuellt_sats"], 0)
         self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 500)
         self.assertFalse(offensiv["eintraege"][0]["erfuellt"])
+
+    def test_offensiv_offen_bleibt_auf_juengstem_stempel(self):
+        """Grauer Rest: offensiv darf nicht auf den ältesten Stempel springen."""
+        self._speichern("d5", [
+            self._extern("h1", 500, "01.01.2020 12:00:00"),
+            {"type": "external_unresolved", "amount_sats": 500, "children": []},
+        ])
+        ergebnis = self._aus("d5", anschaffung="aelteste")
+        eintrag = ergebnis["eintraege"][0]
+        self.assertTrue(eintrag["offensiv_fallback"])
+        self.assertEqual(eintrag["datum"], "01.01.2020")
+        self.assertTrue(eintrag["herkunft_offen"])
 
     def test_undatiertes_ende_wird_aus_tx_cache_gruen(self):
         from core import xpub_cache

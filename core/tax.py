@@ -576,12 +576,16 @@ def _anschaffung(
     ingress: dict | None,
     *,
     anschaffung: str = STANDARD_ANSCHAFFUNG,
+    herkunft_vollstaendig: bool = False,
 ) -> tuple[datetime | None, str, bool, bool]:
     """
     Wann die Sats dieses UTXO angeschafft wurden — und woher die Angabe stammt.
 
-    *anschaffung*: ``juengste`` (defensiv, Default) nutzt ``external_time_ts``;
-    ``aelteste`` (offensiv) nutzt ``external_oldest_time_ts``. Interne
+    *anschaffung*: ``juengste`` (defensiv, Default) nutzt ``external_time_ts``.
+    ``aelteste`` (offensiv) nutzt ``external_oldest_time_ts`` erst, wenn
+    *herkunft_vollstaendig* ist. Solange der Baum offen ist, gilt derselbe
+    jüngste Stempel wie defensiv — ein späterer Hop kann jünger sein, und
+    der Punkt darf nicht links von seiner endgültigen X stehen. Interne
     Überträge zwischen eigenen Wallets verändern die Haltedauer nicht.
 
     Fehlt der Wert — ältere Cache-Einträge, oder eine Datenquelle ohne
@@ -592,10 +596,15 @@ def _anschaffung(
     Outputs.
 
     Liefert *(zeitpunkt, grundlage, untergrenze, offensiv_fallback)*.
-    *offensiv_fallback* ist True, wenn Offensiv gewählt war, aber kein
-    Oldest-Feld im Ingress lag und deshalb der jüngste Wert genutzt wurde.
+    *offensiv_fallback* ist True, wenn Offensiv gewählt war, der Baum aber
+    noch offen ist oder kein Oldest-Feld im Ingress lag.
     """
     modus = parse_anschaffung(anschaffung)
+    if modus == ANSCHAFFUNG_AELTESTE and not herkunft_vollstaendig:
+        modus = ANSCHAFFUNG_JUENGSTE
+        offen_offensiv = True
+    else:
+        offen_offensiv = False
     if ingress:
         untergrenze = bool(ingress.get("external_untergrenze"))
         # Variante A: tax_horizon vor Haltefrist-Grenze → erfuellt (grün)
@@ -636,18 +645,17 @@ def _anschaffung(
                     )
                 except (ValueError, OSError, OverflowError):
                     pass
-        else:
-            stempel = ingress.get("external_time_ts")
-            if stempel:
-                try:
-                    return (
-                        datetime.fromtimestamp(int(stempel)),
-                        GRUNDLAGE_HERKUNFT,
-                        untergrenze,
-                        False,
-                    )
-                except (ValueError, OSError, OverflowError):
-                    pass
+        stempel = ingress.get("external_time_ts")
+        if stempel:
+            try:
+                return (
+                    datetime.fromtimestamp(int(stempel)),
+                    GRUNDLAGE_HERKUNFT,
+                    untergrenze,
+                    offen_offensiv,
+                )
+            except (ValueError, OSError, OverflowError):
+                pass
         # Variante A: tax_horizon als ausreichendes Anschaffungsdatum nutzen
         horizon_ts = ingress.get("tax_horizon_time_ts")
         if horizon_ts:
@@ -819,11 +827,17 @@ def auswerten(
         # Zuerst die Herkunft: Sie liefert das steuerlich maßgebliche Datum,
         # das Entstehungsdatum des Outputs ist nur der Rückfall.
         ingress = None
+        kopf = None
         if immutable_cache_dir:
             ingress = xpub_cache.load_utxo_ingress_cache(txid, vout, immutable_cache_dir)
+            kopf = trace_cache.kopf(txid, vout, immutable_cache_dir)
+        herkunft_voll = bool(
+            kopf and kopf.get("vollstaendig") and not kopf.get("veraltet")
+        )
 
         zeitpunkt, grundlage, untergrenze, offensiv_fb = _anschaffung(
             utxo, ingress, anschaffung=modus,
+            herkunft_vollstaendig=herkunft_voll,
         )
         if zeitpunkt is None:
             ohne_datum += 1
@@ -897,9 +911,6 @@ def auswerten(
         frist_ende, erfuellt, neuvermoegen = haltefrist_entscheidung(
             zeitpunkt, ende, haltefrist_jahre, stichtag
         )
-        kopf = None
-        if immutable_cache_dir:
-            kopf = trace_cache.kopf(txid, vout, immutable_cache_dir)
         eintrag = Eingang(
             txid=txid,
             vout=vout,

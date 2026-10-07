@@ -296,6 +296,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     "key": schluessel,
                     "time_ts": ts,
                     "oldest_time_ts": alt,
+                    "vollstaendig": True,
                 })
 
             def _marker(stand: dict) -> None:

@@ -164,12 +164,22 @@ def _anschaffung_los(
         ingress = xpub_cache.load_utxo_ingress_cache(
             utxo.get("txid", ""), int(utxo.get("vout", 0)), immutable_cache_dir
         )
+    from core import trace_cache
+
+    kopf = trace_cache.kopf(
+        utxo.get("txid", ""), int(utxo.get("vout", 0)), immutable_cache_dir,
+    ) if immutable_cache_dir else None
+    herkunft_voll = bool(kopf and kopf.get("vollstaendig") and not kopf.get("veraltet"))
     zeit, grundlage, untergrenze, _fb = tax_mod._anschaffung(
         utxo, ingress, anschaffung=anschaffung,
+        herkunft_vollstaendig=herkunft_voll,
     )
     ext_addr = ""
     if ingress:
-        if tax_mod.parse_anschaffung(anschaffung) == tax_mod.ANSCHAFFUNG_AELTESTE:
+        if (
+            tax_mod.parse_anschaffung(anschaffung) == tax_mod.ANSCHAFFUNG_AELTESTE
+            and herkunft_voll
+        ):
             ext_addr = str(
                 ingress.get("external_oldest_address")
                 or ingress.get("external_address")
