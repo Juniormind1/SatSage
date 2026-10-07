@@ -43,6 +43,26 @@ def parse_utxo_ref(utxo_ref: str) -> tuple[str, int] | None:
         return None
 
 
+def _tx_als_dict(tx) -> dict:
+    """
+    Transaktion als Dict.
+
+    Start9-Core und Electrs liefern ``getrawtransaction`` / 
+    ``blockchain.transaction.get`` manchmal als Roh-Hex, obwohl verbose
+    angefordert war. Der Walk liest ``.get`` — ein String bricht die
+    Herkunft mit ``'str' object has no attribute 'get'``.
+    """
+    if isinstance(tx, dict):
+        return tx
+    if isinstance(tx, str) and tx.strip():
+        from core.fulcrum_history import _parse_tx_hex
+
+        return _parse_tx_hex(tx)
+    raise TypeError(
+        f"Transaktion ist weder Objekt noch Hex ({type(tx).__name__})"
+    )
+
+
 def resolve_vin_prevout(
     get_tx: Callable[[str], dict],
     vin: dict,
@@ -50,11 +70,13 @@ def resolve_vin_prevout(
     progress: ProgressCallback | None = None,
 ) -> dict | None:
     """Ermittelt den Output einer Input-Referenz (RPC oder Esplora)."""
+    if not isinstance(vin, dict):
+        return None
     if vin.get("is_coinbase") or "txid" not in vin or "vout" not in vin:
         return None
 
     prevout = vin.get("prevout")
-    if prevout:
+    if isinstance(prevout, dict) and prevout:
         return prevout
 
     if progress:
@@ -62,10 +84,12 @@ def resolve_vin_prevout(
         progress(
             f"↻ Herkunft: warte auf Vorgänger {vin['txid'][:12]}…:{vout}"
         )
-    prev_tx = get_tx(vin["txid"])
-    vouts = prev_tx.get("vout", [])
+    prev_tx = _tx_als_dict(get_tx(vin["txid"]))
+    vouts = prev_tx.get("vout") or []
+    if not isinstance(vouts, list):
+        return None
     vout_index = int(vin["vout"])
-    if vout_index >= len(vouts):
+    if vout_index >= len(vouts) or not isinstance(vouts[vout_index], dict):
         return None
     prev_out = dict(vouts[vout_index])
     prev_out["_prev_tx_time_ts"] = _tx_block_time(prev_tx)
@@ -164,7 +188,7 @@ def iter_funding_inputs(
     Vollständige Auflösung — für Tx-Analyse und Sanktions-Scans.
     """
     try:
-        tx = get_tx(creator_txid)
+        tx = _tx_als_dict(get_tx(creator_txid))
     except Exception as exc:
         _abbruch_durchreichen(exc)
         return
@@ -295,7 +319,7 @@ def _mit_vorgaengerzeit(
     if progress:
         progress(f"↻ Herkunft: Blockzeit zu {edge.prevout.txid[:16]}…")
     try:
-        prev_tx = get_tx(edge.prevout.txid)
+        prev_tx = _tx_als_dict(get_tx(edge.prevout.txid))
     except Exception as exc:
         _abbruch_durchreichen(exc)
         return edge
@@ -338,7 +362,7 @@ def iter_trace_funding_inputs(
     Eingänge nachgeholt; interne Eingänge verfolgt der Aufrufer weiter.
     """
     try:
-        tx = get_tx(creator_txid)
+        tx = _tx_als_dict(get_tx(creator_txid))
     except Exception as exc:
         _abbruch_durchreichen(exc)
         return

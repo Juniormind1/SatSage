@@ -79,6 +79,13 @@ def wrap_get_tx_with_immutable_cache(
             return cached
         schritt(f"cache-fehl {txid}")
         tx = fetch_tx(txid)
+        # Start9/Electrs liefern trotz verbose-Anfrage Roh-Hex. Ungeparst
+        # landet der String im Cache und der nächste Herkunfts-Walk bricht
+        # mit „'str' object has no attribute 'get'“.
+        if isinstance(tx, str):
+            from core.trace import _tx_als_dict
+
+            tx = _tx_als_dict(tx)
         schritt(f"cache-schreibe {txid}")
         save_cached_tx(txid, tx, cache_root, source)
         return tx
@@ -114,6 +121,10 @@ def _mache_prefetch(pool, cache_root: Path, source: str):
 
         def hole(client, txid: str) -> None:
             tx = fetch_tx_fulcrum(client, txid, roh=True)
+            if isinstance(tx, str):
+                from core.trace import _tx_als_dict
+
+                tx = _tx_als_dict(tx)
             save_cached_tx(txid, tx, cache_root, source)
 
         # Im Hintergrund: die Herkunft wartet sonst auf den langsamsten

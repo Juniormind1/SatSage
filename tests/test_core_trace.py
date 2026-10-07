@@ -95,6 +95,49 @@ class TestEinfacherBaum(unittest.TestCase):
         self.assertTrue(all(k.startswith("0.") for k in kennungen))
 
 
+class TestRohHexVorgaenger(unittest.TestCase):
+    """Start9/Core liefert die Vorgänger-Tx als Hex statt als Objekt."""
+
+    def test_hex_vorgaenger_wird_externes_blatt(self):
+        from embit.script import address_to_scriptpubkey
+        from embit.transaction import Transaction, TransactionInput, TransactionOutput
+
+        from core.trace import resolve_vin_prevout
+
+        creator = txid("a4")
+        prev = txid("e4")
+        # Coinbase-Eingang, ein P2WPKH-Ausgang. So liefert Start9 die
+        # Vorgänger-Tx, wenn verbose=true nur Hex zurückgibt.
+        prev_tx = Transaction(
+            version=2,
+            vin=[TransactionInput(b"\x00" * 32, 0xFFFFFFFF)],
+            vout=[TransactionOutput(50_000, address_to_scriptpubkey(EXTERN_A))],
+        )
+        hexa = prev_tx.serialize().hex()
+        self.assertIsInstance(hexa, str)
+
+        chain = {
+            creator: core_tx(
+                creator,
+                [core_vin(prev, 0)],
+                [core_vout(0, BIP84_RECEIVE_0, 0.0004)],
+            ),
+            prev: hexa,
+        }
+        ergebnis = trace_utxo(make_get_tx(chain), creator, 0, EIGENE)
+        kinder = ergebnis["children"]
+        self.assertGreaterEqual(len(kinder), 1, msg=ergebnis)
+        self.assertEqual(kinder[0]["type"], "external", msg=kinder[0])
+        self.assertNotIn("has no attribute", kinder[0].get("note") or "")
+
+        out = resolve_vin_prevout(
+            make_get_tx({prev: hexa}),
+            {"txid": prev, "vout": 0},
+        )
+        self.assertIsInstance(out, dict)
+        self.assertEqual(out.get("value"), 50_000 / 1e8)
+
+
 class TestFehlenderPrevout(unittest.TestCase):
     """Vorgänger-Tx fehlt → Lücke, nicht leeres „found“ ohne Kinder."""
 

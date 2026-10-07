@@ -231,7 +231,9 @@ def trace_utxo_origin(
         spur.hop(depth + 1, utxo_key, quelle="lade")
 
     try:
-        tx = get_tx(creator_txid)
+        from core.trace import _tx_als_dict
+
+        tx = _tx_als_dict(get_tx(creator_txid))
     except Exception as e:
         from core.jobs import ist_abbruch
 

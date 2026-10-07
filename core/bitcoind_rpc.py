@@ -1209,7 +1209,19 @@ def fetch_tx_core(client: BitcoinRpcClient, txid: str) -> dict:
     if isinstance(raw, dict):
         return normalize_core_tx(raw, client)
     if isinstance(raw, str):
-        return _embit_tx_to_analyze_dict(Transaction.from_string(raw.strip()))
+        # Start9/Core liefert trotz verbose=true oft nur das Roh-Hex
+        # (rpcwhitelist, alte Version, oder der zweite Aufruf mit false).
+        text = raw.strip()
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict) and (
+                parsed.get("txid") or parsed.get("vout") or parsed.get("vin")
+            ):
+                return normalize_core_tx(parsed, client)
+        return _embit_tx_to_analyze_dict(Transaction.from_string(text))
     raise RuntimeError(f"unerwartete getrawtransaction-Antwort: {type(raw)}")
 
 
