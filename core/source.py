@@ -1454,7 +1454,9 @@ def check_reachable(
                 tor_proxy=tor_proxy, require_listunspent=True,
             )
             # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung.
-            if not client and fehler and chain_sources.tls_should_try_opposite(fehler):
+            if not client and fehler and chain_sources.tls_should_try_opposite(
+                fehler, use_ssl=use_ssl, port=port,
+            ):
                 alt = not use_ssl
                 log(
                     f"{'TLS' if use_ssl else 'Ohne TLS'} fehlgeschlagen: "
@@ -1512,6 +1514,32 @@ def check_reachable(
                     host, port, use_ssl=use_ssl, timeout=timeout,
                     tor_proxy=tor_proxy, require_listunspent=True,
                 )
+                if (
+                    not client
+                    and fehler
+                    and chain_sources.tls_should_try_opposite(
+                        fehler, use_ssl=use_ssl, port=port,
+                    )
+                ):
+                    alt = not use_ssl
+                    log(
+                        f"{'TLS' if use_ssl else 'Ohne TLS'} fehlgeschlagen: "
+                        f"{fehler}"
+                    )
+                    log(
+                        f"Fallback: derselbe Port "
+                        f"{'ohne TLS' if use_ssl else 'mit TLS'}"
+                    )
+                    log(
+                        f"Verbinde mit "
+                        f"{_verbindung_ziel(host, port, alt, tor_proxy)}"
+                    )
+                    client, fehler = connect_fulcrum(
+                        host, port, use_ssl=alt, timeout=timeout,
+                        tor_proxy=tor_proxy, require_listunspent=True,
+                    )
+                    if client:
+                        use_ssl = alt
     except Exception as exc:  # Import- oder Laufzeitfehler
         ergebnis.reachable = False
         ergebnis.error = str(exc)

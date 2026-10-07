@@ -689,7 +689,9 @@ def _eigener_watch_client(state):
     )
     if client:
         return client
-    if fehler and chain_sources.tls_should_try_opposite(fehler):
+    if fehler and chain_sources.tls_should_try_opposite(
+        fehler, use_ssl=use_ssl, port=port,
+    ):
         client, _fehler = connect_fulcrum(
             host, port, use_ssl=not use_ssl, timeout=FULCRUM_CONNECT_TIMEOUT,
         )

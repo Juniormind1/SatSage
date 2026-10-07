@@ -638,7 +638,7 @@
   "sources.confirmDisableP2p": "P2P trennen? Laufende Header- und Scan-Jobs über Compact Filter werden abgebrochen. Electrum und erneuten Scan startest du danach selbst.",
   "sources.confirmDiscard": "{name} wirklich verwerfen?\nDie Einträge verschwinden aus der .env.",
   "sources.connect": "Verbinden",
-  "sources.connectPublicTitle": "Fragt nach der Freigabe und verbindet dann mit den geladenen öffentlichen Electrum-Servern.",
+  "sources.connectPublicTitle": "Aktualisiert die Serverliste, wenn sie älter als einen Tag ist, fragt nach der Freigabe und verbindet dann.",
   "sources.connectP2pTitle": "Compact Filter über Bitcoin-P2P aufbauen bzw. wieder einschalten.",
   "sources.connecting": "Verbindung im Aufbau…",
   "sources.detail.clearnetCount": "{n} Clearnet-Server in electrum_servers.json",

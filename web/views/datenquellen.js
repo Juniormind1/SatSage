@@ -663,8 +663,9 @@ async function verwerfeQuelle(quelle) {
 }
 
 /**
- * Liste ist schon da: „Verbinden“ fragt die Freigabe und prüft danach
- * die öffentlichen Server. Ohne Ja bleibt alles unverbunden.
+ * Liste ist schon da: „Verbinden“ holt sie neu, wenn sie älter als einen
+ * Tag ist, fragt die Freigabe und prüft danach die öffentlichen Server.
+ * Ohne Ja bleibt alles unverbunden.
  */
 async function verbindeOeffentlicheElectrum(quelle, knopf) {
   const vorher = knopf.textContent;
@@ -675,6 +676,16 @@ async function verbindeOeffentlicheElectrum(quelle, knopf) {
     if (!Zustand.config?.oeffentliche_electrum) {
       const erlaubt = await frageOeffentlicheElectrum();
       if (!erlaubt || !Zustand.config?.oeffentliche_electrum) return;
+    }
+    const liste = await api("/config/electrum-servers", {
+      methode: "POST",
+      daten: { filter: quelle.laden_filter },
+    });
+    if (Array.isArray(liste.sources) && Zustand.config) {
+      Zustand.config.sources = liste.sources;
+    }
+    if (liste.refreshed) {
+      meldung(übersetzeLogText(liste.message || t("sources.listAdopted")), "gut");
     }
     await testeEigenenNode(knopf);
   } catch (fehler) {

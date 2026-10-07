@@ -230,16 +230,17 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
 
     _datenquellen_config_gesperrt(state)
     """
-    Lädt servers.json vom Electrum-Repo.
+    Lädt servers.json vom Electrum-Repo, wenn die lokale Datei fehlt
+    oder mindestens einen Tag alt ist.
 
     filter=onion  → schreibt bis zu zehn Onion-Hosts nach FULCRUM_TOR_0…
     filter=clearnet → legt nur electrum_servers.json an (Clearnet-Pool).
     Die Datei selbst bleibt vollständig, damit beide Abschnitte dieselbe
     Quelle nutzen und sich nicht gegenseitig die Liste zerschneiden.
     """
-    from check_fulcrum_tor import (
+    from core.electrum_servers import (
         ELECTRUM_SERVERS_URL,
-        fetch_electrum_servers_json,
+        lade_oder_aktualisiere_electrum_servers,
         splitte_electrum_server,
     )
 
@@ -249,7 +250,7 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
 
     ziel = main.ELECTRUM_SERVERS_FILE
     try:
-        servers = fetch_electrum_servers_json(ziel)
+        servers, refreshed = lade_oder_aktualisiere_electrum_servers(ziel)
     except (OSError, ValueError, RuntimeError) as exc:
         raise ApiError(502, f"Download fehlgeschlagen: {exc}") from exc
 
@@ -257,24 +258,28 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
     if art == "onion":
         if not onions:
             raise ApiError(502, "Die geladene Liste enthält keine Onion-Adressen.")
-        updates: dict[str, str | None] = {}
-        for i in range(main.MAX_PUBLIC_ONION_SERVERS):
-            if i < len(onions):
-                host, port, use_ssl = onions[i]
-                updates[f"FULCRUM_TOR_{i}"] = host
-                updates[f"FULCRUM_PORT_{i}"] = str(port)
-                updates[f"FULCRUM_SSL_{i}"] = "true" if use_ssl else "false"
-            else:
-                updates[f"FULCRUM_TOR_{i}"] = None
-                updates[f"FULCRUM_PORT_{i}"] = None
-                updates[f"FULCRUM_SSL_{i}"] = None
         env = state.env()
-        env.apply(updates)
-        try:
-            env.save()
-        except OSError as exc:
-            raise ApiError(500, "Interner Serverfehler.") from exc
-        state.reload()
+        schon_da = bool((env.values().get("FULCRUM_TOR_0") or "").strip())
+        # Frische Liste und schon Einträge: .env nicht bei jedem Verbinden
+        # überschreiben. Nachziehen oder erstes Laden schreibt die Rotation.
+        if refreshed or not schon_da:
+            updates: dict[str, str | None] = {}
+            for i in range(main.MAX_PUBLIC_ONION_SERVERS):
+                if i < len(onions):
+                    host, port, use_ssl = onions[i]
+                    updates[f"FULCRUM_TOR_{i}"] = host
+                    updates[f"FULCRUM_PORT_{i}"] = str(port)
+                    updates[f"FULCRUM_SSL_{i}"] = "true" if use_ssl else "false"
+                else:
+                    updates[f"FULCRUM_TOR_{i}"] = None
+                    updates[f"FULCRUM_PORT_{i}"] = None
+                    updates[f"FULCRUM_SSL_{i}"] = None
+            env.apply(updates)
+            try:
+                env.save()
+            except OSError as exc:
+                raise ApiError(500, "Interner Serverfehler.") from exc
+            state.reload()
         anzahl = min(len(onions), main.MAX_PUBLIC_ONION_SERVERS)
         meldung = (
             f"{anzahl} Onion-Adressen übernommen"
@@ -295,6 +300,7 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
         "count": zaehler,
         "url": ELECTRUM_SERVERS_URL,
         "message": meldung,
+        "refreshed": refreshed,
         "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
     }
 

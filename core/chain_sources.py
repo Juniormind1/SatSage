@@ -243,10 +243,20 @@ def _default_fulcrum_port(args, env: dict[str, str]) -> int:
     return 50002
 
 
-def _default_fulcrum_ssl(args, env: dict[str, str]) -> bool:
+def _default_fulcrum_ssl(args, env: dict[str, str], port: int | None = None) -> bool:
+    """TLS-Default: Port 50001 Klartext (electrs/Start9), sonst an.
+
+    Explizites ``FULCRUM_SSL`` sticht. Leerer Wert gilt als nicht gesetzt —
+    wie die Anzeige in ``describe_sources``.
+    """
     if getattr(args, "fulcrum_no_ssl", False):
         return False
-    return _parse_env_bool(env.get("FULCRUM_SSL"), default=True)
+    if port is None:
+        port = _default_fulcrum_port(args, env)
+    raw = env.get("FULCRUM_SSL")
+    if raw is None or not str(raw).strip():
+        return int(port) != 50001
+    return _parse_env_bool(raw, default=(int(port) != 50001))
 
 
 def _resolve_own_lan_endpoint(
@@ -268,7 +278,8 @@ def _resolve_own_lan_endpoint(
     host = _normalize_fulcrum_host(host_raw)
     if host.endswith(".onion"):
         return None
-    return host, _default_fulcrum_port(args, env), _default_fulcrum_ssl(args, env)
+    port = _default_fulcrum_port(args, env)
+    return host, port, _default_fulcrum_ssl(args, env, port)
 
 
 def _resolve_own_tor_endpoint(
@@ -287,7 +298,7 @@ def _resolve_own_tor_endpoint(
     if ssl_raw:
         use_ssl = _parse_env_bool(ssl_raw, default=True)
     else:
-        use_ssl = _default_fulcrum_ssl(args, env)
+        use_ssl = _default_fulcrum_ssl(args, env, port)
     return host, port, use_ssl
 
 
@@ -297,7 +308,6 @@ def _load_public_onion_endpoints(
 ) -> list[tuple[int, str, int, bool]]:
     """FULCRUM_TOR_0…9 aus .env; Rückgabe: (index, host, port, use_ssl)."""
     default_port = _default_fulcrum_port(args, env)
-    default_ssl = _default_fulcrum_ssl(args, env)
     endpoints: list[tuple[int, str, int, bool]] = []
     for index in range(MAX_PUBLIC_ONION_SERVERS):
         host_raw = env.get(f"FULCRUM_TOR_{index}")
@@ -307,6 +317,7 @@ def _load_public_onion_endpoints(
         port_raw = env.get(f"FULCRUM_PORT_{index}")
         port = int(port_raw) if port_raw else default_port
         ssl_raw = env.get(f"FULCRUM_SSL_{index}")
+        default_ssl = _default_fulcrum_ssl(args, env, port)
         use_ssl = _parse_env_bool(ssl_raw, default_ssl) if ssl_raw else default_ssl
         endpoints.append((index, host, port, use_ssl))
     return endpoints
@@ -339,11 +350,18 @@ def _probe_public_onion_endpoint(
     return index, client, error
 
 
-def tls_should_try_opposite(error: str | None) -> bool:
+def tls_should_try_opposite(
+    error: str | None,
+    *,
+    use_ssl: bool = False,
+    port: int | None = None,
+) -> bool:
     """
     Ob nach Fehlversuch die andere TLS-Einstellung sinnvoll ist.
 
     Reine Netzfehler (Timeout, refused) nicht — da hilft SSL-Umschalten nicht.
+    Ausnahme: TLS auf Port 50001 hängt über Tor oft, statt WRONG_VERSION
+    zu liefern; dann Klartext mitprobieren.
     Protokoll-Mismatch (wrong version, EOF, SSL) und unklare Handshake-Fehler ja.
     """
     if not error:
@@ -365,6 +383,12 @@ def tls_should_try_opposite(error: str | None) -> bool:
             "temporary failure in name resolution",
         )
     ):
+        if (
+            use_ssl
+            and port == 50001
+            and any(x in text for x in ("timed out", "timeout"))
+        ):
+            return True
         return False
     return True
 
@@ -471,7 +495,9 @@ def _try_fulcrum_endpoint(
             require_listunspent=True,
         )
     # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung (LAN + Onion).
-    if not client and error and tls_should_try_opposite(error):
+    if not client and error and tls_should_try_opposite(
+        error, use_ssl=use_ssl, port=port,
+    ):
         alt = not use_ssl
         _quelle_zeile(
             f"  → {'TLS' if use_ssl else 'ohne TLS'} fehlgeschlagen "

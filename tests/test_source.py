@@ -49,6 +49,16 @@ class TestTlsAutoProbe(unittest.TestCase):
         self.assertFalse(
             main.tls_should_try_opposite("listunspent nicht unterstützt")
         )
+        self.assertTrue(
+            main.tls_should_try_opposite(
+                "timed out", use_ssl=True, port=50001,
+            )
+        )
+        self.assertFalse(
+            main.tls_should_try_opposite(
+                "timed out", use_ssl=False, port=50001,
+            )
+        )
 
     def test_check_reachable_probiert_ohne_tls_und_meldet_persist(self):
         from fulcrum import FulcrumClient
@@ -241,6 +251,35 @@ class TestCheckReachable(unittest.TestCase):
         )
         ssl = next(f for f in quelle.felder if f.key == "FULCRUM_SSL")
         self.assertEqual(ssl.value, "false")
+
+    def test_tor_50001_ohne_ssl_env_verbindet_ohne_tls(self):
+        """Anzeige und Scan-Pfad müssen denselben TLS-Default nutzen."""
+        from types import SimpleNamespace
+
+        import core.chain_sources as chain_sources
+
+        args = SimpleNamespace(
+            fulcrum_host=None,
+            rpchost=None,
+            fulcrum_port=None,
+            fulcrum_no_ssl=False,
+        )
+        ende = chain_sources._resolve_own_tor_endpoint(
+            args,
+            {"FULCRUM_TOR": "abc.onion", "FULCRUM_PORT": "50001"},
+        )
+        self.assertIsNotNone(ende)
+        self.assertEqual(ende[1], 50001)
+        self.assertFalse(ende[2])
+        ende_ssl = chain_sources._resolve_own_tor_endpoint(
+            args,
+            {
+                "FULCRUM_TOR": "abc.onion",
+                "FULCRUM_PORT": "50001",
+                "FULCRUM_SSL": "true",
+            },
+        )
+        self.assertTrue(ende_ssl[2])
 
     def test_oeffentliche_quellen_haben_electrum_ladeknopf(self):
         quellen = {q.key: q for q in describe_sources({})}

@@ -1414,13 +1414,14 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
 
         ziel = Path(self._tmp.name) / "electrum_servers.json"
         with mock.patch(
-            "check_fulcrum_tor.fetch_electrum_servers_json", side_effect=fake
+            "core.electrum_servers.fetch_electrum_servers_json", side_effect=fake
         ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
             status, körper = self.anfrage(
                 "/api/config/electrum-servers",
                 methode="POST", daten={"filter": "onion"},
             )
         self.assertEqual(status, 200)
+        self.assertTrue(körper["refreshed"])
         self.assertEqual(körper["count"], 2)
         self.assertIn("Onion", körper["message"])
         werte = main._load_dotenv(self.env_pfad)
@@ -1430,6 +1431,30 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_TOR_1"], "zzz.onion")
         self.assertEqual(werte["FULCRUM_SSL_1"], "true")
         self.assertNotIn("FULCRUM_TOR_2", werte)
+
+    def test_electrum_laden_onion_frisch_laesst_env_in_ruhe(self):
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad) + "FULCRUM_TOR_0=keep.onion\n",
+        )
+        self.state.reload()
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            json.dumps({"neu.onion": {"s": "50002"}}), encoding="utf-8",
+        )
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "onion"},
+            )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["refreshed"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_TOR_0"), "keep.onion")
+        self.assertNotIn("FULCRUM_TOR_1", werte)
 
     def test_electrum_laden_clearnet_laesst_onion_env_in_ruhe(self):
         write_env_scrambled(
@@ -1448,17 +1473,86 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
 
         ziel = Path(self._tmp.name) / "electrum_servers.json"
         with mock.patch(
-            "check_fulcrum_tor.fetch_electrum_servers_json", side_effect=fake
+            "core.electrum_servers.fetch_electrum_servers_json", side_effect=fake
         ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
             status, körper = self.anfrage(
                 "/api/config/electrum-servers",
                 methode="POST", daten={"filter": "clearnet"},
             )
         self.assertEqual(status, 200)
+        self.assertTrue(körper["refreshed"])
         self.assertEqual(körper["count"], 2)
         self.assertIn("Clearnet", körper["message"])
         werte = main._load_dotenv(self.env_pfad)
         self.assertEqual(werte.get("FULCRUM_TOR_0"), "keep.onion")
+
+    def test_electrum_laden_ueberspringt_frische_liste(self):
+        import os
+
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"a.example": {"s": "50002"}}', encoding="utf-8",
+        )
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "clearnet"},
+            )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["refreshed"])
+        self.assertEqual(körper["count"], 1)
+        self.assertTrue(os.path.isfile(ziel))
+
+    def test_electrum_laden_zieht_alte_liste_neu(self):
+        import os
+
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"alt.example": {"s": "50002"}}', encoding="utf-8",
+        )
+        stamp = time.time() - 2 * 86400
+        os.utime(ziel, (stamp, stamp))
+        neu = {"neu.example": {"s": "50002"}}
+
+        def fake(dest, url=None):
+            Path(dest).write_text(json.dumps(neu), encoding="utf-8")
+            return neu
+
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=fake,
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "clearnet"},
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["refreshed"])
+        self.assertEqual(körper["count"], 1)
+
+    def test_electrum_laden_behaelt_alte_liste_wenn_download_scheitert(self):
+        import os
+
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"alt.example": {"s": "50002"}}', encoding="utf-8",
+        )
+        stamp = time.time() - 2 * 86400
+        os.utime(ziel, (stamp, stamp))
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=RuntimeError("offline"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "clearnet"},
+            )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["refreshed"])
+        self.assertEqual(körper["count"], 1)
 
 
 class TestSanktionen(ApiTestBasis):

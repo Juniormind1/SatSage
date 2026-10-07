@@ -136,6 +136,12 @@ class FulcrumClient:
             )
         else:
             raw = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        # Timeout vor dem TLS-Handshake — sonst hängt wrap_socket auf
+        # Klartext-Port 50001 über Tor bis zum Default (oft Minuten).
+        try:
+            raw.settimeout(float(self.timeout))
+        except OSError:
+            pass
         if self.use_ssl:
             ctx = outbound_policy.tls_context(host=self.host)
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)

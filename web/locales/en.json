@@ -638,7 +638,7 @@
   "sources.confirmDisableP2p": "Disconnect P2P? Running header and scan jobs over compact filters will be cancelled. You start Electrum and a new scan yourself afterwards.",
   "sources.confirmDiscard": "Really discard {name}?\nThe entries disappear from .env.",
   "sources.connect": "Connect",
-  "sources.connectPublicTitle": "Asks for confirmation, then connects to the loaded public Electrum servers.",
+  "sources.connectPublicTitle": "Refreshes the server list if it is older than one day, asks for confirmation, then connects.",
   "sources.connectP2pTitle": "Build or re-enable compact filters over Bitcoin P2P.",
   "sources.connecting": "Connecting…",
   "sources.detail.clearnetCount": "{n} clearnet servers in electrum_servers.json",

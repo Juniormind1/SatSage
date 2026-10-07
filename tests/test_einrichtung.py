@@ -377,6 +377,9 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('id="oeffentliche-electrum-ja"', html)
         self.assertIn("frageOeffentlicheElectrum", self.js)
         self.assertIn("verbindeOeffentlicheElectrum", self.datenquellen_js)
+        # „Verbinden“ zieht die Liste nach, wenn sie älter als einen Tag ist.
+        self.assertIn('"/config/electrum-servers"', self.datenquellen_js)
+        self.assertIn("liste.refreshed", self.datenquellen_js)
         self.assertIn("hatOeffentlicheElectrumListen", self.js)
         self.assertIn("header.sourceElectrumPublicFailed", self.js)
         self.assertIn("erlaubeOeffentlicheElectrum", self.js)
