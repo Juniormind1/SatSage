@@ -1,6 +1,7 @@
 """Fulcrum tx normalize/batch, address/wallet history, tip/date→height."""
 from __future__ import annotations
 
+import contextvars
 from typing import Any
 
 from embit.script import Script, address_to_scriptpubkey
@@ -114,32 +115,203 @@ def _history_fuer_adresse(client: FulcrumClient, addr: str, txid: str) -> list:
 
 
 def _lookup_tx_height(client: FulcrumClient, txid: str, vouts: list[dict]) -> int | None:
+    """
+    Blockhöhe einer bekannten Tx.
+
+    Eine Abfrage je Tx, nicht je Output. Fremde Mit-Outputs einer
+    Sammeltransaktion bleiben unangetastet. Reihenfolge:
+
+    1. ``blockchain.transaction.get_height`` (eine Zahl).
+    2. Blockhash aus der ausführlichen Antwort, lokal in ``p2p_headers.bin``.
+    3. Historie einer eigenen Output-Adresse, die der Scan schon kennt.
+    4. Bisheriger Weg über die Output-Adressen, falls nichts davon greift.
+    """
     cached = _TX_HEIGHT_CACHE.get(txid.lower())
     if cached is not None or txid.lower() in _TX_HEIGHT_CACHE:
         return cached
 
-    txid_l = txid.lower()
-    seen_addrs: set[str] = set()
-    height: int | None = None
-
-    for vout in vouts:
-        for addr in _vout_addresses(vout):
-            if addr in seen_addrs:
-                continue
-            seen_addrs.add(addr)
-            try:
-                history = _history_fuer_adresse(client, addr, txid)
-            except Exception:
-                continue
-            for entry in history:
-                if str(entry.get("tx_hash", "")).lower() == txid_l:
-                    height = int(entry.get("height", 0))
-                    break
-            if height is not None:
-                break
-
+    height = _hoehe_per_txid(client, txid, vouts)
     _TX_HEIGHT_CACHE[txid.lower()] = height
     return height
+
+
+def _hoehe_per_txid(
+    client: FulcrumClient, txid: str, vouts: list[dict],
+) -> int | None:
+    direkt = _hoehe_von_get_height(client, txid)
+    if direkt is not None:
+        return direkt
+    blockhash, blocktime = _block_der_tx(client, txid)
+    if blockhash:
+        aus_datei = _hoehe_aus_headerdatei(blockhash)
+        if aus_datei is not None:
+            return aus_datei
+        # Hash bekannt, Datei hinkt hinterher: nur das Reststück über dem
+        # lokalen Tip. Die Zeit bleibt dabei ungenutzt — Miner-Zeiten
+        # liegen um wenige Blöcke daneben und taugen nicht als gespeicherte
+        # Höhe.
+        rest = _hoehe_ueber_lokalem_tip(client, blockhash)
+        if rest is not None:
+            return rest
+    elif blocktime:
+        # Zeit ohne Hash: lokale Obergrenze, damit die Adress-Historie
+        # nicht bei Genesis anfängt. Die gespeicherte Höhe kommt weiter
+        # aus der Historie einer eigenen Adresse.
+        pass
+    eigene = _eigene_output_adressen(vouts)
+    if eigene:
+        aus_eigener = _hoehe_aus_historie(client, txid, eigene)
+        if aus_eigener is not None:
+            return aus_eigener
+    if not eigene:
+        return _hoehe_aus_historie(client, txid, _vout_addresses_flach(vouts))
+    return None
+
+
+def _hoehe_von_get_height(client: FulcrumClient, txid: str) -> int | None:
+    """Eine Zahl vom Server. Unbekannte Methode: still None, kein Fallback-Log."""
+    from core.fulcrum_client import _is_unknown_method_error
+
+    try:
+        roh = client.request("blockchain.transaction.get_height", [txid])
+    except Exception as exc:
+        if _is_unknown_method_error(exc, "blockchain.transaction.get_height"):
+            return None
+        return None
+    try:
+        return int(roh)
+    except (TypeError, ValueError):
+        return None
+
+
+def _block_der_tx(client: FulcrumClient, txid: str) -> tuple[str | None, int | None]:
+    """
+    Blockhash und Blockzeit aus der ausführlichen Antwort.
+
+    Das JSON wird nicht behalten. Server ohne verbose liefern den bekannten
+    Fehler; alles andere fällt auf die Adress-Historie zurück.
+    """
+    try:
+        tx = client.request("blockchain.transaction.get", [txid, True])
+    except Exception as exc:
+        if _verbose_tx_unsupported(exc):
+            return None, None
+        return None, None
+    if not isinstance(tx, dict):
+        return None, None
+    blockhash = str(tx.get("blockhash") or "").strip().lower()
+    if len(blockhash) != 64:
+        blockhash = None
+    zeit = tx.get("blocktime") or tx.get("time")
+    try:
+        blocktime = int(zeit) if zeit else None
+    except (TypeError, ValueError):
+        blocktime = None
+    return blockhash, blocktime
+
+
+def _hoehe_ueber_lokalem_tip(client: FulcrumClient, blockhash: str) -> int | None:
+    """Höhe eines Blocks, der über dem Stand von ``p2p_headers.bin`` liegt."""
+    try:
+        from core.p2p import header_hash, hex_to_hash
+        from core.xpub_cache import _p2p_header_chain
+    except Exception:
+        return None
+    chain = _p2p_header_chain(None)
+    if chain is None:
+        return None
+    try:
+        ziel = hex_to_hash(blockhash)
+        tip = int(chain.tip_height())
+    except (TypeError, ValueError):
+        return None
+    # Ein paar Header über dem lokalen Tip. Der Peer-Nachzug pflegt die
+    # Datei; hier reicht das kurze Fenster, das der Tip-Job noch nicht hat.
+    for schritt in range(1, 9):
+        header = _fetch_block_header_hex(client, tip + schritt)
+        if not header:
+            return None
+        try:
+            roh = bytes.fromhex(header)
+        except ValueError:
+            return None
+        if len(roh) < 80:
+            return None
+        if header_hash(roh[:80]) == ziel:
+            return tip + schritt
+    return None
+
+
+def _hoehe_aus_headerdatei(blockhash: str) -> int | None:
+    try:
+        from core.xpub_cache import hoehe_fuer_blockhash
+
+        return hoehe_fuer_blockhash(blockhash)
+    except Exception:
+        return None
+
+
+# Eigene Adressen des laufenden Herkunftslaufs. Nur O(1)-Lookup, keine
+# XPUB-Ableitung — eine große Transaktion darf hier nicht alle Wallets
+# durchrechnen. Der Trace setzt das Set; ohne Trace bleibt es leer und
+# der Fallback fragt die Output-Adressen wie bisher.
+_EIGENE_ADRESSEN: contextvars.ContextVar[frozenset[str] | None] = (
+    contextvars.ContextVar("satsage_eigene_adressen", default=None)
+)
+
+
+def setze_eigene_adressen(adressen) -> None:
+    """Bekannte Wallet-Adressen für die Höhen-Suche dieses Laufs."""
+    if not adressen:
+        _EIGENE_ADRESSEN.set(None)
+        return
+    _EIGENE_ADRESSEN.set(frozenset(str(a) for a in adressen if a))
+
+
+def _eigene_output_adressen(vouts: list[dict]) -> list[str]:
+    """Output-Adressen, die der Scan schon einem Wallet zugeordnet hat."""
+    bekannt = _EIGENE_ADRESSEN.get()
+    if not bekannt:
+        return []
+    eigene: list[str] = []
+    gesehen: set[str] = set()
+    for addr in _vout_addresses_flach(vouts):
+        if addr in gesehen or addr not in bekannt:
+            continue
+        gesehen.add(addr)
+        eigene.append(addr)
+    return eigene
+
+
+def _vout_addresses_flach(vouts: list[dict]) -> list[str]:
+    adressen: list[str] = []
+    gesehen: set[str] = set()
+    for vout in vouts or []:
+        for addr in _vout_addresses(vout):
+            if addr in gesehen:
+                continue
+            gesehen.add(addr)
+            adressen.append(addr)
+    return adressen
+
+
+def _hoehe_aus_historie(
+    client: FulcrumClient, txid: str, adressen: list[str],
+) -> int | None:
+    """Höhe aus der Historie der genannten Adressen. Erste Treffer-Adresse reicht."""
+    txid_l = txid.lower()
+    for addr in adressen:
+        try:
+            history = _history_fuer_adresse(client, addr, txid)
+        except Exception:
+            continue
+        for entry in history:
+            if str(entry.get("tx_hash", "")).lower() == txid_l:
+                try:
+                    return int(entry.get("height", 0))
+                except (TypeError, ValueError):
+                    return None
+    return None
 
 
 def _fetch_block_header_hex(client, height: int) -> str | None:
@@ -161,6 +333,24 @@ def _fetch_block_header_hex(client, height: int) -> str | None:
                 continue
             return None
     return None
+
+
+def _hoehe_zur_zeit_lokal(ziel: int) -> int | None:
+    try:
+        from core.xpub_cache import hoehe_zur_blockzeit
+
+        return hoehe_zur_blockzeit(ziel)
+    except Exception:
+        return None
+
+
+def _lokaler_header_tip() -> int | None:
+    try:
+        from core.p2p import header_datei_tip, p2p_headers_path
+
+        return header_datei_tip(p2p_headers_path())
+    except Exception:
+        return None
 
 
 def _block_time_for_height(client: FulcrumClient, height: int) -> int | None:
@@ -922,7 +1112,12 @@ def get_chain_tip_height(client: FulcrumClient, *, force: bool = False) -> int:
 
 
 def date_to_block_height_fulcrum(client: FulcrumClient, date_str: str) -> int:
-    """Erste Blockhöhe am oder nach dem Datum (UTC-Tagesbeginn), via Fulcrum."""
+    """Erste Blockhöhe am oder nach dem Datum (UTC-Tagesbeginn).
+
+    Liegt das Datum unter dem Tip von ``p2p_headers.bin``, kommt die Höhe
+    lokal aus der Halbierung. Sonst ist der lokale Tip die untere Grenze
+    und nur das Reststück geht an den Server.
+    """
     cache_key = _fulcrum_client_cache_key(client)
     date_key = date_str.strip()
     cached = _DATE_HEIGHT_CACHE.get((cache_key, date_key))
@@ -930,8 +1125,15 @@ def date_to_block_height_fulcrum(client: FulcrumClient, date_str: str) -> int:
         return cached
 
     target_ts = _parse_utc_date_timestamp(date_key)
+    lokal = _hoehe_zur_zeit_lokal(target_ts)
+    if lokal is not None:
+        _DATE_HEIGHT_CACHE[(cache_key, date_key)] = lokal
+        return lokal
     tip = get_chain_tip_height(client)
-    lo, hi = 0, tip
+    lo = _lokaler_header_tip() or 0
+    if lo > tip:
+        lo = 0
+    hi = tip
     while lo < hi:
         mid = (lo + hi) // 2
         block_time = _block_time_for_height(client, mid)

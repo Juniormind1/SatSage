@@ -1021,6 +1021,7 @@ class HeaderChain:
         if prev != self.hash_at(self.tip_height()):
             raise ConnectionError("Header-Kette reißt (prev-Hash)")
         self._data.extend(header)
+        self._hash_nach_hoehe = None
 
     def truncate_to(self, height: int) -> None:
         """Kürzt die Kette auf ``height`` (inkl.). Darf nicht unter den Anker."""
@@ -1030,9 +1031,22 @@ class HeaderChain:
             )
         if height == self._anchor_height:
             self._data = bytearray()
+            self._hash_nach_hoehe = None
             return
         n = height - self._anchor_height
         self._data = self._data[: n * 80]
+        self._hash_nach_hoehe = None
+
+    def _hash_index(self) -> dict[bytes, int]:
+        """Hash → Höhe, einmal je geladener Kette. Reorg-Suche bleibt linear."""
+        index = getattr(self, "_hash_nach_hoehe", None)
+        if isinstance(index, dict):
+            return index
+        index = {self._anchor_hash: self._anchor_height}
+        for hoehe in range(self._anchor_height + 1, self.tip_height() + 1):
+            index[header_hash(self.header_at(hoehe))] = hoehe
+        self._hash_nach_hoehe = index
+        return index
 
     def hoehe_fuer_hash(
         self, intern: bytes, *, max_tiefe: int | None = 4_096,
@@ -1041,12 +1055,15 @@ class HeaderChain:
         Höhe zu einem internen Block-Hash, oder None.
 
         Sucht vom Tip rückwärts. ``max_tiefe`` begrenzt den Scan (None = bis
-        Anker) — reicht für Overlap und typische Kurz-Reorgs.
+        Anker) — reicht für Overlap und typische Kurz-Reorgs. Die volle
+        Suche nutzt den Hash-Index, sonst würde jede alte Tx die Kette
+        Header für Header ablaufen.
         """
+        if max_tiefe is None:
+            return self._hash_index().get(intern)
         tip = self.tip_height()
         unten = self._anchor_height
-        if max_tiefe is not None:
-            unten = max(unten, tip - max_tiefe)
+        unten = max(unten, tip - max_tiefe)
         for hoehe in range(tip, unten - 1, -1):
             if self.hash_at(hoehe) == intern:
                 return hoehe
@@ -1115,11 +1132,13 @@ class HeaderChain:
             self._anchor_height = hoehe
             self._anchor_hash = intern
             self._data = bytearray(rest)
+            self._hash_nach_hoehe = None
             return True
         if roh and len(roh) % 80 == 0 and roh[:80] == GENESIS_HEADER:
             self._anchor_height = 0
             self._anchor_hash = header_hash(GENESIS_HEADER)
             self._data = bytearray(roh[80:])
+            self._hash_nach_hoehe = None
             return True
         return False
 

@@ -86,6 +86,23 @@ def _parse_utxo_ref(ref: str) -> tuple[str, int] | None:
     return parse_utxo_ref(ref)
 
 
+def _merke_eigene_fuer_hoehe(own_addresses, wallet) -> None:
+    """Bekannte Wallet-Adressen an die Höhen-Suche geben.
+
+    Eine Transaktion mit eigener Output-Adresse braucht dann nur diese
+    eine Historie, nicht die Historie jedes Mit-Outputs.
+    """
+    try:
+        from core.fulcrum_history import setze_eigene_adressen
+    except Exception:
+        return
+    adressen = set(own_addresses or ())
+    mapping = getattr(wallet, "address_to_wallet", None)
+    if isinstance(mapping, dict):
+        adressen.update(a for a in mapping if a)
+    setze_eigene_adressen(adressen)
+
+
 def _match_own_address(
     addrs: list[str],
     own_addresses: set,
@@ -197,6 +214,8 @@ def trace_utxo_origin(
     # bekommen ihn so mit, ohne jede Signatur zu erweitern.
     if on_teilstand is None and progress is not None:
         on_teilstand = getattr(progress, "on_teilstand", None)
+    if depth == 0:
+        _merke_eigene_fuer_hoehe(own_addresses, wallet)
 
     utxo_key = f"{creator_txid}:{vout_index}"
     spur = getattr(progress, "spur", None) if progress is not None else None

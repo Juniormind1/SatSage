@@ -508,6 +508,77 @@ def block_time_for_height(
         pass
     return block_time
 
+
+def hoehe_fuer_blockhash(
+    blockhash: str,
+    cache_root: Path | None = None,
+) -> int | None:
+    """
+    Höhe eines bestätigten Blocks aus ``p2p_headers.bin``.
+
+    Der Hash ist der aus der ausführlichen Transaktion (Anzeige-Byteorder).
+    Liegt er über dem lokalen Tip oder vor dem Anker, ist das Ergebnis None —
+    der Aufrufer fragt dann nur das Reststück beim Server.
+    """
+    text = str(blockhash or "").strip().lower()
+    if len(text) != 64:
+        return None
+    try:
+        from core.p2p import hex_to_hash
+        intern = hex_to_hash(text)
+    except ValueError:
+        return None
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        return chain.hoehe_fuer_hash(intern, max_tiefe=None)
+    except (IndexError, OSError, ValueError, TypeError):
+        return None
+
+
+def hoehe_zur_blockzeit(
+    ziel: int,
+    cache_root: Path | None = None,
+) -> int | None:
+    """
+    Erste lokale Höhe, deren Header-Zeit ``ziel`` erreicht.
+
+    Halbierung über ``p2p_headers.bin``. Miner dürfen die Zeit kurz
+    zurücksetzen, deshalb kann das Ergebnis um wenige Blöcke neben der
+    echten Höhe liegen. Es ist eine Obergrenze, keine gespeicherte
+    Transaktionshöhe. Liegt ``ziel`` über dem lokalen Tip, None.
+    """
+    try:
+        ziel_ts = int(ziel)
+    except (TypeError, ValueError):
+        return None
+    if ziel_ts <= 0:
+        return None
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        tip = int(chain.tip_height())
+        anker = int(getattr(chain, "_anchor_height", 0))
+    except (TypeError, ValueError):
+        return None
+    if tip <= anker:
+        return None
+    tip_zeit = block_time_for_height(tip, cache_root)
+    if tip_zeit is None or tip_zeit < ziel_ts:
+        return None
+    unten = anker + 1
+    oben = tip
+    while unten < oben:
+        mitte = (unten + oben) // 2
+        zeit = block_time_for_height(mitte, cache_root)
+        if zeit is None or zeit < ziel_ts:
+            unten = mitte + 1
+        else:
+            oben = mitte
+    return unten
+
 def enrich_utxos_with_block_times(
     utxos: list[dict],
     cache_root: Path | None = None,
