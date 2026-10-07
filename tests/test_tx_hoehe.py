@@ -181,6 +181,101 @@ class TestHoehePerTxid(unittest.TestCase):
             client.aufrufe[-1][0], "blockchain.scripthash.get_history",
         )
 
+    def test_electrs_tote_methoden_nur_beim_ersten_txid(self):
+        andere = "ab" * 32
+        client = _Client({
+            "blockchain.transaction.get_height": RuntimeError(
+                "unknown method blockchain.transaction.get_height"
+            ),
+            "blockchain.transaction.get": RuntimeError(
+                "verbose transactions are currently unsupported"
+            ),
+            "blockchain.scripthash.get_history": [
+                {"tx_hash": self.txid, "height": 640_000},
+                {"tx_hash": andere, "height": 640_001},
+            ],
+        })
+        vout = [{"scriptPubKey": {"address": _adresse(4)}}]
+        self.assertEqual(fh._hoehe_per_txid(client, self.txid, vout), 640_000)
+        erste = [name for name, _ in client.aufrufe]
+        self.assertEqual(erste.count("blockchain.transaction.get_height"), 1)
+        self.assertEqual(erste.count("blockchain.transaction.get"), 1)
+        client.aufrufe.clear()
+        self.assertEqual(fh._hoehe_per_txid(client, andere, vout), 640_001)
+        zweite = [name for name, _ in client.aufrufe]
+        self.assertNotIn("blockchain.transaction.get_height", zweite)
+        self.assertNotIn("blockchain.transaction.get", zweite)
+
+    def test_fremde_outputs_bleiben_unangetastet(self):
+        fh.setze_eigene_adressen({_adresse(9)})
+        client = _Client({
+            "blockchain.scripthash.get_history": [
+                {"tx_hash": self.txid, "height": 640_000},
+            ],
+        })
+        hoehe = fh._hoehe_per_txid(client, self.txid, [
+            {"scriptPubKey": {"address": _adresse(20)}},
+        ])
+        self.assertIsNone(hoehe)
+        self.assertFalse(any(
+            name == "blockchain.scripthash.get_history" for name, _ in client.aufrufe
+        ))
+
+
+class TestBlockzeitUndTip(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        kette = HeaderChain()
+        kette._anchor_height = 700_000
+        kette._anchor_hash = header_hash(GENESIS_HEADER)
+        self.h1 = _header(kette._anchor_hash, 1_638_000_000)
+        self.h2 = _header(header_hash(self.h1), 1_638_000_600)
+        (self.root / "p2p_headers.bin").write_bytes(
+            HEADER_FILE_MAGIC
+            + struct.pack("<I", 700_000)
+            + kette._anchor_hash
+            + self.h1
+            + self.h2
+        )
+        self._chain = _Patch(self.root)
+        self.addCleanup(self._chain.stop)
+        from unittest.mock import patch
+
+        p_dir = patch("core.xpub_cache.IMMUTABLE_CACHE_DIR", self.root)
+        p_dir.start()
+        self.addCleanup(p_dir.stop)
+        fh._HEADER_TIME_CACHE.clear()
+        fh._TIP_HEIGHT_CACHE.clear()
+        self.addCleanup(fh._HEADER_TIME_CACHE.clear)
+        self.addCleanup(fh._TIP_HEIGHT_CACHE.clear)
+
+    def test_bekannte_hoehe_liest_zeit_ohne_block_header(self):
+        client = _Client({})
+        zeit = fh._block_time_for_height(client, 700_002)
+        self.assertEqual(zeit, 1_638_000_600)
+        self.assertFalse(any(
+            name == "blockchain.block.header" for name, _ in client.aufrufe
+        ))
+
+    def test_tip_aus_subscribe_ohne_block_header(self):
+        client = _Client({
+            "blockchain.headers.subscribe": {"height": 800_000},
+        })
+        self.assertEqual(fh.get_chain_tip_height(client, force=True), 800_000)
+        self.assertEqual(
+            [name for name, _ in client.aufrufe],
+            ["blockchain.headers.subscribe"],
+        )
+
+    def test_tip_aus_headerdatei_ohne_server(self):
+        client = _Client({})
+        self.assertEqual(fh.get_chain_tip_height(client, force=True), 700_002)
+        self.assertFalse(any(
+            name == "blockchain.block.header" for name, _ in client.aufrufe
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

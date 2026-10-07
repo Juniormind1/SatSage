@@ -121,10 +121,12 @@ def _lookup_tx_height(client: FulcrumClient, txid: str, vouts: list[dict]) -> in
     Eine Abfrage je Tx, nicht je Output. Fremde Mit-Outputs einer
     Sammeltransaktion bleiben unangetastet. Reihenfolge:
 
-    1. ``blockchain.transaction.get_height`` (eine Zahl).
+    1. ``blockchain.transaction.get_height``, wenn der Server das kann.
     2. Blockhash aus der ausführlichen Antwort, lokal in ``p2p_headers.bin``.
-    3. Historie einer eigenen Output-Adresse, die der Scan schon kennt.
-    4. Bisheriger Weg über die Output-Adressen, falls nichts davon greift.
+    3. Historie einer eigenen Output-Adresse (``setze_eigene_adressen``).
+    4. Ohne gesetzte eigene Adressen: Output-Adressen wie bisher.
+
+    Unbekannte Methode und der verbose-Fehler werden am Client gemerkt.
     """
     cached = _TX_HEIGHT_CACHE.get(txid.lower())
     if cached is not None or txid.lower() in _TX_HEIGHT_CACHE:
@@ -158,26 +160,43 @@ def _hoehe_per_txid(
         # nicht bei Genesis anfängt. Die gespeicherte Höhe kommt weiter
         # aus der Historie einer eigenen Adresse.
         pass
+    bekannt = _EIGENE_ADRESSEN.get()
     eigene = _eigene_output_adressen(vouts)
     if eigene:
-        aus_eigener = _hoehe_aus_historie(client, txid, eigene)
-        if aus_eigener is not None:
-            return aus_eigener
-    if not eigene:
-        return _hoehe_aus_historie(client, txid, _vout_addresses_flach(vouts))
-    return None
+        return _hoehe_aus_historie(client, txid, eigene)
+    if bekannt:
+        return None
+    return _hoehe_aus_historie(client, txid, _vout_addresses_flach(vouts))
+
+
+_FLAG_GET_HEIGHT = "_kann_tx_get_height"
+_FLAG_VERBOSE = "_kann_tx_verbose"
+
+
+def _server_kann(client, flag: str) -> bool | None:
+    return getattr(client, flag, None)
+
+
+def _merke_server_kann(client, flag: str, wert: bool) -> None:
+    try:
+        setattr(client, flag, wert)
+    except Exception:
+        pass
 
 
 def _hoehe_von_get_height(client: FulcrumClient, txid: str) -> int | None:
-    """Eine Zahl vom Server. Unbekannte Methode: still None, kein Fallback-Log."""
+    """Eine Zahl vom Server. Unbekannte Methode: am Client merken, nicht je Tx."""
+    if _server_kann(client, _FLAG_GET_HEIGHT) is False:
+        return None
     from core.fulcrum_client import _is_unknown_method_error
 
     try:
         roh = client.request("blockchain.transaction.get_height", [txid])
     except Exception as exc:
         if _is_unknown_method_error(exc, "blockchain.transaction.get_height"):
-            return None
+            _merke_server_kann(client, _FLAG_GET_HEIGHT, False)
         return None
+    _merke_server_kann(client, _FLAG_GET_HEIGHT, True)
     try:
         return int(roh)
     except (TypeError, ValueError):
@@ -188,17 +207,25 @@ def _block_der_tx(client: FulcrumClient, txid: str) -> tuple[str | None, int | N
     """
     Blockhash und Blockzeit aus der ausführlichen Antwort.
 
-    Das JSON wird nicht behalten. Server ohne verbose liefern den bekannten
-    Fehler; alles andere fällt auf die Adress-Historie zurück.
+    Das JSON wird nicht behalten. Unbekannte Methode oder der verbose-Fehler
+    werden am Client gemerkt.
     """
+    if _server_kann(client, _FLAG_VERBOSE) is False:
+        return None, None
+    from core.fulcrum_client import _is_unknown_method_error
+
     try:
         tx = client.request("blockchain.transaction.get", [txid, True])
     except Exception as exc:
-        if _verbose_tx_unsupported(exc):
-            return None, None
+        if _verbose_tx_unsupported(exc) or _is_unknown_method_error(
+            exc, "blockchain.transaction.get"
+        ):
+            _merke_server_kann(client, _FLAG_VERBOSE, False)
         return None, None
     if not isinstance(tx, dict):
+        _merke_server_kann(client, _FLAG_VERBOSE, False)
         return None, None
+    _merke_server_kann(client, _FLAG_VERBOSE, True)
     blockhash = str(tx.get("blockhash") or "").strip().lower()
     if len(blockhash) != 64:
         blockhash = None
@@ -346,9 +373,12 @@ def _hoehe_zur_zeit_lokal(ziel: int) -> int | None:
 
 def _lokaler_header_tip() -> int | None:
     try:
-        from core.p2p import header_datei_tip, p2p_headers_path
+        from core.xpub_cache import IMMUTABLE_CACHE_DIR, _p2p_header_chain
 
-        return header_datei_tip(p2p_headers_path())
+        chain = _p2p_header_chain(IMMUTABLE_CACHE_DIR)
+        if chain is None:
+            return None
+        return int(chain.tip_height())
     except Exception:
         return None
 
@@ -359,14 +389,17 @@ def _block_time_for_height(client: FulcrumClient, height: int) -> int | None:
     if height in _HEADER_TIME_CACHE:
         return _HEADER_TIME_CACHE[height]
     try:
-        from core.xpub_cache import IMMUTABLE_CACHE_DIR, load_cached_block_time, save_cached_block_time
+        from core.xpub_cache import IMMUTABLE_CACHE_DIR, block_time_for_height
 
-        disk_time = load_cached_block_time(height, IMMUTABLE_CACHE_DIR)
-        if disk_time is not None:
-            _HEADER_TIME_CACHE[height] = disk_time
-            return disk_time
+        lokal = block_time_for_height(height, IMMUTABLE_CACHE_DIR)
+        if lokal is not None:
+            _HEADER_TIME_CACHE[height] = lokal
+            return lokal
     except Exception:
         pass
+    lokal_tip = _lokaler_header_tip()
+    if lokal_tip is not None and height <= lokal_tip:
+        return None
     header = _fetch_block_header_hex(client, height)
     if not header:
         return None
@@ -1068,7 +1101,7 @@ def supports_historical_headers(
 
 
 def _tip_height_via_binary_search(client) -> int:
-    lo, hi = 0, _TIP_SEARCH_CEILING
+    lo, hi = _lokaler_header_tip() or 0, _TIP_SEARCH_CEILING
     while lo < hi:
         mid = (lo + hi + 1) // 2
         if _header_exists_at_height(client, mid):
@@ -1081,7 +1114,11 @@ def _tip_height_via_binary_search(client) -> int:
 
 
 def get_chain_tip_height(client: FulcrumClient, *, force: bool = False) -> int:
-    """Aktuelle Chain-Tip-Höhe (subscribe, sonst Binärsuche auf block.header).
+    """Aktuelle Chain-Tip-Höhe.
+
+    Zuerst ``headers.subscribe``, sonst der Tip von ``p2p_headers.bin``.
+    Binärsuche über ``block.header`` nur ohne lokale Header, und nur über
+    dem lokalen Tip.
 
     *force*: Cache ignorieren — nötig für Tip-Nachzug über Stunden, sonst
     bleibt der Prozess auf dem ersten Tip der Session kleben.
@@ -1104,7 +1141,9 @@ def get_chain_tip_height(client: FulcrumClient, *, force: bool = False) -> int:
         # Manche Server liefern Notifications statt Tip-Dict — nicht vertrauen.
         pass
 
-    if tip is None or not _header_exists_at_height(client, tip):
+    if tip is None:
+        tip = _lokaler_header_tip()
+    if tip is None:
         tip = _tip_height_via_binary_search(client)
 
     _TIP_HEIGHT_CACHE[cache_key] = tip

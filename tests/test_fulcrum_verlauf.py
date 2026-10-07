@@ -191,7 +191,7 @@ class VerlaufTest(unittest.TestCase):
                 "confirmed": False, "block_height": FAKE_TIP,
                 "mindesthoehe": True, "block_time": FAKE_HEADER_ZEIT,
             })
-        # Tip aus headers.subscribe, nur bestätigt per block.header — keine Binärsuche.
+        # Tip aus headers.subscribe; Blockzeit einmal per block.header am Tip.
         self.assertEqual(set(self.client.header_hoehen), {FAKE_TIP})
 
     def test_unspent_ableitung_filtert_ausgegebene(self):
