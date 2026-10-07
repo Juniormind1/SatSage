@@ -415,6 +415,9 @@ def write_env(rpc: Rpc) -> None:
         "FULCRUM_PORT=50001",
         "FULCRUM_SSL=false",
         "BIP158_P2P=0",
+        # Regtest-Kette ist kurz — Mainnet-Default 481824 würde jeden Filter-Scan überspringen.
+        "BIP158_START_HEIGHT=1",
+        "BIP158_PEERS=127.0.0.1:18444",
         "OEFFENTLICHE_ELECTRUM=0",
         "NODE_IP=127.0.0.1",
         "RPCPORT=18443",

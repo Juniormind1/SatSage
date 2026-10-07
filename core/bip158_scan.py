@@ -84,6 +84,26 @@ def plane_filter_passes(
     return passe
 
 
+def _zusammenhaengende_bereiche(hoehen: list[int]) -> list[tuple[int, int]]:
+    """Sortierte Höhen → geschlossene Intervalle ``(start, ende)`` inklusiv.
+
+    Eine Lücke in einem 1000er-Chunk darf nicht den ganzen Chunk neu holen.
+    """
+    if not hoehen:
+        return []
+    sortiert = sorted({int(h) for h in hoehen})
+    out: list[tuple[int, int]] = []
+    start = prev = sortiert[0]
+    for h in sortiert[1:]:
+        if h == prev + 1:
+            prev = h
+            continue
+        out.append((start, prev))
+        start = prev = h
+    out.append((start, prev))
+    return out
+
+
 def _cfilter_chunks(
     von: int, bis: int, hash_at,
     *,
@@ -234,22 +254,44 @@ def _lade_cfilter_chunk(
         for h in range(von, bis + 1):
             filter_liste.append(cached[h])
     else:
-        # Wire-API ist range-basiert — fehlende Höhen über den Chunk nachladen.
-        netz = peer.fetch_cfilters(von, stop_hash, expect=expect)
-        if len(netz) != expect:
-            raise ConnectionError(
-                f"cfilter: {len(netz)} statt {expect} ab Höhe {von}"
-            )
-        if stats is not None:
-            stats["geholt"] = int(stats.get("geholt") or 0) + len(netz)
-        for offset, (block_hash, blob) in enumerate(netz):
-            h = von + offset
-            if h in cached:
-                filter_liste.append(cached[h])
-                continue
-            if cache_dir is not None and blob:
-                speichere_cfilter_blob(cache_dir, h, block_hash, blob)
-            filter_liste.append((block_hash, blob))
+        by_h: dict[int, tuple[bytes, bytes]] = dict(cached)
+        bereiche = _zusammenhaengende_bereiche(fehlend)
+        # Ohne Hash je Höhe: ein Range über den ganzen Chunk (Wire-API).
+        if hash_at is None:
+            bereiche = [(von, bis)]
+        for a, b in bereiche:
+            n_expect = b - a + 1
+            if hash_at is None:
+                stop = stop_hash
+            else:
+                try:
+                    stop = hash_at(b)
+                except Exception:
+                    stop = None
+                if stop is None:
+                    stop = stop_hash if (a, b) == (von, bis) else None
+                if stop is None:
+                    raise ConnectionError(
+                        f"cfilter: kein Stop-Hash für Höhe {b}"
+                    )
+            netz = peer.fetch_cfilters(a, stop, expect=n_expect)
+            if len(netz) != n_expect:
+                raise ConnectionError(
+                    f"cfilter: {len(netz)} statt {n_expect} ab Höhe {a}"
+                )
+            if stats is not None:
+                stats["geholt"] = int(stats.get("geholt") or 0) + len(netz)
+            for offset, (block_hash, blob) in enumerate(netz):
+                h = a + offset
+                if h in by_h:
+                    continue
+                if cache_dir is not None and blob:
+                    speichere_cfilter_blob(cache_dir, h, block_hash, blob)
+                by_h[h] = (block_hash, blob)
+        for h in range(von, bis + 1):
+            if h not in by_h:
+                raise ConnectionError(f"cfilter: Höhe {h} fehlt nach dem Abruf")
+            filter_liste.append(by_h[h])
 
     scripts_list = list(scripts) if not isinstance(scripts, list) else scripts
     zeilen = []
@@ -266,6 +308,12 @@ def _lade_cfilter_chunk(
                 roh = _BLOCK_PENDING
             else:
                 roh = peer.fetch_block(block_hash)
+                try:
+                    from core.bip158_wallet import merke_block_bytes
+
+                    merke_block_bytes(block_hash, roh)
+                except Exception:
+                    pass
         zeilen.append((h, block_hash, blob, roh))
     return zeilen
 
@@ -409,6 +457,12 @@ def verteile_cfilter_chunks(
             try:
                 with lock:
                     roh = peer.fetch_block(block_hash)
+                try:
+                    from core.bip158_wallet import merke_block_bytes
+
+                    merke_block_bytes(block_hash, roh)
+                except Exception:
+                    pass
             except Exception as exc:
                 try:
                     from core.jobs import ist_abbruch

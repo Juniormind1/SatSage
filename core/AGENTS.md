@@ -101,6 +101,7 @@ Einzelmodi:
   - Mitgeliefertes Archiv `data/p2p_headers_segwit.bin.gz` wird ausgelegt, wenn der lokale Cache fehlt oder hinter dem Archiv-Tip liegt; P2P holt nur den Rest bis zum Tip
   - Matcher: `_CoreBasicFilterMatcher` (nicht `chiabip158`)
   - UTXO-Scan schreibt den Verlaufs-Cache mit (Empfang/Ausgabe aus dem Blockwalk); Merge, kein Überschreiben durch Turbo-Pässe
+  - Wirtschaft: Historie nur Gap-Keys; `getcfilters` nur fehlende Höhen-Spannen; Block je Hash einmal je Sitzung; mit Höhe kein `getdata` TX; Header-Overlap über Hash-Index (wie Electrs-Tip per Binärsuche in `p2p_headers.bin`)
 - **Fulcrum** — `--rpc-only` oder Auto-Kette; eigener Node vs. öffentliche Rotation (`FULCRUM_TOR_0`…`9`) nur nach Bestätigung
 
 **Sanktions-Scans** (Wallet-Check, UTXO-Scan auf Listen-Adressen): immer **Clearnet-Fulcrum** über `build_sanctions_fulcrum_fetchers()` / `resolve_sanctions_clearnet_pool()` — unabhängig von der Wallet-Datenquelle. Optional `FULCRUM_SANCTIONS_HOST` in `.env`, sonst paralleler Probe aus `electrum_servers.json`.

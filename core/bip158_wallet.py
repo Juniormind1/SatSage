@@ -5,6 +5,7 @@ Ableitung bzw. die Client-Factory per Late-Import (kein Lade-Zyklus).
 """
 from __future__ import annotations
 
+import threading
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -368,6 +369,38 @@ def clear_tx_height_hints() -> None:
     _TX_HEIGHT_HINTS.set({})
 
 
+#: Rohe Blöcke dieser Session — derselbe Hash nicht zweimal über P2P holen.
+_BLOCK_BYTES: dict[bytes, bytes] = {}
+_BLOCK_BYTES_LOCK = threading.Lock()
+_BLOCK_BYTES_MAX = 64
+
+
+def merke_block_bytes(block_hash: bytes, roh: bytes) -> None:
+    """Merkt den Rohblock; älteste Einträge weichen bei Überlauf."""
+    if not block_hash or not roh:
+        return
+    key = bytes(block_hash)
+    with _BLOCK_BYTES_LOCK:
+        _BLOCK_BYTES.pop(key, None)
+        _BLOCK_BYTES[key] = roh
+        while len(_BLOCK_BYTES) > _BLOCK_BYTES_MAX:
+            alt = next(iter(_BLOCK_BYTES))
+            _BLOCK_BYTES.pop(alt, None)
+
+
+def block_bytes_hint(block_hash: bytes) -> bytes | None:
+    if not block_hash:
+        return None
+    with _BLOCK_BYTES_LOCK:
+        return _BLOCK_BYTES.get(bytes(block_hash))
+
+
+def clear_p2p_block_cache() -> None:
+    """Leert den Session-Blockcache (Tests / neuer Lauf)."""
+    with _BLOCK_BYTES_LOCK:
+        _BLOCK_BYTES.clear()
+
+
 
 def _embit_tx_to_dict(
     tx,
@@ -465,27 +498,57 @@ def fetch_tx_from_block_p2p(
             f"Header-Cache endet bei {chain.tip_height()}, braucht {hoehe}"
         )
     block_hash = chain.hash_at(hoehe)
-    if on_log:
+    raw = block_bytes_hint(block_hash)
+    if raw is None:
+        if on_log:
+            on_log(
+                f"hole Block {hoehe:,} ({hash_to_hex(block_hash)[:12]}…) "
+                f"für Tx {key[:16]}…".replace(",", ".")
+            )
+        peer = scanner._ensure_peer()
+        raw = peer.fetch_block(block_hash)
+        merke_block_bytes(block_hash, raw)
+    elif on_log:
         on_log(
-            f"hole Block {hoehe:,} ({hash_to_hex(block_hash)[:12]}…) "
-            f"für Tx {key[:16]}…".replace(",", ".")
+            f"Block {hoehe:,} aus Session-Cache "
+            f"({hash_to_hex(block_hash)[:12]}…)".replace(",", ".")
         )
-    peer = scanner._ensure_peer()
-    raw = peer.fetch_block(block_hash)
     header, txs = parse_raw_block(raw)
     block_time = _header_unixzeit(header)
     gefunden: dict[str, Any] | None = None
+    geschwister: list[dict[str, Any]] = []
     for tx in txs:
         d = _embit_tx_to_dict(tx, height=hoehe, block_time=block_time)
+        note_tx_height(d["txid"], hoehe)
         if d["txid"].lower() == key:
             gefunden = d
-            break
+        else:
+            geschwister.append(d)
     if gefunden is None:
         raise ConnectionError(
             f"Tx {key[:16]}… nicht in Block {hoehe} "
             f"(Peer lieferte {len(txs)} Transaktionen)"
         )
+    _lege_block_txs_ab(client, [gefunden, *geschwister])
     return gefunden
+
+
+def _lege_block_txs_ab(client: Bip158Client, txs: list[dict[str, Any]]) -> None:
+    """Geschwister aus demselben Block: nächster get_tx ohne zweiten Download."""
+    cache_dir = getattr(client, "cache_dir", None)
+    if cache_dir is None:
+        return
+    try:
+        from core.xpub_cache import resolve_immutable_cache_dir, save_cached_tx
+
+        imm = resolve_immutable_cache_dir(None, utxo_cache_dir=Path(cache_dir))
+    except Exception:
+        return
+    for d in txs:
+        try:
+            save_cached_tx(d["txid"], d, imm, "p2p-block")
+        except Exception:
+            continue
 
 
 
@@ -501,7 +564,12 @@ def fetch_tx_p2p_mit_fallback(
     on_log=None,
 ) -> dict[str, Any]:
     """
-    Tx-Lookup ohne Electrs: Core-RPC (lokal/Lookup) → P2P getdata → Block.
+    Tx-Lookup ohne Electrs: Core-RPC (lokal/Lookup) → Block bei bekannter
+    Höhe → P2P getdata (Mempool / Tx-Index).
+
+    Historische Tx per ``getdata`` TX sind beim Node fast immer notfound.
+    Mit Höhe geht der Blockweg zuerst — eine Roundtrip weniger, wie die
+    Header-Binärsuche den Electrs-Bruteforce ersetzt.
 
     *local_core* / *archival_core*: Rollen-Split (pruned lokal bis pruneheight,
     sonst Lookup z. B. Start9). *core_client* bleibt als Einzel-Fallback.
@@ -550,15 +618,18 @@ def fetch_tx_p2p_mit_fallback(
         except Exception as exc:
             fehler.append(f"Core: {exc}")
 
+    if hoehe:
+        try:
+            return fetch_tx_from_block_p2p(
+                client, key, int(hoehe), on_log=on_log,
+            )
+        except Exception as exc:
+            fehler.append(f"P2P-Block: {exc}")
+
     try:
         return fetch_tx_p2p(client, key)
     except Exception as exc:
         fehler.append(f"P2P-Tx: {exc}")
-
-    if hoehe:
-        return fetch_tx_from_block_p2p(
-            client, key, int(hoehe), on_log=on_log,
-        )
 
     detail = "; ".join(fehler) if fehler else "unbekannt"
     raise ConnectionError(

@@ -1086,7 +1086,9 @@ class HeaderChain:
             return
         i = 0
         while i < len(batch):
-            vorhanden = self.hoehe_fuer_hash(header_hash(batch[i]))
+            vorhanden = self.hoehe_fuer_hash(
+                header_hash(batch[i]), max_tiefe=None,
+            )
             if vorhanden is None:
                 break
             i += 1
@@ -1105,8 +1107,11 @@ class HeaderChain:
             tip = self.tip_height()
             if prev == self.hash_at(tip):
                 self._data.extend(header)
+                idx = getattr(self, "_hash_nach_hoehe", None)
+                if isinstance(idx, dict):
+                    idx[header_hash(header)] = self.tip_height()
                 continue
-            eltern = self.hoehe_fuer_hash(prev)
+            eltern = self.hoehe_fuer_hash(prev, max_tiefe=None)
             if eltern is None:
                 raise ConnectionError("Header-Kette reißt (prev-Hash)")
             if eltern < tip:

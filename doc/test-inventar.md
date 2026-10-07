@@ -1,6 +1,6 @@
 # Test-Inventar
 
-Stand: 2026-10-06. Erhebung per AST und Import-Zuordnung, **ohne** die Suite oder das Regtest-Labor zu fahren.
+Stand: 2026-10-07. Erhebung per AST und Import-Zuordnung, **ohne** die Suite oder das Regtest-Labor zu fahren.
 
 Die schnelle CI-Suite (`tests/`, Dealbreaker **Q1**) umfasst Unittests ohne Node. Hart-Dealbreaker (T1/T6/T9/T13, Auth, CSRF) sind auf `dev-juniormind` optional und auf `main` Pflicht (`SATSAGE_HARD_TESTS`).
 
@@ -114,6 +114,7 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 |-------|--:|-------|
 | `test_source.py` | 47 | Kaskade, öffentliche Electrum nur mit Opt-in (**P2/T11**) |
 | `test_bip158_scanblocks.py` | 53 | TurboSync, CFilter, P2P |
+| `test_p2p_economy.py` | 6 | kein Filter-Bruteforce, CFilter-Lücken, Block-Session-Cache |
 | `test_start_sync.py` | 16 | Start-Nachzug, kein Fullscan |
 | `test_tip_fenster_je_chain.py` | 8 | Empfang/Change getrennt |
 | `test_utxo_scan_prioritaet.py` | 6 | Electrs-LAN vor scantxoutset |
@@ -205,10 +206,12 @@ Labor (`lab/regtest/scripts/`):
 - `verify_rpc_allowlist.py` — Allowlist + Hinweise `rpcwhitelist?` / `disablewallet?` am echten Node
 - `generate_scenarios.py` / `generate_sanctions_scenarios.py`
 - `verify_tx_classify.py` / `verify_sanctions_hops.py`
+- `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6)
+- `verify_p2p_traces.py` — Herkunft, Klassifikation, Sanktions-Hops nur BIP-158/P2P; Protokoll `doc/testprotokoll-p2p-traces.md` (noch nicht Q6)
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)
 - `live_psbt_regtest_timing.py` — Lab darf `sendrawtransaction`, die App nicht
 
-GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`.
+GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`, `doc/testprotokoll-p2p-traces.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`; Labor: `verify_scan_abort_cache.py`, `verify_p2p_traces.py`.
 
 ---
 
@@ -332,6 +335,8 @@ Reihenfolge: Dealbreaker und Datenverlust zuerst, dann HTTP-Löcher der Produktf
 15. Ein E2E-Smoke im Userflow-Sinn (Kern-Nav, keine 100 Chaos-Runden) — erst wenn der Maintainer CI-Zeit will; steht in ISSUES.
 16. Eine automatisierte Mini-Variante von `testprotokoll-datenquellen-wechsel-waehrend-scan.md` im Labor.
 17. Chaos-Runner: Windows `channel="chrome"` wie im GUI-Protokoll beschrieben.
+18. **Scan-Abbruch/Cache** — Harness liegt (`verify_scan_abort_cache.py`). Produkt muss die Fälle noch grün machen (atomare Writes, kaputtes JSON = Miss, kein Quellenwechsel mitten im Job).
+19. **P2P-only Traces** — Harness liegt (`verify_p2p_traces.py`). Produkt muss Regtest-P2P können (Magic/Genesis, Start-Höhe 1, Compact Filter, Tx-Höhe für Block-Fallback).
 
 ### Bewusst nicht
 

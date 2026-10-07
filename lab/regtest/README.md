@@ -130,6 +130,34 @@ Verify (Lab muss laufen):
 py -3 lab/regtest/scripts/verify_sanctions_hops.py
 ```
 
+### Scan-Abbruch und Cache-Hinterlassenschaften
+
+Ein Scan, der mittendrin stirbt (Abbruch-Knopf, Electrs weg, `kill -9`), plus Start-Sync oder ungeduldiger Scan **bevor** Electrs steht, darf keinen Cache hinterlassen, an dem die nächste Instanz hängt. Der Prüfer verlangsamt den Scan über einen Loopback-Proxy, bricht ab, startet SatSage neu gegen denselben Cache.
+
+Protokoll: [`doc/testprotokoll-scan-abbruch-cache.md`](../../doc/testprotokoll-scan-abbruch-cache.md). Noch nicht Teil von Q6.
+
+```bash
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --list
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --group abort
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --group quelle
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --group synthetic
+```
+
+Windows: `py -3 lab\regtest\scripts\verify_scan_abort_cache.py`. Isolierte Caches unter `.data/abort-scan/` (nicht der GUI-Cache). Der Proxy lauscht auf `127.0.0.1:15001`. Labor muss schon laufen — der Prüfer startet Docker nicht.
+
+### P2P-only Traces (kein Electrs)
+
+Herkunft, Tx-Klassifikation und Sanktions-Hops nur über Compact Filter und Blöcke. Electrs und Core-`getrawtransaction` bleiben außen vor. Der Labor-Node braucht `peerblockfilters=1` und P2P `127.0.0.1:18444` (Docker mappt den Port). Start-Höhe 1, nicht Mainnet-481824.
+
+Protokoll: [`doc/testprotokoll-p2p-traces.md`](../../doc/testprotokoll-p2p-traces.md). Noch nicht Teil von Q6.
+
+```bash
+python3 lab/regtest/scripts/verify_p2p_traces.py
+python3 lab/regtest/scripts/verify_p2p_traces.py --suite origin --max-traces 8
+```
+
+Bestehende Nodes: `peerblockfilters=1` in die `bitcoin.conf`, bitcoind neu starten. Chain-Wipe ist dafür nicht nötig.
+
 ### Core-Allowlist (harte Regel, jeder PR nach main)
 
 `scripts/verify_rpc_allowlist.py` spricht den laufenden Labor-Node an. `dumpwallet` und `listdescriptors true` müssen im Client enden, ohne dass ein Socket aufgeht. `sendtoaddress` ist nur bei `NETWORK=regtest` überhaupt erlaubt und scheitert am Whitelist-User mit „rpcwhitelist?“. `listwallets` als `satsage` liefert denselben Hinweis. Port 18445 (`disablewallet`) liefert „disablewallet?“ statt „nicht erreichbar“. `bitcoin`/`secret` bleibt ohne Whitelist (`rpcwhitelistdefault=0` in der Labor-`bitcoin.conf`; ohne die Zeile sperrt Core jeden anderen User), sonst stehen Electrs, Healthcheck und die Szenarien.

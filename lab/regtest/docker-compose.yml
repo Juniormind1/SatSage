@@ -12,6 +12,7 @@ services:
       GID: ${SATSAGE_LAB_GID:-}
     ports:
       - "127.0.0.1:18443:18443"
+      - "127.0.0.1:18444:18444"
     volumes:
       - ./scripts/bitcoin-entrypoint.sh:/lab-entrypoint.sh:ro
       - ./.data/bitcoin:/home/bitcoin/.bitcoin
@@ -30,6 +31,7 @@ services:
       - -fallbackfee=0.0001
       - -txindex=1
       - -blockfilterindex=1
+      - -peerblockfilters=1
       - -printtoconsole=1
       # electrs P2P-Sync: Docker-Netz nicht als „fremd“ kappen
       - -whitelist=0.0.0.0/0

@@ -16,6 +16,7 @@ LAB = HERE.parent
 BITCOIND_PORT = 18443
 ELECTRS_PORT = 50001
 NOWALLET_PORT = 18445
+P2P_PORT = 18444
 HOST = "127.0.0.1"
 
 
@@ -70,6 +71,17 @@ def hinweis_nowallet() -> str:
     return (
         "Der zweite Core-Node (disablewallet) antwortet nicht auf "
         f"{HOST}:{NOWALLET_PORT}.\n"
+        + _start_hinweis()
+    )
+
+
+def hinweis_p2p() -> str:
+    return (
+        "Bitcoin-P2P antwortet nicht auf "
+        f"{HOST}:{P2P_PORT} (Regtest Compact Filter / Blocks).\n"
+        "Ohne diesen Port kein BIP-158-Labor. Docker: Port 18444 "
+        "in docker-compose veröffentlichen. Windows: bitcoind listen=1, "
+        "peerblockfilters=1.\n"
         + _start_hinweis()
     )
 
@@ -130,6 +142,7 @@ def brauche(*was: str) -> int | None:
         "bitcoind": (BITCOIND_PORT, hinweis_bitcoind),
         "electrs": (ELECTRS_PORT, hinweis_electrs),
         "nowallet": (NOWALLET_PORT, hinweis_nowallet),
+        "p2p": (P2P_PORT, hinweis_p2p),
     }
     for name in was:
         port, hinweis = mapping[name]
