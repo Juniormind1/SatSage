@@ -53,8 +53,9 @@ function aktualisiereSpecterUi() {
 
 /**
  * Ein Wallet, sobald sein Cache gelesen ist — nicht erst mit dem letzten.
- * Reihenfolge bleibt die der Konfiguration. Der Cache-Stand (UTXO-Zahl,
- * Frische) kommt mit „Cache gelesen.“ und ersetzt den Platzhalter.
+ * Die Liste bleibt in Konfigurationsreihenfolge; die Navigation sortiert
+ * beim Zeichnen alphabetisch. Der Cache-Stand (UTXO-Zahl, Frische) kommt
+ * mit „Cache gelesen.“ und ersetzt den Platzhalter.
  */
 function nimmWalletSobaldFertig(wallet) {
   if (!wallet || !wallet.id) return;
@@ -93,11 +94,28 @@ function einstiegsWalletId() {
   return liste[0].id;
 }
 
+/**
+ * Navigationsleiste: Namen A–Z in der UI-Sprache, Groß/Klein egal.
+ * Gleiche Namen: id als Tie-Break, damit die Reihenfolge stabil bleibt.
+ * Die Konfiguration selbst bleibt unsortiert (Speichern schreibt .env).
+ */
+function walletsFuerNav(liste) {
+  const sprache = typeof uiSprache === "function" && uiSprache() === "en" ? "en" : "de";
+  return [...(liste || [])].sort((a, b) => {
+    const namen = String(a?.name || "").localeCompare(String(b?.name || ""), sprache, {
+      sensitivity: "base",
+      numeric: true,
+    });
+    if (namen) return namen;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+}
+
 function zeichneNav() {
   const behaelter = $("#wallet-nav");
   behaelter.replaceChildren();
 
-  const wallets = Zustand.config?.wallets || [];
+  const wallets = walletsFuerNav(Zustand.config?.wallets);
   if (wallets.length === 0) {
     // Neunutzer: Klick → Verwaltung · Wallets (nicht nur toter Hinweis).
     const leer = document.createElement("button");
