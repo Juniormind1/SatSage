@@ -118,6 +118,7 @@ CI: Workflow „Build StartOS s9pk“ nur manuell (`workflow_dispatch`) — Arti
 | App ohne Node | StartOS-Deps `bitcoind` + gewÃ¤hlter Indexer (`electrs` **oder** `fulcrum`) mÃ¼ssen running sein |
 | Fulcrum statt Electrs | Action **Select Indexer** in SatSage; Fulcrum-Paket installieren/starten; siehe [`START9-fulcrum-indexer.md`](START9-fulcrum-indexer.md) |
 | `gh: not logged in` | `gh auth login`; privates Repo |
+| `CERTIFICATE_VERIFY_FAILED` … `certificate has expired` beim BTC-Preis-Bundle | Zertifikat von `cryptodatadownload.com` abgelaufen (Stand 2026-10-05). `scripts/refresh_btc_price_bundle.py` fällt dann auf Mempool zurück und hängt nur die fehlenden Tage an das vorhandene Bundle. Ohne lokales Bundle oder ohne Netz: `SKIP_BTC_PRICE_REFRESH=1` |
 
 App-Start im Container (schon im Entrypoint): `--env /data/.env`, Caches unter `/data`, `SATSAGE_MANAGED_BY=start9`, Cookie `/mnt/bitcoind/.cookie`. Das nicht in `server.py` â€žneu erfindenâ€œ.
 
