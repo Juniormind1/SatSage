@@ -485,12 +485,18 @@ function steuerScorecardModelle(daten) {
       klaeren: true,
     },
   ];
-  if (k.ungeprueft_count > 0) {
+  if ((Number(k.ungeprueft_sats) || 0) > 0 || (Number(k.ungeprueft_count) || 0) > 0) {
     karten.push({
       id: "ungeprueft",
-      titel: "Ohne Herkunftsanalyse",
+      titel: t("tax.tileNoOrigin") !== "tax.tileNoOrigin"
+        ? t("tax.tileNoOrigin")
+        : "Ohne Herkunftsanalyse",
       wert: steuerScorecardWert(k.ungeprueft_sats),
-      zusatz: `${k.ungeprueft_count} UTXOs — Frist evtl. länger`,
+      zusatz: k.ungeprueft_count > 0
+        ? `${k.ungeprueft_count} UTXOs — Frist evtl. länger`
+        : (t("tax.tileLotGrayNote") !== "tax.tileLotGrayNote"
+          ? t("tax.tileLotGrayNote")
+          : "undatierte Herkunftsenden"),
       art: "ungeprueft",
       klaeren: true,
     });
@@ -944,7 +950,9 @@ function zeichneSteuerUtxoGruppen(daten) {
   const fenster = daten.seitenweise ? (daten.steuer_gruppen || {}) : null;
   const liste = daten.eintraege || [];
   const leer = fenster
-    ? !(Number(fenster.erfuellt?.voll_count) || Number(fenster.offen?.voll_count))
+    ? !(Number(fenster.erfuellt?.voll_count)
+      || Number(fenster.offen?.voll_count)
+      || Number(fenster.ungeprueft?.voll_count))
     : liste.length === 0;
   if (leer) {
     const koerper = document.createElement("tbody");
@@ -961,9 +969,14 @@ function zeichneSteuerUtxoGruppen(daten) {
     return;
   }
 
-  // Reihenfolge wie Scorecard: außerhalb (grün), dann innerhalb (gelb).
+  // Reihenfolge wie Scorecard: grün, gelb, grau.
+  const gruppen = [
+    ["erfuellt", "tax.haltefristOut"],
+    ["offen", "tax.haltefristIn"],
+    ["ungeprueft", "tax.tileNoOrigin"],
+  ];
   if (fenster) {
-    for (const [teil, titel] of [["erfuellt", "tax.haltefristOut"], ["offen", "tax.haltefristIn"]]) {
+    for (const [teil, titel] of gruppen) {
       const f = fenster[teil];
       if (!f || !Number(f.voll_count)) continue;
       tabelle.append(zeichneSteuerUtxoGruppe(t(titel), [], { art: teil, daten, fenster: f }));
@@ -972,21 +985,14 @@ function zeichneSteuerUtxoGruppen(daten) {
   }
 
   const erfuellt = liste.filter((e) => e.erfuellt);
-  const offen = liste.filter((e) => !e.erfuellt);
+  const offen = liste.filter((e) => e.geprueft && !e.erfuellt);
+  const ungeprueft = liste.filter((e) => !e.geprueft && !e.erfuellt);
+  const listen = { erfuellt, offen, ungeprueft };
 
-  if (erfuellt.length) {
-    tabelle.append(zeichneSteuerUtxoGruppe(
-      t("tax.haltefristOut"),
-      erfuellt,
-      { art: "erfuellt", daten },
-    ));
-  }
-  if (offen.length) {
-    tabelle.append(zeichneSteuerUtxoGruppe(
-      t("tax.haltefristIn"),
-      offen,
-      { art: "offen", daten },
-    ));
+  for (const [teil, titel] of gruppen) {
+    const items = listen[teil];
+    if (!items.length) continue;
+    tabelle.append(zeichneSteuerUtxoGruppe(t(titel), items, { art: teil, daten }));
   }
 }
 

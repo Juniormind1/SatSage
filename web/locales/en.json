@@ -1598,6 +1598,7 @@
   "tax.tileNextDeadline": "next on {datum}",
   "tax.tileNoOrigin": "No origin analysis",
   "tax.tileNoOriginNote": "{anzahl} UTXOs — period may be longer",
+  "tax.tileLotGrayNote": "undated origin ends",
   "tax.tileNoDate": "No date",
   "tax.tileNoDateNote": "unconfirmed, not counted",
   "tax.greyClarifyTitle": "Every UTXO still grey, i.e. with unclear history, is analysed until it turns green or yellow",

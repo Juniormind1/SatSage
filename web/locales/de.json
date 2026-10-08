@@ -1598,6 +1598,7 @@
   "tax.tileNextDeadline": "nächste am {datum}",
   "tax.tileNoOrigin": "Ohne Herkunftsanalyse",
   "tax.tileNoOriginNote": "{anzahl} UTXOs — Frist evtl. länger",
+  "tax.tileLotGrayNote": "undatierte Herkunftsenden",
   "tax.tileNoDate": "Ohne Datum",
   "tax.tileNoDateNote": "unbestätigt, nicht gewertet",
   "tax.greyClarifyTitle": "Alle noch grauen, d.h. UTXOs unklarer Vergangenheit, werden analysiert bis sie grün oder gelb sind",

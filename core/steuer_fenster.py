@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 
 from core import listen_fenster as lf
 
-TEILE = ("erfuellt", "offen", "abgaenge")
+UTXO_GRUPPEN = ("erfuellt", "offen", "ungeprueft")
+TEILE = (*UTXO_GRUPPEN, "abgaenge")
 
 
 def haltefrist_beschriftung(erfuellt: bool, neuvermoegen: bool, hat_stichtag: bool,
@@ -153,17 +154,20 @@ def fenster(auswertung: dict, *, teil: str = "alle", offset: int = 0, limit: int
 
     ``teil=alle``: alles außer den Zeilenlisten, dazu die ersten Fenster je
     Gruppe (``steuer_gruppen``) und der Veräußerungen (``abgaenge_fenster``).
-    ``teil=erfuellt|offen|abgaenge``: nur dieses Fenster — der Zeitstrahl
-    geht beim Blättern nicht jedes Mal neu über die Leitung.
-    ``teil=zeilen``: die ersten Fenster aller drei Listen ohne den Rest
-    (neuer Filter).
+    ``teil=erfuellt|offen|ungeprueft|abgaenge``: nur dieses Fenster — der
+    Zeitstrahl geht beim Blättern nicht jedes Mal neu über die Leitung.
+    ``teil=zeilen``: die ersten Fenster aller UTXO-Gruppen und der
+    Veräußerungen ohne den Rest (neuer Filter).
     """
     f = f or lf.parse_filter("")
     hat_stichtag = bool(auswertung.get("stichtag_regel"))
     alle = list(auswertung.get("eintraege") or [])
     gruppen = {
         "erfuellt": [e for e in alle if e.get("erfuellt")],
-        "offen": [e for e in alle if not e.get("erfuellt")],
+        "offen": [e for e in alle if e.get("geprueft") and not e.get("erfuellt")],
+        "ungeprueft": [
+            e for e in alle if not e.get("geprueft") and not e.get("erfuellt")
+        ],
     }
     abgaenge = list(auswertung.get("abgaenge") or [])
 
@@ -187,7 +191,7 @@ def fenster(auswertung: dict, *, teil: str = "alle", offset: int = 0, limit: int
     if teil == "zeilen":
         return {
             "jahr": auswertung.get("jahr"), "teil": teil, "seitenweise": True,
-            "steuer_gruppen": {name: g_teil(name, limit, 0) for name in ("erfuellt", "offen")},
+            "steuer_gruppen": {name: g_teil(name, limit, 0) for name in UTXO_GRUPPEN},
             "abgaenge_fenster": ab_teil(lim_ab, 0),
         }
 
@@ -197,7 +201,7 @@ def fenster(auswertung: dict, *, teil: str = "alle", offset: int = 0, limit: int
     }
     antwort["seitenweise"] = True
     antwort["teil"] = "alle"
-    antwort["steuer_gruppen"] = {name: g_teil(name, limit, 0) for name in ("erfuellt", "offen")}
+    antwort["steuer_gruppen"] = {name: g_teil(name, limit, 0) for name in UTXO_GRUPPEN}
     antwort["abgaenge_fenster"] = ab_teil(lim_ab, 0)
     antwort["kennzahlen_ts"] = kennzahlen_ts(auswertung)
     antwort.update(klaeren_keys(auswertung))
@@ -212,8 +216,12 @@ def kennzahlen_ts(auswertung: dict) -> dict:
     return {
         "gesamt": gemeinsamer_ts(alle),
         "erfuellt": gemeinsamer_ts([e for e in alle if e.get("erfuellt")]),
-        "offen": gemeinsamer_ts([e for e in alle if not e.get("erfuellt")]),
-        "ungeprueft": gemeinsamer_ts([e for e in alle if not e.get("geprueft")]),
+        "offen": gemeinsamer_ts(
+            [e for e in alle if e.get("geprueft") and not e.get("erfuellt")]
+        ),
+        "ungeprueft": gemeinsamer_ts(
+            [e for e in alle if not e.get("geprueft") and not e.get("erfuellt")]
+        ),
     }
 
 
@@ -222,7 +230,8 @@ def klaeren_keys(auswertung: dict) -> dict:
 
     Gelb: analysiert und Frist offen, plus jeder Punkt mit undatiertem
     Lot-Anteil — auch wenn er schon außerhalb der Haltefrist grün ist.
-    Grau: noch keine Herkunftsanalyse.
+    Grau: ohne Herkunft und noch in der Frist.
+    Lot-Grau: schon verfolgt, aber undatierte Enden (Extra-Lauf Grau-Klären).
     """
     alle = list(auswertung.get("eintraege") or [])
     return {
@@ -233,7 +242,15 @@ def klaeren_keys(auswertung: dict) -> dict:
         ],
         "grau_keys": [
             f"{e.get('txid')}:{e.get('vout')}" for e in alle
-            if not e.get("geprueft")
+            if not e.get("geprueft") and not e.get("erfuellt")
+        ],
+        "lot_grau_keys": [
+            f"{e.get('txid')}:{e.get('vout')}" for e in alle
+            if e.get("geprueft")
+            and (
+                int(e.get("sats_grau") or 0) > 0
+                or int(e.get("sats_ohne_datum") or 0) > 0
+            )
         ],
     }
 

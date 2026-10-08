@@ -119,7 +119,38 @@ class TestFenster(unittest.TestCase):
         r = sf.fenster(auswertung(e), limit=1)
         self.assertEqual(len(r["gelb_keys"]), 15)
         self.assertEqual(len(r["grau_keys"]), 15)
+        self.assertEqual(r["steuer_gruppen"]["offen"]["voll_count"], 15)
+        self.assertEqual(r["steuer_gruppen"]["ungeprueft"]["voll_count"], 15)
         self.assertEqual(len(r["steuer_gruppen"]["offen"]["items"]), 1)
+
+    def test_grau_nicht_in_gelb_gruppe(self):
+        e = [
+            eintrag(0, 100, erfuellt=True, geprueft=False),
+            eintrag(1, 200, erfuellt=False, geprueft=True),
+            eintrag(2, 400, erfuellt=False, geprueft=False),
+        ]
+        r = sf.fenster(auswertung(e), limit=10)
+        self.assertEqual(r["steuer_gruppen"]["erfuellt"]["voll_sats"], 100)
+        self.assertEqual(r["steuer_gruppen"]["offen"]["voll_sats"], 200)
+        self.assertEqual(r["steuer_gruppen"]["ungeprueft"]["voll_sats"], 400)
+        self.assertEqual(r["gelb_keys"], [f"{txid('01')}:0"])
+        self.assertEqual(r["grau_keys"], [f"{txid('02')}:0"])
+        self.assertEqual(r["lot_grau_keys"], [])
+        self.assertEqual(r["kennzahlen_ts"]["offen"], e[1]["time_ts"])
+
+    def test_lot_grau_keys_aus_sats(self):
+        e = [
+            eintrag(1, 1000, erfuellt=False, geprueft=True,
+                    sats_grau=400, sats_ohne_datum=0),
+            eintrag(2, 800, erfuellt=True, geprueft=True,
+                    sats_grau=0, sats_ohne_datum=200),
+            eintrag(3, 500, erfuellt=False, geprueft=False),
+        ]
+        r = sf.fenster(auswertung(e), limit=10)
+        self.assertEqual(r["lot_grau_keys"], [f"{txid('01')}:0", f"{txid('02')}:0"])
+        self.assertEqual(r["grau_keys"], [f"{txid('03')}:0"])
+        self.assertIn(f"{txid('01')}:0", r["gelb_keys"])
+        self.assertIn(f"{txid('02')}:0", r["gelb_keys"])
 
 
 def sa_abfluss(i, sats, *, wallet="Alpha", ts=1_736_726_460, gewaehlt=False, adressen=()):

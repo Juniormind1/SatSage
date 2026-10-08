@@ -181,21 +181,29 @@ class TestKennzahlen(unittest.TestCase):
         kennzahlen = self.ergebnis["kennzahlen"]
         self.assertEqual(kennzahlen["gesamt_sats"], 135_124_500)
         self.assertEqual(kennzahlen["erfuellt_sats"], 135_000_000)
-        self.assertEqual(kennzahlen["offen_sats"], 124_500)
+        # Ohne Herkunft in der Frist: grau, nicht gelb.
+        self.assertEqual(kennzahlen["offen_sats"], 0)
+        self.assertEqual(kennzahlen["ungeprueft_sats"], 124_500)
 
     def test_summen_ergaenzen_sich(self):
         kennzahlen = self.ergebnis["kennzahlen"]
         self.assertEqual(
-            kennzahlen["erfuellt_sats"] + kennzahlen["offen_sats"],
+            kennzahlen["erfuellt_sats"]
+            + kennzahlen["offen_sats"]
+            + kennzahlen["ungeprueft_sats"],
             kennzahlen["gesamt_sats"],
         )
         self.assertEqual(
-            kennzahlen["erfuellt_count"] + kennzahlen["offen_count"],
+            kennzahlen["erfuellt_count"]
+            + kennzahlen["offen_count"]
+            + kennzahlen["ungeprueft_count"],
             kennzahlen["gesamt_count"],
         )
 
-    def test_naechste_frist_wird_genannt(self):
-        self.assertEqual(self.ergebnis["kennzahlen"]["naechste_frist"], "28.11.2027")
+    def test_naechste_frist_nur_gelbe(self):
+        # Der einzige UTXO in der Frist hat keine Herkunft → grau, nicht gelb.
+        self.assertEqual(self.ergebnis["kennzahlen"]["naechste_frist"], "")
+        self.assertEqual(self.ergebnis["kennzahlen"]["offen_count"], 0)
 
     def test_stichtag_und_erstelldatum_dabei(self):
         self.assertEqual(self.ergebnis["stichtag"], "31.12.2026")
@@ -432,6 +440,39 @@ class TestAnschaffungsdatum(unittest.TestCase):
         self.assertEqual(kennzahlen["geprueft_count"], 1)
         self.assertEqual(kennzahlen["ungeprueft_count"], 2)
         self.assertEqual(kennzahlen["ungeprueft_sats"], 6000)
+        self.assertEqual(kennzahlen["erfuellt_sats"], 1000)
+        self.assertEqual(kennzahlen["offen_sats"], 0)
+        self.assertEqual(
+            kennzahlen["erfuellt_sats"]
+            + kennzahlen["offen_sats"]
+            + kennzahlen["ungeprueft_sats"],
+            kennzahlen["gesamt_sats"],
+        )
+
+    def test_alte_ungepruefte_bleiben_gruen_nicht_grau(self):
+        """Output schon außerhalb der Frist: grün, auch ohne Trace."""
+        ergebnis = auswerten_zum_jahresende(
+            [utxo(5000, "01.01.2020 12:00")],
+            immutable_cache_dir=self.cache,
+        )
+        k = ergebnis["kennzahlen"]
+        self.assertEqual(k["erfuellt_sats"], 5000)
+        self.assertEqual(k["offen_sats"], 0)
+        self.assertEqual(k["ungeprueft_sats"], 0)
+        self.assertEqual(k["ungeprueft_count"], 0)
+        self.assertFalse(ergebnis["eintraege"][0]["geprueft"])
+        self.assertTrue(ergebnis["eintraege"][0]["erfuellt"])
+
+    def test_naechste_frist_nach_herkunft_in_gelb(self):
+        self.herkunft_hinterlegen("c3", 0, "28.11.2026 04:00")
+        ergebnis = auswerten_zum_jahresende(
+            [utxo(124_500, "28.11.2026 04:00", marker="c3")],
+            immutable_cache_dir=self.cache,
+        )
+        k = ergebnis["kennzahlen"]
+        self.assertEqual(k["offen_sats"], 124_500)
+        self.assertEqual(k["ungeprueft_sats"], 0)
+        self.assertEqual(k["naechste_frist"], "28.11.2027")
 
     def test_hinweis_nennt_die_richtung_des_fehlers(self):
         """
@@ -1535,7 +1576,14 @@ class TestLotSummen(unittest.TestCase):
         )
         self.assertFalse(defensiv["eintraege"][0]["erfuellt"])
         self.assertEqual(defensiv["kennzahlen"]["erfuellt_sats"], 0)
+        self.assertEqual(defensiv["kennzahlen"]["lot_grau_sats"], 500)
+        self.assertEqual(defensiv["kennzahlen"]["ungeprueft_sats"], 500)
+        self.assertEqual(defensiv["kennzahlen"]["offen_sats"], 500)
+        self.assertEqual(defensiv["kennzahlen"]["ungeprueft_count"], 0)
         self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["lot_grau_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["ungeprueft_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["offen_sats"], 0)
         self.assertFalse(offensiv["eintraege"][0]["erfuellt"])
 
     def test_offensiv_offen_bleibt_auf_juengstem_stempel(self):

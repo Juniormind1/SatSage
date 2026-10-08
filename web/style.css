@@ -2629,6 +2629,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .steuer-gruppe.erfuellt .steuer-gruppe-titel { color: var(--gut); }
 .steuer-gruppe.offen .steuer-gruppe-titel { color: var(--warn); }
+.steuer-gruppe.ungeprueft .steuer-gruppe-titel { color: var(--achse-ungeprueft); }
 .steuer-gruppe-meta {
   margin-left: auto;
   font-family: var(--mono);

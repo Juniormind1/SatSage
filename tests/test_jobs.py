@@ -1,4 +1,4 @@
-"""Fortschritt langer Jobs: Phasen sofort, Zwischenstand spätestens alle 10s."""
+"""Fortschritt langer Jobs: Phasen sofort, Zwischenstand spätestens nach INTERVALL."""
 import threading
 import time
 import unittest
@@ -31,14 +31,15 @@ class TestFortschritt(unittest.TestCase):
         self.assertEqual(self.job.message, "Verbinde…")
         self.assertEqual(self.job.as_dict()["log"], ["Verbinde…"])
 
-    def test_tick_innerhalb_von_zehn_sekunden_nicht_ins_log(self):
+    def test_tick_innerhalb_des_intervalls_nicht_ins_log(self):
         self.stand.phase("Verbinde…")
         self.stand.tick("Gap-Scan Index #3…")
         self.assertEqual(self.job.message, "Gap-Scan Index #3…")
         self.assertEqual(self.job.as_dict()["log"], ["Verbinde…"])
 
-    def test_tick_nach_zehn_sekunden_schreibt_eine_zeile(self):
+    def test_tick_nach_intervall_schreibt_eine_zeile(self):
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -48,7 +49,7 @@ class TestFortschritt(unittest.TestCase):
             jobs_mod._reset_herzschlag_stand_fuer_tests(start)
             stand = Fortschritt(self.job)
             stand.phase("Verbinde…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick("Gap-Scan Index #40…")
             stand.close()
         self.assertEqual(
@@ -59,6 +60,7 @@ class TestFortschritt(unittest.TestCase):
     def test_herzschlag_bei_gleichem_stand_schreibt_moment_noch(self):
         """Dieselbe Arbeitszeile nicht nochmal — nur ein Lebenszeichen."""
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -68,9 +70,9 @@ class TestFortschritt(unittest.TestCase):
             jobs_mod._reset_herzschlag_stand_fuer_tests(start)
             stand = Fortschritt(self.job)
             stand.phase("Prüfe Adresse 101 von 101…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick()
-            _jetzt.wert = start + 20.0
+            _jetzt.wert = start + 2 * iv
             stand.tick()
             stand.close()
         self.assertEqual(
@@ -80,8 +82,9 @@ class TestFortschritt(unittest.TestCase):
         self.assertEqual(self.job.message, "Prüfe Adresse 101 von 101…")
 
     def test_phase_setzt_herzschlag_zurueck(self):
-        """Filter-Treffer (phase) zählt als Meldung — kein „Moment noch“ nach 10s ab Start."""
+        """Filter-Treffer (phase) zählt als Meldung — kein „Moment noch“ nach INTERVALL ab Start."""
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -93,7 +96,7 @@ class TestFortschritt(unittest.TestCase):
             stand.phase("Filter 0/481.375 (0,0 %)")
             _jetzt.wert = start + 6.0
             stand.phase("Filter-Treffer Block 850.123 — hole Block…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick()
             stand.close()
         log = self.job.as_dict()["log"]
@@ -105,10 +108,11 @@ class TestFortschritt(unittest.TestCase):
 
     def test_herzschlag_wartet_nach_jeder_log_zeile(self):
         """
-        „Moment noch“ erst 10s nach der letzten Log-Meldung — auch wenn die
+        „Moment noch“ erst INTERVALL nach der letzten Log-Meldung — auch wenn die
         Zeile nicht über phase/tick kam (direkter Job-Log).
         """
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -118,13 +122,13 @@ class TestFortschritt(unittest.TestCase):
             jobs_mod._reset_herzschlag_stand_fuer_tests(start)
             stand = Fortschritt(self.job)
             stand.phase("Start…")
-            _jetzt.wert = start + 9.0
+            _jetzt.wert = start + iv - 1.0
             # Frische Log-Zeile außerhalb von Fortschritt — setzt Stille zurück.
             self.job.progress("Zwischenergebnis…", log=True)
-            _jetzt.wert = start + 12.0  # nur 3s nach der Log-Zeile
+            _jetzt.wert = start + iv + 2.0  # nur 3s nach der Log-Zeile
             stand.tick()
             self.assertNotIn("Moment noch", self.job.as_dict()["log"])
-            _jetzt.wert = start + 19.0  # 10s nach Zwischenergebnis
+            _jetzt.wert = start + 2 * iv - 1.0  # INTERVALL nach Zwischenergebnis
             stand.tick()
             stand.close()
         self.assertEqual(
@@ -138,6 +142,7 @@ class TestFortschritt(unittest.TestCase):
         nennt keinen Job, also kein Spam pro Job.
         """
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -151,7 +156,7 @@ class TestFortschritt(unittest.TestCase):
             sb = Fortschritt(job_b)
             sa.phase("A arbeitet…")
             sb.phase("B arbeitet…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             sa.tick()
             sb.tick()
             sa.close()
@@ -165,6 +170,7 @@ class TestFortschritt(unittest.TestCase):
     def test_herzschlag_durch_anderen_job_unterdrueckt(self):
         """Ausgabe von Job B verhindert Herzschlag von Job A."""
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -177,9 +183,9 @@ class TestFortschritt(unittest.TestCase):
             sa = Fortschritt(job_a)
             sb = Fortschritt(job_b)
             sa.phase("A start…")
-            _jetzt.wert = start + 9.0
+            _jetzt.wert = start + iv - 1.0
             sb.phase("B meldet…")  # globale Stille zurück
-            _jetzt.wert = start + 12.0  # nur 3s nach B
+            _jetzt.wert = start + iv + 2.0  # nur 3s nach B
             sa.tick()
             sa.close()
             sb.close()
@@ -218,6 +224,7 @@ class TestFortschritt(unittest.TestCase):
 
     def test_neuer_stand_nach_intervall_steht_ausgeschrieben(self):
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -226,7 +233,7 @@ class TestFortschritt(unittest.TestCase):
         with patch("core.jobs.time.monotonic", side_effect=_jetzt):
             stand = Fortschritt(self.job)
             stand.phase("Prüfe Adresse 94 von 101…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick("Prüfe Adresse 101 von 101…")
             stand.close()
         self.assertEqual(

@@ -258,6 +258,11 @@ def export_markdown(auswertung: dict[str, Any]) -> dict[str, Any]:
         ),
         f"- außerhalb Haltefrist: {format_sats(k.get('erfuellt_sats', 0))}",
         f"- innerhalb Haltefrist: {format_sats(k.get('offen_sats', 0))}",
+        *(
+            [f"- ohne Herkunft: {format_sats(k.get('ungeprueft_sats', 0))}"]
+            if k.get("ungeprueft_count")
+            else []
+        ),
         "",
         "## Abgänge",
     ]
@@ -295,7 +300,13 @@ def export_brief(auswertung: dict[str, Any]) -> dict[str, Any]:
             f"{format_sats(k.get('gesamt_sats', 0))} in "
             f"{k.get('gesamt_count', 0)} UTXOs. "
             f"Außerhalb der Haltefrist {format_sats(k.get('erfuellt_sats', 0))}, "
-            f"innerhalb {format_sats(k.get('offen_sats', 0))}."
+            f"innerhalb {format_sats(k.get('offen_sats', 0))}"
+            + (
+                f", ohne Herkunft {format_sats(k.get('ungeprueft_sats', 0))}"
+                if k.get("ungeprueft_count")
+                else ""
+            )
+            + "."
         ),
     ]
     if k.get("abgang_count"):

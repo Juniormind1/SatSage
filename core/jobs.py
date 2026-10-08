@@ -448,8 +448,8 @@ class Fortschritt:
     """
 
     #: Sekunden ohne Log-Ausgabe, bevor Herzschlag oder nachgezogener Tick.
-    #: Bewusst 10 — nicht kürzer (AGENTS.md / Changelog).
-    INTERVALL = 10.0
+    #: Bewusst 90 — nicht kürzer (AGENTS.md / Changelog).
+    INTERVALL = 90.0
     HERZSCHLAG = "Moment noch"
 
     def __init__(self, job: Job):

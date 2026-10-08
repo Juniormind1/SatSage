@@ -1242,7 +1242,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     or t.startswith("→")
                 ):
                     # Jeder Hop und jeder Ziel-Scan sofort — sonst klebt
-                    # zehn Sekunden „Moment noch“ über demselben Text.
+                    # INTERVALL Sekunden „Moment noch“ über demselben Text.
                     stand.phase(t)
                 else:
                     stand.tick(t)

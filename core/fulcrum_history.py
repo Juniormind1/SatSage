@@ -1005,7 +1005,7 @@ def fetch_wallet_history_fulcrum(
             continue
 
         def _schritt(detail: str, *, _rest=rest, _nr=adresse_nr) -> None:
-            # Text ändert sich (Tx 3/12…) → tick schreibt nach ~10s Stille.
+            # Text ändert sich (Tx 3/12…) → tick schreibt nach INTERVALL-Stille.
             _melde(_rest, sofort=False, adresse_nr=_nr, detail=detail)
 
         for eintrag in fetch_address_history_fulcrum(

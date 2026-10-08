@@ -512,7 +512,7 @@ class ScantxoutsetProgressLine:
             )
         else:
             message = f"Scanne {self._label} … ({secs}s — {note})"
-        # tick: Fortschritt.herzschlag schreibt spätestens alle 10s
+        # tick: Fortschritt.herzschlag schreibt spätestens alle INTERVALL s
         # den aktuellen Text statt „Moment noch“.
         melde_zwischenstand(message, log=False)
         self._shown = _write_progress_line(

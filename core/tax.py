@@ -760,6 +760,92 @@ class Eingang:
         }
 
 
+def _eintrag_flag(eintrag, name: str) -> bool:
+    if isinstance(eintrag, dict):
+        return bool(eintrag.get(name))
+    return bool(getattr(eintrag, name, False))
+
+
+def _eintrag_sats(eintrag) -> int:
+    if isinstance(eintrag, dict):
+        return int(eintrag.get("value_sats") or 0)
+    return int(getattr(eintrag, "value_sats", 0) or 0)
+
+
+def _lot_grau_sats(eintrag) -> int:
+    """Grauer Lot-Anteil eines schon verfolgten UTXO. Ohne Trace: 0."""
+    if not _eintrag_flag(eintrag, "geprueft"):
+        return 0
+    if isinstance(eintrag, dict):
+        return int(eintrag.get("sats_grau") or 0)
+    return int(getattr(eintrag, "sats_grau", 0) or 0)
+
+
+def _scorecard_mengen(eintraege):
+    """Disjunkte Scorecard-Mengen: erfüllt, geprüft-offen, ohne Herkunft in der Frist."""
+    erfuellt, gelb, grau = [], [], []
+    for e in eintraege:
+        if _eintrag_flag(e, "erfuellt"):
+            erfuellt.append(e)
+        elif _eintrag_flag(e, "geprueft"):
+            gelb.append(e)
+        else:
+            grau.append(e)
+    return erfuellt, gelb, grau
+
+
+def _naechste_frist_label(gelb) -> str:
+    """Nächste Frist nur unter den gelben (geprüft, Frist offen)."""
+    naechste = None
+    for e in gelb:
+        if isinstance(e, dict):
+            text = e.get("frist_ende") or ""
+            if not text:
+                continue
+            try:
+                tag = datetime.strptime(str(text), "%d.%m.%Y")
+            except ValueError:
+                continue
+        else:
+            tag = getattr(e, "frist_ende", None)
+            if tag is None:
+                continue
+        if naechste is None or tag < naechste:
+            naechste = tag
+    return naechste.strftime("%d.%m.%Y") if naechste else ""
+
+
+def _scorecard_kennzahlen_setzen(
+    kennzahlen: dict, eintraege, *, erfuellt_sats: int | None = None,
+) -> None:
+    """Grün + gelb + grau = Bestand.
+
+    Grau: ohne Herkunft und noch in der Frist, plus ``sats_grau`` der
+    schon verfolgten UTXOs. Der UTXO-Zähler bleibt die Menge ohne Trace.
+    """
+    erfuellt, gelb, grau = _scorecard_mengen(eintraege)
+    kennzahlen["erfuellt_count"] = len(erfuellt)
+    kennzahlen["offen_count"] = len(gelb)
+    kennzahlen["ungeprueft_count"] = len(grau)
+    lot_grau = sum(_lot_grau_sats(e) for e in erfuellt) + sum(
+        _lot_grau_sats(e) for e in gelb
+    )
+    kennzahlen["lot_grau_sats"] = lot_grau
+    kennzahlen["ungeprueft_sats"] = (
+        sum(_eintrag_sats(e) for e in grau) + lot_grau
+    )
+    if erfuellt_sats is None:
+        kennzahlen["erfuellt_sats"] = sum(_eintrag_sats(e) for e in erfuellt)
+    else:
+        kennzahlen["erfuellt_sats"] = int(erfuellt_sats)
+    kennzahlen["offen_sats"] = (
+        int(kennzahlen.get("gesamt_sats") or 0)
+        - int(kennzahlen["erfuellt_sats"])
+        - int(kennzahlen["ungeprueft_sats"])
+    )
+    kennzahlen["naechste_frist"] = _naechste_frist_label(gelb)
+
+
 def verfuegbare_jahre(utxos: list[dict]) -> list[int]:
     """Jahre, für die überhaupt Eingänge vorliegen — absteigend."""
     jahre = set()
@@ -942,11 +1028,7 @@ def auswerten(
 
     eintraege.sort(key=lambda e: e.zeitpunkt)
 
-    erfuellt = [e for e in eintraege if e.erfuellt]
-    offen = [e for e in eintraege if not e.erfuellt]
-    naechste = min((e.frist_ende for e in offen if e.frist_ende), default=None)
-
-    ungeprueft = [e for e in eintraege if not e.geprueft]
+    ohne_analyse = [e for e in eintraege if not e.geprueft]
     untergrenzen = [e for e in eintraege if e.untergrenze]
     wallet_eingaenge = [
         e for e in eintraege if e.grundlage == GRUNDLAGE_WALLET_EINGANG
@@ -962,7 +1044,7 @@ def auswerten(
         _h("tax.hintScopeWithHistory") if mit_verlauf else _h("tax.hintScope"),
         hinweis_keine_beratung(lang),
     ]
-    if ungeprueft:
+    if ohne_analyse:
         hinweise.insert(0, _h("tax.hintUnchecked"))
     if wallet_eingaenge:
         hinweise.insert(0, _h("tax.hintWalletEntry"))
@@ -1004,18 +1086,11 @@ def auswerten(
         "kennzahlen": {
             "gesamt_count": len(eintraege),
             "gesamt_sats": sum(e.value_sats for e in eintraege),
-            "erfuellt_count": len(erfuellt),
-            "erfuellt_sats": sum(e.value_sats for e in erfuellt),
-            "offen_count": len(offen),
-            "offen_sats": sum(e.value_sats for e in offen),
             "ohne_datum": ohne_datum,
             "spent_ohne_abgang_count": spent_ohne_abgang,
-            "naechste_frist": naechste.strftime("%d.%m.%Y") if naechste else "",
-            # Wie viel der Aufstellung auf dem bloßen Output-Datum beruht und
-            # damit eine zu kurze Haltefrist ausweisen kann.
-            "ungeprueft_count": len(ungeprueft),
-            "ungeprueft_sats": sum(e.value_sats for e in ungeprueft),
-            "geprueft_count": len(eintraege) - len(ungeprueft),
+            # Grau: ohne Herkunft und noch in der Frist. Außerhalb der Frist
+            # ohne Trace bleibt grün. Gelb ist nur geprüft und Frist offen.
+            "geprueft_count": len(eintraege) - len(ohne_analyse),
             "untergrenze_count": len(untergrenzen),
             "untergrenze_sats": sum(e.value_sats for e in untergrenzen),
             "wallet_eingang_count": len(wallet_eingaenge),
@@ -1047,6 +1122,7 @@ def auswerten(
         "hinweise": hinweise,
         "_objekte": eintraege,
     }
+    _scorecard_kennzahlen_setzen(ergebnis["kennzahlen"], ergebnis["eintraege"])
     if mit_lots:
         _lot_segmente_eintragen(
             ergebnis, eintraege, immutable_cache_dir, on_lot=on_lot,
@@ -1129,11 +1205,7 @@ def _lot_kennzahlen_nachziehen(ergebnis: dict) -> None:
     strahl = ergebnis.get("zeitstrahl") or {}
     modus = ergebnis.get("anschaffung") or STANDARD_ANSCHAFFUNG
     eintraege = ergebnis.get("eintraege") or []
-    erfuellt = [e for e in eintraege if e.get("erfuellt")]
-    offen = [e for e in eintraege if not e.get("erfuellt")]
     kennzahlen = ergebnis["kennzahlen"]
-    kennzahlen["erfuellt_count"] = len(erfuellt)
-    kennzahlen["offen_count"] = len(offen)
     if modus == ANSCHAFFUNG_AELTESTE:
         gruen = 0
         for e in eintraege:
@@ -1144,22 +1216,9 @@ def _lot_kennzahlen_nachziehen(ergebnis: dict) -> None:
                 gruen += int(anteil)
             elif e.get("erfuellt"):
                 gruen += int(e.get("value_sats") or 0)
-        kennzahlen["erfuellt_sats"] = gruen
+        _scorecard_kennzahlen_setzen(kennzahlen, eintraege, erfuellt_sats=gruen)
     else:
-        kennzahlen["erfuellt_sats"] = sum(int(e.get("value_sats") or 0) for e in erfuellt)
-    kennzahlen["offen_sats"] = int(kennzahlen.get("gesamt_sats") or 0) - kennzahlen["erfuellt_sats"]
-    naechste = None
-    for e in offen:
-        text = e.get("frist_ende") or ""
-        if not text:
-            continue
-        try:
-            tag = datetime.strptime(text, "%d.%m.%Y")
-        except ValueError:
-            continue
-        if naechste is None or tag < naechste:
-            naechste = tag
-    kennzahlen["naechste_frist"] = naechste.strftime("%d.%m.%Y") if naechste else ""
+        _scorecard_kennzahlen_setzen(kennzahlen, eintraege)
     _geister_aus_events(strahl, modus)
 
 
@@ -1764,9 +1823,9 @@ def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
     schreiber.writerow(["davon Frist offen", "", "", "",
                         _btc(kennzahlen["offen_sats"]),
                         kennzahlen["offen_sats"], "", "", "nein"])
-    if kennzahlen.get("ungeprueft_count"):
+    if kennzahlen.get("ungeprueft_sats"):
         schreiber.writerow([
-            "davon ohne Herkunftsanalyse", "", "", "",
+            "davon grau (ohne Herkunft / undatierte Enden)", "", "", "",
             _btc(kennzahlen["ungeprueft_sats"]), kennzahlen["ungeprueft_sats"],
             "", "", "", "Haltefrist kann zu kurz ausgewiesen sein",
         ])
@@ -1929,6 +1988,13 @@ def als_bericht(
 
     theme_css = hb.BERICHT_THEME_CSS
     theme_name = hb.normalize_bericht_theme(theme)
+    grau_html = ""
+    if kennzahlen.get("ungeprueft_sats"):
+        grau_html = (
+            '<div class="kennzahl"><span>Ohne Herkunftsanalyse</span>'
+            f"<b>{_btc(kennzahlen['ungeprueft_sats'])} BTC</b>"
+            f"{kennzahlen['ungeprueft_count']} UTXOs</div>"
+        )
     return f"""<!DOCTYPE html>
 <html lang="de" data-theme="{theme_name}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1980,6 +2046,7 @@ def als_bericht(
   <div class="kennzahl"><span>Haltefrist offen</span>
     <b>{_btc(kennzahlen['offen_sats'])} BTC</b>
     {kennzahlen['offen_count']} UTXOs</div>
+  {grau_html}
 </div>
 
 <table>

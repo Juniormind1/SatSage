@@ -3150,6 +3150,18 @@ function grauKeysAus(daten) {
   return Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
 }
 
+function lotGrauKeysAus(daten) {
+  if (Array.isArray(daten?.lot_grau_keys)) return daten.lot_grau_keys;
+  const keys = [];
+  for (const e of daten.eintraege || []) {
+    if (!e || !e.geprueft) continue;
+    if ((Number(e.sats_grau) || 0) > 0 || (Number(e.sats_ohne_datum) || 0) > 0) {
+      keys.push(e.txid != null ? `${e.txid}:${e.vout}` : e.key);
+    }
+  }
+  return keys.filter(Boolean);
+}
+
 /** UTXO-Schlüssel im Steuerjahr, die zu diesem Wallet gehören. */
 function steuerKeysDiesesWallets(daten, walletId, walletName) {
   const id = String(walletId || "");
@@ -3210,16 +3222,78 @@ function zeigeKeinGelbZumKlaeren() {
   k.hidden = false;
 }
 
+/**
+ * Nach dem normalen Grau-Lauf: Zeitnachzug für Lot-Grau.
+ * Abbruch und Fehler beenden hier — *danach* (Gelb) startet nicht.
+ */
+function lotGrauNachGrauFortsetzen(danach) {
+  return Promise.resolve()
+    .then(async () => {
+      if (typeof ladeSteuerjahrMitKandidaten === "function") {
+        try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Schlüssel unten */ }
+      }
+      let daten = Zustand.steuer;
+      if (
+        !daten
+        || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.lot_grau_keys))
+      ) {
+        Zustand.steuer = null;
+        daten = await steuerStandFuerKlaeren();
+      }
+      const keys = lotGrauKeysAus(daten);
+      const weiter = danach || ladeSteuerjahrMitKandidaten;
+      if (!keys.length) {
+        if (typeof weiter === "function") return weiter({ art: "gut" });
+        return;
+      }
+      return herkunftAllerUtxos({
+        knopf: "#herkunft-grau",
+        lauf: "#herkunft-lauf",
+        text: "#herkunft-text",
+        abbruch: "#herkunft-abbruch",
+        meldung: "#steuer-meldung",
+        danach: weiter,
+        utxo_keys: keys,
+        steuer: false,
+        gelbVertiefen: false,
+        graueAnteile: true,
+        erzwingen: false,
+        uebernommen: true,
+        keinPauschalScan: true,
+      });
+    })
+    .catch((fehler) => {
+      Zustand.herkunftAlleLaeuft = false;
+      if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+      const kasten = $("#steuer-meldung");
+      if (!kasten) return;
+      kasten.className = "hinweis hinweis-krit";
+      setzeText(kasten, fehler.message || String(fehler));
+      kasten.hidden = false;
+    });
+}
+
 /** Dieselben Argumente wie der graue Scorecard-Knopf. *danach* nur für Gelb. */
 function starteGrauKlaerung(keys, uebernommen, danach) {
+  const weiter = (info) => {
+    if (!info || info.art !== "gut") {
+      if (typeof danach === "function") return danach(info);
+      return;
+    }
+    return lotGrauNachGrauFortsetzen(danach);
+  };
+  const liste = Array.isArray(keys) ? keys : [];
+  if (!liste.length) {
+    return lotGrauNachGrauFortsetzen(danach);
+  }
   return herkunftAllerUtxos({
     knopf: "#herkunft-grau",
     lauf: "#herkunft-lauf",
     text: "#herkunft-text",
     abbruch: "#herkunft-abbruch",
     meldung: "#steuer-meldung",
-    danach: danach || ladeSteuerjahrMitKandidaten,
-    utxo_keys: keys,
+    danach: weiter,
+    utxo_keys: liste,
     steuer: false,
     gelbVertiefen: false,
     erzwingen: true,
@@ -3284,13 +3358,13 @@ function gelbNachGrauFortsetzen(info) {
 }
 
 async function herkunftGrauUtxos() {
-  // Graue Scorecard: noch nie analysiert. Der Massenlauf ohne Schlüssel
-  // nimmt nur UTXOs ohne vollen Baum — ein grauer Punkt kann einen
-  // unvollständigen Cache haben und würde sonst sofort als „nichts zu tun“
-  // enden. Deshalb dieselben Schlüssel wie der Punkt selbst.
+  // Graue Scorecard: zuerst UTXOs ohne Baum, danach Extra-Lauf Lot-Grau
+  // (undatierte Fremdenden, graue_anteile).
   return klaerenNachUngescannten(async () => {
-    const keys = grauKeysAus(await steuerStandFuerKlaeren());
-    if (!keys.length) {
+    const daten = await steuerStandFuerKlaeren();
+    const grau = grauKeysAus(daten);
+    const lot = lotGrauKeysAus(daten);
+    if (!grau.length && !lot.length) {
       const k = $("#steuer-meldung");
       if (!k) return null;
       k.className = "hinweis hinweis-warn";
@@ -3298,7 +3372,7 @@ async function herkunftGrauUtxos() {
       k.hidden = false;
       return null;
     }
-    return keys;
+    return grau;
   }, (keys, uebernommen) => starteGrauKlaerung(keys, uebernommen));
 }
 
