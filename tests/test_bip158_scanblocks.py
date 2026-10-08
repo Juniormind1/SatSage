@@ -492,6 +492,21 @@ class TestP2pCodec(unittest.TestCase):
         self.assertTrue(roh.startswith(b"\xf9\xbe\xb4\xd9"))
         self.assertEqual(len(roh), 24)
 
+    def test_regtest_magic_und_genesis(self):
+        import main
+        from core.p2p import genesis_header, p2p_magic
+
+        main.set_chain_network("regtest")
+        try:
+            roh = encode_message("verack")
+            self.assertTrue(roh.startswith(b"\xfa\xbf\xb5\xda"))
+            self.assertEqual(p2p_magic(), b"\xfa\xbf\xb5\xda")
+            display = hash_to_hex(header_hash(genesis_header()))
+            self.assertTrue(display.startswith("0f9188f1"), display)
+            self.assertEqual(checkpoint_fuer(1), (0, header_hash(genesis_header())))
+        finally:
+            main.set_chain_network(None)
+
     def test_getcfilters_und_cfilter(self):
         stop = b"\x11" * 32
         payload = encode_getcfilters(481_824, stop)

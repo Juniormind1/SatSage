@@ -15,6 +15,21 @@ XPUB = (
 )
 
 
+class TestUtxoCacheFalscheForm(unittest.TestCase):
+    """Gültiges JSON, aber kein Objekt: Cache-Miss, kein Absturz."""
+
+    def test_liste_ist_miss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            pfad = cache / f"{main._xpub_cache_key(XPUB)}.json"
+            pfad.write_text("[]\n", encoding="utf-8")
+            self.assertIsNone(main.load_xpub_cache_entry(XPUB, cache))
+            self.assertIsNone(main.load_xpub_utxo_cache(XPUB, cache))
+            from core.xpub_cache import load_unspent_outpoint_values
+
+            self.assertEqual(load_unspent_outpoint_values(cache), {})
+
+
 class TestUtxoCacheFrisch(unittest.TestCase):
     def test_frisch_nach_scan(self):
         with tempfile.TemporaryDirectory() as tmp:

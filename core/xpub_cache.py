@@ -764,7 +764,9 @@ def load_unspent_outpoint_values(utxo_cache_dir: Path | None = None) -> dict[str
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            continue
+        if not isinstance(data, dict):
             continue
         utxos = data.get("utxos")
         if not isinstance(utxos, list):
@@ -828,10 +830,12 @@ def load_xpub_cache_entry(xpub: str, cache_dir: Path) -> dict | None:
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeError):
         return None
 
-    if data.get("xpub") != xpub:
+    # Gültiges JSON in der falschen Form (Liste, Zahl, Text) ist ein Miss.
+    # Sonst wirft ``.get`` und ``/api/config`` antwortet 500.
+    if not isinstance(data, dict) or data.get("xpub") != xpub:
         return None
 
     utxos = data.get("utxos")

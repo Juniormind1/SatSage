@@ -21,6 +21,9 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 MAINNET_MAGIC = b"\xf9\xbe\xb4\xd9"
+REGTEST_MAGIC = b"\xfa\xbf\xb5\xda"
+TESTNET_MAGIC = b"\x0b\x11\x09\x07"
+SIGNET_MAGIC = b"\x0a\x03\xcf\x40"
 PROTOCOL_VERSION = 70016
 NODE_NETWORK = 1
 NODE_WITNESS = 8
@@ -93,13 +96,39 @@ def read_compact_size(data: bytes, offset: int = 0) -> tuple[int, int]:
     return struct.unpack_from("<Q", data, offset + 1)[0], offset + 9
 
 
+def p2p_netz_name() -> str:
+    """Aktives P2P-Netz aus ``set_chain_network``. Mainnet, solange nichts gesetzt ist."""
+    from core.derivation import chain_network
+
+    net = chain_network()
+    if net is None:
+        return "main"
+    name = str(net.get("name") or "main").strip().lower()
+    if "regtest" in name:
+        return "regtest"
+    if "signet" in name:
+        return "signet"
+    if "test" in name:
+        return "test"
+    return "main"
+
+
+def p2p_magic() -> bytes:
+    """Nachrichten-Magic des aktiven Netzes. Zur Laufzeit lesen, nicht beim Import."""
+    return {
+        "regtest": REGTEST_MAGIC,
+        "test": TESTNET_MAGIC,
+        "signet": SIGNET_MAGIC,
+    }.get(p2p_netz_name(), MAINNET_MAGIC)
+
+
 def encode_message(command: str, payload: bytes = b"") -> bytes:
     cmd = command.encode("ascii")
     if len(cmd) > 12:
         raise ValueError(f"P2P-Befehl zu lang: {command}")
     cmd = cmd.ljust(12, b"\x00")
     return (
-        MAINNET_MAGIC
+        p2p_magic()
         + cmd
         + struct.pack("<I", len(payload))
         + double_sha256(payload)[:4]
@@ -110,7 +139,7 @@ def encode_message(command: str, payload: bytes = b"") -> bytes:
 def decode_header(header: bytes) -> tuple[str, int, bytes]:
     if len(header) != 24:
         raise ValueError("P2P-Kopf muss 24 Byte haben")
-    if header[:4] != MAINNET_MAGIC:
+    if header[:4] != p2p_magic():
         # Oft Desync nach Tor-Abbruch — als Verbindungsfehler behandeln,
         # damit der Scan den Peer wechselt statt komplett zu stoppen.
         raise ConnectionError(
@@ -748,6 +777,8 @@ def dns_seed_hosts(
     ungefilterten Seeds liefern fast nur Nodes ohne Filter — der Scan
     darf damit nicht nach acht Versuchen aufgeben.
     """
+    if p2p_netz_name() != "main":
+        return []
     seeds = (seed,) if seed else DNS_SEEDS
     gefiltert: list[tuple[str, int]] = []
     rest: list[tuple[str, int]] = []
@@ -791,12 +822,25 @@ def parse_peer_liste(roh: str) -> list[tuple[str, int]]:
     return paare
 
 
-#: Mainnet-Genesis, 80 Byte.
-GENESIS_HEADER = bytes.fromhex(
-    "0100000000000000000000000000000000000000000000000000000000000000"
-    "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
-    "4b1e5e4a29ab5f49ffff001d1dac2b7c"
-)
+#: Genesis-Header, 80 Byte. Regtest-Hash beginnt mit ``0f9188f1``.
+_GENESIS_HEADER_NACH_NETZ = {
+    "main": bytes.fromhex(
+        "0100000000000000000000000000000000000000000000000000000000000000"
+        "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
+        "4b1e5e4a29ab5f49ffff001d1dac2b7c"
+    ),
+    "regtest": bytes.fromhex(
+        "0100000000000000000000000000000000000000000000000000000000000000"
+        "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
+        "4b1e5e4adae5494dffff7f2002000000"
+    ),
+}
+GENESIS_HEADER = _GENESIS_HEADER_NACH_NETZ["main"]
+
+
+def genesis_header() -> bytes:
+    """Genesis des aktiven Netzes. Mainnet, solange kein Netz gesetzt ist."""
+    return _GENESIS_HEADER_NACH_NETZ.get(p2p_netz_name(), GENESIS_HEADER)
 
 #: Bekannte Mainnet-Hashes (Anzeige-Byteorder). Locator springt hierhin,
 #: statt die Kette von Genesis zu holen. Filter-Scan braucht nur Header
@@ -924,7 +968,12 @@ def lege_header_archiv_aus(dest: Path | None, *, on_log=None) -> int | None:
 
 
 def checkpoint_fuer(start_height: int) -> tuple[int, bytes]:
-    """Höchster bekannter Anker-Hash mit Höhe ≤ ``start_height``."""
+    """Höchster bekannter Anker-Hash mit Höhe ≤ ``start_height``.
+
+    Außerhalb von Mainnet gibt es kein SegWit-Archiv. Anker ist Genesis.
+    """
+    if p2p_netz_name() != "main":
+        return 0, header_hash(genesis_header())
     hoehe, anzeige = MAINNET_CHECKPOINTS[0]
     for kandidat, hexhash in MAINNET_CHECKPOINTS:
         if kandidat <= start_height:
@@ -961,7 +1010,7 @@ class HeaderChain:
     def __init__(self, path: Path | None = None, *, start_height: int = 0):
         self.path = Path(path) if path else None
         self._anchor_height = 0
-        self._anchor_hash = header_hash(GENESIS_HEADER)
+        self._anchor_hash = header_hash(genesis_header())
         self._data = bytearray()
         geladen = False
         if self.path and self.path.is_file():
@@ -987,7 +1036,7 @@ class HeaderChain:
 
     def header_at(self, height: int) -> bytes:
         if height == 0 and self._anchor_height == 0:
-            return GENESIS_HEADER
+            return genesis_header()
         if height <= self._anchor_height:
             raise IndexError(f"kein voller Header bei Höhe {height} (Anker {self._anchor_height})")
         idx = height - self._anchor_height - 1
@@ -1139,9 +1188,9 @@ class HeaderChain:
             self._data = bytearray(rest)
             self._hash_nach_hoehe = None
             return True
-        if roh and len(roh) % 80 == 0 and roh[:80] == GENESIS_HEADER:
+        if roh and len(roh) % 80 == 0 and roh[:80] == genesis_header():
             self._anchor_height = 0
-            self._anchor_hash = header_hash(GENESIS_HEADER)
+            self._anchor_hash = header_hash(genesis_header())
             self._data = bytearray(roh[80:])
             self._hash_nach_hoehe = None
             return True
@@ -1233,7 +1282,8 @@ def hole_header(
         _sag(on_log, "Warte, bis der Header-Download im Hintergrund fertig ist…")
         _HEADER_LOCK.acquire()
     try:
-        lege_header_archiv_aus(path, on_log=on_log)
+        if p2p_netz_name() == "main":
+            lege_header_archiv_aus(path, on_log=on_log)
         chain = HeaderChain(path, start_height=start_height)
         chain.sync(peer, on_log=on_log)
         return chain
