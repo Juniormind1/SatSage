@@ -3014,6 +3014,16 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .achse-punkt:hover .achse-punkt-tip { display: block; }
 .achse-punkt-tip.links { left: auto; right: 16px; }
+/* Lot-Ring 32 px, zentriert auf dem Punkt: Hinweis an der Ring-Kante. */
+.achse-punkt.achse-lot:hover .achse-punkt-tip,
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot .achse-punkt-tip {
+  left: calc(50% + 16px);
+}
+.achse-punkt.achse-lot:hover .achse-punkt-tip.links,
+.achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot .achse-punkt-tip.links {
+  left: auto;
+  right: calc(50% + 16px);
+}
 
 /* Herkunftsnetz (Overlay, views/herkunftsnetz.js): Layer A dimmen, nicht
    löschen; Layer B = orange Ringe an der Output-Zeit, Kanten per SVG. */

@@ -147,6 +147,8 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("setzeAchseLotAusEvent(punkt, event)", steuer)
         css = (WEB / "style.css").read_text(encoding="utf-8")
         self.assertIn(".achse-punkt.achse-lot:hover::before", css)
+        self.assertIn("calc(50% + 16px)", css)
+        self.assertIn("function achsePunktTipText", steuer)
         self.assertIn("springeZuTraceUtxo(key, meta)", NETZ)
         # Zeitstrahl-Rechnung unberührt: kein Overlay in events.
         self.assertNotIn("events.push", NETZ)
@@ -241,12 +243,12 @@ class TestEinUndAusstieg(unittest.TestCase):
         zeilen = r["mit"].split("\n")
         self.assertEqual(zeilen[0], "04.03.2021")
         self.assertEqual(zeilen[1], "2,00 BTC")
+        self.assertEqual(len(zeilen), 4)
         self.assertIn("tax.netzLotGruen", zeilen[2])
         self.assertIn("99,9 %", zeilen[2])
-        self.assertIn("tax.netzLotGelb", zeilen[3])
-        self.assertIn("0,0 %", zeilen[3])
-        self.assertIn("tax.netzLotGrau", zeilen[4])
-        self.assertIn("0,12 %", zeilen[4])
+        self.assertIn("tax.netzLotGrau", zeilen[3])
+        self.assertIn("0,12 %", zeilen[3])
+        self.assertTrue(all("tax.netzLotGelb" not in z for z in zeilen))
         self.assertEqual(r["ohne"], "04.03.2021\n2,00 BTC")
 
     def test_lot_ring_hover_aus_event_ohne_netz(self):

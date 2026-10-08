@@ -475,15 +475,21 @@ function herkunftsnetzLotMischung(daten) {
   return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
 }
 
-/** Drei Zeilen für den Hover des Lot-Rings. Kleine Anteile bleiben sichtbar. */
+/** Lot-Zeilen für den Hover. Nur Farben mit Anteil, kleine Reste bleiben sichtbar. */
 function herkunftsnetzLotZeilen(mischung) {
   const summe = mischung.gruen + mischung.orange + mischung.grau;
   if (!(summe > 0)) return [];
-  return [
-    t("tax.netzLotGruen", { pct: herkunftsnetzProzent(mischung.gruen / summe) }),
-    t("tax.netzLotGelb", { pct: herkunftsnetzProzent(mischung.orange / summe) }),
-    t("tax.netzLotGrau", { pct: herkunftsnetzProzent(mischung.grau / summe) }),
-  ];
+  const zeilen = [];
+  if (mischung.gruen > 0) {
+    zeilen.push(t("tax.netzLotGruen", { pct: herkunftsnetzProzent(mischung.gruen / summe) }));
+  }
+  if (mischung.orange > 0) {
+    zeilen.push(t("tax.netzLotGelb", { pct: herkunftsnetzProzent(mischung.orange / summe) }));
+  }
+  if (mischung.grau > 0) {
+    zeilen.push(t("tax.netzLotGrau", { pct: herkunftsnetzProzent(mischung.grau / summe) }));
+  }
+  return zeilen;
 }
 
 function setzeAchseLotTooltip(punkt, mischung) {

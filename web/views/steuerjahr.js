@@ -1081,6 +1081,21 @@ function scanPunktGroesse(sats, maxSats) {
   return "klein";
 }
 
+/** Hover-Text am Plot-Punkt: Datum, Betrag plus Spot-Fiat, Wallet. Keine Haltefrist. */
+function achsePunktTipText({ datum, sats, wallet, hinweis }) {
+  let betrag = "";
+  if (sats != null && sats !== "") {
+    if (typeof formatZeitstrahlBetragMitFiat === "function") {
+      betrag = formatZeitstrahlBetragMitFiat(sats);
+    } else if (typeof formatZeitstrahlBetrag === "function") {
+      betrag = formatZeitstrahlBetrag(sats);
+    }
+  }
+  return [datum || "", betrag, wallet || "unbekannt", hinweis || ""]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** Einfachklick: Herkunftsnetz oder Sprung zum UTXO. Doppelklick: Bericht. */
 function bindeAchsePunktKlick(punkt, key, adresse) {
   if (!punkt || !key) return;
@@ -1164,14 +1179,9 @@ function zeichneScanPunkte(liste) {
     const datum = `${dd}.${mm}.${wann.getFullYear()}`;
     const tip = document.createElement("span");
     tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
-    const lage = t("tax.legendUnchecked") !== "tax.legendUnchecked"
-      ? t("tax.legendUnchecked")
-      : "innerhalb Frist, ohne Herkunft";
-    tip.textContent = [
-      datum,
-      typeof formatZeitstrahlBetrag === "function" ? formatZeitstrahlBetrag(sats) : "",
-      `${eintrag.wallet || "unbekannt"} · ${lage}`,
-    ].filter(Boolean).join("\n");
+    tip.textContent = achsePunktTipText({
+      datum, sats, wallet: eintrag.wallet,
+    });
     punkt.append(tip);
     bindeAchsePunktKlick(punkt, key, eintrag.address);
     spur.append(punkt);
@@ -1439,16 +1449,12 @@ function wendeLivePunktAn(live) {
     const dd = String(anschaffungDate.getDate()).padStart(2, "0");
     const mm = String(anschaffungDate.getMonth() + 1).padStart(2, "0");
     const datum = `${dd}.${mm}.${anschaffungDate.getFullYear()}`;
-    const lage = t("tax.haltefristIn") !== "tax.haltefristIn"
-      ? t("tax.haltefristIn")
-      : "innerhalb Haltefrist";
-    const wallet = punkt.dataset.wallet || "unbekannt";
-    const betrag = punkt.dataset.valueSats
-      ? formatZeitstrahlBetrag(Number(punkt.dataset.valueSats))
-      : "";
-    tip.textContent = [datum, betrag, `${wallet} · ${lage}`, t("tax.plotIncomplete")]
-      .filter(Boolean)
-      .join("\n");
+    tip.textContent = achsePunktTipText({
+      datum,
+      sats: punkt.dataset.valueSats,
+      wallet: punkt.dataset.wallet,
+      hinweis: t("tax.plotIncomplete"),
+    });
   }
   return true;
 }
@@ -2086,12 +2092,12 @@ function zeichneZeitstrahl(daten, optionen = {}) {
         ? t("tax.legendUnchecked")
         : t("ui.hard.e66ad7aa49"))
       : "";
-    tip.textContent = [
-      eintrag.datum || "",
-      formatZeitstrahlBetrag(eintrag.value_sats),
-      `${eintrag.wallet || "unbekannt"} · ${lage}`,
-      herkunftHinweis,
-    ].filter(Boolean).join("\n");
+    tip.textContent = achsePunktTipText({
+      datum: eintrag.datum,
+      sats: eintrag.value_sats,
+      wallet: eintrag.wallet,
+      hinweis: herkunftHinweis,
+    });
     punkt.append(tip);
     bindeAchsePunktKlick(punkt, key, eintrag.address);
     spur.append(punkt);

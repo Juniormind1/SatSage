@@ -369,6 +369,13 @@ function formatZeitstrahlBetrag(sats) {
   return `${btcText} btc`;
 }
 
+/** Zeitstrahl-Betrag plus Spot-Fiat der Kopfzeile, falls ein Kurs da ist. */
+function formatZeitstrahlBetragMitFiat(sats) {
+  const basis = formatZeitstrahlBetrag(sats);
+  const fiat = formatEurAusSats(sats);
+  return fiat ? `${basis} (≈ ${fiat})` : basis;
+}
+
 /** @deprecated Alias — Punkt/Achse nutzen formatZeitstrahlBetrag. */
 function formatBtcDrei(sats) {
   return formatZeitstrahlBetrag(sats);
