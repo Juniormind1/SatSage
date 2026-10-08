@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft · Lot-Ring:** Die Layout-Box des Rings in der UTXO-Zeile ist 32 px wie der Ring selbst. Der Text sitzt mit dem normalen Abstand rechts daneben.
 - **Log · „Moment noch“:** Kommt erst nach 90 s Stille (bisher 10 s), weiter global über alle Jobs.
 - **Steuerjahr · Scorecards:** Grün + gelb + grau = Bestand. Gelb zählt nur geprüfte UTXOs innerhalb der Haltefrist. Grau zählt ohne Herkunft und noch in der Frist **plus** den grauen Lot-Anteil schon verfolgter UTXOs. Ein UTXO ohne Trace, dessen Output-Datum schon außerhalb der Frist liegt, bleibt grün. Grau-Klären: zuerst ohne Baum, danach Extra-Lauf über undatierte Enden. Gelb-Klären behält Vertiefen und Zeitnachzug. Die Tabelle folgt der UTXO-Teilung (Lot-Grau bleibt in der gelben Gruppe).
 - **Tools · Gezielte Tx-Analyse:** Unter der globalen Cache-Suche. TxID eingeben — SatSage prüft alle Inputs und Outputs gegen die hinterlegten Wallets. Liegt die Tx samt Vorgängern im Cache, kommt die Liste sofort; sonst Electrs. Eigene Zeilen springen in den Wallet-Baum, sonst in die Wallet-Übersicht.

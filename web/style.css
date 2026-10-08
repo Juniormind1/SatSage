@@ -2343,10 +2343,6 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .utxo-wurzel:has(> .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut) > .kopf-mit-verweis > .utxo-kopf {
   align-items: center;
 }
-/* Der Ring ist 32 px. Der Text beginnt am sichtbaren Rand, nicht an der Box. */
-.utxo-wurzel:has(> .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut) > .kopf-mit-verweis > .utxo-kopf > .knoten-info {
-  margin-left: 0;
-}
 .utxo-wurzel > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut,
 .utxo-zeile > .knoten-punkt.lot-donut {
   /* Echte 32 px, nicht scale() auf der 7-px-Box. Safari rastert Prozent-Kinder
@@ -2361,6 +2357,11 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   flex: none;
   box-sizing: border-box;
   background: var(--lot-grau);
+}
+/* Herkunft: Layout-Box = sichtbarer Ring. Nur oben/unten negativ, sonst
+   schiebt die Seitenmargin den Text in den Ring. Flex-Abstand bleibt 9 px. */
+.utxo-wurzel > .kopf-mit-verweis > .utxo-kopf > .knoten-punkt.lot-donut {
+  margin: -12px 0 -13px;
 }
 /* Loch als eigene Fläche — kein mask, das in Edge am Inline-Verlauf verschwindet.
    Immer die Seitenfläche, auch ohne Hover: inherit würde den Kuchen durchreichen.
