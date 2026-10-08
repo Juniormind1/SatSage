@@ -1071,6 +1071,7 @@ from httpserver.api.tools import (  # noqa: E402
     api_tools_adresse,
     api_tools_cache_suche,
     api_tools_schatzsuche,
+    api_tools_tx_beteiligung,
 )
 
 
@@ -1657,6 +1658,8 @@ class Handler(
             return 200, api_tools_adresse(state, self._body())
         if teile == ["tools", "cache-suche"] and methode == "POST":
             return 202, api_tools_cache_suche(state, self._body())
+        if teile == ["tools", "tx-beteiligung"] and methode == "POST":
+            return 202, api_tools_tx_beteiligung(state, self._body())
         if teile == ["tools", "schatzsuche"] and methode == "POST":
             return 202, api_tools_schatzsuche(state, self._body())
         if teile == ["tax"] and methode == "GET":

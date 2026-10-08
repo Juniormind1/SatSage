@@ -636,7 +636,7 @@
           <div>
             <h1 data-i18n="tools.heading">Tools</h1>
             <p class="meta" data-i18n="tools.meta">
-              Drei getrennte Werkzeuge. Jedes startet erst auf Knopf oder Return.
+              Vier getrennte Werkzeuge. Jedes startet erst auf Knopf oder Return.
             </p>
           </div>
         </div>
@@ -695,6 +695,37 @@
             </button>
             <p id="tools-cache-status" class="meta" hidden></p>
             <ul id="tools-cache-liste" class="tools-schatz-liste" hidden></ul>
+          </div>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tools.txHeading">Gezielte Tx-Analyse: eigene Wallets im Input oder Output?</span>
+          </div>
+          <p class="meta tools-erklaerung" data-i18n="tools.txLead">
+            Sämtliche Zu- und Abgänge in der Transaktion werden daraufhin geprüft,
+            ob eines unserer Wallets beteiligt war.
+          </p>
+          <div class="tools-zeile">
+            <input type="text" id="tools-tx-q" class="tools-eingabe mono"
+                   data-i18n-placeholder="tools.txPlaceholder"
+                   data-i18n-aria-label="tools.txAria"
+                   data-i18n-title="tools.txFieldTitle"
+                   placeholder="TxID"
+                   aria-label="Transaktions-ID"
+                   title="Tx aus dem Cache, sonst Electrs. Alle Inputs und Outputs gegen die hinterlegten Wallets."
+                   autocomplete="off" spellcheck="false">
+            <button type="button" id="tools-tx" class="knopf"
+                    data-i18n="tools.go" data-i18n-title="tools.txTitle"
+                    title="Tx aus dem Cache, sonst Electrs. Alle Inputs und Outputs gegen die hinterlegten Wallets.">
+              Los
+            </button>
+            <button type="button" id="tools-tx-abbruch" class="knopf" hidden
+                    data-i18n="tools.cacheCancel">
+              Abbrechen
+            </button>
+            <p id="tools-tx-status" class="meta" hidden></p>
+            <ul id="tools-tx-liste" class="tools-schatz-liste" hidden></ul>
           </div>
         </div>
 

@@ -3240,6 +3240,8 @@ function setzeUtxoTraceDaten(el, utxo) {
     el.dataset.blockHeight = String(utxo.block_height);
   }
   if (utxo.time_label) el.dataset.timeLabel = String(utxo.time_label);
+  if (utxo.spent_txid) el.dataset.spentTxid = String(utxo.spent_txid);
+  else delete el.dataset.spentTxid;
   if (utxo.juengste_sats_ts) {
     el.dataset.juengsteSatsTs = String(utxo.juengste_sats_ts);
   } else {

@@ -82,6 +82,68 @@ def api_fee_suggestion(state: Any, query: dict | None) -> dict:
     return gebuehr_vorschlag(feerate, betrag_sats=betrag, inputs=inputs, fehler=fehler)
 
 
+def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
+    """
+    Prüft Inputs und Outputs einer Tx gegen die hinterlegten Wallets.
+
+    Tx aus dem Immutable-Cache, sonst Electrs/Chain (``get_tx``). Läuft als
+    Job, weil Vorgänger-Txs für die Inputs nachgeladen werden. 409, solange
+    schon eine Analyse läuft.
+    """
+    from server import ApiError, main
+
+    from core.tx_beteiligung import analysiere_tx, parse_txid
+
+    if not state.context_bereit():
+        raise ApiError(409, "Wallets werden noch vorbereitet. Einen Moment.")
+
+    for job in state.jobs.list():
+        if job.kind == "tx_beteiligung" and job.status == "running":
+            raise ApiError(409, "Die Tx-Analyse läuft schon.")
+
+    koerper = payload or {}
+    roh = str(koerper.get("txid") or koerper.get("q") or "").strip()
+    txid = parse_txid(roh)
+    if not txid:
+        raise ApiError(400, "Das ist keine Transaktions-ID.")
+
+    def lauf(job):
+        def fortschritt(text: str) -> None:
+            job.progress(text, log=True)
+
+        args = state.args_namespace()
+        wallet_ctx = state.wallet_ctx_fuer_ansicht()
+        quelle, backend = main._setup_blockchain_client(args, state.env().values())
+        job.raise_if_cancelled()
+        fetchers = main._build_blockchain_fetchers(
+            quelle, backend, args, wallet_ctx,
+            immutable_cache_dir=state.immutable_cache_dir,
+        )
+        get_tx = fetchers["get_tx"]
+        ergebnis = analysiere_tx(
+            txid,
+            get_tx=get_tx,
+            wallet=wallet_ctx,
+            cache_root=state.immutable_cache_dir,
+            on_progress=fortschritt,
+            raise_if_cancelled=job.raise_if_cancelled,
+        )
+        n = int(ergebnis["eigene_inputs"]) + int(ergebnis["eigene_outputs"])
+        job.progress(
+            f"{n} eigene Zu-/Abgänge." if n else "Kein eigenes Wallet in dieser Tx.",
+            log=True,
+        )
+        return ergebnis
+
+    job = state.jobs.start(
+        "tx_beteiligung",
+        "Gezielte Tx-Analyse",
+        lauf,
+        meta={"art": "tx_beteiligung", "txid": txid},
+    )
+    return job.as_dict()
+
+
 def api_tools_cache_suche(state: Any, payload: dict | None = None) -> dict:
     """
     Durchsucht UTXO- und Verlaufs-Cache aller Wallets.

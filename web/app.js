@@ -1925,6 +1925,8 @@ function _kopfFilterHaystack(el) {
     String(el.dataset.timeLabel || ""),
     // Börsen (Kraken, …) und CJ-Formen (Wasabi, Whirlpool, …)
     String(el.dataset.filterLabels || ""),
+    // Ausgabe-Tx (Börsen-Einzahlung): Verlaufs-``spent_txid``
+    String(el.dataset.spentTxid || ""),
     // Sichtbarer Pillen-/Icon-Text (aria-label), falls schon gerendert
     String(el.getAttribute("aria-label") || ""),
   ].join(" ").toLowerCase();

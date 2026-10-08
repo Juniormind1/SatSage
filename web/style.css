@@ -2078,6 +2078,7 @@ input[type="text"].fifo-ziel-fee.ungueltig {
 .tools-zeile > .tools-schatz-liste {
   grid-column: 1 / -1;
 }
+.tools-tx-eigen { color: var(--gut); font-weight: 650; }
 .tools-erklaerung {
   margin: 0;
   padding: 10px 13px 0;

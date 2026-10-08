@@ -407,7 +407,7 @@ function jobIstKlickbar(job) {
   if (kind === "labels" || kind === "sanctions" || kind === "sanctions-check") {
     return true;
   }
-  if (kind === "schatzsuche" || kind === "cache_suche" || kind === "p2p-walk") {
+  if (kind === "schatzsuche" || kind === "cache_suche" || kind === "tx_beteiligung" || kind === "p2p-walk") {
     return true;
   }
   if (kind === "wallet_sync") {
@@ -459,13 +459,16 @@ function springeZuJob(job) {
     oeffneVerwaltung("datenquellen");
     return;
   }
-  if (kind === "schatzsuche" || kind === "cache_suche") {
+  if (kind === "schatzsuche" || kind === "cache_suche" || kind === "tx_beteiligung") {
     zeigeAnsicht("tools");
     if (kind === "schatzsuche" && typeof merkeLaufendeSchatzsuche === "function") {
       merkeLaufendeSchatzsuche();
     }
     if (kind === "cache_suche" && typeof merkeLaufendeCacheSuche === "function") {
       merkeLaufendeCacheSuche();
+    }
+    if (kind === "tx_beteiligung" && typeof merkeLaufendeTxAnalyse === "function") {
+      merkeLaufendeTxAnalyse();
     }
     return;
   }
