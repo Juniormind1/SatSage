@@ -473,7 +473,7 @@ function zeigeTxErgebnis(daten) {
   zeichneTxListe(daten);
 }
 
-function txZeileText(art, z) {
+function txZeileTeile(art, z) {
   const kopf = art === "in"
     ? t("tools.txInput", { n: z.n })
     : t("tools.txOutput", { n: z.n });
@@ -482,7 +482,54 @@ function txZeileText(art, z) {
   if (z.coinbase) wer = t("tools.txCoinbase");
   else if (z.wallet) wer = z.wallet;
   const addr = z.address ? kuerze(z.address, 12, 8) : "";
-  return [kopf, betrag, wer, addr].filter(Boolean).join(" · ");
+  return { kopf, betrag, wer, addr };
+}
+
+function txZeileText(art, z) {
+  const tle = txZeileTeile(art, z);
+  return [tle.kopf, tle.betrag, tle.wer, tle.addr].filter(Boolean).join(" · ");
+}
+
+function oeffneTxBeteiligungZeile(z) {
+  const wid = z && z.wallet_id;
+  if (!wid) return;
+  const key = String(z.key || "");
+  if (z.ziel === "bestand" && key && typeof springeZuWalletUtxo === "function") {
+    springeZuWalletUtxo(wid, key, z.address || "").then((ok) => {
+      if (!ok && typeof zeigeWallet === "function") zeigeWallet(wid).catch(() => {});
+    });
+    return;
+  }
+  if (z.ziel === "verlauf" && key && typeof springeZuAusgegebenemUtxo === "function") {
+    springeZuAusgegebenemUtxo(wid, key).then((ok) => {
+      if (!ok && typeof zeigeWallet === "function") zeigeWallet(wid).catch(() => {});
+    });
+    return;
+  }
+  if (typeof zeigeWallet === "function") zeigeWallet(wid).catch(() => {});
+}
+
+function txZeileKnoten(art, z) {
+  const li = document.createElement("li");
+  if (z.eigen) li.className = "tools-tx-eigen";
+  const tle = txZeileTeile(art, z);
+  if (z.eigen && z.wallet_id && tle.wer) {
+    const vor = [tle.kopf, tle.betrag].filter(Boolean).join(" · ");
+    if (vor) li.append(vor, " · ");
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "ankunft-link";
+    knopf.textContent = tle.wer;
+    knopf.title = z.ziel === "uebersicht"
+      ? t("tools.txOpenWallet")
+      : t("tools.txOpenTree");
+    knopf.addEventListener("click", () => oeffneTxBeteiligungZeile(z));
+    li.append(knopf);
+    if (tle.addr) li.append(" · ", tle.addr);
+  } else {
+    li.textContent = txZeileText(art, z);
+  }
+  return li;
 }
 
 function zeichneTxListe(daten) {
@@ -494,18 +541,8 @@ function zeichneTxListe(daten) {
     return;
   }
   const zeilen = [];
-  for (const z of daten.inputs || []) {
-    const li = document.createElement("li");
-    if (z.eigen) li.className = "tools-tx-eigen";
-    li.textContent = txZeileText("in", z);
-    zeilen.push(li);
-  }
-  for (const z of daten.outputs || []) {
-    const li = document.createElement("li");
-    if (z.eigen) li.className = "tools-tx-eigen";
-    li.textContent = txZeileText("out", z);
-    zeilen.push(li);
-  }
+  for (const z of daten.inputs || []) zeilen.push(txZeileKnoten("in", z));
+  for (const z of daten.outputs || []) zeilen.push(txZeileKnoten("out", z));
   if (!zeilen.length) {
     liste.hidden = true;
     return;

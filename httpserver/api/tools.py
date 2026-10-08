@@ -92,7 +92,12 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
     """
     from server import ApiError, main
 
-    from core.tx_beteiligung import analysiere_tx, cache_deckt_analyse, parse_txid
+    from core.tx_beteiligung import (
+        analysiere_tx,
+        anreichern_navigation,
+        cache_deckt_analyse,
+        parse_txid,
+    )
     from core.xpub_cache import load_cached_tx
 
     if not state.context_bereit():
@@ -111,6 +116,22 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
     cache_root = state.immutable_cache_dir
     wallet_ctx = state.wallet_ctx_fuer_ansicht()
 
+    def mit_nav(ergebnis: dict) -> dict:
+        wallets = [
+            {
+                "name": e.display_name,
+                "id": e.wallet_id(),
+                "schluessel": e.analyse_schluessel,
+            }
+            for e in state.analyse_entries
+        ]
+        return anreichern_navigation(
+            ergebnis,
+            wallets,
+            lambda s: main.load_xpub_utxo_cache(s, state.cache_dir),
+            lambda s: main.load_xpub_verlauf_cache(s, state.cache_dir),
+        )
+
     def nur_cache(t: str):
         tx = load_cached_tx(t, cache_root)
         if tx is None:
@@ -125,7 +146,7 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
             cache_root=cache_root,
         )
         ergebnis["aus_cache"] = True
-        return ergebnis
+        return mit_nav(ergebnis)
 
     def lauf(job):
         def fortschritt(text: str) -> None:
@@ -164,6 +185,7 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
             raise_if_cancelled=job.raise_if_cancelled,
         )
         ergebnis["aus_cache"] = not netz
+        ergebnis = mit_nav(ergebnis)
         n = int(ergebnis["eigene_inputs"]) + int(ergebnis["eigene_outputs"])
         job.progress(
             f"{n} eigene Zu-/Abgänge." if n else "Kein eigenes Wallet in dieser Tx.",

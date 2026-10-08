@@ -155,3 +155,87 @@ def analysiere_tx(
         "eigene_inputs": eigene_in,
         "eigene_outputs": eigene_out,
     }
+
+
+def _outpoint_key(txid: str, vout) -> str:
+    try:
+        n = int(vout)
+    except (TypeError, ValueError):
+        n = 0
+    return f"{str(txid or '').lower()}:{n}"
+
+
+def _index_cache(liste) -> dict[str, dict]:
+    idx: dict[str, dict] = {}
+    for u in liste or []:
+        if not isinstance(u, dict):
+            continue
+        if u.get("key"):
+            idx[str(u["key"]).lower()] = u
+        tx = str(u.get("txid") or "").lower()
+        if tx:
+            idx[_outpoint_key(tx, u.get("vout"))] = u
+    return idx
+
+
+def anreichern_navigation(
+    ergebnis: dict,
+    wallets: list[dict],
+    lade_bestand,
+    lade_verlauf,
+) -> dict:
+    """
+    Setzt an eigenen Zeilen ``wallet_id``, ``key`` und ``ziel``.
+
+    *ziel*: ``bestand`` / ``verlauf`` (Sprung in den Wallet-Baum) oder
+    ``uebersicht``, wenn das Outpoint nicht im Wallet-Cache liegt.
+    """
+    namen = {
+        str(w.get("name") or ""): w
+        for w in wallets or []
+        if w.get("name")
+    }
+    caches: dict[str, tuple[dict, dict]] = {}
+
+    def cache_fuer(schluessel: str):
+        if schluessel not in caches:
+            caches[schluessel] = (
+                _index_cache(lade_bestand(schluessel) if lade_bestand else None),
+                _index_cache(lade_verlauf(schluessel) if lade_verlauf else None),
+            )
+        return caches[schluessel]
+
+    txid = str((ergebnis or {}).get("txid") or "").lower()
+
+    def zeile_anreichern(z: dict, *, art: str) -> None:
+        if not z or not z.get("eigen"):
+            z["ziel"] = ""
+            z["wallet_id"] = ""
+            z["key"] = ""
+            return
+        w = namen.get(str(z.get("wallet") or ""))
+        if not w:
+            z["ziel"] = ""
+            z["wallet_id"] = ""
+            z["key"] = ""
+            return
+        z["wallet_id"] = str(w.get("id") or "")
+        if art == "in":
+            z["key"] = _outpoint_key(z.get("txid"), z.get("vout"))
+        else:
+            z["key"] = _outpoint_key(txid, z.get("n"))
+        bestand, verlauf = cache_fuer(str(w.get("schluessel") or ""))
+        key = z["key"]
+        if key in bestand:
+            z["ziel"] = "bestand"
+        elif key in verlauf:
+            z["ziel"] = "verlauf"
+        else:
+            z["ziel"] = "uebersicht"
+
+    for z in (ergebnis or {}).get("inputs") or []:
+        zeile_anreichern(z, art="in")
+    for z in (ergebnis or {}).get("outputs") or []:
+        zeile_anreichern(z, art="out")
+    return ergebnis
+

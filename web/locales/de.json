@@ -938,6 +938,8 @@
   "tools.txOutput": "Output #{n}",
   "tools.txSummary": "{eigeneIn} eigene Inputs · {eigeneOut} eigene Outputs · {quelle}",
   "tools.txNone": "Kein eigenes Wallet in dieser Tx.",
+  "tools.txOpenTree": "Im Wallet-Baum zu diesem Output springen.",
+  "tools.txOpenWallet": "Dieses Wallet öffnen — der Output liegt nicht im Wallet-Cache.",
   "tools.noWallets": "Keine Wallets eingerichtet.",
   "tools.notMine": "gehört Dir nicht",
   "tools.preparing": "Wallets werden noch vorbereitet. Einen Moment.",

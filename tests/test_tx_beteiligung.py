@@ -3,7 +3,12 @@ import unittest
 
 from unittest.mock import patch
 
-from core.tx_beteiligung import analysiere_tx, cache_deckt_analyse, parse_txid
+from core.tx_beteiligung import (
+    analysiere_tx,
+    anreichern_navigation,
+    cache_deckt_analyse,
+    parse_txid,
+)
 from tests.fixtures import (
     BIP84_RECEIVE_0,
     EXTERN_A,
@@ -95,6 +100,51 @@ class TestCacheDeckt(unittest.TestCase):
 
         with patch("core.tx_beteiligung.load_cached_tx", side_effect=lade):
             self.assertFalse(cache_deckt_analyse(TXID_SPEND))
+
+
+class TestNavigation(unittest.TestCase):
+    def test_bestand_und_uebersicht(self):
+        key = f"{TXID_WALLET_IN}:0"
+        ergebnis = {
+            "txid": TXID_WALLET_IN,
+            "inputs": [],
+            "outputs": [
+                {"n": 0, "eigen": True, "wallet": "Cold Storage",
+                 "txid": TXID_WALLET_IN, "vout": 0},
+                {"n": 1, "eigen": True, "wallet": "Cold Storage",
+                 "txid": TXID_WALLET_IN, "vout": 1},
+            ],
+        }
+        aus = anreichern_navigation(
+            ergebnis,
+            [{"name": "Cold Storage", "id": "w1", "schluessel": "zpub"}],
+            lambda _s: [{"txid": TXID_WALLET_IN, "vout": 0, "key": key}],
+            lambda _s: [],
+        )
+        self.assertEqual(aus["outputs"][0]["ziel"], "bestand")
+        self.assertEqual(aus["outputs"][0]["wallet_id"], "w1")
+        self.assertEqual(aus["outputs"][0]["key"], key)
+        self.assertEqual(aus["outputs"][1]["ziel"], "uebersicht")
+        self.assertEqual(aus["outputs"][1]["wallet_id"], "w1")
+
+    def test_verlauf_am_input(self):
+        key = f"{TXID_WALLET_IN}:0"
+        ergebnis = {
+            "txid": TXID_SPEND,
+            "inputs": [{
+                "n": 0, "eigen": True, "wallet": "Cold Storage",
+                "txid": TXID_WALLET_IN, "vout": 0,
+            }],
+            "outputs": [],
+        }
+        aus = anreichern_navigation(
+            ergebnis,
+            [{"name": "Cold Storage", "id": "w1", "schluessel": "zpub"}],
+            lambda _s: [],
+            lambda _s: [{"txid": TXID_WALLET_IN, "vout": 0}],
+        )
+        self.assertEqual(aus["inputs"][0]["ziel"], "verlauf")
+        self.assertEqual(aus["inputs"][0]["key"], key)
 
 
 if __name__ == "__main__":
