@@ -47,6 +47,8 @@
     [/^Hole Bitcoin-Kurs…$/, "Fetching Bitcoin price…"],
     [/^FiFo-Kandidaten: aus Cache…$/,
       "FiFo candidates: from cache…"],
+    [/^FiFo-Kandidaten: (\d+) Abfluss\(e\)\.$/,
+      "FiFo candidates: $1 outflow(s)."],
     [/^FiFo-Kandidaten: (\d+) Abfluss\(e\) · (\d+) UTXO\(s\) Was-wäre-wenn\.$/,
       "FiFo candidates: $1 outflow(s) · $2 what-if UTXO(s)."],
     [/^FiFo-Kandidaten: fehlgeschlagen — (.+)$/,

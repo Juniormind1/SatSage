@@ -91,7 +91,7 @@ class TestEinbindung(unittest.TestCase):
         self.assertNotIn("SA_UTXO_CHUNK", steuer)
         self.assertIn("function zeichneSaSeiten", steuer)
         self.assertRegex(steuer, r'ansicht: "sa_abfluesse"')
-        self.assertRegex(steuer, r'ansicht: "sa_utxos"')
+        self.assertNotIn('ansicht: "sa_utxos"', steuer)
         self.assertIn('p.set("werte", "1")', steuer)
         # Bericht aus der ganzen Auswahl, per POST (lange Auswahl sprengt die URL).
         self.assertIn("for (const id of Zustand.saGewaehlt || [])", steuer)

@@ -96,6 +96,10 @@
     "en": "Self-report: loading candidates from cache…"
   },
   {
+    "re": "^FiFo-Kandidaten: (\\d+) Abfluss\\(e\\)\\.$",
+    "en": "FiFo candidates: $1 outflow(s)."
+  },
+  {
     "re": "^Selbstanzeige: (\\d+) Abfluss-Kandidat\\(en\\) · (\\d+) UTXO\\(s\\) Was-wäre-wenn\\.$",
     "en": "Self-report: $1 outflow candidate(s) · $2 UTXO(s) what-if."
   },

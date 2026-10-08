@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Hinweise:** Statt „Verlauf“ steht **Wallet-Historie** (Knopf Historie in der Wallet-Ansicht).
+- **Steuerjahr · UTXOs:** Die Gruppen außerhalb/innerhalb Haltefrist haben Checkboxen; HTML und CSV stehen vor dem Explorer-Pfeil wie zuvor in der Was-wäre-wenn-Liste. Die Was-wäre-wenn-Liste unter Bericht Sat-Geschichte entfällt — offene UTXOs kreuzt man in der Tabelle an.
 - **Steuerjahr · Knöpfe:** Der Sammel-Knopf **Historien** ist weg. Verlauf bleibt in der Wallet-Ansicht (**Historie**). In der Kopfzeile stehen **HTML** (früher Bericht) und danach **CSV**.
 - **Wallet · Herkunft:** Der Knopf öffnet das Steuerjahr und startet denselben Klären-Lauf nur für die UTXOs dieses Wallets (`?`/`!` im Dotplot). Fehlt der Bestand, wird zuerst nur dieses Wallet gescannt — die Punkte erscheinen im Plot.
 - **Wallet · Knöpfe:** In der Kopfzeile steht **Herkunft** vor **Historie** (ganz rechts).

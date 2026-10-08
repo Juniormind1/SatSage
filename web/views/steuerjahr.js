@@ -625,6 +625,9 @@ function zeichneSteuerjahr(daten) {
   );
 
   zeichneSteuerUtxoGruppen(daten);
+  if (typeof saAuswahlMitschreiben === "function") {
+    saAuswahlMitschreiben($("#steuer-tabelle"));
+  }
 
   setzeText($("#steuer-vorbehalt"), (daten.hinweise || []).join(" "));
   $("#steuer-meldung").hidden = true;
@@ -672,7 +675,20 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
 
   const datum = document.createElement("td");
   datum.className = "zahl";
-  datum.textContent = eintrag.datum;
+  const wahl = document.createElement("label");
+  wahl.className = "steuer-utxo-wahl";
+  if (schluessel) {
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.art = "utxo";
+    box.value = `utxo:${schluessel}`;
+    box.addEventListener("click", (e) => e.stopPropagation());
+    wahl.append(box);
+  }
+  const datumText = document.createElement("span");
+  datumText.textContent = eintrag.datum;
+  wahl.append(datumText);
+  datum.append(wahl);
   if (eintrag.herkunft) {
     const h = document.createElement("div");
     h.className = "zart";
@@ -757,18 +773,26 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
   }
 
   const status = document.createElement("td");
-  status.className = "r";
+  status.className = "r steuer-utxo-status";
   const hatStichtag = Boolean(daten.stichtag_regel);
   let statusText = haltefristBeschriftung(eintrag, hatStichtag);
   if (!eintrag.erfuellt && eintrag.frist_ende && !eintrag.neuvermoegen) {
     statusText += ` · ab ${eintrag.frist_ende}`;
   }
   status.append(pille(eintrag.erfuellt ? "gut" : "warn", statusText));
-
-  const extern = mempoolVerweis("tx", eintrag.txid);
-  if (extern) status.append(extern);
+  if (schluessel && typeof saZeilenReportAktionen === "function") {
+    status.append(saZeilenReportAktionen({
+      art: "utxo",
+      id: schluessel,
+      txid: eintrag.txid,
+    }));
+  } else {
+    const extern = mempoolVerweis("tx", eintrag.txid);
+    if (extern) status.append(extern);
+  }
 
   zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status);
+  if (typeof saZeileMitAuswahl === "function") saZeileMitAuswahl(zeile);
   return zeile;
 }
 
@@ -2101,7 +2125,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
 /**
  * Zeigt, was im Steuerjahr veräußert wurde.
  *
- * Die Karte bleibt verborgen, solange kein Verlauf vorliegt — dort wäre eine
+ * Die Karte bleibt verborgen, solange keine Wallet-Historie vorliegt — dort wäre eine
  * leere Liste keine Aussage („nichts verkauft"), sondern ein Nichtwissen.
  */
 function zeichneAbgaenge(daten) {
@@ -2299,7 +2323,8 @@ Zustand.saDaten = null;
 Zustand.saGewaehlt = new Set();
 
 /**
- * FiFo-/Report-Kandidaten aus dem Cache (Abflüsse + Was-wäre-wenn-UTXOs).
+ * FiFo-/Report-Kandidaten aus dem Cache (Abflüsse). Offene UTXOs
+ * stehen in der Haltefrist-Tabelle darunter.
  *
  * Technisch: GET /tax/selbstanzeige/kandidaten — reiner Cache-Read, kein Trace.
  * Wird beim Öffnen des Steuerjahrs und bei Tip-Nachzug/Jahr-Wechsel oft
@@ -2331,7 +2356,7 @@ async function ladeSelbstanzeigeKandidaten(opts = {}) {
     const p = new URLSearchParams(filter);
     p.set("seite", "1");
     p.set("limit", String(2 * pagerGroesse("sa_abfluesse")));
-    p.set("limit_utxos", String(2 * pagerGroesse("sa_utxos")));
+    p.set("limit_utxos", "0");
     p.set("lang", uiSprache());
     const daten = await api(`/tax/selbstanzeige/kandidaten${abfrage}&${p}`);
     if (lauf !== Zustand.saLadeLauf) return;
@@ -2340,21 +2365,21 @@ async function ladeSelbstanzeigeKandidaten(opts = {}) {
     Zustand.saDaten = daten;
     // Neu geladen = neue Liste: Häkchen wie bisher aus der Vorauswahl.
     const vorab = daten.ausgewaehlt || {};
+    const utxoHaken = [...(Zustand.saGewaehlt || [])].filter((id) =>
+      String(id).startsWith("utxo:"));
     Zustand.saGewaehlt = new Set([
       ...(vorab.abfluss || []).map((w) => `abfluss:${w}`),
+      ...utxoHaken,
       ...(vorab.utxo || []).map((w) => `utxo:${w}`),
     ]);
     Zustand.saKandidaten = daten.abfluesse_fenster?.items || [];
-    Zustand.saUtxos = daten.utxos_fenster?.items || [];
+    Zustand.saUtxos = [];
     Zustand.saVerlauf = daten.verlauf || null;
     Zustand.saStichtag = daten.stichtag_hypothese || "";
     zeichneSelbstanzeigeKandidaten();
     if (laut) {
       const n = Number(daten.abfluesse_fenster?.voll_count) || 0;
-      const u = Number(daten.utxos_fenster?.voll_count) || 0;
-      logZeile(
-        t("ui.hard.92999accba", { n, u }),
-      );
+      logZeile(t("ui.hard.92999accba", { n }));
     }
   } catch (fehler) {
     if (lauf !== Zustand.saLadeLauf) return;
@@ -2388,7 +2413,7 @@ async function ladeSaSeitenNeu() {
   p.set("seite", "1");
   p.set("teil", "zeilen");
   p.set("limit", String(2 * pagerGroesse("sa_abfluesse")));
-  p.set("limit_utxos", String(2 * pagerGroesse("sa_utxos")));
+  p.set("limit_utxos", "0");
   p.set("lang", uiSprache());
   const neu = await api(`/tax/selbstanzeige/kandidaten${daten._abfrage}&${p}`);
   if (lauf !== Zustand.saZeilenLauf || Zustand.saDaten !== daten) return;
@@ -2716,9 +2741,7 @@ function zeichneSelbstanzeigeKandidaten() {
 
   const daten = Zustand.saDaten || {};
   const abFenster = daten.abfluesse_fenster || { items: [], total: 0, voll_count: 0 };
-  const utFenster = daten.utxos_fenster || { items: [], total: 0, voll_count: 0 };
   const nAb = Number(abFenster.voll_count) || 0;
-  const nUt = Number(utFenster.voll_count) || 0;
   const verlauf = Zustand.saVerlauf;
 
   const ab = saAbschnitt(
@@ -2747,65 +2770,6 @@ function zeichneSelbstanzeigeKandidaten() {
   }
   liste.append(ab.details);
 
-  const stichtag = Zustand.saStichtag
-    ? t("ui.hard.11361714f6", { stichtag: Zustand.saStichtag })
-    : "";
-  // UTXOs aufklappen, wenn keine Abflüsse — sonst sieht man keine Checkboxen.
-  const ut = saAbschnitt(
-    t("tax.hard.bb993ba73a"),
-    nUt
-      ? `${nUt} UTXO(s)${stichtag}`
-      : `keine${stichtag}`,
-    {
-      offen: nUt > 0 && nAb === 0,
-      ausklappbar: nUt > 0,
-      leerText: nUt
-        ? ""
-        : t("ui.hard.3939cbbda7"),
-    },
-  );
-  if (nUt) {
-    const hinweis = document.createElement("p");
-    hinweis.className = "sa-leer";
-    hinweis.textContent =
-      "Checkbox ankreuzen → Report. Angekreuzte UTXOs werden fiktiv zum Stichtag " +
-      t("ui.hard.c5ddd7fafe");
-    ut.innen.append(hinweis);
-
-    const werkzeug = document.createElement("div");
-    werkzeug.className = "sa-werkzeug";
-    const alle = document.createElement("button");
-    alle.type = "button";
-    alle.className = "knopf knopf-klein";
-    alle.textContent = t("ui.hard.b0ca3442c8");
-    alle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      saUtxosAlleKeine(true).catch(() => {});
-    });
-    const keine = document.createElement("button");
-    keine.type = "button";
-    keine.className = "knopf knopf-klein";
-    keine.textContent = "Keine";
-    keine.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      saUtxosAlleKeine(false).catch(() => {});
-    });
-    werkzeug.append(alle, keine);
-    ut.innen.append(werkzeug);
-    zeichneSaSeiten({
-      abschnitt: ut.details,
-      innen: ut.innen,
-      teil: "utxos",
-      fenster: utFenster,
-      zeichneZeile: zeichneSaUtxoZeile,
-      ansicht: "sa_utxos",
-      hostKlasse: "sa-utxo-host",
-    });
-  }
-  liste.append(ut.details);
-
   if (verlauf) {
     const teile = [];
     if (verlauf.vorhanden) teile.push("Verlaufsdaten vorhanden");
@@ -2821,9 +2785,7 @@ function zeichneSelbstanzeigeKandidaten() {
     }
     const vl = saAbschnitt(t("tax.hard.c8a4f137db"), teile.join(" · "), {
       ausklappbar: false,
-      leerText:
-        "Nur Orientierung: Abflüsse oben brauchen Verlauf; " +
-        "UTXOs kommen aus dem Bestand.",
+      leerText: t("tax.historyHint"),
     });
     liste.append(vl.details);
   }

@@ -2765,6 +2765,27 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   font-size: 11px;
   line-height: 1.2;
 }
+.steuer-utxo-wahl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.steuer-utxo-wahl input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--akzent);
+  cursor: pointer;
+}
+.steuer-utxo-status {
+  white-space: nowrap;
+}
+.steuer-utxo-status .sa-zeile-aktionen {
+  margin-left: 8px;
+  vertical-align: middle;
+}
 
 /* ---------- Zeitstrahl ---------- */
 

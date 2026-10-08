@@ -461,6 +461,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("border-style: dotted", self.css)
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("_setzeSteuerGruppe", steuer)
+        self.assertIn("steuer-utxo-wahl", steuer)
+        self.assertIn("saZeilenReportAktionen", steuer)
+        self.assertNotIn('ansicht: "sa_utxos"', steuer)
+        self.assertIn("steuer-utxo-wahl", self.css)
         # Kandidaten des Berichts: Filter über alle Seiten (Server, ISSUES P2).
         self.assertIn("async function ladeSaSeitenNeu", steuer)
         self.assertIn("dataset.filterAus", steuer)

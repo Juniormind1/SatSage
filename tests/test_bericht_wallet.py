@@ -55,7 +55,7 @@ class TestBerichtWalletLesen(unittest.TestCase):
 
     def test_hinweise_ersetzen_walletnamen(self):
         texte = tax.hinweise_fuer_bericht(
-            ['Für „Cold Storage“, „Ledger Alt“ liegen kein Verlauf vor.'],
+            ['Für „Cold Storage“, „Ledger Alt“ fehlt die Wallet-Historie.'],
             ["Cold Storage", "Ledger Alt"],
             "Eigenverwahrung",
         )
