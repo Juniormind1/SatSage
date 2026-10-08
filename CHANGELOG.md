@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Knöpfe:** Der Sammel-Knopf **Historien** ist weg. Verlauf bleibt in der Wallet-Ansicht (**Historie**). In der Kopfzeile stehen **HTML** (früher Bericht) und danach **CSV**.
 - **Wallet · Herkunft:** Der Knopf öffnet das Steuerjahr und startet denselben Klären-Lauf nur für die UTXOs dieses Wallets (`?`/`!` im Dotplot). Fehlt der Bestand, wird zuerst nur dieses Wallet gescannt — die Punkte erscheinen im Plot.
 - **Wallet · Knöpfe:** In der Kopfzeile steht **Herkunft** vor **Historie** (ganz rechts).
 - **Wallet · Lot-Ring:** Links neben Name und „n UTXO · Skripttyp…“ steht ein Lot-Ring für den ganzen Bestand. UTXOs ohne Herkunft füllen den grauen Teil.

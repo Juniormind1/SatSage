@@ -152,8 +152,8 @@ function zeichneEmpfangReadOnly(walletName, { puls = false } = {}) {
 
 /**
  * Empfangspanel im „beschäftigt“-Zustand: QR weg, Atem an.
- * Gilt für UTXO-Scan, Historie, Tip-Nachzug, Herkunft und die
- * Sammel-Jobs Historien / Herkünfte UTXOs — auch Read-only-Wallets.
+ * Gilt für UTXO-Scan, Historie, Tip-Nachzug, Herkunft und klären —
+ * auch Read-only-Wallets.
  */
 function zeichneEmpfangBeschaeftigt(walletId) {
   // Laufender Atem bleibt. Ein neuer Log-Tick darf den Takt nicht zurücksetzen.
@@ -290,8 +290,8 @@ function jobIstAktiv(job) {
 }
 
 /**
- * Scan über alle Wallets: Steuerjahr „Historien“ und Massen-Herkunft
- * („Herkünfte UTXOs“ / klären). Atem unabhängig vom gerade offenen Wallet.
+ * Scan über alle Wallets: Massen-Herkunft („klären“) und ein noch
+ * laufender Sammel-Verlauf. Atem unabhängig vom gerade offenen Wallet.
  */
 function empfangGlobalerScanLaeuft() {
   if (Zustand.contextBereit === false) return true;
@@ -306,7 +306,7 @@ function empfangGlobalerScanLaeuft() {
 
 /**
  * Empfang noch unsicher: UTXO-Scan, Historie, Tip-Nachzug, Wallet-Herkunft
- * oder ein globaler Scan (Historien / Herkünfte UTXOs).
+ * oder ein globaler Scan (klären / Sammel-Verlauf).
  */
 function empfangScanLaeuftFuer(walletId) {
   if (empfangGlobalerScanLaeuft()) return true;

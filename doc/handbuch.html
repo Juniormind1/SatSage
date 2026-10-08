@@ -1034,10 +1034,9 @@ auffindbar.</p>
 
 <div class="hinweis">
   <div class="kopf">Setzt den Verlauf voraus</div>
-  <p>Die Liste erscheint erst, wenn ein <strong>Verlaufsscan</strong> (Wallet)
-  oder <strong>Verlauf aller Wallets</strong> (Steuerjahr) gelaufen ist —
-  nur dort werden ausgegebene Outputs überhaupt erfasst. Vorher steht an
-  dieser Stelle ein entsprechender Hinweis.</p>
+  <p>Die Liste erscheint erst, wenn <strong>Historie</strong> in der
+  Wallet-Ansicht gelaufen ist — nur dort werden ausgegebene Outputs
+  überhaupt erfasst. Vorher steht an dieser Stelle ein entsprechender Hinweis.</p>
   <p>Bei einem Wallet mit Historie sind das schnell deutlich mehr Vorgänge als
   aktuelle UTXOs; gezeichnet wird die Liste deshalb erst beim Aufklappen.</p>
 </div>
@@ -2115,7 +2114,7 @@ Header mitschicken kann.</p>
         <td>Bereits verfolgten Baum liefern (<code>?target=txid:vout</code>) — ohne Job</td></tr>
     <tr><td><code>POST /api/trace</code></td><td>Herkunftsanalyse starten (überschreibt den gespeicherten Baum)</td></tr>
     <tr><td><code>POST /api/verlauf</code></td>
-        <td>Vollständigen Verlauf aller Wallets erheben (auch ausgegebene Outputs)</td></tr>
+        <td>Verlauf erheben (auch ausgegebene Outputs). Mit <code>wallet_id</code> ein Wallet, ohne Angabe alle.</td></tr>
     <tr><td><code>POST /api/config/deskriptor</code></td>
         <td>Deskriptor oder Wallet-Export prüfen; liefert Skripttyp, Schlüssel und erste Adresse</td></tr>
     <tr><td><code>POST /api/trace/alle</code></td><td>Herkunft aller offenen UTXOs (Job)</td></tr>

@@ -2099,16 +2099,6 @@ function zeichneZeitstrahl(daten, optionen = {}) {
  * statt auf dem bloßen Entstehungsdatum des Outputs.
  */
 /**
- * Erhebt den vollständigen Verlauf aller Wallets.
- *
- * Ohne ihn rechnet das Steuerjahr nur mit dem heutigen Bestand: Ein 2023
- * empfangener und 2024 verkaufter Betrag taucht nirgends auf — obwohl gerade
- * die Veräußerung der steuerlich maßgebliche Vorgang ist.
- *
- * Kostet eine Abfrage je Adresse und braucht einen Electrum-Server, läuft
- * deshalb nur auf ausdrücklichen Wunsch.
- */
-/**
  * Zeigt, was im Steuerjahr veräußert wurde.
  *
  * Die Karte bleibt verborgen, solange kein Verlauf vorliegt — dort wäre eine

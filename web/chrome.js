@@ -572,7 +572,6 @@ async function start() {
   if (herkunftTief) {
     herkunftTief.addEventListener("click", () => starteHerkunftVollstaendig());
   }
-  $("#verlauf-erheben").addEventListener("click", verlaufErheben);
   $("#export-csv").addEventListener("click", () => ladeExport("export.csv"));
   $("#export-bericht").addEventListener("click", () => ladeExport("bericht.html"));
   const saLaden = $("#sa-laden");

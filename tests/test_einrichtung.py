@@ -595,14 +595,19 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("tipSync.hidden = false", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.chrome_js)
-        self.assertIn('id="verlauf-erheben"', self.html)
-        self.assertIn("tax.historyAll", self.html)
+        self.assertNotIn('id="verlauf-erheben"', self.html)
+        self.assertNotIn("tax.historyAll", self.html)
+        self.assertLess(
+            self.html.find('id="export-bericht"'),
+            self.html.find('id="export-csv"'),
+        )
+        import json
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertEqual(de.get("tax.report"), "HTML")
         # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in views/steuerjahr.js
         steuer_js = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("tax.originAll", steuer_js)
         self.assertIn("herkunft-alle", self.chrome_js)
-        import json
-        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
         self.assertEqual(de.get("tax.originAll"), "klären")
         self.assertIn('zeigeAnsicht("steuerjahr")', self.herkunft_js)
         self.assertIn("grauKeysFuerWallet", self.herkunft_js)
