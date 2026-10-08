@@ -250,6 +250,16 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
   } else {
     await oeffneZweig(utxo, zweig, klapp, jobId);
   }
+  if (
+    Zustand.traceKlaerenUeberSprung === schluessel
+    && zweig.dataset.geladen !== "laeuft"
+    && !(Zustand.traceJobs && Zustand.traceJobs.has(schluessel))
+  ) {
+    Zustand.traceKlaerenUeberSprung = null;
+    if (typeof blendeAlterKlaerenUndScan === "function") {
+      blendeAlterKlaerenUndScan(block);
+    }
+  }
   aktualisiereTraceWurzelKopf(utxo, block);
   if (zweig.dataset.geladen === "ja") aktualisiereLotDonut(block, zweig);
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -275,6 +285,7 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
  */
 async function springeZuTraceUtxo(key, meta = null) {
   if (!key || typeof zeigeHerkunftFuer !== "function") return false;
+  Zustand.traceKlaerenUeberSprung = key;
   const ausSteuer = typeof utxoMetaAusSteuerjahr === "function"
     ? utxoMetaAusSteuerjahr(key)
     : null;
@@ -1165,6 +1176,10 @@ async function starteZweigTrace(
   if (utxo && utxo.key && Zustand.traceJobs) {
     Zustand.traceJobs.set(utxo.key, Zustand.traceJobs.get(utxo.key) || "wartet");
   }
+  if (typeof blendeAlterKlaerenUndScan === "function") {
+    const wurzel = zweig.closest(".utxo-wurzel");
+    if (wurzel) blendeAlterKlaerenUndScan(wurzel);
+  }
   if (typeof stoesseEmpfangScanPuls === "function") stoesseEmpfangScanPuls();
   delete zweig._lotKinder;
   delete zweig._lotFifo;
@@ -1197,6 +1212,9 @@ async function starteZweigTrace(
     clearInterval(timer);
     const gemerkt = Zustand.traceJobs.get(utxo.key);
     if (gemerkt === jobId || gemerkt === "wartet") Zustand.traceJobs.delete(utxo.key);
+    if (Zustand.traceKlaerenUeberSprung === utxo.key) {
+      Zustand.traceKlaerenUeberSprung = null;
+    }
     if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
   };
 
@@ -1224,6 +1242,10 @@ async function starteZweigTrace(
     aufraeumen();
     zweig.dataset.geladen = "";
     zweig.replaceChildren(hinweisZeile(meldung));
+    const wurzel = zweig.closest(".utxo-wurzel");
+    if (wurzel && typeof blendeAlterKlaerenUndScan === "function") {
+      blendeAlterKlaerenUndScan(wurzel);
+    }
   };
 
   const statusText = (job) => {

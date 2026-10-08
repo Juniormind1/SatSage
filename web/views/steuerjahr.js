@@ -445,25 +445,23 @@ function fuelleJahresauswahl(jahre, gewaehlt) {
   if (gewaehlt) wahl.value = gewaehlt;
 }
 
+/**
+ * Scorecard-Betrag: sats/BTC plus Spot-Gegenwert (DE € / EN $).
+ * Kein Einstand — die Karten zählen den Bestand heute.
+ */
+function steuerScorecardWert(sats) {
+  return formatSats(Number(sats) || 0);
+}
+
 /** Scorecards oben im Steuerjahr. id bleibt stabil, solange die Farbe steht. */
 function steuerScorecardModelle(daten) {
   const k = daten.kennzahlen || {};
-  const alleE = daten.eintraege || [];
-  const erfuelltE = alleE.filter((e) => e.erfuellt);
-  const offenE = alleE.filter((e) => !e.erfuellt);
-  const ungeprueftE = alleE.filter((e) => !e.geprueft);
-  // Seitenweise liegt nur ein Fenster vor: Der Server nennt den gemeinsamen
-  // Bewertungstag je Menge (sonst null → kein Fiat, wie bisher).
-  const kts = daten.seitenweise ? (daten.kennzahlen_ts || {}) : null;
-  const fiatE = (sats, liste, name) => (kts
-    ? steuerSatsGemeinsam(sats, kts[name])
-    : formatSatsGemeinsam(sats, liste));
 
   const karten = [
     {
       id: "gesamt",
       titel: t("tax.hard.ee18fac200"),
-      wert: fiatE(k.gesamt_sats, alleE, "gesamt"),
+      wert: steuerScorecardWert(k.gesamt_sats),
       zusatz: `${k.gesamt_count} UTXOs`,
       art: "",
       klaeren: false,
@@ -471,7 +469,7 @@ function steuerScorecardModelle(daten) {
     {
       id: "erfuellt",
       titel: t("tax.hard.91a2ea86bd"),
-      wert: fiatE(k.erfuellt_sats, erfuelltE, "erfuellt"),
+      wert: steuerScorecardWert(k.erfuellt_sats),
       zusatz: `${k.erfuellt_count} UTXOs`,
       art: "gut",
       klaeren: false,
@@ -479,7 +477,7 @@ function steuerScorecardModelle(daten) {
     {
       id: "offen",
       titel: t("tax.hard.innerhalbHaltefrist"),
-      wert: fiatE(k.offen_sats, offenE, "offen"),
+      wert: steuerScorecardWert(k.offen_sats),
       zusatz: k.naechste_frist
         ? t("tax.hard.ed098d09aa", { naechste_frist: k.naechste_frist })
         : `${k.offen_count} UTXOs`,
@@ -491,7 +489,7 @@ function steuerScorecardModelle(daten) {
     karten.push({
       id: "ungeprueft",
       titel: "Ohne Herkunftsanalyse",
-      wert: fiatE(k.ungeprueft_sats, ungeprueftE, "ungeprueft"),
+      wert: steuerScorecardWert(k.ungeprueft_sats),
       zusatz: `${k.ungeprueft_count} UTXOs — Frist evtl. länger`,
       art: "ungeprueft",
       klaeren: true,

@@ -949,6 +949,17 @@ function utxoAlterGeklaert(utxo) {
 }
 
 /**
+ * True, wenn „Alter klären“ für dieses UTXO überflüssig ist: der Trace
+ * läuft schon (Dotplot-Sprung oder laufender Job).
+ */
+function alterKlaerenVerborgen(key) {
+  if (!key || typeof Zustand === "undefined") return false;
+  if (Zustand.traceKlaerenUeberSprung === key) return true;
+  if (Zustand.traceJobs && Zustand.traceJobs.has(key)) return true;
+  return false;
+}
+
+/**
  * Fehlt das grüne Label, steht hier der Knopf, der den Trace dafür startet.
  * Unvollständig: vorhandenen Baum fortsetzen. Sonst neu bis außen.
  */
@@ -956,6 +967,7 @@ function alterKlaerenKnopf(utxo) {
   if (!utxo || !utxo.key || utxoAlterGeklaert(utxo)) return null;
   // Unvollständig hat schon „vervollständigen“ — kein zweiter Start-Knopf.
   if (utxo.verfolgt && utxoHerkunftUnvollstaendig(utxo)) return null;
+  if (alterKlaerenVerborgen(utxo.key)) return null;
   const knopf = document.createElement("button");
   knopf.type = "button";
   knopf.className = "trace-link alter-klaeren";
@@ -1302,6 +1314,16 @@ function traceKnopfZeile(anker) {
     : null;
 }
 
+/** txid:vout der Zeile — am Element, sonst an der UTXO-Wurzel. */
+function traceZeileKey(zeile) {
+  if (!zeile) return "";
+  if (zeile.dataset && zeile.dataset.key) return zeile.dataset.key;
+  const wurzel = zeile.closest && zeile.closest(".utxo-wurzel");
+  if (wurzel && wurzel.dataset && wurzel.dataset.key) return wurzel.dataset.key;
+  const innen = zeile.querySelector && zeile.querySelector("[data-key]");
+  return (innen && innen.dataset && innen.dataset.key) || "";
+}
+
 /** „Scan neu“ in derselben Zeile — nicht „Alter klären“ oder „vervollständigen“. */
 function scanNeuKnopfIn(zeile) {
   if (!zeile) return null;
@@ -1314,16 +1336,17 @@ function scanNeuKnopfIn(zeile) {
 }
 
 /**
- * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht
- * oder das Alter noch nicht geklärt ist. Ist die rote Marke weg und das
- * grüne „jüngste sats“ da, kommt der Knopf wieder.
+ * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht,
+ * das Alter noch nicht geklärt ist oder der Trace schon läuft (Dotplot-Sprung).
+ * Ist die rote Marke weg und das grüne „jüngste sats“ da, kommt der Knopf wieder.
  */
 function blendeScanNeuNebenVervollstaendigen(anker) {
   const zeile = traceKnopfZeile(anker);
   const scan = scanNeuKnopfIn(zeile);
   if (!scan) return;
   const alterOffen = Boolean(zeile.querySelector(".alter-klaeren"));
-  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen")) || alterOffen;
+  const laeuft = alterKlaerenVerborgen(traceZeileKey(zeile));
+  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen")) || alterOffen || laeuft;
   scan.hidden = zeigt;
 }
 
@@ -1337,13 +1360,11 @@ function blendeAlterKlaerenUndScan(anker) {
   const oben = zeile.classList.contains("utxo-zeile")
     ? zeile
     : (zeile.querySelector(".knoten-oben") || zeile);
+  const key = traceZeileKey(zeile);
   const geklaert = Boolean(oben.querySelector(".juengste-sats-marke"));
-  if (geklaert) {
+  if (geklaert || alterKlaerenVerborgen(key)) {
     for (const knopf of oben.querySelectorAll(".alter-klaeren")) knopf.remove();
   } else if (!oben.querySelector(".alter-klaeren, .vervollstaendigen")) {
-    const key = zeile.dataset.key
-      || zeile.querySelector("[data-key]")?.dataset.key
-      || "";
     const klaeren = key ? alterKlaerenKnopf({ key }) : null;
     if (klaeren) {
       const juengstePlatz = oben.querySelector(

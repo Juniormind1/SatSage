@@ -95,6 +95,8 @@ const Zustand = {
   traceListe: null,
   /** Sprung aus Wallet: nur dieses UTXO — null = volle Herkunftsliste. */
   traceFokus: null,
+  /** Dotplot-Sprung hat den Trace für dieses UTXO schon gestartet — „Alter klären“ aus. */
+  traceKlaerenUeberSprung: null,
   steuer: null,
   onchainHinweisSitzungWeg: false,
 };

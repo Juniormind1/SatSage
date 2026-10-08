@@ -12,7 +12,8 @@ STUB = (WURZEL / "tests" / "herkunftsnetz_dom_stub.js").read_text(encoding="utf-
 STEUER = (WURZEL / "web" / "views" / "steuerjahr.js").read_text(encoding="utf-8")
 
 PREAMBLE = r"""
-function formatSatsGemeinsam(sats) { return `${sats} sat`; }
+function formatSats(sats) { return `${sats} sat`; }
+function formatSatsGemeinsam(sats) { return `${sats} sat HIST`; }
 function formatSatsBasis(sats) { return `${sats} sat`; }
 function formatZeitstrahlBetrag(sats) { return `${sats} sat`; }
 function t(key) { return key; }
@@ -195,6 +196,21 @@ class TestScanScorecards(unittest.TestCase):
         self.assertTrue(r["klickbar"])
         self.assertTrue(r["ungeprueft"])
         self.assertEqual(r["umschalt"], ["a" * 64 + ":0"])
+
+    def test_scorecard_betrag_ist_spot_nicht_einstand(self):
+        r = _node(r"""
+function formatSats(sats) { return `${sats} sat (≈ 9 €)`; }
+zeichneSteuerScorecards(Zustand.steuer);
+console.log(JSON.stringify({
+  gesamt: kasten.querySelector('[data-score="gesamt"] .kennzahl-zahl').textContent,
+  erfuellt: kasten.querySelector('[data-score="erfuellt"] .kennzahl-zahl').textContent,
+  offen: kasten.querySelector('[data-score="offen"] .kennzahl-zahl').textContent,
+}));
+""")
+        self.assertEqual(r["gesamt"], "3000 sat (≈ 9 €)")
+        self.assertEqual(r["erfuellt"], "1000 sat (≈ 9 €)")
+        self.assertEqual(r["offen"], "2000 sat (≈ 9 €)")
+        self.assertNotIn("HIST", r["gesamt"])
 
 
 if __name__ == "__main__":

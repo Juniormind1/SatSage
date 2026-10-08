@@ -122,6 +122,7 @@ class TestEinbindung(unittest.TestCase):
         herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.assertIn("function springeImHerkunftsbaum", herkunft)
         self.assertIn("function springeZuTraceUtxo", herkunft)
+        self.assertIn("Zustand.traceKlaerenUeberSprung = key", herkunft)
         self.assertIn("setzeKlapp(kopf, klapp, zweig, true)", herkunft)
         self.assertIn("herkunftsnetzBericht(key)", steuer)
         self.assertIn('addEventListener("dblclick"', steuer)
