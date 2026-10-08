@@ -45,6 +45,9 @@ RPC_KERN: tuple[str, ...] = (
     "getrawtransaction",
     "scantxoutset",
     "estimatesmartfee",
+    # Index-Stand beim Verbinden. Ohne txindex kein Herkunfts-Walk.
+    # Freigabe Maintainer 2026-10-08.
+    "getindexinfo",
 )
 
 #: B · Core-Wallet-Import („Wallets suchen“): öffentliche Deskriptoren lesen.
@@ -88,6 +91,22 @@ class RpcAllowlistError(outbound_policy.OutboundPolicyError):
         super().__init__(
             f"Core-RPC „{self.method}“ blockiert (SatSage-Allowlist, "
             f"Dealbreaker T14): {self.grund}"
+        )
+
+
+class TxindexFehltError(RuntimeError):
+    """Der Node hat keinen aktiven Transaktionsindex.
+
+    ``getrawtransaction`` findet dann nur Mempool und Wallet-Txs. Ein
+    bestätigter fremder Vorgänger bleibt leer, der Herkunfts-Walk bricht ab.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Bitcoin Core ohne txindex=1. Herkunfts-Walks brauchen den "
+            "Transaktionsindex. In bitcoin.conf txindex=1 setzen und den "
+            "Node neu starten — der Index baut sich danach auf. Ein "
+            "geprunter Node lässt sich mit txindex nicht starten."
         )
 
 
@@ -594,12 +613,27 @@ def stelle_utxo_core_client_bereit(
     return _client_aus_config(env, cfg, on_log=on_log, timeout=timeout)
 
 
+def txindex_aktiv(indexinfo: Any) -> bool:
+    """True, wenn ``getindexinfo`` einen fertigen, synchronen txindex meldet."""
+    if not isinstance(indexinfo, dict):
+        return False
+    eintrag = indexinfo.get("txindex")
+    if not isinstance(eintrag, dict):
+        return False
+    if eintrag.get("synced") is False:
+        return False
+    return True
+
+
 def verify_core_rpc(
     client: BitcoinRpcClient,
     *,
     on_log: LogFn | None = None,
 ) -> dict[str, Any]:
-    """``getblockchaininfo`` — wirft bei Fehler."""
+    """``getblockchaininfo`` und ``getindexinfo`` — wirft bei Fehler.
+
+    Ohne aktiven ``txindex`` ist die Verbindung unbrauchbar für Herkunft.
+    """
     _log(on_log, f"Prüfe Bitcoin Core {client.cfg.ziel}…")
     _log(on_log, f"Verbinde mit Bitcoin Core {client.cfg.host}:{client.cfg.port}…")
     info = client.call("getblockchaininfo")
@@ -607,10 +641,14 @@ def verify_core_rpc(
         raise RuntimeError("getblockchaininfo: unerwartete Antwort")
     blocks = info.get("blocks")
     chain = info.get("chain")
-    _log(
-        on_log,
-        f"Verbunden. Bitcoin Core · {chain} · Tip {blocks}",
-    )
+    _log(on_log, f"Verbunden. Bitcoin Core · {chain} · Tip {blocks}")
+    _log(on_log, "Prüfe txindex…")
+    indexinfo = client.call("getindexinfo")
+    if not txindex_aktiv(indexinfo):
+        raise TxindexFehltError()
+    _log(on_log, "txindex ist aktiv.")
+    info = dict(info)
+    info["txindex"] = True
     return info
 
 

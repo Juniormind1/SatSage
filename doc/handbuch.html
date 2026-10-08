@@ -1817,9 +1817,9 @@ manipuliertes Programm nichts.</p>
 <pre><code># Eigener RPC-User nur für SatSage. Salt und Hash erzeugt
 # share/rpcauth/rpcauth.py satsage — das Passwort steht nur in der SatSage-.env
 rpcauth=satsage:&lt;salt&gt;$&lt;hash&gt;
-rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee,getindexinfo
 # Mit Core-Wallet-Import („Wallets suchen“) stattdessen diese Zeile:
-# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee,listwallets,listwalletdir,loadwallet,listdescriptors
+# rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee,getindexinfo,listwallets,listwalletdir,loadwallet,listdescriptors
 # Andere RPC-User (Electrs, Sparrow, Cookie …) behalten vollen Zugriff:
 rpcwhitelistdefault=0
 # RPC nur lokal; zweite Zeile nur, wenn SatSage auf einem anderen Rechner läuft
@@ -1851,6 +1851,11 @@ rpcallowip=127.0.0.1
     <li>Verweigert der Node eine Methode, meldet SatSage
         „Node verweigert Methode … – rpcwhitelist?“. Dann fehlt die Methode in
         der Zeile oben.</li>
+    <li><strong><code>txindex=1</code> ist Pflicht</strong> für den
+        Tx/Block-Lookup. SatSage liest beim Verbinden
+        <code>getindexinfo</code>. Fehlt der Index oder ist er noch nicht
+        synchron, gilt die Verbindung als gescheitert. Der Log nennt den
+        Grund. Ein geprunter Node startet mit <code>txindex</code> nicht.</li>
   </ul>
   <p><strong>StartOS und Umbrel:</strong> Dort ist das nur ein Hinweis, keine
   Einstellung für SatSage. Unter StartOS liest SatSage die Cookie-Datei des

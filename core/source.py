@@ -710,9 +710,9 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         privacy=PRIVACY_HIGH,
         configured=core_ok,
         note=(
-            "getrawtransaction / getblock für Herkunft — ideal full node mit "
-            "txindex (z. B. Start9). Nicht der Adress-Verlaufsscan (Electrs/"
-            "BIP-158). UTXO-Bestand hat einen eigenen Slot darüber."
+            "getrawtransaction / getblock für Herkunft. Verbindung nur mit "
+            "txindex=1. Nicht der Adress-Verlaufsscan (Electrs). UTXO-Bestand "
+            "hat einen eigenen Slot darüber."
             if core_ok else
             "Core für Tx/Block-Lookups (Start9 o. Ä.). Pruned Desktop-Node "
             "gehört in die pruned UTXO-Set-Quelle, nicht hier."

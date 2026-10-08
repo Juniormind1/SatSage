@@ -73,7 +73,7 @@ Mit Electrs-LAN entfällt `scantxoutset`. Ohne LAN-Electrs: lokaler pruned Node 
 
 **Tx/Block-Lookup** (Herkunft ohne Electrs bzw. Electrs-Ausnahme):
 
-1. Lokaler Core (`UTXO_RPC_*`), solange Höhe > `pruneheight` (sonst Block weg)
+1. Lokaler Core (`UTXO_RPC_*`), solange Höhe > `pruneheight` (sonst Block weg). Verbindung nur mit aktivem `txindex` (`getindexinfo` beim Handshake, sonst Ablehnung im Log).
 2. Lookup-Core (`NODE_IP`, archival / Start9)
 3. P2P `getdata` / Block bei bekannter Höhe
 

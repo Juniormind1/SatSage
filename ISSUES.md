@@ -3,7 +3,21 @@
 Bekannte Lücken, noch ohne Lösung. Sortiert nach **voraussichtlichem Aufwand** (niedrigster zuerst), sofern keine Priorität genannt ist.
 Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalten).
 
-**Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie).
+**Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie). Bis Release 1.0: fehlerfreie Electrs-Walks. Core-Walks und ihr Abgleich gegen Electrs danach.
+
+## Release 1.0 · Core as is
+
+**Stand:** 2026-10-08 · **offen** · bewusst zurückgestellt
+**Ort:** `core/bitcoind_rpc.py`, `core/chain_sources.py`
+Aufwand: nach 1.0
+
+Für das erste Release 1.0 ist Bitcoin Core nicht gehärtet. SatSage nutzt den angebundenen Node so, wie er ist: Verbindung, `scantxoutset`, `getrawtransaction`. Die `txindex`-Prüfung beim Verbinden bleibt. Ein vollständiger Core-Walk und sein Abgleich gegen einen schon gelaufenen Electrs-Walk sind kein 1.0-Ziel.
+
+Es gibt keinen Inventar-Prüfer für Core-Walks. Prune-Grenze, Blockhash-Fallback ohne `txindex` und Abweichungen gegenüber Electrs bleiben unbewiesen.
+
+Jetzt zählt der fehlerfreie Electrs-Walk. Core-Walks und der Abgleich gegen Electrs kommen danach.
+
+---
 
 ## P2P · Herkunft reicht nicht
 
@@ -26,7 +40,7 @@ SatSage liest von Bitcoin Core nur. Bisher konnte der RPC-Nutzer aber alles, was
 
 **Umgesetzt:**
 
-- **Client-Allowlist:** `call()` prüft als erste Zeile, vor Payload, Auth und Socket. Erlaubt sind A Kern (`getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`), B Core-Wallet-Import (`listwallets`, `listwalletdir`, `loadwallet`, `listdescriptors` nur mit `[]` bzw. `[false]`), C `sendtoaddress` nur bei `NETWORK=regtest` (Lab-Faucet).
+- **Client-Allowlist:** `call()` prüft als erste Zeile, vor Payload, Auth und Socket. Erlaubt sind A Kern (`getblockchaininfo`, `getblockhash`, `getblockheader`, `getblock`, `getrawtransaction`, `scantxoutset`, `estimatesmartfee`, `getindexinfo`), B Core-Wallet-Import (`listwallets`, `listwalletdir`, `loadwallet`, `listdescriptors` nur mit `[]` bzw. `[false]`), C `sendtoaddress` nur bei `NETWORK=regtest` (Lab-Faucet). `getindexinfo` seit 2026-10-08, damit der Verbindungstest `txindex` lesen kann.
 - **Verstoß = Sicherheitsstopp:** `RpcAllowlistError` (Unterklasse von `OutboundPolicyError`), ERROR-Log `RPC-ALLOWLIST-VERSTOSS`, Prozess-Flag in `/api/health` (nur ja/nein), Quellen-Status und `/config`, rote Pille „Core-RPC gesperrt“ in der Kopfzeile plus Log-Zeile (de/en). Die Stellen, die RPC-Fehler bisher verschluckten und auf Electrum/P2P auswichen, werfen den Verstoß weiter.
 - **Node-Seite:** HTTP 403 mit leerem Body wird zu „Node verweigert Methode X (HTTP 403) – rpcwhitelist?“. Die Wallet-Suche nennt bei `-32601` „disablewallet?“ statt „nicht erreichbar“.
 - **Merge-Regel T14** (hart) in `doc/merge-dealbreakers.md` und `AGENTS.md`; AST-Test `tests/test_rpc_allowlist_statisch.py` prüft jeden `.call("…")` im Produktivcode und dass die Doku-Liste zur Konstante passt.

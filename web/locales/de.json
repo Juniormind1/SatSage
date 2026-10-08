@@ -764,7 +764,7 @@
   "sources.note.clearnet": "Erst nach Bestätigung — Adressen gehen an Dritte.",
   "sources.note.clearnet.empty": "Noch keine Liste — „Verbinden“ holt sie.",
   "sources.note.own_core": "UTXO-Bestand per scantxoutset am eigenen bitcoind (LAN vor Onion). Electrs im LAN hat Vorrang — Gap-Scan ist oft schneller. Kein Verlauf und keine Herkunft aus Core; die bleiben bei Electrum oder BIP-158.",
-  "sources.note.own_core.empty": "UTXO-Bestand per scantxoutset: Host (LAN oder .onion), Port, RPC-Benutzer und Passwort. Ideal mit -txindex=1. Electrs im LAN bleibt schneller und hat Vorrang.",
+  "sources.note.own_core.empty": "UTXO-Bestand per scantxoutset: Host (LAN oder .onion), Port, RPC-Benutzer und Passwort. Die Verbindung gilt nur mit txindex=1. Electrs im LAN bleibt schneller und hat Vorrang.",
   "sources.note.own_fulcrum.empty": "Host eintragen — Fulcrum, electrs oder ElectrumX",
   "sources.note.public_onion": "Rotation mildert das Risiko einzelner Server. Erst nach Bestätigung.",
   "sources.ownNetwork": "Eigenes Netz",

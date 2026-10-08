@@ -764,7 +764,7 @@
   "sources.note.clearnet": "Only after confirmation — addresses go to third parties.",
   "sources.note.clearnet.empty": "No list yet — “Connect” fetches it.",
   "sources.note.own_core": "UTXO set via scantxoutset on your own bitcoind (LAN before onion). Electrs on the LAN takes priority — gap scan is often faster. No history and no origin from Core; those stay with Electrum or BIP-158.",
-  "sources.note.own_core.empty": "UTXO set via scantxoutset: host (LAN or .onion), port, RPC user and password. Ideal with -txindex=1. Electrs on the LAN stays faster and has priority.",
+  "sources.note.own_core.empty": "UTXO set via scantxoutset: host (LAN or .onion), port, RPC user and password. The connection counts only with txindex=1. Electrs on the LAN stays faster and has priority.",
   "sources.note.own_fulcrum.empty": "Enter host — Fulcrum, electrs, or ElectrumX",
   "sources.note.public_onion": "Rotation mitigates the risk of individual servers. Only after confirmation.",
   "sources.ownNetwork": "Own network",
