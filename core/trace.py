@@ -63,6 +63,23 @@ def _tx_als_dict(tx) -> dict:
     )
 
 
+def _merke_vorgaenger_hoehe(tx: dict) -> None:
+    """Bekannte Blockhöhe der Vorgänger-Tx, damit P2P getdata TX auslässt."""
+    if not isinstance(tx, dict):
+        return
+    txid = tx.get("txid")
+    status = tx.get("status") if isinstance(tx.get("status"), dict) else {}
+    hoehe = status.get("block_height") or tx.get("blockheight")
+    if not txid or not hoehe:
+        return
+    try:
+        from core.bip158_wallet import note_tx_height
+
+        note_tx_height(str(txid), int(hoehe))
+    except Exception:
+        return
+
+
 def resolve_vin_prevout(
     get_tx: Callable[[str], dict],
     vin: dict,
@@ -85,6 +102,7 @@ def resolve_vin_prevout(
             f"↻ Herkunft: warte auf Vorgänger {vin['txid'][:12]}…:{vout}"
         )
     prev_tx = _tx_als_dict(get_tx(vin["txid"]))
+    _merke_vorgaenger_hoehe(prev_tx)
     vouts = prev_tx.get("vout") or []
     if not isinstance(vouts, list):
         return None
@@ -189,6 +207,7 @@ def iter_funding_inputs(
     """
     try:
         tx = _tx_als_dict(get_tx(creator_txid))
+        _merke_vorgaenger_hoehe(tx)
     except Exception as exc:
         _abbruch_durchreichen(exc)
         return
@@ -363,6 +382,7 @@ def iter_trace_funding_inputs(
     """
     try:
         tx = _tx_als_dict(get_tx(creator_txid))
+        _merke_vorgaenger_hoehe(tx)
     except Exception as exc:
         _abbruch_durchreichen(exc)
         return

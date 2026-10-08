@@ -558,6 +558,15 @@ function zeichneQuellen(quellen) {
       verbinden.disabled = bridgeManaged;
       verbinden.addEventListener("click", () => verbindeP2p(quelle, verbinden));
       rechts.append(verbinden);
+
+      const abgleich = document.createElement("button");
+      abgleich.type = "button";
+      abgleich.className = "knopf knopf-klein";
+      abgleich.textContent = t("sources.checkP2pWalks");
+      abgleich.title = t("sources.checkP2pWalksTitle");
+      abgleich.disabled = bridgeManaged;
+      abgleich.addEventListener("click", () => starteP2pWalkAbgleich(abgleich));
+      rechts.append(abgleich);
       if (quelle.verwerfbar) {
         const korb = document.createElement("button");
         korb.type = "button";
@@ -750,6 +759,59 @@ async function speichereBip158StartHoehe(eingabe) {
   } catch (fehler) {
     meldung(fehler.message, "krit");
     eingabe.disabled = false;
+  }
+}
+
+function beobachteP2pWalk(jobId) {
+  const timer = setInterval(async () => {
+    try {
+      const job = await api(`/jobs/${jobId}`);
+      if (job.running) return;
+      clearInterval(timer);
+      const stand = job.result || {};
+      const ent = stand.entdeckung || {};
+      const entText = ent.ok
+        ? `${ent.gefunden}/${ent.soll}`
+        : `${ent.gefunden ?? "?"}/${ent.soll ?? "?"}, fehlend ${ent.fehlend ?? "?"}`;
+      if (job.status === "done" && stand.ok) {
+        meldung(
+          t("sources.checkP2pWalksDone", { n: stand.verglichen, g: stand.gesamt }),
+          "gut",
+        );
+      } else if (job.status === "done") {
+        meldung(
+          t("sources.checkP2pWalksDiff", {
+            e: entText,
+            n: stand.verglichen, g: stand.gesamt, d: stand.abweichungen,
+          }),
+          "krit",
+        );
+      } else if (job.status === "cancelled") {
+        meldung(t("sources.checkP2pWalksCancelled"), "warn");
+      } else {
+        meldung(job.error || t("sources.checkP2pWalksFailed"), "krit");
+      }
+    } catch (_) {
+      clearInterval(timer);
+    }
+  }, 1500);
+}
+
+/** Reiner P2P-Walk gegen gespeicherte Electrs-Herkunft. */
+async function starteP2pWalkAbgleich(knopf) {
+  const vorher = knopf.textContent;
+  knopf.disabled = true;
+  knopf.textContent = t("common.loadingEllipsis");
+  try {
+    const ergebnis = await api("/p2p/walk-abgleich", { methode: "POST" });
+    meldung(t("sources.checkP2pWalksStarted", { n: ergebnis.utxos || 0 }), "gut");
+    await ladeJobsNav();
+    if (ergebnis.job_id) beobachteP2pWalk(ergebnis.job_id);
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  } finally {
+    knopf.disabled = false;
+    knopf.textContent = vorher;
   }
 }
 

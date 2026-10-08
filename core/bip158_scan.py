@@ -42,6 +42,47 @@ TURBO_WINDOW = 2_016
 _BLOCK_PENDING = object()
 
 
+def plane_union_passes(
+    wallets: Sequence[tuple[int, bool, set[bytes], set[bytes]]],
+    tip: int,
+    *,
+    turbo_window: int = TURBO_WINDOW,
+) -> list[tuple[str, int, int, frozenset[bytes]]]:
+    """
+    Gemeinsame Filter-Pässe mehrerer Wallets.
+
+    Jedes Element ist ``(start, erstscan, lookahead, historie_scripts)``.
+    Turbo: Vereinigung der Lookaheads im Tip-Fenster, ein Pass.
+    Historie: je Wallet nur dessen used/gap, Höhen vereinigt, ein Pass.
+    Volle Lookahead-Menge über die Historie bleibt draußen.
+    """
+    if tip < 0 or not wallets:
+        return []
+    turbo_from = max(0, tip - turbo_window + 1)
+    turbo_scripts: set[bytes] = set()
+    turbo_von: int | None = None
+    histo_scripts: set[bytes] = set()
+    histo_von: int | None = None
+    histo_bis = turbo_from - 1
+    for start, _erstscan, lookahead, historie in wallets:
+        start_i = max(0, int(start))
+        if tip < start_i:
+            continue
+        wallet_turbo = max(start_i, turbo_from)
+        if wallet_turbo <= tip:
+            turbo_scripts |= set(lookahead)
+            turbo_von = wallet_turbo if turbo_von is None else min(turbo_von, wallet_turbo)
+        if start_i < turbo_from and historie:
+            histo_scripts |= set(historie)
+            histo_von = start_i if histo_von is None else min(histo_von, start_i)
+    passe: list[tuple[str, int, int, frozenset[bytes]]] = []
+    if turbo_von is not None and turbo_scripts:
+        passe.append(("turbo", turbo_von, tip, frozenset(turbo_scripts)))
+    if histo_von is not None and histo_scripts and histo_von <= histo_bis:
+        passe.append(("historie", histo_von, histo_bis, frozenset(histo_scripts)))
+    return passe
+
+
 def plane_filter_passes(
     start_height: int,
     tip: int,
@@ -1110,6 +1151,314 @@ class BIP158Scanner:
     def scan_from_xpub_sync(self, xpub: str, **kwargs) -> ScanResult:
         return self.scan_from_xpub(xpub, **kwargs)
 
+    def scan_union(
+        self,
+        wallets: Sequence[dict[str, Any]],
+        *,
+        stop_height: int | None = None,
+        on_utxos_update=None,
+    ) -> dict[str, ScanResult]:
+        """
+        Ein Filterdurchgang für mehrere Wallets, Zuordnung danach je xPub.
+
+        *wallets*: ``xpub``, ``start_height``, ``used_scripts``, ``gap_scripts``,
+        ``max_index``, ``seed_outputs``, ``seed_verlauf``. Turbo matcht die
+        vereinigten Lookaheads, Historie nur used/gap je Wallet. Ein Wallet
+        mit späterem Start verwirft Treffer darunter.
+        """
+        from core.bip158_wallet import (
+            derive_script_pubkeys_from_xpub,
+            gap_scripts_anfang,
+            scripts_mit_gap_um_treffer,
+        )
+
+        if not wallets:
+            return {}
+        vorbereitet: list[dict[str, Any]] = []
+        for roh in wallets:
+            xpub = str(roh.get("xpub") or "")
+            if not xpub:
+                continue
+            gap_limit = int(roh.get("gap_limit") or DEFAULT_GAP_LIMIT)
+            max_index = max(gap_limit, int(roh.get("max_index") or DEFAULT_MAX_INDEX))
+            include_change = bool(roh.get("include_change", True))
+            watched = derive_script_pubkeys_from_xpub(
+                xpub, max_index=max_index, include_change=include_change,
+            )
+            used = set(roh.get("used_scripts") or ())
+            gap = set(roh.get("gap_scripts") or ())
+            if not used and not gap:
+                gap = gap_scripts_anfang(
+                    xpub, gap_limit=gap_limit, include_change=include_change,
+                )
+            vorbereitet.append({
+                "xpub": xpub,
+                "start": max(0, int(roh.get("start_height") or 0)),
+                "watched": watched,
+                "used": used,
+                "gap": gap,
+                "gap_limit": gap_limit,
+                "max_index": max_index,
+                "include_change": include_change,
+                "seed_out": dict(roh.get("seed_outputs") or {}),
+                "seed_verl": dict(roh.get("seed_verlauf") or {}),
+                "on_utxos_update": roh.get("on_utxos_update"),
+            })
+        if not vorbereitet:
+            return {}
+
+        chain, tip, pool = self._header_bis(min(w["start"] for w in vorbereitet))
+        end = tip if stop_height is None else min(stop_height, tip)
+        ergebnisse: dict[str, ScanResult] = {
+            w["xpub"]: ScanResult(start_height=w["start"], stop_height=end)
+            for w in vorbereitet
+        }
+        if end < min(w["start"] for w in vorbereitet):
+            return ergebnisse
+
+        def _plane() -> list[tuple[str, int, int, frozenset[bytes]]]:
+            return plane_union_passes(
+                [
+                    (
+                        w["start"],
+                        not w["used"],
+                        set(w["watched"]),
+                        w["used"] or w["gap"],
+                    )
+                    for w in vorbereitet
+                    if w["start"] <= end
+                ],
+                end,
+            )
+
+        passe = _plane()
+        self._filter_gesamt = _filter_umfang(passe)
+        self._log(
+            f"BIP-158 Union: {len(vorbereitet)} Wallets, "
+            f"{self._filter_gesamt:,} Filter-Höhen".replace(",", ".")
+        )
+
+        staende: dict[str, dict[str, Any]] = {}
+        for w in vorbereitet:
+            staende[w["xpub"]] = {
+                "bestaende": dict(w["seed_out"]),
+                "verlauf": dict(w["seed_verl"]),
+                "hit_scripts": set(w["used"]),
+            }
+        block_events: list[tuple[int, str, bytes, frozenset[bytes]]] = []
+        gezaehlt = [0]
+        geprueft = 0
+        filter_stats: dict[str, int] = {"geholt": 0, "gecacht": 0}
+        cache_dir = self._immutable_dir()
+
+        def _apply(
+            h: int, display: str, roh: bytes, phase: str,
+            *, provisional: bool, pass_scripts: frozenset[bytes],
+        ) -> None:
+            header, txs = parse_raw_block(roh)
+            self._merke_scan_block(header, txs, h, cache_dir)
+            aktiv = [w for w in vorbereitet if w["start"] <= h <= end]
+            if not aktiv:
+                return
+            watched: dict[bytes, str | None] = {}
+            for w in aktiv:
+                kandidaten = w["watched"] if phase == "turbo" else {
+                    spk: addr for spk, addr in w["watched"].items()
+                    if spk in pass_scripts or spk in staende[w["xpub"]]["hit_scripts"]
+                }
+                for spk, addr in kandidaten.items():
+                    if spk not in watched:
+                        watched[spk] = addr
+            if not watched:
+                return
+            _treffer, neu, spent_by = extract_from_parsed_block(header, txs, watched, h)
+            block_time = _header_unixzeit(header)
+            irgendwas = False
+            for w in aktiv:
+                eigene_neu = {
+                    key: out for key, out in neu.items()
+                    if bytes.fromhex(out.script_pubkey_hex) in w["watched"]
+                } if neu else {}
+                stand = staende[w["xpub"]]
+                gesehen = set(stand["bestaende"]) | set(eigene_neu) | set(stand["verlauf"])
+                spent_ours = {
+                    key: spent_by[key] for key in spent_by if key in gesehen
+                }
+                for spk_hex in (o.script_pubkey_hex for o in eigene_neu.values()):
+                    try:
+                        stand["hit_scripts"].add(bytes.fromhex(spk_hex))
+                    except ValueError:
+                        pass
+                if not eigene_neu and not spent_ours:
+                    continue
+                irgendwas = True
+                result = ergebnisse[w["xpub"]]
+                if display not in result.matched_blocks:
+                    result.matched_blocks.append(display)
+                _uebernehme_block_verlauf(
+                    stand["verlauf"], eigene_neu, spent_ours,
+                    hoehe=h, block_time=block_time,
+                )
+                for key in spent_ours:
+                    stand["bestaende"].pop(key, None)
+                stand["bestaende"].update(eigene_neu)
+                if provisional and w["on_utxos_update"] and (eigene_neu or spent_ours):
+                    from core.bip158_wallet import _matched_output_to_utxo
+
+                    w["on_utxos_update"]([
+                        _matched_output_to_utxo(a) for a in stand["bestaende"].values()
+                    ])
+            if not irgendwas and display:
+                for w in aktiv:
+                    result = ergebnisse[w["xpub"]]
+                    if display not in result.false_positive_blocks:
+                        result.false_positive_blocks.append(display)
+            self._emit(h, end, geprueft, 0, phase)
+
+        def _rebuild() -> None:
+            for w in vorbereitet:
+                staende[w["xpub"]]["bestaende"] = dict(w["seed_out"])
+                staende[w["xpub"]]["verlauf"] = dict(w["seed_verl"])
+                ergebnisse[w["xpub"]].matched_blocks.clear()
+                ergebnisse[w["xpub"]].false_positive_blocks.clear()
+                ergebnisse[w["xpub"]].transactions.clear()
+            for h, display, roh, pass_scripts in sorted(block_events, key=lambda e: e[0]):
+                _apply(
+                    h, display, roh, "final",
+                    provisional=False, pass_scripts=pass_scripts,
+                )
+
+        for name, von, bis, scripts in passe:
+            from display import is_list_abort_requested, melde_zwischenstand
+
+            self._check_abbruch()
+            if is_list_abort_requested():
+                self._log("BIP-158 abgebrochen.")
+                break
+            if name == "historie":
+                nachzug: set[bytes] = set(scripts)
+                for w in vorbereitet:
+                    if w["used"] or w["start"] > bis:
+                        continue
+                    nachzug |= scripts_mit_gap_um_treffer(
+                        w["xpub"],
+                        staende[w["xpub"]]["hit_scripts"] | w["gap"],
+                        gap_limit=w["gap_limit"],
+                        max_index=w["max_index"],
+                        include_change=w["include_change"],
+                    )
+                scripts = frozenset(nachzug)
+            if not scripts and name == "historie":
+                continue
+            melde_zwischenstand(
+                f"BIP-158 Union {name}: Block {von:,}–{bis:,} "
+                f"({len(scripts)} Keys)".replace(",", ".")
+            )
+            from core.p2p import GETCFILTERS_MAX, hash_to_hex
+
+            chunks = _cfilter_chunks(von, bis, chain.hash_at, schritt=GETCFILTERS_MAX)
+            geladen = verteile_cfilter_chunks(
+                pool, chunks, scripts, on_log=self._log,
+                gesamt=self._filter_gesamt, gezaehlt=gezaehlt,
+                tor_proxy=self._tor_proxy,
+                hash_at=chain.hash_at,
+                cache_dir=cache_dir,
+                stats=filter_stats,
+            )
+            abgebrochen = False
+            for zeilen in geladen:
+                self._check_abbruch()
+                if is_list_abort_requested():
+                    abgebrochen = True
+                    break
+                for h, block_hash, _blob, roh in zeilen:
+                    self._check_abbruch()
+                    geprueft += 1
+                    if roh is None:
+                        self._emit(h, end, geprueft, 0, name)
+                        continue
+                    display = hash_to_hex(block_hash)
+                    block_events.append((h, display, roh, scripts))
+                    _apply(
+                        h, display, roh, name,
+                        provisional=True, pass_scripts=scripts,
+                    )
+            if abgebrochen or is_list_abort_requested():
+                self._log("BIP-158 abgebrochen.")
+                break
+
+        if block_events and any(not w["used"] for w in vorbereitet):
+            _rebuild()
+
+        self._log(
+            f"BIP-158 Filter: {filter_stats.get('geholt', 0)} geholt, "
+            f"{filter_stats.get('gecacht', 0)} aus Cache"
+        )
+        if on_utxos_update:
+            from core.bip158_wallet import _matched_output_to_utxo
+
+            gesamt_utxos = []
+            for w in vorbereitet:
+                gesamt_utxos.extend(
+                    _matched_output_to_utxo(a)
+                    for a in staende[w["xpub"]]["bestaende"].values()
+                )
+            on_utxos_update(gesamt_utxos)
+        for w in vorbereitet:
+            stand = staende[w["xpub"]]
+            result = ergebnisse[w["xpub"]]
+            result.outputs = list(stand["bestaende"].values())
+            result.verlauf = list(stand["verlauf"].values())
+        return ergebnisse
+
+    def _header_bis(self, start_height: int):
+        """Header-Sync wie im Einzelscan. Liefert Kette, Tip, Peer-Pool."""
+        from core.p2p import hole_header
+
+        self._log("Synchronisiere Block-Header…")
+        letzter_fehler: BaseException | None = None
+        pool: list = []
+        chain = None
+        tip = 0
+        for versuch in range(1, 6):
+            try:
+                pool = self._ensure_peers()
+                peer = pool[0]
+                chain = hole_header(
+                    self._header_path, start_height, peer, on_log=self._log,
+                )
+                tip = chain.tip_height()
+                if peer.start_height and tip < peer.start_height:
+                    chain = hole_header(
+                        self._header_path, start_height, peer, on_log=self._log,
+                    )
+                    tip = chain.tip_height()
+                letzter_fehler = None
+                break
+            except (ConnectionError, OSError, TimeoutError) as exc:
+                letzter_fehler = exc
+                self._log(
+                    f"Header-Sync abgebrochen ({exc}) — "
+                    f"neuer Peer (Versuch {versuch}/5)…"
+                )
+                self.close()
+        if chain is None or letzter_fehler is not None and tip <= 0:
+            raise RuntimeError(
+                f"Header-Sync gescheitert: {letzter_fehler}"
+            ) from letzter_fehler
+        return chain, tip, pool
+
+    def _merke_scan_block(self, header: bytes, txs, hoehe: int, cache_dir) -> None:
+        """Jede Tx des Scan-Blocks in den Tx-Cache, plus Höhen-Hinweis."""
+        try:
+            from core.bip158_wallet import _lege_geparsten_block_ab
+
+            _lege_geparsten_block_ab(
+                header, txs, hoehe, cache_dir=cache_dir,
+            )
+        except Exception:
+            return
+
     def _immutable_dir(self) -> Path | None:
         if self._header_path is not None:
             return Path(self._header_path).parent
@@ -1227,6 +1576,7 @@ class BIP158Scanner:
         ) -> None:
             nonlocal bestaende, verlauf
             header, txs = parse_raw_block(roh)
+            self._merke_scan_block(header, txs, h, cache_dir)
             treffer, neu, spent_by = extract_from_parsed_block(
                 header, txs, watched, h,
             )

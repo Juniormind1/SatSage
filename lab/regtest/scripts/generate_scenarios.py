@@ -804,6 +804,9 @@ def run(rpc: Rpc) -> None:
         "records": records,
     }
     (HERE / ".data" / "scenario-report.json").write_text(json.dumps(report, indent=2) + "\n")
+    from herkunft_inventar import schreibe_inventar
+
+    schreibe_inventar(rpc)
 
     # Expectations für Klassifikation / Soft-Label-Abnahme
     txclass = {

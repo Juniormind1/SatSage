@@ -373,6 +373,7 @@ def clear_tx_height_hints() -> None:
 _BLOCK_BYTES: dict[bytes, bytes] = {}
 _BLOCK_BYTES_LOCK = threading.Lock()
 _BLOCK_BYTES_MAX = 64
+_BLOCK_LAEUFT: dict[bytes, threading.Event] = {}
 
 
 def merke_block_bytes(block_hash: bytes, roh: bytes) -> None:
@@ -393,6 +394,38 @@ def block_bytes_hint(block_hash: bytes) -> bytes | None:
         return None
     with _BLOCK_BYTES_LOCK:
         return _BLOCK_BYTES.get(bytes(block_hash))
+
+
+def hole_block_einmal(block_hash: bytes, holen: Callable[[], bytes]) -> bytes:
+    """Ein ``fetch_block`` je Hash, auch wenn mehrere Traces parallel warten."""
+    key = bytes(block_hash)
+    with _BLOCK_BYTES_LOCK:
+        da = _BLOCK_BYTES.get(key)
+        if da is not None:
+            return da
+        laufend = _BLOCK_LAEUFT.get(key)
+        if laufend is None:
+            laufend = threading.Event()
+            _BLOCK_LAEUFT[key] = laufend
+            ich = True
+        else:
+            ich = False
+    if not ich:
+        if not laufend.wait(timeout=180.0):
+            raise TimeoutError("Block-Download läuft zu lange")
+        with _BLOCK_BYTES_LOCK:
+            da = _BLOCK_BYTES.get(key)
+        if da is None:
+            raise ConnectionError("Block-Download ohne Ergebnis")
+        return da
+    try:
+        roh = holen()
+        merke_block_bytes(key, roh)
+        return roh
+    finally:
+        with _BLOCK_BYTES_LOCK:
+            _BLOCK_LAEUFT.pop(key, None)
+        laufend.set()
 
 
 def clear_p2p_block_cache() -> None:
@@ -505,9 +538,12 @@ def fetch_tx_from_block_p2p(
                 f"hole Block {hoehe:,} ({hash_to_hex(block_hash)[:12]}…) "
                 f"für Tx {key[:16]}…".replace(",", ".")
             )
-        peer = scanner._ensure_peer()
-        raw = peer.fetch_block(block_hash)
-        merke_block_bytes(block_hash, raw)
+
+        def _holen() -> bytes:
+            peer = scanner._ensure_peer()
+            return peer.fetch_block(block_hash)
+
+        raw = hole_block_einmal(block_hash, _holen)
     elif on_log:
         on_log(
             f"Block {hoehe:,} aus Session-Cache "
@@ -539,16 +575,12 @@ def _lege_block_txs_ab(client: Bip158Client, txs: list[dict[str, Any]]) -> None:
     if cache_dir is None:
         return
     try:
-        from core.xpub_cache import resolve_immutable_cache_dir, save_cached_tx
+        from core.xpub_cache import resolve_immutable_cache_dir
 
         imm = resolve_immutable_cache_dir(None, utxo_cache_dir=Path(cache_dir))
     except Exception:
         return
-    for d in txs:
-        try:
-            save_cached_tx(d["txid"], d, imm, "p2p-block")
-        except Exception:
-            continue
+    _lege_block_txs_ab_dir(imm, txs)
 
 
 
@@ -740,6 +772,112 @@ def _seed_aus_cache(
 
 
 
+def scan_start_fuer_xpub(
+    client: Bip158Client,
+    xpub: str,
+) -> dict[str, Any]:
+    """
+    Start, Grund, Seeds und used-Scripts für ein Wallet.
+
+    Dieselbe Wahl wie der Einzelscan: fertiger Tip vor First-seen,
+    First-seen vor SegWit, jüngerer UI-Start bleibt.
+    """
+    from core.p2p import SEGWIT_HEIGHT
+    from core.xpub_cache import (
+        bip158_fullscan_ist_fertig,
+        bip158_start_aus_first_seen,
+        load_xpub_cache_entry,
+    )
+
+    used = _used_scripts_aus_cache(xpub, client.cache_dir)
+    start = int(client.start_height or 0)
+    seed_out: dict[str, MatchedOutput] = {}
+    seed_verlauf: dict[str, dict[str, Any]] = {}
+    start_grund = "konfiguriert"
+    unvollstaendig = False
+    if client.cache_dir is not None:
+        entry = load_xpub_cache_entry(xpub, client.cache_dir)
+        roh = (entry or {}).get("raw") or {}
+        fertig = bip158_fullscan_ist_fertig(roh)
+        unvollstaendig = bool(
+            (roh.get("utxos") or roh.get("bip158_fullscan_ok") is False)
+            and not fertig
+        )
+        prev_tip = roh.get("scan_tip_height") if fertig else None
+        if prev_tip is not None:
+            try:
+                prev_tip_i = int(prev_tip)
+            except (TypeError, ValueError):
+                prev_tip_i = 0
+            if prev_tip_i > 0:
+                tip_start = max(0, prev_tip_i - BIP158_REORG_BUFFER + 1)
+                start = max(start, tip_start) if start > 0 else tip_start
+                seed_out, seed_verlauf = _seed_aus_cache(
+                    xpub, client.cache_dir, ab_hoehe=start,
+                )
+                start_grund = "tip"
+        if start_grund != "tip":
+            alter_start = bip158_start_aus_first_seen(
+                xpub,
+                client.cache_dir,
+                floor=None,
+                puffer=BIP158_REORG_BUFFER,
+            )
+            if alter_start is not None:
+                if start <= 0 or start <= SEGWIT_HEIGHT:
+                    start = alter_start
+                elif start < alter_start:
+                    start = alter_start
+                start_grund = "alter"
+    if start <= 0:
+        start = SEGWIT_HEIGHT
+        start_grund = "segwit-default"
+    return {
+        "start": start,
+        "start_grund": start_grund,
+        "used": used,
+        "seed_out": seed_out,
+        "seed_verlauf": seed_verlauf,
+        "unvollstaendig": unvollstaendig,
+    }
+
+
+def _keys_text(plan: dict[str, Any]) -> str:
+    used = plan["used"]
+    if plan["seed_out"] or plan["start_grund"] == "tip":
+        return f"{len(used)} used Keys, inkrementell"
+    if plan["start_grund"] == "alter":
+        return "ab Wallet-Beginn"
+    if used:
+        return f"{len(used)} used Keys"
+    if plan["unvollstaendig"]:
+        return "Erstscan (letzter Lauf unvollständig — Turbo)"
+    return "Erstscan"
+
+
+def _uebernimm_scan_ergebnis(
+    client: Bip158Client,
+    xpub: str,
+    result,
+    utxos: list[dict],
+    *,
+    on_utxos_update,
+) -> None:
+    from core.xpub_cache import merke_bip158_verlauf
+    from display import melde_zwischenstand
+
+    _LAST_SCAN_TIPS[xpub] = int(result.stop_height)
+    for output in result.outputs:
+        utxos.append(_matched_output_to_utxo(output))
+    if on_utxos_update:
+        on_utxos_update(list(utxos))
+    if client.cache_dir is not None and result.verlauf:
+        merke_bip158_verlauf(xpub, result.verlauf, client.cache_dir)
+        melde_zwischenstand(
+            f"BIP-158 Verlauf: {len(result.verlauf)} Ein- und Ausgänge"
+        )
+
+
 def fetch_wallet_utxos_bip158(
     client: Bip158Client,
     xpubs: list[str],
@@ -748,84 +886,34 @@ def fetch_wallet_utxos_bip158(
     max_addresses_by_xpub: dict[str, int] | None = None,
     on_utxos_update=None,
 ) -> list[dict]:
-    from core.xpub_cache import (
-        bip158_fullscan_ist_fertig,
-        bip158_start_aus_first_seen,
-        load_xpub_cache_entry,
-        merke_bip158_verlauf,
-    )
+    """
+    UTXOs über Compact Filter.
+
+    Mehr als ein xPub: ein gemeinsamer Filterdurchgang (``scan_union``),
+    Zuordnung danach je Wallet. Ein xPub bleibt der Einzelscan.
+    """
     from display import Bip158ProgressLine, melde_zwischenstand
 
+    plaene = [(xpub, scan_start_fuer_xpub(client, xpub)) for xpub in xpubs]
+    if len(plaene) > 1:
+        return _fetch_wallet_utxos_union(
+            client,
+            plaene,
+            max_addresses=max_addresses,
+            max_addresses_by_xpub=max_addresses_by_xpub,
+            on_utxos_update=on_utxos_update,
+        )
+
     utxos: list[dict] = []
-    for xpub in xpubs:
+    for xpub, plan in plaene:
         konfiguriert = (
             max_addresses_by_xpub.get(xpub, max_addresses)
             if max_addresses_by_xpub
             else max_addresses
         )
         xpub_max = max(int(konfiguriert), int(max_addresses))
-        used = _used_scripts_aus_cache(xpub, client.cache_dir)
-        from core.p2p import SEGWIT_HEIGHT
-
-        # client.start_height = UI/CLI/Env (kann jünger als SegWit sein).
-        start = int(client.start_height or 0)
-        seed_out: dict[str, MatchedOutput] = {}
-        seed_verlauf: dict[str, dict[str, Any]] = {}
-        start_grund = "konfiguriert"
-        unvollstaendig = False
-        if client.cache_dir is not None:
-            entry = load_xpub_cache_entry(xpub, client.cache_dir)
-            roh = (entry or {}).get("raw") or {}
-            fertig = bip158_fullscan_ist_fertig(roh)
-            unvollstaendig = bool(
-                (roh.get("utxos") or roh.get("bip158_fullscan_ok") is False)
-                and not fertig
-            )
-            prev_tip = roh.get("scan_tip_height") if fertig else None
-            if prev_tip is not None:
-                try:
-                    prev_tip_i = int(prev_tip)
-                except (TypeError, ValueError):
-                    prev_tip_i = 0
-                if prev_tip_i > 0:
-                    tip_start = max(0, prev_tip_i - BIP158_REORG_BUFFER + 1)
-                    start = max(start, tip_start) if start > 0 else tip_start
-                    seed_out, seed_verlauf = _seed_aus_cache(
-                        xpub, client.cache_dir, ab_hoehe=start,
-                    )
-                    start_grund = "tip"
-            if start_grund != "tip":
-                # First-seen − Reorg-Puffer. SegWit-Default weicht dem Alter;
-                # explizit jüngeres UI/CLI (Höhe > First-seen) bleibt.
-                alter_start = bip158_start_aus_first_seen(
-                    xpub,
-                    client.cache_dir,
-                    floor=None,
-                    puffer=BIP158_REORG_BUFFER,
-                )
-                if alter_start is not None:
-                    if start <= 0 or start <= SEGWIT_HEIGHT:
-                        start = alter_start
-                    elif start < alter_start:
-                        # UI älter als First-seen → First-seen (weniger Blindflug)
-                        start = alter_start
-                    # else: start > alter_start → User will ab jüngerer Höhe
-                    start_grund = "alter"
-        if start <= 0:
-            start = SEGWIT_HEIGHT
-            start_grund = "segwit-default"
-        if seed_out or start_grund == "tip":
-            keys_txt = f"{len(used)} used Keys, inkrementell"
-        elif start_grund == "alter":
-            keys_txt = "ab Wallet-Beginn"
-        elif used:
-            keys_txt = f"{len(used)} used Keys"
-        elif unvollstaendig:
-            keys_txt = "Erstscan (letzter Lauf unvollständig — Turbo)"
-        else:
-            keys_txt = "Erstscan"
         anfang = (
-            f"P2P-BIP-158 {xpub[:20]}… ab Höhe {start:,} ({keys_txt})"
+            f"P2P-BIP-158 {xpub[:20]}… ab Höhe {plan['start']:,} ({_keys_text(plan)})"
             .replace(",", ".")
         )
         print(f"\n{anfang}", flush=True)
@@ -842,33 +930,124 @@ def fetch_wallet_utxos_bip158(
 
         def _bip158_zwischenstand(stand: list[dict], *, _xpub=xpub) -> None:
             if on_utxos_update:
-                # Ein XPUB nach dem anderen — Zwischenstand ist der laufende
-                # XPUB plus bereits fertige XPUBs dieses Aufrufs.
                 on_utxos_update(utxos + stand)
 
         try:
             result = client.scanner.scan_from_xpub(
                 xpub,
                 max_index=max(xpub_max // 2, 1),
-                start_height=start,
-                used_scripts=used,
-                seed_outputs=seed_out or None,
-                seed_verlauf=seed_verlauf or None,
+                start_height=plan["start"],
+                used_scripts=plan["used"],
+                seed_outputs=plan["seed_out"] or None,
+                seed_verlauf=plan["seed_verlauf"] or None,
                 on_utxos_update=_bip158_zwischenstand if on_utxos_update else None,
             )
         finally:
             progress_line.finish()
-        _LAST_SCAN_TIPS[xpub] = int(result.stop_height)
-        for output in result.outputs:
-            utxos.append(_matched_output_to_utxo(output))
-        if on_utxos_update:
-            on_utxos_update(list(utxos))
-        if client.cache_dir is not None and result.verlauf:
-            merke_bip158_verlauf(xpub, result.verlauf, client.cache_dir)
-            melde_zwischenstand(
-                f"BIP-158 Verlauf: {len(result.verlauf)} Ein- und Ausgänge"
-            )
+        _uebernimm_scan_ergebnis(
+            client, xpub, result, utxos, on_utxos_update=on_utxos_update,
+        )
     fertig = f"BIP-158: {len(utxos)} unspent UTXO(s) nach Filter-Scan"
     print(f"\n{fertig}", flush=True)
     melde_zwischenstand(fertig)
     return utxos
+
+
+def _fetch_wallet_utxos_union(
+    client: Bip158Client,
+    plaene: list[tuple[str, dict[str, Any]]],
+    *,
+    max_addresses: int,
+    max_addresses_by_xpub: dict[str, int] | None,
+    on_utxos_update,
+) -> list[dict]:
+    from display import Bip158ProgressLine, melde_zwischenstand
+
+    wallets = []
+    for xpub, plan in plaene:
+        konfiguriert = (
+            max_addresses_by_xpub.get(xpub, max_addresses)
+            if max_addresses_by_xpub
+            else max_addresses
+        )
+        xpub_max = max(int(konfiguriert), int(max_addresses))
+        anfang = (
+            f"P2P-BIP-158 {xpub[:20]}… ab Höhe {plan['start']:,} ({_keys_text(plan)})"
+            .replace(",", ".")
+        )
+        print(f"\n{anfang}", flush=True)
+        melde_zwischenstand(anfang)
+        wallets.append({
+            "xpub": xpub,
+            "start_height": plan["start"],
+            "used_scripts": plan["used"],
+            "max_index": max(xpub_max // 2, 1),
+            "seed_outputs": plan["seed_out"] or None,
+            "seed_verlauf": plan["seed_verlauf"] or None,
+        })
+    progress_line = Bip158ProgressLine(verbose=client.verbose)
+
+    def on_progress(event: ScanProgress) -> None:
+        progress_line.update(
+            event.height, event.utxo_id,
+            checked=event.blocks_checked, total=event.total_blocks,
+        )
+
+    client.scanner._progress_callback = on_progress
+    try:
+        ergebnisse = client.scanner.scan_union(
+            wallets,
+            on_utxos_update=on_utxos_update,
+        )
+    finally:
+        progress_line.finish()
+    utxos: list[dict] = []
+    for xpub, _plan in plaene:
+        result = ergebnisse.get(xpub)
+        if result is None:
+            continue
+        _uebernimm_scan_ergebnis(
+            client, xpub, result, utxos, on_utxos_update=on_utxos_update,
+        )
+    fertig = f"BIP-158: {len(utxos)} unspent UTXO(s) nach Filter-Scan"
+    print(f"\n{fertig}", flush=True)
+    melde_zwischenstand(fertig)
+    return utxos
+
+
+def _lege_geparsten_block_ab(
+    header: bytes,
+    txs,
+    hoehe: int,
+    *,
+    cache_dir: Path | None,
+) -> None:
+    """Scan-Block: jede Tx in den unveränderlichen Cache, Höhe merken."""
+    block_time = _header_unixzeit(header)
+    dicts = [
+        _embit_tx_to_dict(tx, height=hoehe, block_time=block_time)
+        for tx in txs
+    ]
+    for d in dicts:
+        note_tx_height(d.get("txid"), hoehe)
+    if cache_dir is None:
+        return
+    try:
+        from core.xpub_cache import resolve_immutable_cache_dir
+
+        imm = resolve_immutable_cache_dir(None, utxo_cache_dir=Path(cache_dir))
+    except Exception:
+        return
+    _lege_block_txs_ab_dir(imm, dicts)
+
+
+def _lege_block_txs_ab_dir(imm: Path | None, txs: list[dict[str, Any]]) -> None:
+    if imm is None:
+        return
+    from core.xpub_cache import save_cached_tx
+
+    for d in txs:
+        try:
+            save_cached_tx(d["txid"], d, imm, "p2p-block")
+        except Exception:
+            continue

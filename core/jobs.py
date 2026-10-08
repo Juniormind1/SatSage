@@ -194,6 +194,7 @@ NUTZER_JOB_KINDS = frozenset({
     "export_adressen",  # Adressen nach Wallet-Export (Electrs-Batch)
     "schatzsuche",  # scantxoutset jenseits des Suchfensters
     "cache_suche",  # UTXO- und Verlaufs-Cache aller Wallets
+    "p2p-walk",  # Herkunftsabgleich gegen gespeicherten Electrs-Walk
 })
 
 

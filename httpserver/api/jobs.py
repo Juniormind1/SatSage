@@ -101,7 +101,7 @@ def api_job(state: Any, job_id: str) -> dict:
         daten["result"] = job.result
     # Während Tip-Sync/BIP-158: Live-Peers für die Kopf-Pille mitschicken.
     if job.status == "running" and job.kind in (
-        "wallet_sync", "headers", "rescan", "verlauf",
+        "wallet_sync", "headers", "rescan", "verlauf", "p2p-walk",
     ):
         live = _live_p2p_peers()
         if live:

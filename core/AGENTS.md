@@ -194,7 +194,7 @@ Hintergrund: [`../doc/adr-modularisierung.md`](../doc/adr-modularisierung.md). S
 
 - **Neue Analyse-Funktion:** Logik in `core/` (z. B. `tx_utxo_analyze`, `utxo_origin`), Prompts in `interact.py`, Menüpunkt in `menu.py`; Web: Route in `httpserver/api/` + View in `web/views/`; `analyze.py` und `server.py` nur Fassade/Dispatch. Im Plugin optional `specter_session.run_*` + Route/Template in `controller.py`
 - **Neues Backend:** Fetcher in Backend-Modul, Anbindung in `core.chain_sources` (`_setup_blockchain_client` / `_build_blockchain_fetchers`, über die `main`-Fassade erreichbar)
-- **BIP-158:** P2P in `core/p2p.py`, Scan in `core/bip158_scan.py`, Wallet-API in `core/bip158_wallet.py`; `bip158_scanner.py` bleibt Fassade. Kein Core-RPC. Turbo-Pässe in `plane_filter_passes`
+- **BIP-158:** P2P in `core/p2p.py`, Scan in `core/bip158_scan.py`, Wallet-API in `core/bip158_wallet.py`; `bip158_scanner.py` bleibt Fassade. Kein Core-RPC. Turbo-Pässe in `plane_filter_passes`. P2P-Check gegen den Electrs-Cache (Entdeckung und Herkunft): `core/p2p_walk_abgleich.py`, Route `POST /api/p2p/walk-abgleich` — schreibt den Electrs-Cache nicht an.
 - **Steuerjahr:** `core/tax.py`; Einstellungen `STEUER_HALTEFRIST_JAHRE` / `STEUER_STICHTAG`; Web-Ansicht in `web/views/`
 - **Fulcrum/Tor:** Fachcode in `core/fulcrum_*` und `core/electrum_servers.py`; `fulcrum.py` und `check_fulcrum_tor.py` bleiben Fassade bzw. Diagnose-CLI. `.env`-Variablen, `electrum_servers.json`
 - **Adress-Auflösung:** `WalletContext`, `external_addresses.json` in `main.py`

@@ -8,6 +8,7 @@ from bip158_scanner import (
     _filter_prozent_text,
     _filter_umfang,
     plane_filter_passes,
+    plane_union_passes,
     verteile_cfilter_chunks,
 )
 from core.p2p import (
@@ -156,6 +157,40 @@ class TestTurboPasses(unittest.TestCase):
             sum(bis - von + 1 for _n, von, bis, _s in zwei),
         )
         self.assertGreater(_filter_umfang(zwei), 0)
+
+    def test_union_turbo_vereinigt_lookahead_historie_bleibt_eng(self):
+        tip = 900_000
+        turbo_from = tip - TURBO_WINDOW + 1
+        passe = plane_union_passes(
+            [
+                (481_824, True, {b"\x01", b"\x02"}, {b"\x01"}),
+                (800_000, False, {b"\x03", b"\x04"}, {b"\x03"}),
+            ],
+            tip,
+        )
+        self.assertEqual([p[0] for p in passe], ["turbo", "historie"])
+        turbo, histo = passe
+        self.assertEqual(turbo[3], frozenset({b"\x01", b"\x02", b"\x03", b"\x04"}))
+        self.assertEqual(turbo[1], turbo_from)
+        self.assertEqual(histo[3], frozenset({b"\x01", b"\x03"}))
+        self.assertNotIn(b"\x02", histo[3])
+        self.assertEqual(histo[1], 481_824)
+        self.assertEqual(histo[2], turbo_from - 1)
+
+    def test_union_spaeter_start_hebt_nur_dieses_wallet(self):
+        tip = 900_000
+        turbo_from = tip - TURBO_WINDOW + 1
+        passe = plane_union_passes(
+            [
+                (481_824, True, {b"\x01", b"\x0a"}, {b"\x01"}),
+                (turbo_from + 10, True, {b"\x02", b"\x0b"}, {b"\x02"}),
+            ],
+            tip,
+        )
+        self.assertEqual([p[0] for p in passe], ["turbo", "historie"])
+        self.assertEqual(passe[1][1], 481_824)
+        self.assertEqual(passe[1][3], frozenset({b"\x01"}))
+        self.assertIn(b"\x02", passe[0][3])
 
     def test_filter_prozent_text(self):
         self.assertEqual(_filter_prozent_text(0, 0), "")

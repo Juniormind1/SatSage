@@ -30,6 +30,7 @@ REPO = HERE.parents[1]
 ENV_PATH = HERE / ".data" / ".regtest.env"
 TXCLASS = HERE / ".data" / "scenario-report-txclass.json"
 SANCTIONS = HERE / ".data" / "scenario-report-sanctions.json"
+INVENTAR = HERE / ".data" / "herkunft-inventar.json"
 SANCTIONS_DIR = HERE / ".data" / "sanctioned_cache"
 WORK = HERE / ".data" / "p2p-traces"
 
@@ -37,6 +38,11 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(SCRIPTS))
 
 from infra_check import brauche  # noqa: E402
+from herkunft_inventar import (  # noqa: E402
+    lade_inventar,
+    vergleiche_bestand,
+    vergleiche_herkunft,
+)
 
 P2P_PEER = "127.0.0.1:18444"
 
@@ -205,6 +211,10 @@ def merke_hoehen(utxos: list[dict]) -> int:
     return n
 
 
+def _utxo_key(txid: str, vout: int) -> str:
+    return f"{txid.strip().lower()}:{int(vout)}"
+
+
 def suite_origin(
     *,
     client,
@@ -228,6 +238,11 @@ def suite_origin(
         script_types=scripts,
     )
     eigene = set(ctx.address_to_wallet)
+    addr_wallet = ctx.address_to_wallet
+    try:
+        soll = lade_inventar(INVENTAR)
+    except (FileNotFoundError, RuntimeError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc), "utxos": 0, "failed": 1}
     t0 = time.monotonic()
     print("BIP-158-Scan der Lab-Wallets…", flush=True)
     utxos = fetch_wallet_utxos_bip158(
@@ -238,47 +253,74 @@ def suite_origin(
     )
     n_hint = merke_hoehen(utxos)
     print(
-        f"  {len(utxos)} UTXOs, {n_hint} Höhen-Hinweise, "
-        f"{time.monotonic() - t0:.1f}s",
+        f"  {len(utxos)} UTXOs gescannt, Inventar {len(soll)}, "
+        f"{n_hint} Höhen-Hinweise, {time.monotonic() - t0:.1f}s",
         flush=True,
     )
-    if max_traces > 0:
-        utxos = utxos[:max_traces]
-    ok = fail = 0
-    faelle: list[dict[str, Any]] = []
-    for i, u in enumerate(utxos, 1):
-        txid = str(u.get("txid") or "")
+    gefunden: dict[str, dict] = {}
+    for u in utxos:
+        txid = str(u.get("txid") or "").lower()
         try:
             vout = int(u.get("vout", 0))
         except (TypeError, ValueError):
             vout = 0
+        gefunden[_utxo_key(txid, vout)] = u
+
+    if max_traces > 0:
+        # Rauchtest: Teilmenge, aber Bestand bleibt vollständig.
+        trace_keys = list(soll)[:max_traces]
+    else:
+        trace_keys = list(soll)
+
+    ok = fail = 0
+    fehlend, extra, faelle = vergleiche_bestand(
+        soll, gefunden, addr_wallet=addr_wallet, quelle="P2P",
+    )
+    fail += len(fehlend) + len(extra)
+
+    for i, key in enumerate(trace_keys, 1):
+        if key not in gefunden:
+            continue
+        eintrag = soll[key]
+        u = gefunden[key]
+        txid = eintrag["txid"]
+        vout = int(eintrag["vout"])
         start = time.monotonic()
         try:
+            ist_sats = int(u.get("value") or 0)
+            if ist_sats != int(eintrag["amount_sats"]):
+                raise AssertionError(
+                    f"Betrag {ist_sats} != {eintrag['amount_sats']}"
+                )
+            wallet_ist = addr_wallet.get(u.get("address"))
+            if wallet_ist != eintrag["wallet"]:
+                raise AssertionError(
+                    f"Wallet {wallet_ist} != {eintrag['wallet']}"
+                )
             baum = trace_utxo_origin(
-                get_tx,
-                txid,
-                vout,
-                eigene,
-                wallet=ctx,
-                cache_dir=cache_dir,
+                get_tx, txid, vout, eigene, wallet=ctx, cache_dir=cache_dir,
             )
+            from herkunft_inventar import _signatur
+
+            diff = vergleiche_herkunft(eintrag["herkunft"], _signatur(baum))
+            if diff:
+                raise AssertionError(diff)
             dauer = time.monotonic() - start
-            typ = (baum or {}).get("type") if isinstance(baum, dict) else None
             ok += 1
             print(
-                f"  OK  origin {i}/{len(utxos)} {_kurz_txid(txid)}:{vout} "
-                f"type={typ} {dauer:.1f}s",
+                f"  OK  origin {i}/{len(trace_keys)} {_kurz_txid(txid)}:{vout} "
+                f"{eintrag['wallet']} {dauer:.1f}s",
                 flush=True,
             )
             faelle.append({
                 "txid": _kurz_txid(txid), "vout": vout, "ok": True,
-                "type": typ, "seconds": round(dauer, 2),
+                "wallet": eintrag["wallet"], "seconds": round(dauer, 2),
             })
         except Exception as exc:
             dauer = time.monotonic() - start
             fail += 1
             print(
-                f"  FAIL origin {i}/{len(utxos)} {_kurz_txid(txid)}:{vout} "
+                f"  FAIL origin {i}/{len(trace_keys)} {_kurz_txid(txid)}:{vout} "
                 f"{type(exc).__name__}: {exc} {dauer:.1f}s",
                 flush=True,
             )
@@ -287,11 +329,27 @@ def suite_origin(
                 "error": f"{type(exc).__name__}: {exc}",
                 "seconds": round(dauer, 2),
             })
+    vollstaendig = (
+        max_traces <= 0
+        and not fehlend
+        and not extra
+        and fail == 0
+        and ok == len(soll)
+    )
+    if max_traces > 0:
+        print(
+            f"  Teilvergleich {ok}/{len(trace_keys)} — "
+            "Suite bleibt rot, bis alle Inventar-UTXOs verglichen sind.",
+            flush=True,
+        )
     return {
-        "ok": fail == 0 and ok > 0,
+        "ok": vollstaendig,
         "traced": ok,
         "failed": fail,
-        "utxos": len(utxos),
+        "utxos": len(gefunden),
+        "inventar": len(soll),
+        "missing": len(fehlend),
+        "extra": len(extra),
         "height_hints": n_hint,
         "cases": faelle,
     }

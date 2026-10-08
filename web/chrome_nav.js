@@ -407,7 +407,9 @@ function jobIstKlickbar(job) {
   if (kind === "labels" || kind === "sanctions" || kind === "sanctions-check") {
     return true;
   }
-  if (kind === "schatzsuche" || kind === "cache_suche") return true;
+  if (kind === "schatzsuche" || kind === "cache_suche" || kind === "p2p-walk") {
+    return true;
+  }
   if (kind === "wallet_sync") {
     const ids = job.meta?.wallet_ids;
     return Array.isArray(ids) && ids.length > 0;
@@ -425,6 +427,10 @@ function springeZuJob(job) {
   if (kind === "wallet_sync") {
     const ids = job.meta?.wallet_ids;
     if (Array.isArray(ids) && ids[0]) zeigeWallet(ids[0]);
+    return;
+  }
+  if (kind === "p2p-walk") {
+    zeigeAnsicht("datenquellen");
     return;
   }
   if (kind === "trace" || kind === "trace-alle" || kind === "trace-tief") {

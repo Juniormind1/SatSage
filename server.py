@@ -1007,6 +1007,9 @@ from httpserver.api.jobs import (  # noqa: E402
 )
 
 
+from httpserver.api.p2p_walk import api_p2p_walk_abgleich  # noqa: E402
+
+
 from httpserver.api.source import (  # noqa: E402
     api_clear_source,
     api_header_vorab,
@@ -1707,6 +1710,8 @@ class Handler(
             return 200, api_cache_wallet_leeren(state, teile[1])
         if teile == ["headers"] and methode == "POST":
             return 202, api_header_vorab(state)
+        if teile == ["p2p", "walk-abgleich"] and methode == "POST":
+            return 202, api_p2p_walk_abgleich(state)
         if teile == ["jobs", "rescan"] and methode == "POST":
             return 202, api_rescan(state, self._body())
         if teile == ["gui-bereit"] and methode == "POST":
