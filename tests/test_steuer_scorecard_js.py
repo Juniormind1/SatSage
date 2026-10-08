@@ -17,6 +17,9 @@ function formatSatsBasis(sats) { return `${sats} sat`; }
 function formatZeitstrahlBetrag(sats) { return `${sats} sat`; }
 function t(key) { return key; }
 const $ = (sel) => document.querySelector(sel);
+const umschalt = [];
+function herkunftsnetzUmschalten(key) { umschalt.push(key); }
+function herkunftsnetzBericht() {}
 const Zustand = {
   ansicht: "steuerjahr",
   herkunftAlleLaeuft: false,
@@ -114,10 +117,36 @@ console.log(JSON.stringify({
 """
 
 
-def _node() -> dict:
+KLICK_SZENARIO = r"""
+(async () => {
+  ZeitstrahlAnsicht.daten = {
+    zeitstrahl: { von: "01.01.2020", bis: "31.12.2026", max_sats: 100000 },
+  };
+  ZeitstrahlAnsicht.x0 = 0;
+  ZeitstrahlAnsicht.x1 = 100;
+  ZeitstrahlAnsicht.y0 = 0;
+  ZeitstrahlAnsicht.y1 = 100;
+  const keyA = "a".repeat(64) + ":0";
+  const tsA = Date.UTC(2024, 5, 15, 12, 0, 0) / 1000;
+  zeichneScanPunkte([{
+    key: keyA, time_ts: tsA, value_sats: 500, wallet: "Cold", wallet_id: "w1",
+  }]);
+  const p = spur.querySelector(".achse-punkt");
+  p.fire("click", { detail: 1 });
+  await new Promise((r) => setTimeout(r, 320));
+  console.log(JSON.stringify({
+    klickbar: p.classList.contains("klickbar"),
+    ungeprueft: p.classList.contains("ungeprueft"),
+    umschalt,
+  }));
+})();
+"""
+
+
+def _node(szenario: str = SZENARIO) -> dict:
     aus = subprocess.run(
         ["node"],
-        input=STUB + PREAMBLE + STEUER + "\n" + SZENARIO,
+        input=STUB + PREAMBLE + STEUER + "\n" + szenario,
         capture_output=True,
         text=True,
         timeout=30,
@@ -160,6 +189,12 @@ class TestScanScorecards(unittest.TestCase):
         self.assertEqual(zweiter["grauSats"], 1200)
         self.assertEqual(zweiter["keys"], ["a" * 64 + ":0", "b" * 64 + ":0"])
         self.assertEqual(zweiter["punkte"], 2)
+
+    def test_grauer_scan_punkt_klick_oeffnet_herkunft(self):
+        r = _node(KLICK_SZENARIO)
+        self.assertTrue(r["klickbar"])
+        self.assertTrue(r["ungeprueft"])
+        self.assertEqual(r["umschalt"], ["a" * 64 + ":0"])
 
 
 if __name__ == "__main__":

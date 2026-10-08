@@ -8,7 +8,8 @@
  *
  * Nur das flache Netz vom Server liegt im Speicher (GET /api/tax/herkunftsnetz)
  * — nie ein Baum. Nichts davon landet in zeitstrahl.events[].
- * Ende: Esc, Klick ins Leere, zweiter Klick auf denselben Punkt, Ansichtswechsel.
+ * Ende: Esc, Klick ins Leere, Ansichtswechsel.
+ * Klick auf den Lot-Ring des Fokus springt zum UTXO in „Herkunft tracen“.
  * Klick auf einen eigenen Vorgänger-Ring springt in den Herkunftsbaum
  * dieses UTXO unter „Bereits ausgegeben“ des zugehörigen Wallets.
  */
@@ -60,11 +61,20 @@ function herkunftsnetzOhneHerkunft(key) {
   return Boolean(treffer && treffer.geprueft === false && !treffer.erfuellt);
 }
 
-/** Klick auf einen Bestandspunkt: ein-, bei zweitem Klick ausblenden. */
+/** Klick auf einen Bestandspunkt: Netz einblenden.
+ *  Liegt der Lot-Ring schon auf diesem Punkt, springt der Klick zum UTXO.
+ *  Klick ins Leere blendet das Netz aus.
+ */
 function herkunftsnetzUmschalten(key) {
   if (!key) return;
   if (Herkunftsnetz.key === key) {
+    const punktEl = herkunftsnetzPunktEl(key);
+    const lot = Boolean(punktEl && punktEl.classList.contains("achse-lot"));
+    const meta = herkunftsnetzPunkt(key);
     herkunftsnetzBeenden();
+    if (lot && typeof springeZuTraceUtxo === "function") {
+      springeZuTraceUtxo(key, meta);
+    }
     return;
   }
   if (herkunftsnetzOhneHerkunft(key)) {
@@ -115,6 +125,9 @@ function herkunftsnetzPunkt(key) {
     walletId: (punkt && punkt.dataset.walletId) || treffer.wallet_id || "",
     wallet: (punkt && punkt.dataset.wallet) || treffer.wallet || "",
     address: (punkt && punkt.dataset.address) || treffer.address || "",
+    value_sats: (punkt && punkt.dataset.valueSats)
+      ? Number(punkt.dataset.valueSats)
+      : (treffer.value_sats ?? null),
   };
 }
 

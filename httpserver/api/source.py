@@ -689,6 +689,7 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                         "value_sats": sats,
                         "wallet": entry.display_name,
                         "wallet_id": wid,
+                        "address": str(u.get("address") or ""),
                     })
                 job.result = {
                     "utxo_count": len(stand_utxos),

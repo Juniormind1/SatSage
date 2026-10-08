@@ -1045,6 +1045,35 @@ function scanPunktGroesse(sats, maxSats) {
   return "klein";
 }
 
+/** Einfachklick: Herkunftsnetz oder Sprung zum UTXO. Doppelklick: Bericht. */
+function bindeAchsePunktKlick(punkt, key, adresse) {
+  if (!punkt || !key) return;
+  punkt.classList.add("klickbar");
+  let einfach = null;
+  punkt.addEventListener("click", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (ereignis.detail > 1) return;
+    if (adresse && typeof kopiereInZwischenablage === "function") {
+      kopiereInZwischenablage(adresse);
+    }
+    if (einfach) clearTimeout(einfach);
+    einfach = setTimeout(() => {
+      einfach = null;
+      herkunftsnetzUmschalten(key);
+    }, 280);
+  });
+  punkt.addEventListener("dblclick", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (einfach) {
+      clearTimeout(einfach);
+      einfach = null;
+    }
+    herkunftsnetzBericht(key);
+  });
+}
+
 function zeichneScanPunkte(liste) {
   if (Zustand.ansicht !== "steuerjahr") return 0;
   const spur = $("#achse-spur");
@@ -1089,6 +1118,7 @@ function zeichneScanPunkte(liste) {
     punkt.dataset.scanNeu = "1";
     if (eintrag.wallet) punkt.dataset.wallet = eintrag.wallet;
     if (eintrag.wallet_id) punkt.dataset.walletId = eintrag.wallet_id;
+    if (eintrag.address) punkt.dataset.address = eintrag.address;
     punkt.dataset.valueSats = String(sats);
     punkt.dataset.eventTs = String(ts);
     punkt.style.left = `${sicht}%`;
@@ -1107,6 +1137,7 @@ function zeichneScanPunkte(liste) {
       `${eintrag.wallet || "unbekannt"} · ${lage}`,
     ].filter(Boolean).join("\n");
     punkt.append(tip);
+    bindeAchsePunktKlick(punkt, key, eintrag.address);
     spur.append(punkt);
     ScanPunktStand.keys.add(key);
     dazu += 1;
@@ -2007,7 +2038,6 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     punkt.dataset.filterLabels = [
       eintrag.wallet, eintrag.txid, lage,
     ].filter(Boolean).join(" ");
-    if (key) punkt.classList.add("klickbar");
     punkt.style.left = `${sicht}%`;
     punkt.style.bottom = `${y}%`;
     // Betrag/Datum/Wallet nur im Hover-Tooltip — feste Labels überladen den Plot.
@@ -2027,32 +2057,7 @@ function zeichneZeitstrahl(daten, optionen = {}) {
       herkunftHinweis,
     ].filter(Boolean).join("\n");
     punkt.append(tip);
-    if (key) {
-      // Einfachklick wartet, bis klar ist, dass kein Doppelklick folgt.
-      let einfach = null;
-      punkt.addEventListener("click", (ereignis) => {
-        ereignis.preventDefault();
-        ereignis.stopPropagation();
-        if (ereignis.detail > 1) return;
-        if (eintrag.address && typeof kopiereInZwischenablage === "function") {
-          kopiereInZwischenablage(eintrag.address);
-        }
-        if (einfach) clearTimeout(einfach);
-        einfach = setTimeout(() => {
-          einfach = null;
-          herkunftsnetzUmschalten(key);
-        }, 280);
-      });
-      punkt.addEventListener("dblclick", (ereignis) => {
-        ereignis.preventDefault();
-        ereignis.stopPropagation();
-        if (einfach) {
-          clearTimeout(einfach);
-          einfach = null;
-        }
-        herkunftsnetzBericht(key);
-      });
-    }
+    bindeAchsePunktKlick(punkt, key, eintrag.address);
     spur.append(punkt);
   }
 

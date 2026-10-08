@@ -2982,7 +2982,8 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
       var(--lot-orange) 0 calc((var(--lot-g) + var(--lot-o)) * 1%),
       var(--lot-grau) 0
     ) border-box;
-  pointer-events: none;
+  /* Ring ist größer als der Punkt — sonst trifft der Klick das Leere und blendet aus. */
+  pointer-events: auto;
 }
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"]::before {
   background:

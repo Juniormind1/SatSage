@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Dotplot:** Liegt das Herkunftsnetz mit Lot-Ring auf einem Punkt, öffnet ein Klick auf den Ring „Herkunft tracen“ für dieses UTXO. Ein Klick daneben blendet das Netz weiter aus.
+- **Steuerjahr · Dotplot:** Ein grauer Punkt, der während des UTXO-Scans erscheint, öffnet beim Klick „Herkunft tracen“ und klappt dieses UTXO auf. Bisher war der Punkt nur optisch klickbar.
 - **Release 1.0 · Core as is:** Bitcoin Core bleibt für das erste Release ungehärtet. Verbindung und vorhandene Aufrufe laufen weiter, ein vollständiger Core-Walk und der Abgleich gegen Electrs sind zurückgestellt. Bis 1.0 zählt der fehlerfreie Electrs-Walk. Siehe `ISSUES.md`.
 - **Bitcoin Core · txindex:** Der Verbindungstest liest `getindexinfo`. Fehlt `txindex=1` oder ist der Index noch nicht synchron, gilt die Verbindung als gescheitert. Der Log nennt den Grund. `getindexinfo` steht in der RPC-Allowlist (Freigabe 2026-10-08). Wer `rpcwhitelist` nutzt, ergänzt die Methode.
 - **P2P abgeklemmt:** Compact Filter bleiben als Datenquelle aus. Historische Vorgänger-Transaktionen kommen per `getdata` nicht, Key-Path-Taproot lässt sich aus dem Witness nicht rekonstruieren. Herkunft, Haltefrist und Stichtag wären damit leer. Die Zeile in den Datenquellen und die P2P-Pille in der Kopfzeile sind ausgeblendet. `BIP158_P2P=1` schaltet den Verkehr nicht ein. Früheste Neuprüfung 2027-01-08, siehe `doc/issues/p2p-herkunft.md`.

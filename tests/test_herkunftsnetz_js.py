@@ -112,10 +112,12 @@ class TestEinbindung(unittest.TestCase):
     def test_punktklick_und_neuzeichnen_und_ansichtswechsel(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("herkunftsnetzUmschalten(key)", steuer)
+        self.assertIn("function bindeAchsePunktKlick", steuer)
+        self.assertIn("bindeAchsePunktKlick(punkt, key, eintrag.address)", steuer)
         self.assertIn("herkunftsnetzZumBaum(v)", NETZ)
         self.assertIn("function herkunftsnetzBaumVorladen", NETZ)
         self.assertIn("kopiereInZwischenablage(outpoint)", NETZ)
-        self.assertIn("kopiereInZwischenablage(eintrag.address)", steuer)
+        self.assertIn("kopiereInZwischenablage(adresse)", steuer)
         self.assertIn("herkunftsnetzSpringbar", NETZ)
         herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.assertIn("function springeImHerkunftsbaum", herkunft)
@@ -126,6 +128,8 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("herkunftsnetzZeichnen()", steuer)
         self.assertIn("function herkunftsnetzOhneHerkunft", NETZ)
         self.assertIn("springeZuTraceUtxo(key, punkt)", NETZ)
+        self.assertIn('classList.contains("achse-lot")', NETZ)
+        self.assertIn("springeZuTraceUtxo(key, meta)", NETZ)
         # Zeitstrahl-Rechnung unberührt: kein Overlay in events.
         self.assertNotIn("events.push", NETZ)
         nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
@@ -226,6 +230,35 @@ class TestEinUndAusstieg(unittest.TestCase):
         self.assertIn("tax.netzLotGrau", zeilen[4])
         self.assertIn("0,12 %", zeilen[4])
         self.assertEqual(r["ohne"], "04.03.2021\n2,00 BTC")
+
+    def test_lot_ring_klick_springt_zum_utxo(self):
+        """Netz an, Lot-Ring da: Klick auf den Fokus springt, Klick daneben blendet aus."""
+        r = _node("""
+          globalThis.setzeLotDonut = (punkt) => { punkt.classList.add("lot-donut"); };
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          const lot = pA.classList.contains("achse-lot");
+          pA.fire("click");
+          const nachRing = {
+            an: stand().an, trace: traceSpruenge.slice(), wallet: walletSpruenge.slice(),
+          };
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          viewport.fire("click");
+          console.log(JSON.stringify({
+            lot, nachRing, nachLeer: {
+              an: stand().an, trace: traceSpruenge.slice(),
+            },
+          }));
+        """)
+        self.assertTrue(r["lot"])
+        self.assertFalse(r["nachRing"]["an"])
+        self.assertEqual(r["nachRing"]["wallet"], [])
+        self.assertEqual(r["nachRing"]["trace"][0][0], K)
+        self.assertFalse(r["nachLeer"]["an"])
+        self.assertEqual(len(r["nachLeer"]["trace"]), 1)
 
     def test_grauer_punkt_oeffnet_herkunft_aufgeklappt(self):
         """Ohne Herkunft gibt es kein Netz. Der Klick öffnet den Trace aufgeklappt."""
