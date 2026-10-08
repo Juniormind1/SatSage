@@ -378,9 +378,12 @@
       <!-- ---------- Wallet-Ansicht ---------- -->
       <section id="ansicht-wallet" hidden>
         <div class="bereich-kopf">
-          <div>
-            <h1 id="wallet-titel">Wallet</h1>
-            <p id="wallet-meta" class="meta"></p>
+          <div class="wallet-kopf-stand">
+            <span id="wallet-lot" class="knoten-punkt knoten-eigen wallet-lot-donut" hidden aria-hidden="true"></span>
+            <div>
+              <h1 id="wallet-titel">Wallet</h1>
+              <p id="wallet-meta" class="meta"></p>
+            </div>
           </div>
           <div class="bereich-aktionen">
             <label class="feld-inline">
@@ -394,8 +397,8 @@
               <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO:</span>
               <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Leichter Tip-Nachzug wie beim Start mit „Wallets immer aktuell halten“: bestehender Cache bis zum Chain-Tip (BIP-158 inkrementell oder Electrs light). Kein Fullscan — dafür Neu scannen." class="knopf">Aktualisieren</button>
               <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Neu scannen</button>
+              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Öffnet das Steuerjahr und klärt die Herkunft der UTXOs dieses Wallets. Fehlt der Bestand, scannt SatSage zuerst dieses Wallet — die Punkte erscheinen im Dotplot." class="knopf">Herkunft</button>
               <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Historie</button>
-              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Neu scannen." class="knopf">Herkunft</button>
             </div>
           </div>
         </div>

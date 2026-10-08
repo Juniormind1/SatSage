@@ -1097,6 +1097,34 @@ button, input, select { font: inherit; color: inherit; }
   margin-bottom: 16px;
 }
 .bereich-kopf h1 { font-family: var(--mono); font-size: 18px; margin: 0; }
+.wallet-kopf-stand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+#wallet-lot.wallet-lot-donut.lot-donut {
+  position: relative;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--lot-grau);
+}
+#wallet-lot.wallet-lot-donut.lot-donut::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--grund);
+  pointer-events: none;
+}
 .bereich-aktionen { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .utxo-aktionen {
   display: inline-flex;

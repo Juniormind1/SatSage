@@ -2744,149 +2744,47 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
 
 
 /**
- * Wallet-Knopf: jedes UTXO wie „Herkunftslücken schließen“ (gebündelte
- * Eingänge + Vorgänger-Txs) bis external/coinbase.
- * Bewusst mit Confirm — kann Stunden dauern, füllt den Herkunfts-Cache.
+ * Wallet-Knopf Herkunft: Steuerjahr/Dotplot, dann derselbe Klären-Lauf
+ * nur für die grauen UTXOs dieses Wallets. Ohne Bestand zuerst scannen.
  */
 async function starteHerkunftVollstaendig() {
   const wid = Zustand.walletId;
   if (!wid) return;
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === wid);
-  if (!wallet || !wallet.has_cache) {
-    meldung(t("wallet.originDeepNeedCache"), "warn");
-    return;
+  if (!wallet) return;
+  if (typeof zeigeAnsicht === "function") zeigeAnsicht("steuerjahr");
+  if (typeof ladeSteuerjahrMitKandidaten === "function") {
+    try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Plot folgt nach dem Scan */ }
+  } else if (typeof ladeSteuerjahr === "function") {
+    try { await ladeSteuerjahr(); } catch (_) { /* Plot folgt nach dem Scan */ }
   }
-  if (herkunftTiefLaeuftFuer(wid)) {
-    meldung(t("nav.jobAlreadyRunning"), "warn");
+  if (Zustand.herkunftAlleLaeuft) {
+    if (typeof zeigeKlaerenLaeuftSchon === "function") zeigeKlaerenLaeuftSchon();
     return;
   }
   const name = wallet.name || wid;
-  if (!window.confirm(t("wallet.originDeepConfirm", { name }))) return;
-
-  Zustand.herkunftTiefWalletId = wid;
-  stoesseEmpfangScanPuls();
-
-  const knopf = $("#herkunft-tief-knopf");
-  const leiste = $("#herkunft-tief-lauf");
-  const textEl = $("#herkunft-tief-text");
-  if (knopf) knopf.disabled = true;
-  if (leiste) leiste.hidden = false;
-  setzeText(textEl, t("wallet.originDeepRunning"));
-
-  let jobId = null;
-  let timer = null;
-  const logStand = { index: 0 };
-  let zuletztVerfolgt = -1;
-  let refreshUm = 0;
-  let refreshLaeuft = false;
-
-  const fertig = async (meldungText, art) => {
-    clearInterval(timer);
-    Zustand.herkunftTiefWalletId = null;
-    merkeScanJobBeendet(jobId);
-    if (leiste) leiste.hidden = true;
-    setzeWalletScanGesperrt();
-    if (meldungText) meldung(meldungText, art || "gut");
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === wid) {
-      try { await zeigeWallet(wid); } catch (_) { /* ignore */ }
-    } else {
-      loeseEmpfangScanPuls();
-    }
-    await ladeJobsNav();
-  };
-
   logZeile(t("wallet.originDeepStarted", { name }), undefined, name);
-  logZeile(
-    "Browser darf geschlossen werden — Server und Scan laufen im Terminal weiter.",
-    undefined,
-    name,
-  );
-  try {
-    const antwort = await api("/trace/alle", {
-      methode: "POST",
-      daten: { wallet_id: wid, vollstaendig: true },
-    });
-    if (antwort.nichts_zu_tun) {
-      if (antwort.keine_utxos) {
-        await fertig(t("wallet.originDeepNeedCache"), "warn");
-      } else {
-        await fertig(t("wallet.originDeepNothing"), "gut");
-      }
-      return;
-    }
-    jobId = antwort.id;
-    nimmJobLogAb(antwort, logStand, name);
-  } catch (fehler) {
-    await fertig(fehler.message || String(fehler), "krit");
-    return;
-  }
-
-  const abbruch = $("#herkunft-tief-abbruch");
-  if (abbruch) {
-    abbruch.onclick = async () => {
-      setzeText(textEl, t("common.abortRequested"));
-      try {
-        await api(`/jobs/${jobId}`, { methode: "DELETE" });
-      } catch (_) {
-        /* schon beendet */
-      }
-    };
-  }
-
-  timer = setInterval(async () => {
-    try {
-      const job = await api(`/jobs/${jobId}`);
-      nimmJobLogAb(job, logStand, name);
-      const zahl = job.result?.verfolgt;
-      const vollOk = job.result?.vollstaendig_ok;
-      let standText = übersetzeLogText(job.message || t("common.runningEllipsis"));
-      if (typeof vollOk === "number" && vollOk > 0) {
-        standText += t("ui.hard.4a3387f537", { n: vollOk });
-      }
-      setzeText(textEl, standText);
-
-      if (job.running) {
-        if (
-          typeof zahl === "number"
-          && zahl > zuletztVerfolgt
-          && !refreshLaeuft
-        ) {
-          const jetzt = Date.now();
-          if (zuletztVerfolgt < 0 || jetzt - refreshUm >= HERKUNFT_REFRESH_MS) {
-            zuletztVerfolgt = zahl;
-            refreshUm = jetzt;
-            refreshLaeuft = true;
-            try {
-              if (Zustand.ansicht === "wallet" && Zustand.walletId === wid) {
-                await zeigeWallet(wid);
-              }
-            } finally {
-              refreshLaeuft = false;
-            }
-          }
+  return klaerenNachUngescannten(
+    async () => {
+      const keys = grauKeysFuerWallet(
+        await steuerStandFuerKlaeren(),
+        wid,
+        wallet.name,
+      );
+      if (!keys.length) {
+        const k = $("#steuer-meldung");
+        if (k) {
+          k.className = "hinweis hinweis-warn";
+          setzeText(k, t("wallet.originDeepNothing"));
+          k.hidden = false;
         }
-        return;
+        return null;
       }
-
-      if (job.status === "done") {
-        await fertig(
-          t("wallet.originDeepDone", {
-            msg: job.message || t("common.running"),
-          }),
-          "gut",
-        );
-      } else if (job.status === "cancelled") {
-        await fertig(
-          "Abgebrochen — bereits ermittelte Herkunft bleibt erhalten.",
-          "warn",
-        );
-      } else {
-        await fertig(job.error || t("trace.analyseFailShort"), "krit");
-      }
-    } catch (fehler) {
-      await fertig(fehler.message, "krit");
-    }
-  }, 1200);
+      return keys;
+    },
+    (keys, uebernommen) => starteGrauKlaerung(keys, uebernommen),
+    [wid],
+  );
 }
 
 /**
@@ -3116,7 +3014,7 @@ async function scanneAlleWalletsUtxo({
  * Scorecard „klären“: fehlende UTXO-Scans zuerst, dann die eigentliche Routine.
  * Hält die Sperre, solange der Scan lief und die Routine ihn übernehmen soll.
  */
-async function scanneUngescannteVorKlaeren() {
+async function scanneUngescannteVorKlaeren(nurIds) {
   if (
     Zustand.config?.context_bereit === false
     && typeof ladeConfig === "function"
@@ -3124,7 +3022,16 @@ async function scanneUngescannteVorKlaeren() {
     try { await ladeConfig(); } catch (_) { /* alter Stand bleibt */ }
   }
   const tip = typeof chainTipHoehe === "function" ? chainTipHoehe() : null;
-  const offen = walletsOhneUtxoScan(Zustand.config, tip);
+  let offen = walletsOhneUtxoScan(Zustand.config, tip);
+  if (Array.isArray(nurIds) && nurIds.length) {
+    const want = new Set(nurIds.map(String));
+    offen = offen.filter((w) => want.has(String(w.id)));
+    for (const id of want) {
+      if (offen.some((w) => String(w.id) === id)) continue;
+      const w = (Zustand.config?.wallets || []).find((x) => String(x.id) === id);
+      if (w && !w.has_cache && !w.is_new) offen.push(w);
+    }
+  }
   if (!offen.length) return { gescannt: false, haeltSperre: false };
 
   Zustand.herkunftAlleLaeuft = true;
@@ -3189,7 +3096,7 @@ function zeigeKlaerenLaeuftSchon() {
  * *sammle* liefert die Schlüssel oder null, wenn nichts zu tun ist (Meldung selbst).
  * Ein Objekt ist ebenfalls ein Auftrag — Gelb hängt den grauen Lauf davor.
  */
-async function klaerenNachUngescannten(sammle, starte) {
+async function klaerenNachUngescannten(sammle, starte, nurIds) {
   if (Zustand.herkunftAlleLaeuft) {
     zeigeKlaerenLaeuftSchon();
     return;
@@ -3197,7 +3104,7 @@ async function klaerenNachUngescannten(sammle, starte) {
   let vorab = { gescannt: false, haeltSperre: false };
   let keys = null;
   try {
-    vorab = await scanneUngescannteVorKlaeren();
+    vorab = await scanneUngescannteVorKlaeren(nurIds);
     if (vorab.abbruch) return;
     if (vorab.gescannt) Zustand.steuer = null;
     keys = await sammle();
@@ -3241,6 +3148,35 @@ async function steuerStandFuerKlaeren() {
 
 function grauKeysAus(daten) {
   return Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
+}
+
+/** UTXO-Schlüssel im Steuerjahr, die zu diesem Wallet gehören. */
+function steuerKeysDiesesWallets(daten, walletId, walletName) {
+  const id = String(walletId || "");
+  const name = String(walletName || "").trim();
+  const keys = new Set();
+  const listen = [
+    (daten && daten.zeitstrahl && daten.zeitstrahl.events) || [],
+    (daten && daten.eintraege) || [],
+  ];
+  for (const liste of listen) {
+    for (const e of liste) {
+      if (!e) continue;
+      const key = e.key || (e.txid != null ? `${e.txid}:${e.vout}` : "");
+      if (!key) continue;
+      if (id && String(e.wallet_id || "") === id) {
+        keys.add(String(key));
+        continue;
+      }
+      if (name && String(e.wallet || "").trim() === name) keys.add(String(key));
+    }
+  }
+  return keys;
+}
+
+function grauKeysFuerWallet(daten, walletId, walletName) {
+  const erlaubt = steuerKeysDiesesWallets(daten, walletId, walletName);
+  return grauKeysAus(daten).filter((k) => erlaubt.has(String(k)));
 }
 
 function gelbKeysAus(daten) {

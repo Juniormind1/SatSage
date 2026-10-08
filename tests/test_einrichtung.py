@@ -582,6 +582,14 @@ class TestOberflaeche(unittest.TestCase):
             self.html.find("utxo-aktionen-praefix", gruppe),
             self.html.find('id="tip-sync-knopf"', gruppe),
         )
+        self.assertLess(
+            self.html.find('id="rescan-knopf"', gruppe),
+            self.html.find('id="herkunft-tief-knopf"', gruppe),
+        )
+        self.assertLess(
+            self.html.find('id="herkunft-tief-knopf"', gruppe),
+            self.html.find('id="verlauf-knopf"', gruppe),
+        )
         # Auch bei „Wallets immer aktuell halten“ sichtbar (leichter Tip-Nachzug).
         self.assertNotIn("tipSync.hidden = autoAktuell", self.wallets_js)
         self.assertIn("tipSync.hidden = false", self.wallets_js)
@@ -596,6 +604,11 @@ class TestOberflaeche(unittest.TestCase):
         import json
         de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
         self.assertEqual(de.get("tax.originAll"), "klären")
+        self.assertIn('zeigeAnsicht("steuerjahr")', self.herkunft_js)
+        self.assertIn("grauKeysFuerWallet", self.herkunft_js)
+        self.assertIn("starteGrauKlaerung(keys, uebernommen)", self.herkunft_js)
+        self.assertIn("klaerenNachUngescannten", self.herkunft_js)
+        self.assertIn("[wid]", self.herkunft_js)
 
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""
@@ -781,6 +794,18 @@ class TestOberflaeche(unittest.TestCase):
             2,
             "Marke muss in Wallet-Zeile und Herkunfts-UTXO stehen",
         )
+
+    def test_wallet_kopf_hat_lot_ring(self):
+        """Lot-Ring links vom Namen; UTXOs ohne Herkunft zählen grau."""
+        html = self.html
+        self.assertLess(html.index('id="wallet-lot"'), html.index('id="wallet-titel"'))
+        self.assertIn("wallet-kopf-stand", html)
+        self.assertIn("function walletLotMischungAusEvents", self.wallets_js)
+        self.assertIn("e.geprueft === false", self.wallets_js)
+        self.assertIn("acc.grau += wert", self.wallets_js)
+        self.assertIn("function aktualisiereWalletLotDonut", self.wallets_js)
+        self.assertIn("aktualisiereWalletLotDonut()", self.wallets_js)
+        self.assertIn("#wallet-lot.wallet-lot-donut.lot-donut", self.css)
 
     def test_herkunftsbaum_lazy_hoechstens_einer(self):
         """

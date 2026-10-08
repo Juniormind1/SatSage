@@ -688,6 +688,69 @@ function setzeWalletTitel(wallet, sats) {
   setzeText(el, `${base} (${klammer})`);
 }
 
+/**
+ * Lot-Anteile aller aktuellen UTXOs dieses Wallets.
+ * Ohne Herkunft (ungeprüft / ohne Lot-Felder) zählt der ganze Betrag grau.
+ */
+function walletLotMischungAusEvents(events) {
+  const acc = { gruen: 0, orange: 0, grau: 0 };
+  for (const e of events || []) {
+    const wert = Math.max(0, Math.floor(Number(e.value_sats) || 0));
+    const hatLot = e.sats_gruen !== null && e.sats_gruen !== undefined;
+    if (!hatLot || e.geprueft === false) {
+      acc.grau += wert;
+      continue;
+    }
+    acc.gruen += Math.max(0, Math.floor(Number(e.sats_gruen) || 0));
+    acc.orange += Math.max(0, Math.floor(Number(e.sats_orange) || 0));
+    acc.grau += Math.max(0, Math.floor(Number(e.sats_grau) || 0));
+  }
+  return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
+}
+
+function setzeWalletLotDonut(mischung) {
+  const punkt = $("#wallet-lot");
+  if (!punkt) return;
+  if (!mischung || typeof setzeLotDonut !== "function") {
+    if (typeof entferneLotDonut === "function") entferneLotDonut(punkt);
+    punkt.hidden = true;
+    punkt.setAttribute("aria-hidden", "true");
+    return;
+  }
+  setzeLotDonut(punkt, mischung);
+  const da = punkt.classList.contains("lot-donut");
+  punkt.hidden = !da;
+  if (da) punkt.removeAttribute("aria-hidden");
+  else punkt.setAttribute("aria-hidden", "true");
+}
+
+/** Ring links vom Namen: Steuer-Lots, sonst der ganze Bestand grau. */
+function aktualisiereWalletLotDonut() {
+  const id = Zustand.walletId;
+  const stand = Zustand.fifoSpend;
+  if (
+    id
+    && stand
+    && String(stand.walletId || "") === String(id)
+    && stand.zustand === "fertig"
+  ) {
+    const mix = walletLotMischungAusEvents(stand.events);
+    if (mix) {
+      setzeWalletLotDonut(mix);
+      return;
+    }
+  }
+  const daten = Zustand._walletUtxoDaten;
+  const grau = daten && daten.has_cache
+    ? Math.max(0, Math.floor(Number(daten.total_sats) || 0))
+    : 0;
+  if (grau > 0) {
+    setzeWalletLotDonut({ gruen: 0, orange: 0, grau });
+    return;
+  }
+  setzeWalletLotDonut(null);
+}
+
 async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletId = walletId;
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
@@ -704,6 +767,7 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   setzeWalletTitel(wallet);
+  if (typeof setzeWalletLotDonut === "function") setzeWalletLotDonut(null);
   // Erst Cache (schnell), Mempool-Pending danach im Hintergrund.
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
@@ -1064,6 +1128,7 @@ function zeigeLeer(titel, text) {
   kasten.hidden = false;
   $("#adress-liste").hidden = true;
   $("#sanktions-karte").hidden = true;
+  if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
 }
 
 function zeichneUtxos(daten, wallet, seite = null) {
@@ -1215,6 +1280,7 @@ function zeichneUtxos(daten, wallet, seite = null) {
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
   if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
+  if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
 }
 
 /* --- wallet-fifo-spend --- */
@@ -1714,6 +1780,7 @@ function zeichneFifoSpend(stand) {
     schreibeFifoSpendFiatAusSats();
   }
   planeFifoNetto();
+  if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
 }
 
 /** Knopf „max“ nur bei Zieladresse eines eigenen Wallets, zwischen Sat- und Fiat-Feld. */
@@ -3455,13 +3522,11 @@ function setzeWalletScanGesperrt() {
   }
   if (tief) {
     if (!tief.dataset.titel) tief.dataset.titel = tief.title || "";
-    const hatCache = (Zustand.config?.wallets || []).some(
-      (w) => w.id === wid && w.has_cache,
-    );
-    tief.disabled = Boolean(tiefLaeuft || !hatCache || !wid);
-    tief.title = tiefLaeuft
+    const klaerenLaeuft = Boolean(Zustand.herkunftAlleLaeuft);
+    tief.disabled = Boolean(tiefLaeuft || klaerenLaeuft || !wid);
+    tief.title = (tiefLaeuft || klaerenLaeuft)
       ? t("nav.jobAlreadyRunning")
-      : (!hatCache ? t("wallet.originDeepNeedCache") : tief.dataset.titel);
+      : tief.dataset.titel;
   }
 }
 

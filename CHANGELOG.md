@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallet · Herkunft:** Der Knopf öffnet das Steuerjahr und startet denselben Klären-Lauf nur für die UTXOs dieses Wallets (`?`/`!` im Dotplot). Fehlt der Bestand, wird zuerst nur dieses Wallet gescannt — die Punkte erscheinen im Plot.
+- **Wallet · Knöpfe:** In der Kopfzeile steht **Herkunft** vor **Historie** (ganz rechts).
+- **Wallet · Lot-Ring:** Links neben Name und „n UTXO · Skripttyp…“ steht ein Lot-Ring für den ganzen Bestand. UTXOs ohne Herkunft füllen den grauen Teil.
 - **UTXO · Alter klären:** Nach dem Sprung vom grauen Dotplot-Punkt nach „Herkunft tracen“ bleibt der Knopf aus — der Trace läuft schon. „Scan neu“ bleibt in dem Fall ebenfalls aus.
 - **Steuerjahr · Scorecards:** Hinter den BTC-/Sat-Beträgen steht der aktuelle Gegenwert in Euro (Deutsch) bzw. Dollar (Englisch). Das ist der Spotkurs der Kopfzeile, kein Anschaffungspreis.
 - **Herkunft tracen · Punkte:** Externe und Coinbase-Enden sind Kreise in der Lot-Farbe: gelb innerhalb der Haltefrist, grün außerhalb. Eigene Wallet-Hops (auch Wechsel) haben kein Symbol, solange darunter jedes Blatt extern oder Coinbase ist; eine Lücke zeigt ein rotes Fragezeichen.
