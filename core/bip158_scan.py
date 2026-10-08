@@ -1763,6 +1763,11 @@ def vorab_block_header(
         if on_log:
             on_log(text)
 
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        _log("P2P-Header-Vorab aus (P2P abgeklemmt).")
+        return 0
     if env.get("BIP158_P2P", "1").strip().lower() in ("0", "false", "nein", "off"):
         _log("P2P-Header-Vorab aus (BIP158_P2P=0).")
         return 0

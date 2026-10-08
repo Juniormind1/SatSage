@@ -6,6 +6,13 @@ from typing import Any
 
 def api_p2p_walk_abgleich(state: Any) -> dict:
     from server import ApiError
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        raise ApiError(
+            403,
+            "P2P ist abgeklemmt. Compact Filter reichen für die Herkunft nicht.",
+        )
 
     from core.jobs import JobQuotaExceeded
     from core.p2p_walk_abgleich import cache_utxos

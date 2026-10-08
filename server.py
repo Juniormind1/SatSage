@@ -1887,7 +1887,11 @@ def starte_header_vorab(state: AppState, *, nur_wenn_leer: bool = False) -> None
     from core.jobs import Fortschritt, herzschlag
     from core.p2p import SEGWIT_HEIGHT, header_cache_leer, header_datei_tip
 
+    from core.p2p import p2p_gesperrt
+
     env = state.env().values()
+    if p2p_gesperrt():
+        return
     if env.get("BIP158_P2P", "1").strip().lower() in ("0", "false", "nein", "off"):
         return
     if state.header_job_id:

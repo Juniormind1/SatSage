@@ -426,6 +426,7 @@ function zeichneQuellen(quellen) {
   const liste = quellen || [];
 
   for (const quelle of liste) {
+    if (quelle.ausgeblendet) continue;
     const bridgeManaged = start9BridgeManaged(quelle);
     const block = document.createElement("div");
     const zeile = document.createElement("div");

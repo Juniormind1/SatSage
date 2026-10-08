@@ -110,6 +110,14 @@ def api_save_source(state: AppState, payload: dict) -> dict:
     Schreibzugriff auf beliebige Einträge — auch auf XPUBS.
     """
     quelle = str(payload.get("source", "")).strip()
+    if quelle == "bip158":
+        from core.p2p import p2p_gesperrt
+
+        if p2p_gesperrt():
+            raise ApiError(
+                403,
+                "P2P ist abgeklemmt. Compact Filter reichen für die Herkunft nicht.",
+            )
     erlaubt = source_mod.EDITIERBARE_FELDER.get(quelle)
     if not erlaubt:
         raise ApiError(400, f"Quelle „{quelle}“ ist nicht bearbeitbar.")
@@ -507,6 +515,13 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
     elif name == "bip158":
+        from core.p2p import p2p_gesperrt
+
+        if p2p_gesperrt():
+            raise ApiError(
+                403,
+                "P2P ist abgeklemmt. Compact Filter reichen für die Herkunft nicht.",
+            )
         # Wie Zeilen-Knopf „Verbinden“ rückgängig (fehlender Key = Default an).
         env.apply({"BIP158_P2P": "false"})
         env.runtime_values.pop("BIP158_P2P", None)

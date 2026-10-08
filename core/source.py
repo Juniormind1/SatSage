@@ -117,6 +117,8 @@ class SourceInfo:
     ssl_persist: dict[str, str] = field(default_factory=dict)
     #: BIP-158: Start­höhe für Inline-Feld (kein Stift-Dialog).
     start_height: int | None = None
+    #: True: Zeile und Kopf-Pille bleiben aus (P2P-Sperre).
+    ausgeblendet: bool = False
 
     @property
     def editierbar(self) -> bool:
@@ -153,6 +155,7 @@ class SourceInfo:
             "ssl_effective": self.ssl_effective,
             "ssl_persist": dict(self.ssl_persist) if self.ssl_persist else {},
             "start_height": self.start_height,
+            "ausgeblendet": self.ausgeblendet,
         }
 
 
@@ -738,9 +741,16 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     start = _int(values, "BIP158_START_HEIGHT", chain_sources.DEFAULT_BIP158_START_HEIGHT)
     peers = values.get("BIP158_PEERS", "").strip()
     lan_host = values.get("FULCRUM_HOST", "").strip()
+    from core.p2p import p2p_gesperrt
+
     p2p_an = values.get("BIP158_P2P", "1").strip().lower() not in (
         "0", "false", "nein", "off",
     )
+    # Zeile und Pille bleiben aus, bis die Herkunfts-Lücke fällt.
+    # Siehe doc/issues/p2p-herkunft.md. configured bleibt falsch, damit
+    # kein Probe und kein Header-Vorab losläuft.
+    if p2p_gesperrt():
+        p2p_an = False
     p2p_teile = [f"ab Block {start:,}".replace(",", ".")]
     if lan_host and not _host_ist_onion(lan_host):
         p2p_teile.append(f"Node im LAN {lan_host}")
@@ -774,6 +784,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         # Kein Stift-Dialog: Start­höhe als Inline-Feld in der Zeile.
         felder=[],
         start_height=int(start),
+        ausgeblendet=p2p_gesperrt(),
     ))
 
     onions = [v for k, v in values.items() if k.startswith("FULCRUM_TOR_") and v.strip()
@@ -932,6 +943,10 @@ def check_sources(
     own_ok = bool(own and own.reachable)
 
     p2p = gefunden.get("bip158")
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        p2p = None
     if p2p is not None and p2p.configured:
         if own_ok:
             core = gefunden.get("own_core")

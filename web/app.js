@@ -1545,7 +1545,7 @@ function zeichneKopfStatus(quellen) {
     });
   }
 
-  if (p2pVerbunden || p2pAufbau) {
+  if ((p2pVerbunden || p2pAufbau) && !p2p?.ausgeblendet) {
     const n = p2pVerbunden ? p2pAnzahl : 0;
     eintraege.push({
       key: "bip158",

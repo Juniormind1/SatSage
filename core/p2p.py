@@ -96,6 +96,24 @@ def read_compact_size(data: bytes, offset: int = 0) -> tuple[int, int]:
     return struct.unpack_from("<Q", data, offset + 1)[0], offset + 9
 
 
+class P2pGesperrt(ConnectionError):
+    """P2P ist bis zur Aufhebung der Herkunfts-Lücke aus."""
+
+
+def p2p_gesperrt() -> bool:
+    """
+    True, solange Compact Filter keine ausreichende Herkunft liefern.
+
+    Bitcoin Core beantwortet ``getdata`` TX nur aus Mempool und letztem
+    Block. Eine historische Vorgänger-Tx braucht eine Txid-zu-Block-
+    Abbildung, die P2P nicht hat. Key-Path-Taproot lässt sich aus dem
+    Witness nicht rekonstruieren. Bis sich daran substanziell etwas
+    ändert, bleibt jeder P2P-Socket zu. Aufheben nur mit dem Issue
+    ``doc/issues/p2p-herkunft.md`` und einem erneuten Labor-Abgleich.
+    """
+    return True
+
+
 def p2p_netz_name() -> str:
     """Aktives P2P-Netz aus ``set_chain_network``. Mainnet, solange nichts gesetzt ist."""
     from core.derivation import chain_network
@@ -383,6 +401,10 @@ def _oeffne_socket(
     timeout: float,
     tor_proxy: tuple[str, int] | None,
 ) -> socket.socket:
+    if p2p_gesperrt():
+        raise P2pGesperrt(
+            "P2P ist abgeklemmt: Compact Filter reichen für die Herkunft nicht."
+        )
     if tor_proxy and not host_ist_lan(host):
         from core.fulcrum_transport import _socks5_connect
 

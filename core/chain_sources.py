@@ -892,6 +892,10 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
 
 def _try_bip158_backend(args, env: dict[str, str]):
     """Priorität 2: Compact Filter über Bitcoin-P2P (kein eigener Core)."""
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        return None
     if env.get("BIP158_P2P", "1").strip() in ("0", "false", "nein", "off"):
         return None
     try:
@@ -1406,6 +1410,10 @@ def _resolve_data_source(args, env: dict[str, str]) -> None:
 
 def _wants_bip158(args, env: dict[str, str]) -> bool:
     """P2P-BIP-158 wenn --bip158 oder BIP158_P2P=1 (ohne 0)."""
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        return False
     if getattr(args, "bip158", False):
         return True
     return _parse_env_bool(env.get("BIP158_P2P"), default=False)

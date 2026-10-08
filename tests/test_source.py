@@ -10,6 +10,8 @@ beides keine Konstruktor-Argumente.
 import unittest
 from unittest import mock
 
+from core.p2p import p2p_gesperrt
+
 from core.source import (
     check_reachable,
     check_sources,
@@ -354,6 +356,7 @@ class TestCheckReachable(unittest.TestCase):
         p2p = next(q for q in describe_sources({}) if q.key == "bip158")
         self.assertFalse(source_needs_tor(p2p, {}))
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_onion_braucht_tor(self):
         onion = "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz.onion"
         fulcrum = next(
@@ -381,6 +384,7 @@ class TestCheckReachable(unittest.TestCase):
         quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
         self.assertFalse(source_needs_tor(quelle, werte))
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_erreichbares_lan_electrum_startet_kein_tor(self):
         from unittest import mock
 
@@ -407,6 +411,7 @@ class TestCheckReachable(unittest.TestCase):
             "P2P als Datenquelle nicht erforderlich (Electrs erreichbar).",
         )
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_hinweis_mit_electrs_und_core(self):
         from unittest import mock
 
@@ -444,27 +449,45 @@ class TestCheckReachable(unittest.TestCase):
         )
 
     def test_electrum_und_p2p_sind_verwerfbar(self):
+        from core.p2p import p2p_gesperrt
+
         leer = {q.key: q for q in describe_sources({})}
         self.assertFalse(leer["own_fulcrum"].verwerfbar)
-        # P2P ist standardmäßig an → Papierkorb sichtbar.
-        self.assertTrue(leer["bip158"].verwerfbar)
+        # Solange die Herkunfts-Lücke gilt, ist die Zeile ausgeblendet
+        # und nicht verwerfbar. Sonst ist P2P standardmäßig an.
+        if p2p_gesperrt():
+            self.assertTrue(leer["bip158"].ausgeblendet)
+            self.assertFalse(leer["bip158"].configured)
+            self.assertFalse(leer["bip158"].verwerfbar)
+        else:
+            self.assertTrue(leer["bip158"].verwerfbar)
         self.assertFalse(leer["public_onion"].verwerfbar)
         gesetzt = {q.key: q for q in describe_sources({
             "FULCRUM_HOST": "192.0.2.1",
         })}
         self.assertTrue(gesetzt["own_fulcrum"].verwerfbar)
-        self.assertTrue(gesetzt["bip158"].verwerfbar)
+        if p2p_gesperrt():
+            self.assertFalse(gesetzt["bip158"].verwerfbar)
+        else:
+            self.assertTrue(gesetzt["bip158"].verwerfbar)
         self.assertTrue(gesetzt["own_fulcrum"].as_dict()["verwerfbar"])
         aus = {q.key: q for q in describe_sources({"BIP158_P2P": "0"})}
         self.assertFalse(aus["bip158"].verwerfbar)
         self.assertFalse(aus["bip158"].configured)
 
     def test_p2p_bip158_ist_standard_konfiguriert(self):
+        from core.p2p import p2p_gesperrt
+
         quelle = next(q for q in describe_sources({}) if q.key == "bip158")
-        self.assertTrue(quelle.configured)
+        if p2p_gesperrt():
+            self.assertFalse(quelle.configured)
+            self.assertTrue(quelle.ausgeblendet)
+        else:
+            self.assertTrue(quelle.configured)
         self.assertEqual(quelle.name, "Bitcoin-P2P · Compact Filter")
         self.assertNotIn("NODE_IP", [f.key for f in quelle.felder])
-        self.assertIn("DNS-Seeds", quelle.detail)
+        if not p2p_gesperrt():
+            self.assertIn("DNS-Seeds", quelle.detail)
         # Kein Stift-Dialog — Start­höhe nur noch inline in der Zeile.
         self.assertFalse(quelle.editierbar)
         self.assertEqual(quelle.felder, [])
@@ -483,12 +506,17 @@ class TestCheckReachable(unittest.TestCase):
             q for q in describe_sources({"FULCRUM_HOST": "192.168.1.50"})
             if q.key == "bip158"
         )
-        self.assertIn("Node im LAN 192.168.1.50", quelle.detail)
-        self.assertIn("DNS-Seeds", quelle.detail)
+        if p2p_gesperrt():
+            self.assertTrue(quelle.ausgeblendet)
+            self.assertNotIn("DNS-Seeds", quelle.detail)
+        else:
+            self.assertIn("Node im LAN 192.168.1.50", quelle.detail)
+            self.assertIn("DNS-Seeds", quelle.detail)
         # Extra-Peers nur noch per .env — kein Stift-Feld mehr.
         self.assertNotIn("BIP158_PEERS", [f.key for f in quelle.felder])
         self.assertEqual(quelle.start_height, 481824)
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_pruefung_nutzt_lan_und_dns_fallback(self):
         from unittest import mock
 
@@ -509,6 +537,7 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(kwargs["dns_fallback"])
         self.assertIsNone(kwargs.get("tor_proxy"))
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_verbindungstest_zaehlt_compact_filter_peers(self):
         with mock.patch(
             "core.p2p.zaehle_compact_filter_peers",
@@ -605,6 +634,7 @@ class TestCheckReachable(unittest.TestCase):
         pruefe.assert_not_called()
         self.assertTrue(any("Bestätigung fehlt" in z for z in gesehen))
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_ok_raeumt_oeffentliche_verbunden_stand(self):
         """Mit P2P-Peers kein stale „verbunden“ an Onion/Clearnet."""
         from unittest import mock
@@ -707,6 +737,7 @@ class TestCheckReachable(unittest.TestCase):
         }
         self.assertEqual(peer_aenderungen(None, neu), [])
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_clearnet_ohne_peer_startet_tor(self):
         from unittest import mock
 
@@ -740,6 +771,7 @@ class TestCheckReachable(unittest.TestCase):
             gesehen,
         )
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_clearnet_mit_peer_startet_kein_tor(self):
         from unittest import mock
 
@@ -752,6 +784,7 @@ class TestCheckReachable(unittest.TestCase):
         nach = {q.key: q for q in ergebnis}
         self.assertEqual(nach["bip158"].peer_count, 1)
 
+    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_tor_fehlschlag_bleibt_ohne_peer(self):
         from unittest import mock
 

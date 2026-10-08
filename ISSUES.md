@@ -5,6 +5,17 @@ Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalte
 
 **Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie).
 
+## P2P · Herkunft reicht nicht
+
+**Stand:** 2026-10-08 · **offen** · P2P abgeklemmt
+**Ort:** `doc/issues/p2p-herkunft.md`, `core/p2p.py` (`p2p_gesperrt`)
+**Nächste Prüfung:** frühestens 2027-01-08
+Aufwand: erst nach einer Protokoll-Änderung abschätzbar
+
+P2P ohne Electrs trägt den Betrieb nicht. Compact Filter finden den UTXO-Bestand. Die Herkunft eines fremden Vorgängers nicht: `getdata` TX liefert nur Mempool und den letzten Block, Key-Path-Taproot lässt sich aus dem Witness nicht rekonstruieren. Bis sich daran substanziell etwas ändert, bleibt jeder P2P-Socket zu, die Datenquellen-Zeile und die Kopf-Pille sind ausgeblendet. Detail und Aufhebe-Bedingung: [`doc/issues/p2p-herkunft.md`](doc/issues/p2p-herkunft.md).
+
+---
+
 ## Bitcoin Core · RPC-Allowlist + rpcwhitelist-Hinweis
 
 **Stand:** 2026-09-28 · **umgesetzt** · Maintainer-Abnahme offen · Sicherheit / Doku

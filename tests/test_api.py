@@ -958,6 +958,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertIn("header_tip", körper)
         self.assertIsNone(körper["header_job_id"])
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_header_vorab_legt_einen_job_an(self):
         with mock.patch(
             "bip158_scanner.vorab_block_header", return_value=900_000,
@@ -974,6 +978,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(job.status, "done")
         self.assertEqual(job.result["tip"], 900_000)
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_header_vorab_laeuft_trotz_wallet_wenn_cache_leer(self):
         """Wallet im Cache ändert nichts — ohne Header-Datei muss geladen werden."""
         self.assertTrue(self.state.entries)
@@ -989,6 +997,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             time.sleep(0.05)
         vorab.assert_called()
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_header_vorab_nicht_doppelt_solange_laufend(self):
         def langsam(*_a, **_k):
             time.sleep(0.4)
@@ -1000,6 +1012,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             server.starte_header_vorab(self.state, nur_wenn_leer=True)
             self.assertEqual(self.state.header_job_id, erste)
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_post_headers_startet_job(self):
         with mock.patch(
             "bip158_scanner.vorab_block_header", return_value=900_000,
@@ -1061,6 +1077,16 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(ende[2])
 
     def test_p2p_starthoehe_wird_gespeichert(self):
+        from core.p2p import p2p_gesperrt
+
+        if p2p_gesperrt():
+            status, körper = self.anfrage(
+                "/api/config/source", methode="PUT",
+                daten={"source": "bip158", "values": {"BIP158_START_HEIGHT": "481824"}},
+            )
+            self.assertEqual(status, 403)
+            self.assertIn("abgeklemmt", körper["error"])
+            return
         status, _ = self.anfrage(
             "/api/config/source", methode="PUT",
             daten={"source": "bip158", "values": {"BIP158_START_HEIGHT": "481824"}},
@@ -1177,6 +1203,15 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(nach_key["own_fulcrum"]["verwerfbar"])
 
     def test_p2p_laesst_sich_ausschalten(self):
+        from core.p2p import p2p_gesperrt
+
+        if p2p_gesperrt():
+            status, körper = self.anfrage(
+                "/api/config/source/bip158", methode="DELETE",
+            )
+            self.assertEqual(status, 403)
+            self.assertIn("abgeklemmt", körper["error"])
+            return
         status, körper = self.anfrage("/api/config/source/bip158", methode="DELETE")
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
@@ -1199,6 +1234,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             [f["key"] for f in bip["felder"]],
         )
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_p2p_trennen_bricht_laufende_scan_jobs_ab(self):
         import threading
         import time
@@ -1234,6 +1273,17 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             self.state.jobs.cancel(job.id)
 
     def test_p2p_verbinden_schalter_schreibt_env(self):
+        from core.p2p import p2p_gesperrt
+
+        if p2p_gesperrt():
+            status, körper = self.anfrage(
+                "/api/config/source",
+                methode="PUT",
+                daten={"source": "bip158", "values": {"BIP158_P2P": "true"}},
+            )
+            self.assertEqual(status, 403)
+            self.assertIn("abgeklemmt", körper["error"])
+            return
         status, körper = self.anfrage(
             "/api/config/source",
             methode="PUT",
