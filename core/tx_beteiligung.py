@@ -16,6 +16,39 @@ def parse_txid(text: str) -> str | None:
     return ziel[0]
 
 
+def cache_deckt_analyse(txid: str, cache_root=None) -> bool:
+    """
+    True, wenn die Tx und alle Input-Vorgänger im Immutable-Cache liegen
+    (oder die Prevouts schon in der Tx stehen). Dann braucht die Analyse
+    kein Electrs.
+    """
+    key = parse_txid(txid)
+    if not key:
+        return False
+    tx = load_cached_tx(key, cache_root)
+    if not isinstance(tx, dict):
+        return False
+    for vin in tx.get("vin") or []:
+        if not isinstance(vin, dict):
+            continue
+        if vin.get("is_coinbase") or "txid" not in vin:
+            continue
+        prev = vin.get("prevout")
+        if isinstance(prev, dict) and prev:
+            continue
+        parent = load_cached_tx(str(vin.get("txid") or ""), cache_root)
+        if not isinstance(parent, dict):
+            return False
+        vouts = parent.get("vout") or []
+        try:
+            idx = int(vin.get("vout") or 0)
+        except (TypeError, ValueError):
+            return False
+        if idx < 0 or idx >= len(vouts):
+            return False
+    return True
+
+
 def _adresse_wallet(wallet: Any, adressen: list[str]) -> tuple[str, str]:
     """Erste erkennbare Adresse und Wallet-Name (leer = fremd)."""
     for addr in adressen:

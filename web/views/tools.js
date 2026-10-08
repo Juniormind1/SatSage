@@ -456,6 +456,23 @@ function txStatus(text) {
   el.hidden = !text;
 }
 
+function zeigeTxErgebnis(daten) {
+  if (!daten) {
+    zeichneTxListe(null);
+    return;
+  }
+  const quelle = daten.aus_cache ? t("tools.txFromCache") : t("tools.txFromNet");
+  const n = (Number(daten.eigene_inputs) || 0) + (Number(daten.eigene_outputs) || 0);
+  txStatus(n
+    ? t("tools.txSummary", {
+        eigeneIn: daten.eigene_inputs || 0,
+        eigeneOut: daten.eigene_outputs || 0,
+        quelle,
+      })
+    : `${t("tools.txNone")} · ${quelle}`);
+  zeichneTxListe(daten);
+}
+
 function txZeileText(art, z) {
   const kopf = art === "in"
     ? t("tools.txInput", { n: z.n })
@@ -515,16 +532,7 @@ async function pruefeTxJob() {
     }
     const daten = job.result || null;
     if (txListeAnzeigen && Zustand.ansicht === "tools" && job.status === "done" && daten) {
-      const quelle = daten.aus_cache ? t("tools.txFromCache") : t("tools.txFromNet");
-      const n = (Number(daten.eigene_inputs) || 0) + (Number(daten.eigene_outputs) || 0);
-      txStatus(n
-        ? t("tools.txSummary", {
-            eigeneIn: daten.eigene_inputs || 0,
-            eigeneOut: daten.eigene_outputs || 0,
-            quelle,
-          })
-        : `${t("tools.txNone")} · ${quelle}`);
-      zeichneTxListe(daten);
+      zeigeTxErgebnis(daten);
     } else if (Zustand.ansicht === "tools" && job.status !== "done") {
       txStatus(job.error || job.message || t("common.netError"));
       zeichneTxListe(null);
@@ -561,11 +569,21 @@ async function starteTxAnalyse() {
   txStatus(t("tools.txRunning"));
   knopf.disabled = true;
   try {
-    const job = await api("/tools/tx-beteiligung", {
+    const antwort = await api("/tools/tx-beteiligung", {
       methode: "POST",
       daten: { txid: roh },
     });
-    bindeTxJob(job.id);
+    if (antwort && Array.isArray(antwort.inputs)) {
+      zeigeTxErgebnis(antwort);
+      knopf.disabled = false;
+      return;
+    }
+    if (!antwort || !antwort.id) {
+      txStatus(t("common.netError"));
+      knopf.disabled = false;
+      return;
+    }
+    bindeTxJob(antwort.id);
   } catch (fehler) {
     const status = fehler && fehler.status;
     txStatus(

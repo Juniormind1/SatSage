@@ -86,13 +86,14 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
     """
     Prüft Inputs und Outputs einer Tx gegen die hinterlegten Wallets.
 
-    Tx aus dem Immutable-Cache, sonst Electrs/Chain (``get_tx``). Läuft als
-    Job, weil Vorgänger-Txs für die Inputs nachgeladen werden. 409, solange
-    schon eine Analyse läuft.
+    Liegt die Tx samt Input-Vorgängern im Cache, Antwort sofort (200).
+    Sonst Job: Cache zuerst, Electrs erst bei Lücke. 409, solange schon
+    eine Analyse läuft.
     """
     from server import ApiError, main
 
-    from core.tx_beteiligung import analysiere_tx, parse_txid
+    from core.tx_beteiligung import analysiere_tx, cache_deckt_analyse, parse_txid
+    from core.xpub_cache import load_cached_tx
 
     if not state.context_bereit():
         raise ApiError(409, "Wallets werden noch vorbereitet. Einen Moment.")
@@ -107,27 +108,62 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
     if not txid:
         raise ApiError(400, "Das ist keine Transaktions-ID.")
 
+    cache_root = state.immutable_cache_dir
+    wallet_ctx = state.wallet_ctx_fuer_ansicht()
+
+    def nur_cache(t: str):
+        tx = load_cached_tx(t, cache_root)
+        if tx is None:
+            raise LookupError(t)
+        return tx
+
+    if cache_deckt_analyse(txid, cache_root):
+        ergebnis = analysiere_tx(
+            txid,
+            get_tx=nur_cache,
+            wallet=wallet_ctx,
+            cache_root=cache_root,
+        )
+        ergebnis["aus_cache"] = True
+        return ergebnis
+
     def lauf(job):
         def fortschritt(text: str) -> None:
             job.progress(text, log=True)
 
-        args = state.args_namespace()
-        wallet_ctx = state.wallet_ctx_fuer_ansicht()
-        quelle, backend = main._setup_blockchain_client(args, state.env().values())
-        job.raise_if_cancelled()
-        fetchers = main._build_blockchain_fetchers(
-            quelle, backend, args, wallet_ctx,
-            immutable_cache_dir=state.immutable_cache_dir,
-        )
-        get_tx = fetchers["get_tx"]
+        netz = []
+
+        def hole_netz():
+            if netz:
+                return netz[0]
+            fortschritt("Verbinde mit Electrs…")
+            args = state.args_namespace()
+            quelle, backend = main._setup_blockchain_client(
+                args, state.env().values(),
+            )
+            job.raise_if_cancelled()
+            fetchers = main._build_blockchain_fetchers(
+                quelle, backend, args, wallet_ctx,
+                immutable_cache_dir=cache_root,
+            )
+            netz.append(fetchers["get_tx"])
+            return netz[0]
+
+        def get_tx(t: str):
+            cached = load_cached_tx(t, cache_root)
+            if cached is not None:
+                return cached
+            return hole_netz()(t)
+
         ergebnis = analysiere_tx(
             txid,
             get_tx=get_tx,
             wallet=wallet_ctx,
-            cache_root=state.immutable_cache_dir,
+            cache_root=cache_root,
             on_progress=fortschritt,
             raise_if_cancelled=job.raise_if_cancelled,
         )
+        ergebnis["aus_cache"] = not netz
         n = int(ergebnis["eigene_inputs"]) + int(ergebnis["eigene_outputs"])
         job.progress(
             f"{n} eigene Zu-/Abgänge." if n else "Kein eigenes Wallet in dieser Tx.",

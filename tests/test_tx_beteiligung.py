@@ -1,13 +1,18 @@
 """Gezielte Tx-Analyse: eigene Wallets in Inputs/Outputs."""
 import unittest
 
-from core.tx_beteiligung import analysiere_tx, parse_txid
+from unittest.mock import patch
+
+from core.tx_beteiligung import analysiere_tx, cache_deckt_analyse, parse_txid
 from tests.fixtures import (
     BIP84_RECEIVE_0,
     EXTERN_A,
     TXID_EXTERN,
     TXID_SPEND,
     TXID_WALLET_IN,
+    core_tx,
+    core_vin,
+    core_vout,
     esplora_tx,
     esplora_vin,
     esplora_vout,
@@ -62,6 +67,34 @@ class TestAnalysiereTx(unittest.TestCase):
     def test_ungueltig_wirft(self):
         with self.assertRaises(ValueError):
             analysiere_tx("nein", get_tx=lambda _t: {})
+
+
+class TestCacheDeckt(unittest.TestCase):
+    def test_inline_prevout_reicht(self):
+        tx = esplora_tx(
+            TXID_SPEND,
+            [esplora_vin(TXID_WALLET_IN, 0, BIP84_RECEIVE_0, 80_000)],
+            [esplora_vout(EXTERN_A, 79_000)],
+        )
+
+        def lade(t, _root=None):
+            return tx if t == TXID_SPEND else None
+
+        with patch("core.tx_beteiligung.load_cached_tx", side_effect=lade):
+            self.assertTrue(cache_deckt_analyse(TXID_SPEND))
+
+    def test_ohne_parent_nicht(self):
+        tx = core_tx(
+            TXID_SPEND,
+            [core_vin(TXID_WALLET_IN, 0)],
+            [core_vout(0, EXTERN_A, 0.001)],
+        )
+
+        def lade(t, _root=None):
+            return tx if t == TXID_SPEND else None
+
+        with patch("core.tx_beteiligung.load_cached_tx", side_effect=lade):
+            self.assertFalse(cache_deckt_analyse(TXID_SPEND))
 
 
 if __name__ == "__main__":

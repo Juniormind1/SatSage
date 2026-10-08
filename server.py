@@ -1659,7 +1659,8 @@ class Handler(
         if teile == ["tools", "cache-suche"] and methode == "POST":
             return 202, api_tools_cache_suche(state, self._body())
         if teile == ["tools", "tx-beteiligung"] and methode == "POST":
-            return 202, api_tools_tx_beteiligung(state, self._body())
+            antwort = api_tools_tx_beteiligung(state, self._body())
+            return (202, antwort) if antwort.get("id") else (200, antwort)
         if teile == ["tools", "schatzsuche"] and methode == "POST":
             return 202, api_tools_schatzsuche(state, self._body())
         if teile == ["tax"] and methode == "GET":
