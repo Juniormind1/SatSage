@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft tracen · Punkte:** Externe und Coinbase-Enden sind Kreise in der Lot-Farbe: gelb innerhalb der Haltefrist, grün außerhalb. Eigene Wallet-Hops (auch Wechsel) haben kein Symbol, solange darunter jedes Blatt extern oder Coinbase ist; eine Lücke zeigt ein rotes Fragezeichen.
 - **Steuerjahr · Dotplot:** Liegt das Herkunftsnetz mit Lot-Ring auf einem Punkt, öffnet ein Klick auf den Ring „Herkunft tracen“ für dieses UTXO. Ein Klick daneben blendet das Netz weiter aus.
 - **Steuerjahr · Dotplot:** Ein grauer Punkt, der während des UTXO-Scans erscheint, öffnet beim Klick „Herkunft tracen“ und klappt dieses UTXO auf. Bisher war der Punkt nur optisch klickbar.
 - **Release 1.0 · Core as is:** Bitcoin Core bleibt für das erste Release ungehärtet. Verbindung und vorhandene Aufrufe laufen weiter, ein vollständiger Core-Walk und der Abgleich gegen Electrs sind zurückgestellt. Bis 1.0 zählt der fehlerfreie Electrs-Walk. Siehe `ISSUES.md`.

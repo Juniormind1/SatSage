@@ -2230,6 +2230,93 @@ function knotenIstWalletAustritt(eltern, kind) {
   return true;
 }
 
+/**
+ * Herkunft unter diesem Knoten: true = jedes Blatt extern/Coinbase,
+ * false = Lücke, null = Kinder noch nicht geladen.
+ */
+function teilbaumHerkunftStand(knoten, gesehen) {
+  if (!knoten || typeof knoten !== "object") return false;
+  const vis = gesehen || new Set();
+  if (vis.has(knoten)) return false;
+  vis.add(knoten);
+  const typ = knoten.type;
+  if (typ === "external" || typ === "coinbase") return true;
+  if (typ !== "internal") return false;
+  if (!Array.isArray(knoten.children)) return null;
+  if (!knoten.children.length) return false;
+  let unbekannt = false;
+  for (const kind of knoten.children) {
+    const stand = teilbaumHerkunftStand(kind, vis);
+    if (stand === false) return false;
+    if (stand === null) unbekannt = true;
+  }
+  return unbekannt ? null : true;
+}
+
+function knotenEndeFristKlasse(knoten, elternKnoten) {
+  const farbe = lotFarbeBlatt(knoten, lotZeitTs(elternKnoten));
+  if (farbe === "gruen") return "knoten-frist-ok";
+  if (farbe === "orange") return "knoten-frist-offen";
+  return "knoten-frist-grau";
+}
+
+function knotenPunktTitel(key, fallback) {
+  const text = t(key);
+  return text !== key ? text : fallback;
+}
+
+/** Punkt vor der Zeile, oder null (intern und vollständig). */
+function macheKnotenPunkt(knoten, elternKnoten) {
+  if (!knoten) return null;
+  if (knoten.type === "internal") {
+    if (teilbaumHerkunftStand(knoten) !== false) return null;
+    const punkt = document.createElement("span");
+    punkt.className = "knoten-punkt knoten-luecke";
+    punkt.textContent = "?";
+    punkt.title = knotenPunktTitel("trace.incompleteTitle", t("trace.incomplete"));
+    return punkt;
+  }
+  if (knoten.type === "external" || knoten.type === "coinbase") {
+    const punkt = document.createElement("span");
+    const frist = knotenEndeFristKlasse(knoten, elternKnoten);
+    punkt.className = `knoten-punkt knoten-extern ${frist}`;
+    const titelKey = frist === "knoten-frist-ok"
+      ? "trace.legendHeld"
+      : frist === "knoten-frist-offen"
+        ? "trace.legendUnheld"
+        : "trace.legendUndated";
+    const fallback = frist === "knoten-frist-ok"
+      ? "außerhalb Haltefrist"
+      : frist === "knoten-frist-offen"
+        ? "innerhalb Haltefrist"
+        : "ohne Datum";
+    punkt.title = knotenPunktTitel(titelKey, fallback);
+    return punkt;
+  }
+  const punkt = document.createElement("span");
+  punkt.className = `knoten-punkt ${PUNKT_KLASSE[knoten.type] || "knoten-extern"}`;
+  return punkt;
+}
+
+function setzeInternenKnotenPunkt(block) {
+  const knoten = BAUM_KNOTEN_DATEN.get(block);
+  if (!knoten || knoten.type !== "internal") return;
+  const zeile = block.querySelector(":scope > .kopf-mit-verweis > .baum-knoten");
+  if (!zeile) return;
+  const alt = zeile.querySelector(":scope > .knoten-punkt");
+  const neu = macheKnotenPunkt(knoten);
+  if (!neu) {
+    if (alt) alt.remove();
+    return;
+  }
+  if (alt) alt.replaceWith(neu);
+  else {
+    const info = zeile.querySelector(":scope > .knoten-info");
+    if (info) zeile.insertBefore(neu, info);
+    else zeile.append(neu);
+  }
+}
+
 function zeichneKnotenListe(knoten, elternWallet, elternKnoten) {
   const huelle = document.createDocumentFragment();
   for (const k of knoten) {
@@ -2300,6 +2387,7 @@ function expandiereKnotenBlock(block) {
   kinder.hidden = false;
   if (klapp && !klapp.classList.contains("leer")) klapp.textContent = "▾";
   if (zeile) zeile.setAttribute("aria-expanded", "true");
+  setzeInternenKnotenPunkt(block);
   return true;
 }
 
@@ -2377,6 +2465,11 @@ function zeichneBaumSeiten(behaelter, ziel, pfad, { elternWallet, elternKnoten, 
     const seite = await q.seite(offset);
     if (q !== quelle) return;
     behaelter.replaceChildren(zeichneKnotenListe(seite.items, elternWallet, elternKnoten));
+    if (elternKnoten && Array.isArray(seite.items)
+        && seite.items.some((k) => teilbaumHerkunftStand(k) === false)) {
+      if (!Array.isArray(elternKnoten.children)) elternKnoten.children = seite.items;
+      setzeInternenKnotenPunkt(behaelter.closest(".baum-knoten-block"));
+    }
     behaelter.append(zeichnePager({
       total: seite.total,
       offset: seite.offset,
@@ -2482,8 +2575,7 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   // Soft-Label am Mix-Icon (native title am Button gewinnt über Kinder).
   if (knoten.expandable) klapp.title = "Zweig auf- und zuklappen";
 
-  const punkt = document.createElement("span");
-  punkt.className = `knoten-punkt ${PUNKT_KLASSE[knoten.type] || "knoten-extern"}`;
+  const punkt = macheKnotenPunkt(knoten, elternKnoten);
 
   const info = document.createElement("span");
   info.className = "knoten-info";
@@ -2587,7 +2679,8 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
     info.append(notiz);
   }
 
-  zeile.append(klapp, punkt, info);
+  if (punkt) zeile.append(klapp, punkt, info);
+  else zeile.append(klapp, info);
 
   const kopfzeile = document.createElement("div");
   kopfzeile.className = "kopf-mit-verweis";

@@ -2093,6 +2093,10 @@ input[type="text"].fifo-ziel-fee.ungueltig {
 .punkt-eigen  { background: var(--eigen); }
 .punkt-extern { background: var(--fremd); border-radius: 50%; }
 .punkt-offen  { background: var(--warn); }
+.punkt-luecke {
+  background: none; color: var(--krit); font-size: 11px; font-weight: 700;
+  width: auto; height: auto; line-height: 1; border-radius: 0;
+}
 
 .baum { padding: 12px 13px; }
 .baum-knoten { display: flex; align-items: center; gap: 9px; padding: 5px 0; }
@@ -2133,9 +2137,17 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 .knoten-eigen  { background: var(--eigen); }
 .knoten-extern { background: var(--fremd); border-radius: 50%; }
+.knoten-extern.knoten-frist-ok { background: var(--gut); }
+.knoten-extern.knoten-frist-offen { background: var(--warn); }
+.knoten-extern.knoten-frist-grau { background: var(--achse-ungeprueft, #8a8a8a); }
 .knoten-offen  { background: var(--warn); }
 .knoten-krit   { background: var(--krit); border-radius: 2px; }
 .knoten-coinbase { background: var(--akzent); }
+.knoten-luecke {
+  background: none; border-radius: 0; color: var(--krit);
+  font-size: 12px; font-weight: 700; width: 8px; height: 12px;
+  line-height: 12px; text-align: center;
+}
 .knoten-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .knoten-oben { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
 .knoten-unten {
