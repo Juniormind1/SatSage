@@ -248,6 +248,14 @@ function steuerLotZeile(zeile) {
   if (punkt) {
     punkt.classList.remove("ungeprueft", "offen", "erfuellt");
     punkt.classList.add(steuerPunktFarbe(event));
+    const netzFokus = typeof herkunftsnetzAktiv === "function"
+      && herkunftsnetzAktiv()
+      && typeof Herkunftsnetz !== "undefined"
+      && Herkunftsnetz.key === zeile.key
+      && Herkunftsnetz.daten;
+    if (!netzFokus && typeof setzeAchseLotAusEvent === "function") {
+      setzeAchseLotAusEvent(punkt, event);
+    }
   }
   steuerLotUiPlanen();
 }

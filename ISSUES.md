@@ -117,7 +117,8 @@ Bewegungszeit** (Layer B). Nicht dieselbe X.
 
 #### Interaktion
 
-- Einstieg: Klick auf `.achse-punkt`.
+- Hover auf `.achse-punkt` mit Lot-Mix: 32-px-Lot-Ring aus den Zeitstrahl-Zahlen, ohne Request.
+- Einstieg Netz: Klick auf `.achse-punkt`.
 - Hinweiszeile, solange der Modus an ist:
   „Orange: eigene Vorgänger nach Output-Zeit“.
 - Ende: Esc, Klick ins Leere, zweiter Klick auf denselben Punkt,

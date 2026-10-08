@@ -2999,6 +2999,7 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .achse-punkt.mittel { width: 11px; height: 11px; }
 .achse-punkt.gross  { width: 15px; height: 15px; }
 .achse-punkt:hover { outline: 2px solid var(--akzent); outline-offset: 1px; z-index: 3; }
+.achse-punkt.achse-lot:hover { outline: none; z-index: 6; }
 .achse-punkt-tip {
   display: none;
   position: absolute;
@@ -3017,17 +3018,20 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 /* Herkunftsnetz (Overlay, views/herkunftsnetz.js): Layer A dimmen, nicht
    löschen; Layer B = orange Ringe an der Output-Zeit, Kanten per SVG. */
 .achse-spur.netz-an .achse-punkt:not(.geister):not(.netz-fokus) { opacity: .22; }
+.achse-spur.netz-an .achse-punkt.achse-lot:hover { opacity: 1; }
 .achse-spur.netz-an .achse-punkt.netz-fokus {
   z-index: 5;
   box-shadow: 0 0 0 2px var(--netz);
 }
-/* Los-Ring ist die Umrandung des angeklickten Punkts, nicht eine Füllung darin.
+/* Los-Ring: Hover ohne Netz, und Umrandung des angeklickten Fokus.
    Der Punkt selbst bleibt unskaliert, damit der Tooltip seine Größe behält. */
+.achse-punkt.achse-lot:hover,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
 }
+.achse-punkt.achse-lot:hover::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot::before {
   content: "";
   position: absolute;
@@ -3049,31 +3053,37 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
   /* Ring ist größer als der Punkt — sonst trifft der Klick das Leere und blendet aus. */
   pointer-events: auto;
 }
+.achse-punkt.achse-lot:hover[data-lot-orange="0"]::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"]::before {
   background:
     linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
     conic-gradient(var(--lot-gruen) calc(var(--lot-g) * 1%), var(--lot-grau) 0) border-box;
 }
+.achse-punkt.achse-lot:hover[data-lot-grau="0"]::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-grau="0"]::before {
   background:
     linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
     conic-gradient(var(--lot-gruen) calc(var(--lot-g) * 1%), var(--lot-orange) 0) border-box;
 }
+.achse-punkt.achse-lot:hover[data-lot-gruen="0"]::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"]::before {
   background:
     linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
     conic-gradient(var(--lot-orange) calc(var(--lot-o) * 1%), var(--lot-grau) 0) border-box;
 }
+.achse-punkt.achse-lot:hover[data-lot-orange="0"][data-lot-grau="0"]::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-orange="0"][data-lot-grau="0"]::before {
   background:
     linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
     var(--lot-gruen) border-box;
 }
+.achse-punkt.achse-lot:hover[data-lot-gruen="0"][data-lot-grau="0"]::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-grau="0"]::before {
   background:
     linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
     var(--lot-orange) border-box;
 }
+.achse-punkt.achse-lot:hover[data-lot-gruen="0"][data-lot-orange="0"]::before,
 .achse-spur.netz-an .achse-punkt.netz-fokus.achse-lot[data-lot-gruen="0"][data-lot-orange="0"]::before {
   background:
     linear-gradient(var(--flaeche), var(--flaeche)) padding-box,
