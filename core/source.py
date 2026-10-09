@@ -16,8 +16,11 @@ from core.electrum_servers import ELECTRUM_SERVERS_URL, splitte_electrum_server
 from core.outbound_policy import (
     futures_bis_oeffentliche_electrum_stopp,
     melde_oeffentliche_electrum_abbruch,
+    oeffentliche_electrum_art,
     oeffentliche_electrum_session_aktiv,
     oeffentliche_electrum_suche_abgebrochen,
+    oeffentliche_familie_aktiv,
+    setze_oeffentliche_electrum_art,
     setze_oeffentliche_electrum_session,
     stoppe_oeffentliche_electrum_suche,
     widerrufe_oeffentliche_electrum_freigabe,
@@ -27,6 +30,11 @@ from core.outbound_policy import (
 OEFFENTLICHE_QUELLEN_KEYS = ("public_onion", "clearnet")
 _OEFFENTLICHE_UNGENUTZT_NOTE = (
     "Nicht genutzt — höhere Privatsphäre-Quelle ist aktiv."
+)
+_OEFFENTLICHE_CLEAR_GEWAEHLT_NOTE = "Nicht genutzt — Clearnet gewählt."
+_OEFFENTLICHE_ONION_GEWAEHLT_NOTE = "Nicht genutzt — Onion gewählt."
+_OEFFENTLICHE_CLEAR_VORHANDEN_NOTE = (
+    "Nicht genutzt — öffentliches Clearnet-Electrs ist erreichbar."
 )
 
 #: Reihenfolge wie in core.chain_sources._setup_blockchain_client.
@@ -907,7 +915,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         privacy=PRIVACY_MEDIUM,
         configured=bool(onions),
         note=(
-            "Nur wenn öffentliches Clearnet fehlt. Rotation mildert das Risiko "
+            "Verbinden gilt nur für Onion-Server. Rotation mildert das Risiko "
             "einzelner Server. Erst nach Bestätigung."
         ),
         laden_url=ELECTRUM_SERVERS_URL,
@@ -938,7 +946,8 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         privacy=PRIVACY_MEDIUM,
         configured=clearnet_datei,
         note=(
-            "Erst nach Bestätigung — Adressen gehen an Dritte."
+            "Verbinden gilt nur für Clearnet-Server. Erst nach Bestätigung — "
+            "Adressen gehen an Dritte."
             if clearnet_datei
             else "Noch keine Liste — „Verbinden“ holt sie."
         ),
@@ -1267,6 +1276,25 @@ def _loese_oeffentliches_onion_tor(*, on_log=None) -> None:
         )
 
 
+def _markiere_oeffentliche_quelle(
+    gefunden: dict[str, SourceInfo],
+    key: str,
+    *,
+    note: str,
+) -> None:
+    info = gefunden.get(key)
+    if info is None:
+        return
+    gefunden[key] = replace(
+        info,
+        reachable=None if info.configured else info.reachable,
+        peer_count=0,
+        peer_hosts=[],
+        error="",
+        note=note if info.configured else info.note,
+    )
+
+
 def _pruefe_oeffentliche_electrum(
     gefunden: dict[str, SourceInfo],
     values: dict[str, str],
@@ -1274,7 +1302,7 @@ def _pruefe_oeffentliche_electrum(
     timeout: int,
     on_log=None,
 ) -> dict[str, SourceInfo]:
-    """Öffentliche Clearnet zählen; Onions nur wenn Clearnet fehlt."""
+    """Öffentliche Familie prüfen — GUI-Wahl ist exklusiv, sonst Clearnet zuerst."""
 
     def log(text: str) -> None:
         if on_log:
@@ -1284,40 +1312,51 @@ def _pruefe_oeffentliche_electrum(
         melde_oeffentliche_electrum_abbruch(log)
         return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
 
-    log("Prüfe öffentliche Electrum-Server…")
-    clear_hosts: list[str] = []
-    try:
-        from core.electrum_servers import load_electrum_servers
+    art = oeffentliche_electrum_art()
+    if art == "onion":
+        log("Prüfe öffentliche Onion-Electrum-Server…")
+    elif art == "clearnet":
+        log("Prüfe öffentliche Clearnet-Electrum-Server…")
+    else:
+        log("Prüfe öffentliche Electrum-Server…")
 
-        servers = load_electrum_servers(chain_sources.ELECTRUM_SERVERS_FILE)
-        _onion_liste, clear = splitte_electrum_server(servers)
-    except (OSError, ValueError):
-        clear = []
-    if clear:
-        log(
-            f"{len(clear)} Clearnet-Server in der Liste, "
-            f"zufällige Stichprobe (bis 8, ggf. zweite Runde)…"
-        )
-        # Früher: endpunkte[:8] — alphabetisch oft tote IP-Literale vorn;
-        # bekannte Hosts (blockstream/qtornado/…) lagen unerreicht weiter hinten.
-        clear_hosts = _zaehle_electrum_endpunkte(
-            clear, timeout=8.0,
-            tor_proxy=None, on_log=log,
-        )
-        if oeffentliche_electrum_suche_abgebrochen():
-            melde_oeffentliche_electrum_abbruch(log)
-            return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
+    clear_hosts: list[str] = []
+    clear: list = []
+    if art != "onion":
+        try:
+            from core.electrum_servers import load_electrum_servers
+
+            servers = load_electrum_servers(chain_sources.ELECTRUM_SERVERS_FILE)
+            _onion_liste, clear = splitte_electrum_server(servers)
+        except (OSError, ValueError):
+            clear = []
+        if clear:
+            log(
+                f"{len(clear)} Clearnet-Server in der Liste, "
+                f"zufällige Stichprobe (bis 8, ggf. zweite Runde)…"
+            )
+            # Früher: endpunkte[:8] — alphabetisch oft tote IP-Literale vorn;
+            # bekannte Hosts (blockstream/qtornado/…) lagen unerreicht weiter hinten.
+            clear_hosts = _zaehle_electrum_endpunkte(
+                clear, timeout=8.0,
+                tor_proxy=None, on_log=log,
+            )
+            if oeffentliche_electrum_suche_abgebrochen():
+                melde_oeffentliche_electrum_abbruch(log)
+                return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
 
     onions = _oeffentliche_onion_endpunkte(values)
     onion_hosts: list[str] = []
     if oeffentliche_electrum_suche_abgebrochen():
         melde_oeffentliche_electrum_abbruch(log)
         return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
-    if clear_hosts:
-        # Clearnet reicht — Onions weder proben noch als „verbunden“ führen,
-        # Tor-Autostart für öffentliche Onions lösen.
+
+    onion_erlaubt = art != "clearnet" and oeffentliche_familie_aktiv("onion")
+    if art == "clearnet" or (clear_hosts and art is None):
+        # Gewähltes oder gefundenes Clearnet: Onions weder proben noch
+        # als „verbunden“ führen; Tor-Autostart für öffentliche Onions lösen.
         _loese_oeffentliches_onion_tor(on_log=log)
-    elif onions:
+    elif onion_erlaubt and onions:
         from core.tor import TorFehler, stelle_tor_socks_bereit
 
         raw = values.get("FULCRUM_TOR_PROXY") or values.get("TOR_PROXY") or "127.0.0.1:9050"
@@ -1332,7 +1371,10 @@ def _pruefe_oeffentliche_electrum(
             log(f"Tor für öffentliche Onions nicht bereit: {exc}")
             tor_proxy = None
         else:
-            log(f"{len(onions)} öffentliche Onions (Clearnet fehlt)…")
+            if art == "onion":
+                log(f"{len(onions)} öffentliche Onions…")
+            else:
+                log(f"{len(onions)} öffentliche Onions (Clearnet fehlt)…")
             # Nach Bootstrap: etwas Luft für den ersten Circuit; nicht 30s je
             # Probe, sonst wirkt die Pille minutenlang grau.
             onion_hosts = _zaehle_electrum_endpunkte(
@@ -1347,19 +1389,13 @@ def _pruefe_oeffentliche_electrum(
 
     onion_info = gefunden.get("public_onion")
     if onion_info is not None:
-        if clear_hosts:
-            # Stale „onion verbunden“ vermeiden, wenn Clearnet die Quelle ist.
-            gefunden["public_onion"] = replace(
-                onion_info,
-                reachable=None if onion_info.configured else onion_info.reachable,
-                peer_count=0,
-                peer_hosts=[],
-                error="",
-                note=(
-                    "Nicht genutzt — öffentliches Clearnet-Electrs ist erreichbar."
-                    if onion_info.configured
-                    else onion_info.note
-                ),
+        if art == "clearnet" or clear_hosts:
+            if art == "clearnet":
+                onion_note = _OEFFENTLICHE_CLEAR_GEWAEHLT_NOTE
+            else:
+                onion_note = _OEFFENTLICHE_CLEAR_VORHANDEN_NOTE
+            _markiere_oeffentliche_quelle(
+                gefunden, "public_onion", note=onion_note,
             )
         else:
             gefunden["public_onion"] = replace(
@@ -1370,12 +1406,17 @@ def _pruefe_oeffentliche_electrum(
             )
     clear_info = gefunden.get("clearnet")
     if clear_info is not None:
-        gefunden["clearnet"] = replace(
-            clear_info,
-            reachable=bool(clear_hosts) if clear else clear_info.reachable,
-            peer_count=len(clear_hosts),
-            peer_hosts=clear_hosts,
-        )
+        if art == "onion":
+            _markiere_oeffentliche_quelle(
+                gefunden, "clearnet", note=_OEFFENTLICHE_ONION_GEWAEHLT_NOTE,
+            )
+        else:
+            gefunden["clearnet"] = replace(
+                clear_info,
+                reachable=bool(clear_hosts) if clear else clear_info.reachable,
+                peer_count=len(clear_hosts),
+                peer_hosts=clear_hosts,
+            )
     gesamt = len(onion_hosts) + len(clear_hosts)
     if gesamt:
         log(

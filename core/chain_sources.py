@@ -704,8 +704,11 @@ def _setup_public_onion_rotation(
         futures_bis_oeffentliche_electrum_stopp,
         melde_oeffentliche_electrum_abbruch,
         oeffentliche_electrum_suche_abgebrochen,
+        oeffentliche_familie_aktiv,
     )
 
+    if not oeffentliche_familie_aktiv("onion"):
+        return None
     if oeffentliche_electrum_suche_abgebrochen():
         melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
@@ -745,7 +748,10 @@ def _setup_public_onion_rotation(
                 _index, client, error = future.result()
             except Exception as exc:
                 client, error = None, str(exc)
-            if oeffentliche_electrum_suche_abgebrochen():
+            if (
+                oeffentliche_electrum_suche_abgebrochen()
+                or not oeffentliche_familie_aktiv("onion")
+            ):
                 if client:
                     try:
                         client.close()
@@ -766,13 +772,17 @@ def _setup_public_onion_rotation(
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
-    if oeffentliche_electrum_suche_abgebrochen():
+    if (
+        oeffentliche_electrum_suche_abgebrochen()
+        or not oeffentliche_familie_aktiv("onion")
+    ):
         for client in reachable_by_index.values():
             try:
                 client.close()
             except Exception:
                 pass
-        melde_oeffentliche_electrum_abbruch(_log_quelle)
+        if oeffentliche_electrum_suche_abgebrochen():
+            melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
 
     reachable_clients = [
@@ -998,13 +1008,17 @@ def _try_public_onion_fulcrum(
     *,
     interactive: bool = False,
 ):
-    """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt."""
-    if not _load_public_onion_endpoints(args, env):
-        return None
+    """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt oder Onion gewählt."""
     from core.outbound_policy import (
         melde_oeffentliche_electrum_abbruch,
         oeffentliche_electrum_suche_abgebrochen,
+        oeffentliche_familie_aktiv,
     )
+
+    if not oeffentliche_familie_aktiv("onion"):
+        return None
+    if not _load_public_onion_endpoints(args, env):
+        return None
 
     if oeffentliche_electrum_suche_abgebrochen():
         melde_oeffentliche_electrum_abbruch(_log_quelle)
@@ -1151,8 +1165,11 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     from core.outbound_policy import (
         melde_oeffentliche_electrum_abbruch,
         oeffentliche_electrum_suche_abgebrochen,
+        oeffentliche_familie_aktiv,
     )
 
+    if not oeffentliche_familie_aktiv("clearnet"):
+        return None
     if oeffentliche_electrum_suche_abgebrochen():
         melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
@@ -1329,10 +1346,18 @@ def _try_public_electrum_fuer_verlauf(
                 "Blockwalk/Cache (Onion zu langsam)."
             )
             return quelle, backend
-        _log_quelle(
-            "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
-            "(Privatsphäre mäßig; Clearnet nicht erreichbar)."
-        )
+        from core.outbound_policy import oeffentliche_electrum_art
+
+        if oeffentliche_electrum_art() == "onion":
+            _log_quelle(
+                "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
+                "(Privatsphäre mäßig)."
+            )
+        else:
+            _log_quelle(
+                "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
+                "(Privatsphäre mäßig; Clearnet nicht erreichbar)."
+            )
         return "fulcrum", backend
     return None
 

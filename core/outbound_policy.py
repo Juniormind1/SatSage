@@ -22,6 +22,10 @@ class OutboundPolicyError(ValueError):
 #: Gilt nur für den laufenden Prozess — nach Server-Neustart wieder aus.
 _SESSION_OEFFENTLICHE_ELECTRUM = False
 
+#: Welche öffentliche Familie der Nutzer verbunden hat: ``clearnet``,
+#: ``onion`` oder ``None`` (noch keine Wahl / CLI-Fallback).
+_SESSION_OEFFENTLICHE_ELECTRUM_ART: str | None = None
+
 #: Laufende öffentliche Electrum-Probes (Clearnet/Onion-Stichprobe,
 #: Wallet-Clearnet-Pool, Onion-Rotation) — nicht der Sanktions-Pool.
 _OEFFENTLICHE_ELECTRUM_STOP = threading.Event()
@@ -39,6 +43,37 @@ def setze_oeffentliche_electrum_session(erlaubt: bool) -> None:
     _SESSION_OEFFENTLICHE_ELECTRUM = bool(erlaubt)
     if erlaubt:
         erlaube_oeffentliche_electrum_suche()
+    else:
+        setze_oeffentliche_electrum_art(None)
+
+
+def oeffentliche_electrum_art() -> str | None:
+    """``clearnet``, ``onion`` oder ``None`` (keine GUI-Wahl)."""
+    return _SESSION_OEFFENTLICHE_ELECTRUM_ART
+
+
+def setze_oeffentliche_electrum_art(art: str | None) -> None:
+    """
+    Merkt, welche öffentliche Familie der Nutzer verbunden hat.
+
+    ``None`` / leer = keine Wahl (CLI: Clearnet, danach Onion).
+    """
+    global _SESSION_OEFFENTLICHE_ELECTRUM_ART
+    if art is None or str(art).strip() == "":
+        _SESSION_OEFFENTLICHE_ELECTRUM_ART = None
+        return
+    wert = str(art).strip().lower()
+    if wert not in ("clearnet", "onion"):
+        raise ValueError(f"Unbekannte öffentliche Electrum-Art: {art}")
+    _SESSION_OEFFENTLICHE_ELECTRUM_ART = wert
+
+
+def oeffentliche_familie_aktiv(familie: str) -> bool:
+    """False, wenn der Nutzer ausdrücklich die andere Familie gewählt hat."""
+    art = _SESSION_OEFFENTLICHE_ELECTRUM_ART
+    if art is None:
+        return True
+    return art == familie
 
 
 def widerrufe_oeffentliche_electrum_freigabe() -> bool:
@@ -120,9 +155,11 @@ def futures_bis_oeffentliche_electrum_stopp(futures, *, poll_s: float = 0.2):
 
 
 def _reset_oeffentliche_electrum_suche_fuer_tests() -> None:
-    """Nur Tests: Stopp-Flags zurücksetzen."""
+    """Nur Tests: Stopp-Flags und Sitzungs-Art zurücksetzen."""
+    global _SESSION_OEFFENTLICHE_ELECTRUM_ART
     _OEFFENTLICHE_ELECTRUM_STOP.clear()
     _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.clear()
+    _SESSION_OEFFENTLICHE_ELECTRUM_ART = None
 
 
 def _truthy(value: object) -> bool:

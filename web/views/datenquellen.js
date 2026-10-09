@@ -706,7 +706,7 @@ async function verbindeOeffentlicheElectrum(quelle, knopf) {
     }
     const liste = await api("/config/electrum-servers", {
       methode: "POST",
-      daten: { filter: quelle.laden_filter },
+      daten: { filter: quelle.laden_filter, verbinden: true },
     });
     if (Array.isArray(liste.sources) && Zustand.config) {
       Zustand.config.sources = liste.sources;

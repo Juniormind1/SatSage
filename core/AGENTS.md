@@ -59,7 +59,7 @@ py main.py --txid <txid> --xpubs zpub6...
 1. **Eigener Electrum-Server** (`FULCRUM_HOST` / `FULCRUM_TOR`, electrs/Fulcrum) — Privatsphäre **hoch**
 2. **Bitcoin-P2P Compact Filter** — `--bip158` (kein Core-RPC)
 3. **Clearnet-Fulcrum** — öffentliche Server ohne Tor (`electrum_servers.json`), nur nach Bestätigung
-4. **Öffentliche Fulcrum-Onions** — `FULCRUM_TOR_0`…`9`, nur nach Bestätigung und nur wenn Clearnet nicht erreichbar (dann Tor; bei Clearnet-Treffer wird öffentliches Onion/Tor-Autostart gelöst)
+4. **Öffentliche Fulcrum-Onions** — `FULCRUM_TOR_0`…`9`, nur nach Bestätigung. In der Web-GUI ist „Verbinden“ exklusiv: Clearnet-Knopf nur Clearnet, Onion-Knopf nur Onion. Ohne GUI-Wahl (CLI): Onion nur wenn Clearnet fehlt (bei Clearnet-Treffer wird öffentliches Onion/Tor-Autostart gelöst)
 
 **UTXO-Bestand** (zusätzlich, in `_utxo_scan_scantxoutset_vorrang` / `_try_scantxoutset_xpub`):
 
@@ -86,7 +86,7 @@ Mit Electrs bleibt Electrs primär für `get_tx`; Core nur wenn Electrs die Tx n
 3. BIP-158 Compact Filter (Blockwalk/Cache)
 4. öffentliche Electrum (nach Bestätigung)
 
-Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. Sobald ein eigener Electrum-Server (electrs/Fulcrum/libbitcoin) erreichbar ist, werden öffentliche Verbindungen abgeklemmt und die Sitzungs-Freigabe ungültig — ein erneuter öffentlicher Connect fragt wieder. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
+Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. In der Oberfläche merkt „Verbinden“ die gewählte Familie (Clearnet oder Onion) für die Sitzung — Scan, Verlauf und Empfang bleiben bei dieser Familie. Sobald ein eigener Electrum-Server (electrs/Fulcrum/libbitcoin) erreichbar ist, werden öffentliche Verbindungen abgeklemmt und die Sitzungs-Freigabe ungültig — ein erneuter öffentlicher Connect fragt wieder. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
 
 Explizit nur per **CLI** (`--bip158`, `--rpc-only`) oder **Einstellungen → Datenquelle wählen**. `BIP158_P2P=1` in `.env` allein erzwingt **keine** Datenquelle — die Auto-Priorität bleibt aktiv.
 

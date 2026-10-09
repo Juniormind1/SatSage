@@ -255,6 +255,7 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
     art = str(payload.get("filter") or "").strip()
     if art not in ("onion", "clearnet"):
         raise ApiError(400, "filter muss „onion“ oder „clearnet“ sein.")
+    verbinden = bool(payload.get("verbinden"))
 
     ziel = main.ELECTRUM_SERVERS_FILE
     try:
@@ -301,6 +302,12 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
         meldung = f"{len(clearnet)} Clearnet-Server in electrum_servers.json."
         zaehler = len(clearnet)
 
+    if verbinden:
+        source_mod.setze_oeffentliche_electrum_art(art)
+        from httpserver.empfang import _verwerfe_oeffentlichen_empfang_pool
+
+        _verwerfe_oeffentlichen_empfang_pool(state)
+
     werte = state.env().values()
     return {
         "saved": True,
@@ -309,6 +316,8 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
         "url": ELECTRUM_SERVERS_URL,
         "message": meldung,
         "refreshed": refreshed,
+        "verbinden": verbinden,
+        "art": source_mod.oeffentliche_electrum_art(),
         "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
     }
 

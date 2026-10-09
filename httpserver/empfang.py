@@ -122,12 +122,7 @@ def _kappe_oeffentliche_electrum_nach_privater_quelle(
             neu.append(eintrag)
     if neu != last:
         state.sources_last = neu
-    lock = _empfang_lock(state)
-    with lock:
-        pub = getattr(state, "_empfang_public_fulcrum", None)
-        state._empfang_public_fulcrum = None
-    if pub is not None:
-        _schliesse_fulcrum_hintergrund(pub)
+    if _verwerfe_oeffentlichen_empfang_pool(state):
         stand_weg = True
     if session_weg:
         text = (
@@ -139,6 +134,18 @@ def _kappe_oeffentliche_electrum_nach_privater_quelle(
         else:
             LOGGER.info("%s", text)
     return session_weg or stand_weg
+
+
+def _verwerfe_oeffentlichen_empfang_pool(state) -> bool:
+    """Schließt den öffentlichen Empfangs-Pool (Familienwechsel / Kappen)."""
+    lock = _empfang_lock(state)
+    with lock:
+        pub = getattr(state, "_empfang_public_fulcrum", None)
+        state._empfang_public_fulcrum = None
+    if pub is None:
+        return False
+    _schliesse_fulcrum_hintergrund(pub)
+    return True
 
 
 def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
@@ -267,11 +274,19 @@ def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
 
     try:
         args = state.args_namespace()
-        pool = main._try_public_onion_fulcrum(
-            args, werte, interactive=False,
-        )
-        if pool is None:
+        art = source_mod.oeffentliche_electrum_art()
+        if art == "onion":
+            pool = main._try_public_onion_fulcrum(
+                args, werte, interactive=False,
+            )
+        elif art == "clearnet":
             pool = main._setup_public_clearnet_fulcrum(args, werte)
+        else:
+            pool = main._setup_public_clearnet_fulcrum(args, werte)
+            if pool is None:
+                pool = main._try_public_onion_fulcrum(
+                    args, werte, interactive=False,
+                )
     except Exception:
         return None
 

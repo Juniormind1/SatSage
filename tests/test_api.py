@@ -1615,6 +1615,45 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         werte = main._load_dotenv(self.env_pfad)
         self.assertEqual(werte.get("FULCRUM_TOR_0"), "keep.onion")
 
+    def test_electrum_verbinden_setzt_sitzungs_art(self):
+        from core.outbound_policy import (
+            _reset_oeffentliche_electrum_suche_fuer_tests,
+            oeffentliche_electrum_art,
+        )
+
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"a.example": {"s": "50002"}, "n.onion": {"s": "50002"}}',
+            encoding="utf-8",
+        )
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST",
+                daten={"filter": "clearnet", "verbinden": True},
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["verbinden"])
+        self.assertEqual(körper["art"], "clearnet")
+        self.assertEqual(oeffentliche_electrum_art(), "clearnet")
+
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST",
+                daten={"filter": "onion", "verbinden": True},
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(körper["art"], "onion")
+        self.assertEqual(oeffentliche_electrum_art(), "onion")
+
     def test_electrum_laden_ueberspringt_frische_liste(self):
         import os
 

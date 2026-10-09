@@ -390,6 +390,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("verbindeOeffentlicheElectrum", self.datenquellen_js)
         # „Verbinden“ zieht die Liste nach, wenn sie älter als einen Tag ist.
         self.assertIn('"/config/electrum-servers"', self.datenquellen_js)
+        self.assertIn("verbinden: true", self.datenquellen_js)
         self.assertIn("liste.refreshed", self.datenquellen_js)
         self.assertIn("hatOeffentlicheElectrumListen", self.js)
         self.assertIn("header.sourceElectrumPublicFailed", self.js)
