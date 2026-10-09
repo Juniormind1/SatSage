@@ -14,7 +14,11 @@ from embit.script import address_to_scriptpubkey
 
 import core.outbound_policy as outbound_policy
 
-from core.fulcrum_transport import _socks5_connect
+from core.fulcrum_transport import (
+    _socks5_connect,
+    merke_kette_socket,
+    vergiss_kette_socket,
+)
 
 
 FULCRUM_DEFAULT_PORT = 50002
@@ -137,6 +141,8 @@ class FulcrumClient:
                 return None
 
     def connect(self) -> None:
+        if outbound_policy.oeffentliche_electrum_suche_prozess_ende():
+            raise ConnectionError("abgebrochen")
         outbound_policy.ensure_resolves_to_allowed_host(
             self.host,
             service="fulcrum",
@@ -149,6 +155,7 @@ class FulcrumClient:
             )
         else:
             raw = socket.create_connection((self.host, self.port), timeout=self.timeout)
+            merke_kette_socket(raw)
         # Timeout vor dem TLS-Handshake — sonst hängt wrap_socket auf
         # Klartext-Port 50001 über Tor bis zum Default (oft Minuten).
         try:
@@ -158,6 +165,9 @@ class FulcrumClient:
         if self.use_ssl:
             ctx = outbound_policy.tls_context(host=self.host)
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
+            if self._sock is not raw:
+                vergiss_kette_socket(raw)
+                merke_kette_socket(self._sock)
         else:
             self._sock = raw
         self._handshaked = False
@@ -173,11 +183,17 @@ class FulcrumClient:
 
     def close(self) -> None:
         if self._sock:
+            sock = self._sock
+            self._sock = None
+            vergiss_kette_socket(sock)
             try:
-                self._sock.close()
+                sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-            self._sock = None
+            try:
+                sock.close()
+            except OSError:
+                pass
         self._handshaked = False
 
     def _apply_server_version(self, version_result: Any) -> None:
@@ -681,6 +697,11 @@ def connect_fulcrum(
     require_listunspent: bool = False,
 ) -> tuple[FulcrumClient | None, str | None]:
     """Verbindet zu Fulcrum; gibt (client, None) oder (None, Fehlertext) zurück."""
+    try:
+        if outbound_policy.oeffentliche_electrum_suche_prozess_ende():
+            return None, "abgebrochen"
+    except Exception:
+        pass
     client = FulcrumClient(
         host,
         port,

@@ -1194,6 +1194,43 @@ class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
         self.assertFalse(any("eigener Indexer" in z for z in logs), logs)
         self.assertFalse(any("Electrum-Suche beendet" in z for z in logs), logs)
 
+    def test_onion_probe_erreichbar_schweigt_bei_prozess_ende(self):
+        """Taste 3: keine Restzeile „9050) — erreichbar“ nach dem Abbruch."""
+        from core import chain_sources
+        from core import outbound_policy as policy
+
+        self.addCleanup(policy._reset_oeffentliche_electrum_suche_fuer_tests)
+        policy.stoppe_oeffentliche_electrum_suche(prozess_ende=True)
+        with mock.patch.object(chain_sources, "_quelle_zeile") as zeile:
+            chain_sources._print_public_onion_probe_result(
+                0, "x.onion", 50002, True, ("127.0.0.1", 9050),
+                client=object(), error=None,
+            )
+        zeile.assert_not_called()
+
+    def test_gleiche_onion_probe_zeile_nur_einmal(self):
+        from core import chain_sources
+        from core import outbound_policy as policy
+
+        self.addCleanup(policy._reset_oeffentliche_electrum_suche_fuer_tests)
+        self.addCleanup(chain_sources._reset_quelle_log)
+        chain_sources._reset_quelle_log()
+        logs: list[str] = []
+        with mock.patch.object(chain_sources, "print", side_effect=lambda *a, **k: logs.append(a[0] if a else "")):
+            for _ in range(6):
+                chain_sources._print_public_onion_probe_result(
+                    6,
+                    "qly7g5n5t3f3h23xvbp44vs6vpmayurno4basuu5rcvrupli7y2jmgid.onion",
+                    50002,
+                    True,
+                    ("127.0.0.1", 9050),
+                    client=None,
+                    error="SOCKS5-Connect fehlgeschlagen (Status 4)",
+                )
+        self.assertEqual(len(logs), 1)
+        self.assertIn("[6]", logs[0])
+        self.assertIn("Status 4", logs[0])
+
 
 if __name__ == "__main__":
     unittest.main()

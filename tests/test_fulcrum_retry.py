@@ -1,6 +1,9 @@
 """Fulcrum-Anfragen bei Timeout neu verbinden und wiederholen."""
 from __future__ import annotations
 
+import socket
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -168,6 +171,47 @@ class TestNotifySessionHandshake(unittest.TestCase):
         sess.handshake()
         sess.handshake()
         sess.request.assert_called_once()
+
+
+class TestKetteSocketsAbbruch(unittest.TestCase):
+    def test_schliesse_gibt_haengenden_recv_frei(self):
+        from core.fulcrum_transport import (
+            merke_kette_socket,
+            schliesse_offene_fulcrum_sockets,
+        )
+
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        peer: list[socket.socket] = []
+
+        def accept() -> None:
+            verb, _addr = srv.accept()
+            peer.append(verb)
+
+        threading.Thread(target=accept, daemon=True).start()
+        cli = socket.create_connection(("127.0.0.1", srv.getsockname()[1]), timeout=2)
+        merke_kette_socket(cli)
+        time.sleep(0.05)
+        fertig = threading.Event()
+
+        def rec() -> None:
+            try:
+                cli.recv(64)
+            except OSError:
+                pass
+            finally:
+                fertig.set()
+
+        threading.Thread(target=rec, daemon=True).start()
+        t0 = time.monotonic()
+        self.assertGreaterEqual(schliesse_offene_fulcrum_sockets(), 1)
+        self.assertTrue(fertig.wait(2.0))
+        self.assertLess(time.monotonic() - t0, 1.5)
+        srv.close()
+        for sock in peer:
+            sock.close()
 
 
 if __name__ == "__main__":

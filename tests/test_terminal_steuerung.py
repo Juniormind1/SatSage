@@ -14,9 +14,11 @@ from core.terminal_steuerung import (
     Fussleiste,
     LogPuffer,
     StdoutTee,
+    _ausgabe_ist_stumm,
     _job_kurzzeile,
     _loese_terminal_fuss,
     _reset_hartes_prozessende_fuer_tests,
+    _stdout_nach_ende,
     format_job_log_zeile,
     httpd_stopp_ohne_join,
     steuerung_sinnvoll,
@@ -173,6 +175,42 @@ class TestBeendenBestaetigung(unittest.TestCase):
         httpd.server_close.assert_called()
 
 
+class TestHartesProzessende(unittest.TestCase):
+    def tearDown(self):
+        _reset_hartes_prozessende_fuer_tests()
+
+    def test_atexit_ruft_kein_os_exit(self):
+        from core import terminal_steuerung as ts
+
+        with patch.object(ts.os, "_exit") as hart:
+            ts._hartes_ende_atexit()
+        hart.assert_not_called()
+
+    def test_plane_unterdrueckt_executor_join(self):
+        import concurrent.futures.thread as ft
+        import threading
+        from core import terminal_steuerung as ts
+
+        ts._reset_hartes_prozessende_fuer_tests()
+
+        class _Merk:  # weakrefbar, im Gegensatz zu object()
+            pass
+
+        dummy = _Merk()
+        ft._threads_queues[dummy] = None
+        with patch("core.terminal_steuerung.atexit.unregister") as unreg, patch(
+            "core.terminal_steuerung.atexit.register",
+        ) as reg:
+            ts.plane_hartes_prozessende()
+        unreg.assert_called_with(ft._python_exit)
+        reg.assert_called_with(ts._hartes_ende_atexit)
+        self.assertEqual(len(ft._threads_queues), 0)
+        atexits = getattr(threading, "_threading_atexits", [])
+        for cb in atexits:
+            for cell in getattr(cb, "__closure__", None) or ():
+                self.assertIsNot(cell.cell_contents, ft._python_exit)
+
+
 class TestHttpdStoppOhneJoin(unittest.TestCase):
     def test_timeout_wenn_shutdown_blockiert(self):
         httpd = MagicMock()
@@ -230,7 +268,8 @@ class TestFussleiste(unittest.TestCase):
         fuss._aktiv = True
         fuss.deaktivieren()
         text = stream.getvalue()
-        self.assertIn("\033[r", text)
+        self.assertIn("\033[1;", text)
+        self.assertIn("r", text)
         self.assertIn("\033[2K", text)
         self.assertIn("\033[?25h", text)
         self.assertFalse(fuss._aktiv)
@@ -238,6 +277,29 @@ class TestFussleiste(unittest.TestCase):
         stream.seek(0)
         fuss.zeichnen(erzwingen=True)
         self.assertEqual(stream.getvalue(), "")
+
+    def test_log_nach_deaktivieren_ohne_esc_restore(self):
+        state = SimpleNamespace(jobs=SimpleNamespace(list=lambda: []), entries=[])
+        stream = io.StringIO()
+        fuss = Fussleiste(stream, "http://127.0.0.1:8730/?t=x", state)
+        fuss._aktiv = True
+        fuss._cursor_auf_menue = True
+        fuss.deaktivieren()
+        stream.truncate(0)
+        stream.seek(0)
+        fuss.schreibe_log_text("spaete zeile\n")
+        self.assertEqual(stream.getvalue(), "spaete zeile\n")
+        self.assertNotIn("\033[u", stream.getvalue())
+
+    def test_reset_bytes_volle_scrollregion(self):
+        from core.terminal_steuerung import _ansi_reset_bytes
+
+        roh = _ansi_reset_bytes(24).decode("ascii")
+        self.assertTrue(roh.startswith("\033[s\033[1;24r"), roh)
+        self.assertIn("\033[?25h", roh)
+        self.assertTrue(roh.endswith("\033[u"))
+        self.assertNotIn("\033[?1049l", roh)
+        self.assertNotIn("\033[24;1H\n", roh)
 
     def test_beende_server_loest_fuss_vor_weiterem_log(self):
         from core import terminal_steuerung as ts
@@ -261,6 +323,52 @@ class TestFussleiste(unittest.TestCase):
         self.assertIsNone(ts._aktive_fussleiste)
         self.assertIsNone(tee._fuss)
         self.assertIsNone(tee._nach_zeile)
+        self.assertTrue(_ausgabe_ist_stumm())
+
+    def test_beende_server_verschluckt_spaete_clearnet_probe_zeile(self):
+        """Taste 3: „…9050) — erreichbar“ darf die Konsole nicht mehr treffen."""
+        from core import terminal_steuerung as ts
+
+        state = SimpleNamespace(
+            jobs=SimpleNamespace(list=lambda: []),
+            entries=[],
+        )
+        stream = io.StringIO()
+        fuss = Fussleiste(stream, "http://127.0.0.1:8730/?t=x", state)
+        fuss._aktiv = True
+        tee = StdoutTee(stream, LogPuffer())
+        tee.setze_fussleiste(fuss)
+        ts._aktive_fussleiste = fuss
+        ts._aktive_tees = (tee,)
+        httpd = MagicMock()
+        with patch.object(ts, "plane_hartes_prozessende"):
+            ts._beende_server(state, httpd)
+        stream.truncate(0)
+        stream.seek(0)
+        tee.write(
+            "  → [0] öffentlicher Server: x.example:50002 "
+            "(SSL, via Tor 127.0.0.1:9050) — erreichbar\n"
+        )
+        fuss.schreibe_log_text("9050) — erreichbar\n")
+        self.assertEqual(stream.getvalue(), "")
+        stumm = _stdout_nach_ende(stream)
+        stumm.write("9050) — erreichbar\n")
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_beende_server_schliesst_fulcrum_sockets(self):
+        from core import terminal_steuerung as ts
+
+        state = SimpleNamespace(
+            jobs=SimpleNamespace(list=lambda: []),
+            entries=[],
+        )
+        httpd = MagicMock()
+        with patch.object(ts, "plane_hartes_prozessende"), patch(
+            "core.fulcrum_transport.schliesse_offene_fulcrum_sockets",
+            return_value=2,
+        ) as schliesse:
+            ts._beende_server(state, httpd)
+        schliesse.assert_called_once()
 
 
 class TestMainCliFlag(unittest.TestCase):

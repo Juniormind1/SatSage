@@ -430,13 +430,33 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     return None
 
 
+#: Letzte Quellen-/Probe-Zeile (Dedup bei Watch/Reconnect und Onion-Probes).
+_quelle_log_zuletzt: str = ""
+_quelle_log_lock = threading.Lock()
+
+
 def _quelle_zeile(text: str) -> None:
     """Verbindungsprobe: Terminal und, wenn ein Job läuft, GUI-Log."""
-    print(text, flush=True)
+    global _quelle_log_zuletzt
+    try:
+        from core.outbound_policy import oeffentliche_electrum_suche_prozess_ende
+
+        if oeffentliche_electrum_suche_prozess_ende():
+            return
+    except Exception:
+        pass
+    zeile = (text or "").rstrip("\n")
+    if not zeile.strip():
+        return
+    with _quelle_log_lock:
+        if zeile == _quelle_log_zuletzt:
+            return
+        _quelle_log_zuletzt = zeile
+    print(zeile, flush=True)
     try:
         from display import melde_zwischenstand
 
-        melde_zwischenstand(text.strip())
+        melde_zwischenstand(zeile.strip())
     except Exception:
         pass
 
@@ -466,10 +486,10 @@ def _print_public_onion_probe_result(
     label = f"[{index}] öffentlicher Server"
     target = f"{label}: {host}:{port} ({route})"
     if client:
-        print(f"  → {target} — erreichbar", flush=True)
+        _quelle_zeile(f"  → {target} — erreichbar")
         return
     if error and "listunspent" in error:
-        print(f"  → {target} — ungeeignet: {error}", flush=True)
+        _quelle_zeile(f"  → {target} — ungeeignet: {error}")
     else:
         _print_connection_error(f"  → {target} — ", error, use_ssl)
 
@@ -794,11 +814,6 @@ def _setup_public_onion_rotation(
     return RotatingFulcrumPool(reachable_clients)
 
 
-#: Letzte _log_quelle-Zeile (Dedup bei Watch/Reconnect/Setup-Wiederholung).
-_quelle_log_zuletzt: str = ""
-_quelle_log_lock = threading.Lock()
-
-
 def _log_quelle(text: str) -> None:
     """
     Eine Zeile nach stdout und in den Web-Log.
@@ -811,6 +826,13 @@ def _log_quelle(text: str) -> None:
     Sekunden mit derselben Datenquellen-Zeile).
     """
     global _quelle_log_zuletzt
+    try:
+        from core.outbound_policy import oeffentliche_electrum_suche_prozess_ende
+
+        if oeffentliche_electrum_suche_prozess_ende():
+            return
+    except Exception:
+        pass
     zeile = (text or "").strip()
     if not zeile:
         return
