@@ -88,8 +88,8 @@ Der Proxy verzögert, der Scan schreibt Zwischenstand, dann der Abbruch.
 
 | ID | Ablauf | Abbruch |
 |----|--------|---------|
-| Q-START-P2P | Seed-Cache (schneller Scan). Neu starten mit `WALLETS_IMMER_AKTUELL=1`. Proxy **hold**. `POST /api/gui-bereit` löst Wallet-Aktualisieren aus. Hold > Indexer-Frist (90 s) → P2P-Fallback. Dann Proxy **resume** (Electrs plötzlich da). | Abbruch-Knopf |
-| Q-START-KILL | wie Q-START-P2P | kill -9 während P2P oder Mix |
+| Q-START-P2P | **Ausgesetzt.** Seed-Cache (schneller Scan). Neu starten mit `WALLETS_IMMER_AKTUELL=1`. Proxy **hold**. `POST /api/gui-bereit` löst Wallet-Aktualisieren aus. Hold > Indexer-Frist (90 s) → P2P-Fallback. Dann Proxy **resume** (Electrs plötzlich da). | Abbruch-Knopf |
+| Q-START-KILL | **Ausgesetzt.** wie Q-START-P2P | kill -9 während P2P oder Mix |
 | Q-IMPATIENT | Aktuell halten **aus**. Hold. User startet UTXO-Scan sofort (Job in der Indexer-Warte). Nach wenigen Sekunden resume. | Abbruch-Knopf |
 | Q-IMPATIENT-ONION | Kein Hold, Delay 2 s/Zeile (Onion-ähnlich). Scan sofort. | Abbruch-Knopf |
 | Q-IMPATIENT-DROP | Hold bleibt. Scan sofort. Electrs kommt nie. | Drop |
@@ -118,7 +118,7 @@ Der Proxy verzögert, der Scan schreibt Zwischenstand, dann der Abbruch.
 # Katalog
 python3 lab/regtest/scripts/verify_scan_abort_cache.py --list
 
-# Alles (Labor muss laufen; Q-START wartet ~100 s Hold)
+# Alles außer den ausgesetzten P2P-Fällen (Labor muss laufen)
 python3 lab/regtest/scripts/verify_scan_abort_cache.py
 
 # Nur Abbruch / nur Quelle / nur synthetisch
@@ -158,7 +158,7 @@ SatSage gegen den Proxy: `FULCRUM_PORT=15001`, `--cache-dir` auf den Isolationso
 
 ## 7. Vollprotokoll (~45–70 min)
 
-Kurz plus **Q-START-P2P** und **Q-START-KILL** (`--hold-s 100`, Indexer-Frist 90 s). Log lesen: „P2P wird die Quelle“ / „Scan gebunden an“, danach kein stiller Electrs-Hop im selben Job.
+Dasselbe wie das Kurzprotokoll. **Q-START-P2P** und **Q-START-KILL** nicht dazunehmen: sie prüfen P2P als Quelle, und P2P ist keine (`doc/issues/p2p-herkunft.md`). Der Default-Lauf lässt sie aus. Ein ausdrückliches `--only Q-START-P2P` startet sie trotzdem, für den Tag, an dem die Sperre fällt.
 
 ---
 
@@ -178,8 +178,8 @@ U-KILL              |         |             |                    |
 V-ABORT             |         |             |                    |
 V-DROP              |         |             |                    |
 V-KILL              |         |             |                    |
-Q-START-P2P         |         |             |                    |
-Q-START-KILL        |         |             |                    |
+Q-START-P2P         | ausgesetzt (P2P keine Datenquelle) | | |
+Q-START-KILL        | ausgesetzt (P2P keine Datenquelle) | | |
 Q-IMPATIENT         |         |             |                    |
 Q-IMPATIENT-ONION   |         |             |                    |
 Q-IMPATIENT-DROP    |         |             |                    |

@@ -206,12 +206,13 @@ Labor (`lab/regtest/scripts/`):
 - `verify_rpc_allowlist.py` — Allowlist + Hinweise `rpcwhitelist?` / `disablewallet?` am echten Node
 - `generate_scenarios.py` / `generate_sanctions_scenarios.py`
 - `verify_tx_classify.py` / `verify_sanctions_hops.py`
-- `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6)
-- `verify_p2p_traces.py` — Herkunft, Klassifikation, Sanktions-Hops nur BIP-158/P2P; Protokoll `doc/testprotokoll-p2p-traces.md` (noch nicht Q6)
+- `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6). `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen (P2P-Fallback, siehe unten).
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)
 - `live_psbt_regtest_timing.py` — Lab darf `sendrawtransaction`, die App nicht
 
-GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`, `doc/testprotokoll-p2p-traces.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`; Labor: `verify_scan_abort_cache.py`, `verify_p2p_traces.py`.
+GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`; Labor: `verify_scan_abort_cache.py` ohne die beiden P2P-Fälle.
+
+**P2P nicht testen.** P2P ohne Electrs ist keine ausreichende Datenquelle (Bestand über Compact Filter ja, Herkunft nein: historische Vorgänger kommen per `getdata` nicht, Key-Path-Taproot bleibt ohne Txid-zu-Block). Befund und Sperre: `doc/issues/p2p-herkunft.md`. Deshalb nicht starten: `verify_p2p_traces.py` (Protokoll `doc/testprotokoll-p2p-traces.md` liegt nur noch als Beleg) und im Scan-Abbruch `Q-START-P2P` sowie `Q-START-KILL`. Der Default-Lauf von `verify_scan_abort_cache.py` lässt die beiden aus. Frühestens 2027-01-08 neu prüfen, und nur ob die P2P-Schnittstelle die Lücke schließt. Unittests, die die Sperre oder Filter-Code ohne Live-Peer prüfen (`test_p2p_economy.py`, Teile von `test_bip158_scanblocks.py`), bleiben.
 
 ---
 
@@ -335,8 +336,7 @@ Reihenfolge: Dealbreaker und Datenverlust zuerst, dann HTTP-Löcher der Produktf
 15. Ein E2E-Smoke im Userflow-Sinn (Kern-Nav, keine 100 Chaos-Runden) — erst wenn der Maintainer CI-Zeit will; steht in ISSUES.
 16. Eine automatisierte Mini-Variante von `testprotokoll-datenquellen-wechsel-waehrend-scan.md` im Labor.
 17. Chaos-Runner: Windows `channel="chrome"` wie im GUI-Protokoll beschrieben.
-18. **Scan-Abbruch/Cache** — Harness liegt (`verify_scan_abort_cache.py`). Produkt muss die Fälle noch grün machen (atomare Writes, kaputtes JSON = Miss, kein Quellenwechsel mitten im Job).
-19. **P2P-only Traces** — Harness liegt (`verify_p2p_traces.py`). Produkt muss Regtest-P2P können (Magic/Genesis, Start-Höhe 1, Compact Filter, Tx-Höhe für Block-Fallback).
+18. **Scan-Abbruch/Cache** — Harness liegt (`verify_scan_abort_cache.py`). Produkt muss die Fälle noch grün machen (atomare Writes, kaputtes JSON = Miss, kein Quellenwechsel mitten im Job). Ohne `Q-START-P2P` und `Q-START-KILL`.
 
 ### Bewusst nicht
 
@@ -344,6 +344,7 @@ Reihenfolge: Dealbreaker und Datenverlust zuerst, dann HTTP-Löcher der Produktf
 - Ollama-Live in CI.
 - Steuer-Zwei-Tiefen-Abnahme, solange ISSUES das Feature verschiebt.
 - Eigene Los-Buchhaltung testen — widerspricht dem Nutzerprofil.
+- **P2P als Datenquelle** (`verify_p2p_traces.py`, Scan-Abbruch `Q-START-P2P` / `Q-START-KILL`). P2P reicht für Herkunft, Haltefrist und Stichtag nicht. Siehe Abschnitt 3 und `doc/issues/p2p-herkunft.md`. Frühestens 2027-01-08.
 
 ---
 

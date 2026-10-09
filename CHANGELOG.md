@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Testsuite · kein P2P:** P2P bleibt als Datenquelle aus (Herkunft kommt darüber nicht an). `verify_p2p_traces.py` und die Scan-Abbruch-Fälle `Q-START-P2P` und `Q-START-KILL` gehören nicht zum Lauf. Der Default des Abbruch-Prüfers lässt die beiden aus. Frühestens 2027-01-08, siehe `doc/issues/p2p-herkunft.md`.
 - **Herkunft · Lot-Ring:** Die Layout-Box des Rings in der UTXO-Zeile ist 32 px wie der Ring selbst. Der Text sitzt mit dem normalen Abstand rechts daneben.
 - **Log · „Moment noch“:** Kommt erst nach 90 s Stille (bisher 10 s), weiter global über alle Jobs.
 - **Steuerjahr · Scorecards:** Grün + gelb + grau = Bestand. Gelb zählt nur geprüfte UTXOs innerhalb der Haltefrist. Grau zählt ohne Herkunft und noch in der Frist **plus** den grauen Lot-Anteil schon verfolgter UTXOs. Ein UTXO ohne Trace, dessen Output-Datum schon außerhalb der Frist liegt, bleibt grün. Grau-Klären: zuerst ohne Baum, danach Extra-Lauf über undatierte Enden. Gelb-Klären behält Vertiefen und Zeitnachzug. Die Tabelle folgt der UTXO-Teilung (Lot-Grau bleibt in der gelben Gruppe).

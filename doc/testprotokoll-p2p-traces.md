@@ -1,6 +1,8 @@
 # Testprotokoll: Lab-Traces ausschließlich über Bitcoin-P2P
 
-**Stand:** 2026-10-07  
+**Nicht fahren.** P2P ist keine ausreichende Datenquelle für SatSage. Dieses Protokoll bleibt als Beleg, gehört aber nicht zur Testsuite. Grund und Wiederaufnahme: [`issues/p2p-herkunft.md`](issues/p2p-herkunft.md), Suite: [`test-inventar.md`](test-inventar.md). Frühestens 2027-01-08.
+
+**Stand:** 2026-10-08  
 **Für:** Maintainer, Regtest-Labor.  
 **Zweck:** Herkunft, Tx-Klassifikation und Sanktions-Hops **ohne Electrs und ohne Core-`getrawtransaction`** — nur Compact Filter, Header und Blöcke vom Labor-Node. P2P war im Labor bisher ungenutzt.
 
@@ -8,7 +10,7 @@
 
 **Runner:** `lab/regtest/scripts/verify_p2p_traces.py`
 
-Kein Pflichtlauf in Dealbreaker **Q6**, bis P2P auf Regtest grün ist.
+Kein Lauf, solange [`issues/p2p-herkunft.md`](issues/p2p-herkunft.md) offen ist. Nicht Q6.
 
 ---
 
@@ -95,6 +97,8 @@ Analogie: Electrs-Tip war `block.header` 0…1,5 Mio., jetzt Halbierung über 
 ---
 
 ## 5. Automatisierung
+
+Nicht ausführen, solange der Hinweis oben gilt. Die Aufrufe bleiben stehen für den Tag, an dem `doc/issues/p2p-herkunft.md` die Sperre aufhebt.
 
 ```bash
 python3 lab/regtest/scripts/verify_p2p_traces.py

@@ -12,7 +12,9 @@ Endlosschleife) und einen neuen Scan starten können.
 Gruppen:
 
 * abort — UTXO-/Verlaufs-Scan, Abbruch per Knopf / Electrs-Drop / kill -9
-* quelle — Wallet-Aktualisieren oder ungeduldiger Scan, bevor Electrs steht
+* quelle — ungeduldiger Scan, bevor Electrs steht.
+  Q-START-P2P und Q-START-KILL prüfen einen P2P-Fallback und laufen
+  nicht mit: P2P ist keine Datenquelle (doc/issues/p2p-herkunft.md).
 * synthetic — bekannte kaputte Dateien (kill -9 während write_text ist racy)
 
 Kein Pflichtlauf in Q6, bis das Produkt die Fälle grün hat.
@@ -103,13 +105,19 @@ SCENARIOS: list[dict[str, Any]] = [
 ]
 
 
+# P2P-Fallback. Nicht Teil der Suite, solange doc/issues/p2p-herkunft.md offen ist.
+P2P_AUSGESETZT = frozenset({"Q-START-P2P", "Q-START-KILL"})
+
+
 def szenarien_fuer(only: str, group: str) -> list[dict[str, Any]]:
     if only:
         wollen = {t.strip() for t in only.split(",") if t.strip()}
         return [s for s in SCENARIOS if s["id"] in wollen]
     if group:
-        return [s for s in SCENARIOS if s["group"] == group]
-    return list(SCENARIOS)
+        chosen = [s for s in SCENARIOS if s["group"] == group]
+    else:
+        chosen = list(SCENARIOS)
+    return [s for s in chosen if s["id"] not in P2P_AUSGESETZT]
 
 
 # ---------------------------------------------------------------------------
@@ -826,7 +834,8 @@ def main() -> int:
 
     if args.list:
         for s in SCENARIOS:
-            print(f"{s['id']:22}  {s['group']:10}  {s['title']}")
+            mark = "  ausgesetzt" if s["id"] in P2P_AUSGESETZT else ""
+            print(f"{s['id']:22}  {s['group']:10}  {s['title']}{mark}")
         return 0
 
     fehl = brauche("bitcoind", "electrs")
@@ -846,6 +855,17 @@ def main() -> int:
     if not auswahl:
         print("Keine Szenarien gewählt.", file=sys.stderr)
         return 1
+    if not args.only:
+        ausgelassen = [
+            s["id"] for s in SCENARIOS
+            if s["id"] in P2P_AUSGESETZT and (not args.group or s["group"] == args.group)
+        ]
+        if ausgelassen:
+            print(
+                "Ausgesetzt (P2P keine Datenquelle, doc/issues/p2p-herkunft.md): "
+                + ", ".join(ausgelassen),
+                flush=True,
+            )
 
     WORK.mkdir(parents=True, exist_ok=True)
     lauf = Lauf(args, basis)

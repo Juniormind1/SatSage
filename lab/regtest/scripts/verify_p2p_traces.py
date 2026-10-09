@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Alle Lab-Traces ausschließlich über Bitcoin-P2P (kein Electrs, kein Core-get_tx).
 
-Voraussetzung: Lab-bitcoind mit P2P ``127.0.0.1:18444``, Compact Filter
-(``peerblockfilters=1`` + ``blockfilterindex=1``), Szenarien erzeugt.
+Nicht Teil der Testsuite. P2P ist keine ausreichende Datenquelle
+(``doc/issues/p2p-herkunft.md``, ``doc/test-inventar.md``). Nicht starten.
+Frühestens 2027-01-08 neu prüfen.
+
+Voraussetzung, falls die Sperre fällt: Lab-bitcoind mit P2P ``127.0.0.1:18444``,
+Compact Filter (``peerblockfilters=1`` + ``blockfilterindex=1``), Szenarien erzeugt.
 Electrs wird nicht benutzt.
 
 Suiten:

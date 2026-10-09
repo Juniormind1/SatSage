@@ -22,9 +22,9 @@ Protokoll [`../doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`](../doc/
 
 Protokoll [`../doc/testprotokoll-scan-abbruch-cache.md`](../doc/testprotokoll-scan-abbruch-cache.md). Runner und Proxy liegen im Labor (`lab/regtest/scripts/verify_scan_abort_cache.py`, `electrs_delay_proxy.py`), nicht hier. Windows: kein Docker starten.
 
-## P2P-only Lab-Traces
+## P2P nicht testen
 
-Protokoll [`../doc/testprotokoll-p2p-traces.md`](../doc/testprotokoll-p2p-traces.md). Runner `lab/regtest/scripts/verify_p2p_traces.py`. Kein Electrs, kein Core-get_tx.
+P2P ist keine ausreichende Datenquelle. `verify_p2p_traces.py` nicht starten. Im Scan-Abbruch `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen. Grund: [`../doc/issues/p2p-herkunft.md`](../doc/issues/p2p-herkunft.md). Suite: [`../doc/test-inventar.md`](../doc/test-inventar.md). Frühestens 2027-01-08.
 
 ## Commit und Push
 

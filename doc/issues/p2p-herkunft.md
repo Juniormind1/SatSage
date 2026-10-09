@@ -21,7 +21,7 @@ Ein Script-Nachlauf bis zur Ausgabehöhe würde SegWit-Vorgänger mit einem Bloc
 - Die P2P-Pille bleibt aus der Kopfzeile.
 - `BIP158_P2P=1` schaltet den Verkehr nicht wieder ein.
 
-Labor-Prüfer, die P2P absichtlich gegen den Regtest-Node fahren, sind von dieser Betriebssperre mit betroffen. Sie laufen erst wieder, wenn die Sperre fällt.
+Labor-Prüfer, die P2P absichtlich gegen den Regtest-Node fahren, sind von dieser Betriebssperre mit betroffen. Die Testsuite startet sie nicht: `verify_p2p_traces.py` sowie im Scan-Abbruch `Q-START-P2P` und `Q-START-KILL` (`doc/test-inventar.md`). Sie laufen erst wieder, wenn die Sperre fällt.
 
 ## Wann neu prüfen
 

@@ -145,18 +145,9 @@ python3 lab/regtest/scripts/verify_scan_abort_cache.py --group synthetic
 
 Windows: `py -3 lab\regtest\scripts\verify_scan_abort_cache.py`. Isolierte Caches unter `.data/abort-scan/` (nicht der GUI-Cache). Der Proxy lauscht auf `127.0.0.1:15001`. Labor muss schon laufen — der Prüfer startet Docker nicht.
 
-### P2P-only Traces (kein Electrs)
+### P2P-only Traces — nicht fahren
 
-Herkunft, Tx-Klassifikation und Sanktions-Hops nur über Compact Filter und Blöcke. Electrs und Core-`getrawtransaction` bleiben außen vor. Der Labor-Node braucht `peerblockfilters=1` und P2P `127.0.0.1:18444` (Docker mappt den Port). Start-Höhe 1, nicht Mainnet-481824.
-
-Protokoll: [`doc/testprotokoll-p2p-traces.md`](../../doc/testprotokoll-p2p-traces.md). Noch nicht Teil von Q6.
-
-```bash
-python3 lab/regtest/scripts/verify_p2p_traces.py
-python3 lab/regtest/scripts/verify_p2p_traces.py --suite origin --max-traces 8
-```
-
-Bestehende Nodes: `peerblockfilters=1` in die `bitcoin.conf`, bitcoind neu starten. Chain-Wipe ist dafür nicht nötig.
+P2P ist keine ausreichende Datenquelle (Herkunft, Haltefrist, Stichtag fehlen). `verify_p2p_traces.py` nicht starten. Der Harness und das Protokoll [`doc/testprotokoll-p2p-traces.md`](../../doc/testprotokoll-p2p-traces.md) bleiben liegen. Wiederaufnahme frühestens 2027-01-08, siehe [`doc/issues/p2p-herkunft.md`](../../doc/issues/p2p-herkunft.md) und [`doc/test-inventar.md`](../../doc/test-inventar.md). Nicht Teil von Q6.
 
 ### Core-Allowlist (harte Regel, jeder PR nach main)
 
