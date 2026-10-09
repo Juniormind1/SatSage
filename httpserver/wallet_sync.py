@@ -19,6 +19,7 @@ from core import wallets as wallets_mod
 from httpserver.empfang import (
     _merke_own_fulcrum_client,
     _schaerfe_empfang_nach_sync,
+    _schliesse_fulcrum_hintergrund,
 )
 
 LOGGER = logging.getLogger("satsage.server")
@@ -43,12 +44,7 @@ def _verwerfe_electrs_verbindungen(state: AppState) -> None:
         state._empfang_fulcrum = None
         state._empfang_public_fulcrum = None
     for client in (alt, alt_pub):
-        if client is None:
-            continue
-        try:
-            client.close()
-        except Exception:
-            pass
+        _schliesse_fulcrum_hintergrund(client)
     try:
         from core import wallet_watch
 

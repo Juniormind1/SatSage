@@ -27,6 +27,16 @@ from core import source as source_mod
 
 LOGGER = logging.getLogger("satsage.server")
 
+
+def _close_fulcrum_quiet(client) -> None:
+    """``close()`` an SOCKS/Tor nicht im Request-Thread."""
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        pass
+
 # Plattformen, die Node- und Indexer-Adressen per Prozess-Env vorgeben und
 # deren Datenquellen-Felder deshalb in der UI gesperrt sind.
 _NODE_MANAGED = frozenset(("start9", "umbrel"))
@@ -423,10 +433,11 @@ class AppState:
         for client in (alt, alt_pub):
             if client is None:
                 continue
-            try:
-                client.close()
-            except Exception:
-                pass
+            threading.Thread(
+                target=lambda c=client: _close_fulcrum_quiet(c),
+                name="satsage-fulcrum-close",
+                daemon=True,
+            ).start()
 
     def context_bereit(self) -> bool:
         return self._context_bereit.is_set()

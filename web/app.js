@@ -1022,6 +1022,19 @@ async function pruefePeersLeise() {
  * ein paralleler Check meldet dann fälschlich „nicht erreichbar“. Den letzten
  * positiven Stand behalten, bis der Scan durch ist.
  */
+function quelleEndpointSchluessel(q) {
+  const felder = (q && q.felder) || [];
+  if (!felder.length) return "";
+  const wert = (key) => {
+    const f = felder.find((x) => x && x.key === key);
+    return String(f?.value || "").trim();
+  };
+  return [
+    wert("FULCRUM_HOST"), wert("FULCRUM_TOR"), wert("FULCRUM_PORT"),
+    wert("FULCRUM_SSL"), wert("NODE_IP"), wert("RPCPORT"),
+  ].join("|");
+}
+
 function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
   behaltePositivBeiNegativ = false,
 } = {}) {
@@ -1053,6 +1066,10 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
     }
     if (neu.reachable == null) {
       if (alt.reachable == null && !(alt.peer_count > 0)) return neu;
+      // Onion → IP (oder anderer Host): alten „verbunden“-Stand nicht übernehmen.
+      const altEp = quelleEndpointSchluessel(alt);
+      const neuEp = quelleEndpointSchluessel(neu);
+      if (altEp && neuEp && altEp !== neuEp) return neu;
       return {
         ...neu,
         reachable: alt.reachable,
@@ -1067,8 +1084,12 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
         detail: neu.detail || alt.detail || "",
       };
     }
+    const altEpScan = quelleEndpointSchluessel(alt);
+    const neuEpScan = quelleEndpointSchluessel(neu);
+    const gleicherEndpoint = !altEpScan || !neuEpScan || altEpScan === neuEpScan;
     if (
       behaltePositivBeiNegativ
+      && gleicherEndpoint
       && neu.reachable === false
       && alt.reachable === true
     ) {

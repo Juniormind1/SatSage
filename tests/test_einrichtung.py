@@ -40,6 +40,14 @@ class TestVertragMitDerApi(unittest.TestCase):
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("teste Verbindung", de)
 
+    def test_uebernehmen_wird_wieder_aktiv(self):
+        """Nach Onion→IP bleibt der Knopf sonst tot, neue Änderungen gehen nicht."""
+        self.assertIn("speichern.isConnected", self.datenquellen_js)
+        self.assertIn("merkeOffeneQuellenFormulare", self.datenquellen_js)
+        self.assertIn("dataset.quelleKey", self.datenquellen_js)
+        self.assertIn("[data-quelle-key]", self.datenquellen_js)
+        self.assertIn("quelleEndpointSchluessel", self.js)
+
     def test_electrum_hat_einen_papierkorb(self):
         """Sonst bleibt eine Onion in der .env und der Node-Test startet Tor."""
         self.assertIn("verwerfeQuelle", self.datenquellen_js)

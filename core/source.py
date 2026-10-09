@@ -159,6 +159,31 @@ class SourceInfo:
         }
 
 
+def _quelle_endpoint_schluessel(obj: SourceInfo | dict) -> str:
+    """Host/Onion/Port/TLS aus den Formularfeldern — ohne Software-Label."""
+    if isinstance(obj, dict):
+        felder = obj.get("felder") or []
+        werte = {
+            str(f.get("key") or ""): str(f.get("value") or "").strip()
+            for f in felder
+            if isinstance(f, dict)
+        }
+    else:
+        werte = {
+            str(getattr(f, "key", "") or ""): str(getattr(f, "value", "") or "").strip()
+            for f in (getattr(obj, "felder", None) or [])
+        }
+    if not werte:
+        return ""
+    return "|".join(
+        werte.get(k, "")
+        for k in (
+            "FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_PORT", "FULCRUM_SSL",
+            "NODE_IP", "RPCPORT",
+        )
+    )
+
+
 def mergere_erreichbarkeit(
     frisch: list[SourceInfo],
     alt: list[dict] | None,
@@ -168,7 +193,8 @@ def mergere_erreichbarkeit(
 
     Damit ``GET /api/config`` (ohne Netzprobe) denselben Stand zeigen kann wie
     nach dem letzten ``?check=1`` — Browser-Reload muss Verbindungen nicht
-    optisch „neu aufbauen“.
+    optisch „neu aufbauen“. Wechselt der Endpoint (z. B. Onion → LAN-IP),
+    bleibt der alte Connect-Stand weg.
     """
     if not alt:
         return list(frisch)
@@ -196,6 +222,11 @@ def mergere_erreichbarkeit(
             )
             continue
         if q.reachable is not None:
+            out.append(q)
+            continue
+        alt_ep = _quelle_endpoint_schluessel(alt_q)
+        neu_ep = _quelle_endpoint_schluessel(q)
+        if alt_ep and neu_ep and alt_ep != neu_ep:
             out.append(q)
             continue
         hosts = list(alt_q.get("peer_hosts") or [])

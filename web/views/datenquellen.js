@@ -419,9 +419,20 @@ function quelleZeigtVerbindungsaufbau(quelle, quellen) {
   return true;
 }
 
+function merkeOffeneQuellenFormulare() {
+  const offen = new Set();
+  for (const form of document.querySelectorAll("#quellen-liste .quelle-formular")) {
+    if (form.hidden) continue;
+    const key = form.closest("[data-quelle-key]")?.dataset.quelleKey;
+    if (key) offen.add(key);
+  }
+  return offen;
+}
+
 function zeichneQuellen(quellen) {
   const behaelter = $("#quellen-liste");
   if (!behaelter) return;
+  const formularOffen = merkeOffeneQuellenFormulare();
   behaelter.replaceChildren();
   const liste = quellen || [];
 
@@ -429,6 +440,7 @@ function zeichneQuellen(quellen) {
     if (quelle.ausgeblendet) continue;
     const bridgeManaged = start9BridgeManaged(quelle);
     const block = document.createElement("div");
+    block.dataset.quelleKey = quelle.key || "";
     const zeile = document.createElement("div");
     zeile.className = "quelle-zeile";
     if (!quelle.configured) zeile.classList.add("nicht-konfiguriert");
@@ -482,6 +494,11 @@ function zeichneQuellen(quellen) {
         formular.hidden = !auf;
         stift.setAttribute("aria-expanded", String(auf));
       });
+      if (formularOffen.has(quelle.key)) {
+        formular.append(quellenFormular(quelle, formular));
+        formular.hidden = false;
+        stift.setAttribute("aria-expanded", "true");
+      }
       rechts.append(stift);
     }
 
@@ -991,7 +1008,8 @@ function quellenFormular(quelle, behaelter) {
       }
     } catch (fehler) {
       meldungsfeld.textContent = fehler.message;
-      speichern.disabled = false;
+    } finally {
+      if (speichern.isConnected) speichern.disabled = false;
     }
   });
 

@@ -14,6 +14,30 @@ import time
 #: Verbindungs-Timeout (~8 s) ab.
 MEMPOOL_NODE_PAUSE_S = 45.0
 
+
+def _schliesse_fulcrum_hintergrund(client) -> None:
+    """``close()`` an SOCKS/Tor darf den Aufrufer nicht blockieren."""
+    if client is None:
+        return
+
+    def _lauf() -> None:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=_lauf, name="satsage-fulcrum-close", daemon=True,
+    ).start()
+
+
+def _empfang_lock(state) -> threading.Lock:
+    lock = getattr(state, "_empfang_fulcrum_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+    return lock
+
 def _sortierung(query: dict) -> str:
     roh = (query.get("sort") or ["betrag"])[0]
     return roh if roh in ("betrag", "datum") else "betrag"
@@ -108,34 +132,44 @@ def _eigener_fulcrum_client(state: AppState):
     ):
         return None
 
-    lock = getattr(state, "_empfang_fulcrum_lock", None)
-    if lock is None:
-        lock = threading.Lock()
-        state._empfang_fulcrum_lock = lock
-
+    # Ping und Connect außerhalb des Locks: sonst wartet PUT /config/source
+    # (Onion→IP) auf einen hängenden Tor-Ping, und „Übernehmen“ bleibt tot.
+    lock = _empfang_lock(state)
     with lock:
         alt = getattr(state, "_empfang_fulcrum", None)
-        if alt is not None:
-            try:
-                alt.request("server.ping")
+
+    if alt is not None:
+        try:
+            alt.request("server.ping")
+            with lock:
+                noch = getattr(state, "_empfang_fulcrum", None) is alt
+            if noch:
                 _merke_own_fulcrum_client(state, alt)
                 return alt
-            except Exception:
-                try:
-                    alt.close()
-                except Exception:
-                    pass
-                state._empfang_fulcrum = None
-        try:
-            client = main._try_own_fulcrum_client(
-                state.args_namespace(), werte,
-            )
+            _schliesse_fulcrum_hintergrund(alt)
         except Exception:
-            return None
+            _schliesse_fulcrum_hintergrund(alt)
+            with lock:
+                if getattr(state, "_empfang_fulcrum", None) is alt:
+                    state._empfang_fulcrum = None
+
+    try:
+        client = main._try_own_fulcrum_client(
+            state.args_namespace(), werte,
+        )
+    except Exception:
+        return None
+
+    with lock:
+        jetzt = getattr(state, "_empfang_fulcrum", None)
+        if jetzt is not None:
+            if client is not None and client is not jetzt:
+                _schliesse_fulcrum_hintergrund(client)
+            return jetzt
         state._empfang_fulcrum = client
-        if client is not None:
-            _merke_own_fulcrum_client(state, client)
-        return client
+    if client is not None:
+        _merke_own_fulcrum_client(state, client)
+    return client
 
 def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
     """
@@ -156,32 +190,39 @@ def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
     if not source_mod.oeffentliche_electrum_erlaubt(werte):
         return None
 
-    lock = getattr(state, "_empfang_fulcrum_lock", None)
-    if lock is None:
-        lock = threading.Lock()
-        state._empfang_fulcrum_lock = lock
-
+    lock = _empfang_lock(state)
     with lock:
         alt = getattr(state, "_empfang_public_fulcrum", None)
-        if alt is not None:
-            try:
-                alt.request("server.ping")
-                return alt
-            except Exception:
-                try:
-                    alt.close()
-                except Exception:
-                    pass
-                state._empfang_public_fulcrum = None
+
+    if alt is not None:
         try:
-            args = state.args_namespace()
-            pool = main._try_public_onion_fulcrum(
-                args, werte, interactive=False,
-            )
-            if pool is None:
-                pool = main._setup_public_clearnet_fulcrum(args, werte)
+            alt.request("server.ping")
+            with lock:
+                if getattr(state, "_empfang_public_fulcrum", None) is alt:
+                    return alt
+            _schliesse_fulcrum_hintergrund(alt)
         except Exception:
-            return None
+            _schliesse_fulcrum_hintergrund(alt)
+            with lock:
+                if getattr(state, "_empfang_public_fulcrum", None) is alt:
+                    state._empfang_public_fulcrum = None
+
+    try:
+        args = state.args_namespace()
+        pool = main._try_public_onion_fulcrum(
+            args, werte, interactive=False,
+        )
+        if pool is None:
+            pool = main._setup_public_clearnet_fulcrum(args, werte)
+    except Exception:
+        return None
+
+    with lock:
+        jetzt = getattr(state, "_empfang_public_fulcrum", None)
+        if jetzt is not None:
+            if pool is not None and pool is not jetzt:
+                _schliesse_fulcrum_hintergrund(pool)
+            return jetzt
         state._empfang_public_fulcrum = pool
         return pool
 

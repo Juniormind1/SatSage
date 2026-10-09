@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · Übernehmen:** IP eintragen und Onion löschen speichert die leere Onion wirklich weg. Der Verbindungsversuch hängt nicht mehr hinter dem alten Tor-Ping, das Formular bleibt offen, und **Übernehmen** wird wieder aktiv — weitere Änderungen gehen ohne Neu-Laden.
 - **Steuerjahr · Dotplot:** Endet „vervollständigen“ (oder „Scan neu“ an demselben UTXO), verschwindet der rote Ring, sobald der Lauf fertig ist. Der Punkt rückt mit dem neuen Server-Stand; das gezoomte Fenster bleibt. Bisher blieb der Ring bis zum nächsten Neuzeichnen des Plots.
 - **Specter-Plugin · Navigation:** In der Plugin-Leiste stehen nur noch Oberfläche und Einstellungen. Übersicht, Wallets, die Plaintext-Analyse und `context.json` sind aus der Navigation und von der Startseite. Die Adressen bleiben.
 - **Specter-Plugin · Icon:** Seitenleiste und Plugin-Kopf zeigen die Pfeifen-Marke (helle Platte), nicht mehr den Ausschnitt aus dem dunklen Logo.

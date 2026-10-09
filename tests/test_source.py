@@ -832,6 +832,33 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(nach["own_fulcrum"].reachable)
         self.assertEqual(nach["own_fulcrum"].peer_count, 1)
 
+    def test_mergere_erreichbarkeit_verwirft_stand_nach_hostwechsel(self):
+        """Onion → LAN-IP: alter „verbunden“-Stand darf nicht am neuen Host kleben."""
+        onion = "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz.onion"
+        frisch = describe_sources({
+            "FULCRUM_HOST": "192.0.2.50",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        })
+        alt_quellen = describe_sources({
+            "FULCRUM_TOR": onion,
+            "FULCRUM_PORT": "50002",
+            "FULCRUM_SSL": "true",
+        })
+        alt = []
+        for q in alt_quellen:
+            d = q.as_dict()
+            if q.key == "own_fulcrum":
+                d["reachable"] = True
+                d["peer_count"] = 1
+                d["peer_hosts"] = [f"{onion}:50002"]
+            alt.append(d)
+        gemerged = mergere_erreichbarkeit(frisch, alt)
+        nach = {q.key: q for q in gemerged}
+        self.assertTrue(nach["own_fulcrum"].configured)
+        self.assertIsNone(nach["own_fulcrum"].reachable)
+        self.assertEqual(nach["own_fulcrum"].peer_count, 0)
+
 
 class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
     """Nach Opt-in: Clearnet zuerst; Onions/Tor nur wenn Clearnet fehlt."""

@@ -1048,6 +1048,29 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_PORT"], "50001")
         self.assertEqual(werte["FULCRUM_SSL"], "false")
 
+    def test_leere_onion_wird_geloescht_wenn_ip_kommt(self):
+        """Formular: IP eintragen, Onion leeren — FULCRUM_TOR muss weg."""
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad)
+            + "\nFULCRUM_TOR=abc.onion\nFULCRUM_PORT=50002\nFULCRUM_SSL=true\n",
+        )
+        status, koerper = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "FULCRUM_HOST": "192.0.2.50",
+                "FULCRUM_TOR": "",
+                "FULCRUM_PORT": "50001",
+                "FULCRUM_SSL": "false",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(koerper["saved"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte["FULCRUM_HOST"], "192.0.2.50")
+        self.assertNotIn("FULCRUM_TOR", werte)
+        self.assertEqual(werte.get("FULCRUM_PORT"), "50001")
+
     def test_port_speichern_loescht_stale_tor_port(self):
         """UI-Port muss Tor-Endpoint steuern — altes FULCRUM_TOR_PORT weg."""
         write_env_scrambled(
