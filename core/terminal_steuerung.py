@@ -25,6 +25,11 @@ _HTTPD_SHUTDOWN_TIMEOUT_S = 1.0
 
 _HARTES_ENDE_ATEXIT_GESETZT = False
 
+#: Aktive ANSI-Fußleiste + Tees — Taste 3 muss die Scrollregion lösen,
+#: bevor noch eine Log-Zeile die Leiste neu zeichnet.
+_aktive_fussleiste: Fussleiste | None = None
+_aktive_tees: tuple[Any, ...] = ()
+
 
 LOG_PUFFER_MAX = 400
 LOG_PANE_ZEILEN = 18
@@ -206,6 +211,51 @@ def _ansi_ok(stream: TextIO) -> bool:
     return True
 
 
+def _ansi_terminal_zuruecksetzen(stream: TextIO) -> None:
+    """Scrollregion, Attribute und Cursor — sonst bleibt die Konsole kaputt."""
+    try:
+        hoehe = shutil.get_terminal_size(fallback=(80, 24)).lines
+        start = max(1, hoehe - FUSS_ZEILEN + 1)
+        stream.write("\033[r")
+        stream.write("\033[0m")
+        stream.write("\033[?25h")
+        for i in range(FUSS_ZEILEN):
+            stream.write(f"\033[{start + i};1H\033[2K")
+        stream.write(f"\033[{hoehe};1H\n")
+        stream.flush()
+    except Exception:
+        pass
+
+
+def _loese_terminal_fuss() -> None:
+    """Fußleiste und Log-Spiegel aus, bevor nach Taste 3 noch etwas druckt."""
+    global _aktive_fussleiste, _aktive_tees
+    for tee in _aktive_tees:
+        try:
+            tee.setze_nach_zeile(None)
+        except Exception:
+            pass
+    fuss = _aktive_fussleiste
+    if fuss is not None:
+        try:
+            fuss.deaktivieren()
+        except Exception:
+            pass
+    for tee in _aktive_tees:
+        try:
+            tee.setze_fussleiste(None)
+        except Exception:
+            pass
+    _aktive_fussleiste = None
+    _aktive_tees = ()
+    try:
+        from core.jobs import setze_log_spiegel
+
+        setze_log_spiegel(None)
+    except Exception:
+        pass
+
+
 class Fussleiste:
     """
     Feste Menüzeilen am unteren Rand per ANSI-Scrollregion.
@@ -240,16 +290,12 @@ class Fussleiste:
         return True
 
     def deaktivieren(self) -> None:
-        if not self._aktiv:
-            return
         with self._lock:
-            self._stream.write("\033[r")  # Scrollregion zurücksetzen
-            # Cursor unter die Fußzeile / ans Ende
-            hoehe = shutil.get_terminal_size(fallback=(80, 24)).lines
-            self._stream.write(f"\033[{hoehe};1H\n")
-            self._stream.flush()
+            if not self._aktiv:
+                return
             self._aktiv = False
             self._cursor_auf_menue = False
+            _ansi_terminal_zuruecksetzen(self._stream)
 
     def setze_hinweis(self, text: str) -> None:
         self._hinweis = text or "Taste 1–3"
@@ -281,6 +327,8 @@ class Fussleiste:
         ):
             return
         with self._lock:
+            if not self._aktiv:
+                return
             hoehe = shutil.get_terminal_size(fallback=(80, 24)).lines
             breite = shutil.get_terminal_size(fallback=(80, 24)).columns
             start = max(1, hoehe - FUSS_ZEILEN + 1)
@@ -391,6 +439,14 @@ def _zeige_status(state: Any, puffer: LogPuffer) -> None:
 
 def _hartes_ende_atexit() -> None:
     """Überspringt atexit-Joins von ThreadPoolExecutor-Workern in connect()."""
+    try:
+        _loese_terminal_fuss()
+    except Exception:
+        pass
+    try:
+        _ansi_terminal_zuruecksetzen(sys.__stdout__)
+    except Exception:
+        pass
     os._exit(0)
 
 
@@ -418,6 +474,7 @@ def _reset_hartes_prozessende_fuer_tests() -> None:
         atexit.unregister(_hartes_ende_atexit)
     except Exception:
         pass
+    _loese_terminal_fuss()
 
 
 def httpd_stopp_ohne_join(httpd: Any, *, timeout_s: float = _HTTPD_SHUTDOWN_TIMEOUT_S) -> None:
@@ -470,6 +527,7 @@ def _beende_server(state: Any, httpd: Any) -> None:
         stoppe_oeffentliche_electrum_suche(prozess_ende=True)
     except Exception:
         pass
+    _loese_terminal_fuss()
     plane_hartes_prozessende()
     laufend = _jobs_laufend(state)
     for job in laufend:
@@ -596,6 +654,7 @@ def lauf_steuerung(
     Mit ANSI: feste Fußzeile + nicht-blockierende Tasten.
     Fallback: blockierendes ``input`` wie zuvor.
     """
+    global _aktive_fussleiste, _aktive_tees
     from core.jobs import setze_log_spiegel
 
     puffer = LogPuffer()
@@ -634,6 +693,8 @@ def lauf_steuerung(
 
         if ansi and fuss_kandidat.aktivieren():
             fuss = fuss_kandidat
+            _aktive_fussleiste = fuss
+            _aktive_tees = (tee_out, tee_err)
             tee_out.setze_fussleiste(fuss)
             tee_err.setze_fussleiste(fuss)
             tee_out.setze_nach_zeile(lambda: fuss.zeichnen() if fuss else None)
@@ -649,9 +710,7 @@ def lauf_steuerung(
         _beende_server(state, httpd)
         raise
     finally:
-        if fuss is not None:
-            fuss.deaktivieren()
-        setze_log_spiegel(None)
+        _loese_terminal_fuss()
         sys.stdout = original_out  # type: ignore[assignment]
         sys.stderr = original_err  # type: ignore[assignment]
 

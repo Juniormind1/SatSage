@@ -1172,6 +1172,28 @@ class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
         self.assertIsNone(out["public_onion"].reachable)
         self.assertTrue(any("eigener Indexer" in z for z in logs), logs)
 
+    def test_pruefe_oeffentliche_schweigt_bei_prozess_ende(self):
+        from core import outbound_policy as policy
+        from core import source as source_mod
+        from core.source import SourceInfo, PRIVACY_MEDIUM
+
+        self.addCleanup(policy._reset_oeffentliche_electrum_suche_fuer_tests)
+        policy.stoppe_oeffentliche_electrum_suche(prozess_ende=True)
+        gefunden = {
+            "clearnet": SourceInfo(
+                rank=6, key="clearnet", name="Clear", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+                peer_count=1, peer_hosts=["e.example:50002"],
+            ),
+        }
+        logs: list[str] = []
+        source_mod._pruefe_oeffentliche_electrum(
+            gefunden, {"OEFFENTLICHE_ELECTRUM": "1"},
+            timeout=1, on_log=logs.append,
+        )
+        self.assertFalse(any("eigener Indexer" in z for z in logs), logs)
+        self.assertFalse(any("Electrum-Suche beendet" in z for z in logs), logs)
+
 
 if __name__ == "__main__":
     unittest.main()

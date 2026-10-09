@@ -15,6 +15,7 @@ import core.chain_sources as chain_sources
 from core.electrum_servers import ELECTRUM_SERVERS_URL, splitte_electrum_server
 from core.outbound_policy import (
     futures_bis_oeffentliche_electrum_stopp,
+    melde_oeffentliche_electrum_abbruch,
     oeffentliche_electrum_session_aktiv,
     oeffentliche_electrum_suche_abgebrochen,
     setze_oeffentliche_electrum_session,
@@ -1280,7 +1281,7 @@ def _pruefe_oeffentliche_electrum(
             on_log(text)
 
     if oeffentliche_electrum_suche_abgebrochen():
-        log("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+        melde_oeffentliche_electrum_abbruch(log)
         return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
 
     log("Prüfe öffentliche Electrum-Server…")
@@ -1304,13 +1305,13 @@ def _pruefe_oeffentliche_electrum(
             tor_proxy=None, on_log=log,
         )
         if oeffentliche_electrum_suche_abgebrochen():
-            log("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+            melde_oeffentliche_electrum_abbruch(log)
             return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
 
     onions = _oeffentliche_onion_endpunkte(values)
     onion_hosts: list[str] = []
     if oeffentliche_electrum_suche_abgebrochen():
-        log("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+        melde_oeffentliche_electrum_abbruch(log)
         return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
     if clear_hosts:
         # Clearnet reicht — Onions weder proben noch als „verbunden“ führen,
@@ -1339,10 +1340,7 @@ def _pruefe_oeffentliche_electrum(
                 tor_proxy=tor_proxy, on_log=log,
             )
             if oeffentliche_electrum_suche_abgebrochen():
-                log(
-                    "Öffentliche Electrum-Suche beendet — "
-                    "eigener Indexer verbunden."
-                )
+                melde_oeffentliche_electrum_abbruch(log)
                 return _oeffentliche_electrum_als_ungenutzt(
                     gefunden, on_log=None,
                 )

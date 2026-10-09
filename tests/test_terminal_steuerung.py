@@ -15,6 +15,7 @@ from core.terminal_steuerung import (
     LogPuffer,
     StdoutTee,
     _job_kurzzeile,
+    _loese_terminal_fuss,
     _reset_hartes_prozessende_fuer_tests,
     format_job_log_zeile,
     httpd_stopp_ohne_join,
@@ -183,6 +184,10 @@ class TestHttpdStoppOhneJoin(unittest.TestCase):
 
 
 class TestFussleiste(unittest.TestCase):
+    def tearDown(self):
+        _loese_terminal_fuss()
+        _reset_hartes_prozessende_fuer_tests()
+
     def test_fuss_zeilen_enthalten_menue(self):
         state = SimpleNamespace(
             jobs=SimpleNamespace(list=lambda: []),
@@ -217,6 +222,45 @@ class TestFussleiste(unittest.TestCase):
         stream = io.StringIO()  # kein TTY
         fuss = Fussleiste(stream, "http://127.0.0.1:8730/?t=x", state)
         self.assertFalse(fuss.aktivieren())
+
+    def test_deaktivieren_loescht_fuss_und_scrollregion(self):
+        state = SimpleNamespace(jobs=SimpleNamespace(list=lambda: []), entries=[])
+        stream = io.StringIO()
+        fuss = Fussleiste(stream, "http://127.0.0.1:8730/?t=x", state)
+        fuss._aktiv = True
+        fuss.deaktivieren()
+        text = stream.getvalue()
+        self.assertIn("\033[r", text)
+        self.assertIn("\033[2K", text)
+        self.assertIn("\033[?25h", text)
+        self.assertFalse(fuss._aktiv)
+        stream.truncate(0)
+        stream.seek(0)
+        fuss.zeichnen(erzwingen=True)
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_beende_server_loest_fuss_vor_weiterem_log(self):
+        from core import terminal_steuerung as ts
+
+        state = SimpleNamespace(
+            jobs=SimpleNamespace(list=lambda: []),
+            entries=[],
+        )
+        stream = io.StringIO()
+        fuss = Fussleiste(stream, "http://127.0.0.1:8730/?t=x", state)
+        fuss._aktiv = True
+        tee = StdoutTee(stream, LogPuffer())
+        tee.setze_fussleiste(fuss)
+        tee.setze_nach_zeile(lambda: fuss.zeichnen(erzwingen=True))
+        ts._aktive_fussleiste = fuss
+        ts._aktive_tees = (tee,)
+        httpd = MagicMock()
+        with patch.object(ts, "plane_hartes_prozessende"):
+            ts._beende_server(state, httpd)
+        self.assertFalse(fuss._aktiv)
+        self.assertIsNone(ts._aktive_fussleiste)
+        self.assertIsNone(tee._fuss)
+        self.assertIsNone(tee._nach_zeile)
 
 
 class TestMainCliFlag(unittest.TestCase):

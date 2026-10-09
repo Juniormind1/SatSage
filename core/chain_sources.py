@@ -458,6 +458,10 @@ def _print_public_onion_probe_result(
     client: object | None,
     error: str | None,
 ) -> None:
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        return
     route = _format_fulcrum_route(use_ssl, tor_proxy)
     label = f"[{index}] öffentlicher Server"
     target = f"{label}: {host}:{port} ({route})"
@@ -678,13 +682,12 @@ def _setup_public_onion_rotation(
 
     from core.outbound_policy import (
         futures_bis_oeffentliche_electrum_stopp,
+        melde_oeffentliche_electrum_abbruch,
         oeffentliche_electrum_suche_abgebrochen,
     )
 
     if oeffentliche_electrum_suche_abgebrochen():
-        _log_quelle(
-            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
-        )
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
 
     tor_proxy = _require_tor_proxy(env)
@@ -749,9 +752,7 @@ def _setup_public_onion_rotation(
                 client.close()
             except Exception:
                 pass
-        _log_quelle(
-            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
-        )
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
 
     reachable_clients = [
@@ -978,12 +979,13 @@ def _try_public_onion_fulcrum(
     """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt."""
     if not _load_public_onion_endpoints(args, env):
         return None
-    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+    from core.outbound_policy import (
+        melde_oeffentliche_electrum_abbruch,
+        oeffentliche_electrum_suche_abgebrochen,
+    )
 
     if oeffentliche_electrum_suche_abgebrochen():
-        _log_quelle(
-            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
-        )
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
     try:
         return _setup_public_onion_rotation(args, env, interactive=interactive)
@@ -1124,12 +1126,13 @@ def _eigen_nach_abbruch_oeffentlicher_suche(args, env: dict[str, str]):
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     """Öffentliche Fulcrum-Server über Clearnet (vor öffentlichem Onion)."""
     from core.fulcrum_client import RotatingFulcrumPool
-    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+    from core.outbound_policy import (
+        melde_oeffentliche_electrum_abbruch,
+        oeffentliche_electrum_suche_abgebrochen,
+    )
 
     if oeffentliche_electrum_suche_abgebrochen():
-        _log_quelle(
-            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
-        )
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
 
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
@@ -1145,9 +1148,7 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
                 pool.close()
             except Exception:
                 pass
-        _log_quelle(
-            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
-        )
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
     if pool is None:
         _log_quelle("→ kein Clearnet-Electrum für Wallet-Zugriff gefunden")

@@ -75,6 +75,25 @@ def oeffentliche_electrum_suche_abgebrochen() -> bool:
     )
 
 
+def oeffentliche_electrum_suche_prozess_ende() -> bool:
+    """True nach Taste 3 / Strg+C — kein weiteres Probe-Log."""
+    return _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set()
+
+
+def melde_oeffentliche_electrum_abbruch(log_fn=None) -> None:
+    """
+    Loggt den Abbruch nur, wenn ein privater Indexer die Suche beendet.
+
+    Beim Prozess-Ende (Taste 3) bleibt es still — sonst steht nach
+    „Beendet.“ noch „eigener Indexer verbunden“ in der Konsole.
+    """
+    if _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set():
+        return
+    if log_fn is None:
+        return
+    log_fn("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+
+
 def futures_bis_oeffentliche_electrum_stopp(futures, *, poll_s: float = 0.2):
     """
     Liefert fertige Futures, bis alle durch sind oder die öffentliche

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import fulcrum
 
@@ -49,6 +49,57 @@ class TestFulcrumRequestRetry(unittest.TestCase):
         self.assertEqual(client.handshake()[0], "/libbitcoin:4.0.0/")
         self.assertEqual(client.request("server.version"), ["/libbitcoin:4.0.0/", "1.4"])
         self.assertEqual(client._request_once.call_count, 1)
+
+    def test_nicht_verbunden_wird_neu_verbunden(self):
+        client = fulcrum.FulcrumClient("127.0.0.1", 50001, use_ssl=False, timeout=1)
+        client._handshaked = True
+        n = {"i": 0}
+
+        def once(method, params=None):
+            n["i"] += 1
+            if n["i"] < 2:
+                raise RuntimeError("Fulcrum-Client nicht verbunden")
+            return []
+
+        client._request_once = once  # type: ignore[method-assign]
+        client.connect = MagicMock()
+        client.close = MagicMock()
+        self.assertEqual(
+            client.request("blockchain.scripthash.get_history", ["00"]),
+            [],
+        )
+        self.assertEqual(n["i"], 2)
+        client.connect.assert_called()
+
+    def test_nicht_verbunden_bei_abbruch_cancelled(self):
+        from core.jobs import Cancelled
+
+        client = fulcrum.FulcrumClient("127.0.0.1", 50001, use_ssl=False, timeout=1)
+        client._handshaked = True
+        client._request_once = MagicMock(
+            side_effect=RuntimeError("Fulcrum-Client nicht verbunden"),
+        )
+        client.connect = MagicMock()
+        client.close = MagicMock()
+        with patch("display.is_list_abort_requested", return_value=True):
+            with self.assertRaises(Cancelled):
+                client.request("blockchain.scripthash.get_history", ["00"])
+        client.connect.assert_not_called()
+
+    def test_rotation_nimmt_naechsten_wenn_nicht_verbunden(self):
+        tot = MagicMock()
+        tot.request.side_effect = RuntimeError("Fulcrum-Client nicht verbunden")
+        tot.close = MagicMock()
+        tot.connect = MagicMock()
+        lebend = MagicMock()
+        lebend.request.return_value = [{"tx_hash": "ab", "height": 1}]
+        pool = fulcrum.RotatingFulcrumPool([tot, lebend])
+        self.assertEqual(
+            pool.request("blockchain.scripthash.get_history", ["00"]),
+            [{"tx_hash": "ab", "height": 1}],
+        )
+        tot.close.assert_called()
+        lebend.request.assert_called()
 
 
 class TestNotifySessionTimeout(unittest.TestCase):
