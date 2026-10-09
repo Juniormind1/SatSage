@@ -1445,6 +1445,9 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.addCleanup(
             lambda: server.source_mod.setze_oeffentliche_electrum_session(False)
         )
+        from core.outbound_policy import _reset_oeffentliche_electrum_suche_fuer_tests
+
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
         self.state.sources_last = [
             {
                 "key": "clearnet",
@@ -1486,6 +1489,9 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             or nach["clearnet"]["reachable"] is False
             or int(nach["clearnet"].get("peer_count") or 0) == 0
         )
+        from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+        self.assertTrue(oeffentliche_electrum_suche_abgebrochen())
 
     def test_source_status_streamt_log_zeilen(self):
         """Die Oberfläche soll Zeilen sehen, bevor die Prüfung fertig ist."""

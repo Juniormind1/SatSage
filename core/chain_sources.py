@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -338,6 +338,10 @@ def _probe_public_onion_endpoint(
     tor_proxy: tuple[str, int],
 ) -> tuple[int, object | None, str | None]:
     from core.fulcrum_client import FULCRUM_ONION_TIMEOUT, connect_fulcrum
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        return index, None, "abgebrochen"
 
     client, error = connect_fulcrum(
         host,
@@ -672,6 +676,17 @@ def _setup_public_onion_rotation(
             "Nutze check_fulcrum_tor.py --onion-list-only für Vorschläge."
         )
 
+    from core.outbound_policy import (
+        futures_bis_oeffentliche_electrum_stopp,
+        oeffentliche_electrum_suche_abgebrochen,
+    )
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        _log_quelle(
+            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
+        )
+        return None
+
     tor_proxy = _require_tor_proxy(env)
     workers = min(PUBLIC_ONION_PROBE_WORKERS, len(endpoints))
     print(
@@ -686,7 +701,9 @@ def _setup_public_onion_rotation(
         for index, host, port, use_ssl in endpoints
     }
     reachable_by_index: dict[int, object] = {}
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
         futures = {
             executor.submit(
                 _probe_public_onion_endpoint,
@@ -698,13 +715,20 @@ def _setup_public_onion_rotation(
             ): index
             for index, host, port, use_ssl in endpoints
         }
-        for future in as_completed(futures):
+        for future in futures_bis_oeffentliche_electrum_stopp(futures):
             index = futures[future]
             host, port, use_ssl = endpoint_by_index[index]
             try:
                 _index, client, error = future.result()
             except Exception as exc:
                 client, error = None, str(exc)
+            if oeffentliche_electrum_suche_abgebrochen():
+                if client:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                break
             _print_public_onion_probe_result(
                 index,
                 host,
@@ -716,6 +740,19 @@ def _setup_public_onion_rotation(
             )
             if client:
                 reachable_by_index[index] = client
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        for client in reachable_by_index.values():
+            try:
+                client.close()
+            except Exception:
+                pass
+        _log_quelle(
+            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
+        )
+        return None
 
     reachable_clients = [
         reachable_by_index[index]
@@ -941,6 +978,13 @@ def _try_public_onion_fulcrum(
     """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt."""
     if not _load_public_onion_endpoints(args, env):
         return None
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        _log_quelle(
+            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
+        )
+        return None
     try:
         return _setup_public_onion_rotation(args, env, interactive=interactive)
     except SystemExit as exc:
@@ -1068,9 +1112,25 @@ def _nach_oeffentlichem_onion_latenz(
     return "fulcrum", pool
 
 
+def _eigen_nach_abbruch_oeffentlicher_suche(args, env: dict[str, str]):
+    """Privater Indexer kam während der öffentlichen Suche — den nehmen."""
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if not oeffentliche_electrum_suche_abgebrochen():
+        return None
+    return _try_own_fulcrum_client(args, env)
+
+
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     """Öffentliche Fulcrum-Server über Clearnet (vor öffentlichem Onion)."""
     from core.fulcrum_client import RotatingFulcrumPool
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        _log_quelle(
+            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
+        )
+        return None
 
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
     # letzte Probe, während Clearnet nur nach stdout schreibt.
@@ -1078,7 +1138,17 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     # Sanctions-Pool in core.sanctions_pool; lazy, kein Top-Level-Zyklus.
     from core.sanctions_pool import resolve_sanctions_clearnet_pool
 
-    pool, _from_cache = resolve_sanctions_clearnet_pool(env)
+    pool, _from_cache = resolve_sanctions_clearnet_pool(env, abbrechbar=True)
+    if oeffentliche_electrum_suche_abgebrochen():
+        if pool is not None:
+            try:
+                pool.close()
+            except Exception:
+                pass
+        _log_quelle(
+            "Öffentliche Electrum-Suche beendet — eigener Indexer verbunden."
+        )
+        return None
     if pool is None:
         _log_quelle("→ kein Clearnet-Electrum für Wallet-Zugriff gefunden")
         return None
@@ -1149,6 +1219,13 @@ def _try_data_source_priority_chain(
     pool = _setup_public_clearnet_fulcrum(args, env)
     if pool:
         return "fulcrum", pool, None
+    eigen = _eigen_nach_abbruch_oeffentlicher_suche(args, env)
+    if eigen:
+        return "fulcrum", eigen, None
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        return None
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
@@ -1203,6 +1280,13 @@ def _try_public_electrum_fuer_verlauf(
             "(Privatsphäre mäßig)."
         )
         return "fulcrum", pool
+    eigen = _eigen_nach_abbruch_oeffentlicher_suche(args, env)
+    if eigen:
+        return "fulcrum", eigen
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        return None
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:

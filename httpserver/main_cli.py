@@ -195,11 +195,20 @@ def _http_loop_bis_strg_c(httpd) -> None:
         _http_debug_log("KeyboardInterrupt in main keep-alive")
         stop.set()
         try:
-            httpd.shutdown()
+            from core.outbound_policy import stoppe_oeffentliche_electrum_suche
+
+            stoppe_oeffentliche_electrum_suche(prozess_ende=True)
         except Exception:
             pass
+        from core.terminal_steuerung import (
+            httpd_stopp_ohne_join,
+            plane_hartes_prozessende,
+        )
+
+        plane_hartes_prozessende()
+        httpd_stopp_ohne_join(httpd)
         if http_thread is not None:
-            http_thread.join(timeout=5.0)
+            http_thread.join(timeout=1.0)
 
 
 def main_cli(argv=None) -> int:
@@ -334,10 +343,9 @@ def main_cli(argv=None) -> int:
             )
         finally:
             stop_http.set()
-            try:
-                httpd.shutdown()
-            except Exception:
-                pass
+            from core.terminal_steuerung import httpd_stopp_ohne_join
+
+            httpd_stopp_ohne_join(httpd)
             _splash_schliessen()
             try:
                 gui_session_mod.loesche_session(session_pfad)

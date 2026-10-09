@@ -111,6 +111,8 @@ def _print_sanctions_clearnet_pool(pool) -> None:
 
 def resolve_sanctions_clearnet_pool(
     env: dict[str, str],
+    *,
+    abbrechbar: bool = False,
 ) -> tuple[object | None, bool]:
     """
     Mehrere schnelle Clearnet-Fulcrum-Server für OFAC-Listenabfragen.
@@ -201,7 +203,19 @@ def resolve_sanctions_clearnet_pool(
         for host, port, use_ssl in targets
     ]
     try:
-        for future in as_completed(futures):
+        from core.outbound_policy import (
+            futures_bis_oeffentliche_electrum_stopp,
+            oeffentliche_electrum_suche_abgebrochen,
+        )
+
+        fertig = (
+            futures_bis_oeffentliche_electrum_stopp(futures)
+            if abbrechbar
+            else as_completed(futures)
+        )
+        for future in fertig:
+            if abbrechbar and oeffentliche_electrum_suche_abgebrochen():
+                break
             try:
                 probe = future.result()
             except Exception:
@@ -214,6 +228,17 @@ def resolve_sanctions_clearnet_pool(
                 break
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+
+    if abbrechbar:
+        from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+        if oeffentliche_electrum_suche_abgebrochen():
+            for client, _lat in hits:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+            return None, False
 
     unique_hits = _dedupe_clearnet_fulcrum_hits(hits)[:SANCTIONS_CLEARNET_MAX_SERVERS]
     if not unique_hits:

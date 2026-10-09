@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import ssl
+import threading
 import warnings
 from urllib.parse import urlparse
 
@@ -21,6 +22,11 @@ class OutboundPolicyError(ValueError):
 #: Gilt nur für den laufenden Prozess — nach Server-Neustart wieder aus.
 _SESSION_OEFFENTLICHE_ELECTRUM = False
 
+#: Laufende öffentliche Electrum-Probes (Clearnet/Onion-Stichprobe,
+#: Wallet-Clearnet-Pool, Onion-Rotation) — nicht der Sanktions-Pool.
+_OEFFENTLICHE_ELECTRUM_STOP = threading.Event()
+_OEFFENTLICHE_ELECTRUM_PROZESS_ENDE = threading.Event()
+
 
 def oeffentliche_electrum_session_aktiv() -> bool:
     """True wenn diese Prozess-Sitzung öffentliche Electrum freigegeben hat."""
@@ -31,6 +37,8 @@ def setze_oeffentliche_electrum_session(erlaubt: bool) -> None:
     """Sitzungs-Freigabe setzen (kein Schreiben in die .env)."""
     global _SESSION_OEFFENTLICHE_ELECTRUM
     _SESSION_OEFFENTLICHE_ELECTRUM = bool(erlaubt)
+    if erlaubt:
+        erlaube_oeffentliche_electrum_suche()
 
 
 def widerrufe_oeffentliche_electrum_freigabe() -> bool:
@@ -39,6 +47,63 @@ def widerrufe_oeffentliche_electrum_freigabe() -> bool:
         return False
     setze_oeffentliche_electrum_session(False)
     return True
+
+
+def stoppe_oeffentliche_electrum_suche(*, prozess_ende: bool = False) -> None:
+    """
+    Bricht laufende öffentliche Electrum-Probes ab.
+
+    Aufruf sobald der eigene Indexer verbunden ist, und beim Server-Ende
+    (Taste 3 / Strg+C) — sonst wartet ``httpd.shutdown`` auf die Probe.
+    """
+    _OEFFENTLICHE_ELECTRUM_STOP.set()
+    if prozess_ende:
+        _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.set()
+
+
+def erlaube_oeffentliche_electrum_suche() -> None:
+    """Stopp lösen — Nutzer hat öffentliche Electrum erneut bestätigt."""
+    if not _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set():
+        _OEFFENTLICHE_ELECTRUM_STOP.clear()
+
+
+def oeffentliche_electrum_suche_abgebrochen() -> bool:
+    """True, wenn öffentliche Wallet-Probes sofort enden sollen."""
+    return (
+        _OEFFENTLICHE_ELECTRUM_STOP.is_set()
+        or _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set()
+    )
+
+
+def futures_bis_oeffentliche_electrum_stopp(futures, *, poll_s: float = 0.2):
+    """
+    Liefert fertige Futures, bis alle durch sind oder die öffentliche
+    Suche gestoppt wurde (privater Indexer / Job-Abbruch / Prozess-Ende).
+    """
+    from concurrent.futures import FIRST_COMPLETED, wait
+
+    pending = set(futures)
+    while pending:
+        if oeffentliche_electrum_suche_abgebrochen():
+            return
+        try:
+            from core.jobs import job_abgebrochen
+
+            if job_abgebrochen():
+                return
+        except Exception:
+            pass
+        done, pending = wait(
+            pending, timeout=max(0.05, float(poll_s)), return_when=FIRST_COMPLETED,
+        )
+        for fut in done:
+            yield fut
+
+
+def _reset_oeffentliche_electrum_suche_fuer_tests() -> None:
+    """Nur Tests: Stopp-Flags zurücksetzen."""
+    _OEFFENTLICHE_ELECTRUM_STOP.clear()
+    _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.clear()
 
 
 def _truthy(value: object) -> bool:

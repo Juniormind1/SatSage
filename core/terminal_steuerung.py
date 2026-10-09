@@ -7,6 +7,7 @@ Job-Log (wie im Web-Log) wird parallel nach stdout gespiegelt.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import sys
@@ -16,6 +17,13 @@ import webbrowser
 from collections import deque
 from datetime import datetime
 from typing import Any, TextIO
+
+#: ``httpd.shutdown()`` darf den Menü-Thread nicht blockieren (Windows:
+#: ``serve_forever`` wacht erst am ``poll_interval`` auf; Request-Threads
+#: können in Socket-Timeouts stecken).
+_HTTPD_SHUTDOWN_TIMEOUT_S = 1.0
+
+_HARTES_ENDE_ATEXIT_GESETZT = False
 
 
 LOG_PUFFER_MAX = 400
@@ -381,6 +389,68 @@ def _zeige_status(state: Any, puffer: LogPuffer) -> None:
     print(flush=True)
 
 
+def _hartes_ende_atexit() -> None:
+    """Überspringt atexit-Joins von ThreadPoolExecutor-Workern in connect()."""
+    os._exit(0)
+
+
+def plane_hartes_prozessende() -> None:
+    """
+    Nach Taste 3 / Strg+C: Interpreter-Ende nicht auf Probe-Sockets warten.
+
+    ``concurrent.futures`` joined seine Worker in einem atexit-Handler,
+    auch wenn ``shutdown(wait=False)`` schon lief. Unter Windows kommt
+    Ctrl-C dort nicht mehr durch. ``os._exit`` nach den ``finally``-Blöcken
+    (Session-Datei, Splash) beendet den Prozess trotzdem.
+    """
+    global _HARTES_ENDE_ATEXIT_GESETZT
+    if _HARTES_ENDE_ATEXIT_GESETZT:
+        return
+    _HARTES_ENDE_ATEXIT_GESETZT = True
+    atexit.register(_hartes_ende_atexit)
+
+
+def _reset_hartes_prozessende_fuer_tests() -> None:
+    """Nur Tests: atexit-os._exit wieder abmelden."""
+    global _HARTES_ENDE_ATEXIT_GESETZT
+    _HARTES_ENDE_ATEXIT_GESETZT = False
+    try:
+        atexit.unregister(_hartes_ende_atexit)
+    except Exception:
+        pass
+
+
+def httpd_stopp_ohne_join(httpd: Any, *, timeout_s: float = _HTTPD_SHUTDOWN_TIMEOUT_S) -> None:
+    """
+    ``serve_forever`` stoppen, ohne auf Request-Threads zu warten.
+
+    ``shutdown()`` läuft in einem Daemon-Thread — hängt er (Windows-select),
+    kehrt der Menü-Thread nach *timeout_s* zurück. ``server_close`` joined
+    bei ``block_on_close=False`` niemanden.
+    """
+    fertig = threading.Event()
+
+    def _shutdown() -> None:
+        try:
+            httpd.shutdown()
+        except Exception:
+            pass
+        finally:
+            fertig.set()
+
+    threading.Thread(
+        target=_shutdown, name="satsage-http-shutdown", daemon=True,
+    ).start()
+    try:
+        fertig.wait(timeout=max(0.1, float(timeout_s)))
+    except KeyboardInterrupt:
+        pass
+    try:
+        httpd.server_close()
+    except Exception:
+        pass
+
+
 def _beende_server(state: Any, httpd: Any) -> None:
     # Zuerst Shutdown-Markierung + stop-Flag — laufende Browser-Requests
     # und der HTTP-Neustart-Thread sollen still enden, nicht neu speien.
@@ -395,9 +465,12 @@ def _beende_server(state: Any, httpd: Any) -> None:
         except Exception:
             pass
     try:
-        httpd.shutdown()
+        from core.outbound_policy import stoppe_oeffentliche_electrum_suche
+
+        stoppe_oeffentliche_electrum_suche(prozess_ende=True)
     except Exception:
         pass
+    plane_hartes_prozessende()
     laufend = _jobs_laufend(state)
     for job in laufend:
         try:
@@ -406,12 +479,7 @@ def _beende_server(state: Any, httpd: Any) -> None:
             job.cancel()
         except Exception:
             pass
-    # Kurz warten, damit Request-Threads den Shutdown sehen und abbrechen.
-    time.sleep(0.15)
-    try:
-        httpd.server_close()
-    except Exception:
-        pass
+    httpd_stopp_ohne_join(httpd)
 
 
 def _drain_stdin() -> None:
@@ -616,97 +684,97 @@ def _schleife_ansi_tasten(
     while True:
         try:
             taste = _lese_taste(0.25)
+
+            fuss.zeichnen()
+
+            if taste is None:
+                continue
+            if taste == "\x03":  # Ctrl+C
+                print("\nBeendet.", flush=True)
+                _beende_server(state, httpd)
+                return 0
+            # Ctrl+D: unter Unix übliches EOF/Quit. Unter Windows/ConPTY nicht —
+            # dort kann \x04 spontan kommen und den Server ungewollt beenden.
+            if taste == "\x04" and sys.platform != "win32":
+                print("\nBeendet.", flush=True)
+                _beende_server(state, httpd)
+                return 0
+
+            wahl = taste.lower()
+
+            if warte_bestaetigung:
+                # j/y = Server aus (Jobs abbrechen). n = weiter.
+                # Enter/Space ignorieren (Rest von „3↵“ oder versehentlich).
+                if wahl in ("j", "y"):
+                    print("  Beende Server (breche laufende Jobs ab)…", flush=True)
+                    _drucke_laufende_jobs(state, einleitung="  Noch aktiv:")
+                    _beende_server(state, httpd)
+                    print("Beendet.", flush=True)
+                    return 0
+                if wahl in ("\n", "\r", "\t"):
+                    continue
+                if wahl in ("n", " ", "1", "2"):
+                    warte_bestaetigung = False
+                    fuss.setze_hinweis("Taste 1–3")
+                    print("  Abbruch — Server läuft weiter.", flush=True)
+                    fuss.zeichnen(erzwingen=True)
+                    continue
+                # 3 während Bestätigung: Hinweis, Zustand behalten (kein Abbruch)
+                print(
+                    "  Bitte j (Server beenden) oder n (weiter) drücken.",
+                    flush=True,
+                )
+                fuss.zeichnen(erzwingen=True)
+                continue
+
+            if wahl in ("1", "s"):
+                _zeige_status(state, puffer)
+                fuss.zeichnen(erzwingen=True)
+                continue
+            if wahl in ("2", "b"):
+                print("  Öffne Browser…", flush=True)
+                try:
+                    _oeffne_browser_sicher(adresse)
+                except Exception as exc:
+                    print(f"  ⚠️  Browser: {exc}", flush=True)
+                fuss.zeichnen(erzwingen=True)
+                continue
+            if wahl in ("3", "q"):
+                # Rest von „3↵“ verwerfen, sonst killt Enter die Bestätigung.
+                _drain_stdin()
+                laufend = _jobs_laufend(state)
+                if laufend:
+                    warte_bestaetigung = True
+                    fuss.setze_hinweis(
+                        f"{len(laufend)} Job(s) — j=Server aus · n=weiter"
+                    )
+                    print(
+                        f"  {len(laufend)} Job(s) laufen noch "
+                        "(auch Auto: Header/Wallet-Sync — nicht in der Web-Nav):",
+                        flush=True,
+                    )
+                    _drucke_laufende_jobs(state)
+                    print(
+                        "  Server wirklich beenden? "
+                        "j = ja (bricht Jobs ab und stoppt), "
+                        "n = weiterlaufen lassen",
+                        flush=True,
+                    )
+                    fuss.zeichnen(erzwingen=True)
+                    continue
+                print("  Beende Server…", flush=True)
+                _beende_server(state, httpd)
+                print("Beendet.", flush=True)
+                return 0
+
+            # Unbekannte Taste: ignorieren (kein Spam bei Pfeiltasten-Resten)
+            if wahl.isprintable() and wahl not in ("\n", "\r", " "):
+                print("  ⚠️  1, 2 oder 3 wählen.", flush=True)
+                fuss.zeichnen(erzwingen=True)
         except KeyboardInterrupt:
             print("\nBeendet.", flush=True)
             _beende_server(state, httpd)
             return 0
-
-        fuss.zeichnen()
-
-        if taste is None:
-            continue
-        if taste == "\x03":  # Ctrl+C
-            print("\nBeendet.", flush=True)
-            _beende_server(state, httpd)
-            return 0
-        # Ctrl+D: unter Unix übliches EOF/Quit. Unter Windows/ConPTY nicht —
-        # dort kann \x04 spontan kommen und den Server ungewollt beenden.
-        if taste == "\x04" and sys.platform != "win32":
-            print("\nBeendet.", flush=True)
-            _beende_server(state, httpd)
-            return 0
-
-        wahl = taste.lower()
-
-        if warte_bestaetigung:
-            # j/y = Server aus (Jobs abbrechen). n = weiter.
-            # Enter/Space ignorieren (Rest von „3↵“ oder versehentlich).
-            if wahl in ("j", "y"):
-                print("  Beende Server (breche laufende Jobs ab)…", flush=True)
-                _drucke_laufende_jobs(state, einleitung="  Noch aktiv:")
-                _beende_server(state, httpd)
-                print("Beendet.", flush=True)
-                return 0
-            if wahl in ("\n", "\r", "\t"):
-                continue
-            if wahl in ("n", " ", "1", "2"):
-                warte_bestaetigung = False
-                fuss.setze_hinweis("Taste 1–3")
-                print("  Abbruch — Server läuft weiter.", flush=True)
-                fuss.zeichnen(erzwingen=True)
-                continue
-            # 3 während Bestätigung: Hinweis, Zustand behalten (kein Abbruch)
-            print(
-                "  Bitte j (Server beenden) oder n (weiter) drücken.",
-                flush=True,
-            )
-            fuss.zeichnen(erzwingen=True)
-            continue
-
-        if wahl in ("1", "s"):
-            _zeige_status(state, puffer)
-            fuss.zeichnen(erzwingen=True)
-            continue
-        if wahl in ("2", "b"):
-            print("  Öffne Browser…", flush=True)
-            try:
-                _oeffne_browser_sicher(adresse)
-            except Exception as exc:
-                print(f"  ⚠️  Browser: {exc}", flush=True)
-            fuss.zeichnen(erzwingen=True)
-            continue
-        if wahl in ("3", "q"):
-            # Rest von „3↵“ verwerfen, sonst killt Enter die Bestätigung.
-            _drain_stdin()
-            laufend = _jobs_laufend(state)
-            if laufend:
-                warte_bestaetigung = True
-                fuss.setze_hinweis(
-                    f"{len(laufend)} Job(s) — j=Server aus · n=weiter"
-                )
-                print(
-                    f"  {len(laufend)} Job(s) laufen noch "
-                    "(auch Auto: Header/Wallet-Sync — nicht in der Web-Nav):",
-                    flush=True,
-                )
-                _drucke_laufende_jobs(state)
-                print(
-                    "  Server wirklich beenden? "
-                    "j = ja (bricht Jobs ab und stoppt), "
-                    "n = weiterlaufen lassen",
-                    flush=True,
-                )
-                fuss.zeichnen(erzwingen=True)
-                continue
-            print("  Beende Server…", flush=True)
-            _beende_server(state, httpd)
-            print("Beendet.", flush=True)
-            return 0
-
-        # Unbekannte Taste: ignorieren (kein Spam bei Pfeiltasten-Resten)
-        if wahl.isprintable() and wahl not in ("\n", "\r", " "):
-            print("  ⚠️  1, 2 oder 3 wählen.", flush=True)
-            fuss.zeichnen(erzwingen=True)
 
 
 def _oeffne_browser_sicher(adresse: str, *, verzoegerung_s: float = 1.2) -> None:

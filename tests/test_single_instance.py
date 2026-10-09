@@ -92,5 +92,14 @@ class TestHttpdBinden(unittest.TestCase):
                 httpd2.server_close()
 
 
+class TestQuietThreadingHTTPServer(unittest.TestCase):
+    def test_request_threads_sind_daemon_kein_join_beim_close(self):
+        """Taste 3 darf nicht auf hängende Electrum-/SSE-Requests warten."""
+        import server
+
+        self.assertTrue(server.QuietThreadingHTTPServer.daemon_threads)
+        self.assertFalse(server.QuietThreadingHTTPServer.block_on_close)
+
+
 if __name__ == "__main__":
     unittest.main()

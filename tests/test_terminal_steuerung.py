@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -14,7 +15,9 @@ from core.terminal_steuerung import (
     LogPuffer,
     StdoutTee,
     _job_kurzzeile,
+    _reset_hartes_prozessende_fuer_tests,
     format_job_log_zeile,
+    httpd_stopp_ohne_join,
     steuerung_sinnvoll,
 )
 
@@ -106,6 +109,9 @@ class TestSteuerungSinnvoll(unittest.TestCase):
 class TestBeendenBestaetigung(unittest.TestCase):
     """3 + Enter darf die j-Nachfrage nicht sofort verwerfen."""
 
+    def tearDown(self):
+        _reset_hartes_prozessende_fuer_tests()
+
     def test_schleife_j_beendet_trotz_newline_nach_3(self):
         from core import terminal_steuerung as ts
 
@@ -134,7 +140,9 @@ class TestBeendenBestaetigung(unittest.TestCase):
         fuss.setze_hinweis = MagicMock()
         with patch.object(ts, "_lese_taste", side_effect=lese), patch.object(
             ts, "_drain_stdin"
-        ), patch.object(ts, "_CbreakStdin") as cbreak:
+        ), patch.object(ts, "_CbreakStdin") as cbreak, patch(
+            "core.outbound_policy.stoppe_oeffentliche_electrum_suche",
+        ) as stoppe, patch.object(ts, "plane_hartes_prozessende"):
             cbreak.return_value.__enter__ = lambda s: s
             cbreak.return_value.__exit__ = lambda *_a: None
             # _schleife_ansi wraps cbreak then calls tasten-loop
@@ -143,7 +151,35 @@ class TestBeendenBestaetigung(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         httpd.shutdown.assert_called()
+        stoppe.assert_called_with(prozess_ende=True)
         self.assertTrue(job.cancelled)
+
+    def test_beende_server_kehrt_zurueck_wenn_shutdown_haengt(self):
+        from core import terminal_steuerung as ts
+
+        state = SimpleNamespace(
+            jobs=SimpleNamespace(list=lambda: []),
+            entries=[],
+        )
+        httpd = MagicMock()
+        httpd.shutdown.side_effect = lambda: time.sleep(30)
+
+        with patch.object(ts, "plane_hartes_prozessende"):
+            t0 = time.monotonic()
+            ts._beende_server(state, httpd)
+            dauer = time.monotonic() - t0
+        self.assertLess(dauer, 3.0)
+        httpd.server_close.assert_called()
+
+
+class TestHttpdStoppOhneJoin(unittest.TestCase):
+    def test_timeout_wenn_shutdown_blockiert(self):
+        httpd = MagicMock()
+        httpd.shutdown.side_effect = lambda: time.sleep(30)
+        t0 = time.monotonic()
+        httpd_stopp_ohne_join(httpd, timeout_s=0.2)
+        self.assertLess(time.monotonic() - t0, 2.0)
+        httpd.server_close.assert_called()
 
 
 class TestFussleiste(unittest.TestCase):

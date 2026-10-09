@@ -214,6 +214,12 @@ class TestElectrumSoftwareLabel(unittest.TestCase):
 
 class TestCheckReachable(unittest.TestCase):
 
+    def setUp(self):
+        from core.outbound_policy import _reset_oeffentliche_electrum_suche_fuer_tests
+
+        _reset_oeffentliche_electrum_suche_fuer_tests()
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+
     def test_kopie_funktioniert_fuer_alle_quellen(self):
         """Jede Quelle muss durch check_reachable kopierbar sein."""
         quellen = describe_sources({})
@@ -717,6 +723,7 @@ class TestCheckReachable(unittest.TestCase):
         from unittest import mock
 
         from core.outbound_policy import (
+            _reset_oeffentliche_electrum_suche_fuer_tests,
             oeffentliche_electrum_session_aktiv,
             setze_oeffentliche_electrum_session,
         )
@@ -724,6 +731,7 @@ class TestCheckReachable(unittest.TestCase):
 
         setze_oeffentliche_electrum_session(True)
         self.addCleanup(lambda: setze_oeffentliche_electrum_session(False))
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
 
         own = SourceInfo(
             rank=1, key="own_fulcrum", name="Electrum", detail="",
@@ -768,6 +776,9 @@ class TestCheckReachable(unittest.TestCase):
         self.assertEqual(out["public_onion"].peer_count, 0)
         self.assertIsNone(out["clearnet"].reachable)
         self.assertFalse(oeffentliche_electrum_session_aktiv())
+        from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+        self.assertTrue(oeffentliche_electrum_suche_abgebrochen())
         self.assertTrue(
             any("Freigabe ungültig" in z for z in logs),
             logs,
@@ -993,6 +1004,12 @@ class TestCheckReachable(unittest.TestCase):
 class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
     """Nach Opt-in: Clearnet zuerst; Onions/Tor nur wenn Clearnet fehlt."""
 
+    def setUp(self):
+        from core.outbound_policy import _reset_oeffentliche_electrum_suche_fuer_tests
+
+        _reset_oeffentliche_electrum_suche_fuer_tests()
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+
     def test_clearnet_treffer_probt_keine_onions(self):
         from core import source as source_mod
         from core.source import SourceInfo, PRIVACY_MEDIUM
@@ -1037,6 +1054,12 @@ class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
 class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
     """Clearnet-Probe darf nicht an den ersten 8 alphabetischen IPs hängen."""
 
+    def setUp(self):
+        from core.outbound_policy import _reset_oeffentliche_electrum_suche_fuer_tests
+
+        _reset_oeffentliche_electrum_suche_fuer_tests()
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+
     def test_stichprobe_nicht_nur_prefix(self):
         from core import source as source_mod
 
@@ -1078,6 +1101,76 @@ class TestOeffentlicheElectrumStichprobe(unittest.TestCase):
                 )
         self.assertEqual(treffer, ["alive.example:50002"])
         self.assertTrue(any("weitere" in z for z in logs), logs)
+
+    def test_stichprobe_bricht_sofort_ab_wenn_privater_indexer_kommt(self):
+        """Taste 3 / Strg+C und Wechsel auf privat dürfen nicht auf Timeouts warten."""
+        import threading
+        import time
+
+        from core import outbound_policy as policy
+        from core import source as source_mod
+
+        self.addCleanup(policy._reset_oeffentliche_electrum_suche_fuer_tests)
+        endpunkte = [(f"h{i}.example", 50002, True) for i in range(8)]
+        block = threading.Event()
+        logs: list[str] = []
+
+        def fake_connect(host, port, **_kw):
+            block.wait(timeout=8)
+            return None, "timed out"
+
+        result: list = []
+
+        def lauf():
+            with mock.patch(
+                "core.fulcrum_client.connect_fulcrum", side_effect=fake_connect,
+            ):
+                result.append(
+                    source_mod._zaehle_electrum_endpunkte(
+                        endpunkte, timeout=8, tor_proxy=None,
+                        on_log=logs.append, limit=8, max_runden=2,
+                    )
+                )
+
+        th = threading.Thread(target=lauf)
+        started = time.monotonic()
+        th.start()
+        time.sleep(0.08)
+        policy.stoppe_oeffentliche_electrum_suche()
+        th.join(timeout=2.0)
+        block.set()
+        self.assertFalse(th.is_alive(), "Probe muss den Stopp innerhalb 2 s sehen")
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(result, [[]])
+
+    def test_pruefe_oeffentliche_markiert_nicht_verbunden_nach_abbruch(self):
+        from core import outbound_policy as policy
+        from core import source as source_mod
+        from core.source import SourceInfo, PRIVACY_MEDIUM
+
+        self.addCleanup(policy._reset_oeffentliche_electrum_suche_fuer_tests)
+        policy.stoppe_oeffentliche_electrum_suche()
+        gefunden = {
+            "public_onion": SourceInfo(
+                rank=5, key="public_onion", name="Onion", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+                peer_count=2, peer_hosts=["x.onion:50002"],
+            ),
+            "clearnet": SourceInfo(
+                rank=6, key="clearnet", name="Clear", detail="",
+                privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+                peer_count=1, peer_hosts=["e.example:50002"],
+            ),
+        }
+        logs: list[str] = []
+        out = source_mod._pruefe_oeffentliche_electrum(
+            gefunden, {"OEFFENTLICHE_ELECTRUM": "1"},
+            timeout=1, on_log=logs.append,
+        )
+        self.assertIsNone(out["clearnet"].reachable)
+        self.assertEqual(out["clearnet"].peer_count, 0)
+        self.assertIsNone(out["public_onion"].reachable)
+        self.assertTrue(any("eigener Indexer" in z for z in logs), logs)
 
 
 if __name__ == "__main__":

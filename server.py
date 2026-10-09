@@ -1290,7 +1290,16 @@ def _server_faehrt_runter(state) -> bool:
 
 
 class QuietThreadingHTTPServer(ThreadingHTTPServer):
-    """Unterdrückt Tracebacks bei Client-Abbruch und Server-Shutdown."""
+    """Unterdrückt Tracebacks bei Client-Abbruch und Server-Shutdown.
+
+    Request-Threads sind Daemon-Threads, ``server_close`` joined sie nicht.
+    Sonst hält eine hängende Electrum-Probe (oder SSE) den Prozess nach
+    Taste 3 / Strg+C fest — ``ThreadingMixIn`` wartet standardmäßig auf
+    jeden Request-Thread, und Ctrl-C kommt dort unter Windows nicht durch.
+    """
+
+    daemon_threads = True
+    block_on_close = False
 
     def handle_error(self, request, client_address) -> None:
         err = sys.exc_info()[1]

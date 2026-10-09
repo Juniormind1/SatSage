@@ -94,7 +94,9 @@ def _kappe_oeffentliche_electrum_nach_privater_quelle(
     ``.env`` fällt weg, der Empfangs-Pool zum öffentlichen Server schließt.
     """
     from server import LOGGER, source_mod
+    from core.outbound_policy import stoppe_oeffentliche_electrum_suche
 
+    stoppe_oeffentliche_electrum_suche()
     session_weg = source_mod.widerrufe_oeffentliche_electrum_freigabe()
     streiche = getattr(state, "_streiche_dauerhafte_oeffentliche_electrum", None)
     if callable(streiche):

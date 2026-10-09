@@ -14,8 +14,11 @@ from datetime import datetime
 import core.chain_sources as chain_sources
 from core.electrum_servers import ELECTRUM_SERVERS_URL, splitte_electrum_server
 from core.outbound_policy import (
+    futures_bis_oeffentliche_electrum_stopp,
     oeffentliche_electrum_session_aktiv,
+    oeffentliche_electrum_suche_abgebrochen,
     setze_oeffentliche_electrum_session,
+    stoppe_oeffentliche_electrum_suche,
     widerrufe_oeffentliche_electrum_freigabe,
 )
 
@@ -1126,8 +1129,9 @@ def _oeffentliche_electrum_als_ungenutzt(
         geaendert = True
     if geaendert and on_log:
         on_log("Öffentliche Electrum-Verbindung nicht mehr aktiv (höhere Quelle).")
-    if widerrufe_freigabe and widerrufe_oeffentliche_electrum_freigabe():
-        if on_log:
+    if widerrufe_freigabe:
+        stoppe_oeffentliche_electrum_suche()
+        if widerrufe_oeffentliche_electrum_freigabe() and on_log:
             on_log(
                 "Öffentliche Electrum-Freigabe ungültig — "
                 "eigener Indexer verbunden."
@@ -1174,7 +1178,7 @@ def _zaehle_electrum_endpunkte(
     limit: int = 8,
     max_runden: int = 2,
 ) -> list[str]:
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     from core.fulcrum_client import connect_fulcrum
 
@@ -1183,6 +1187,8 @@ def _zaehle_electrum_endpunkte(
 
     def eines(ende: tuple[str, int, bool]):
         host, port, ssl = ende
+        if oeffentliche_electrum_suche_abgebrochen():
+            return host, port, "abgebrochen"
         client, fehler = connect_fulcrum(
             host, port, use_ssl=ssl, timeout=int(timeout),
             tor_proxy=tor_proxy, require_listunspent=False,
@@ -1199,6 +1205,8 @@ def _zaehle_electrum_endpunkte(
     treffer: list[str] = []
     runden = max(1, int(max_runden))
     for runde in range(runden):
+        if oeffentliche_electrum_suche_abgebrochen():
+            return []
         if not rest:
             break
         auswahl = _waehle_electrum_stichprobe(rest, limit)
@@ -1206,18 +1214,27 @@ def _zaehle_electrum_endpunkte(
         genommen = set(auswahl)
         rest = [e for e in rest if e not in genommen]
         for host, port, _ssl in auswahl:
+            if oeffentliche_electrum_suche_abgebrochen():
+                return []
             if on_log:
                 on_log(f"Verbinde mit {host}:{port}")
-        with ThreadPoolExecutor(max_workers=min(8, len(auswahl))) as pool:
+        pool = ThreadPoolExecutor(max_workers=min(8, len(auswahl)))
+        try:
             futures = [pool.submit(eines, e) for e in auswahl]
-            for fut in as_completed(futures):
+            for fut in futures_bis_oeffentliche_electrum_stopp(futures):
                 host, port, fehler = fut.result()
+                if oeffentliche_electrum_suche_abgebrochen():
+                    return []
                 if fehler is None:
                     treffer.append(f"{host}:{port}")
                     if on_log:
                         on_log(f"Verbunden. {host}:{port}")
-                elif on_log:
+                elif on_log and fehler != "abgebrochen":
                     on_log(f"Verbindung fehlgeschlagen {host}:{port}: {fehler}")
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        if oeffentliche_electrum_suche_abgebrochen():
+            return []
         if treffer:
             break
         if rest and on_log and runde + 1 < runden:
@@ -1262,6 +1279,10 @@ def _pruefe_oeffentliche_electrum(
         if on_log:
             on_log(text)
 
+    if oeffentliche_electrum_suche_abgebrochen():
+        log("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+        return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
+
     log("Prüfe öffentliche Electrum-Server…")
     clear_hosts: list[str] = []
     try:
@@ -1282,9 +1303,15 @@ def _pruefe_oeffentliche_electrum(
             clear, timeout=8.0,
             tor_proxy=None, on_log=log,
         )
+        if oeffentliche_electrum_suche_abgebrochen():
+            log("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+            return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
 
     onions = _oeffentliche_onion_endpunkte(values)
     onion_hosts: list[str] = []
+    if oeffentliche_electrum_suche_abgebrochen():
+        log("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+        return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
     if clear_hosts:
         # Clearnet reicht — Onions weder proben noch als „verbunden“ führen,
         # Tor-Autostart für öffentliche Onions lösen.
@@ -1311,6 +1338,14 @@ def _pruefe_oeffentliche_electrum(
                 onions, timeout=min(max(float(timeout), 8.0), 15.0),
                 tor_proxy=tor_proxy, on_log=log,
             )
+            if oeffentliche_electrum_suche_abgebrochen():
+                log(
+                    "Öffentliche Electrum-Suche beendet — "
+                    "eigener Indexer verbunden."
+                )
+                return _oeffentliche_electrum_als_ungenutzt(
+                    gefunden, on_log=None,
+                )
 
     onion_info = gefunden.get("public_onion")
     if onion_info is not None:
