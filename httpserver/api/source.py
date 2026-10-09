@@ -406,6 +406,43 @@ def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
     }
 
 
+def _kappe_oeffentliche_wenn_indexer_steht(
+    state, quellen: list, werte: dict, *, still: bool, on_log=None,
+) -> tuple[list, dict]:
+    """Eigener Indexer erreichbar → öffentliche Electrum-Reste und Opt-in weg."""
+    from dataclasses import replace
+
+    from server import source_mod
+
+    own = next((q for q in quellen if getattr(q, "key", None) == "own_fulcrum"), None)
+    if own is None or not own.reachable:
+        return quellen, werte
+    from httpserver.empfang import _kappe_oeffentliche_electrum_nach_privater_quelle
+
+    _kappe_oeffentliche_electrum_nach_privater_quelle(
+        state, on_log=None if still else on_log,
+    )
+    nach_kappe = {
+        q.get("key"): q
+        for q in (getattr(state, "sources_last", None) or [])
+        if isinstance(q, dict) and q.get("key")
+    }
+    gekappt: list = []
+    for q in quellen:
+        a = nach_kappe.get(q.key)
+        if a and q.key in source_mod.OEFFENTLICHE_QUELLEN_KEYS:
+            q = replace(
+                q,
+                reachable=a.get("reachable"),
+                peer_count=int(a.get("peer_count") or 0),
+                peer_hosts=list(a.get("peer_hosts") or []),
+                error=str(a.get("error") or ""),
+                note=str(a.get("note") or q.note or ""),
+            )
+        gekappt.append(q)
+    return gekappt, state.env().values()
+
+
 def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     from server import (
         _header_tip,
@@ -457,6 +494,9 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
             aufgefrischt.append(q)
         quellen = aufgefrischt
     quellen = source_mod.anreichere_live_p2p(quellen)
+    quellen, werte = _kappe_oeffentliche_wenn_indexer_steht(
+        state, quellen, werte, still=still, on_log=on_log,
+    )
     stand = source_mod.peer_status(quellen, werte)
     # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
     # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
@@ -473,6 +513,10 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         "live_p2p_peers": _live_p2p_peers(),
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
+        "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
+        "oeffentliche_electrum_session": (
+            source_mod.oeffentliche_electrum_session_aktiv()
+        ),
         # Dealbreaker T14: Kopfzeile zeigt eine rote Pille, solange gesetzt.
         "rpc_allowlist": rpc_allowlist_status(),
     }

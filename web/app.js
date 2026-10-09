@@ -1035,6 +1035,36 @@ function quelleEndpointSchluessel(q) {
   ].join("|");
 }
 
+function indexerVerbundenInQuellen(neuListe, altListe) {
+  const neuOwn = (neuListe || []).find((q) => q && q.key === "own_fulcrum");
+  if (neuOwn && neuOwn.configured && neuOwn.reachable === true) return true;
+  const altOwn = (altListe || []).find((q) => q && q.key === "own_fulcrum");
+  if (!neuOwn || !neuOwn.configured || !altOwn) return false;
+  if (altOwn.reachable !== true && !(altOwn.peer_count > 0)) return false;
+  const altEp = quelleEndpointSchluessel(altOwn);
+  const neuEp = quelleEndpointSchluessel(neuOwn);
+  if (altEp && neuEp && altEp !== neuEp) return false;
+  return true;
+}
+
+function kappeOeffentlicheElectrumLokal() {
+  if (!Zustand.config) return false;
+  let geaendert = false;
+  if (Zustand.config.oeffentliche_electrum || Zustand.config.oeffentliche_electrum_session) {
+    Zustand.config.oeffentliche_electrum = false;
+    Zustand.config.oeffentliche_electrum_session = false;
+    geaendert = true;
+  }
+  Zustand.oeffentlicheGefragt = false;
+  Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+    if (q.key !== "public_onion" && q.key !== "clearnet") return q;
+    if (q.reachable == null && !(q.peer_count > 0)) return q;
+    geaendert = true;
+    return { ...q, reachable: null, peer_count: 0, peer_hosts: [] };
+  });
+  return geaendert;
+}
+
 function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
   behaltePositivBeiNegativ = false,
 } = {}) {
@@ -1044,8 +1074,17 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
   for (const q of altListe) {
     if (q && q.key) altNach[q.key] = q;
   }
+  const indexerOk = indexerVerbundenInQuellen(neuListe, altListe);
   return neuListe.map((neu) => {
     const alt = altNach[neu.key];
+    if (indexerOk && (neu.key === "public_onion" || neu.key === "clearnet")) {
+      return {
+        ...neu,
+        reachable: null,
+        peer_count: 0,
+        peer_hosts: [],
+      };
+    }
     if (!alt) return neu;
     // .env gelöscht / Host geleert: kein alter „verbunden“-Stand behalten.
     if (!neu.configured) {
@@ -1187,6 +1226,11 @@ function nimmOwnFulcrumStand(info) {
     };
   });
   Zustand.peersGeprueft = true;
+  if (info.reachable !== false) {
+    if (kappeOeffentlicheElectrumLokal()) {
+      logZeile(t("ui.hard.667be59b8a"));
+    }
+  }
   const stand = peerStatusAusQuellen(Zustand.config.sources);
   Zustand.peerStatus = stand;
   Zustand.peers = stand.n;
@@ -1210,6 +1254,22 @@ function nimmPeerStand(ergebnis, still) {
     }
     if (ergebnis.header_tip != null) {
       Zustand.config.header_tip = ergebnis.header_tip;
+    }
+    if (ergebnis.oeffentliche_electrum != null) {
+      Zustand.config.oeffentliche_electrum = Boolean(ergebnis.oeffentliche_electrum);
+    }
+    if (ergebnis.oeffentliche_electrum_session != null) {
+      Zustand.config.oeffentliche_electrum_session = Boolean(
+        ergebnis.oeffentliche_electrum_session,
+      );
+    }
+  }
+  const ownNachCheck = (Zustand.config?.sources || quellen || []).find(
+    (q) => q && q.key === "own_fulcrum",
+  );
+  if (ownNachCheck && ownNachCheck.reachable === true) {
+    if (kappeOeffentlicheElectrumLokal() && !still) {
+      logZeile(t("ui.hard.667be59b8a"));
     }
   }
   const liveHosts = Array.isArray(ergebnis.live_p2p_peers)
@@ -1533,9 +1593,12 @@ function zeichneKopfStatus(quellen) {
     && !p2pVerbunden
     && (!Zustand.peersGeprueft || Zustand.peerCheckLaeuft);
   const oeffentlichVerbunden =
-    kopfQuelleVerbunden(oeffentlichOnion)
-    || kopfQuelleVerbunden(oeffentlichClear)
-    || (Zustand.peerStatus && Zustand.peerStatus.kind === "public");
+    !electrsVerbunden
+    && (
+      kopfQuelleVerbunden(oeffentlichOnion)
+      || kopfQuelleVerbunden(oeffentlichClear)
+      || (Zustand.peerStatus && Zustand.peerStatus.kind === "public")
+    );
 
   const p2pHosts = [
     ...new Set([

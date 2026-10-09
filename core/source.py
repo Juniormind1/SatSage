@@ -16,6 +16,13 @@ from core.electrum_servers import ELECTRUM_SERVERS_URL, splitte_electrum_server
 from core.outbound_policy import (
     oeffentliche_electrum_session_aktiv,
     setze_oeffentliche_electrum_session,
+    widerrufe_oeffentliche_electrum_freigabe,
+)
+
+#: Öffentliche Electrum-Zeilen in der Prioritätskette.
+OEFFENTLICHE_QUELLEN_KEYS = ("public_onion", "clearnet")
+_OEFFENTLICHE_UNGENUTZT_NOTE = (
+    "Nicht genutzt — höhere Privatsphäre-Quelle ist aktiv."
 )
 
 #: Reihenfolge wie in core.chain_sources._setup_blockchain_client.
@@ -159,6 +166,34 @@ class SourceInfo:
         }
 
 
+def oeffentliche_quelle_dict_als_ungenutzt(eintrag: dict) -> dict:
+    """Peer-Stand einer öffentlichen Quelle auf ungenutzt setzen."""
+    out = dict(eintrag)
+    out["reachable"] = None
+    out["peer_count"] = 0
+    out["peer_hosts"] = []
+    out["error"] = ""
+    out["note"] = _OEFFENTLICHE_UNGENUTZT_NOTE
+    return out
+
+
+def oeffentliche_quelle_wirkt_verbunden(obj: SourceInfo | dict | None) -> bool:
+    """True, wenn Onion/Clearnet als verbunden geführt wird."""
+    if obj is None:
+        return False
+    if isinstance(obj, dict):
+        return bool(
+            obj.get("reachable") is True
+            or int(obj.get("peer_count") or 0) > 0
+            or (obj.get("peer_hosts") or [])
+        )
+    return bool(
+        getattr(obj, "reachable", None) is True
+        or int(getattr(obj, "peer_count", 0) or 0) > 0
+        or (getattr(obj, "peer_hosts", None) or [])
+    )
+
+
 def _quelle_endpoint_schluessel(obj: SourceInfo | dict) -> str:
     """Host/Onion/Port/TLS aus den Formularfeldern — ohne Software-Label."""
     if isinstance(obj, dict):
@@ -202,11 +237,44 @@ def mergere_erreichbarkeit(
     for eintrag in alt:
         if isinstance(eintrag, dict) and eintrag.get("key"):
             nach[str(eintrag["key"])] = eintrag
+    own_ok = False
+    for q in frisch:
+        if q.key != "own_fulcrum":
+            continue
+        if not q.configured:
+            break
+        if q.reachable is not None:
+            own_ok = bool(q.reachable)
+            break
+        alt_own = nach.get(q.key)
+        if not alt_own:
+            break
+        alt_ep = _quelle_endpoint_schluessel(alt_own)
+        neu_ep = _quelle_endpoint_schluessel(q)
+        if alt_ep and neu_ep and alt_ep != neu_ep:
+            break
+        own_ok = bool(alt_own.get("reachable"))
+        break
     out: list[SourceInfo] = []
     for q in frisch:
         alt_q = nach.get(q.key)
         if not alt_q:
             out.append(q)
+            continue
+        if own_ok and q.key in OEFFENTLICHE_QUELLEN_KEYS:
+            if q.configured:
+                out.append(
+                    replace(
+                        q,
+                        reachable=None,
+                        error="",
+                        peer_count=0,
+                        peer_hosts=[],
+                        note=_OEFFENTLICHE_UNGENUTZT_NOTE,
+                    )
+                )
+            else:
+                out.append(q)
             continue
         if not q.configured:
             out.append(
@@ -433,6 +501,12 @@ def merke_own_fulcrum_in_sources(
             detail = str(stand.get("detail") or "").strip()
             if detail:
                 d["detail"] = detail
+            out.append(d)
+            continue
+        if q.key in OEFFENTLICHE_QUELLEN_KEYS:
+            # Eigener Indexer steht: öffentliche „verbunden“-Reste nicht mergen.
+            if q.configured:
+                d = oeffentliche_quelle_dict_als_ungenutzt(d)
             out.append(d)
             continue
         if a and d.get("reachable") is None:
@@ -1016,7 +1090,11 @@ def check_sources(
             )
     else:
         # Höhere Quelle aktiv: öffentliche „verbunden“-Reste nicht stehen lassen.
-        gefunden = _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=log)
+        # Eigener Indexer: Sitzungs-Opt-in mitkappen, damit ein späterer
+        # öffentlicher Connect wieder nachfragt.
+        gefunden = _oeffentliche_electrum_als_ungenutzt(
+            gefunden, on_log=log, widerrufe_freigabe=own_ok,
+        )
 
     return [gefunden[q.key] for q in quellen]
 
@@ -1025,21 +1103,17 @@ def _oeffentliche_electrum_als_ungenutzt(
     gefunden: dict[str, SourceInfo],
     *,
     on_log=None,
+    widerrufe_freigabe: bool = False,
 ) -> dict[str, SourceInfo]:
     """Löscht stale Peer-Stand bei Onion/Clearnet, wenn P2P/Eigen aktiv ist."""
-    note = "Nicht genutzt — höhere Privatsphäre-Quelle ist aktiv."
     geaendert = False
-    for key in ("public_onion", "clearnet"):
+    for key in OEFFENTLICHE_QUELLEN_KEYS:
         info = gefunden.get(key)
         if info is None:
             continue
         if not info.configured:
             continue
-        if (
-            info.reachable is None
-            and not info.peer_count
-            and not (info.peer_hosts or [])
-        ):
+        if not oeffentliche_quelle_wirkt_verbunden(info):
             continue
         gefunden[key] = replace(
             info,
@@ -1047,11 +1121,17 @@ def _oeffentliche_electrum_als_ungenutzt(
             peer_count=0,
             peer_hosts=[],
             error="",
-            note=note,
+            note=_OEFFENTLICHE_UNGENUTZT_NOTE,
         )
         geaendert = True
     if geaendert and on_log:
         on_log("Öffentliche Electrum-Verbindung nicht mehr aktiv (höhere Quelle).")
+    if widerrufe_freigabe and widerrufe_oeffentliche_electrum_freigabe():
+        if on_log:
+            on_log(
+                "Öffentliche Electrum-Freigabe ungültig — "
+                "eigener Indexer verbunden."
+            )
     return gefunden
 
 

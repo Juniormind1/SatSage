@@ -3483,6 +3483,8 @@ async function leseSourceCheckStream(antwort) {
   let peers = null;
   let peer_status = null;
   let rpc_allowlist = null;
+  let oeffentliche_electrum;
+  let oeffentliche_electrum_session;
   let fehler = "";
 
   const nimm = (obj) => {
@@ -3491,6 +3493,12 @@ async function leseSourceCheckStream(antwort) {
     if (obj.peers != null) peers = obj.peers;
     if (obj.peer_status) peer_status = obj.peer_status;
     if (obj.rpc_allowlist) rpc_allowlist = obj.rpc_allowlist;
+    if (obj.oeffentliche_electrum != null) {
+      oeffentliche_electrum = obj.oeffentliche_electrum;
+    }
+    if (obj.oeffentliche_electrum_session != null) {
+      oeffentliche_electrum_session = obj.oeffentliche_electrum_session;
+    }
     if (obj.error) fehler = obj.error;
   };
 
@@ -3507,7 +3515,14 @@ async function leseSourceCheckStream(antwort) {
   }
   if (puffer.trim()) nimm(JSON.parse(puffer));
   if (fehler && !sources) throw new ApiFehler(500, fehler);
-  return { sources: sources || [], peers, peer_status, rpc_allowlist };
+  return {
+    sources: sources || [],
+    peers,
+    peer_status,
+    rpc_allowlist,
+    oeffentliche_electrum,
+    oeffentliche_electrum_session,
+  };
 }
 
 async function apiSourceCheck(optionen = {}) {

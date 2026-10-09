@@ -220,6 +220,14 @@
     "en": "Public Electrum servers not requested$1"
   },
   {
+    "re": "^Öffentliche Electrum-Verbindung nicht mehr aktiv \\(höhere Quelle\\)\\.$",
+    "en": "Public Electrum connection no longer active (higher-privacy source)."
+  },
+  {
+    "re": "^Öffentliche Electrum-Freigabe ungültig — eigener Indexer verbunden\\.$",
+    "en": "Public Electrum permission revoked — own indexer connected."
+  },
+  {
     "re": "^Verbinde mit dem Sanktions-Server…$",
     "en": "Connecting to the sanctions server…"
   },

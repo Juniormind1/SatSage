@@ -33,6 +33,14 @@ def setze_oeffentliche_electrum_session(erlaubt: bool) -> None:
     _SESSION_OEFFENTLICHE_ELECTRUM = bool(erlaubt)
 
 
+def widerrufe_oeffentliche_electrum_freigabe() -> bool:
+    """Sitzungs-Opt-in zurücknehmen. True, wenn sie aktiv war."""
+    if not oeffentliche_electrum_session_aktiv():
+        return False
+    setze_oeffentliche_electrum_session(False)
+    return True
+
+
 def _truthy(value: object) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "ja", "on")
 

@@ -86,7 +86,7 @@ Mit Electrs bleibt Electrs primär für `get_tx`; Core nur wenn Electrs die Tx n
 3. BIP-158 Compact Filter (Blockwalk/Cache)
 4. öffentliche Electrum (nach Bestätigung)
 
-Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
+Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. Sobald ein eigener Electrum-Server (electrs/Fulcrum/libbitcoin) erreichbar ist, werden öffentliche Verbindungen abgeklemmt und die Sitzungs-Freigabe ungültig — ein erneuter öffentlicher Connect fragt wieder. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
 
 Explizit nur per **CLI** (`--bip158`, `--rpc-only`) oder **Einstellungen → Datenquelle wählen**. `BIP158_P2P=1` in `.env` allein erzwingt **keine** Datenquelle — die Auto-Priorität bleibt aktiv.
 

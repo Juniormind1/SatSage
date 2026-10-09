@@ -1437,6 +1437,56 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(körper["erlaubt"])
         self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
 
+    def test_source_status_kappe_oeffentliche_wenn_eigener_indexer(self):
+        """Nach erfolgreichem eigenem Indexer ist die Sitzungs-Freigabe weg."""
+        from dataclasses import replace
+
+        server.source_mod.setze_oeffentliche_electrum_session(True)
+        self.addCleanup(
+            lambda: server.source_mod.setze_oeffentliche_electrum_session(False)
+        )
+        self.state.sources_last = [
+            {
+                "key": "clearnet",
+                "configured": True,
+                "reachable": True,
+                "peer_count": 2,
+                "peer_hosts": ["e.example:50002"],
+            },
+        ]
+
+        def fake_check(info, values, *, timeout=5, on_log=None):
+            if info.key == "own_fulcrum" and info.configured:
+                return replace(
+                    info, reachable=True, peer_count=1,
+                    peer_hosts=["192.0.2.1:50002"], software="libbitcoin",
+                    log=["Verbunden (libbitcoin)."],
+                )
+            return replace(info, log=[])
+
+        with mock.patch(
+            "server.source_mod.check_reachable", side_effect=fake_check,
+        ), mock.patch(
+            "core.p2p.zaehle_compact_filter_peers", return_value=[],
+        ), mock.patch(
+            "core.p2p.stelle_p2p_tor_bereit", return_value=None,
+        ), mock.patch(
+            "core.source._pruefe_oeffentliche_electrum",
+            side_effect=lambda gefunden, *a, **k: gefunden,
+        ):
+            status, körper = self.anfrage("/api/source/status?check=1")
+        self.assertEqual(status, 200)
+        self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
+        self.assertFalse(körper.get("oeffentliche_electrum"))
+        self.assertFalse(körper.get("oeffentliche_electrum_session"))
+        nach = {q["key"]: q for q in körper["sources"]}
+        self.assertTrue(nach["own_fulcrum"]["reachable"])
+        self.assertTrue(
+            nach["clearnet"]["reachable"] is None
+            or nach["clearnet"]["reachable"] is False
+            or int(nach["clearnet"].get("peer_count") or 0) == 0
+        )
+
     def test_source_status_streamt_log_zeilen(self):
         """Die Oberfläche soll Zeilen sehen, bevor die Prüfung fertig ist."""
         from dataclasses import replace

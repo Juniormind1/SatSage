@@ -99,6 +99,10 @@
     [/^Öffentliche Electrum-Server nicht genutzt \(Bestätigung fehlt\)\.$/,
       "Public Electrum servers not used (confirmation missing)."],
     [/^Öffentliche Electrum-Server nicht angefragt(.*)$/, "Public Electrum servers not requested$1"],
+    [/^Öffentliche Electrum-Verbindung nicht mehr aktiv \(höhere Quelle\)\.$/,
+      "Public Electrum connection no longer active (higher-privacy source)."],
+    [/^Öffentliche Electrum-Freigabe ungültig — eigener Indexer verbunden\.$/,
+      "Public Electrum permission revoked — own indexer connected."],
 
     // --- Verbindung ---
     [/^Verbinde mit dem Sanktions-Server…$/, "Connecting to the sanctions server…"],

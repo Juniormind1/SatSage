@@ -174,6 +174,43 @@ class TestElectrumSoftwareLabel(unittest.TestCase):
         self.assertIn("libbitcoin", ps["label"])
         self.assertEqual(ps.get("software"), "libbitcoin")
 
+    def test_merke_own_fulcrum_kappe_oeffentliche(self):
+        """Job/Empfang merkt Indexer — öffentliche „verbunden“-Reste fallen."""
+        from core.source import merke_own_fulcrum_in_sources
+
+        onion = (
+            "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz.onion"
+        )
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+            "FULCRUM_TOR_0": onion,
+        }
+        frisch = describe_sources(werte)
+        alt = []
+        for q in frisch:
+            d = q.as_dict()
+            if q.key == "public_onion":
+                d["reachable"] = True
+                d["peer_count"] = 2
+                d["peer_hosts"] = [f"{onion}:50002"]
+            alt.append(d)
+        stand = {
+            "reachable": True,
+            "peer_count": 1,
+            "peer_hosts": ["192.0.2.10:50001"],
+            "software": "libbitcoin",
+            "software_raw": "/libbitcoin:4.0.0/",
+        }
+        liste = merke_own_fulcrum_in_sources(alt, frisch, stand)
+        nach = {q["key"]: q for q in liste}
+        self.assertTrue(nach["own_fulcrum"]["reachable"])
+        self.assertTrue(nach["public_onion"]["configured"])
+        self.assertIsNone(nach["public_onion"]["reachable"])
+        self.assertEqual(nach["public_onion"]["peer_count"], 0)
+        self.assertEqual(nach["public_onion"]["peer_hosts"], [])
+
 
 class TestCheckReachable(unittest.TestCase):
 
@@ -674,6 +711,68 @@ class TestCheckReachable(unittest.TestCase):
         self.assertIsNone(out["clearnet"].reachable)
         self.assertTrue(any("Öffentliche Electrum" in z for z in logs))
 
+    def test_own_fulcrum_ok_widerruft_oeffentliche_freigabe(self):
+        """Eigener Indexer: öffentliche Reste weg, Sitzungs-Opt-in ungültig."""
+        from dataclasses import replace
+        from unittest import mock
+
+        from core.outbound_policy import (
+            oeffentliche_electrum_session_aktiv,
+            setze_oeffentliche_electrum_session,
+        )
+        from core.source import SourceInfo, PRIVACY_HIGH, PRIVACY_MEDIUM
+
+        setze_oeffentliche_electrum_session(True)
+        self.addCleanup(lambda: setze_oeffentliche_electrum_session(False))
+
+        own = SourceInfo(
+            rank=1, key="own_fulcrum", name="Electrum", detail="",
+            privacy=PRIVACY_HIGH, configured=True,
+        )
+        onion = SourceInfo(
+            rank=5, key="public_onion", name="Onion", detail="",
+            privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+            peer_count=2, peer_hosts=["x.onion:50002"],
+        )
+        clear = SourceInfo(
+            rank=6, key="clearnet", name="Clear", detail="",
+            privacy=PRIVACY_MEDIUM, configured=True, reachable=True,
+            peer_count=1, peer_hosts=["e.example:50002"],
+        )
+        logs: list[str] = []
+
+        def fake_check(info, values, *, timeout=5, on_log=None):
+            if info.key == "own_fulcrum":
+                return replace(
+                    info, reachable=True, peer_count=1,
+                    peer_hosts=["192.0.2.10:50001"], software="libbitcoin",
+                )
+            return info
+
+        with mock.patch(
+            "core.source.check_reachable", side_effect=fake_check,
+        ), mock.patch(
+            "core.source._pruefe_oeffentliche_electrum",
+        ) as pruefe_oeff:
+            out = {
+                q.key: q
+                for q in check_sources(
+                    [own, onion, clear],
+                    {"FULCRUM_HOST": "192.0.2.10", "FULCRUM_PORT": "50001"},
+                    timeout=1, on_log=logs.append,
+                )
+            }
+        pruefe_oeff.assert_not_called()
+        self.assertTrue(out["own_fulcrum"].reachable)
+        self.assertIsNone(out["public_onion"].reachable)
+        self.assertEqual(out["public_onion"].peer_count, 0)
+        self.assertIsNone(out["clearnet"].reachable)
+        self.assertFalse(oeffentliche_electrum_session_aktiv())
+        self.assertTrue(
+            any("Freigabe ungültig" in z for z in logs),
+            logs,
+        )
+
     def test_verbindungstest_fragt_oeffentliche_nach_bestaetigung(self):
         from unittest import mock
 
@@ -858,6 +957,37 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(nach["own_fulcrum"].configured)
         self.assertIsNone(nach["own_fulcrum"].reachable)
         self.assertEqual(nach["own_fulcrum"].peer_count, 0)
+
+    def test_mergere_erreichbarkeit_kappe_oeffentliche_wenn_indexer_steht(self):
+        """GET /config darf öffentliche Reste nicht neben libbitcoin behalten."""
+        onion = (
+            "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz.onion"
+        )
+        frisch = describe_sources({
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+            "FULCRUM_TOR_0": onion,
+        })
+        alt = []
+        for q in frisch:
+            d = q.as_dict()
+            if q.key == "own_fulcrum":
+                d["reachable"] = True
+                d["peer_count"] = 1
+                d["peer_hosts"] = ["192.0.2.10:50001"]
+                d["software"] = "libbitcoin"
+            if q.key == "public_onion":
+                d["reachable"] = True
+                d["peer_count"] = 3
+                d["peer_hosts"] = [f"{onion}:50002"]
+            alt.append(d)
+        gemerged = mergere_erreichbarkeit(frisch, alt)
+        nach = {q.key: q for q in gemerged}
+        self.assertTrue(nach["own_fulcrum"].reachable)
+        self.assertTrue(nach["public_onion"].configured)
+        self.assertIsNone(nach["public_onion"].reachable)
+        self.assertEqual(nach["public_onion"].peer_count, 0)
 
 
 class TestOeffentlicheClearnetVorOnion(unittest.TestCase):

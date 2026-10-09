@@ -23,6 +23,7 @@ from core.outbound_policy import (
     oeffentliche_electrum_session_aktiv,
     public_opt_in,
     setze_oeffentliche_electrum_session,
+    widerrufe_oeffentliche_electrum_freigabe,
     tls_context,
     tls_insecure_enabled,
 )

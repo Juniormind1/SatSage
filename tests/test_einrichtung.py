@@ -241,6 +241,9 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('"privacy.pillUnclear": "Privatsphäre unklar"', de)
         # Nach Scan: /config ohne Check darf grüne Pillen nicht rot blitzen.
         self.assertIn("function uebernehmeQuellenErreichbarkeit", self.js)
+        self.assertIn("function kappeOeffentlicheElectrumLokal", self.js)
+        self.assertIn("function indexerVerbundenInQuellen", self.js)
+        self.assertIn("!electrsVerbunden", self.js)
         self.assertIn("behaltePositivBeiNegativ", self.js)
         self.assertIn(
             "uebernehmeQuellenErreichbarkeit(\n    Zustand.config?.sources",

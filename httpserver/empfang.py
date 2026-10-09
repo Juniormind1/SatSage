@@ -84,6 +84,61 @@ def _verlaufs_anhang(state: AppState, entries, *, limit: int | None = None,
         "hat_verlauf": bool(verlauf),
     }
 
+def _kappe_oeffentliche_electrum_nach_privater_quelle(
+    state, *, on_log=None,
+) -> bool:
+    """
+    Öffentliche Electrum abklemmen, sobald der eigene Indexer steht.
+
+    Sitzungs-Opt-in wird ungültig, ein altes ``OEFFENTLICHE_ELECTRUM`` in der
+    ``.env`` fällt weg, der Empfangs-Pool zum öffentlichen Server schließt.
+    """
+    from server import LOGGER, source_mod
+
+    session_weg = source_mod.widerrufe_oeffentliche_electrum_freigabe()
+    streiche = getattr(state, "_streiche_dauerhafte_oeffentliche_electrum", None)
+    if callable(streiche):
+        try:
+            streiche()
+        except Exception:
+            LOGGER.debug(
+                "OEFFENTLICHE_ELECTRUM aus .env streichen fehlgeschlagen",
+                exc_info=True,
+            )
+    last = getattr(state, "sources_last", None) or []
+    neu: list = []
+    stand_weg = False
+    for eintrag in last:
+        if (
+            isinstance(eintrag, dict)
+            and eintrag.get("key") in source_mod.OEFFENTLICHE_QUELLEN_KEYS
+        ):
+            if source_mod.oeffentliche_quelle_wirkt_verbunden(eintrag):
+                stand_weg = True
+            neu.append(source_mod.oeffentliche_quelle_dict_als_ungenutzt(eintrag))
+        else:
+            neu.append(eintrag)
+    if neu != last:
+        state.sources_last = neu
+    lock = _empfang_lock(state)
+    with lock:
+        pub = getattr(state, "_empfang_public_fulcrum", None)
+        state._empfang_public_fulcrum = None
+    if pub is not None:
+        _schliesse_fulcrum_hintergrund(pub)
+        stand_weg = True
+    if session_weg:
+        text = (
+            "Öffentliche Electrum-Freigabe ungültig — "
+            "eigener Indexer verbunden."
+        )
+        if on_log:
+            on_log(text)
+        else:
+            LOGGER.info("%s", text)
+    return session_weg or stand_weg
+
+
 def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
     """
     Eigener Electrum-Connect → sources_last + Job-tauglicher Stand.
@@ -108,6 +163,7 @@ def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
             frisch,
             stand,
         )
+        _kappe_oeffentliche_electrum_nach_privater_quelle(state)
     except Exception:
         LOGGER.debug("own_fulcrum Stand merken fehlgeschlagen", exc_info=True)
     return stand
