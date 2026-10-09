@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Specter-Plugin · Navigation:** In der Plugin-Leiste stehen nur noch Oberfläche und Einstellungen. Übersicht, Wallets, die Plaintext-Analyse und `context.json` sind aus der Navigation und von der Startseite. Die Adressen bleiben.
+- **Specter-Plugin · Icon:** Seitenleiste und Plugin-Kopf zeigen die Pfeifen-Marke (helle Platte), nicht mehr den Ausschnitt aus dem dunklen Logo.
+- **Specter-Plugin · Seitenleiste:** Unter Einstellungen gibt es „Menüeintrag anzeigen“ (Ja/Nein), wie beim Development Helper. Ja blendet SatSage in der Specter-Seitenleiste ein.
 - **Testsuite · kein P2P:** P2P bleibt als Datenquelle aus (Herkunft kommt darüber nicht an). `verify_p2p_traces.py` und die Scan-Abbruch-Fälle `Q-START-P2P` und `Q-START-KILL` gehören nicht zum Lauf. Der Default des Abbruch-Prüfers lässt die beiden aus. Frühestens 2027-01-08, siehe `doc/issues/p2p-herkunft.md`.
 - **Herkunft · Lot-Ring:** Die Layout-Box des Rings in der UTXO-Zeile ist 32 px wie der Ring selbst. Der Text sitzt mit dem normalen Abstand rechts daneben.
 - **Log · „Moment noch“:** Kommt erst nach 90 s Stille (bisher 10 s), weiter global über alle Jobs.

@@ -58,8 +58,7 @@ Browser: **http://127.0.0.1:25441**
 2. Device + Watch-Only-Wallet mit XPUB anlegen (oder Hot-Wallet im Regtest)
 3. **Plugins → SatSage** aktivieren
 4. Sidebar → **SatSage** → **Oberfläche** (volle Web-GUI in einem eigenen Tab)
-5. Optional: Übersicht / Wallets / klassische Analyse / `context.json`
-6. API-Probe: `./.venv/bin/python scripts/probe_api.py`
+5. API-Probe: `./.venv/bin/python scripts/probe_api.py`
 
 Offline-Check der Bridge:
 
@@ -98,6 +97,7 @@ Daten der Testinstanz liegen unter `specter_plugin/.specter_dev/` (gitignore).
 
 - **Development (`DevConfig`):** Extension ist in `EXTENSION_LIST`, `devstatus=alpha`, API an.
 - UI: „Choose plugins“ / Plugins → **SatSage**.
+- Seitenleiste: im Plugin **Einstellungen → Menüeintrag anzeigen → Ja**.
 - URL-Prefix (Specter-Default): `/svc/satsage/`
 
 ## REST-API (optional)

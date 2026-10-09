@@ -109,28 +109,34 @@ function _appPasswortFelderLeeren({ auchAktuell = true } = {}) {
   aktualisiereAppPasswortMatch();
 }
 
+let appPasswortSpeichert = false;
+
 async function speichereAppPasswort() {
-  const neu = String($("#app-passwort-neu")?.value || "");
-  const neu2 = String($("#app-passwort-neu2")?.value || "");
-  const aktuell = String($("#app-passwort-aktuell")?.value || "");
-  const gesetzt = Boolean(Zustand.config?.password_set);
-  aktualisiereAppPasswortMatch();
-  if (!neu) {
-    appPasswortMeldung(t("settings.password.emptyNew"), "krit");
-    return;
-  }
-  if (neu !== neu2) {
-    appPasswortMeldung(t("settings.password.mismatch"), "krit");
-    return;
-  }
-  if (gesetzt && !aktuell) {
-    appPasswortMeldung(t("settings.password.needCurrent"), "krit");
-    return;
-  }
+  // Ein Klick darf nur einen PUT auslösen. Ein zweiter Lauf (Listener plus
+  // onclick, Enter plus Klick) hat dieselbe .tmp umbenannt und ENOENT geworfen.
+  if (appPasswortSpeichert) return;
+  appPasswortSpeichert = true;
   const knopf = $("#app-passwort-setzen");
-  if (knopf) knopf.disabled = true;
-  appPasswortMeldung(t("settings.password.saving"), "warn");
   try {
+    const neu = String($("#app-passwort-neu")?.value || "");
+    const neu2 = String($("#app-passwort-neu2")?.value || "");
+    const aktuell = String($("#app-passwort-aktuell")?.value || "");
+    const gesetzt = Boolean(Zustand.config?.password_set);
+    aktualisiereAppPasswortMatch();
+    if (!neu) {
+      appPasswortMeldung(t("settings.password.emptyNew"), "krit");
+      return;
+    }
+    if (neu !== neu2) {
+      appPasswortMeldung(t("settings.password.mismatch"), "krit");
+      return;
+    }
+    if (gesetzt && !aktuell) {
+      appPasswortMeldung(t("settings.password.needCurrent"), "krit");
+      return;
+    }
+    if (knopf) knopf.disabled = true;
+    appPasswortMeldung(t("settings.password.saving"), "warn");
     const ergebnis = await api("/config/app-password", {
       methode: "PUT",
       daten: {
@@ -164,6 +170,7 @@ async function speichereAppPasswort() {
       "krit",
     );
   } finally {
+    appPasswortSpeichert = false;
     if (knopf) knopf.disabled = false;
   }
 }

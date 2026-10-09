@@ -14,14 +14,8 @@
         <a class="btn {% if active_tab == 'gui' %}action{% endif %}"
            href="{{ url_for(service.id + '_endpoint.gui') }}"
            target="_blank" rel="noopener">Oberfläche</a>
-        <a class="btn {% if active_tab == 'index' %}action{% endif %}"
-           href="{{ url_for(service.id + '_endpoint.index') }}">Übersicht</a>
-        <a class="btn {% if active_tab == 'wallets' %}action{% endif %}"
-           href="{{ url_for(service.id + '_endpoint.wallets') }}">Wallets / XPUBs</a>
-        <a class="btn {% if active_tab == 'analyze' %}action{% endif %}"
-           href="{{ url_for(service.id + '_endpoint.analyze') }}">Analyse</a>
-        <a class="btn"
-           href="{{ url_for(service.id + '_endpoint.context_json') }}" target="_blank">context.json</a>
+        <a class="btn {% if active_tab == 'settings' %}action{% endif %}"
+           href="{{ url_for(service.id + '_endpoint.settings_get') }}">Einstellungen</a>
     </nav>
 
     {% block satsage_content %}{% endblock %}

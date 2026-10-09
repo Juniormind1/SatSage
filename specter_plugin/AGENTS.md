@@ -20,7 +20,7 @@ Specter liefert **Wallets/XPUBs**, den **aktiven Node** und **UTXOs/Txs** in-pro
 | `controller.py` | Flask-Routes: `/`, `/wallets`, `/wallet/<alias>`, `/analyze`, `/context.json`, `/reload` |
 | `config.py` | Extension-Keys `SATSAGE_SHOW_SENSITIVE`, `SATSAGE_PREVIEW_LIMIT` (nicht in Server-Config duplizieren) |
 | `app_config.py` | `DevConfig` / `ProdLikeConfig`: `EXTENSION_LIST`, API an, `SERVICES_LOAD_FROM_CWD=False` |
-| `templates/satsage/*.jinja` | UI (Übersicht, Wallets, Analyse-Formulare, Ergebnis-Plaintext) |
+| `templates/satsage/*.jinja` | Navigation: Oberfläche und Einstellungen. Übrige Seiten ohne Link |
 
 ## Anbindung an SatSage-Core (`main.py` / `analyze.py`)
 
@@ -47,7 +47,13 @@ Session ist **gecacht** (`context_fingerprint` aus Node+Wallets); UTXOs werden b
 | Route | Funktion |
 |-------|----------|
 | `/svc/satsage/gui` | Volle Web-GUI (`server.py`+`web/`) in eigenem Tab (Redirect); `?embed=1` = iframe; Specter-Wallets via `gui_server.py` |
-| `/svc/satsage/` | Übersicht + Session-Info |
+| `/svc/satsage/` | Kurzer Hinweis; keine Session, kein Config-Dump |
+| `/svc/satsage/settings` | Menüeintrag: `show_menu=yes` hängt SatSage an die Specter-Seitenleiste (`user.add_service`) |
+
+Die Navigation zeigt nur **Oberfläche** und **Einstellungen**. Diese Routen bleiben, sind aber nicht verlinkt:
+
+| Route | Funktion |
+|-------|----------|
 | `/svc/satsage/wallets` | Wallet-Liste |
 | `/svc/satsage/wallet/<alias>` | Detail (UTXO/Tx-Preview) |
 | `/svc/satsage/analyze` | Formulare: `mode=tx\|utxo\|rank\|trace_top` (Legacy-Plaintext) |

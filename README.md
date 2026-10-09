@@ -349,10 +349,10 @@ Unter `specter_plugin/` liegt eine **Specter-Desktop-Extension** (Package `satsa
 
 | Bereich | Inhalt |
 |---------|--------|
-| **Übersicht** | Node, XPUB-Anzahl, Session-Status (Datenquelle, Privatsphäre), Adress-/UTXO-Counts |
-| **Wallets** | Specter-Wallets inkl. XPUBs, Saldo, UTXO-/Tx-Vorschau; Detailseite pro Alias |
-| **Analyse** | Tx-Trace (TxID), UTXO-Trace (`txid:vout`), UTXO-Rangfolge, Top-N-UTXOs tracen |
-| **Kontext** | `context.json` (exportierbarer Bridge-Snapshot; Secrets nur mit Dev-Flag) |
+| **Oberfläche** | Dieselbe Web-GUI wie `py server.py`, in einem eigenen Tab |
+| **Einstellungen** | Menüeintrag in der Specter-Seitenleiste |
+
+Übersicht, Wallet-Vorschau, Plaintext-Analyse und `context.json` bleiben als Adressen (`/svc/satsage/wallets`, `/analyze`, `/context.json`), ohne Eintrag in der Navigation.
 
 Die Analyse ruft dieselbe Logik wie die CLI auf (`analyze.analyze_tx`, `analyze_address_utxos`, `list_top_wallet_utxos`, `trace_known_utxos`). XPUBs und Node kommen aus Specter; Caches liegen im Repo-Root (`utxo_cache/`, `immutable_cache/`). Bevorzugt wird **Bitcoin Core + BIP-158**, wenn Specter einen Core-Node mit RPC-Credentials hat.
 
@@ -376,7 +376,7 @@ chmod +x scripts/*.sh
 2. Node verbinden (Regtest: `localhost:18443`, User `bitcoin`, Pass `secret`)
 3. Device + Watch-Only-Wallet mit XPUB anlegen (oder Hot-Wallet im Regtest)
 4. **Plugins → SatSage** aktivieren
-5. Sidebar → **SatSage**: Übersicht, Wallets, Analyse
+5. Sidebar → **SatSage** → **Oberfläche**
 
 Offline-Checks:
 
