@@ -1352,6 +1352,16 @@ async function starteZweigTrace(
 
   const fertigAusJob = (job) => {
     aufraeumen();
+    // „vervollständigen“ und „Scan neu“: Plot nachziehen, sobald der Lauf
+    // endet. Sonst bleibt der rote Ring, bis das Steuerjahr neu geladen wird.
+    if (
+      (force || followup)
+      && job
+      && job.status === "done"
+      && typeof steuerPlotNachEinzelTrace === "function"
+    ) {
+      steuerPlotNachEinzelTrace(utxo.key, job.result);
+    }
     if (job.status === "done" && job.result?.baum_im_cache) {
       // Fertig und gespeichert: Baum einzeln aus dem Cache holen.
       delete zweig.dataset.teilbaum;

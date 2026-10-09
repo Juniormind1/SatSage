@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Steuerjahr · Dotplot:** Endet „vervollständigen“ (oder „Scan neu“ an demselben UTXO), verschwindet der rote Ring, sobald der Lauf fertig ist. Der Punkt rückt mit dem neuen Server-Stand; das gezoomte Fenster bleibt. Bisher blieb der Ring bis zum nächsten Neuzeichnen des Plots.
 - **Specter-Plugin · Navigation:** In der Plugin-Leiste stehen nur noch Oberfläche und Einstellungen. Übersicht, Wallets, die Plaintext-Analyse und `context.json` sind aus der Navigation und von der Startseite. Die Adressen bleiben.
 - **Specter-Plugin · Icon:** Seitenleiste und Plugin-Kopf zeigen die Pfeifen-Marke (helle Platte), nicht mehr den Ausschnitt aus dem dunklen Logo.
 - **Specter-Plugin · Seitenleiste:** Unter Einstellungen gibt es „Menüeintrag anzeigen“ (Ja/Nein), wie beim Development Helper. Ja blendet SatSage in der Specter-Seitenleiste ein.

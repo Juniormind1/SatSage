@@ -340,7 +340,8 @@ async function steuerLotsNachziehen(lauf) {
   }
 }
 
-async function ladeSteuerjahr() {
+async function ladeSteuerjahr(optionen = {}) {
+  const fensterBehalten = Boolean(optionen && optionen.fensterBehalten);
   Zustand.steuerPlotLauf = (Zustand.steuerPlotLauf || 0) + 1;
   const lauf = Zustand.steuerPlotLauf;
   if (Zustand.steuerLotsAbbruch) {
@@ -355,8 +356,9 @@ async function ladeSteuerjahr() {
     `&stichtag=${encodeURIComponent(stichtag)}`;
   // Achse sofort, auch wenn der Cache noch gelesen wird. Liegt schon ein
   // Plot, bleibt er stehen, bis die neuen Punkte da sind.
+  // fensterBehalten: laufender Plot (Pan/Zoom) — kein leerer Rahmen darüber.
   const karte = $("#zeitstrahl-karte");
-  if (!karte || karte.hidden) zeichneSteuerLeerenRahmen();
+  if (!fensterBehalten && (!karte || karte.hidden)) zeichneSteuerLeerenRahmen();
   // Seitenweise (ISSUES P2): Summen, Kennzahlen und Zeitstrahl über alles,
   // Zeilen nur im Fenster — die erste Anfrage bringt je Liste zwei Seiten.
   // lots=0: Punkte aus UTXO und Ingress, Bäume folgen im Strom.
@@ -374,7 +376,7 @@ async function ladeSteuerjahr() {
     daten._abfrage = abfrage;
     daten._q = filter.toString();
     Zustand.steuer = daten;
-    zeichneSteuerjahr(daten);
+    zeichneSteuerjahr(daten, { fensterBehalten });
     if (daten.lots_fertig) {
       Zustand.steuerLots = Promise.resolve();
     } else {
@@ -615,7 +617,7 @@ function zeichneSteuerScorecards(daten) {
   }
 }
 
-function zeichneSteuerjahr(daten) {
+function zeichneSteuerjahr(daten, optionen = {}) {
   fuelleJahresauswahl(daten.verfuegbare_jahre || [], daten.jahr);
   fuelleHaltefristAuswahl(
     $("#frist-wahl"),
@@ -629,7 +631,9 @@ function zeichneSteuerjahr(daten) {
   ScanPunktStand.gezahlt.clear();
   zeichneSteuerScorecards(daten);
 
-  zeichneZeitstrahl(daten);
+  zeichneZeitstrahl(daten, {
+    fensterBehalten: Boolean(optionen && optionen.fensterBehalten),
+  });
 
   setzeText(
     $("#steuer-zusatz"),
@@ -1369,6 +1373,47 @@ function traceMarkenNachZeichnen() {
     setzeTraceMarke(key, "fertig");
   }
   traceWartenPruefen();
+}
+
+/**
+ * Einzel-Trace („vervollständigen“, „Scan neu“) ist zu Ende.
+ *
+ * Der Massenlauf lädt das Steuerjahr nach dem Job neu. Dieser Pfad bisher
+ * nicht: der rote Ring blieb am gezeichneten Punkt, bis ein späteres
+ * Neuzeichnen den Server-Stand holte. Voller Baum nimmt den Ring sofort
+ * vom Punkt und aus dem gemerkten Event — ein Pan dazwischen zeichnet
+ * ihn sonst aus dem alten Stand wieder. Danach derselbe Abruf wie beim
+ * Öffnen des Steuerjahrs, das X/Y-Fenster bleibt.
+ */
+function steuerPlotNachEinzelTrace(key, ergebnis) {
+  const voll = Boolean(ergebnis && ergebnis.verfolgt_vollstaendig);
+  if (voll && key) {
+    const daten = typeof Zustand !== "undefined" ? Zustand.steuer : null;
+    const events = daten && daten.zeitstrahl && daten.zeitstrahl.events;
+    if (Array.isArray(events)) {
+      const event = events.find((e) => e && e.key === key);
+      if (event) event.herkunft_offen = false;
+    }
+    const punkt = typeof tracePunktImPlot === "function" ? tracePunktImPlot(key) : null;
+    if (punkt) {
+      punkt.classList.remove("herkunft-offen-marke");
+      const tip = punkt.querySelector(".achse-punkt-tip");
+      const hinweis = typeof t === "function" ? t("tax.plotIncomplete") : "";
+      if (tip && hinweis) {
+        tip.textContent = String(tip.textContent || "")
+          .split("\n")
+          .filter((zeile) => zeile && zeile !== hinweis)
+          .join("\n");
+      }
+    }
+  }
+  if (
+    typeof Zustand !== "undefined"
+    && Zustand.ansicht === "steuerjahr"
+    && typeof ladeSteuerjahr === "function"
+  ) {
+    ladeSteuerjahr({ fensterBehalten: true }).catch(() => {});
+  }
 }
 
 /**

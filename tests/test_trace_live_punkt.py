@@ -174,3 +174,77 @@ class TestJobLiveFeld(unittest.TestCase):
         self.assertIn("function traceFragenSetzen", plot)
         self.assertIn("function traceWartenPruefen", plot)
         self.assertIn("TRACE_AUSRUF_MS = 1600", plot)
+        self.assertIn("function steuerPlotNachEinzelTrace", plot)
+        self.assertIn("fensterBehalten", plot)
+        self.assertIn("steuerPlotNachEinzelTrace", herkunft)
+        # Nur der Abschluss von „vervollständigen“ / „Scan neu“, nicht jedes Aufklappen.
+        self.assertIn("(force || followup)", herkunft)
+
+
+class TestPlotNachEinzelTrace(unittest.TestCase):
+    """Voller Einzel-Trace nimmt den roten Ring sofort und lädt den Plot neu."""
+
+    def test_voller_baum_nimmt_ring_und_behaelt_fenster(self):
+        import shutil
+        import subprocess
+
+        if not shutil.which("node"):
+            self.skipTest("node fehlt")
+        from pathlib import Path
+
+        quelle = (
+            Path(__file__).resolve().parents[1] / "web" / "views" / "steuerjahr.js"
+        ).read_text(encoding="utf-8")
+        start = quelle.index("function steuerPlotNachEinzelTrace(")
+        ende = quelle.index("\nfunction ", start + 10)
+        funktion = quelle[start:ende]
+        skript = r"""
+const geladen = [];
+function ladeSteuerjahr(optionen) { geladen.push(optionen || {}); return Promise.resolve(); }
+function t(key) { return key === "tax.plotIncomplete" ? "Herkunft unvollständig" : key; }
+const tip = { textContent: "01.01.2024\n1 sat\nWallet\nHerkunft unvollständig" };
+const punkt = {
+  classList: { removed: [], remove(name) { this.removed.push(name); } },
+  querySelector() { return tip; },
+};
+function tracePunktImPlot(key) { return key === "aa:0" ? punkt : null; }
+const event = { key: "aa:0", herkunft_offen: true };
+const anderer = { key: "bb:0", herkunft_offen: true };
+const Zustand = {
+  ansicht: "steuerjahr",
+  steuer: { zeitstrahl: { events: [event, anderer] } },
+};
+""" + funktion + r"""
+steuerPlotNachEinzelTrace("aa:0", { found: true, verfolgt_vollstaendig: false });
+const unvoll = {
+  ring: punkt.classList.removed.slice(),
+  offen: event.herkunft_offen,
+  laden: geladen.length,
+};
+steuerPlotNachEinzelTrace("aa:0", { found: true, verfolgt_vollstaendig: true });
+console.log(JSON.stringify({
+  unvoll,
+  ring: punkt.classList.removed,
+  offen: event.herkunft_offen,
+  anderer: anderer.herkunft_offen,
+  tip: tip.textContent,
+  laden: geladen,
+}));
+"""
+        aus = subprocess.run(
+            ["node", "-e", skript], capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(aus.returncode, 0, aus.stderr)
+        import json
+        roh = json.loads(aus.stdout)
+        self.assertEqual(roh["unvoll"]["ring"], [])
+        self.assertTrue(roh["unvoll"]["offen"])
+        self.assertEqual(roh["unvoll"]["laden"], 1)
+        self.assertEqual(roh["ring"], ["herkunft-offen-marke"])
+        self.assertFalse(roh["offen"])
+        self.assertTrue(roh["anderer"])
+        self.assertNotIn("Herkunft unvollständig", roh["tip"])
+        self.assertEqual(
+            roh["laden"],
+            [{"fensterBehalten": True}, {"fensterBehalten": True}],
+        )
