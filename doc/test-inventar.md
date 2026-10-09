@@ -39,7 +39,7 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_start9_phase_s1.py` | 23 | Passwort, Login, Proxy, CSRF/Origin hinter Start9 |
 | `test_start9_phase_s2.py` | 9 | Outbound/SSRF |
 | `test_start9_phase_s3.py` | 4 | Import-Limits / DoS |
-| `test_umbrel_mode.py` | 14 | Managed Electrum/Auth |
+| `test_umbrel_mode.py` | 16 | Managed Electrum/Auth; Klartext-Passwort setzen/ändern/löschen |
 | `test_env_scramble.py` | 8 | `.env` SSGB1 |
 | `test_env_backup.py` | 5 | `.env.backup0–9` |
 | `test_config.py` | 44 | `.env` lesen/schreiben (temporäre Dateien) |
@@ -194,6 +194,7 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | Datei | n | Zweck |
 |-------|--:|-------|
 | `test_specter_gui_server.py` | 1 | GUI-Server ohne Specter |
+| `test_specter_password.py` | 5 | App-Passwort ohne Scramble: setzen, ändern, löschen |
 | `test_specter_phase_a.py` | 3 | Plugin-Phase A |
 | `test_specter_seed.py` | 4 | Cache-Seed aus Specter-Wallet-Info |
 
@@ -210,7 +211,7 @@ Labor (`lab/regtest/scripts/`):
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)
 - `live_psbt_regtest_timing.py` — Lab darf `sendrawtransaction`, die App nicht
 
-GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`; Labor: `verify_scan_abort_cache.py` ohne die beiden P2P-Fälle.
+GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`. Passwort setzen/ändern/löschen in der Oberfläche: `scripts/webgui_passwort_flow.py`, aufgerufen von Userflow und Chaos bei `--spawn` (Desktop, Specter, Umbrel). Labor: `verify_scan_abort_cache.py` ohne die beiden P2P-Fälle.
 
 **P2P nicht testen.** P2P ohne Electrs ist keine ausreichende Datenquelle (Bestand über Compact Filter ja, Herkunft nein: historische Vorgänger kommen per `getdata` nicht, Key-Path-Taproot bleibt ohne Txid-zu-Block). Befund und Sperre: `doc/issues/p2p-herkunft.md`. Deshalb nicht starten: `verify_p2p_traces.py` (Protokoll `doc/testprotokoll-p2p-traces.md` liegt nur noch als Beleg) und im Scan-Abbruch `Q-START-P2P` sowie `Q-START-KILL`. Der Default-Lauf von `verify_scan_abort_cache.py` lässt die beiden aus. Frühestens 2027-01-08 neu prüfen, und nur ob die P2P-Schnittstelle die Lücke schließt. Unittests, die die Sperre oder Filter-Code ohne Live-Peer prüfen (`test_p2p_economy.py`, Teile von `test_bip158_scanblocks.py`), bleiben.
 

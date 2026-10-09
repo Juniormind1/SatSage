@@ -24,6 +24,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
 HARNESS = Path(__file__).resolve().parent / "webgui_chaos_harness.js"
 
 
@@ -242,6 +245,24 @@ def main(argv: list[str] | None = None) -> int:
                 args.text_ratio,
                 args.submit_ratio,
             )
+
+        passwort = None
+        if args.spawn:
+            # Fester Klicklauf vor dem Zufall. Der Zufall füllt keine
+            # Passwortfelder und darf eine echte --url-Sitzung nicht anfassen.
+            from webgui_passwort_flow import lauf_passwort_zyklen
+
+            print("Passwort setzen / ändern / löschen…", flush=True)
+            passwort = lauf_passwort_zyklen(headless=True)
+            for schritt in passwort["schritte"]:
+                mark = "OK" if schritt.get("ok") else "FAIL"
+                print(
+                    f"  {mark} {schritt.get('schritt')}: "
+                    f"{schritt.get('detail') or schritt.get('fehler')}",
+                    flush=True,
+                )
+            if not passwort["ok"]:
+                return 1
 
         print(
             f"Chaos: rounds={args.rounds} seed={seed} "

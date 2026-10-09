@@ -3485,6 +3485,17 @@ function setzeTipSyncSichtbarkeit() {
   tipSync.hidden = false;
 }
 
+function i18nTitel(el) {
+  // dataset.titel würde den deutschen HTML-Titel festnageln. Der Schlüssel
+  // bleibt, die sichtbare Sprache kommt aus dem aktuellen Katalog.
+  const key = el && el.getAttribute("data-i18n-title");
+  if (key) {
+    const text = t(key);
+    if (text && text !== key) return text;
+  }
+  return (el && el.title) || "";
+}
+
 function setzeWalletScanGesperrt() {
   const rescan = $("#rescan-knopf");
   const verlauf = $("#verlauf-knopf");
@@ -3498,37 +3509,33 @@ function setzeWalletScanGesperrt() {
   const tipLaeuft = Boolean(wid && walletSyncLaeuftFuer(wid));
   const tiefLaeuft = Boolean(wid && herkunftTiefLaeuftFuer(wid));
   if (rescan) {
-    if (!rescan.dataset.titel) rescan.dataset.titel = rescan.title || "";
     rescan.disabled = utxoGeplant;
     rescan.title = rescan.disabled
       ? t("nav.jobAlreadyRunning")
-      : rescan.dataset.titel;
+      : i18nTitel(rescan);
   }
   if (verlauf) {
-    if (!verlauf.dataset.titel) verlauf.dataset.titel = verlauf.title || "";
     verlauf.disabled = verlaufGeplant;
     verlauf.title = verlauf.disabled
       ? t("nav.jobAlreadyRunning")
-      : verlauf.dataset.titel;
+      : i18nTitel(verlauf);
   }
   if (tipSync) {
     setzeTipSyncSichtbarkeit();
-    if (!tipSync.dataset.titel) tipSync.dataset.titel = tipSync.title || "";
     const hatCache = (Zustand.config?.wallets || []).some(
       (w) => w.id === wid && w.has_cache,
     );
     tipSync.disabled = Boolean(tipLaeuft || !hatCache || !wid);
     tipSync.title = tipLaeuft
       ? t("nav.jobAlreadyRunning")
-      : (!hatCache ? t("wallet.tipSyncNeedCache") : tipSync.dataset.titel);
+      : (!hatCache ? t("wallet.tipSyncNeedCache") : i18nTitel(tipSync));
   }
   if (tief) {
-    if (!tief.dataset.titel) tief.dataset.titel = tief.title || "";
     const klaerenLaeuft = Boolean(Zustand.herkunftAlleLaeuft);
     tief.disabled = Boolean(tiefLaeuft || klaerenLaeuft || !wid);
     tief.title = (tiefLaeuft || klaerenLaeuft)
       ? t("nav.jobAlreadyRunning")
-      : tief.dataset.titel;
+      : i18nTitel(tief);
   }
 }
 

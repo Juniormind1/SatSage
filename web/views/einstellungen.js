@@ -75,9 +75,26 @@ function zeichneAppPasswort() {
   const karte = $("#karte-app-passwort");
   if (!karte) return;
   const gesetzt = Boolean(Zustand.config?.password_set);
+  const scrambleErlaubt = Zustand.config?.env_scramble?.allowed !== false;
   const aktuell = $("#app-passwort-aktuell");
   const entfernen = $("#app-passwort-entfernen");
   const zusatz = $("#app-passwort-zusatz");
+  const hinweis = karte.querySelector(".steuer-einstellungen-hinweis");
+  if (hinweis) {
+    const key = scrambleErlaubt
+      ? "settings.password.hint"
+      : "settings.password.hintPlain";
+    hinweis.setAttribute("data-i18n", key);
+    hinweis.textContent = t(key);
+  }
+  const setzen = $("#app-passwort-setzen");
+  if (setzen) {
+    const titleKey = scrambleErlaubt
+      ? "settings.password.saveTitle"
+      : "settings.password.saveTitlePlain";
+    setzen.setAttribute("data-i18n-title", titleKey);
+    setzen.title = t(titleKey);
+  }
   if (aktuell) {
     aktuell.disabled = !gesetzt;
     if (!gesetzt) aktuell.value = "";
@@ -85,13 +102,13 @@ function zeichneAppPasswort() {
   }
   if (entfernen) entfernen.disabled = !gesetzt;
   if (zusatz) {
-    zusatz.textContent = gesetzt
-      ? t("settings.password.zusatzOn")
-      : t("settings.password.zusatzOff");
-    zusatz.setAttribute(
-      "data-i18n",
-      gesetzt ? "settings.password.zusatzOn" : "settings.password.zusatzOff",
-    );
+    const key = gesetzt
+      ? (scrambleErlaubt
+        ? "settings.password.zusatzOn"
+        : "settings.password.zusatzOnPlain")
+      : "settings.password.zusatzOff";
+    zusatz.textContent = t(key);
+    zusatz.setAttribute("data-i18n", key);
   }
   aktualisiereAppPasswortMatch();
   bindeAppPasswortUi();
