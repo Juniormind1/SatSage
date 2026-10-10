@@ -202,5 +202,32 @@ class TestVerlaufPrioritaet(unittest.TestCase):
         self.assertTrue(callable(fetchers["fetch_wallet_history"]))
 
 
+class TestIndexerWarteNachPapierkorb(unittest.TestCase):
+    def test_geloeschte_adresse_beendet_die_warte(self):
+        args = SimpleNamespace(
+            fulcrum_host=None,
+            rpchost=None,
+            fulcrum_port=None,
+            fulcrum_no_ssl=False,
+        )
+        env = {
+            "FULCRUM_HOST": "192.0.2.9",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        ladungen = iter([dict(env), {"NETWORK": "main"}])
+        with patch.object(
+            chain_sources, "_try_own_fulcrum_client", return_value=None,
+        ) as versuch, patch(
+            "core.env_bootstrap._load_dotenv",
+            side_effect=lambda *a, **k: next(ladungen),
+        ), patch(
+            "core.env_scramble.is_env_scrambled", return_value=False,
+        ), patch("time.sleep") as schlaf:
+            self.assertIsNone(chain_sources._warte_auf_eigenen_indexer(args, env))
+        self.assertEqual(versuch.call_count, 1)
+        schlaf.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

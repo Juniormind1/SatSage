@@ -1104,6 +1104,18 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
       };
     }
     if (neu.reachable == null) {
+      // „Nicht genutzt“ ist das Ergebnis der anderen Familie, kein fehlender Check.
+      if (
+        (neu.key === "public_onion" || neu.key === "clearnet")
+        && String(neu.note || "").startsWith("Nicht genutzt")
+      ) {
+        return {
+          ...neu,
+          reachable: null,
+          peer_count: 0,
+          peer_hosts: [],
+        };
+      }
       if (alt.reachable == null && !(alt.peer_count > 0)) return neu;
       // Onion → IP (oder anderer Host): alten „verbunden“-Stand nicht übernehmen.
       const altEp = quelleEndpointSchluessel(alt);
@@ -1263,6 +1275,9 @@ function nimmPeerStand(ergebnis, still) {
         ergebnis.oeffentliche_electrum_session,
       );
     }
+    if ("oeffentliche_electrum_art" in ergebnis) {
+      Zustand.oeffentlicheArt = String(ergebnis.oeffentliche_electrum_art || "");
+    }
   }
   const ownNachCheck = (Zustand.config?.sources || quellen || []).find(
     (q) => q && q.key === "own_fulcrum",
@@ -1379,9 +1394,10 @@ async function erlaubeOeffentlicheElectrum() {
     t("ui.hard.81909b08fe"),
   );
   try {
+    const art = String(Zustand._oeffentlichWahl || "");
     await api("/source/oeffentlich", {
       methode: "POST",
-      daten: { erlauben: true },
+      daten: art ? { erlauben: true, art } : { erlauben: true },
     });
     if (Zustand.config) {
       Zustand.config.oeffentliche_electrum = true;
@@ -1610,7 +1626,7 @@ function zeichneKopfStatus(quellen) {
     (liveN > 0
       ? t("ui.hard.30afd7b333", { n: liveN }) + " "
       : "")
-    + "Bitcoin-P2P mit BIP-158 Compact Filters. "
+    + "Bitcoin-P2P, nur UTXO-Bestand (BIP-158). "
     + (p2pHosts.length ? p2pHosts.slice(0, 6).join(", ") : "");
 
   const eintraege = [];
@@ -1685,10 +1701,16 @@ function zeichneKopfStatus(quellen) {
   }
 
   if (oeffentlichVerbunden) {
+    const art = String(Zustand.oeffentlicheArt || "");
+    const onionZahl = Number(oeffentlichOnion?.peer_count || 0);
+    const clearZahl = Number(oeffentlichClear?.peer_count || 0);
+    const oeffentlichZahl = art === "onion"
+      ? onionZahl
+      : (art === "clearnet" ? clearZahl : onionZahl + clearZahl);
     eintraege.push({
       key: "public",
       lern: "privatsphaere",
-      label: t("header.sourceElectrumPublic"),
+      label: t("header.sourceElectrumPublicN", { n: oeffentlichZahl }),
       stufe: "krit",
       title: `${t("header.sourceConnectionUp")} ${t("header.sourceElectrumPublicTitle")}`,
     });

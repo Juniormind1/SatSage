@@ -110,14 +110,6 @@ def api_save_source(state: AppState, payload: dict) -> dict:
     Schreibzugriff auf beliebige Einträge — auch auf XPUBS.
     """
     quelle = str(payload.get("source", "")).strip()
-    if quelle == "bip158":
-        from core.p2p import p2p_gesperrt
-
-        if p2p_gesperrt():
-            raise ApiError(
-                403,
-                "P2P ist abgeklemmt. Compact Filter reichen für die Herkunft nicht.",
-            )
     erlaubt = source_mod.EDITIERBARE_FELDER.get(quelle)
     if not erlaubt:
         raise ApiError(400, f"Quelle „{quelle}“ ist nicht bearbeitbar.")
@@ -256,6 +248,13 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
     if art not in ("onion", "clearnet"):
         raise ApiError(400, "filter muss „onion“ oder „clearnet“ sein.")
     verbinden = bool(payload.get("verbinden"))
+    # „Verbinden“ gilt nur für diese Zeile. Die Liste kommt bei Bedarf mit.
+    # Sonst prüft der folgende Status-Check ohne Wahl und nimmt Clearnet,
+    # weil es schneller antwortet als Onion.
+    source_mod.setze_oeffentliche_electrum_art(art)
+    from httpserver.empfang import _verwerfe_oeffentlichen_empfang_pool
+
+    _verwerfe_oeffentlichen_empfang_pool(state)
 
     ziel = main.ELECTRUM_SERVERS_FILE
     try:
@@ -302,12 +301,6 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
         meldung = f"{len(clearnet)} Clearnet-Server in electrum_servers.json."
         zaehler = len(clearnet)
 
-    if verbinden:
-        source_mod.setze_oeffentliche_electrum_art(art)
-        from httpserver.empfang import _verwerfe_oeffentlichen_empfang_pool
-
-        _verwerfe_oeffentlichen_empfang_pool(state)
-
     werte = state.env().values()
     return {
         "saved": True,
@@ -339,7 +332,12 @@ def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
 
     _datenquellen_config_gesperrt(state)
     erlauben = bool(payload.get("erlauben"))
+    art = str(payload.get("art") or "").strip().lower()
+    if art and art not in ("onion", "clearnet"):
+        raise ApiError(400, "art muss „onion“ oder „clearnet“ sein.")
     source_mod.setze_oeffentliche_electrum_session(erlauben)
+    if erlauben and art:
+        source_mod.setze_oeffentliche_electrum_art(art)
     # Dauerhafte Freigabe streichen — Opt-in ist sitzungsweise.
     env = state.env()
     if (env.values().get("OEFFENTLICHE_ELECTRUM") or "").strip():
@@ -526,6 +524,7 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         "oeffentliche_electrum_session": (
             source_mod.oeffentliche_electrum_session_aktiv()
         ),
+        "oeffentliche_electrum_art": source_mod.oeffentliche_electrum_art(),
         # Dealbreaker T14: Kopfzeile zeigt eine rote Pille, solange gesetzt.
         "rpc_allowlist": rpc_allowlist_status(),
     }
@@ -563,18 +562,13 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
             if not (name == "own_core" and k == "FULCRUM_TOR_PROXY")
         ]
         env.apply({schluessel: None for schluessel in loeschen})
+        for schluessel in loeschen:
+            env.runtime_values.pop(schluessel, None)
         try:
             sicherung = env.save()
         except OSError as exc:
             raise ApiError(500, "Interner Serverfehler.") from exc
     elif name == "bip158":
-        from core.p2p import p2p_gesperrt
-
-        if p2p_gesperrt():
-            raise ApiError(
-                403,
-                "P2P ist abgeklemmt. Compact Filter reichen für die Herkunft nicht.",
-            )
         # Wie Zeilen-Knopf „Verbinden“ rückgängig (fehlender Key = Default an).
         env.apply({"BIP158_P2P": "false"})
         env.runtime_values.pop("BIP158_P2P", None)
@@ -673,6 +667,7 @@ def api_rescan(state: AppState, payload: dict) -> dict:
         threading.Thread(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
+        fetchers = None
         try:
             stand.phase(f"Verbinde für {entry.display_name}…")
             args = state.args_namespace()
@@ -693,7 +688,22 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 if alter_start is not None:
                     args.bip158_start = alter_start
 
-            quelle, backend = main._setup_blockchain_client(args, state.env().values())
+            werte = state.env().values()
+            try:
+                quelle, backend = main._setup_blockchain_client(args, werte)
+            except SystemExit:
+                from core.chain_sources import fetchers_fuer_utxo_entdeckung
+
+                ersatz = fetchers_fuer_utxo_entdeckung(
+                    werte,
+                    args,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
+                if ersatz is None:
+                    raise
+                quelle, fetchers = ersatz
+                backend = None
             job.raise_if_cancelled()
             if isinstance(job.meta, dict):
                 job.meta["source"] = quelle
@@ -711,10 +721,11 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                         f"(Block {bip_start:,})…".replace(",", ".")
                     )
 
-            fetchers = main._build_blockchain_fetchers(
-                quelle, backend, args, state.wallet_ctx,
-                immutable_cache_dir=state.immutable_cache_dir,
-            )
+            if fetchers is None:
+                fetchers = main._build_blockchain_fetchers(
+                    quelle, backend, args, state.wallet_ctx,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
             stand.phase(f"Scanne {entry.display_name} über {quelle}…")
 
             def on_utxos_update(stand_utxos: list) -> None:
@@ -791,6 +802,12 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 "empfang_scharf": n_empfang,
             }
         finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
             halt.set()
             stand.close()
 

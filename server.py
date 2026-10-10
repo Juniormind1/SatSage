@@ -877,8 +877,8 @@ def _ui_lang_fuer_web(
     der Browser über ``Accept-Language`` — umbrelOS reicht seine eigene
     Spracheinstellung nicht an Apps durch, das ist also das einzige Signal.
     Gibt auch der nichts her, ist Englisch die Vorgabe: die Web-GUI hat im
-    App Store internationales Publikum. CLI und Terminal-Menü bleiben davon
-    unberührt und antworten weiter auf Deutsch.
+    App Store internationales Publikum. Die Terminal-Steuerung bleibt davon
+    unberührt und antwortet weiter auf Deutsch.
     """
     from core import i18n
 

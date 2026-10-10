@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import main
 from fulcrum import FulcrumClient, RotatingFulcrumPool
+from tests.fixtures import BIP84_ZPUB
 
 
 def _client(*, host: str, tor_proxy=None) -> MagicMock:
@@ -40,6 +41,44 @@ class TestUtxoScanPrioritaet(unittest.TestCase):
 
     def test_ohne_fulcrum_core_vor_bip158(self):
         self.assertTrue(main._utxo_scan_scantxoutset_vorrang(None, env={}))
+
+    def test_oeffentlicher_pool_nimmt_p2p_vor_dem_gap(self):
+        from pathlib import Path
+        import tempfile
+
+        pool = MagicMock(spec=RotatingFulcrumPool)
+        gesehen = {}
+
+        def fetch(_addrs, **kw):
+            gesehen["filter"] = kw.get("filter_scan")
+            gesehen["xpubs"] = list(kw.get("xpubs") or [])
+            return [{
+                "txid": "ab" * 32,
+                "vout": 0,
+                "value": 5,
+                "status": {"block_time": 1_700_000_000},
+            }]
+
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "core.wallet_sync_engine._try_scantxoutset_xpub", return_value=None,
+        ), patch(
+            "core.chain_sources.baue_p2p_utxo_fetch",
+            return_value=(fetch, lambda: None),
+        ) as bau:
+            out = main._scan_xpub_utxos(
+                BIP84_ZPUB,
+                lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Gap")),
+                Path(tmp),
+                "fulcrum",
+                max_addresses=4,
+                fulcrum=pool,
+            )
+        bau.assert_called_once()
+        self.assertEqual(bau.call_args.kwargs["scantxoutset"], False)
+        self.assertIs(bau.call_args.kwargs["fulcrum"], pool)
+        self.assertTrue(gesehen["filter"])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["value"], 5)
 
     def test_try_scantxoutset_ueberspringt_bei_lan_electrs(self):
         lan = _client(host="10.0.0.2")

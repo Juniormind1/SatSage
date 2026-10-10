@@ -21,12 +21,12 @@ Jetzt zählt der fehlerfreie Electrs-Walk. Core-Walks und der Abgleich gegen Ele
 
 ## P2P · Herkunft reicht nicht
 
-**Stand:** 2026-10-08 · **offen** · P2P abgeklemmt
+**Stand:** 2026-10-10 · **offen** · Herkunft zu, UTXO-Suche unter Vorbehalt
 **Ort:** `doc/issues/p2p-herkunft.md`, `core/p2p.py` (`p2p_gesperrt`)
 **Nächste Prüfung:** frühestens 2027-01-08
 Aufwand: erst nach einer Protokoll-Änderung abschätzbar
 
-P2P ohne Electrs trägt den Betrieb nicht. Compact Filter finden den UTXO-Bestand. Die Herkunft eines fremden Vorgängers nicht: `getdata` TX liefert nur Mempool und den letzten Block, Key-Path-Taproot lässt sich aus dem Witness nicht rekonstruieren. Bis sich daran substanziell etwas ändert, bleibt jeder P2P-Socket zu, die Datenquellen-Zeile und die Kopf-Pille sind ausgeblendet. Detail und Aufhebe-Bedingung: [`doc/issues/p2p-herkunft.md`](doc/issues/p2p-herkunft.md).
+Compact Filter suchen den UTXO-Bestand, und nur wenn eigener Electrum-Server und scantxoutset nicht verbunden sind. Die Herkunft eines fremden Vorgängers bleibt zu: `getdata` TX liefert nur Mempool und den letzten Block, Key-Path-Taproot lässt sich aus dem Witness nicht rekonstruieren. Herkunft, Verlauf, Header-Vorab und der Walk-Abgleich bleiben aus. Detail: [`doc/issues/p2p-herkunft.md`](doc/issues/p2p-herkunft.md).
 
 ---
 

@@ -876,6 +876,13 @@ def _verify_cached_utxos_against_chain(
     return cached_by_xpub
 
 
+class _ScantxoutsetVerbunden:
+    """Marker: Core-Handshake stand, der Scan hat keine UTXO-Liste geliefert."""
+
+
+_SCANTXOUTSET_VERBUNDEN = _ScantxoutsetVerbunden()
+
+
 def _utxo_scan_scantxoutset_vorrang(fulcrum=None, env: dict[str, str] | None = None) -> bool:
     """
     Wann Bitcoin Core ``scantxoutset`` vor dem Electrum-Gap-Scan steht.
@@ -925,7 +932,11 @@ def _try_scantxoutset_xpub(
                 on_progress(msg)
         return None
 
-    from core.bitcoind_rpc import RpcAllowlistError, try_scantxoutset_for_xpubs
+    from core.bitcoind_rpc import (
+        RpcAllowlistError,
+        ScantxoutsetVerbundenFehler,
+        try_scantxoutset_for_xpubs,
+    )
 
     scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
 
@@ -941,6 +952,9 @@ def _try_scantxoutset_xpub(
             wallet=wallet,
             on_progress=on_progress,
         )
+    except ScantxoutsetVerbundenFehler:
+        # Verbunden, Scan selbst gescheitert: nicht auf P2P ausweichen.
+        return _SCANTXOUTSET_VERBUNDEN
     except RpcAllowlistError:
         raise  # Dealbreaker T14: nicht still auf Electrum/BIP-158 ausweichen
     except Exception as exc:
@@ -994,6 +1008,7 @@ def _scan_xpub_utxos(
     on_progress=None,
     on_utxos_update=None,
     allow_scantxoutset: bool = True,
+    _p2p_schon: bool = False,
 ) -> list[dict]:
     """Scannt ein XPUB und schreibt das Ergebnis in den Cache."""
     label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."
@@ -1009,6 +1024,7 @@ def _scan_xpub_utxos(
             on_utxos_update(zwischen)
 
     # Core scantxoutset nur bei Vollabgleich (User-Scan), nie beim Tip-Nachzug.
+    scantx_verbunden = False
     if allow_scantxoutset and start_index == 0:
         core_utxos = _try_scantxoutset_xpub(
             xpub,
@@ -1018,10 +1034,60 @@ def _scan_xpub_utxos(
             fulcrum=fulcrum,
             on_progress=on_progress,
         )
-        if core_utxos is not None:
+        if core_utxos is _SCANTXOUTSET_VERBUNDEN:
+            scantx_verbunden = True
+        elif core_utxos is not None:
             if on_utxos_update:
                 on_utxos_update(core_utxos)
             return core_utxos
+    if (
+        not _p2p_schon
+        and start_index == 0
+        and source != "bip158"
+        and not scantx_verbunden
+    ):
+        from core.chain_sources import baue_p2p_utxo_fetch
+
+        gebaut = baue_p2p_utxo_fetch(
+            _load_dotenv(),
+            fulcrum=fulcrum,
+            scantxoutset=False,
+            cache_dir=cache_dir,
+        )
+        if gebaut is not None:
+            p2p_fetch, p2p_close = gebaut
+            try:
+                return _scan_xpub_utxos(
+                    xpub,
+                    p2p_fetch,
+                    cache_dir,
+                    "bip158",
+                    max_addresses,
+                    start_index=0,
+                    wallet=wallet,
+                    fulcrum=None,
+                    on_progress=on_progress,
+                    on_utxos_update=on_utxos_update,
+                    allow_scantxoutset=False,
+                    _p2p_schon=True,
+                )
+            except Exception as exc:
+                from core.jobs import ist_abbruch
+
+                if ist_abbruch(exc):
+                    raise
+                msg = (
+                    f"P2P-UTXO-Suche fehlgeschlagen ({exc}) — "
+                    "nächste Quelle."
+                )
+                print(f"  {msg}", flush=True)
+                if on_progress:
+                    try:
+                        on_progress(msg, sofort=True)
+                    except TypeError:
+                        on_progress(msg)
+            finally:
+                p2p_close()
     scan_end_index = start_index + max_addresses // 2
     scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
     use_gap_scan = start_index == 0 and (fulcrum is not None)

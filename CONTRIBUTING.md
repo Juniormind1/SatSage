@@ -33,7 +33,7 @@ GitHub startet dieselbe Suite bei jedem Push und jedem Pull Request nach `dev-ju
 
 ## Regtest vor `main`
 
-Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. Dasselbe gilt für einen Release-Wechsel: Tag `v*`, Container-Image, Linux-Binary und StartOS-Paket laufen erst, wenn `Regtest-Labor` auf diesem Commit grün ist. GitHub startet dafür Bitcoin Core und Electrs in Docker, dann `verify_rpc_allowlist.py` (Allowlist, rpcwhitelist, disablewallet), Lab-Szenarien, `verify_tx_classify.py` und `verify_sanctions_hops.py`. Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main`, bei einem Push nach `main` und bei einem Tag `v*`, nicht bei jedem Push nach `dev-juniormind`. Montags schaut `Regtest-Labor Woche` auf `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag (Lab, Allowlist, Klassifikation, Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
+Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. Dasselbe gilt für einen Release-Wechsel: Tag `v*`, Container-Image, Linux-Binary und StartOS-Paket laufen erst, wenn `Regtest-Labor` auf diesem Commit grün ist. GitHub startet dafür Bitcoin Core und Electrs in Docker, dann `verify_rpc_allowlist.py` (Allowlist, rpcwhitelist, disablewallet), Lab-Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py` und `verify_quellen_inventar.py` (jede eigene Datenquelle allein: Cache leer, Bestand und Herkunft aller UTXOs; P2P erst ohne Sperre, mit rotem Ring nach dem ersten Klären und ohne Ring nach Electrs). Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main`, bei einem Push nach `main` und bei einem Tag `v*`, nicht bei jedem Push nach `dev-juniormind`. Montags schaut `Regtest-Labor Woche` auf `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag (Lab, Allowlist, Klassifikation, Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
 
 Lokal derselbe Kern, ohne den Mempool-Explorer:
 
@@ -45,6 +45,7 @@ python3 scripts/generate_scenarios.py
 python3 scripts/generate_sanctions_scenarios.py
 python3 scripts/verify_tx_classify.py
 python3 scripts/verify_sanctions_hops.py
+python3 scripts/verify_quellen_inventar.py
 ```
 
 Windows bleibt bei `scripts/win/start_lab.ps1` (siehe [`lab/regtest/README.md`](lab/regtest/README.md)).

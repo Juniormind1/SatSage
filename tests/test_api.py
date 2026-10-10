@@ -1100,16 +1100,6 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(ende[2])
 
     def test_p2p_starthoehe_wird_gespeichert(self):
-        from core.p2p import p2p_gesperrt
-
-        if p2p_gesperrt():
-            status, körper = self.anfrage(
-                "/api/config/source", methode="PUT",
-                daten={"source": "bip158", "values": {"BIP158_START_HEIGHT": "481824"}},
-            )
-            self.assertEqual(status, 403)
-            self.assertIn("abgeklemmt", körper["error"])
-            return
         status, _ = self.anfrage(
             "/api/config/source", methode="PUT",
             daten={"source": "bip158", "values": {"BIP158_START_HEIGHT": "481824"}},
@@ -1226,15 +1216,6 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(nach_key["own_fulcrum"]["verwerfbar"])
 
     def test_p2p_laesst_sich_ausschalten(self):
-        from core.p2p import p2p_gesperrt
-
-        if p2p_gesperrt():
-            status, körper = self.anfrage(
-                "/api/config/source/bip158", methode="DELETE",
-            )
-            self.assertEqual(status, 403)
-            self.assertIn("abgeklemmt", körper["error"])
-            return
         status, körper = self.anfrage("/api/config/source/bip158", methode="DELETE")
         self.assertEqual(status, 200)
         self.assertTrue(körper["saved"])
@@ -1257,10 +1238,6 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             [f["key"] for f in bip["felder"]],
         )
 
-    @unittest.skipIf(
-        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
-        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
-    )
     def test_p2p_trennen_bricht_laufende_scan_jobs_ab(self):
         import threading
         import time
@@ -1296,17 +1273,6 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             self.state.jobs.cancel(job.id)
 
     def test_p2p_verbinden_schalter_schreibt_env(self):
-        from core.p2p import p2p_gesperrt
-
-        if p2p_gesperrt():
-            status, körper = self.anfrage(
-                "/api/config/source",
-                methode="PUT",
-                daten={"source": "bip158", "values": {"BIP158_P2P": "true"}},
-            )
-            self.assertEqual(status, 403)
-            self.assertIn("abgeklemmt", körper["error"])
-            return
         status, körper = self.anfrage(
             "/api/config/source",
             methode="PUT",
@@ -1560,6 +1526,14 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_TOR_1"], "zzz.onion")
         self.assertEqual(werte["FULCRUM_SSL_1"], "true")
         self.assertNotIn("FULCRUM_TOR_2", werte)
+        from core.outbound_policy import (
+            _reset_oeffentliche_electrum_suche_fuer_tests,
+            oeffentliche_electrum_art,
+        )
+
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+        self.assertEqual(körper["art"], "onion")
+        self.assertEqual(oeffentliche_electrum_art(), "onion")
 
     def test_electrum_laden_onion_frisch_laesst_env_in_ruhe(self):
         write_env_scrambled(

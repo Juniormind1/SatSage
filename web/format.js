@@ -810,6 +810,7 @@ const T_FALLBACK = {
   "header.sourceElectrumImpl": "{name}",
   "header.sourceElectrumImplTitle": "Eigener Electrum-Indexer: {name} ({raw}). {detail}",
   "header.sourceElectrumPublic": "Electrum öffentlich",
+  "header.sourceElectrumPublicN": "Electrum öffentlich {n}",
   "privacy.pillHigh": "Privatsphäre hoch",
   "privacy.pillMedium": "Privatsphäre mittel",
   "privacy.pillNone": "keine Privatsphäre",
@@ -3485,6 +3486,8 @@ async function leseSourceCheckStream(antwort) {
   let rpc_allowlist = null;
   let oeffentliche_electrum;
   let oeffentliche_electrum_session;
+  let oeffentliche_electrum_art;
+  let artGesetzt = false;
   let fehler = "";
 
   const nimm = (obj) => {
@@ -3498,6 +3501,10 @@ async function leseSourceCheckStream(antwort) {
     }
     if (obj.oeffentliche_electrum_session != null) {
       oeffentliche_electrum_session = obj.oeffentliche_electrum_session;
+    }
+    if ("oeffentliche_electrum_art" in obj) {
+      oeffentliche_electrum_art = obj.oeffentliche_electrum_art;
+      artGesetzt = true;
     }
     if (obj.error) fehler = obj.error;
   };
@@ -3522,6 +3529,7 @@ async function leseSourceCheckStream(antwort) {
     rpc_allowlist,
     oeffentliche_electrum,
     oeffentliche_electrum_session,
+    ...(artGesetzt ? { oeffentliche_electrum_art } : {}),
   };
 }
 

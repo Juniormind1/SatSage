@@ -415,6 +415,10 @@ function quelleZeigtVerbindungsaufbau(quelle, quellen) {
   if (quelle.key === "public_onion" || quelle.key === "clearnet") {
     if (!Zustand.config?.oeffentliche_electrum) return false;
     if (quelleHochVerdraengt(quellen)) return false;
+    // Gewählte Zeile allein: die andere Familie wird nicht mitgeprüft.
+    const art = String(Zustand.oeffentlicheArt || "");
+    if (art === "onion" && quelle.key !== "public_onion") return false;
+    if (art === "clearnet" && quelle.key !== "clearnet") return false;
   }
   return true;
 }
@@ -518,19 +522,12 @@ function zeichneQuellen(quellen) {
     }
 
     if (quelle.laden_url && quelle.laden_filter) {
-      const listeDa = Boolean(quelle.configured);
       const laden = document.createElement("button");
       laden.type = "button";
       laden.className = "knopf knopf-klein";
-      laden.textContent = listeDa ? t("sources.connect") : t("sources.loadList");
-      laden.title = listeDa
-        ? t("sources.connectPublicTitle")
-        : t("sources.loadElectrumTitle", { url: quelle.laden_url });
-      laden.addEventListener("click", () => (
-        listeDa
-          ? verbindeOeffentlicheElectrum(quelle, laden)
-          : ladeElectrumServer(quelle, laden)
-      ));
+      laden.textContent = t("sources.connect");
+      laden.title = t("sources.connectPublicTitle");
+      laden.addEventListener("click", () => verbindeOeffentlicheElectrum(quelle, laden));
       rechts.append(laden);
       // Papierkorb hinter dem Verbinden-Knopf: nur die Serverliste, nicht Opt-in.
       if (quelle.configured) {
@@ -690,8 +687,8 @@ async function verwerfeQuelle(quelle) {
 }
 
 /**
- * Liste ist schon da: „Verbinden“ holt sie neu, wenn sie älter als einen
- * Tag ist, fragt die Freigabe und prüft danach die öffentlichen Server.
+ * „Verbinden“ holt die Liste, wenn sie fehlt oder älter als einen Tag ist,
+ * fragt die Freigabe und prüft danach nur diese Server-Art.
  * Ohne Ja bleibt alles unverbunden.
  */
 async function verbindeOeffentlicheElectrum(quelle, knopf) {
@@ -699,11 +696,18 @@ async function verbindeOeffentlicheElectrum(quelle, knopf) {
   knopf.disabled = true;
   knopf.textContent = t("common.loadingEllipsis");
   Zustand._oeffentlichVerbindenLaeuft = true;
+  Zustand._oeffentlichWahl = quelle.laden_filter;
+  Zustand.oeffentlicheArt = quelle.laden_filter;
   try {
     if (!Zustand.config?.oeffentliche_electrum) {
       const erlaubt = await frageOeffentlicheElectrum();
       if (!erlaubt || !Zustand.config?.oeffentliche_electrum) return;
     }
+    // Familie festlegen, bevor irgendein Check Clearnet und Onion mischt.
+    await api("/source/oeffentlich", {
+      methode: "POST",
+      daten: { erlauben: true, art: quelle.laden_filter },
+    });
     const liste = await api("/config/electrum-servers", {
       methode: "POST",
       daten: { filter: quelle.laden_filter, verbinden: true },
@@ -719,30 +723,11 @@ async function verbindeOeffentlicheElectrum(quelle, knopf) {
     meldung(fehler.message, "krit");
   } finally {
     Zustand._oeffentlichVerbindenLaeuft = false;
+    Zustand._oeffentlichWahl = "";
     if (knopf.isConnected) {
       knopf.disabled = false;
       knopf.textContent = vorher;
     }
-  }
-}
-
-async function ladeElectrumServer(quelle, knopf) {
-  const vorher = knopf.textContent;
-  knopf.disabled = true;
-  knopf.textContent = t("common.loadingEllipsis");
-  try {
-    const ergebnis = await api("/config/electrum-servers", {
-      methode: "POST",
-      daten: { filter: quelle.laden_filter },
-    });
-    await ladeConfig();
-    zeichneQuellen(Zustand.config.sources);
-    meldung(übersetzeLogText(ergebnis.message || t("sources.listAdopted")), "gut");
-    pruefeNodeStatus();
-  } catch (fehler) {
-    meldung(fehler.message, "krit");
-    knopf.disabled = false;
-    knopf.textContent = vorher;
   }
 }
 

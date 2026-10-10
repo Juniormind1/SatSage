@@ -100,6 +100,7 @@ class _Patch:
 class TestHoehePerTxid(unittest.TestCase):
     def setUp(self):
         fh._TX_HEIGHT_CACHE.clear()
+        fh._VERBOSE_TX_CACHE.clear()
         fh._HISTORY_CACHE.clear()
         fh.setze_eigene_adressen(None)
         self.txid = "cd" * 32
@@ -206,6 +207,31 @@ class TestHoehePerTxid(unittest.TestCase):
         self.assertNotIn("blockchain.transaction.get_height", zweite)
         self.assertNotIn("blockchain.transaction.get", zweite)
 
+    def test_verbose_blockzeit_ohne_hoehe_und_ohne_fremde_historie(self):
+        """Electrs-Regtest: kein get_height, Hash nicht in der Header-Datei."""
+        fh.setze_eigene_adressen({_adresse(3)})
+        self.addCleanup(fh.setze_eigene_adressen, None)
+        client = _Client({
+            "blockchain.transaction.get_height": RuntimeError(
+                "method not found blockchain.transaction.get_height"
+            ),
+            "blockchain.transaction.get": {
+                "blockhash": "ab" * 32,
+                "blocktime": 1_790_606_384,
+                "confirmations": 38,
+            },
+        })
+        tx = fh._enrich_tx_block_info(client, {
+            "txid": self.txid,
+            "vout": [{"scriptPubKey": {"address": _adresse(4)}}],
+            "confirmations": 0,
+        })
+        self.assertEqual(tx.get("blocktime"), 1_790_606_384)
+        self.assertEqual(tx["status"]["block_time"], 1_790_606_384)
+        self.assertFalse(any(
+            name == "blockchain.scripthash.get_history" for name, _ in client.aufrufe
+        ))
+
     def test_fremde_outputs_bleiben_unangetastet(self):
         fh.setze_eigene_adressen({_adresse(9)})
         client = _Client({
@@ -250,6 +276,15 @@ class TestBlockzeitUndTip(unittest.TestCase):
         fh._TIP_HEIGHT_CACHE.clear()
         self.addCleanup(fh._HEADER_TIME_CACHE.clear)
         self.addCleanup(fh._TIP_HEIGHT_CACHE.clear)
+
+    def test_hoehe_unter_dem_anker_fragt_den_server(self):
+        kopf = _header(header_hash(GENESIS_HEADER), 1_600_000_000).hex()
+        client = _Client({"blockchain.block.header": kopf})
+        zeit = fh._block_time_for_height(client, 100)
+        self.assertEqual(zeit, 1_600_000_000)
+        self.assertTrue(any(
+            name == "blockchain.block.header" for name, _ in client.aufrufe
+        ))
 
     def test_bekannte_hoehe_liest_zeit_ohne_block_header(self):
         client = _Client({})

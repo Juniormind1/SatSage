@@ -11,7 +11,7 @@ Die schnelle CI-Suite (`tests/`, Dealbreaker **Q1**) umfasst Unittests ohne Node
 | Schicht | Ort | Wann | Inhalt |
 |---------|-----|------|--------|
 | Unittests | `tests/` | jeder Push/PR (`test.yml`), Hook vor Push nach `main` | gemockt, ohne Node/Electrs/persönliche `.env` |
-| Regtest-Labor | `lab/regtest/scripts/` | Merge nach `main`, Release, wöchentlich bei Delta (**Q6**) | Core + Electrs, Allowlist am echten Node, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py` |
+| Regtest-Labor | `lab/regtest/scripts/` | Merge nach `main`, Release, wöchentlich bei Delta (**Q6**) | Core + Electrs, Allowlist am echten Node, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py` |
 | GUI-Chaos / Userflow | `scripts/webgui_*.py`, `doc/testprotokoll-*.md` | manuell / Assistent nach Angebot | Playwright, kein CI |
 | Specter | `tests/test_specter_*.py` | in Q1 | ohne laufendes Specter |
 | Start9 / Umbrel | `tests/test_start9_phase_s*.py`, `test_umbrel_mode.py` | in Q1 | Bind, Auth, Outbound, Managed-Modus |
@@ -207,7 +207,7 @@ Labor (`lab/regtest/scripts/`):
 
 - `verify_rpc_allowlist.py` — Allowlist + Hinweise `rpcwhitelist?` / `disablewallet?` am echten Node
 - `generate_scenarios.py` / `generate_sanctions_scenarios.py`
-- `verify_tx_classify.py` / `verify_sanctions_hops.py`
+- `verify_tx_classify.py` / `verify_sanctions_hops.py` / `verify_quellen_inventar.py` — letztere: Cache leer, nur eine Quelle, Bestand und Herkunft aller Inventar-UTXOs. Der P2P-Zusatzschritt (Bestand, Grau/Gelb, rote Ringe, dann Electrs) läuft mit. Sockets für den Bestand nur in `p2p_nur_utxo_entdeckung`. Die Herkunftssperre bleibt.
 - `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6). `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen (P2P-Fallback, siehe unten).
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)
 - `verify_gui_dachboden.py` — Playwright-Szenario: leeres Wallet im Dachboden, Faucet, Sweep, Umgruppieren ohne Reload. GUI muss laufen. macOS/Linux ohne `channel`, Windows mit `channel=chrome`.
@@ -215,7 +215,7 @@ Labor (`lab/regtest/scripts/`):
 
 GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`. Passwort setzen/ändern/löschen in der Oberfläche: `scripts/webgui_passwort_flow.py`, aufgerufen von Userflow und Chaos bei `--spawn` (Desktop, Specter, Umbrel). Labor: `verify_scan_abort_cache.py` ohne die beiden P2P-Fälle.
 
-**P2P nicht testen.** P2P ohne Electrs ist keine ausreichende Datenquelle (Bestand über Compact Filter ja, Herkunft nein: historische Vorgänger kommen per `getdata` nicht, Key-Path-Taproot bleibt ohne Txid-zu-Block). Befund und Sperre: `doc/issues/p2p-herkunft.md`. Deshalb nicht starten: `verify_p2p_traces.py` (Protokoll `doc/testprotokoll-p2p-traces.md` liegt nur noch als Beleg) und im Scan-Abbruch `Q-START-P2P` sowie `Q-START-KILL`. Der Default-Lauf von `verify_scan_abort_cache.py` lässt die beiden aus. Frühestens 2027-01-08 neu prüfen, und nur ob die P2P-Schnittstelle die Lücke schließt. Unittests, die die Sperre oder Filter-Code ohne Live-Peer prüfen (`test_p2p_economy.py`, Teile von `test_bip158_scanblocks.py`), bleiben.
+**P2P-Herkunft nicht testen.** Der Bestand über Compact Filter ist wieder an, Herkunft nicht (historische Vorgänger kommen per `getdata` nicht, Key-Path-Taproot bleibt ohne Txid-zu-Block). Befund: `doc/issues/p2p-herkunft.md`. Deshalb nicht starten: `verify_p2p_traces.py` (Protokoll `doc/testprotokoll-p2p-traces.md` liegt nur noch als Beleg) und im Scan-Abbruch `Q-START-P2P` sowie `Q-START-KILL`. `verify_quellen_inventar.py` fährt den P2P-Bestand mit (rote Ringe nach dem Klären im Discovery-Kontext, weg nach Electrs). `p2p_gesperrt()` bleibt dafür wahr. Der Default-Lauf von `verify_scan_abort_cache.py` lässt die beiden Abbruch-Fälle aus. Frühestens 2027-01-08 neu prüfen, und nur ob die P2P-Schnittstelle die Herkunfts-Lücke schließt. Unittests ohne Live-Peer (`test_p2p_gesperrt.py`, `test_p2p_economy.py`, Teile von `test_bip158_scanblocks.py`) bleiben.
 
 ---
 

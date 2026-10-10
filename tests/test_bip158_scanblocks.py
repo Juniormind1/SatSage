@@ -556,6 +556,46 @@ class TestP2pCodec(unittest.TestCase):
         display = hash_to_hex(header_hash(GENESIS_HEADER))
         self.assertTrue(display.startswith("000000000019d668"))
 
+    def test_regtest_nur_bitcoind(self):
+        import main
+        from unittest.mock import patch
+
+        import core.p2p as p2p_mod
+        from core.p2p import _p2p_kandidaten, merke_filter_peer
+
+        p2p_mod._FILTER_PEER_CACHE.clear()
+        p2p_mod._FILTER_PEER_LOADED = True
+        main.set_chain_network("regtest")
+        try:
+            logs: list[str] = []
+            kandidaten = _p2p_kandidaten(
+                [
+                    ("192.168.1.50", 8333),
+                    ("198.51.100.1", 8333),
+                    ("10.0.0.8", 18444),
+                ],
+                dns_fallback=True,
+                tor_proxy=None,
+                on_log=logs.append,
+            )
+            self.assertEqual(kandidaten, [("10.0.0.8", 18444)])
+            self.assertTrue(any("nur bitcoind" in z for z in logs), logs)
+            leer = _p2p_kandidaten(
+                [("198.51.100.9", 8333)],
+                dns_fallback=True,
+                tor_proxy=None,
+                on_log=None,
+            )
+            self.assertEqual(leer, [("127.0.0.1", 18444)])
+            with patch.object(p2p_mod, "_speichere_filter_peers_datei") as speichern:
+                merke_filter_peer("127.0.0.1", 18444)
+            speichern.assert_not_called()
+            self.assertEqual(p2p_mod._FILTER_PEER_CACHE, [])
+        finally:
+            main.set_chain_network(None)
+            p2p_mod._FILTER_PEER_CACHE.clear()
+            p2p_mod._FILTER_PEER_LOADED = False
+
     def test_p2p_peers_from_env_nimmt_lan_zuerst(self):
         from core.p2p import p2p_peers_from_env
 

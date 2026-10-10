@@ -228,7 +228,7 @@
     </li>
     <li><a href="#sanktionen">Sanktions- und Blacklists</a></li>
     <li><a href="#labels">Adress-Labels</a></li>
-    <li><a href="#menue">Menü und CLI (Legacy / Fallback)</a></li>
+    <li><a href="#menue">Terminal neben der Web-GUI</a></li>
     <li><a href="#datenquellen">Datenquellen und Privatsphäre</a></li>
     <li><a href="#konfiguration">Konfiguration (<code>.env</code>)</a>
       <ol>
@@ -264,23 +264,10 @@ On-Chain-Haltedauer ablesen.</p>
   <p>SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
 </div>
 
-<p>Es gibt zwei Bedienwege, die dieselbe <code>.env</code> und dieselben Caches
-benutzen:</p>
-
-<div class="tabelle">
-<table>
-  <thead><tr><th>Weg</th><th>Aufruf</th><th>Wofür</th></tr></thead>
-  <tbody>
-    <tr><td><strong>Web-Oberfläche</strong></td><td><code>server.py</code></td>
-        <td>Alles, was sich im Terminal schlecht zeigen lässt: Herkunftsbäume,
-            Haltefristen, Zeitstrahl, Steuer-Export</td></tr>
-    <tr><td><strong>Menü / CLI</strong></td><td><code>main.py</code></td>
-        <td><strong>Legacy / Fallback</strong> (SSH, kein Browser); Direktmodi
-            <code>--txid</code> / <code>--cli</code>; zusätzlich
-            UTXO-Konsolidierung und Scan über Listenadressen</td></tr>
-  </tbody>
-</table>
-</div>
+<p>Der Bedienweg ist die Web-Oberfläche (<code>server.py</code>). Dieselbe
+<code>.env</code> und dieselben Caches. Im Terminal daneben nur die Steuerung:
+<strong>1</strong> Status, <strong>2</strong> Browser öffnen,
+<strong>3</strong> Server stoppen.</p>
 
 <h3>Was das Werkzeug kann</h3>
 <ul>
@@ -385,8 +372,7 @@ pip install -r requirements.txt
 copy .env.example .env</code></pre>
 
 <p>Starten:</p>
-<pre><code>py server.py     # Web-Oberfläche
-py main.py       # Menü (Legacy/Fallback)</code></pre>
+<pre><code>py server.py     # Web-Oberfläche</code></pre>
 
 <h4>Besonderheiten</h4>
 <ul>
@@ -396,8 +382,7 @@ py main.py       # Menü (Legacy/Fallback)</code></pre>
       <code>Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass</code>,
       oder die klassische <code>cmd.exe</code> benutzen.</li>
   <li><strong>Umlaute in der Konsole:</strong> <code>server.py</code> stellt die
-      Ausgabe selbst auf UTF-8 um. Bei <code>main.py</code> hilft in seltenen
-      Fällen <code>chcp 65001</code> vor dem Start.</li>
+      Ausgabe selbst auf UTF-8 um.</li>
   <li><strong>Tor:</strong> Für <code>.onion</code> muss der Tor Browser laufen
       (SOCKS-Proxy <code>127.0.0.1:9150</code>).</li>
 </ul>
@@ -489,8 +474,10 @@ füllt, sieht die Schritte sofort als erledigt:</p>
 <ul>
   <li><strong>Node verbinden (empfohlen):</strong> eigener Electrum-Server
       (Fulcrum, electrs, ElectrumX) oder Bitcoin Core im eigenen Netz – schneller
-      und privat. Ohne eigenen Node laufen die Abfragen über Compact Filter
-      (BIP-158), siehe <a href="#datenquellen">Datenquellen und Privatsphäre</a>.</li>
+      und privat. Ohne verbundenen eigenen Electrum-Server und ohne
+      scantxoutset sucht der UTXO-Bestand über Compact Filter (BIP-158).
+      Herkunft und Verlauf nicht. Siehe
+      <a href="#datenquellen">Datenquellen und Privatsphäre</a>.</li>
   <li><strong>Block-Explorer eintragen (optional):</strong> eigene
       mempool.space-Instanz für Links zu UTXOs und Adressen, siehe
       <a href="#explorer">Block-Explorer</a>. Fehlt er, bleibt die Einrichtung
@@ -521,15 +508,15 @@ Kommentare und übrige Einträge bleiben erhalten.</p>
 <table>
   <thead><tr>
     <th>Plattform</th><th>Umgebung aktivieren</th>
-    <th>Weboberfläche</th><th>Menü (Legacy)</th>
+    <th>Weboberfläche</th>
   </tr></thead>
   <tbody>
     <tr><td>Windows</td><td><code>.venv\Scripts\activate</code></td>
-        <td><code>py server.py</code></td><td><code>py main.py</code></td></tr>
+        <td><code>py server.py</code></td></tr>
     <tr><td>macOS</td><td><code>source .venv/bin/activate</code></td>
-        <td><code>python3 server.py</code></td><td><code>python3 main.py</code></td></tr>
+        <td><code>python3 server.py</code></td></tr>
     <tr><td>Linux</td><td><code>source .venv/bin/activate</code></td>
-        <td><code>python3 server.py</code></td><td><code>python3 main.py</code></td></tr>
+        <td><code>python3 server.py</code></td></tr>
   </tbody>
 </table>
 </div>
@@ -744,7 +731,7 @@ Fehler gemeldet statt stillschweigend zu <code>wsh</code> zu werden.</p>
 <p>Neben dem Bestand steht <strong>„seit 05.09.2022"</strong> — der Zeitpunkt,
 zu dem eine Adresse dieses XPUB <em>zum ersten Mal</em> eine Transaktion
 gesehen hat. Die Angabe erscheint in der Wallet-Liste der Einstellungen, über
-der Wallet-Ansicht und im Menü des Terminals.</p>
+der Wallet-Ansicht.</p>
 
 <p>Gemeint ist die älteste Transaktion <em>irgendeiner</em> Adresse, nicht die
 der ersten. Die erste Empfangsadresse muss nicht die zuerst benutzte sein —
@@ -802,9 +789,7 @@ genau die Adresse, die jede Wallet-Software als erste anzeigt. Stimmt eine
 davon mit der eigenen Wallet überein, ist der Typ gefunden.</p>
 
 <p>Die Einstellung landet als <code>SCRIPT_TYPES</code> in der
-<code>.env</code> und gilt auch fürs CLI:</p>
-
-<pre><code>py main.py --xpubs xpub6... --script-types segwit</code></pre>
+<code>.env</code>.</p>
 
 <p>Werte: <code>auto</code>, <code>legacy</code>, <code>nested</code>,
 <code>segwit</code>, <code>taproot</code>. In der <code>.env</code> auch als
@@ -1420,7 +1405,7 @@ ein leeres Ergebnis kein Freibrief.</p>
 
 <p>Der Bereich <strong>Sanktionscheck</strong> prüft die Vorgeschichte der
 UTXOs <strong>xpub-blind</strong> (Perspektive eines Dritten ohne XPUB-Wissen)
-— dasselbe wie Menüpunkt 6.1 im CLI. Jeder Prevout-Hop zählt; eigene
+Jeder Prevout-Hop zählt; eigene
 Wallet-Adressen werden nicht übersprungen. Gewählt werden Wallet (oder alle)
 und die <strong>Hop-Tiefe</strong> (1–20, Standard 3). Grünes Licht = keine
 gelistete Adresse in diesem Fenster. Treffer nennen Hop, Adresse, Betrag und
@@ -1555,108 +1540,24 @@ löschen; er liegt in <code>label_cache/</code>.</p>
 
 <!-- ================================================================= -->
 <section id="menue">
-<h2><span class="nr">7</span>Menü und CLI (Legacy / Fallback)</h2>
+<h2><span class="nr">7</span>Terminal neben der Web-GUI</h2>
 
-<p><strong>Empfohlen</strong> ist die Web-GUI (<code>py server.py</code>). Das
-Terminal-Menü bleibt für Umgebungen ohne Browser. Beim Start ohne
-<code>--txid</code>, <code>--address</code> oder <code>--cli</code> erscheint
-das Menü mit Statuszeile: gewählte Datenquelle samt Privatsphäre-Hinweis,
-Anzahl und Namen der XPUBs, <code>[C]</code> = UTXO-Cache vorhanden.</p>
+<p>Gearbeitet wird in der Web-Oberfläche. Das Terminal, in dem
+<code>server.py</code> läuft, steuert nur den Prozess:</p>
 
 <div class="tabelle">
 <table>
-  <thead><tr><th>Nr.</th><th>Funktion</th></tr></thead>
+  <thead><tr><th>Taste</th><th>Funktion</th></tr></thead>
   <tbody>
-    <tr><td>1</td><td>Tracen: TxID oder UTXO — woher kamen die Sats, wann rein/raus</td></tr>
-    <tr><td>2</td><td>UTXO-Rangfolge eines Wallets</td></tr>
-    <tr><td>3</td><td>UTXO-Rangfolge aller Wallets</td></tr>
-    <tr><td>4</td><td>Gespeicherte Herkunfts-Analysen zu Outputs (auch bereits ausgegebene)</td></tr>
-    <tr><td>5</td><td>UTXO-Konsolidierung (Dust zusammenführen, PSBT erzeugen)</td></tr>
-    <tr><td>6</td><td>Prüfe Sanktionsliste</td></tr>
-    <tr><td>7</td><td>Einstellungen</td></tr>
-    <tr><td>8</td><td>Quit</td></tr>
+    <tr><td>1</td><td>Status</td></tr>
+    <tr><td>2</td><td>Browser erneut öffnen</td></tr>
+    <tr><td>3</td><td>Server stoppen</td></tr>
   </tbody>
 </table>
 </div>
 
-<h3>Schnellstart</h3>
-
-<pre><code># Interaktives Menü (Legacy/Fallback) — empfohlen: python3 server.py
-python3 main.py
-python3 main.py --xpubs zpub6DeinXPUB... --wallet-names "Mein Wallet"
-
-# Transaktion analysieren (direkt, ohne Menü)
-python3 main.py --xpubs zpub6... --txid &lt;txid&gt;
-
-# Adresse / einzelnes UTXO
-python3 main.py --xpubs zpub6... --address bc1q...
-python3 main.py --xpubs zpub6... --address bc1q... --utxo &lt;txid&gt;:&lt;vout&gt;
-
-# Klassischer CLI-Modus: Top-UTXOs ohne Menü
-python3 main.py --xpubs zpub6... --cli --top-utxos 10</code></pre>
-
-<p>Stehen die Wallets bereits als <code>WALLET_0_XPUB</code>-Block in
-<code>.env</code>, reicht schlicht <code>python3 main.py</code>. Ohne
-Anzeigenamen wird pro XPUB ein SHA256-Hex des Keys verwendet.</p>
-
-<h3>UTXO-Konsolidierung (Menü 5)</h3>
-
-<p>Führt Dust-UTXOs unterhalb eines wählbaren Limits zu einer signierbaren
-<strong>PSBT</strong> zusammen, abgelegt unter <code>psbt_out/</code>. Die PSBT
-kann anschließend in eine Wallet- oder Hardware-Wallet-Software zum Signieren
-importiert werden.</p>
-
-<h3>Einstellungen (Menü 7)</h3>
-
-<div class="tabelle">
-<table>
-  <thead><tr><th>Nr.</th><th>Funktion</th></tr></thead>
-  <tbody>
-    <tr><td>1</td><td>Datenquelle: Bitcoin Core (BIP-158) / Fulcrum / Esplora</td></tr>
-    <tr><td>2</td><td>BIP-158 Start-Blockhöhe (Vorgabe 850 000) oder Startdatum</td></tr>
-    <tr><td>3</td><td>Top-N-Limit für Ranglisten</td></tr>
-    <tr><td>4</td><td>Verbose (j/n) — volle TxIDs/Adressen</td></tr>
-    <tr><td>5</td><td><code>.env</code> im Editor öffnen</td></tr>
-    <tr><td>6</td><td><code>check_fulcrum_tor.py</code> in externem Terminal</td></tr>
-    <tr><td>7</td><td>Sanktions- und Blacklists aktualisieren</td></tr>
-    <tr><td>8</td><td>Zurück</td></tr>
-  </tbody>
-</table>
-</div>
-
-<h3>Wichtige CLI-Optionen</h3>
-
-<div class="tabelle">
-<table>
-  <thead><tr><th>Option</th><th>Beschreibung</th></tr></thead>
-  <tbody>
-    <tr><td><code>--xpubs XPUB […]</code></td>
-        <td>Extended Public Keys (sonst <code>WALLET_0_XPUB</code>… aus <code>.env</code>)</td></tr>
-    <tr><td><code>--wallet-names NAME […]</code></td><td>Anzeigenamen</td></tr>
-    <tr><td><code>--txid TXID</code></td><td>Spending-Tx analysieren (ohne Menü)</td></tr>
-    <tr><td><code>--address ADDR</code></td><td>Unspent UTXOs + Herkunft</td></tr>
-    <tr><td><code>--utxo TXID:VOUT</code></td><td>Einzelnes UTXO (mit <code>--address</code>)</td></tr>
-    <tr><td><code>--cli</code></td><td>Klassischer Modus: Top-UTXOs statt Menü</td></tr>
-    <tr><td><code>--top-utxos N</code></td><td>Top-N (Vorgabe 10)</td></tr>
-    <tr><td><code>--max-addresses N</code></td><td>Abgeleitete Adressen pro XPUB (Vorgabe 50)</td></tr>
-    <tr><td><code>--max-addresses-per-xpub N […]</code></td><td>Individuelles Limit pro XPUB</td></tr>
-    <tr><td><code>--script-types TYP […]</code></td>
-        <td><code>auto</code>|<code>legacy</code>|<code>nested</code>|<code>segwit</code>|<code>taproot</code></td></tr>
-    <tr><td><code>--rescan</code></td><td>Full-Rescan aller XPUBs</td></tr>
-    <tr><td><code>--cache-dir DIR</code></td><td>UTXO-Cache-Verzeichnis</td></tr>
-    <tr><td><code>--immutable-cache-dir DIR</code></td><td>Cache unveränderlicher Daten</td></tr>
-    <tr><td><code>--bip158</code></td><td>Bitcoin Core RPC + BIP-158 erzwingen</td></tr>
-    <tr><td><code>--bip158-start HEIGHT</code></td><td>Erster Scan-Block (Vorgabe 850 000)</td></tr>
-    <tr><td><code>--rpc-only</code></td><td>Fulcrum erzwingen</td></tr>
-    <tr><td><code>--esplora [URL]</code></td><td>Esplora erzwingen</td></tr>
-    <tr><td><code>--no-verbose</code></td><td>Gekürzte TxIDs/Adressen erzwingen</td></tr>
-    <tr><td><code>--fulcrum-host</code>, <code>--fulcrum-port</code>,
-            <code>--fulcrum-no-ssl</code></td><td>Fulcrum-Verbindung</td></tr>
-  </tbody>
-</table>
-</div>
-
-<p>Vollständige Liste: <code>python3 main.py --help</code></p>
+<p>Scans, Herkunft und Einstellungen liegen in der Web-GUI. Ein zweites
+Menü und Einmal-Läufe über <code>main.py</code> sind kein Bedienweg.</p>
 
 <a class="zurueck" href="#">↑ nach oben</a>
 </section>
@@ -1700,8 +1601,13 @@ importiert werden.</p>
 manuelle Wahl gesetzt ist:</p>
 
 <p style="text-align:center; font-size:.95rem">
-eigener Electrum-Server → BIP-158 → öffentliche Onions → Clearnet
+eigener Electrum-Server → öffentliche Onions → Clearnet
 </p>
+
+<p>Compact Filter (BIP-158) sind dabei keine Sitzungsquelle. Sie suchen nur
+den UTXO-Bestand, und nur solange der eigene Electrum-Server und
+scantxoutset nicht verbunden sind. Herkunft und Verlauf bleiben bei
+Electrs oder, nach Bestätigung, bei öffentlichen Electrum-Servern.</p>
 
 <p><strong>P2P-BIP-158 Erstscan:</strong> Zuerst das jüngste Fenster
 (~2016 Blöcke, TurboSync) mit der vollen Lookahead-Menge — danach die Historie
@@ -1866,10 +1772,12 @@ rpcallowip=127.0.0.1
         „Node verweigert Methode … – rpcwhitelist?“. Dann fehlt die Methode in
         der Zeile oben.</li>
     <li><strong><code>txindex=1</code> ist Pflicht</strong> für den
-        Tx/Block-Lookup. SatSage liest beim Verbinden
-        <code>getindexinfo</code>. Fehlt der Index oder ist er noch nicht
-        synchron, gilt die Verbindung als gescheitert. Der Log nennt den
-        Grund. Ein geprunter Node startet mit <code>txindex</code> nicht.</li>
+        Tx/Block-Lookup (Bitcoin Core · RPC). SatSage liest dort beim
+        Verbinden <code>getindexinfo</code>. Fehlt der Index oder ist er
+        noch nicht synchron, gilt diese Verbindung als gescheitert. Der Log
+        nennt den Grund. Ein geprunter Node startet mit <code>txindex</code>
+        nicht. Die Zeile <strong>Pruned Node</strong> braucht den Index
+        nicht: <code>scantxoutset</code> liest das UTXO-Set.</li>
   </ul>
   <p><strong>StartOS und Umbrel:</strong> Dort ist das nur ein Hinweis, keine
   Einstellung für SatSage. Unter StartOS liest SatSage die Cookie-Datei des
@@ -1943,8 +1851,8 @@ Wallets neu gescannt werden.</p>
 <p>Ein <strong>Light-Rescan</strong> setzt am gespeicherten
 <code>scan_end_index</code> fort (etwa #25–#49 bei Vorgabe 50).</p>
 
-<pre><code>python3 main.py --xpubs zpub6... --rescan                  # Full-Rescan erzwingen
-python3 main.py --xpubs zpub6... --cache-dir ./mein_cache   # eigenes Verzeichnis</code></pre>
+<p>Full-Rescan und ein anderes Cache-Verzeichnis stellt die Web-GUI ein
+(Datenquellen, Danger Zone, Server-Start mit <code>--cache-dir</code>).</p>
 
 <p>Unter <strong>5 % freiem Speicherplatz</strong> am Cache-Laufwerk werden neue
 Schreibvorgänge pausiert (Warnung einmalig).</p>
@@ -2005,12 +1913,10 @@ Schreibvorgänge pausiert (Warnung einmalig).</p>
 
 <h3 id="architektur">11.1 Architektur</h3>
 
-<p>Der Grundsatz: <strong>eine Engine, mehrere Oberflächen</strong>. Die
-Kernlogik liegt einmal vor und wird von Web-GUI und CLI gleichermaßen
-aufgerufen — nichts davon ist doppelt implementiert. Die Web-GUI
-(<code>server.py</code>) ist die empfohlene Oberfläche; das interaktive
-Terminal-Menü (<code>menu.py</code>) gilt als <strong>Legacy /
-Fallback</strong> (SSH, kein Browser).</p>
+<p>Der Grundsatz: <strong>eine Engine, eine Oberfläche</strong>. Die
+Kernlogik liegt einmal vor. Die Web-GUI (<code>server.py</code>) ist der
+Bedienweg. Das Terminal daneben steuert nur den Prozess (1 Status,
+2 Browser, 3 Stopp).</p>
 
 <div class="tabelle">
 <table>
@@ -2027,9 +1933,8 @@ Fallback</strong> (SSH, kein Browser).</p>
         <td>Liefert Daten statt Text — ruft die Engine auf, rechnet sie nicht
             nach</td></tr>
     <tr><td><strong>Oberflächen</strong></td>
-        <td><code>server.py</code> + <code>web/</code> ·
-            <code>menu.py</code>/<code>display.py</code> (Legacy)</td>
-        <td>Web-GUI (empfohlen); Terminal-Menü als Fallback</td></tr>
+        <td><code>server.py</code> + <code>web/</code></td>
+        <td>Web-GUI. Terminal nur 1 / 2 / 3</td></tr>
   </tbody>
 </table>
 </div>
@@ -2189,7 +2094,7 @@ beschrieben.</p>
 <h3>Noch nicht in der Web-Oberfläche</h3>
 
 <p>UTXO-Konsolidierung und der Sanktions-Scan über <em>fremde</em>
-Listenadressen (Menüpunkt 6.2) sind weiterhin nur im Menü verfügbar.</p>
+Listenadressen haben in der Web-GUI noch keinen Knopf.</p>
 
 <h3>Vorgemerkte Verbesserungen</h3>
 

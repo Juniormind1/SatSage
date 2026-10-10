@@ -76,6 +76,13 @@ ALLE_RPC_METHODEN: frozenset[str] = frozenset(
 _REGTEST_NAMEN = ("regtest", "reg")
 
 
+class ScantxoutsetVerbundenFehler(RuntimeError):
+    """Handshake stand, ``scantxoutset`` selbst ist fehlgeschlagen.
+
+    Der Caller darf danach nicht auf P2P ausweichen: die Quelle ist verbunden.
+    """
+
+
 class RpcAllowlistError(outbound_policy.OutboundPolicyError):
     """SatSage wollte eine Core-RPC-Methode außerhalb der Allowlist aufrufen.
 
@@ -629,10 +636,12 @@ def verify_core_rpc(
     client: BitcoinRpcClient,
     *,
     on_log: LogFn | None = None,
+    txindex_erforderlich: bool = True,
 ) -> dict[str, Any]:
-    """``getblockchaininfo`` und ``getindexinfo`` — wirft bei Fehler.
+    """``getblockchaininfo``. Mit ``txindex_erforderlich`` auch ``getindexinfo``.
 
-    Ohne aktiven ``txindex`` ist die Verbindung unbrauchbar für Herkunft.
+    Der Lookup (Herkunft) braucht ``txindex``. Pruned Node (``scantxoutset``)
+    nicht: das UTXO-Set bleibt auch ohne alte Blöcke vollständig.
     """
     _log(on_log, f"Prüfe Bitcoin Core {client.cfg.ziel}…")
     _log(on_log, f"Verbinde mit Bitcoin Core {client.cfg.host}:{client.cfg.port}…")
@@ -642,26 +651,33 @@ def verify_core_rpc(
     blocks = info.get("blocks")
     chain = info.get("chain")
     _log(on_log, f"Verbunden. Bitcoin Core · {chain} · Tip {blocks}")
+    info = dict(info)
+    if not txindex_erforderlich:
+        info["txindex"] = False
+        return info
     _log(on_log, "Prüfe txindex…")
     indexinfo = client.call("getindexinfo")
     if not txindex_aktiv(indexinfo):
         raise TxindexFehltError()
     _log(on_log, "txindex ist aktiv.")
-    info = dict(info)
     info["txindex"] = True
     return info
 
 
 def _xpub_to_core_xpub(xpub: str) -> str:
-    """SLIP-132 (zpub/ypub/…) → Standard-xpub für Core-Deskriptoren."""
+    """SLIP-132 (zpub/ypub/…) → neutrale xpub/tpub für Core-Deskriptoren.
+
+    Regtest und Testnet lehnen eine Mainnet-xpub in ``scantxoutset`` ab.
+    """
     from embit.bip32 import HDKey
+    from embit.networks import NETWORKS
+
+    from core.derivation import chain_network
 
     hd = HDKey.from_string(xpub)
-    # Mainnet xpub-Version erzwingen, falls SLIP-132
+    netz = chain_network()
+    ver = (netz or NETWORKS["main"]).get("xpub") or NETWORKS["main"]["xpub"]
     try:
-        from embit.networks import NETWORKS
-
-        ver = NETWORKS["main"]["xpub"]
         return hd.to_base58(version=ver)
     except Exception:
         return hd.to_string()
@@ -1043,12 +1059,19 @@ def try_scantxoutset_for_xpubs(
                     pass
 
     # scantxoutset über Onion kann viele Minuten dauern.
-    # Eigener UTXO-RPC-Slot (lokaler pruned Node) vor Lookup-Core (Start9).
+    # Eigener Pruned-Node-Slot vor Lookup-Core (Start9).
+    # Der Slot scannt das UTXO-Set ohne txindex. Der Lookup-Fallback nicht.
+    from core.local_bitcoind import utxo_rpc_dedicated
+
     client = stelle_utxo_core_client_bereit(env, on_log=log, timeout=900.0)
     if client is None:
         return None
     try:
-        info = verify_core_rpc(client, on_log=log)
+        info = verify_core_rpc(
+            client,
+            on_log=log,
+            txindex_erforderlich=not utxo_rpc_dedicated(env),
+        )
     except RpcAllowlistError:
         raise  # Dealbreaker T14: nie im Fallback verschlucken
     except Exception as exc:
@@ -1092,7 +1115,9 @@ def try_scantxoutset_for_xpubs(
         raise  # Dealbreaker T14: nie im Fallback verschlucken
     except Exception as exc:
         log(f"scantxoutset fehlgeschlagen: {exc}")
-        return None
+        # Handshake stand schon. Kein stilles None: das wäre „nicht verbunden“
+        # und der UTXO-Scan dürfte auf P2P ausweichen.
+        raise ScantxoutsetVerbundenFehler(str(exc)) from exc
 
     tip = tip_scan if tip_scan is not None else tip_info
 

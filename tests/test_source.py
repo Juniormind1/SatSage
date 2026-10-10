@@ -10,7 +10,6 @@ beides keine Konstruktor-Argumente.
 import unittest
 from unittest import mock
 
-from core.p2p import p2p_gesperrt
 
 from core.source import (
     check_reachable,
@@ -348,10 +347,12 @@ class TestCheckReachable(unittest.TestCase):
         self.assertIn("own_core", leer)
         self.assertIn("own_utxo_core", leer)
         self.assertEqual(leer["own_utxo_core"].rank, 2)
+        self.assertEqual(leer["own_utxo_core"].name, "Pruned Node")
         self.assertEqual(leer["own_core"].rank, 3)
         self.assertFalse(leer["own_core"].configured)
         self.assertIn("Tx/Block", leer["own_core"].note)
         self.assertIn("scantxoutset", leer["own_utxo_core"].note)
+        self.assertIn("ohne txindex", leer["own_utxo_core"].note)
 
         werte = {
             "NODE_IP": "https://abcdefghijklmnop.onion",
@@ -399,7 +400,6 @@ class TestCheckReachable(unittest.TestCase):
         p2p = next(q for q in describe_sources({}) if q.key == "bip158")
         self.assertFalse(source_needs_tor(p2p, {}))
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_onion_braucht_tor(self):
         onion = "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz.onion"
         fulcrum = next(
@@ -427,7 +427,6 @@ class TestCheckReachable(unittest.TestCase):
         quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
         self.assertFalse(source_needs_tor(quelle, werte))
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_erreichbares_lan_electrum_startet_kein_tor(self):
         from unittest import mock
 
@@ -451,10 +450,11 @@ class TestCheckReachable(unittest.TestCase):
         self.assertIn("electrs", peer_status(ergebnis)["label"])
         self.assertEqual(
             nach_key["bip158"].note,
-            "P2P als Datenquelle nicht erforderlich (Electrs erreichbar).",
+            "Nur UTXO-Bestand. Unbenutzt, solange der eigene "
+            "Electrum-Server, Bitcoin Core oder scantxoutset "
+            "verbunden ist.",
         )
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_hinweis_mit_electrs_und_core(self):
         from unittest import mock
 
@@ -487,50 +487,35 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(nach["own_core"].reachable)
         self.assertEqual(
             nach["bip158"].note,
-            "P2P als Datenquelle nicht erforderlich; "
-            "Header-Tip wird nur selten nachgezogen.",
+            "Nur UTXO-Bestand. Unbenutzt, solange der eigene "
+            "Electrum-Server, Bitcoin Core oder scantxoutset "
+            "verbunden ist.",
         )
 
     def test_electrum_und_p2p_sind_verwerfbar(self):
-        from core.p2p import p2p_gesperrt
-
         leer = {q.key: q for q in describe_sources({})}
         self.assertFalse(leer["own_fulcrum"].verwerfbar)
-        # Solange die Herkunfts-Lücke gilt, ist die Zeile ausgeblendet
-        # und nicht verwerfbar. Sonst ist P2P standardmäßig an.
-        if p2p_gesperrt():
-            self.assertTrue(leer["bip158"].ausgeblendet)
-            self.assertFalse(leer["bip158"].configured)
-            self.assertFalse(leer["bip158"].verwerfbar)
-        else:
-            self.assertTrue(leer["bip158"].verwerfbar)
+        self.assertFalse(leer["bip158"].ausgeblendet)
+        self.assertTrue(leer["bip158"].configured)
+        self.assertTrue(leer["bip158"].verwerfbar)
         self.assertFalse(leer["public_onion"].verwerfbar)
         gesetzt = {q.key: q for q in describe_sources({
             "FULCRUM_HOST": "192.0.2.1",
         })}
         self.assertTrue(gesetzt["own_fulcrum"].verwerfbar)
-        if p2p_gesperrt():
-            self.assertFalse(gesetzt["bip158"].verwerfbar)
-        else:
-            self.assertTrue(gesetzt["bip158"].verwerfbar)
+        self.assertTrue(gesetzt["bip158"].verwerfbar)
         self.assertTrue(gesetzt["own_fulcrum"].as_dict()["verwerfbar"])
         aus = {q.key: q for q in describe_sources({"BIP158_P2P": "0"})}
         self.assertFalse(aus["bip158"].verwerfbar)
         self.assertFalse(aus["bip158"].configured)
 
     def test_p2p_bip158_ist_standard_konfiguriert(self):
-        from core.p2p import p2p_gesperrt
-
         quelle = next(q for q in describe_sources({}) if q.key == "bip158")
-        if p2p_gesperrt():
-            self.assertFalse(quelle.configured)
-            self.assertTrue(quelle.ausgeblendet)
-        else:
-            self.assertTrue(quelle.configured)
+        self.assertTrue(quelle.configured)
+        self.assertFalse(quelle.ausgeblendet)
         self.assertEqual(quelle.name, "Bitcoin-P2P · Compact Filter")
         self.assertNotIn("NODE_IP", [f.key for f in quelle.felder])
-        if not p2p_gesperrt():
-            self.assertIn("DNS-Seeds", quelle.detail)
+        self.assertIn("DNS-Seeds", quelle.detail)
         # Kein Stift-Dialog — Start­höhe nur noch inline in der Zeile.
         self.assertFalse(quelle.editierbar)
         self.assertEqual(quelle.felder, [])
@@ -549,17 +534,13 @@ class TestCheckReachable(unittest.TestCase):
             q for q in describe_sources({"FULCRUM_HOST": "192.168.1.50"})
             if q.key == "bip158"
         )
-        if p2p_gesperrt():
-            self.assertTrue(quelle.ausgeblendet)
-            self.assertNotIn("DNS-Seeds", quelle.detail)
-        else:
-            self.assertIn("Node im LAN 192.168.1.50", quelle.detail)
-            self.assertIn("DNS-Seeds", quelle.detail)
+        self.assertFalse(quelle.ausgeblendet)
+        self.assertIn("Node im LAN 192.168.1.50", quelle.detail)
+        self.assertIn("DNS-Seeds", quelle.detail)
         # Extra-Peers nur noch per .env — kein Stift-Feld mehr.
         self.assertNotIn("BIP158_PEERS", [f.key for f in quelle.felder])
         self.assertEqual(quelle.start_height, 481824)
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_pruefung_nutzt_lan_und_dns_fallback(self):
         from unittest import mock
 
@@ -580,7 +561,6 @@ class TestCheckReachable(unittest.TestCase):
         self.assertTrue(kwargs["dns_fallback"])
         self.assertIsNone(kwargs.get("tor_proxy"))
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_verbindungstest_zaehlt_compact_filter_peers(self):
         with mock.patch(
             "core.p2p.zaehle_compact_filter_peers",
@@ -677,7 +657,6 @@ class TestCheckReachable(unittest.TestCase):
         pruefe.assert_not_called()
         self.assertTrue(any("Bestätigung fehlt" in z for z in gesehen))
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_ok_raeumt_oeffentliche_verbunden_stand(self):
         """Mit P2P-Peers kein stale „verbunden“ an Onion/Clearnet."""
         from unittest import mock
@@ -847,7 +826,6 @@ class TestCheckReachable(unittest.TestCase):
         }
         self.assertEqual(peer_aenderungen(None, neu), [])
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_clearnet_ohne_peer_startet_tor(self):
         from unittest import mock
 
@@ -881,7 +859,6 @@ class TestCheckReachable(unittest.TestCase):
             gesehen,
         )
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_clearnet_mit_peer_startet_kein_tor(self):
         from unittest import mock
 
@@ -894,7 +871,6 @@ class TestCheckReachable(unittest.TestCase):
         nach = {q.key: q for q in ergebnis}
         self.assertEqual(nach["bip158"].peer_count, 1)
 
-    @unittest.skipIf(p2p_gesperrt(), "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md")
     def test_p2p_tor_fehlschlag_bleibt_ohne_peer(self):
         from unittest import mock
 
@@ -1049,6 +1025,84 @@ class TestOeffentlicheClearnetVorOnion(unittest.TestCase):
         self.assertIsNone(out["public_onion"].reachable)
         loese.assert_called_once()
         self.assertTrue(any("Clearnet" in z for z in logs))
+
+
+class TestOeffentlicheVerbindungenHalten(unittest.TestCase):
+    """Bekannte Server nachprüfen; neue Suche erst unter zwei."""
+
+    def setUp(self):
+        from core.outbound_policy import _reset_oeffentliche_electrum_suche_fuer_tests
+        from core.source import _reset_bekannte_oeffentliche_fuer_tests
+
+        _reset_oeffentliche_electrum_suche_fuer_tests()
+        _reset_bekannte_oeffentliche_fuer_tests()
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+        self.addCleanup(_reset_bekannte_oeffentliche_fuer_tests)
+
+    def test_ab_zwei_keine_neue_suche(self):
+        from core import source as source_mod
+
+        alle = [(f"h{i}.example", 50002, True) for i in range(6)]
+        source_mod._bekannte_oeffentliche["clearnet"] = [
+            "h0.example:50002", "h1.example:50002", "h2.example:50002",
+        ]
+        gesehen: list[list] = []
+
+        def zaehle(endpunkte, **_kw):
+            gesehen.append(list(endpunkte))
+            return [f"{h}:{p}" for h, p, _s in endpunkte]
+
+        with mock.patch.object(source_mod, "_zaehle_electrum_endpunkte", side_effect=zaehle):
+            treffer = source_mod._oeffentliche_verbindungen_halten(
+                alle, familie="clearnet", timeout=1, tor_proxy=None,
+            )
+        self.assertEqual(len(gesehen), 1)
+        self.assertEqual(len(gesehen[0]), 3)
+        self.assertEqual(len(treffer), 3)
+
+    def test_unter_zwei_sucht_weitere(self):
+        from core import source as source_mod
+
+        alle = [(f"h{i}.example", 50002, True) for i in range(6)]
+        source_mod._bekannte_oeffentliche["clearnet"] = [
+            "h0.example:50002", "h1.example:50002",
+        ]
+
+        def zaehle(endpunkte, **_kw):
+            hosts = [h for h, _p, _s in endpunkte]
+            if hosts == ["h0.example", "h1.example"]:
+                return ["h0.example:50002"]
+            return ["h3.example:50002"]
+
+        with mock.patch.object(source_mod, "_zaehle_electrum_endpunkte", side_effect=zaehle):
+            treffer = source_mod._oeffentliche_verbindungen_halten(
+                alle, familie="clearnet", timeout=1, tor_proxy=None,
+            )
+        self.assertEqual(treffer, ["h0.example:50002", "h3.example:50002"])
+
+    def test_wegfall_ohne_neue_suche_wenn_noch_zwei(self):
+        from core import source as source_mod
+
+        alle = [(f"h{i}.example", 50002, True) for i in range(4)]
+        source_mod._bekannte_oeffentliche["onion"] = [
+            "h0.example:50002", "h1.example:50002", "h2.example:50002",
+        ]
+
+        def zaehle(endpunkte, **_kw):
+            return [
+                f"{h}:{p}" for h, p, _s in endpunkte
+                if h != "h2.example"
+            ]
+
+        with mock.patch.object(source_mod, "_zaehle_electrum_endpunkte", side_effect=zaehle):
+            treffer = source_mod._oeffentliche_verbindungen_halten(
+                alle, familie="onion", timeout=1, tor_proxy=None,
+            )
+        self.assertEqual(treffer, ["h0.example:50002", "h1.example:50002"])
+        self.assertEqual(
+            source_mod._bekannte_oeffentliche["onion"],
+            ["h0.example:50002", "h1.example:50002"],
+        )
 
 
 class TestOeffentlicheElectrumStichprobe(unittest.TestCase):

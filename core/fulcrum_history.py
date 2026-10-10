@@ -17,6 +17,9 @@ from core.fulcrum_client import (
 
 _HEADER_TIME_CACHE: dict[int, int] = {}
 _TX_HEIGHT_CACHE: dict[str, int | None] = {}
+# Ausführliche Antwort (Blockhash, Blockzeit) je Txid. Die Höhen-Suche
+# verwirft die Zeit, wenn der Hash nicht in der lokalen Header-Datei liegt.
+_VERBOSE_TX_CACHE: dict[str, tuple[str | None, int | None]] = {}
 
 
 def _timestamp_from_block_header(header_hex: str) -> int:
@@ -208,8 +211,13 @@ def _block_der_tx(client: FulcrumClient, txid: str) -> tuple[str | None, int | N
     Blockhash und Blockzeit aus der ausführlichen Antwort.
 
     Das JSON wird nicht behalten. Unbekannte Methode oder der verbose-Fehler
-    werden am Client gemerkt.
+    werden am Client gemerkt. Eine gültige Antwort bleibt je Txid, weil die
+    Höhen-Suche den Hash oft nicht zuordnen kann und die Zeit sonst verloren
+    wäre.
     """
+    key = txid.lower()
+    if key in _VERBOSE_TX_CACHE:
+        return _VERBOSE_TX_CACHE[key]
     if _server_kann(client, _FLAG_VERBOSE) is False:
         return None, None
     from core.fulcrum_client import _is_unknown_method_error
@@ -234,7 +242,11 @@ def _block_der_tx(client: FulcrumClient, txid: str) -> tuple[str | None, int | N
         blocktime = int(zeit) if zeit else None
     except (TypeError, ValueError):
         blocktime = None
-    return blockhash, blocktime
+    if blocktime is not None and blocktime <= 0:
+        blocktime = None
+    ergebnis = (blockhash, blocktime)
+    _VERBOSE_TX_CACHE[key] = ergebnis
+    return ergebnis
 
 
 def _hoehe_ueber_lokalem_tip(client: FulcrumClient, blockhash: str) -> int | None:
@@ -389,17 +401,27 @@ def _block_time_for_height(client: FulcrumClient, height: int) -> int | None:
     if height in _HEADER_TIME_CACHE:
         return _HEADER_TIME_CACHE[height]
     try:
-        from core.xpub_cache import IMMUTABLE_CACHE_DIR, block_time_for_height
+        from core.xpub_cache import (
+            IMMUTABLE_CACHE_DIR,
+            _p2p_header_chain,
+            block_time_for_height,
+        )
 
         lokal = block_time_for_height(height, IMMUTABLE_CACHE_DIR)
         if lokal is not None:
             _HEADER_TIME_CACHE[height] = lokal
             return lokal
+        # Liegt die Höhe in der lokalen Header-Datei, ist die Zeit bekannt
+        # oder der Header taugt nicht. Darunter (Regtest unter dem
+        # Mainnet-Anker) oder darüber fragt der Server.
+        chain = _p2p_header_chain(IMMUTABLE_CACHE_DIR)
+        if chain is not None:
+            anker = int(getattr(chain, "_anchor_height", 0) or 0)
+            tip = int(chain.tip_height())
+            if anker <= height <= tip:
+                return None
     except Exception:
         pass
-    lokal_tip = _lokaler_header_tip()
-    if lokal_tip is not None and height <= lokal_tip:
-        return None
     header = _fetch_block_header_hex(client, height)
     if not header:
         return None
@@ -409,9 +431,12 @@ def _block_time_for_height(client: FulcrumClient, height: int) -> int | None:
         return None
     _HEADER_TIME_CACHE[height] = blocktime
     try:
+        from core.derivation import chain_network
         from core.xpub_cache import IMMUTABLE_CACHE_DIR, save_cached_block_time
 
-        save_cached_block_time(height, blocktime, IMMUTABLE_CACHE_DIR, "fulcrum")
+        # Regtest-Zeiten nicht in den Mainnet-Header-Cache schreiben.
+        if chain_network() is None:
+            save_cached_block_time(height, blocktime, IMMUTABLE_CACHE_DIR, "fulcrum")
     except Exception:
         pass
     return blocktime
@@ -428,6 +453,17 @@ def _enrich_tx_block_info(client: FulcrumClient, tx: dict) -> dict:
 
     height = _lookup_tx_height(client, txid, tx.get("vout", []))
     if height is None:
+        # Electrs ohne get_height: die ausführliche Antwort hat die
+        # Blockzeit, der Hash liegt aber nicht in der Mainnet-Header-Datei.
+        # Eigene Adressen sperren dann die Historie fremder Outputs.
+        _hash, zeit = _block_der_tx(client, txid)
+        if _hash and zeit:
+            tx["blocktime"] = int(zeit)
+            tx["confirmations"] = max(int(tx.get("confirmations") or 0), 1)
+            tx["status"] = {
+                "confirmed": True,
+                "block_time": int(zeit),
+            }
         return tx
 
     tx["blockheight"] = height

@@ -14,6 +14,7 @@ import socket
 import struct
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
@@ -31,6 +32,8 @@ NODE_COMPACT_FILTERS = 64
 NODE_NETWORK_LIMITED = 1024
 USER_AGENT = "/SatSage:1.0/"
 DEFAULT_P2P_PORT = 8333
+#: Bitcoin Core lauscht im Regtest auf diesem P2P-Port.
+REGTEST_P2P_PORT = 18444
 FILTER_TYPE_BASIC = 0
 GETCFILTERS_MAX = 1000
 #: Parallel Compact-Filter-Verbindungen beim Scan.
@@ -97,21 +100,48 @@ def read_compact_size(data: bytes, offset: int = 0) -> tuple[int, int]:
 
 
 class P2pGesperrt(ConnectionError):
-    """P2P ist bis zur Aufhebung der Herkunfts-Lücke aus."""
+    """P2P ist für Herkunft, Verlauf und Header-Vorab zu."""
+
+
+#: Tiefe von ``p2p_nur_utxo_entdeckung``. Prozessweit, damit Filter-Worker
+#: denselben Stand sehen (``threading.Thread`` kopiert kein ContextVar).
+_utxo_entdeckung_tiefe = 0
+_utxo_entdeckung_lock = threading.Lock()
 
 
 def p2p_gesperrt() -> bool:
     """
-    True, solange Compact Filter keine ausreichende Herkunft liefern.
+    True: P2P ist keine Herkunfts- und keine Verlaufsquelle.
 
     Bitcoin Core beantwortet ``getdata`` TX nur aus Mempool und letztem
     Block. Eine historische Vorgänger-Tx braucht eine Txid-zu-Block-
     Abbildung, die P2P nicht hat. Key-Path-Taproot lässt sich aus dem
-    Witness nicht rekonstruieren. Bis sich daran substanziell etwas
-    ändert, bleibt jeder P2P-Socket zu. Aufheben nur mit dem Issue
-    ``doc/issues/p2p-herkunft.md`` und einem erneuten Labor-Abgleich.
+    Witness nicht rekonstruieren. Deshalb bleiben Herkunft, Verlauf,
+    Header-Vorab und der Walk-Abgleich zu.
+
+    Sockets für den UTXO-Bestand öffnet nur ``p2p_nur_utxo_entdeckung``,
+    und der Aufrufer nur, wenn eigener Electrum-Server und scantxoutset
+    nicht verbunden sind (``core.chain_sources.p2p_utxo_entdeckung_frei``).
     """
     return True
+
+
+@contextmanager
+def p2p_nur_utxo_entdeckung():
+    """Erlaubt P2P-Sockets nur für die Dauer eines UTXO-Bestands-Laufs."""
+    global _utxo_entdeckung_tiefe
+    with _utxo_entdeckung_lock:
+        _utxo_entdeckung_tiefe += 1
+    try:
+        yield
+    finally:
+        with _utxo_entdeckung_lock:
+            _utxo_entdeckung_tiefe -= 1
+
+
+def _utxo_entdeckung_laeuft() -> bool:
+    with _utxo_entdeckung_lock:
+        return _utxo_entdeckung_tiefe > 0
 
 
 def p2p_netz_name() -> str:
@@ -401,7 +431,7 @@ def _oeffne_socket(
     timeout: float,
     tor_proxy: tuple[str, int] | None,
 ) -> socket.socket:
-    if p2p_gesperrt():
+    if p2p_gesperrt() and not _utxo_entdeckung_laeuft():
         raise P2pGesperrt(
             "P2P ist abgeklemmt: Compact Filter reichen für die Herkunft nicht."
         )
@@ -730,6 +760,8 @@ def _speichere_filter_peers_datei() -> None:
 
 def merke_filter_peer(host: str, port: int) -> None:
     """Erfolgreichen Compact-Filter-Peer merken (RAM + Disk, MRU)."""
+    if p2p_netz_name() == "regtest":
+        return
     _lade_filter_peers_datei()
     paar = (str(host).strip(), int(port) or DEFAULT_P2P_PORT)
     if not paar[0]:
@@ -744,6 +776,8 @@ def merke_filter_peer(host: str, port: int) -> None:
 
 def demote_filter_peer(host: str, port: int) -> None:
     """Fehlgeschlagenen Peer ans Ende schieben (bleibt für Retry)."""
+    if p2p_netz_name() == "regtest":
+        return
     _lade_filter_peers_datei()
     paar = (str(host).strip(), int(port) or DEFAULT_P2P_PORT)
     with _FILTER_PEER_LOCK:
@@ -1313,6 +1347,16 @@ def hole_header(
         _HEADER_LOCK.release()
 
 
+def regtest_bitcoind_peer(
+    peers: list[tuple[str, int]] | None = None,
+) -> tuple[str, int]:
+    """Der eine Regtest-bitcoind. Kein DNS, keine Merk-Liste, kein Port 8333."""
+    for host, port in peers or []:
+        if host_ist_lan(host) and int(port) == REGTEST_P2P_PORT:
+            return (host, REGTEST_P2P_PORT)
+    return ("127.0.0.1", REGTEST_P2P_PORT)
+
+
 def _kandidaten_ohne_dns(
     peers: list[tuple[str, int]] | None,
     *,
@@ -1382,8 +1426,14 @@ def _p2p_kandidaten(
     Wirkt Port 8333 blockiert, entfällt DNS und jeder Internet-Host —
     übrig bleibt nur das LAN.
 
+    Im Regtest gibt es nur den lokalen bitcoind (Port 18444).
+
     *dns_sofort=False*: nur fest + Merk-Liste (DNS später nachziehen).
     """
+    if p2p_netz_name() == "regtest":
+        peer = regtest_bitcoind_peer(peers)
+        _sag(on_log, f"Regtest: nur bitcoind {peer[0]}:{peer[1]}")
+        return [peer]
     if tor_proxy is None and dns_fallback and dns_sofort:
         if clearnet_p2p_port_blockiert(peers, on_log=on_log):
             # 8333 blockiert: kein Internet, auch keine gemerkten Clearnet-IPs.

@@ -154,6 +154,24 @@ class TestBitcoindRpc(unittest.TestCase):
                 paths.add(1)
         self.assertEqual(paths, {0, 1})
 
+    def test_descriptors_regtest_nutzen_tpub(self):
+        try:
+            from tests.fixtures import BIP84_ZPUB
+        except Exception:
+            self.skipTest("no fixture")
+        from main import set_chain_network
+
+        set_chain_network("regtest")
+        try:
+            objs = descriptors_for_key(
+                BIP84_ZPUB, max_index=2, script_type="segwit",
+            )
+            roh = objs[0]["desc"].split("#")[0]
+            self.assertIn("tpub", roh)
+            self.assertNotIn("xpub", roh)
+        finally:
+            set_chain_network("main")
+
     def test_multipath_deskriptor_wird_fuer_scantxoutset_gesplittet(self):
         try:
             from tests.fixtures import BIP84_AS_XPUB

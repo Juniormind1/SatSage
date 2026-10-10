@@ -136,7 +136,7 @@ class SourceInfo:
     ssl_persist: dict[str, str] = field(default_factory=dict)
     #: BIP-158: Start­höhe für Inline-Feld (kein Stift-Dialog).
     start_height: int | None = None
-    #: True: Zeile und Kopf-Pille bleiben aus (P2P-Sperre).
+    #: True: Zeile und Kopf-Pille bleiben aus.
     ausgeblendet: bool = False
 
     @property
@@ -769,19 +769,20 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     quellen.append(SourceInfo(
         rank=2,
         key="own_utxo_core",
-        name="pruned UTXO-Set-Quelle",
+        name="Pruned Node",
         detail=utxo_detail,
         privacy=PRIVACY_HIGH,
         configured=utxo_ok,
         note=(
-            "scantxoutset am eigenen Node — auch pruned. Lokaler bitcoin-qt "
-            "wird still eingetragen, wenn RPC erreichbar ist. Electrs/Fulcrum "
-            "im LAN hat Vorrang (Gap-Scan schneller); dieser Slot greift ohne "
-            "LAN-Electrs oder als bewusste Alternative."
+            "scantxoutset am eigenen Node, auch ohne txindex. Lokaler "
+            "bitcoin-qt wird still eingetragen, wenn RPC erreichbar ist. "
+            "Electrs/Fulcrum im LAN hat Vorrang (Gap-Scan schneller); dieser "
+            "Slot greift ohne LAN-Electrs oder als bewusste Alternative."
             if utxo_ok else
-            "Optional: eigener Core nur für den UTXO-Bestand (scantxoutset). "
-            "Leer = Lookup-Core (NODE_IP). Lokaler Desktop-Node füllt den "
-            "Slot automatisch. Electrs-LAN bleibt bevorzugt."
+            "Optional: eigener Core nur für den UTXO-Bestand (scantxoutset), "
+            "auch ohne txindex. Leer = Lookup-Core (NODE_IP). Lokaler "
+            "Desktop-Node füllt den Slot automatisch. Electrs-LAN bleibt "
+            "bevorzugt."
         ),
         felder=[
             Feld("UTXO_RPC_HOST", "Host", "text", utxo_host,
@@ -831,8 +832,8 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
             "txindex=1. Nicht der Adress-Verlaufsscan (Electrs). UTXO-Bestand "
             "hat einen eigenen Slot darüber."
             if core_ok else
-            "Core für Tx/Block-Lookups (Start9 o. Ä.). Pruned Desktop-Node "
-            "gehört in die pruned UTXO-Set-Quelle, nicht hier."
+            "Core für Tx/Block-Lookups (Start9 o. Ä.). Ein geprunter "
+            "Desktop-Node gehört in Pruned Node, nicht hier."
         ),
         felder=[
             Feld("NODE_IP", "Host", "text", node,
@@ -858,16 +859,10 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     start = _int(values, "BIP158_START_HEIGHT", chain_sources.DEFAULT_BIP158_START_HEIGHT)
     peers = values.get("BIP158_PEERS", "").strip()
     lan_host = values.get("FULCRUM_HOST", "").strip()
-    from core.p2p import p2p_gesperrt
 
     p2p_an = values.get("BIP158_P2P", "1").strip().lower() not in (
         "0", "false", "nein", "off",
     )
-    # Zeile und Pille bleiben aus, bis die Herkunfts-Lücke fällt.
-    # Siehe doc/issues/p2p-herkunft.md. configured bleibt falsch, damit
-    # kein Probe und kein Header-Vorab losläuft.
-    if p2p_gesperrt():
-        p2p_an = False
     p2p_teile = [f"ab Block {start:,}".replace(",", ".")]
     if lan_host and not _host_ist_onion(lan_host):
         p2p_teile.append(f"Node im LAN {lan_host}")
@@ -887,10 +882,10 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         configured=p2p_an,
         note=(
             (
-                "Zuerst der Node im LAN (P2P-Port 8333), dann extra Peers, "
-                "dann DNS-Seeds. Ohne Compact Filter am eigenen Node werden "
-                "andere Filter-Peers gesucht — nicht gleich öffentliche "
-                "Electrum-Server. Adressen bleiben lokal."
+                "Nur der UTXO-Bestand. Nicht Herkunft und nicht der Verlauf. "
+                "Unbenutzt, solange der eigene Electrum-Server, Bitcoin Core "
+                "oder scantxoutset verbunden ist. Zuerst der Node im LAN "
+                "(P2P-Port 8333), dann extra Peers, dann DNS-Seeds."
             )
             if p2p_an
             else (
@@ -901,7 +896,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         # Kein Stift-Dialog: Start­höhe als Inline-Feld in der Zeile.
         felder=[],
         start_height=int(start),
-        ausgeblendet=p2p_gesperrt(),
+        ausgeblendet=False,
     ))
 
     onions = [v for k, v in values.items() if k.startswith("FULCRUM_TOR_") and v.strip()
@@ -1061,32 +1056,38 @@ def check_sources(
     own_ok = bool(own and own.reachable)
 
     p2p = gefunden.get("bip158")
-    from core.p2p import p2p_gesperrt
-
-    if p2p_gesperrt():
-        p2p = None
+    utxo = gefunden.get("own_utxo_core")
+    kern = gefunden.get("own_core")
+    if utxo is not None and utxo.configured:
+        scantx_ok = bool(utxo.reachable)
+        core_ok = bool(kern and kern.reachable)
+    else:
+        scantx_ok = bool(kern and kern.reachable)
+        core_ok = False
     if p2p is not None and p2p.configured:
-        if own_ok:
-            core = gefunden.get("own_core")
-            core_ok = bool(core and core.reachable)
-            if core_ok:
-                # Ruhiger UI-Takt (~10 Min) zieht den Header-Tip nach.
-                text = (
-                    "P2P als Datenquelle nicht erforderlich; "
-                    "Header-Tip wird nur selten nachgezogen."
-                )
-            else:
-                text = (
-                    "P2P als Datenquelle nicht erforderlich "
-                    "(Electrs erreichbar)."
-                )
+        from core.chain_sources import p2p_utxo_entdeckung_frei
+        from core.p2p import p2p_nur_utxo_entdeckung
+
+        frei = p2p_utxo_entdeckung_frei(
+            values,
+            eigene_electrs=own_ok,
+            scantxoutset=scantx_ok,
+            core=core_ok,
+        )
+        if not frei:
+            text = (
+                "Nur UTXO-Bestand. Unbenutzt, solange der eigene "
+                "Electrum-Server, Bitcoin Core oder scantxoutset "
+                "verbunden ist."
+            )
             if log:
                 log(text)
             gefunden["bip158"] = replace(p2p, log=[text], note=text)
         else:
-            gefunden["bip158"] = _pruefe_p2p_peers(
-                p2p, values, timeout=timeout, on_log=log,
-            )
+            with p2p_nur_utxo_entdeckung():
+                gefunden["bip158"] = _pruefe_p2p_peers(
+                    p2p, values, timeout=timeout, on_log=log,
+                )
 
     p2p_ok = bool(
         gefunden.get("bip158") and gefunden["bip158"].peer_count > 0
@@ -1179,6 +1180,91 @@ def _waehle_electrum_stichprobe(
     return random.sample(list(endpunkte), limit)
 
 
+def _familie_bleibt(familie: str | None) -> bool:
+    """False, sobald der Nutzer die andere öffentliche Familie gewählt hat."""
+    if not familie:
+        return True
+    art = oeffentliche_electrum_art()
+    if art is None:
+        return True
+    return art == familie
+
+
+#: Bekannte öffentliche Server je Familie (host:port). Neue Suche erst unter 2.
+_MIN_OEFFENTLICHE_OHNE_SUCHE = 2
+_bekannte_oeffentliche: dict[str, list[str]] = {}
+
+
+def _reset_bekannte_oeffentliche_fuer_tests() -> None:
+    _bekannte_oeffentliche.clear()
+
+
+def _oeffentliche_verbindungen_halten(
+    endpunkte: list[tuple[str, int, bool]],
+    *,
+    familie: str,
+    timeout: float,
+    tor_proxy: tuple[str, int] | None,
+    on_log=None,
+) -> list[str]:
+    """
+    Bekannte Server neu prüfen. Weitere nur suchen, wenn weniger als zwei bleiben.
+    """
+    by_label: dict[str, tuple[str, int, bool]] = {}
+    for host, port, ssl in endpunkte:
+        by_label.setdefault(f"{host}:{port}", (host, port, ssl))
+    vorher = [
+        label for label in _bekannte_oeffentliche.get(familie, [])
+        if label in by_label
+    ]
+    treffer: list[str] = []
+    if vorher:
+        if on_log:
+            on_log(f"Prüfe {len(vorher)} bekannte Server…")
+        treffer = _zaehle_electrum_endpunkte(
+            [by_label[label] for label in vorher],
+            timeout=timeout,
+            tor_proxy=tor_proxy,
+            on_log=on_log,
+            limit=len(vorher),
+            max_runden=1,
+            familie=familie,
+        )
+    if (
+        oeffentliche_electrum_suche_abgebrochen()
+        or not _familie_bleibt(familie)
+    ):
+        return []
+    if len(treffer) >= _MIN_OEFFENTLICHE_OHNE_SUCHE:
+        _bekannte_oeffentliche[familie] = treffer
+        return treffer
+    bekannt = set(vorher)
+    rest = [
+        ende for ende in endpunkte
+        if f"{ende[0]}:{ende[1]}" not in bekannt
+    ]
+    if vorher and rest and on_log:
+        on_log("Weniger als 2 Server verbunden — suche weitere…")
+    neue = (
+        _zaehle_electrum_endpunkte(
+            rest,
+            timeout=timeout,
+            tor_proxy=tor_proxy,
+            on_log=on_log,
+            familie=familie,
+        )
+        if rest else []
+    )
+    if (
+        oeffentliche_electrum_suche_abgebrochen()
+        or not _familie_bleibt(familie)
+    ):
+        return []
+    zusammen = list(dict.fromkeys([*treffer, *neue]))
+    _bekannte_oeffentliche[familie] = zusammen
+    return zusammen
+
+
 def _zaehle_electrum_endpunkte(
     endpunkte: list[tuple[str, int, bool]],
     *,
@@ -1187,6 +1273,7 @@ def _zaehle_electrum_endpunkte(
     on_log=None,
     limit: int = 8,
     max_runden: int = 2,
+    familie: str | None = None,
 ) -> list[str]:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -1215,7 +1302,7 @@ def _zaehle_electrum_endpunkte(
     treffer: list[str] = []
     runden = max(1, int(max_runden))
     for runde in range(runden):
-        if oeffentliche_electrum_suche_abgebrochen():
+        if oeffentliche_electrum_suche_abgebrochen() or not _familie_bleibt(familie):
             return []
         if not rest:
             break
@@ -1224,14 +1311,18 @@ def _zaehle_electrum_endpunkte(
         genommen = set(auswahl)
         rest = [e for e in rest if e not in genommen]
         for host, port, _ssl in auswahl:
-            if oeffentliche_electrum_suche_abgebrochen():
+            if oeffentliche_electrum_suche_abgebrochen() or not _familie_bleibt(familie):
                 return []
             if on_log:
                 on_log(f"Verbinde mit {host}:{port}")
         pool = ThreadPoolExecutor(max_workers=min(8, len(auswahl)))
         try:
             futures = [pool.submit(eines, e) for e in auswahl]
-            for fut in futures_bis_oeffentliche_electrum_stopp(futures):
+            for fut in futures_bis_oeffentliche_electrum_stopp(
+                futures, weiter=lambda: _familie_bleibt(familie),
+            ):
+                if not _familie_bleibt(familie):
+                    return []
                 host, port, fehler = fut.result()
                 if oeffentliche_electrum_suche_abgebrochen():
                     return []
@@ -1243,7 +1334,7 @@ def _zaehle_electrum_endpunkte(
                     on_log(f"Verbindung fehlgeschlagen {host}:{port}: {fehler}")
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
-        if oeffentliche_electrum_suche_abgebrochen():
+        if oeffentliche_electrum_suche_abgebrochen() or not _familie_bleibt(familie):
             return []
         if treffer:
             break
@@ -1330,20 +1421,26 @@ def _pruefe_oeffentliche_electrum(
             _onion_liste, clear = splitte_electrum_server(servers)
         except (OSError, ValueError):
             clear = []
-        if clear:
+        if clear and not _bekannte_oeffentliche.get("clearnet"):
             log(
                 f"{len(clear)} Clearnet-Server in der Liste, "
                 f"zufällige Stichprobe (bis 8, ggf. zweite Runde)…"
             )
             # Früher: endpunkte[:8] — alphabetisch oft tote IP-Literale vorn;
             # bekannte Hosts (blockstream/qtornado/…) lagen unerreicht weiter hinten.
-            clear_hosts = _zaehle_electrum_endpunkte(
-                clear, timeout=8.0,
+            clear_hosts = _oeffentliche_verbindungen_halten(
+                clear, familie="clearnet", timeout=8.0,
                 tor_proxy=None, on_log=log,
             )
             if oeffentliche_electrum_suche_abgebrochen():
                 melde_oeffentliche_electrum_abbruch(log)
                 return _oeffentliche_electrum_als_ungenutzt(gefunden, on_log=None)
+
+    # Wahl kann während der Clearnet-Probe kommen. Dann zählen die
+    # Clearnet-Treffer nicht — es bleibt nur die gewählte Familie.
+    art = oeffentliche_electrum_art() if oeffentliche_electrum_art() else art
+    if art == "onion":
+        clear_hosts = []
 
     onions = _oeffentliche_onion_endpunkte(values)
     onion_hosts: list[str] = []
@@ -1371,15 +1468,19 @@ def _pruefe_oeffentliche_electrum(
             log(f"Tor für öffentliche Onions nicht bereit: {exc}")
             tor_proxy = None
         else:
-            if art == "onion":
-                log(f"{len(onions)} öffentliche Onions…")
-            else:
-                log(f"{len(onions)} öffentliche Onions (Clearnet fehlt)…")
+            if not _bekannte_oeffentliche.get("onion"):
+                if art == "onion":
+                    log(f"{len(onions)} öffentliche Onions…")
+                else:
+                    log(f"{len(onions)} öffentliche Onions (Clearnet fehlt)…")
             # Nach Bootstrap: etwas Luft für den ersten Circuit; nicht 30s je
             # Probe, sonst wirkt die Pille minutenlang grau.
-            onion_hosts = _zaehle_electrum_endpunkte(
-                onions, timeout=min(max(float(timeout), 8.0), 15.0),
-                tor_proxy=tor_proxy, on_log=log,
+            onion_hosts = _oeffentliche_verbindungen_halten(
+                onions,
+                familie="onion",
+                timeout=min(max(float(timeout), 8.0), 15.0),
+                tor_proxy=tor_proxy,
+                on_log=log,
             )
             if oeffentliche_electrum_suche_abgebrochen():
                 melde_oeffentliche_electrum_abbruch(log)
@@ -1387,9 +1488,15 @@ def _pruefe_oeffentliche_electrum(
                     gefunden, on_log=None,
                 )
 
+    art = oeffentliche_electrum_art() if oeffentliche_electrum_art() else art
+    if art == "onion":
+        clear_hosts = []
+    elif art == "clearnet":
+        onion_hosts = []
+
     onion_info = gefunden.get("public_onion")
     if onion_info is not None:
-        if art == "clearnet" or clear_hosts:
+        if art == "clearnet" or (clear_hosts and art is None):
             if art == "clearnet":
                 onion_note = _OEFFENTLICHE_CLEAR_GEWAEHLT_NOTE
             else:
@@ -1545,7 +1652,11 @@ def check_reachable(
                     error="nicht konfiguriert",
                     log=list(ergebnis.log),
                 )
-            info_chain = verify_core_rpc(client, on_log=log)
+            info_chain = verify_core_rpc(
+                client,
+                on_log=log,
+                txindex_erforderlich=info.key != "own_utxo_core",
+            )
             tip = info_chain.get("blocks")
             host = client.cfg.host
             return replace(

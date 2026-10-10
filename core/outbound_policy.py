@@ -129,16 +129,23 @@ def melde_oeffentliche_electrum_abbruch(log_fn=None) -> None:
     log_fn("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
 
 
-def futures_bis_oeffentliche_electrum_stopp(futures, *, poll_s: float = 0.2):
+def futures_bis_oeffentliche_electrum_stopp(
+    futures, *, poll_s: float = 0.2, weiter=None,
+):
     """
     Liefert fertige Futures, bis alle durch sind oder die öffentliche
     Suche gestoppt wurde (privater Indexer / Job-Abbruch / Prozess-Ende).
+
+    ``weiter`` liefert False, sobald diese Probe der anderen Familie
+    weichen muss (Nutzer hat Onion oder Clearnet ausdrücklich gewählt).
     """
     from concurrent.futures import FIRST_COMPLETED, wait
 
     pending = set(futures)
     while pending:
         if oeffentliche_electrum_suche_abgebrochen():
+            return
+        if weiter is not None and not weiter():
             return
         try:
             from core.jobs import job_abgebrochen

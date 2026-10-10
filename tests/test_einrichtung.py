@@ -237,6 +237,8 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('"header.p2pPeers": "P2P {n}"', de)
         self.assertIn('"header.sourceIndexer": "Indexer"', de)
         self.assertIn('"header.sourceElectrumPublic": "Electrum öffentlich"', de)
+        self.assertIn('"header.sourceElectrumPublicN": "Electrum öffentlich {n}"', de)
+        self.assertIn('t("header.sourceElectrumPublicN"', self.js)
         self.assertIn('"privacy.pillNone": "keine Privatsphäre"', de)
         self.assertIn('"privacy.pillUnclear": "Privatsphäre unklar"', de)
         # Nach Scan: /config ohne Check darf grüne Pillen nicht rot blitzen.
@@ -260,7 +262,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('"sources.connect": "Verbinden"', de)
         self.assertIn('"header.sourceConnectionUp": "Verbindung steht."', de)
         self.assertIn('"header.sourceElectrumPublicFailed": "Verbindung hat nicht geklappt"', de)
-        self.assertIn('"sources.loadList": "Liste laden"', de)
+        self.assertNotIn("sources.loadList", self.datenquellen_js)
         self.assertIn('"sources.connectP2pTitle"', de)
         en = (WEB / "locales" / "en.json").read_text(encoding="utf-8")
         self.assertIn('"sources.reachable": "Connected"', en)
