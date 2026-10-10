@@ -23,6 +23,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 
 `start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf macOS und Linux, nicht hier.
 
+Szenario Dachboden (GUI muss schon laufen, bitcoind und Electrs auch): `scripts/verify_gui_dachboden.py`. Es legt `Dachprobe` an, erwartet sie unter Dachboden, schickt 100 000 sats vom Faucet, mined einen Block und erwartet den Sprung in die normale Liste ohne Reload. Danach Sweep zurück an `lab-faucet` und wieder Dachboden. macOS/Linux starten das gebündelte Chromium ohne `channel`, Windows mit `channel=chrome`.
+
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 
 Endpunkte nur Loopback: RPC `127.0.0.1:18443` (user/pass `bitcoin`/`secret`), Electrum `127.0.0.1:50001` ohne SSL, GUI `127.0.0.1:8730/?t=…`. Der Whitelist-User und der Node ohne Wallet gehören zum Docker-Labor, nicht zu diesem portablen Start.  

@@ -79,13 +79,25 @@ def api_jobs(state: Any, query: dict) -> dict:
             "started_at": None,
             "finished_at": None,
         })
-    return {
+    antwort = {
         "jobs": jobs,
         "scan_pipeline": state.scan_queue.snapshot(),
         "block_event": block_event,
         "context_bereit": state.context_bereit(),
         "wallet_watch": watch,
     }
+    # Nav gruppiert nach UTXO-Zahl. Der Takt liest nur den Dateikopf,
+    # damit ein Empfang oder Sweep die Liste ohne Reload umhängt.
+    if state.context_bereit():
+        try:
+            from core import wallets as wallets_mod
+
+            antwort["wallet_nav"] = wallets_mod.nav_kurzstaende(
+                state.entries, state.cache_dir,
+            )
+        except Exception:
+            pass
+    return antwort
 
 
 def api_job(state: Any, job_id: str) -> dict:

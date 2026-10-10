@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Labor · Playwright Dachboden:** `lab/regtest/scripts/verify_gui_dachboden.py` legt ein leeres Wallet an, prüft den Dachboden, schickt Sats und sweept. Die Walletliste gruppiert dabei ohne Reload um. Der Jobs-Takt liest dafür nur `utxo_count` aus dem Cache-Dateikopf. Nav-Klicks gehen über das DOM, weil der Dachboden unter dem sichtbaren Bereich der Seitenleiste liegt.
 - **Navigation · Dachboden:** Wallets mit gelesenem Cache und ohne offene UTXOs stehen ganz unten in der Gruppe „Dachboden“ (Englisch: Attic). Die Gruppe ist der einzige aufklappbare Eintrag und startet zugeklappt. Nie gescannte Wallets bleiben in der Hauptliste.
 - **Datenquellen · öffentliche Electrum:** „Verbinden“ bei Clearnet verbindet nur Clearnet-Server. „Verbinden“ bei Onion verbindet nur Onion-Server. Es läuft nicht beides parallel, und nach einem Treffer fällt SatSage nicht auf die andere Art um.
 - **Electrs/Fulcrum · Verbindung weg:** Ist der Socket schon zu (`Fulcrum-Client nicht verbunden`), gilt das als normaler Verbindungsverlust: Reconnect oder nächster öffentlicher Server, bei Job-Abbruch Ende ohne Traceback. Ein Gap-Scan knallt darüber nicht mehr.

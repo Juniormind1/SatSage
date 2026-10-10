@@ -5,6 +5,7 @@ Liefert Daten für die Oberfläche — keine Ausgabe, keine Prompts.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -318,6 +319,59 @@ def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary
             )
         )
     return zusammenfassungen
+
+
+_UTXO_COUNT_IM_KOPF = re.compile(br'"utxo_count"\s*:\s*(\d+)')
+
+
+def _utxo_count_aus_dateikopf(pfad: Path) -> int | None:
+    """``utxo_count`` steht vor der UTXO-Liste. Nur die ersten Bytes lesen."""
+    try:
+        with pfad.open("rb") as datei:
+            kopf = datei.read(4096)
+    except OSError:
+        return None
+    treffer = _UTXO_COUNT_IM_KOPF.search(kopf)
+    if not treffer:
+        return None
+    try:
+        return int(treffer.group(1))
+    except ValueError:
+        return None
+
+
+def nav_kurzstaende(entries: list[WalletEntry], cache_dir: Path) -> list[dict]:
+    """
+    Leichte Nav-Stände für den Jobs-Takt: Cache da, UTXO-Zahl, mtime.
+
+    Liest nicht die UTXO-Liste. Fehlt ``utxo_count`` im Dateikopf, bleibt
+    das Feld weg — die Oberfläche darf eine volle Wallet nicht auf 0 setzen.
+    """
+    staende: list[dict] = []
+    for entry in entries:
+        schluessel = entry.analyse_schluessel
+        utxo_pfad = xpub_cache._xpub_cache_path(schluessel, cache_dir)
+        verlauf_pfad = xpub_cache._xpub_verlauf_cache_path(schluessel, cache_dir)
+        hat_utxo = utxo_pfad.is_file()
+        hat_verlauf = verlauf_pfad.is_file()
+        stand: dict = {
+            "id": eintrag_id(entry),
+            "has_cache": hat_utxo or hat_verlauf,
+        }
+        if hat_utxo:
+            zahl = _utxo_count_aus_dateikopf(utxo_pfad)
+            if zahl is not None:
+                stand["utxo_count"] = zahl
+        else:
+            stand["utxo_count"] = 0
+        ziel = utxo_pfad if hat_utxo else verlauf_pfad if hat_verlauf else None
+        if ziel is not None:
+            try:
+                stand["cache_mtime"] = int(ziel.stat().st_mtime)
+            except OSError:
+                pass
+        staende.append(stand)
+    return staende
 
 
 # ---------------------------------------------------------------------------

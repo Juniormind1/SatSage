@@ -321,6 +321,38 @@ function nimmBlockEvent(daten) {
   }
 }
 
+/**
+ * Jobs-Takt liefert leichte Cache-Stände. Weicht die UTXO-Zahl ab,
+ * hängt zeichneNav das Wallet um (Dachboden ↔ Liste) — ohne Reload.
+ */
+function nimmWalletNavStaende(daten) {
+  const staende = daten && daten.wallet_nav;
+  if (!Array.isArray(staende) || !Zustand.config || Zustand.contextBereit === false) {
+    return false;
+  }
+  const liste = Zustand.config.wallets || [];
+  let anders = false;
+  for (const stand of staende) {
+    if (!stand || !stand.id) continue;
+    const wallet = liste.find((eintrag) => eintrag && eintrag.id === stand.id);
+    if (!wallet) continue;
+    const has = Boolean(stand.has_cache);
+    if (Boolean(wallet.has_cache) !== has) {
+      wallet.has_cache = has;
+      anders = true;
+    }
+    if (stand.utxo_count != null && Number(wallet.utxo_count) !== Number(stand.utxo_count)) {
+      wallet.utxo_count = Number(stand.utxo_count) || 0;
+      anders = true;
+    }
+    if (stand.cache_mtime != null && wallet.cache_mtime !== stand.cache_mtime) {
+      wallet.cache_mtime = stand.cache_mtime;
+      anders = true;
+    }
+  }
+  return anders;
+}
+
 /** Wallet-Watch-Zeilen aus dem Jobs-Poll ins Web-Log (Reconnect, Subscribe, …). */
 function nimmWalletWatchLog(daten) {
   const zeilen = daten && daten.wallet_watch && daten.wallet_watch.log;
@@ -370,6 +402,7 @@ async function ladeJobsNav() {
     nimmBlockEvent(daten);
     nimmBootLogAusJobs(daten);
     nimmWalletWatchLog(daten);
+    if (nimmWalletNavStaende(daten)) zeichneNav();
   } catch (fehler) {
     /* offline / alter Server ohne /api/jobs */
     Zustand.jobsNavFehler = (fehler && fehler.message) || t("common.netError");

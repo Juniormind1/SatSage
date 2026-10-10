@@ -179,7 +179,8 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_web_sprache.py` | 30 | Accept-Language, Fußzeile |
 | `test_hinweis_sprache.py` | 10 | On-Chain-Hinweis folgt der Sprache |
 | `test_web_js.py` | 17 | doppelte `const`, Syntax-Fallen in `web/` |
-| `test_chrome_nav_js.py` | 9 | Nav nach `/api/config`, Dachboden |
+| `test_chrome_nav_js.py` | 10 | Nav nach `/api/config`, Dachboden |
+| `test_nav_kurzstaende.py` | 3 | UTXO-Zahl aus dem Cache-Dateikopf |
 | `test_pager_js.py` | 17 | Seitenleiste |
 | `test_anzeige.py` | 10 | sats/BTC-Schwelle Python = `format.js` |
 | `test_llm_anbindung.py` | 34 | Pille, Status, **kein Key im JSON**; Ollama skip |
@@ -209,6 +210,7 @@ Labor (`lab/regtest/scripts/`):
 - `verify_tx_classify.py` / `verify_sanctions_hops.py`
 - `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6). `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen (P2P-Fallback, siehe unten).
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)
+- `verify_gui_dachboden.py` — Playwright-Szenario: leeres Wallet im Dachboden, Faucet, Sweep, Umgruppieren ohne Reload. GUI muss laufen. macOS/Linux ohne `channel`, Windows mit `channel=chrome`.
 - `live_psbt_regtest_timing.py` — Lab darf `sendrawtransaction`, die App nicht
 
 GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`. Passwort setzen/ändern/löschen in der Oberfläche: `scripts/webgui_passwort_flow.py`, aufgerufen von Userflow und Chaos bei `--spawn` (Desktop, Specter, Umbrel). Labor: `verify_scan_abort_cache.py` ohne die beiden P2P-Fälle.

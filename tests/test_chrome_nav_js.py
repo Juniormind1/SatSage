@@ -105,6 +105,11 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("nimmWalletWatchLog(daten)", NAV)
         self.assertIn("daten.wallet_watch.log", NAV)
 
+    def test_jobs_takt_haengt_die_nav_ohne_reload_um(self):
+        self.assertIn("function nimmWalletNavStaende(", NAV)
+        self.assertIn("nimmWalletNavStaende(daten)", NAV)
+        self.assertIn("daten.wallet_nav", NAV)
+
     def test_start_fragt_den_einstieg(self):
         start = CHROME.index("async function start()")
         rumpf = CHROME[start:]
