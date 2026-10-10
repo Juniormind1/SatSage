@@ -179,7 +179,7 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_web_sprache.py` | 30 | Accept-Language, Fußzeile |
 | `test_hinweis_sprache.py` | 10 | On-Chain-Hinweis folgt der Sprache |
 | `test_web_js.py` | 17 | doppelte `const`, Syntax-Fallen in `web/` |
-| `test_chrome_nav_js.py` | 6 | Nav nach `/api/config` |
+| `test_chrome_nav_js.py` | 9 | Nav nach `/api/config`, Dachboden |
 | `test_pager_js.py` | 17 | Seitenleiste |
 | `test_anzeige.py` | 10 | sats/BTC-Schwelle Python = `format.js` |
 | `test_llm_anbindung.py` | 34 | Pille, Status, **kein Key im JSON**; Ollama skip |

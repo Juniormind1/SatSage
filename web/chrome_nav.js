@@ -111,12 +111,133 @@ function walletsFuerNav(liste) {
   });
 }
 
+/**
+ * Bekannt leer: Cache gelesen, keine offenen UTXOs. Solche Wallets braucht
+ * nur die Herkunft (ausgegebene Sätze). Nie gescannt bleibt in der Hauptliste,
+ * sonst verschwindet ein neues Wallet, bevor der Bestand feststeht.
+ * Ein laufender Scan, der schon UTXOs gemeldet hat, zählt nicht mehr als leer.
+ */
+function walletLiegtAufDemDachboden(wallet) {
+  if (!wallet || !wallet.id) return false;
+  if (Number(wallet.utxo_count) > 0) return false;
+  if (
+    typeof Zustand !== "undefined"
+    && Zustand.rescanJob
+    && Zustand.scanWalletId === wallet.id
+    && Number(Zustand.scanUtxoZahl) > 0
+  ) {
+    return false;
+  }
+  return Boolean(wallet.has_cache);
+}
+
+/** Oben die Wallets mit Bestand (oder noch unbekannt), unten der Dachboden. */
+function teileWalletsFuerNav(liste) {
+  const oben = [];
+  const dachboden = [];
+  for (const wallet of walletsFuerNav(liste)) {
+    if (walletLiegtAufDemDachboden(wallet)) dachboden.push(wallet);
+    else oben.push(wallet);
+  }
+  return { oben, dachboden };
+}
+
+/** Sitzungsweit: Dachboden startet zu und bleibt so über jedes Neuzeichnen. */
+let dachbodenAufgeklappt = false;
+
+function navWalletKnopf(wallet) {
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  knopf.className = "nav-eintrag";
+  knopf.dataset.ansicht = "wallet";
+  knopf.dataset.walletId = wallet.id;
+  if (Zustand.ansicht === "wallet" && Zustand.walletId === wallet.id) {
+    knopf.classList.add("aktiv");
+  }
+  const name = document.createElement("span");
+  name.className = "nav-name";
+  name.textContent = wallet.name;
+  knopf.append(name);
+  if (Zustand.rescanJob && Zustand.scanWalletId === wallet.id) {
+    const marker = document.createElement("span");
+    marker.className = "nav-marker";
+    if (Zustand.scanArt === "verlauf") {
+      marker.textContent = t("wallet.historyScanShort");
+    } else if (Zustand.scanUtxoZahl != null && Zustand.scanUtxoZahl > 0) {
+      const n = Zustand.scanUtxoZahl;
+      marker.textContent = n === 1 ? "1 UTXO…" : `${n} UTXOs…`;
+    } else {
+      marker.textContent = t("wallet.utxoScanShort");
+    }
+    knopf.append(marker);
+  } else if (
+    (scanPipeline().queued || []).some((s) => s.wallet_id === wallet.id)
+  ) {
+    const marker = document.createElement("span");
+    marker.className = "nav-marker";
+    marker.textContent = t("wallet.navWaiting");
+    knopf.append(marker);
+  } else if (wallet.has_cache || walletSyncLaeuftFuer(wallet.id)) {
+    const frisch = cacheFrische(wallet);
+    const marker = document.createElement("span");
+    marker.className = "nav-marker";
+    if (frisch.stufe === "gut") marker.classList.add("nav-marker-gut");
+    else if (frisch.stufe === "warn") marker.classList.add("nav-marker-warn");
+    marker.textContent = frisch.kurz || cacheHinweis(wallet);
+    marker.title = frisch.title || frisch.lang || t("wallet.cachePresentTitle");
+    knopf.append(marker);
+  }
+  knopf.addEventListener("click", () => zeigeWallet(wallet.id));
+  return knopf;
+}
+
+function zeichneDachboden(behaelter, wallets) {
+  if (!wallets.length) return;
+  const offen = dachbodenAufgeklappt;
+  const gruppe = document.createElement("div");
+  gruppe.className = "nav-dachboden";
+  const kopf = document.createElement("button");
+  kopf.type = "button";
+  kopf.className = "nav-eintrag nav-dachboden-kopf";
+  kopf.setAttribute("aria-expanded", offen ? "true" : "false");
+  kopf.title = t("nav.dachbodenTitle");
+  const gewaehlt = wallets.some(
+    (w) => Zustand.ansicht === "wallet" && Zustand.walletId === w.id,
+  );
+  if (gewaehlt && !offen) kopf.classList.add("aktiv");
+  const zeile = document.createElement("span");
+  zeile.className = "nav-dachboden-zeile";
+  const klapp = document.createElement("span");
+  klapp.className = "klapp";
+  klapp.setAttribute("aria-hidden", "true");
+  klapp.textContent = offen ? "▾" : "▸";
+  const name = document.createElement("span");
+  name.className = "nav-name";
+  name.textContent = t("nav.dachboden");
+  const zahl = document.createElement("span");
+  zahl.className = "nav-marker nav-dachboden-zahl";
+  zahl.textContent = String(wallets.length);
+  zeile.append(klapp, name, zahl);
+  kopf.append(zeile);
+  kopf.addEventListener("click", () => {
+    dachbodenAufgeklappt = !dachbodenAufgeklappt;
+    zeichneNav();
+  });
+  gruppe.append(kopf);
+  const liste = document.createElement("div");
+  liste.className = "nav-dachboden-liste";
+  liste.hidden = !offen;
+  for (const wallet of wallets) liste.append(navWalletKnopf(wallet));
+  gruppe.append(liste);
+  behaelter.append(gruppe);
+}
+
 function zeichneNav() {
   const behaelter = $("#wallet-nav");
   behaelter.replaceChildren();
 
-  const wallets = walletsFuerNav(Zustand.config?.wallets);
-  if (wallets.length === 0) {
+  const { oben, dachboden } = teileWalletsFuerNav(Zustand.config?.wallets);
+  if (oben.length === 0 && dachboden.length === 0) {
     // Neunutzer: Klick → Verwaltung · Wallets (nicht nur toter Hinweis).
     const leer = document.createElement("button");
     leer.type = "button";
@@ -129,51 +250,8 @@ function zeichneNav() {
     behaelter.append(leer);
   }
 
-  for (const wallet of wallets) {
-    const knopf = document.createElement("button");
-    knopf.type = "button";
-    knopf.className = "nav-eintrag";
-    knopf.dataset.ansicht = "wallet";
-    knopf.dataset.walletId = wallet.id;
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === wallet.id) {
-      knopf.classList.add("aktiv");
-    }
-    const name = document.createElement("span");
-    name.className = "nav-name";
-    name.textContent = wallet.name;
-    knopf.append(name);
-    if (Zustand.rescanJob && Zustand.scanWalletId === wallet.id) {
-      const marker = document.createElement("span");
-      marker.className = "nav-marker";
-      if (Zustand.scanArt === "verlauf") {
-        marker.textContent = t("wallet.historyScanShort");
-      } else if (Zustand.scanUtxoZahl != null && Zustand.scanUtxoZahl > 0) {
-        const n = Zustand.scanUtxoZahl;
-        marker.textContent = n === 1 ? "1 UTXO…" : `${n} UTXOs…`;
-      } else {
-        marker.textContent = t("wallet.utxoScanShort");
-      }
-      knopf.append(marker);
-    } else if (
-      (scanPipeline().queued || []).some((s) => s.wallet_id === wallet.id)
-    ) {
-      const marker = document.createElement("span");
-      marker.className = "nav-marker";
-      marker.textContent = t("wallet.navWaiting");
-      knopf.append(marker);
-    } else if (wallet.has_cache || walletSyncLaeuftFuer(wallet.id)) {
-      const frisch = cacheFrische(wallet);
-      const marker = document.createElement("span");
-      marker.className = "nav-marker";
-      if (frisch.stufe === "gut") marker.classList.add("nav-marker-gut");
-      else if (frisch.stufe === "warn") marker.classList.add("nav-marker-warn");
-      marker.textContent = frisch.kurz || cacheHinweis(wallet);
-      marker.title = frisch.title || frisch.lang || t("wallet.cachePresentTitle");
-      knopf.append(marker);
-    }
-    knopf.addEventListener("click", () => zeigeWallet(wallet.id));
-    behaelter.append(knopf);
-  }
+  for (const wallet of oben) behaelter.append(navWalletKnopf(wallet));
+  zeichneDachboden(behaelter, dachboden);
 
   for (const name of [
     "steuerjahr", "trace", "sanktionen", "tools",

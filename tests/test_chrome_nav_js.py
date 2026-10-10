@@ -66,6 +66,37 @@ class TestEinstiegsWallet(unittest.TestCase):
             ["z", "a", "o", "b", "a2"],
         )
 
+    def test_leere_bestaende_landen_im_dachboden(self):
+        """Cache gelesen und 0 UTXOs → Dachboden. Unbekannt bleibt oben."""
+        wallets = [
+            {"id": "leer", "name": "Zeta", "has_cache": True, "utxo_count": 0},
+            {"id": "voll", "name": "Alpha", "has_cache": True, "utxo_count": 2},
+            {"id": "neu", "name": "Mitte", "has_cache": False, "utxo_count": 0},
+            {"id": "historie", "name": "Beta", "has_cache": True, "utxo_count": 0},
+        ]
+        teile = _node(
+            {"config": {"wallets": wallets}, "rescanJob": None},
+            "teileWalletsFuerNav(Zustand.config.wallets)",
+        )
+        self.assertEqual([w["id"] for w in teile["oben"]], ["voll", "neu"])
+        self.assertEqual([w["id"] for w in teile["dachboden"]], ["historie", "leer"])
+
+    def test_scan_mit_fund_verlaesst_den_dachboden(self):
+        wallets = [
+            {"id": "scan", "name": "Scan", "has_cache": True, "utxo_count": 0},
+        ]
+        teile = _node(
+            {
+                "config": {"wallets": wallets},
+                "rescanJob": {"id": "j"},
+                "scanWalletId": "scan",
+                "scanUtxoZahl": 3,
+            },
+            "teileWalletsFuerNav(Zustand.config.wallets)",
+        )
+        self.assertEqual([w["id"] for w in teile["oben"]], ["scan"])
+        self.assertEqual(teile["dachboden"], [])
+
 
 class TestEinbindung(unittest.TestCase):
 
