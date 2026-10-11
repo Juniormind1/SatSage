@@ -635,6 +635,90 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
     }
 
 
+def _bekannte_utxo_keys(state: AppState, entries) -> set[str]:
+    """txid:vout, die vor diesem Scan schon im Cache lagen."""
+    from server import main
+
+    keys: set[str] = set()
+    for entry in entries:
+        try:
+            liste = main.load_xpub_utxo_cache(
+                entry.analyse_schluessel, state.cache_dir,
+            ) or []
+        except Exception:
+            continue
+        for utxo in liste:
+            if not isinstance(utxo, dict):
+                continue
+            txid = str(utxo.get("txid") or "").strip().lower()
+            if not txid:
+                continue
+            try:
+                vout = int(utxo.get("vout") or 0)
+            except (TypeError, ValueError):
+                vout = 0
+            keys.add(f"{txid}:{vout}")
+    return keys
+
+
+def _adresse_zu_wallet_id(entries) -> dict[str, str]:
+    """Empfangs- und Wechseladressen → Wallet-Kennung. Für den Sammelscan."""
+    from core.derivation import derive_addresses
+    from core.wallets import eintrag_id
+
+    zu: dict[str, str] = {}
+    for entry in entries:
+        wid = eintrag_id(entry)
+        try:
+            tiefe = max(int(entry.max_addresses or 0), 1000)
+            adressen = derive_addresses(
+                entry.analyse_schluessel,
+                max_addresses=tiefe,
+                script_type=getattr(entry, "script_type", None),
+            )
+        except Exception:
+            continue
+        for addr in adressen or ():
+            if addr and addr not in zu:
+                zu[addr] = wid
+    return zu
+
+
+def _merke_scan_funde(
+    stand_utxos,
+    *,
+    gesehen: set[str],
+    entdeckt: list[dict],
+    wallet_id: str = "",
+    adressen: dict[str, str] | None = None,
+) -> list[dict]:
+    """UTXOs, die in diesem Scan neu sind (nicht der Stand vor dem Start)."""
+    for utxo in stand_utxos or []:
+        if not isinstance(utxo, dict):
+            continue
+        txid = str(utxo.get("txid") or "").strip().lower()
+        if not txid:
+            continue
+        try:
+            vout = int(utxo.get("vout") or 0)
+            sats = int(utxo.get("value") or 0)
+        except (TypeError, ValueError):
+            continue
+        if sats < 0:
+            continue
+        key = f"{txid}:{vout}"
+        if key in gesehen:
+            continue
+        gesehen.add(key)
+        wid = wallet_id or (adressen or {}).get(str(utxo.get("address") or ""), "")
+        entdeckt.append({
+            "key": key,
+            "value_sats": sats,
+            "wallet_id": wid,
+        })
+    return entdeckt
+
+
 def api_rescan(state: AppState, payload: dict) -> dict:
     from server import (
         ApiError,
@@ -728,6 +812,9 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 )
             stand.phase(f"Scanne {entry.display_name} über {quelle}…")
 
+            gesehen_funde = _bekannte_utxo_keys(state, [entry])
+            entdeckt_funde: list[dict] = []
+
             def on_utxos_update(stand_utxos: list) -> None:
                 # Zwischenstand schon während des Scans — GUI kann zeichnen.
                 # Neue Punkte: Output-Datum, grau. Ohne Blockzeit kein X.
@@ -759,6 +846,12 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                     "utxo_count": len(stand_utxos),
                     "partial": True,
                     "neu": neu,
+                    "entdeckt": _merke_scan_funde(
+                        stand_utxos,
+                        gesehen=gesehen_funde,
+                        entdeckt=entdeckt_funde,
+                        wallet_id=wid,
+                    ),
                 }
                 wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
                 stand.tick(f"{len(stand_utxos)} {wort} bisher gefunden…")
@@ -899,9 +992,22 @@ def api_rescan_alle(state: AppState) -> dict:
             def max_addresses_for(xpub: str) -> int:
                 return int(max_by.get(xpub) or 0) or 20
 
+            gesehen_funde = _bekannte_utxo_keys(state, wallets)
+            entdeckt_funde: list[dict] = []
+            adressen_funde = _adresse_zu_wallet_id(wallets)
+
             def on_utxos_update(stand_utxos: list) -> None:
                 n = len(stand_utxos or [])
-                job.result = {"utxo_count": n, "partial": True}
+                job.result = {
+                    "utxo_count": n,
+                    "partial": True,
+                    "entdeckt": _merke_scan_funde(
+                        stand_utxos,
+                        gesehen=gesehen_funde,
+                        entdeckt=entdeckt_funde,
+                        adressen=adressen_funde,
+                    ),
+                }
                 wort = "UTXO" if n == 1 else "UTXOs"
                 stand.tick(f"{n} {wort} bisher gefunden…")
 

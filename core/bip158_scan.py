@@ -183,6 +183,16 @@ def _filter_umfang(passe) -> int:
     return sum(max(0, bis - von + 1) for _name, von, bis, _s in passe)
 
 
+def _gesamt_nach_extra_runde(gesamt: int, von: int, bis: int) -> int:
+    """Nenner um eine wiederholte Historie-Spanne vergrößern.
+
+    Die erste Runde steckt schon im Plan. Jede weitere läuft dieselbe
+    Höhe noch einmal, der Zähler wächst mit. Ohne größeren Nenner steht
+    danach auf jeder Zeile 100 %, obwohl der Pass von vorn beginnt.
+    """
+    return int(gesamt) + max(0, int(bis) - int(von) + 1)
+
+
 def _filter_prozent_text(geprueft: int, gesamt: int) -> str:
     """„12.000/481.375 (2,5 %)“ — leer, solange die Gesamtzahl fehlt."""
     if gesamt <= 0:
@@ -1003,7 +1013,16 @@ class BIP158Scanner:
         try:
             from display import melde_zwischenstand
 
-            melde_zwischenstand(text, ersetze_praefix=ersetze_praefix)
+            # Dichte Filter-Treffer dürfen die Prozent-Statuszeile nicht
+            # überschreiben. Sie bleiben im Log.
+            treffer = text.startswith("Filter-Treffer Block") or (
+                ersetze_praefix or ""
+            ).startswith("Filter-Treffer Block")
+            melde_zwischenstand(
+                text,
+                ersetze_praefix=ersetze_praefix,
+                status=not treffer,
+            )
         except Exception as exc:
             # Job-Abbruch darf hier nicht verschwinden (sonst läuft BIP-158
             # trotz Abbruch-Knopf bis zum Tip weiter).
@@ -1301,6 +1320,7 @@ class BIP158Scanner:
             _treffer, neu, spent_by = extract_from_parsed_block(header, txs, watched, h)
             block_time = _header_unixzeit(header)
             irgendwas = False
+            ausgegeben: set[str] = set()
             for w in aktiv:
                 eigene_neu = {
                     key: out for key, out in neu.items()
@@ -1319,6 +1339,7 @@ class BIP158Scanner:
                 if not eigene_neu and not spent_ours:
                     continue
                 irgendwas = True
+                ausgegeben.update(spent_ours)
                 result = ergebnisse[w["xpub"]]
                 if display not in result.matched_blocks:
                     result.matched_blocks.append(display)
@@ -1338,6 +1359,21 @@ class BIP158Scanner:
                     result = ergebnisse[w["xpub"]]
                     if display not in result.false_positive_blocks:
                         result.false_positive_blocks.append(display)
+            # Wie der Einzelscan: „hole Block…“ durch Fund oder False Positive
+            # ersetzen, und den Bestand sofort an die Oberfläche geben.
+            # Der Schluss-Rebuild wiederholt die Blöcke nur intern.
+            if provisional:
+                self._log_block_treffer(h, neu, ausgegeben)
+            if provisional and on_utxos_update and irgendwas:
+                from core.bip158_wallet import _matched_output_to_utxo
+
+                gesamt_utxos = []
+                for ww in vorbereitet:
+                    gesamt_utxos.extend(
+                        _matched_output_to_utxo(a)
+                        for a in staende[ww["xpub"]]["bestaende"].values()
+                    )
+                on_utxos_update(gesamt_utxos)
             self._emit(h, end, geprueft, 0, phase)
 
         def _rebuild() -> None:
@@ -1434,6 +1470,9 @@ class BIP158Scanner:
                     if runde:
                         self._log(
                             f"BIP-158 Historie erweitert: {len(neue)} weitere Keys"
+                        )
+                        self._filter_gesamt = _gesamt_nach_extra_runde(
+                            self._filter_gesamt, von, bis,
                         )
                     abgebrochen = _union_pass(name, von, bis, frozenset(neue))
                     if abgebrochen:
@@ -1780,6 +1819,8 @@ class BIP158Scanner:
                         self._log(
                             f"BIP-158 Historie erweitert: {len(neue)} weitere Keys"
                         )
+                        gesamt = _gesamt_nach_extra_runde(gesamt, von, bis)
+                        self._filter_gesamt = gesamt
                     abgebrochen = _filterpass(name, von, bis, frozenset(neue))
                     if abgebrochen:
                         break

@@ -2478,7 +2478,7 @@ const EmpfangPuls = (() => {
   /**
    * Kalibrierte Defaults (animdebug-Regler / Lab):
    * Impuls 500, Streu 80 %, Grav 5, Luft 2, Winkel 30–80°, Dauer 3 s,
-   * Gold ab 1 Mio, +25 Staub je Schuss.
+   * Gold ab 1 Mio, +75 Staub je Schuss.
    */
   const KONFETTI_DEFAULTS = {
     goldAb: 1_000_000,
@@ -2489,7 +2489,7 @@ const EmpfangPuls = (() => {
     winkelMin: 30,
     winkelMax: 80,
     dauer: 3000,
-    staubExtra: 25,
+    staubExtra: 75,
   };
 
   function konfettiParamsAusSats(sats, overrides) {

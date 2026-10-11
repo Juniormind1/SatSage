@@ -11,6 +11,8 @@ Datei ersetzt keinen Linter, fängt aber die Fehlerklassen ab, die die ganze
 Oberfläche lahmlegen und beim Lesen leicht übersehen werden.
 """
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -441,6 +443,61 @@ class TestPrueferSelbst(unittest.TestCase):
         sauber = ohne_texte_und_kommentare(quelle)
         self.assertEqual(sauber.count("{"), sauber.count("}"))
         self.assertEqual(doppelte_deklarationen(quelle), [])
+
+
+class TestEmpfangPulsAlleWallets(unittest.TestCase):
+    """UTXO-Lauf „alle“ atmet den QR der offenen Wallet."""
+
+    def test_alle_utxos_atmet_unabhaengig_vom_offenen_wallet(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node fehlt")
+        skript = r"""
+const fs = require("fs");
+const vm = require("vm");
+const Zustand = {
+  contextBereit: true,
+  herkunftAlleLaeuft: false,
+  verlaufAlleLaeuft: false,
+  rescanJob: "job-1",
+  scanWalletId: "alle",
+  scanArt: "utxo",
+  walletId: "wallet-a",
+  jobsNav: { jobs: [] },
+  traceJobs: new Set(),
+};
+globalThis.Zustand = Zustand;
+globalThis.herkunftTiefLaeuftFuer = () => false;
+globalThis.walletSyncLaeuftFuer = () => false;
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"), { filename: process.argv[1] });
+const fehler = [];
+if (!empfangScanLaeuftFuer("wallet-a")) fehler.push("offen");
+if (!empfangScanLaeuftFuer("wallet-b")) fehler.push("anderes");
+Zustand.scanArt = "verlauf";
+if (empfangScanLaeuftFuer("wallet-a")) fehler.push("verlauf");
+Zustand.scanArt = "utxo";
+Zustand.rescanJob = null;
+if (empfangScanLaeuftFuer("wallet-a")) fehler.push("aus");
+Zustand.rescanJob = "job-1";
+Zustand.scanWalletId = "wallet-b";
+if (empfangScanLaeuftFuer("wallet-a")) fehler.push("fremd");
+if (!empfangScanLaeuftFuer("wallet-b")) fehler.push("eigen");
+if (fehler.length) {
+  console.error(fehler.join(","));
+  process.exit(1);
+}
+"""
+        lauf = subprocess.run(
+            [node, "-e", skript, str(WEB / "views" / "wallets.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            lauf.returncode,
+            0,
+            (lauf.stdout or "") + (lauf.stderr or ""),
+        )
 
 
 if __name__ == "__main__":

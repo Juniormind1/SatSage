@@ -11,6 +11,7 @@ from bip158_scanner import (
     plane_union_passes,
     verteile_cfilter_chunks,
 )
+from core.bip158_scan import _gesamt_nach_extra_runde
 from core.p2p import (
     GENESIS_HEADER,
     HeaderChain,
@@ -210,6 +211,17 @@ class TestTurboPasses(unittest.TestCase):
         self.assertIn("(2,5 %)", _filter_prozent_text(12_035, 481_375))
         self.assertIn("(100 %)", _filter_prozent_text(481_375, 481_375))
         self.assertIn("(12 %)", _filter_prozent_text(60_000, 481_375))
+
+    def test_extra_historie_runde_bleibt_unter_100(self):
+        """Zweite Runde über dieselbe Spanne darf nicht bei 100 % kleben."""
+        von, bis = 907_914, 968_874
+        erste = bis - von + 1
+        self.assertIn("(100 %)", _filter_prozent_text(erste, erste))
+        gesamt = _gesamt_nach_extra_runde(erste, von, bis)
+        # 8.000 Blöcke in der zweiten Runde: 68.961 / 121.922 → 56 %.
+        text = _filter_prozent_text(erste + 8_000, gesamt)
+        self.assertNotIn("100 %", text)
+        self.assertIn("(56 %)", text)
 
 
 class TestFilterParallel(unittest.TestCase):

@@ -13,6 +13,30 @@ class _Client:
     cache_dir = None
 
 
+class TestScanFunde(unittest.TestCase):
+    def test_nur_neue_utxos_und_wallet_ueber_adresse(self):
+        from httpserver.api.source import _merke_scan_funde
+
+        gesehen = {"aa" * 32 + ":0"}
+        entdeckt: list[dict] = []
+        stand = [
+            {"txid": "AA" * 32, "vout": 0, "value": 5, "address": "bc1qalt"},
+            {"txid": "bb" * 32, "vout": 1, "value": 9, "address": "bc1qneu"},
+        ]
+        _merke_scan_funde(
+            stand, gesehen=gesehen, entdeckt=entdeckt,
+            adressen={"bc1qneu": "wallet-a"},
+        )
+        self.assertEqual(len(entdeckt), 1)
+        self.assertEqual(entdeckt[0]["value_sats"], 9)
+        self.assertEqual(entdeckt[0]["wallet_id"], "wallet-a")
+        _merke_scan_funde(
+            stand, gesehen=gesehen, entdeckt=entdeckt,
+            adressen={"bc1qneu": "wallet-a"},
+        )
+        self.assertEqual(len(entdeckt), 1)
+
+
 class TestGruppen(unittest.TestCase):
     def test_uebernahme_teilt_je_xpub(self):
         ausgang = MatchedOutput(

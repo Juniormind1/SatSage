@@ -253,6 +253,35 @@ class TestBip158ImJobLog(unittest.TestCase):
         melde_zwischenstand("BIP-158-Scan …")
         self.assertIn("BIP-158-Scan …", self.job.as_dict()["log"])
 
+    def test_filter_treffer_verdraengt_die_prozentzeile_nicht(self):
+        from core.bip158_scan import BIP158Scanner
+
+        melde_zwischenstand(
+            "Filter Block 929.000–930.000 · 12.000/481.375 (2,5 %)",
+            log=False,
+        )
+        BIP158Scanner._log(
+            object(),
+            "Filter-Treffer Block 929.002 — hole Block…",
+        )
+        BIP158Scanner._log(
+            object(),
+            "Filter-Treffer Block 929.002 — False Positive",
+            ersetze_praefix="Filter-Treffer Block 929.002",
+        )
+        self.assertEqual(
+            self.job.message,
+            "Filter Block 929.000–930.000 · 12.000/481.375 (2,5 %)",
+        )
+        log = self.job.as_dict()["log"]
+        self.assertIn(
+            "Filter-Treffer Block 929.002 — False Positive",
+            log,
+        )
+        self.assertFalse(
+            any("hole Block" in z for z in log),
+        )
+
     def test_filter_treffer_aus_worker_thread_landet_im_log(self):
         """ContextVar gilt nicht in Filter-Peers — Fallback muss greifen."""
         import threading

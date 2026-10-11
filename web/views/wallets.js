@@ -290,12 +290,19 @@ function jobIstAktiv(job) {
 }
 
 /**
- * Scan über alle Wallets: Massen-Herkunft („klären“) und ein noch
- * laufender Sammel-Verlauf. Atem unabhängig vom gerade offenen Wallet.
+ * Scan über alle Wallets: Massen-Herkunft („klären“), Sammel-Verlauf
+ * und der UTXO-Lauf „Alle Wallets“. Atem unabhängig vom offenen Wallet.
  */
 function empfangGlobalerScanLaeuft() {
   if (Zustand.contextBereit === false) return true;
   if (Zustand.herkunftAlleLaeuft || Zustand.verlaufAlleLaeuft) return true;
+  if (
+    Zustand.rescanJob
+    && String(Zustand.scanWalletId) === "alle"
+    && Zustand.scanArt === "utxo"
+  ) {
+    return true;
+  }
   const jobs = Zustand.jobsNav?.jobs || [];
   return jobs.some((job) => {
     if (!jobIstAktiv(job) || job.meta?.still) return false;
@@ -3937,6 +3944,7 @@ function bindeWalletScanJob(job, ziel) {
   Zustand.scanWalletName = ziel.name || walletNameZu(ziel.id);
   Zustand.scanArt = ziel.art;
   Zustand.scanUtxoZahl = null;
+  Zustand.scanFundKeys = new Set();
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
   Zustand.scanLogIndex = 0;
@@ -3950,11 +3958,15 @@ function bindeWalletScanJob(job, ziel) {
   nimmJobLog(job);
   aktualisiereScanAnzeige(job.message || "wird gestartet…");
   zeichneNav();
-  // Empfangs-Pane: Herzschlag wenn dieses Wallet gewählt (Lern-QR weichen).
-  if (Zustand.walletId === ziel.id) {
+  // Empfangs-Pane: Herzschlag, wenn dieses Wallet gescannt wird oder der
+  // UTXO-Lauf alle Wallets läuft (Lern-QR weichen).
+  const pulsWallet = Zustand.walletId === ziel.id
+    ? ziel.id
+    : (String(ziel.id) === ALLE_WALLETS_SCAN_ID ? Zustand.walletId : "");
+  if (pulsWallet) {
     Zustand.lernThema = null;
     EmpfangPuls.stop();
-    ladeEmpfang(ziel.id).catch(() => {});
+    ladeEmpfang(pulsWallet).catch(() => {});
   }
   if (Zustand.rescanTimer) clearInterval(Zustand.rescanTimer);
   Zustand.rescanTimer = setInterval(pruefeWalletScan, 900);
@@ -3963,6 +3975,30 @@ function bindeWalletScanJob(job, ziel) {
 /** Während UTXO-Scan: Cache-Zwischenstand höchstens alle ~2,5 s in die GUI. */
 const SCAN_REFRESH_MS = 2500;
 
+/**
+ * Jeder in diesem Scan neu gefundene UTXO des offenen Wallets
+ * spielt dieselbe Ka-Ching-Animation wie ein Mempool-Empfang.
+ */
+function spieleScanFunde(job) {
+  const liste = job && job.result && job.result.entdeckt;
+  if (!Array.isArray(liste) || !Zustand.walletId) return;
+  if (!Zustand.scanFundKeys) Zustand.scanFundKeys = new Set();
+  for (const fund of liste) {
+    if (!fund || !fund.key) continue;
+    const key = String(fund.key);
+    if (Zustand.scanFundKeys.has(key)) continue;
+    Zustand.scanFundKeys.add(key);
+    if (String(fund.wallet_id || "") !== String(Zustand.walletId)) continue;
+    const sats = Number(fund.value_sats);
+    if (typeof EmpfangPuls !== "undefined" && EmpfangPuls.flashIncoming) {
+      EmpfangPuls.flashIncoming(
+        Zustand.walletId,
+        Number.isFinite(sats) ? sats : undefined,
+      );
+    }
+  }
+}
+
 async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   if (Zustand.scanRefreshLaeuft) return;
   const vorher = Zustand.scanUtxoZahl;
@@ -3970,19 +4006,6 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   if (!gestiegen && vorher != null) return;
   const jetzt = Date.now();
   if (jetzt - Zustand.scanRefreshUm < SCAN_REFRESH_MS && vorher != null) return;
-
-  // Erster Fund-Schub: ein oranger ₿-Atemzug (nur wenn Betrag ≥ 500 sats
-  // bekannt — Zwischenstand hat oft nur die Anzahl, dann kein Flash).
-  // Weitere Funde während der Animation → still, Animation läuft aus.
-  if (
-    Zustand.walletId === scanId
-    && typeof utxoZahl === "number"
-    && utxoZahl > 0
-    && (vorher == null || utxoZahl > vorher)
-  ) {
-    // Ohne Einzelbetrag: Mindestgröße (Dust = 500 → 15 %).
-    EmpfangPuls.flashOrangeB(500);
-  }
 
   Zustand.scanRefreshLaeuft = true;
   Zustand.scanRefreshUm = jetzt;
@@ -4212,6 +4235,7 @@ async function pruefeWalletScan() {
     aktualisiereScanAnzeige(job.message);
     if (job.running) {
       if (Zustand.scanArt === "utxo") {
+        spieleScanFunde(job);
         const zahl = job.result?.utxo_count;
         if (typeof zahl === "number") {
           await erfrischeScanZwischenstand(scanId, zahl);
@@ -4293,8 +4317,13 @@ function beendeRescan(_meldung, _istFehler = false) {
   // Wallet-Inhalt kommt vom Cache-Zwischenstand (Caller refreshed) —
   // hier keine Leer-Meldung mehr, die gefundene UTXOs verdecken würde.
   zeichneNav();
-  if (scanId && Zustand.walletId === scanId && !Zustand.lernThema) {
-    ladeEmpfang(scanId).catch(() => {});
+  const offen = Zustand.walletId;
+  const pulsEnde = scanId && offen && (
+    String(scanId) === String(offen)
+    || String(scanId) === ALLE_WALLETS_SCAN_ID
+  );
+  if (pulsEnde && !Zustand.lernThema) {
+    ladeEmpfang(offen).catch(() => {});
   }
 }
 

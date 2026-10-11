@@ -274,6 +274,7 @@ def melde_zwischenstand(
     *,
     log: bool = True,
     ersetze_praefix: str | None = None,
+    status: bool = True,
 ) -> None:
     """
     Leitet Scan-Ausgaben in den Web-Log-Bereich, falls ein Job läuft.
@@ -283,6 +284,8 @@ def melde_zwischenstand(
 
     *ersetze_praefix*: statt neuer Zeile die letzte Log-Zeile mit diesem
     Anfang überschreiben (Filter-Treffer → False Positive / UTXO-Fund).
+
+    *status=False*: nur das Log. Die Statuszeile (Filter-Prozent) bleibt.
 
     Wirft ``Cancelled``, wenn der Web-Job abgebrochen wurde — damit greift
     Abbruch an jeder BIP-158-/Scan-Logzeile, nicht erst am Job-Ende.
@@ -304,7 +307,9 @@ def melde_zwischenstand(
     if stand is None:
         return
     if ersetze_praefix:
-        stand.ersetze(ersetze_praefix, text)
+        stand.ersetze(ersetze_praefix, text, status=status)
+    elif log and not status:
+        stand.nur_ins_log(text)
     elif log:
         stand.phase(text)
     else:

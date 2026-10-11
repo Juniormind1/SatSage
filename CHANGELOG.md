@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **UTXO-Scan · Empfang:** Jeder neu gefundene UTXO des gerade offenen Wallets spielt die Ka-Ching-Animation eines Mempool-Empfangs. UTXOs, die schon vor dem Scan im Cache lagen, lösen sie nicht aus. Während **Alle Wallets: UTXOs** atmet der QR der offenen Wallet mit, wie bei einem Scan nur dieses Wallets.
+
+- **P2P · Fortschritt:** „hole Block…“ und das Ergebnis danach bleiben im Log und verdrängen die Prozentzeile nicht mehr. Die Prozentzahl steht in der Statuszeile, nicht als eigene Logzeile, solange Treffer reinkommen.
+- **P2P · gemeinsamer UTXO-Lauf:** Treffer in der Turbo-Phase erscheinen sofort im Log und in der UTXO-Zahl. Bisher blieb die Zeile auf „hole Block…“ und die Zahl auf 0, bis die Historie aller Wallets vorbei war.
 - **Wallets · Alle Wallets:** Rechts neben **Historie** steht „Alle Wallets:“ und der Knopf **UTXOs**. Ein Lauf für jedes ableitbare Wallet. Ist Compact-Filter die einzige Bestandsquelle, ein gemeinsamer Durchgang. Sonst Electrs im LAN (Wallet für Wallet) oder ein `scantxoutset`, wenn der Node verbunden ist.
 - **P2P · UTXO-Bestand:** Die Historie nutzt dieselbe Lücke 100 wie der Electrs-UTXO-Scan und läuft weiter, wenn ein Treffer das Präfix nach oben schiebt. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt nicht im Bestand. Ein früherer P2P-Lauf ohne diese Lücke gilt nicht mehr als fertig; der nächste P2P-Scan holt den Bestand neu. Electrs-Caches bleiben gültig.
 - **Bedienung:** Der Nutzerweg ist die Web-GUI. Das Terminal daneben ist nur 1 Status, 2 Browser öffnen, 3 Server stoppen. `main.py` ist keine zweite Oberfläche.
