@@ -446,8 +446,18 @@ def verteile_cfilter_chunks(
     # holen mit Peer-Lock (Socket nicht parallel getcfilters+getdata).
     async_blocks = bool(hole_bloecke)
     block_queue: queue.Queue | None = queue.Queue() if async_blocks else None
-    peer_locks = {id(p): threading.Lock() for p in peers}
+    peer_locks: dict[int, threading.Lock] = {id(p): threading.Lock() for p in peers}
+    locks_guard = threading.Lock()
     filter_peers = list(peers)
+
+    def _lock_fuer(peer) -> threading.Lock:
+        """Lock je Socket. Ersatz-Peers nach einem Abbruch fehlen im Start-Dict."""
+        with locks_guard:
+            lock = peer_locks.get(id(peer))
+            if lock is None:
+                lock = threading.Lock()
+                peer_locks[id(peer)] = lock
+            return lock
 
     block_ergebnisse: dict = {}
     block_wach = threading.Condition()
@@ -484,7 +494,7 @@ def verteile_cfilter_chunks(
         raise Cancelled()
 
     def block_arbeit(peer) -> None:
-        lock = peer_locks[id(peer)]
+        lock = _lock_fuer(peer)
         while not block_stop.is_set():
             if _soll_enden():
                 return
@@ -525,7 +535,7 @@ def verteile_cfilter_chunks(
             t.start()
 
     def _chunk_laden(peer, von, bis, stop):
-        lock = peer_locks[id(peer)]
+        lock = _lock_fuer(peer)
         with lock:
             return _lade_cfilter_chunk(
                 peer, von, bis, stop, scripts, on_log=on_log,
@@ -1342,7 +1352,7 @@ class BIP158Scanner:
                         continue
                     nachzug |= scripts_mit_gap_um_treffer(
                         w["xpub"],
-                        staende[w["xpub"]]["hit_scripts"] | w["gap"],
+                        staende[w["xpub"]]["hit_scripts"],
                         gap_limit=w["gap_limit"],
                         max_index=w["max_index"],
                         include_change=w["include_change"],
@@ -1658,11 +1668,11 @@ class BIP158Scanner:
                 self._log("BIP-158 abgebrochen.")
                 break
 
-            # Historie-Pass beim Erstscan: Hits aus Turbo + Gap nachziehen.
+            # Historie-Pass beim Erstscan: Präfix 0 … höchster Turbo-Treffer + Gap.
             if name == "historie" and erstscan and xpub:
                 scripts = frozenset(
                     scripts_mit_gap_um_treffer(
-                        xpub, hit_scripts | gap0,
+                        xpub, hit_scripts,
                         gap_limit=gap_limit,
                         max_index=max_index,
                         include_change=include_change,

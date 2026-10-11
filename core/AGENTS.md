@@ -90,14 +90,14 @@ Einzelmodi:
 
 - **Bitcoin-P2P Compact Filter** — Peers mit `NODE_COMPACT_FILTERS` (`peerblockfilters=1`)
   - Filter lokal matchen, Block nur bei Treffer
-  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`), Historie nur already-used
+  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Gap`, ohne Treffer nur die ersten `gap_limit` Indizes
   - Peer-Reihenfolge: Host im LAN (`FULCRUM_HOST`, P2P-Port 8333), dann gemerkte Filter-Peers, dann `BIP158_PEERS`, dann DNS-Seeds mit `x40.` (NODE_COMPACT_FILTERS). Im Regtest nur der bitcoind auf Port 18444, ohne Merk-Liste und ohne DNS. Ohne Compact Filter am eigenen Node kein Sprung zu öffentlichen Electrum-Servern. LAN-IPs nicht über Tor. Vor dem DNS-Rundlauf: drei parallele TCP-Prüfungen auf 8333; lauter Timeouts = Firewall, Clearnet entfällt. Scheitert Clearnet, folgt Tor: laufender Browser (9150) oder Autostart des `tor`-Binary (`stelle_tor_socks_bereit`, wie beim eigenen Onion-Node).
-  - Scan: bis zu 4 Peers parallel für `getcfilters` / Trefferblöcke; Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
+  - Scan: bis zu 8 Peers parallel für `getcfilters` (Clearnet; über Tor 2); Trefferblöcke auf 2 Workern; Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
   - `server.py` startet `starte_header_vorab`: Header ab SegWit in `p2p_headers.bin`, Job `headers` für das Log
   - Mitgeliefertes Archiv `data/p2p_headers_segwit.bin.gz` wird ausgelegt, wenn der lokale Cache fehlt oder hinter dem Archiv-Tip liegt; P2P holt nur den Rest bis zum Tip
   - Matcher: `_CoreBasicFilterMatcher` (nicht `chiabip158`)
   - UTXO-Scan schreibt den Verlaufs-Cache mit (Empfang/Ausgabe aus dem Blockwalk); Merge, kein Überschreiben durch Turbo-Pässe
-  - Wirtschaft: Historie nur Gap-Keys; `getcfilters` nur fehlende Höhen-Spannen; Block je Hash einmal je Sitzung; mit Höhe kein `getdata` TX; Header-Overlap über Hash-Index (wie Electrs-Tip per Binärsuche in `p2p_headers.bin`)
+  - Wirtschaft: Historie das Präfix bis zum höchsten Treffer plus Gap, nicht die volle Lookahead-Menge; `getcfilters` nur fehlende Höhen-Spannen; Block je Hash einmal je Sitzung; mit Höhe kein `getdata` TX; Header-Overlap über Hash-Index (wie Electrs-Tip per Binärsuche in `p2p_headers.bin`)
 - **Fulcrum** — `--rpc-only` oder Auto-Kette; eigener Node vs. öffentliche Rotation (`FULCRUM_TOR_0`…`9`) nur nach Bestätigung
 
 **Sanktions-Scans** (Wallet-Check, UTXO-Scan auf Listen-Adressen): immer **Clearnet-Fulcrum** über `build_sanctions_fulcrum_fetchers()` / `resolve_sanctions_clearnet_pool()` — unabhängig von der Wallet-Datenquelle. Optional `FULCRUM_SANCTIONS_HOST` in `.env`, sonst paralleler Probe aus `electrum_servers.json`.

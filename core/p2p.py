@@ -36,8 +36,9 @@ DEFAULT_P2P_PORT = 8333
 REGTEST_P2P_PORT = 18444
 FILTER_TYPE_BASIC = 0
 GETCFILTERS_MAX = 1000
-#: Parallel Compact-Filter-Verbindungen beim Scan.
-FILTER_PEERS_MAX = 4
+#: Parallel Compact-Filter-Verbindungen beim Scan (Clearnet). Über Tor bleibt
+#: die Grenze in ``BIP158Scanner._ensure_peers`` bei 2.
+FILTER_PEERS_MAX = 8
 #: Unter dieser Zahl wird während des Scans eine Peer-Warnung geloggt.
 P2P_SCAN_WARN_PEERS = 3
 #: TCP-Stichprobe, ob ausgehendes 8333 generell gedroppt wird (Firewall).

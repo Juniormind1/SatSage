@@ -166,9 +166,13 @@ def scripts_mit_gap_um_treffer(
     include_change: bool = True,
 ) -> set[bytes]:
     """
-    Getroffene Scripts plus lokale Gap (nächste gap_limit Indizes je Chain).
+    Historie-Scripts eines Erstscans: das Präfix je Chain, nicht nur der Schwanz.
 
-    Pro Receive/Change-Zweig: höchster getroffener Index, dann +gap_limit.
+    Kein Treffer auf dem Zweig: Indizes ``0 … gap_limit``. Treffer: ``0 …``
+    höchster Index ``+ gap_limit``. Die Lücke zwischen den ersten Indizes und
+    dem höchsten Turbo-Treffer bleibt damit im Filter. Der Aufrufer übergibt
+    nur echte Treffer, keinen Gap-Seed — der Seed hebt sonst den höchsten
+    Index auf ``gap_limit - 1`` und verlängert eine leere Chain.
     """
     gap_limit = max(1, int(gap_limit))
     max_index = max(gap_limit, int(max_index))
@@ -221,11 +225,14 @@ def scripts_mit_gap_um_treffer(
 
     for change in chains:
         basis = max_je_chain.get(change, -1)
-        # Kein Hit auf dem Zweig: Gap ab 0; sonst ab höchstem Hit.
-        start_i = 0 if basis < 0 else basis
-        ende = min(max_index, start_i + gap_limit + (0 if basis < 0 else 1))
+        # Kein Treffer: erste gap_limit Indizes. Sonst das ganze Präfix
+        # bis einschließlich gap_limit hinter dem höchsten Treffer.
+        if basis < 0:
+            ende = min(max_index, gap_limit)
+        else:
+            ende = min(max_index, basis + gap_limit + 1)
         for encoder in _encoders_for_xpub(xpub):
-            for index in range(start_i, ende):
+            for index in range(0, ende):
                 try:
                     child = hd.derive([change, index])
                     out.add(bytes(encoder(child.key).data))

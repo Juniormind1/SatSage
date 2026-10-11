@@ -30,6 +30,94 @@ class TestZusammenhaengendeBereiche(unittest.TestCase):
         self.assertEqual(_zusammenhaengende_bereiche([]), [])
 
 
+def _test_xpub() -> str:
+    """Öffentlicher Testschlüssel aus einem festen kurzen Seed. Kein Wallet."""
+    from embit.bip32 import HDKey
+
+    return HDKey.from_seed(bytes(range(16))).to_public().to_string()
+
+
+def _spk(xpub: str, change: int, index: int) -> bytes:
+    from embit.bip32 import HDKey
+
+    from core.bip158_wallet import _encoders_for_xpub
+
+    child = HDKey.from_string(xpub).derive([change, index])
+    return bytes(_encoders_for_xpub(xpub)[0](child.key).data)
+
+
+class TestHistoriePraefix(unittest.TestCase):
+    def test_hoechster_treffer_fuellt_die_luecke(self):
+        from core.bip158_wallet import scripts_mit_gap_um_treffer
+
+        xpub = _test_xpub()
+        out = scripts_mit_gap_um_treffer(
+            xpub, {_spk(xpub, 1, 119)}, gap_limit=20, max_index=200,
+        )
+        self.assertIn(_spk(xpub, 1, 50), out)
+        self.assertIn(_spk(xpub, 1, 119), out)
+        self.assertIn(_spk(xpub, 1, 139), out)
+        self.assertNotIn(_spk(xpub, 1, 140), out)
+        self.assertIn(_spk(xpub, 0, 19), out)
+        self.assertNotIn(_spk(xpub, 0, 20), out)
+
+    def test_ohne_treffer_nur_die_ersten_gap_indizes(self):
+        from core.bip158_wallet import scripts_mit_gap_um_treffer
+
+        xpub = _test_xpub()
+        out = scripts_mit_gap_um_treffer(
+            xpub, set(), gap_limit=20, max_index=200,
+        )
+        self.assertIn(_spk(xpub, 0, 0), out)
+        self.assertIn(_spk(xpub, 1, 19), out)
+        self.assertNotIn(_spk(xpub, 1, 20), out)
+        self.assertNotIn(_spk(xpub, 0, 20), out)
+
+
+class TestErsatzPeerLock(unittest.TestCase):
+    def test_neuer_peer_nach_abbruch_ist_kein_keyerror(self):
+        from unittest.mock import patch
+
+        from core.bip158_scan import verteile_cfilter_chunks
+
+        class Tot:
+            def fetch_cfilters(self, start, stop, expect):
+                raise BrokenPipeError("tot")
+
+            def close(self):
+                pass
+
+        class Frisch:
+            def __init__(self):
+                self.calls = 0
+
+            def fetch_cfilters(self, start, stop, expect):
+                self.calls += 1
+                return [(b"\x22" * 32, b"\x00") for _ in range(expect)]
+
+            def close(self):
+                pass
+
+        frisch = Frisch()
+        logs: list[str] = []
+        with patch(
+            "core.p2p.verbinde_compact_filter_peers",
+            return_value=[frisch],
+        ), patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = False
+            out = list(verteile_cfilter_chunks(
+                [Tot(), Tot()],
+                [(100, 101, b"\x11" * 32)],
+                frozenset({b"\x01"}),
+                on_log=logs.append,
+                hole_bloecke=False,
+            ))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(frisch.calls, 1)
+        self.assertTrue(any("BrokenPipeError" in z for z in logs))
+        self.assertFalse(any("KeyError" in z for z in logs))
+
+
 class TestTurboKeinLookaheadDurchHistorie(unittest.TestCase):
     def test_erstscan_historie_nur_gap(self):
         alle = {bytes([i]) for i in range(1, 80)}
