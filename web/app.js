@@ -1049,11 +1049,19 @@ function startePeerTakt(quellen) {
   setzePeerTakt(quellen || Zustand.config?.sources);
 }
 
+/** Datenquelle wurde gerade geändert. Laufende Status-Checks haben die
+ *  .env von vorher gelesen und dürfen die Oberfläche nicht zurücksetzen. */
+function merkeQuellenAenderung() {
+  Zustand.quellenEpoch = (Zustand.quellenEpoch || 0) + 1;
+}
+
 async function pruefePeersLeise() {
   if (Zustand.peerCheckLaeuft) return;
+  const epoch = Zustand.quellenEpoch || 0;
   Zustand.peerCheckLaeuft = true;
   try {
     const ergebnis = await apiSourceCheck({ still: true });
+    if ((Zustand.quellenEpoch || 0) !== epoch) return;
     nimmPeerStand(ergebnis, true);
   } catch (_) {
     /* letzter Stand bleibt */

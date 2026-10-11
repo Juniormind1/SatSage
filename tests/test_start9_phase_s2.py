@@ -16,6 +16,24 @@ class TestOutboundPolicy(unittest.TestCase):
         with self.assertRaises(outbound_policy.OutboundPolicyError):
             outbound_policy.ensure_url_allowed("https://example.org", service="mempool")
 
+    def test_kaputte_ip_nennt_ungueltige_adresse(self):
+        with self.assertRaises(outbound_policy.OutboundPolicyError) as ctx:
+            outbound_policy.ensure_host_allowed("192,.168.2.168", service="fulcrum")
+        self.assertIn("Ungültige IP-Adresse", str(ctx.exception))
+        self.assertNotIn("SATSAGE_OUTBOUND_PUBLIC_OPT_IN", str(ctx.exception))
+
+    def test_lokaler_name_bleibt_erlaubt(self):
+        self.assertEqual(
+            outbound_policy.ensure_host_allowed(
+                "superelectrs.local", service="fulcrum",
+            ),
+            "superelectrs.local",
+        )
+        self.assertEqual(
+            outbound_policy.classify_host("superelectrs.local"),
+            "private",
+        )
+
     def test_loopback_private_und_onion_erlaubt(self):
         for url in (
             "http://127.0.0.1:8080",

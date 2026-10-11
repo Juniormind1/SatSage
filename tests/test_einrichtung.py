@@ -8,6 +8,8 @@ Hinweis stillschweigend „nicht eingetragen", obwohl alles konfiguriert ist.
 Genau diese Kopplung prüfen die folgenden Tests.
 """
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -47,6 +49,196 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("dataset.quelleKey", self.datenquellen_js)
         self.assertIn("[data-quelle-key]", self.datenquellen_js)
         self.assertIn("quelleEndpointSchluessel", self.js)
+        self.assertIn("function merkeQuellenAenderung()", self.js)
+        self.assertIn(
+            "if ((Zustand.quellenEpoch || 0) !== epoch) return;",
+            self.js,
+        )
+        self.assertIn("dataset.serverValue", self.datenquellen_js)
+        self.assertIn("stelleQuellenFokusWiederHer", self.datenquellen_js)
+        self.assertIn("quellenEpoch: 0", (WEB / "state.js").read_text(encoding="utf-8"))
+
+    def test_host_im_lan_uebersteht_neuzeichnen(self):
+        """Status-Takt darf eine noch nicht übernommene IP nicht leeren."""
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node fehlt")
+        skript = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+function hatKlasse(node, name) {
+  return String(node.className || "").split(/\s+/).includes(name);
+}
+function passt(node, sel) {
+  sel = sel.trim();
+  if (sel.startsWith("#")) return node.id === sel.slice(1);
+  if (sel.startsWith(".")) return hatKlasse(node, sel.slice(1));
+  const attr = sel.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
+  if (!attr) return false;
+  const key = attr[1].replace(/^data-/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  if (!(key in (node.dataset || {}))) return false;
+  if (attr[2] != null) return String(node.dataset[key]) === attr[2];
+  return true;
+}
+function alle(node) {
+  const out = [];
+  for (const kind of node.children || []) {
+    out.push(kind, ...alle(kind));
+  }
+  return out;
+}
+function sammle(root, sel) {
+  let current = [root];
+  for (const teil of sel.trim().split(/\s+/)) {
+    const next = [];
+    for (const basis of current) {
+      for (const kind of alle(basis)) {
+        if (passt(kind, teil)) next.push(kind);
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+function el(tag) {
+  const node = {
+    tag,
+    id: "",
+    className: "",
+    textContent: "",
+    title: "",
+    hidden: false,
+    disabled: false,
+    type: "",
+    value: "",
+    checked: false,
+    placeholder: "",
+    autocomplete: "",
+    children: [],
+    parentElement: null,
+    dataset: {},
+    childElementCount: 0,
+    listeners: {},
+  };
+  node.classList = { add(name) { node.className = (node.className + " " + name).trim(); } };
+  node.append = (...kids) => {
+    for (const kind of kids) {
+      if (!kind) continue;
+      kind.parentElement = node;
+      node.children.push(kind);
+    }
+    node.childElementCount = node.children.length;
+  };
+  node.replaceChildren = (...kids) => {
+    node.children = [];
+    node.childElementCount = 0;
+    if (kids.length) node.append(...kids);
+  };
+  node.setAttribute = () => {};
+  node.addEventListener = (ev, fn) => {
+    (node.listeners[ev] || (node.listeners[ev] = [])).push(fn);
+  };
+  node.focus = () => { document.activeElement = node; };
+  node.setSelectionRange = (anfang, ende) => {
+    node.selectionStart = anfang;
+    node.selectionEnd = ende;
+  };
+  node.closest = (sel) => {
+    let p = node;
+    while (p) {
+      if (passt(p, sel)) return p;
+      p = p.parentElement;
+    }
+    return null;
+  };
+  node.querySelectorAll = (sel) => sammle(node, sel);
+  node.querySelector = (sel) => sammle(node, sel)[0] || null;
+  return node;
+}
+
+const root = el("body");
+const liste = el("div");
+liste.id = "quellen-liste";
+root.append(liste);
+const document = {
+  activeElement: null,
+  createElement: (tag) => el(tag),
+  querySelectorAll: (sel) => sammle(root, sel),
+  querySelector: (sel) => sammle(root, sel)[0] || null,
+};
+globalThis.document = document;
+globalThis.$ = (sel) => document.querySelector(sel);
+globalThis.t = (key) => key;
+globalThis.Zustand = { peerCheckLaeuft: false, config: {} };
+globalThis.start9BridgeManaged = () => false;
+globalThis.quelleName = (q) => q.name;
+globalThis.quelleDetail = (q) => q.detail || "";
+globalThis.pille = () => el("span");
+globalThis.privacyLabel = () => "hoch";
+globalThis.quelleNotiz = () => "";
+globalThis.quelleFeldLabel = (feld) => feld.key;
+globalThis.quelleFeldHinweis = () => "";
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"), { filename: process.argv[1] });
+
+function quelle(host, port) {
+  return {
+    key: "own_fulcrum",
+    name: "Eigener Electrum-Server",
+    rank: 1,
+    detail: "",
+    privacy: "hoch",
+    configured: false,
+    editierbar: true,
+    reachable: null,
+    felder: [
+      { key: "FULCRUM_HOST", typ: "text", value: host, hinweis: "" },
+      { key: "FULCRUM_PORT", typ: "port", value: port, hinweis: "" },
+    ],
+  };
+}
+function feld(key) {
+  return liste.querySelector('[data-key="' + key + '"]');
+}
+function oeffne() {
+  const stift = liste.querySelectorAll(".stift").find((k) => k.textContent === "✎");
+  if (!stift) throw new Error("kein Stift");
+  stift.listeners.click[0]();
+}
+
+const fehler = [];
+zeichneQuellen([quelle("", "50002")]);
+oeffne();
+const host = feld("FULCRUM_HOST");
+host.value = "192.0.2.50";
+host.selectionStart = 4;
+host.selectionEnd = 7;
+host.focus();
+zeichneQuellen([quelle("", "50001")]);
+const danach = feld("FULCRUM_HOST");
+const port = feld("FULCRUM_PORT");
+if (!danach || danach.value !== "192.0.2.50") fehler.push("host:" + (danach && danach.value));
+if (!port || port.value !== "50001") fehler.push("port:" + (port && port.value));
+if (document.activeElement !== danach) fehler.push("fokus");
+if (danach.selectionStart !== 4 || danach.selectionEnd !== 7) fehler.push("caret");
+const leer = liste.querySelector(".quelle-formular");
+if (!leer || leer.hidden) fehler.push("zu");
+if (fehler.length) {
+  console.error(fehler.join(","));
+  process.exit(1);
+}
+"""
+        lauf = subprocess.run(
+            [node, "-e", skript, str(WEB / "views" / "datenquellen.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            lauf.returncode,
+            0,
+            (lauf.stdout or "") + (lauf.stderr or ""),
+        )
 
     def test_electrum_hat_einen_papierkorb(self):
         """Sonst bleibt eine Onion in der .env und der Node-Test startet Tor."""

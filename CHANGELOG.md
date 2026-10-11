@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · Host im LAN:** Die IP bleibt im offenen Formular stehen, während die Verbindung geprüft wird. Ein früherer Status-Check setzt sie nicht mehr leer. Eine kaputte IP (etwa mit Komma) meldet „Ungültige IP-Adresse“. Lokale Namen wie `superelectrs.local` bleiben erlaubt.
 - **Herkunft · ohne Electrum:** Herkunft, Historie, Klären, einzelne Traces, der Sanktionscheck und eine Tx-Analyse, die den Cache verlässt, starten nicht, solange kein Electrum-Server verbunden ist — eigener Node oder schon verbundene öffentliche Server. Ein Hinweis sagt, dass P2P nur UTXOs findet. Es wird nicht nach einem Server gesucht. Gespeicherte Bäume, ein gespeicherter Sanktionsbefund und eine Tx, die schon im Cache liegt, bleiben lesbar. Der UTXO-Scan über Compact Filter bleibt.
 - **Datenquellen · eigene Electrs-IP:** Eine eingegebene IP wird auf den Ports 50001 und 50002 jeweils mit und ohne TLS gleichzeitig geprüft. Die erste passende Verbindung gilt, die übrigen Timeouts werden nicht abgewartet. Passt ein anderer Port oder TLS, schreibt der Verbindungstest das in die `.env`. Onion, Hostname und öffentliche Server bleiben beim eingestellten Port.
 - **Datenquellen · P2P-Lücke:** Neben dem ersten Scan-Block steht die Lücke, vorbelegt mit 100, höchstens 10.000. Der nächste Compact-Filter-Scan prüft so viele unbenutzte Indizes je Kette hinter dem letzten Treffer. Ein Cache, der mit einer kleineren Lücke fertig war, wird neu gelesen. Electrs bleibt bei 100.

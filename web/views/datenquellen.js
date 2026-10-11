@@ -423,14 +423,73 @@ function quelleZeigtVerbindungsaufbau(quelle, quellen) {
   return true;
 }
 
+function liesEingabeWert(eingabe) {
+  return eingabe.type === "checkbox"
+    ? (eingabe.checked ? "true" : "false")
+    : String(eingabe.value ?? "");
+}
+
+function setzeEingabeWert(eingabe, wert) {
+  if (eingabe.type === "checkbox") eingabe.checked = wert === "true";
+  else eingabe.value = wert;
+}
+
+/**
+ * Offene Bearbeitungsformulare überstehen das Neuzeichnen der Liste.
+ * Geänderte Felder (noch nicht übernommen) bleiben, inklusive Fokus.
+ * Unberührte Felder übernehmen den neuen Serverstand.
+ */
 function merkeOffeneQuellenFormulare() {
-  const offen = new Set();
+  const offen = new Map();
   for (const form of document.querySelectorAll("#quellen-liste .quelle-formular")) {
     if (form.hidden) continue;
     const key = form.closest("[data-quelle-key]")?.dataset.quelleKey;
-    if (key) offen.add(key);
+    if (!key) continue;
+    const werte = {};
+    let fokus = "";
+    let selectionStart = null;
+    let selectionEnd = null;
+    const aktiv = document.activeElement;
+    for (const eingabe of form.querySelectorAll("[data-key]")) {
+      const feldKey = eingabe.dataset.key;
+      if (!feldKey) continue;
+      const wert = liesEingabeWert(eingabe);
+      const server = eingabe.dataset.serverValue ?? "";
+      if (wert !== server) werte[feldKey] = wert;
+      if (eingabe === aktiv) {
+        fokus = feldKey;
+        if (typeof eingabe.selectionStart === "number") {
+          selectionStart = eingabe.selectionStart;
+          selectionEnd = eingabe.selectionEnd;
+        }
+      }
+    }
+    offen.set(key, { werte, fokus, selectionStart, selectionEnd });
   }
   return offen;
+}
+
+function stelleQuellenFokusWiederHer(form, gemerkt) {
+  if (!gemerkt || !gemerkt.fokus || !form) return;
+  let ziel = null;
+  for (const eingabe of form.querySelectorAll("[data-key]")) {
+    if (eingabe.dataset.key === gemerkt.fokus) {
+      ziel = eingabe;
+      break;
+    }
+  }
+  if (!ziel || ziel.disabled) return;
+  if (typeof ziel.focus === "function") ziel.focus();
+  if (
+    gemerkt.selectionStart != null
+    && typeof ziel.setSelectionRange === "function"
+  ) {
+    try {
+      ziel.setSelectionRange(gemerkt.selectionStart, gemerkt.selectionEnd);
+    } catch (_) {
+      /* Zahl- oder Auswahlfeld hat keine Textauswahl */
+    }
+  }
 }
 
 function zeichneQuellen(quellen) {
@@ -499,9 +558,12 @@ function zeichneQuellen(quellen) {
         stift.setAttribute("aria-expanded", String(auf));
       });
       if (formularOffen.has(quelle.key)) {
-        formular.append(quellenFormular(quelle, formular));
+        const gemerkt = formularOffen.get(quelle.key);
+        const form = quellenFormular(quelle, formular, gemerkt);
+        formular.append(form);
         formular.hidden = false;
         stift.setAttribute("aria-expanded", "true");
+        stelleQuellenFokusWiederHer(form, gemerkt);
       }
       rechts.append(stift);
     }
@@ -646,6 +708,7 @@ async function verwerfeQuelle(quelle) {
       : t("sources.confirmDiscard", { name: quelleName(quelle) }),
   );
   if (!ok) return;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
@@ -693,6 +756,7 @@ async function verwerfeQuelle(quelle) {
         return q;
       });
     }
+    merkeQuellenAenderung();
     zeichneDatenquellenAnsicht();
     zeichneKopfStatus(Zustand.config.sources);
     meldung(
@@ -766,6 +830,7 @@ async function speichereBip158StartHoehe(eingabe) {
   const vorher = eingabe.dataset.savedValue;
   if (vorher != null && vorher === String(n)) return;
   eingabe.disabled = true;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api("/config/source", {
       methode: "PUT",
@@ -774,6 +839,7 @@ async function speichereBip158StartHoehe(eingabe) {
         values: { BIP158_START_HEIGHT: String(n) },
       },
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     if (Array.isArray(ergebnis.sources) && Zustand.config) {
       Zustand.config.sources = ergebnis.sources;
@@ -804,6 +870,7 @@ async function speichereBip158Gap(eingabe) {
   const vorher = eingabe.dataset.savedValue;
   if (vorher != null && vorher === String(n)) return;
   eingabe.disabled = true;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api("/config/source", {
       methode: "PUT",
@@ -812,6 +879,7 @@ async function speichereBip158Gap(eingabe) {
         values: { BIP158_GAP_LIMIT: String(n) },
       },
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     if (Array.isArray(ergebnis.sources) && Zustand.config) {
       Zustand.config.sources = ergebnis.sources;
@@ -884,11 +952,13 @@ async function verbindeP2p(quelle, knopf) {
   knopf.disabled = true;
   knopf.textContent = t("common.loadingEllipsis");
   const hatteOeffentlich = oeffentlicheElectrumNochAktiv();
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api("/config/source", {
       methode: "PUT",
       daten: { source: "bip158", values: { BIP158_P2P: "true" } },
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     const pending = Array.isArray(ergebnis.pending_sources)
       && ergebnis.pending_sources.length
@@ -921,10 +991,12 @@ async function loescheElectrumListe(quelle) {
     t("sources.confirmClearList", { name: quelleName(quelle) }),
   );
   if (!ok) return;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     zeichneQuellen(ergebnis.sources || Zustand.config.sources);
     meldung(t("sources.listCleared", { name: quelleName(quelle) }), "warn");
@@ -935,7 +1007,7 @@ async function loescheElectrumListe(quelle) {
 }
 
 /** Baut das Bearbeitungsformular einer Datenquelle. */
-function quellenFormular(quelle, behaelter) {
+function quellenFormular(quelle, behaelter, gemerkt) {
   const form = document.createElement("div");
   const bridgeManaged = start9BridgeManaged(quelle);
   const eingaben = new Map();
@@ -980,6 +1052,11 @@ function quellenFormular(quelle, behaelter) {
       }
     }
     eingabe.dataset.key = feld.key;
+    eingabe.dataset.serverValue = liesEingabeWert(eingabe);
+    const roh = gemerkt && gemerkt.werte;
+    if (roh && Object.prototype.hasOwnProperty.call(roh, feld.key)) {
+      setzeEingabeWert(eingabe, roh[feld.key]);
+    }
     if (bridgeManaged) eingabe.disabled = true;
     eingaben.set(feld.key, eingabe);
     zeile.append(eingabe);
@@ -1022,11 +1099,15 @@ function quellenFormular(quelle, behaelter) {
         ? (eingabe.checked ? "true" : "false")
         : eingabe.value;
     }
+    // Checks, die vor dem Speichern losliefen, haben den Host noch nicht.
+    merkeQuellenAenderung();
     try {
       const ergebnis = await api("/config/source", {
         methode: "PUT",
         daten: { source: quelle.key, values: werte },
       });
+      // Checks, die während des Speicherns die alte .env gelesen haben.
+      merkeQuellenAenderung();
       await ladeConfig();
       // Alte grüne Pille verwerfen: grau bis der neue Connect steht.
       // Electrum: IP und Onion gelten beide als frisch — der Check probiert
@@ -1306,6 +1387,7 @@ async function testeEigenenNode(knopf, opts = {}) {
   if (eigenerNode(Zustand.config?.sources) || knopf) {
     logZeile(t("ui.hard.7c5b3235d4"));
   }
+  const epoch = Zustand.quellenEpoch || 0;
   Zustand.peerCheckLaeuft = true;
   // Sofort „Verbindung im Aufbau…“ in Datenquellen, solange der Check läuft.
   if ($("#quellen-liste")?.childElementCount) {
@@ -1313,6 +1395,9 @@ async function testeEigenenNode(knopf, opts = {}) {
   }
   try {
     const ergebnis = await apiSourceCheck();
+    if ((Zustand.quellenEpoch || 0) !== epoch) {
+      return peerStatusAusQuellen(Zustand.config?.sources || []);
+    }
     const stand = nimmPeerStand(ergebnis, false);
     // Staub bei jedem erfolgreichen Speichern/Test einer hoch-privaten
     // Verbindung (Indexer/P2P) — auch nach IP-/Software-Wechsel.

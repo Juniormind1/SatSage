@@ -179,6 +179,26 @@ def _setting(values: dict[str, str] | None, key: str) -> str:
     return str(os.environ.get(key, "") or "").strip()
 
 
+_IPV4_ZEICHEN = set("0123456789.,")
+_IPV6_ZEICHEN = set("0123456789abcdef:.")
+
+
+def _sieht_aus_wie_ip(host: str) -> bool:
+    """True, wenn der Text eine IP sein soll und kein Hostname.
+
+    ``superelectrs.local`` und kurze Namen bleiben Hostnamen. Ein Komma
+    oder nur Ziffern und Punkte (``192,.168.2.168``, ``192.168.2``) ist
+    ein gescheiterter IP-Versuch.
+    """
+    name = str(host or "").strip().lower()
+    if not name or not any(ch.isdigit() for ch in name):
+        return False
+    zeichen = set(name)
+    if zeichen <= _IPV4_ZEICHEN and ("." in name or "," in name):
+        return True
+    return ":" in name and zeichen <= _IPV6_ZEICHEN
+
+
 def normalize_host(host: str) -> str:
     value = str(host or "").strip().lower().rstrip(".")
     if value.startswith("[") and "]" in value:
@@ -258,6 +278,13 @@ def ensure_host_allowed(host: str, *, service: str = "", values=None, opt_in=Non
     normalized = normalize_host(host)
     if not normalized:
         raise OutboundPolicyError("Outbound-Ziel enthält keinen Host.")
+    if _sieht_aus_wie_ip(normalized):
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError as exc:
+            raise OutboundPolicyError(
+                f"Ungültige IP-Adresse „{normalized}“."
+            ) from exc
     if not allowed_host(normalized, service=service, values=values, opt_in=opt_in):
         label = service or "dieser Dienst"
         raise OutboundPolicyError(

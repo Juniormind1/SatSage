@@ -41,6 +41,9 @@ const Zustand = {
   peerTakt: null,
   peerTaktMs: null,
   peerCheckLaeuft: false,
+  /** Steigt bei jedem Speichern einer Quelle. Ältere Status-Antworten
+   *  dürfen Felder (z. B. Host im LAN) nicht zurücksetzen. */
+  quellenEpoch: 0,
   /** Laufender Sanktions-Hop-Check (UI nach Seitenwechsel wieder anbinden). */
   sanktionsCheckJobId: null,
   sanktionsCheckTimer: null,
