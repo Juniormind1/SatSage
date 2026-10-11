@@ -7,6 +7,8 @@
   <em>Woher die Sats wann kamen — On-Chain-Alter für Steuer und Überblick</em>
 </p>
 
+https://github.com/user-attachments/assets/4078fbfa-0516-4372-8001-ff06609d5f5e
+
 <p align="center">
   <a href="VERSION"><img src="https://img.shields.io/badge/version-0.9.2-f7931a?style=flat-square" alt="Version 0.9.2"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+">
