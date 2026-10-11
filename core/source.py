@@ -1759,6 +1759,7 @@ def check_reachable(
     port = 0
     use_ssl = True
     ssl_gewuenscht = True
+    port_gewuenscht = 0
     tor_proxy = None
 
     try:
@@ -1766,6 +1767,23 @@ def check_reachable(
 
         for host, port, use_ssl, tor_proxy in kandidaten:
             ssl_gewuenscht = use_ssl
+            port_gewuenscht = port
+            if tor_proxy is None and chain_sources.host_ist_klare_ip(host):
+                log(
+                    f"Verbinde mit {host}: 50001 und 50002, "
+                    "mit und ohne TLS"
+                )
+                client, port, use_ssl, fehler = (
+                    chain_sources.verbinde_eigenen_electrs_ip(
+                        host,
+                        timeout=timeout,
+                        require_listunspent=True,
+                    )
+                )
+                if client:
+                    break
+                log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
+                continue
             log(
                 f"Verbinde mit "
                 f"{_verbindung_ziel(host, port, use_ssl, tor_proxy)}"
@@ -1885,13 +1903,19 @@ def check_reachable(
         ergebnis.detail = basis + (
             f" · {'mit TLS' if use_ssl else 'ohne TLS'}"
         )
+        persist: dict[str, str] = {}
+        if port != port_gewuenscht:
+            persist["FULCRUM_PORT"] = str(port)
         if use_ssl != ssl_gewuenscht:
             wert = "true" if use_ssl else "false"
-            ergebnis.ssl_persist = {k: wert for k in ssl_env_keys}
+            for schluessel in ssl_env_keys:
+                persist[schluessel] = wert
+        if persist:
+            ergebnis.ssl_persist = persist
+            bits = ", ".join(f"{k}={v}" for k, v in persist.items())
             ergebnis.note = (
-                f"TLS automatisch auf "
-                f"{'an' if use_ssl else 'aus'} gestellt "
-                f"(FULCRUM_SSL={wert}) — wird in .env festgeschrieben."
+                f"Passende Verbindung ({bits}) — "
+                "wird in .env festgeschrieben."
             )
             log(ergebnis.note)
         log(

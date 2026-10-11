@@ -10,6 +10,7 @@ importiert den Clearnet-Pool lazy von dort (kein Top-Level-Zyklus).
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -354,6 +355,99 @@ def _probe_public_onion_endpoint(
     return index, client, error
 
 
+#: Eigener Electrs im LAN: diese vier gleichzeitig, nicht nacheinander.
+EIGENE_ELECTRS_IP_VERSUCHE: tuple[tuple[int, bool], ...] = (
+    (50001, False),
+    (50001, True),
+    (50002, False),
+    (50002, True),
+)
+
+
+def host_ist_klare_ip(host: str) -> bool:
+    """True für eine IP. Hostname und Onion bleiben beim eingestellten Port."""
+    import ipaddress
+
+    text = (host or "").strip().strip("[]")
+    if not text or text.endswith(".onion"):
+        return False
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
+def verbinde_eigenen_electrs_ip(
+    host: str,
+    *,
+    timeout: float,
+    require_listunspent: bool = True,
+) -> tuple[object | None, int, bool, str | None]:
+    """Vier Kombinationen gleichzeitig. Der erste Treffer gewinnt.
+
+    50001 und 50002, jeweils mit und ohne TLS. Nur für die IP des eigenen
+    Nodes. Sobald eine Verbindung steht, kehrt der Aufruf zurück. Die
+    übrigen Versuche laufen aus und schließen ihren Client, ohne dass
+    ihre Timeouts abgewartet werden. Scheitern alle vier, kommt der
+    Fehler erst, wenn der langsamste fertig ist.
+    """
+    from core.fulcrum_client import connect_fulcrum
+
+    stop = threading.Event()
+    entscheidung = threading.Lock()
+    ergebnisse: queue.Queue = queue.Queue()
+
+    def _versuch(port: int, use_ssl: bool) -> None:
+        if stop.is_set():
+            ergebnisse.put((None, port, use_ssl, None))
+            return
+        client = None
+        fehler: str | None = None
+        try:
+            client, fehler = connect_fulcrum(
+                host,
+                port,
+                use_ssl=use_ssl,
+                timeout=timeout,
+                tor_proxy=None,
+                require_listunspent=require_listunspent,
+            )
+        except Exception as exc:
+            fehler = str(exc)
+        with entscheidung:
+            if client is not None and stop.is_set():
+                _schliesse_fulcrum(client)
+                client = None
+                fehler = None
+            elif client is not None:
+                stop.set()
+        ergebnisse.put((client, port, use_ssl, fehler))
+
+    for port, use_ssl in EIGENE_ELECTRS_IP_VERSUCHE:
+        threading.Thread(
+            target=_versuch,
+            args=(port, use_ssl),
+            daemon=True,
+            name=f"electrs-{port}-{int(use_ssl)}",
+        ).start()
+
+    rest = len(EIGENE_ELECTRS_IP_VERSUCHE)
+    letzter_port, letztes_ssl = EIGENE_ELECTRS_IP_VERSUCHE[0]
+    fehlertexte: list[str] = []
+    while rest:
+        client, port, use_ssl, fehler = ergebnisse.get()
+        rest -= 1
+        letzter_port, letztes_ssl = port, use_ssl
+        if client is not None:
+            return client, port, use_ssl, None
+        if fehler:
+            weg = "TLS" if use_ssl else "ohne TLS"
+            fehlertexte.append(f"{port} {weg}: {fehler}")
+    kurz = "; ".join(fehlertexte) if fehlertexte else "nicht erreichbar"
+    return None, letzter_port, letztes_ssl, kurz
+
+
 def tls_should_try_opposite(
     error: str | None,
     *,
@@ -494,6 +588,10 @@ def _print_public_onion_probe_result(
         _print_connection_error(f"  → {target} — ", error, use_ssl)
 
 
+def _client_ziel(client, host: str, port: int) -> str:
+    return f"{getattr(client, 'host', None) or host}:{getattr(client, 'port', None) or port}"
+
+
 def _try_fulcrum_endpoint(
     label: str,
     host: str,
@@ -501,6 +599,29 @@ def _try_fulcrum_endpoint(
     use_ssl: bool,
     tor_proxy: tuple[str, int] | None,
 ):
+    # Eigene IP: alle vier Kombinationen gleichzeitig. Onion und Hostname
+    # bleiben beim eingestellten Port (darunter die TLS-Gegenprobe).
+    if tor_proxy is None and host_ist_klare_ip(host):
+        _quelle_zeile(
+            f"Prüfe {label}: {host} auf 50001 und 50002, mit und ohne TLS…"
+        )
+        client, treffer_port, treffer_ssl, error = verbinde_eigenen_electrs_ip(
+            host,
+            timeout=FULCRUM_CONNECT_TIMEOUT,
+            require_listunspent=True,
+        )
+        if client:
+            _quelle_zeile(
+                f"  → {label} erreichbar "
+                f"({treffer_port}, {'TLS' if treffer_ssl else 'ohne TLS'})"
+            )
+            return client
+        if error and "listunspent" in error:
+            _quelle_zeile(f"  → ungeeignet: {error}")
+        else:
+            _print_connection_error("  → ", error, use_ssl)
+        return None
+
     route = _format_fulcrum_route(use_ssl, tor_proxy)
     _quelle_zeile(f"Prüfe {label}: {host}:{port} ({route})...")
     if tor_proxy:
@@ -981,7 +1102,8 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
             client = None
         if client:
             _log_quelle(
-                f"Datenquelle: eigener Electrum-Server (LAN) {host}:{port}"
+                "Datenquelle: eigener Electrum-Server (LAN) "
+                + _client_ziel(client, host, port)
             )
             return client
         if _resolve_own_tor_endpoint(args, env):
@@ -1000,7 +1122,8 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
         )
         if client:
             _log_quelle(
-                f"Datenquelle: eigener Electrum-Server (Tor) {host}:{port}"
+                "Datenquelle: eigener Electrum-Server (Tor) "
+                + _client_ziel(client, host, port)
             )
             return client
     return None
@@ -1091,10 +1214,15 @@ def _eigene_electrs_probe(env, *, lan, tor, timeout: int) -> bool:
     from core.fulcrum_client import connect_fulcrum
 
     if lan:
-        client, _fehler = connect_fulcrum(
-            lan[0], int(lan[1]), use_ssl=bool(lan[2]),
-            timeout=timeout, tor_proxy=None,
-        )
+        if host_ist_klare_ip(lan[0]):
+            client, _port, _ssl, _fehler = verbinde_eigenen_electrs_ip(
+                lan[0], timeout=timeout, require_listunspent=False,
+            )
+        else:
+            client, _fehler = connect_fulcrum(
+                lan[0], int(lan[1]), use_ssl=bool(lan[2]),
+                timeout=timeout, tor_proxy=None,
+            )
         if client is None:
             return False
         _schliesse_fulcrum(client)
@@ -1795,8 +1923,9 @@ def _try_verlauf_priority_chain(
         )
         if client:
             _log_quelle(
-                f"Verlauf: eigener Electrum-Server (LAN) {host}:{port} "
-                f"— get_history."
+                "Verlauf: eigener Electrum-Server (LAN) "
+                + _client_ziel(client, host, port)
+                + " — get_history."
             )
             return "fulcrum", client
 
@@ -1813,8 +1942,9 @@ def _try_verlauf_priority_chain(
         )
         if client:
             _log_quelle(
-                f"Verlauf: eigener Electrum-Server (Tor) {host}:{port} "
-                f"— get_history."
+                "Verlauf: eigener Electrum-Server (Tor) "
+                + _client_ziel(client, host, port)
+                + " — get_history."
             )
             return "fulcrum", client
 

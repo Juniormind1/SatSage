@@ -31,6 +31,54 @@ def _ohne_live_p2p():
     )
 
 
+class TestEigeneElectrsIpParallel(unittest.TestCase):
+    """Eigene IP: vier Versuche gleichzeitig, erster Treffer, kein Timeout-Stau."""
+
+    def test_erster_treffer_wartet_nicht_auf_die_anderen(self):
+        import time
+
+        import core.chain_sources as chain_sources
+
+        client = mock.Mock()
+        client.close = mock.Mock()
+
+        def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                    require_listunspent=False):
+            if (port, use_ssl) == (50002, True):
+                return client, None
+            time.sleep(2.5)
+            return None, "timed out"
+
+        start = time.monotonic()
+        with mock.patch(
+            "core.fulcrum_client.connect_fulcrum", side_effect=connect,
+        ):
+            got, port, ssl, fehler = chain_sources.verbinde_eigenen_electrs_ip(
+                "192.0.2.10", timeout=2.5,
+            )
+        self.assertIs(got, client)
+        self.assertEqual(port, 50002)
+        self.assertTrue(ssl)
+        self.assertIsNone(fehler)
+        self.assertLess(time.monotonic() - start, 1.5)
+
+    def test_hostname_bleibt_beim_einen_port(self):
+        werte = {
+            "FULCRUM_HOST": "electrs.local",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
+        with mock.patch(
+            "core.fulcrum_client.connect_fulcrum",
+            return_value=(None, "connection refused"),
+        ) as conn:
+            out = check_reachable(quelle, werte, timeout=1)
+        self.assertFalse(out.reachable)
+        self.assertEqual(conn.call_count, 1)
+        self.assertEqual(conn.call_args.args[:2], ("electrs.local", 50001))
+
+
 class TestTlsAutoProbe(unittest.TestCase):
     """TLS ja/nein: Gegenprobe und Festschreiben."""
 
@@ -79,16 +127,20 @@ class TestTlsAutoProbe(unittest.TestCase):
         def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
                     require_listunspent=False):
             calls["n"] += 1
-            if use_ssl:
+            if port == 50001 and not use_ssl:
+                return client, None
+            if port == 50001 and use_ssl:
                 return None, "WRONG_VERSION_NUMBER"
-            return client, None
+            return None, "connection refused"
 
         with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect):
             out = check_reachable(quelle, werte, timeout=1)
         self.assertTrue(out.reachable)
-        self.assertEqual(calls["n"], 2)
+        self.assertGreaterEqual(calls["n"], 1)
+        self.assertEqual(out.peer_hosts, ["192.0.2.10:50001"])
         self.assertEqual(out.ssl_effective, False)
         self.assertEqual(out.ssl_persist.get("FULCRUM_SSL"), "false")
+        self.assertNotIn("FULCRUM_PORT", out.ssl_persist)
         self.assertIn("festgeschrieben", out.note)
 
 
@@ -264,9 +316,9 @@ class TestCheckReachable(unittest.TestCase):
             geprueft = check_reachable(quelle, werte, timeout=1)
         text = "\n".join(geprueft.log)
         self.assertIn("Prüfe Eigener Electrum-Server", text)
-        self.assertIn("Verbinde mit 192.0.2.1:50001", text)
-        self.assertIn("ohne TLS", text)
-        self.assertIn("Verbindung fehlgeschlagen: timeout", text)
+        self.assertIn("Verbinde mit 192.0.2.1: 50001 und 50002", text)
+        self.assertIn("mit und ohne TLS", text)
+        self.assertIn("Verbindung fehlgeschlagen:", text)
         self.assertNotIn("Verbunden.", text)
         self.assertTrue(
             geprueft.log[0].startswith("Prüfe "),
@@ -387,7 +439,11 @@ class TestCheckReachable(unittest.TestCase):
         quelle = next(
             q for q in describe_sources(werte) if q.key == "own_fulcrum"
         )
-        kopie = check_reachable(quelle, werte, timeout=1)
+        with mock.patch(
+            "core.fulcrum_client.connect_fulcrum",
+            return_value=(None, "connection refused"),
+        ):
+            kopie = check_reachable(quelle, werte, timeout=1)
         self.assertFalse(kopie.reachable)
         self.assertTrue(kopie.error)
 

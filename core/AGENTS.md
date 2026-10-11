@@ -148,6 +148,9 @@ FULCRUM_HOST=...
 FULCRUM_TOR=....onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
+# Ist FULCRUM_HOST eine IP, probiert der eigene Node 50001 und 50002
+# jeweils mit und ohne TLS gleichzeitig und nimmt den ersten Treffer.
+# Onion, Hostname und öffentliche Server bleiben beim eingestellten Port.
 FULCRUM_TOR_PROXY=127.0.0.1:9150   # nur für .onion-Verbindungen
 
 FULCRUM_TOR_0=....onion      # öffentliche Server-Rotation (max. 10)
