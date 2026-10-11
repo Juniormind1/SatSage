@@ -270,6 +270,46 @@ def naechste_historie_scripts(
     return set(ziel) - set(schon or ())
 
 
+#: P2P-Lücke. Electrs bleibt bei ``UTXO_SCAN_GAP_LIMIT`` (100).
+BIP158_GAP_MIN = 1
+BIP158_GAP_DEFAULT = 100
+BIP158_GAP_MAX = 10_000
+
+#: xpub → Lücke des laufenden Scans. Der Cache-Schreiber liest sie mit.
+_SCAN_GAPS: dict[str, int] = {}
+
+
+def normalisiere_bip158_gap(roh: object, *, default: int = BIP158_GAP_DEFAULT) -> int:
+    """Ganze Zahl im Bereich 1…10.000. Leer oder unlesbar → *default*."""
+    if roh is None or str(roh).strip() == "":
+        return default
+    try:
+        n = int(str(roh).strip())
+    except (TypeError, ValueError):
+        return default
+    if n < BIP158_GAP_MIN:
+        return BIP158_GAP_MIN
+    if n > BIP158_GAP_MAX:
+        return BIP158_GAP_MAX
+    return n
+
+
+def bip158_gap_aus_env(env: dict[str, str] | None) -> int:
+    """``BIP158_GAP_LIMIT`` aus der Umgebung, sonst 100."""
+    if not env:
+        return BIP158_GAP_DEFAULT
+    return normalisiere_bip158_gap(env.get("BIP158_GAP_LIMIT"))
+
+
+def merke_scan_gap(xpub: str, gap: int) -> None:
+    """Der laufende P2P-Scan schreibt diese Lücke in den Cache."""
+    _SCAN_GAPS[xpub] = normalisiere_bip158_gap(gap)
+
+
+def peek_scan_gap(xpub: str) -> int | None:
+    return _SCAN_GAPS.get(xpub)
+
+
 def create_bip158_client_from_env(
     env: dict[str, str],
     *,
@@ -298,7 +338,11 @@ def create_bip158_client_from_env(
     )
     hoehe = start_height if start_height else SEGWIT_HEIGHT
     return Bip158Client(
-        scanner=scanner, start_height=hoehe, verbose=verbose, cache_dir=cache_dir,
+        scanner=scanner,
+        start_height=hoehe,
+        verbose=verbose,
+        cache_dir=cache_dir,
+        gap_limit=bip158_gap_aus_env(env),
     )
 
 
@@ -317,7 +361,12 @@ def _matched_output_to_utxo(output: MatchedOutput) -> dict[str, Any]:
 
 
 
-def _used_scripts_aus_cache(xpub: str, cache_dir: Path | None) -> set[bytes]:
+def _used_scripts_aus_cache(
+    xpub: str,
+    cache_dir: Path | None,
+    *,
+    gap_soll: int | None = None,
+) -> set[bytes]:
     """
     Used-Keys für TurboSync-Historie — nur nach abgeschlossenem Fullscan.
 
@@ -337,7 +386,7 @@ def _used_scripts_aus_cache(xpub: str, cache_dir: Path | None) -> set[bytes]:
     except Exception:
         return set()
     roh = (eintrag or {}).get("raw") or {}
-    if not bip158_fullscan_ist_fertig(roh):
+    if not bip158_fullscan_ist_fertig(roh, gap_soll=gap_soll):
         return set()
     adressen: list[str] = []
     for utxo in roh.get("utxos") or []:
@@ -820,7 +869,8 @@ def scan_start_fuer_xpub(
         load_xpub_cache_entry,
     )
 
-    used = _used_scripts_aus_cache(xpub, client.cache_dir)
+    gap = normalisiere_bip158_gap(getattr(client, "gap_limit", None))
+    used = _used_scripts_aus_cache(xpub, client.cache_dir, gap_soll=gap)
     start = int(client.start_height or 0)
     seed_out: dict[str, MatchedOutput] = {}
     seed_verlauf: dict[str, dict[str, Any]] = {}
@@ -829,7 +879,7 @@ def scan_start_fuer_xpub(
     if client.cache_dir is not None:
         entry = load_xpub_cache_entry(xpub, client.cache_dir)
         roh = (entry or {}).get("raw") or {}
-        fertig = bip158_fullscan_ist_fertig(roh)
+        fertig = bip158_fullscan_ist_fertig(roh, gap_soll=gap)
         unvollstaendig = bool(
             (roh.get("utxos") or roh.get("bip158_fullscan_ok") is False)
             and not fertig
@@ -932,7 +982,6 @@ def fetch_wallet_utxos_bip158(
     wie in der flachen Rückgabe). Leere Wallets stehen als leere Liste.
     """
     from display import Bip158ProgressLine, melde_zwischenstand
-    from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
 
     if gruppen is not None:
         for xpub in xpubs:
@@ -971,6 +1020,8 @@ def fetch_wallet_utxos_bip158(
             )
 
         client.scanner._progress_callback = on_progress
+        gap = normalisiere_bip158_gap(client.gap_limit)
+        merke_scan_gap(xpub, gap)
 
         def _bip158_zwischenstand(stand: list[dict], *, _xpub=xpub) -> None:
             if on_utxos_update:
@@ -979,7 +1030,7 @@ def fetch_wallet_utxos_bip158(
         try:
             result = client.scanner.scan_from_xpub(
                 xpub,
-                gap_limit=UTXO_SCAN_GAP_LIMIT,
+                gap_limit=gap,
                 max_index=max(xpub_max // 2, 1),
                 start_height=plan["start"],
                 used_scripts=plan["used"],
@@ -1009,8 +1060,8 @@ def _fetch_wallet_utxos_union(
     gruppen: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     from display import Bip158ProgressLine, melde_zwischenstand
-    from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
 
+    gap = normalisiere_bip158_gap(client.gap_limit)
     wallets = []
     for xpub, plan in plaene:
         konfiguriert = (
@@ -1025,11 +1076,12 @@ def _fetch_wallet_utxos_union(
         )
         print(f"\n{anfang}", flush=True)
         melde_zwischenstand(anfang)
+        merke_scan_gap(xpub, gap)
         wallets.append({
             "xpub": xpub,
             "start_height": plan["start"],
             "used_scripts": plan["used"],
-            "gap_limit": UTXO_SCAN_GAP_LIMIT,
+            "gap_limit": gap,
             "max_index": max(xpub_max // 2, 1),
             "seed_outputs": plan["seed_out"] or None,
             "seed_verlauf": plan["seed_verlauf"] or None,

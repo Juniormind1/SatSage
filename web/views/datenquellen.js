@@ -565,6 +565,28 @@ function zeichneQuellen(quellen) {
       hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe));
       rechts.append(hoehe);
 
+      const luecke = document.createElement("input");
+      luecke.type = "number";
+      luecke.className = "quelle-start-hoehe quelle-gap";
+      luecke.min = "1";
+      luecke.max = "10000";
+      luecke.step = "1";
+      luecke.inputMode = "numeric";
+      luecke.placeholder = t("sources.bip158GapPlaceholder");
+      luecke.title = t("sources.bip158GapTitle");
+      luecke.disabled = bridgeManaged;
+      const gapWert = quelle.gap_limit != null ? String(quelle.gap_limit) : "100";
+      luecke.value = gapWert;
+      luecke.dataset.savedValue = gapWert;
+      luecke.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          luecke.blur();
+        }
+      });
+      luecke.addEventListener("change", () => speichereBip158Gap(luecke));
+      rechts.append(luecke);
+
       const verbinden = document.createElement("button");
       verbinden.type = "button";
       verbinden.className = "knopf knopf-klein";
@@ -759,6 +781,44 @@ async function speichereBip158StartHoehe(eingabe) {
     eingabe.dataset.savedValue = String(n);
     zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
     meldung(t("sources.bip158StartSaved", { n }), "gut");
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+    eingabe.disabled = false;
+  }
+}
+
+/** P2P-Zeile: Lücke je Kette speichern. Leer lässt den gespeicherten Wert. */
+async function speichereBip158Gap(eingabe) {
+  if (!eingabe || eingabe.disabled) return;
+  const roh = String(eingabe.value || "").trim();
+  if (!roh) {
+    eingabe.value = eingabe.dataset.savedValue || "100";
+    return;
+  }
+  const n = Number(roh);
+  if (!Number.isInteger(n) || n < 1 || n > 10000) {
+    meldung(t("sources.bip158GapInvalid"), "krit");
+    eingabe.value = eingabe.dataset.savedValue || "100";
+    return;
+  }
+  const vorher = eingabe.dataset.savedValue;
+  if (vorher != null && vorher === String(n)) return;
+  eingabe.disabled = true;
+  try {
+    const ergebnis = await api("/config/source", {
+      methode: "PUT",
+      daten: {
+        source: "bip158",
+        values: { BIP158_GAP_LIMIT: String(n) },
+      },
+    });
+    await ladeConfig();
+    if (Array.isArray(ergebnis.sources) && Zustand.config) {
+      Zustand.config.sources = ergebnis.sources;
+    }
+    eingabe.dataset.savedValue = String(n);
+    zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
+    meldung(t("sources.bip158GapSaved", { n }), "gut");
   } catch (fehler) {
     meldung(fehler.message, "krit");
     eingabe.disabled = false;

@@ -3417,6 +3417,11 @@ function scanBetrifftDieseAnsicht() {
   return Boolean(ziel) && ziel === String(Zustand.walletId);
 }
 
+/** „Alle Wallets: UTXOs“ schreibt auch das offene Wallet. */
+function scanIstAlleWallets() {
+  return scanZielWalletId() === ALLE_WALLETS_SCAN_ID;
+}
+
 /** Sammelscan schreibt jedes Wallet. Die offene Ansicht danach neu laden. */
 function scanTrifftOffeneWallet(scanId) {
   if (Zustand.ansicht !== "wallet" || !Zustand.walletId || !scanId) return false;
@@ -3590,6 +3595,14 @@ function aktualisiereScanAnzeige(stand) {
   if (!Zustand.rescanJob && !pipe.current) {
     leiste.classList.remove("hinweis-fremd");
     setzeText($("#rescan-text"), (danach || "").trim() || t("common.runningEllipsis"));
+  } else if (scanIstAlleWallets() && Zustand.ansicht === "wallet" && Zustand.walletId) {
+    // Der Lauf heißt „alle“, trifft aber genau diese Ansicht. „Nicht für
+    // dieses Wallet“ wäre falsch und die Warnfarbe auch.
+    leiste.classList.remove("hinweis-fremd");
+    setzeText(
+      $("#rescan-text"),
+      t("wallet.allWalletsScanStatus", { art, schritt, danach }),
+    );
   } else if (scanBetrifftDieseAnsicht()) {
     // Das Wallet ist schon gewählt — den Namen nicht noch einmal nennen.
     leiste.classList.remove("hinweis-fremd");

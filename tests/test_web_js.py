@@ -499,6 +499,90 @@ if (fehler.length) {
             (lauf.stdout or "") + (lauf.stderr or ""),
         )
 
+    def test_alle_utxos_statuszeile_gilt_fuer_offenes_wallet(self):
+        """„Alle Wallets“ ist kein fremder Scan des gerade offenen Wallets."""
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node fehlt")
+        skript = r"""
+const fs = require("fs");
+const vm = require("vm");
+function klasse() {
+  const set = new Set();
+  return {
+    add(name) { set.add(name); },
+    remove(name) { set.delete(name); },
+    has(name) { return set.has(name); },
+  };
+}
+const leiste = { hidden: true, classList: klasse() };
+const text = { textContent: "" };
+globalThis.$ = (sel) => {
+  if (sel === "#rescan-lauf") return leiste;
+  if (sel === "#rescan-text") return text;
+  return null;
+};
+globalThis.setzeText = (el, wert) => { if (el) el.textContent = wert; };
+globalThis.jobNochAktiv = () => true;
+globalThis.autoQuelle = () => null;
+globalThis.walletSyncLaeuftFuer = () => false;
+const katalog = {
+  "wallet.allWalletsScanStatus": "{art} für alle Wallets · {schritt}{danach}",
+  "wallet.utxoScan": "Neu scannen",
+  "wallet.otherWallet": "anderes Wallet",
+  "ui.hard.a7e393ac49": "Läuft für „{name}“, nicht für dieses Wallet. {art} · {schritt}{danach}",
+  "common.loadingFromCache": "lese Cache",
+  "common.runningEllipsis": "läuft…",
+};
+globalThis.t = (key, vars) => {
+  let s = katalog[key] || key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) s = s.split("{" + k + "}").join(String(v ?? ""));
+  }
+  return s;
+};
+const Zustand = {
+  contextBereit: true,
+  ansicht: "wallet",
+  walletId: "wallet-a",
+  rescanJob: "job-1",
+  scanWalletId: "alle",
+  scanWalletName: "Alle Wallets",
+  scanArt: "utxo",
+  scanSchritt: "",
+  config: { wallets: [{ id: "wallet-a", name: "A" }], sources: [] },
+  jobsNav: { jobs: [], scan_pipeline: { current: null, queued: [] } },
+};
+globalThis.Zustand = Zustand;
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"), { filename: process.argv[1] });
+aktualisiereScanAnzeige("40 %");
+const fehler = [];
+if (text.textContent !== "Neu scannen für alle Wallets · 40 %") fehler.push("alle:" + text.textContent);
+if (leiste.classList.has("hinweis-fremd")) fehler.push("alle-fremd");
+Zustand.scanWalletId = "wallet-b";
+Zustand.scanWalletName = "B";
+Zustand.config.wallets.push({ id: "wallet-b", name: "B" });
+aktualisiereScanAnzeige("10 %");
+if (!text.textContent.includes("nicht für dieses Wallet")) fehler.push("fremd:" + text.textContent);
+if (!text.textContent.includes("„B“")) fehler.push("name:" + text.textContent);
+if (!leiste.classList.has("hinweis-fremd")) fehler.push("fremd-farbe");
+if (fehler.length) {
+  console.error(fehler.join(","));
+  process.exit(1);
+}
+"""
+        lauf = subprocess.run(
+            [node, "-e", skript, str(WEB / "views" / "wallets.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            lauf.returncode,
+            0,
+            (lauf.stdout or "") + (lauf.stderr or ""),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

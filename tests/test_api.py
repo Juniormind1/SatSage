@@ -1109,6 +1109,24 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             main._load_dotenv(self.env_pfad)["BIP158_START_HEIGHT"], "481824"
         )
 
+    def test_p2p_luecke_wird_gespeichert_und_begrenzt(self):
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_GAP_LIMIT": "250"}},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["BIP158_GAP_LIMIT"], "250",
+        )
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_GAP_LIMIT": "10001"}},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["BIP158_GAP_LIMIT"], "250",
+        )
+
     def test_fremdes_feld_wird_abgelehnt(self):
         """
         Die Positivliste ist der eigentliche Schutz: Ohne sie wäre der

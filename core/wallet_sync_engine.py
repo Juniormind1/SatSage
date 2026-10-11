@@ -995,6 +995,18 @@ def _try_scantxoutset_xpub(
     return utxos
 
 
+def _stelle_utxo_cache_zurueck(pfad: Path, vorher: bytes | None) -> None:
+    """Scan abgebrochen: Cache auf den Stand vor dem Lauf zurück."""
+    if vorher is None:
+        try:
+            pfad.unlink()
+        except OSError:
+            pass
+        return
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_bytes(vorher)
+
+
 def _scan_xpub_utxos(
     xpub: str,
     fetch_wallet_utxos,
@@ -1159,13 +1171,25 @@ def _scan_xpub_utxos(
         "xpubs": [xpub],
     }
     if source == "bip158" and start_index == 0:
+        from core.bip158_scan import BlockRumpfFehler
+
         fetch_kwargs["filter_scan"] = True
         fetch_kwargs["max_addr"] = scan_cap * 2
+        cache_pfad = _xpub_cache_path(xpub, cache_dir)
+        cache_vorher = (
+            cache_pfad.read_bytes() if cache_pfad.is_file() else None
+        )
         try:
-            utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
-        except TypeError:
-            fetch_kwargs.pop("on_utxos_update", None)
-            utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
+            try:
+                utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
+            except TypeError:
+                fetch_kwargs.pop("on_utxos_update", None)
+                utxos = fetch_wallet_utxos(addresses, **fetch_kwargs)
+        except BlockRumpfFehler:
+            # Zwischenstand mit 0 UTXOs wäre ein gelesener leerer Cache
+            # und schickte das Wallet auf den Dachboden.
+            _stelle_utxo_cache_zurueck(cache_pfad, cache_vorher)
+            raise
         scan_end_index = scan_cap
         try:
             from core.bip158_wallet import take_last_scan_tip

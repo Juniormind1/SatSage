@@ -92,7 +92,7 @@ Einzelmodi:
 
 - **Bitcoin-P2P Compact Filter** — Peers mit `NODE_COMPACT_FILTERS` (`peerblockfilters=1`)
   - Filter lokal matchen, Block nur bei Treffer
-  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + UTXO_SCAN_GAP_LIMIT` (100, dieselbe Lücke wie der Electrs-UTXO-Scan), ohne Treffer nur die ersten 100 Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
+  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Lücke`. Die Lücke ist `BIP158_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld in den Datenquellen). Electrs bleibt bei `UTXO_SCAN_GAP_LIMIT` (100). Ohne Treffer nur die ersten *Lücke* Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein P2P-Cache gilt erst fertig, wenn `bip158_scan_gap` mindestens die eingestellte Lücke ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
   - Peer-Reihenfolge: Host im LAN (`FULCRUM_HOST`, P2P-Port 8333), dann gemerkte Filter-Peers, dann `BIP158_PEERS`, dann DNS-Seeds mit `x40.` (NODE_COMPACT_FILTERS). Im Regtest nur der bitcoind auf Port 18444, ohne Merk-Liste und ohne DNS. Ohne Compact Filter am eigenen Node kein Sprung zu öffentlichen Electrum-Servern. LAN-IPs nicht über Tor. Vor dem DNS-Rundlauf: drei parallele TCP-Prüfungen auf 8333; lauter Timeouts = Firewall, Clearnet entfällt. Scheitert Clearnet, folgt Tor: laufender Browser (9150) oder Autostart des `tor`-Binary (`stelle_tor_socks_bereit`, wie beim eigenen Onion-Node).
   - Scan: bis zu 8 Peers parallel für `getcfilters` (Clearnet; über Tor 2); Trefferblöcke auf 2 Workern; Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
   - `server.py` startet `starte_header_vorab`: Header ab SegWit in `p2p_headers.bin`, Job `headers` für das Log
@@ -141,6 +141,7 @@ WALLET_NAMES=Wallet A|Wallet B       # pipe-getrennt; oder WALLET_NAME_0 …
 
 # BIP158_P2P=1                 # Compact Filter über P2P (kein Core)
 # BIP158_START_HEIGHT=481824   # SegWit
+# BIP158_GAP_LIMIT=100         # 1…10000, Vorgabe 100
 # BIP158_PEERS=                # optional host:port je Zeile
 
 FULCRUM_HOST=...

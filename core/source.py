@@ -58,8 +58,8 @@ EDITIERBARE_FELDER: dict[str, tuple[str, ...]] = {
         "UTXO_RPC_SSL", "UTXO_RPC_COOKIE_FILE",
     ),
     # UI: nur Start-Höhe inline; Peers/Tor-Proxy nur noch per .env.
-    "bip158": ("BIP158_P2P", "BIP158_START_HEIGHT", "BIP158_PEERS",
-               "FULCRUM_TOR_PROXY"),
+    "bip158": ("BIP158_P2P", "BIP158_START_HEIGHT", "BIP158_GAP_LIMIT",
+               "BIP158_PEERS", "FULCRUM_TOR_PROXY"),
     "public_onion": ("FULCRUM_TOR_LISTE", "FULCRUM_TOR_PROXY"),
 }
 
@@ -136,6 +136,8 @@ class SourceInfo:
     ssl_persist: dict[str, str] = field(default_factory=dict)
     #: BIP-158: Start­höhe für Inline-Feld (kein Stift-Dialog).
     start_height: int | None = None
+    #: BIP-158: Lücke je Kette (1…10.000, Vorgabe 100).
+    gap_limit: int | None = None
     #: True: Zeile und Kopf-Pille bleiben aus.
     ausgeblendet: bool = False
 
@@ -174,6 +176,7 @@ class SourceInfo:
             "ssl_effective": self.ssl_effective,
             "ssl_persist": dict(self.ssl_persist) if self.ssl_persist else {},
             "start_height": self.start_height,
+            "gap_limit": self.gap_limit,
             "ausgeblendet": self.ausgeblendet,
         }
 
@@ -856,14 +859,20 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         ],
     ))
 
+    from core.bip158_wallet import bip158_gap_aus_env
+
     start = _int(values, "BIP158_START_HEIGHT", chain_sources.DEFAULT_BIP158_START_HEIGHT)
+    gap = bip158_gap_aus_env(values)
     peers = values.get("BIP158_PEERS", "").strip()
     lan_host = values.get("FULCRUM_HOST", "").strip()
 
     p2p_an = values.get("BIP158_P2P", "1").strip().lower() not in (
         "0", "false", "nein", "off",
     )
-    p2p_teile = [f"ab Block {start:,}".replace(",", ".")]
+    p2p_teile = [
+        f"ab Block {start:,}".replace(",", "."),
+        f"Lücke {gap}",
+    ]
     if lan_host and not _host_ist_onion(lan_host):
         p2p_teile.append(f"Node im LAN {lan_host}")
     if peers:
@@ -896,6 +905,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         # Kein Stift-Dialog: Start­höhe als Inline-Feld in der Zeile.
         felder=[],
         start_height=int(start),
+        gap_limit=gap,
         ausgeblendet=False,
     ))
 

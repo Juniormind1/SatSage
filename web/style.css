@@ -1974,6 +1974,10 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.quelle-gap {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
 .quelle-notiz { flex-basis: 100%; font-size: 11px; color: var(--warn); padding-left: 23px; }
 /* Hoch-Privatsphäre konfiguriert → grün; unkonfiguriert / von besserer Quelle verdrängt → grau */
 .quelle-notiz.notiz-hoch { color: var(--gut); }

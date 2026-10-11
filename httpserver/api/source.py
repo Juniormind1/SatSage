@@ -150,6 +150,16 @@ def api_save_source(state: AppState, payload: dict) -> dict:
 
         if schluessel.endswith(("PORT", "HEIGHT")) and text and not text.isdigit():
             raise ApiError(400, f"„{schluessel}“ muss eine Zahl sein.")
+        if schluessel == "BIP158_GAP_LIMIT":
+            if not text.isdigit():
+                raise ApiError(
+                    400, "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.",
+                )
+            luecke = int(text)
+            if luecke < 1 or luecke > 10_000:
+                raise ApiError(
+                    400, "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.",
+                )
 
         # Start9-GUI kopiert gern https://….onion — SOCKS/IDNA verstehen das nicht.
         if schluessel in ("FULCRUM_HOST", "FULCRUM_TOR", "NODE_IP") and text:

@@ -70,6 +70,9 @@ class TestTurboPasses(unittest.TestCase):
         self.assertTrue(main.bip158_fullscan_ist_fertig({
             "bip158_fullscan_ok": True, "source": "bip158", "bip158_scan_gap": 100,
         }))
+        self.assertFalse(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "bip158", "bip158_scan_gap": 100,
+        }, gap_soll=500))
         self.assertTrue(main.bip158_fullscan_ist_fertig({"scan_tip_height": 800_000}))
         self.assertFalse(main.bip158_fullscan_ist_fertig({"scan_tip_height": 0}))
 
@@ -126,6 +129,59 @@ class TestTurboPasses(unittest.TestCase):
             )
             ein = main.load_xpub_cache_entry(xpub, cache)
             self.assertTrue(ein["raw"].get("bip158_fullscan_ok"))
+
+    def test_hoehere_luecke_liest_historie_neu(self):
+        import tempfile
+        from pathlib import Path
+
+        import main
+        from core.bip158_wallet import _SCAN_GAPS, merke_scan_gap, scan_start_fuer_xpub
+
+        xpub = (
+            "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3N"
+            "o2dFDFGTsxxpG5uJh7n7epu4trkrX7x7DogT5Uf1nxASY"
+        )
+        utxo = [{
+            "txid": "ab" * 32,
+            "vout": 0,
+            "value": 1000,
+            "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        }]
+
+        class Client:
+            def __init__(self, cache, gap):
+                self.cache_dir = cache
+                self.start_height = 0
+                self.gap_limit = gap
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            main.save_xpub_utxo_cache(
+                xpub, utxo, cache, "bip158",
+                scan_tip_height=900_000, bip158_fullscan_ok=True,
+            )
+            self.assertEqual(
+                scan_start_fuer_xpub(Client(cache, 100), xpub)["start_grund"],
+                "tip",
+            )
+            self.assertNotEqual(
+                scan_start_fuer_xpub(Client(cache, 500), xpub)["start_grund"],
+                "tip",
+            )
+            merke_scan_gap(xpub, 400)
+            try:
+                main.save_xpub_utxo_cache(
+                    xpub, utxo, cache, "bip158",
+                    scan_tip_height=900_000, bip158_fullscan_ok=True,
+                )
+                ein = main.load_xpub_cache_entry(xpub, cache)
+                self.assertEqual(ein["raw"].get("bip158_scan_gap"), 400)
+                self.assertEqual(
+                    scan_start_fuer_xpub(Client(cache, 400), xpub)["start_grund"],
+                    "tip",
+                )
+            finally:
+                _SCAN_GAPS.pop(xpub, None)
 
     def test_erstscan_ohne_gap_historie_leer(self):
         alle = {b"\x01", b"\x02"}
@@ -328,15 +384,16 @@ class TestFilterParallel(unittest.TestCase):
         from bip158_scanner import _lade_cfilter_chunk
 
         logs: list[str] = []
+        block_hash, roh = _gueltiger_block()
 
         class FakePeer:
             def fetch_cfilters(self, start, stop, expect):
-                return [(b"\x11" * 32, b"\x01")]
+                return [(block_hash, b"\x01")]
 
-            def fetch_block(self, block_hash):
+            def fetch_block(self, gesehen_hash):
                 self.gesehen = list(logs)
-                self.hash = block_hash
-                return b"\x00" * 80
+                self.hash = gesehen_hash
+                return roh
 
         peer = FakePeer()
         with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
@@ -346,9 +403,8 @@ class TestFilterParallel(unittest.TestCase):
                 frozenset({b"\x01"}), on_log=logs.append,
             )
         self.assertTrue(any("hole Block" in z for z in peer.gesehen), peer.gesehen)
-        self.assertEqual(peer.hash, b"\x11" * 32)
-        self.assertIsNotNone(zeilen[0][3])
-        self.assertIsNot(zeilen[0][3], object())
+        self.assertEqual(peer.hash, block_hash)
+        self.assertEqual(zeilen[0][3], roh)
 
     def test_cfilter_cache_zweiter_scan_ohne_netz(self):
         import tempfile
@@ -403,16 +459,18 @@ class TestFilterParallel(unittest.TestCase):
         fetch_block_calls: list = []
         filter_done = threading.Event()
 
+        block_hash, roh = _gueltiger_block()
+
         class FakePeer:
             def fetch_cfilters(self, start, stop, expect):
                 time.sleep(0.02)
                 filter_done.set()
-                return [(b"\x11" * 32, b"\x01") for _ in range(expect)]
+                return [(block_hash, b"\x01") for _ in range(expect)]
 
-            def fetch_block(self, block_hash):
-                fetch_block_calls.append((block_hash, filter_done.is_set()))
+            def fetch_block(self, gesehen_hash):
+                fetch_block_calls.append((gesehen_hash, filter_done.is_set()))
                 time.sleep(0.05)
-                return b"\x00" * 80
+                return roh
 
         peer = FakePeer()
         with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
@@ -423,7 +481,7 @@ class TestFilterParallel(unittest.TestCase):
                 frozenset({b"\x01"}),
             ))
         self.assertEqual(len(out), 1)
-        self.assertEqual(out[0][0][3], b"\x00" * 80)
+        self.assertEqual(out[0][0][3], roh)
         self.assertEqual(len(fetch_block_calls), 1)
         self.assertTrue(fetch_block_calls[0][1], "Filter-Match vor Block-Fetch")
 
@@ -739,6 +797,7 @@ class TestP2pCodec(unittest.TestCase):
             self.assertEqual(again.tip_height(), 850_001)
             self.assertEqual(again.hash_at(850_000), prev)
             self.assertEqual(again.header_at(850_001), fake)
+
 
     def test_altes_genesis_file_wird_gelesen(self):
         import tempfile
@@ -1241,3 +1300,198 @@ class TestP2pCodec(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def _gueltiger_block(anzahl: int = 1) -> tuple[bytes, bytes]:
+    """Kleiner Block, dessen Header-Hash und Merkle-Root zusammenpassen."""
+    from embit.script import Script
+    from embit.transaction import Transaction, TransactionInput, TransactionOutput
+
+    from core.bip158_scan import _merkle_wurzel
+    from core.p2p import header_hash
+
+    txs = [
+        Transaction(
+            vin=[TransactionInput(b"\x00" * 32, 0xFFFFFFFF)],
+            vout=[TransactionOutput(i + 1, Script(bytes([81])))],
+        )
+        for i in range(anzahl)
+    ]
+    merk = _merkle_wurzel([bytes(tx.hash()) for tx in txs])
+    header = (
+        (1).to_bytes(4, "little")
+        + b"\x22" * 32
+        + merk
+        + (1_700_000_000).to_bytes(4, "little")
+        + (0x1D00FFFF).to_bytes(4, "little")
+        + (7).to_bytes(4, "little")
+    )
+    body = bytes([anzahl])
+    for tx in txs:
+        body += tx.serialize()
+    roh = header + body
+    return header_hash(header), roh
+
+
+class TestBlockRumpfGegenIndex(unittest.TestCase):
+
+    def test_gueltiger_rumpf_bleibt(self):
+        from core.bip158_scan import pruefe_block_rumpf
+
+        block_hash, roh = _gueltiger_block(3)
+        self.assertEqual(pruefe_block_rumpf(roh, block_hash), roh)
+
+    def test_leer_kurz_und_fremder_hash_fallen_durch(self):
+        from core.bip158_scan import BlockRumpfFehler, pruefe_block_rumpf
+
+        block_hash, roh = _gueltiger_block()
+        for kaputt in (None, b"", b"\x00" * 80):
+            with self.assertRaises(BlockRumpfFehler):
+                pruefe_block_rumpf(kaputt, block_hash)
+        with self.assertRaises(BlockRumpfFehler) as ctx:
+            pruefe_block_rumpf(roh, b"\x11" * 32)
+        self.assertIn("Header-Hash", str(ctx.exception))
+
+    def test_falsche_merkle_root_faellt_durch(self):
+        from core.bip158_scan import BlockRumpfFehler, pruefe_block_rumpf
+
+        block_hash, roh = _gueltiger_block()
+        kaputt = roh[:-1] + bytes([roh[-1] ^ 0x01])
+        with self.assertRaises(BlockRumpfFehler) as ctx:
+            pruefe_block_rumpf(kaputt, block_hash)
+        self.assertIn("Merkle-Root", str(ctx.exception))
+
+    def test_sync_holt_den_block_erneut(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import _lade_cfilter_chunk
+
+        block_hash, roh = _gueltiger_block()
+        versuche: list[int] = []
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01")]
+
+            def fetch_block(self, _hash):
+                versuche.append(1)
+                if len(versuche) < 3:
+                    return b""
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            zeilen = _lade_cfilter_chunk(
+                FakePeer(), 100, 100, b"\x22" * 32, frozenset({b"\x01"}),
+            )
+        self.assertEqual(len(versuche), 3)
+        self.assertEqual(zeilen[0][3], roh)
+
+    def test_sync_gibt_nach_fuenf_versuchen_auf(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import _lade_cfilter_chunk
+        from core.bip158_scan import BLOCK_RUMPF_VERSUCHE, BlockRumpfFehler
+
+        block_hash, _roh = _gueltiger_block()
+        versuche: list[int] = []
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01")]
+
+            def fetch_block(self, _hash):
+                versuche.append(1)
+                return b"\x00" * 80
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            with self.assertRaises(BlockRumpfFehler):
+                _lade_cfilter_chunk(
+                    FakePeer(), 100, 100, b"\x22" * 32, frozenset({b"\x01"}),
+                )
+        self.assertEqual(len(versuche), BLOCK_RUMPF_VERSUCHE)
+
+    def test_async_holt_erneut_und_bricht_danach_ab(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.bip158_scan import BLOCK_RUMPF_VERSUCHE, BlockRumpfFehler
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[bytes] = []
+
+        class ErstLeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append(b"")
+                if len(aufrufe) < 2:
+                    return b""
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [ErstLeer()], [(100, 100, b"\x22" * 32)], frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertEqual(len(aufrufe), 2)
+
+        class ImmerLeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append(b"x")
+                return b""
+
+        aufrufe.clear()
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            with self.assertRaises(BlockRumpfFehler):
+                list(verteile_cfilter_chunks(
+                    [ImmerLeer()],
+                    [(100, 100, b"\x22" * 32)],
+                    frozenset({b"\x01"}),
+                ))
+        self.assertEqual(len(aufrufe), BLOCK_RUMPF_VERSUCHE)
+
+    def test_abbruch_laesst_keinen_leeren_cache_stehen(self):
+        import tempfile
+        from pathlib import Path
+
+        from core.bip158_scan import BlockRumpfFehler
+        from core.wallet_sync_engine import _scan_xpub_utxos
+        from core.xpub_cache import _xpub_cache_path
+
+        xpub = (
+            "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3N"
+        )
+
+        def fetch(_addresses, **kwargs):
+            rueck = kwargs.get("on_utxos_update")
+            if rueck:
+                rueck([])
+            raise BlockRumpfFehler("Block 9: Rumpf fehlt")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            pfad = _xpub_cache_path(xpub, cache)
+            pfad.write_bytes(b"ALT")
+            with self.assertRaises(BlockRumpfFehler):
+                _scan_xpub_utxos(
+                    xpub, fetch, cache, "bip158",
+                    allow_scantxoutset=False,
+                )
+            self.assertEqual(pfad.read_bytes(), b"ALT")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            pfad = _xpub_cache_path(xpub, cache)
+            with self.assertRaises(BlockRumpfFehler):
+                _scan_xpub_utxos(
+                    xpub, fetch, cache, "bip158",
+                    allow_scantxoutset=False,
+                )
+            self.assertFalse(pfad.exists())

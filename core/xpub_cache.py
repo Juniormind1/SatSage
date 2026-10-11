@@ -1360,7 +1360,11 @@ def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
         save_xpub_first_seen(xpub, cache_dir, gefunden)
     return gefunden
 
-def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
+def bip158_fullscan_ist_fertig(
+    roh: dict | None,
+    *,
+    gap_soll: int | None = None,
+) -> bool:
     """
     True, wenn der UTXO-Bestand am Chain-Tip bekannt ist.
 
@@ -1378,13 +1382,18 @@ def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
         # kurzen Lücke 20 haben das Flag gesetzt, ohne die Kette zu Ende
         # zu beobachten. Das gilt für jedes xpub, nicht für eines.
         if str(roh.get("source") or "") == "bip158":
-            from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
+            from core.bip158_wallet import BIP158_GAP_DEFAULT, normalisiere_bip158_gap
 
+            soll = (
+                normalisiere_bip158_gap(gap_soll)
+                if gap_soll is not None
+                else BIP158_GAP_DEFAULT
+            )
             try:
                 gap = int(roh.get("bip158_scan_gap") or 0)
             except (TypeError, ValueError):
                 gap = 0
-            if gap < UTXO_SCAN_GAP_LIMIT:
+            if gap < soll:
                 return False
         return True
     if flag is False:
@@ -1485,6 +1494,7 @@ def save_xpub_utxo_cache(
     extra_scanned: list[str] | None = None,
     derived_addresses: list[str] | None = None,
     scan_end_je_chain: dict | None = None,
+    bip158_scan_gap: int | None = None,
 ) -> Path:
     """
     Speichert UTXOs eines XPUB als JSON-Flatfile.
@@ -1586,9 +1596,19 @@ def save_xpub_utxo_cache(
     elif "bip158_fullscan_ok" in roh_bisher:
         payload["bip158_fullscan_ok"] = bool(roh_bisher["bip158_fullscan_ok"])
     if payload.get("bip158_fullscan_ok") is True and payload.get("source") == "bip158":
-        from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
+        from core.bip158_wallet import (
+            BIP158_GAP_DEFAULT,
+            normalisiere_bip158_gap,
+            peek_scan_gap,
+        )
 
-        payload["bip158_scan_gap"] = UTXO_SCAN_GAP_LIMIT
+        if bip158_scan_gap is not None:
+            payload["bip158_scan_gap"] = normalisiere_bip158_gap(bip158_scan_gap)
+        else:
+            geguckt = peek_scan_gap(xpub)
+            payload["bip158_scan_gap"] = (
+                geguckt if geguckt is not None else BIP158_GAP_DEFAULT
+            )
     elif (
         payload.get("source") == "bip158"
         and roh_bisher.get("bip158_scan_gap") is not None
@@ -1641,8 +1661,10 @@ def schreibe_utxo_zwischenstand(
     # War schon ein Fullscan ok, Flag behalten (Rescan-Abbruch).
     full_ok = None
     if source == "bip158":
+        from core.bip158_wallet import peek_scan_gap
+
         roh = (entry or {}).get("raw") or {}
-        if not bip158_fullscan_ist_fertig(roh):
+        if not bip158_fullscan_ist_fertig(roh, gap_soll=peek_scan_gap(xpub)):
             full_ok = False
     return save_xpub_utxo_cache(
         xpub,

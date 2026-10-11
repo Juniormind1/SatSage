@@ -520,6 +520,8 @@ class TestCheckReachable(unittest.TestCase):
         self.assertFalse(quelle.editierbar)
         self.assertEqual(quelle.felder, [])
         self.assertEqual(quelle.start_height, 481824)
+        self.assertEqual(quelle.gap_limit, 100)
+        self.assertIn("Lücke 100", quelle.detail)
 
     def test_p2p_aus_zeigt_hinweis_auf_oeffentliche_listen(self):
         quelle = next(
@@ -540,6 +542,19 @@ class TestCheckReachable(unittest.TestCase):
         # Extra-Peers nur noch per .env — kein Stift-Feld mehr.
         self.assertNotIn("BIP158_PEERS", [f.key for f in quelle.felder])
         self.assertEqual(quelle.start_height, 481824)
+
+    def test_p2p_luecke_aus_env_wird_begrenzt(self):
+        weit = next(
+            q for q in describe_sources({"BIP158_GAP_LIMIT": "250"})
+            if q.key == "bip158"
+        )
+        self.assertEqual(weit.gap_limit, 250)
+        self.assertIn("Lücke 250", weit.detail)
+        deckel = next(
+            q for q in describe_sources({"BIP158_GAP_LIMIT": "99999"})
+            if q.key == "bip158"
+        )
+        self.assertEqual(deckel.gap_limit, 10000)
 
     def test_p2p_pruefung_nutzt_lan_und_dns_fallback(self):
         from unittest import mock

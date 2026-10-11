@@ -41,6 +41,90 @@ TURBO_WINDOW = 2_016
 #: Marker: Filter-Treffer, Block wird asynchron geholt.
 _BLOCK_PENDING = object()
 
+#: Wie oft ein Filter-Treffer den Block-Rumpf neu anfordert.
+BLOCK_RUMPF_VERSUCHE = 5
+
+
+class BlockRumpfFehler(RuntimeError):
+    """Filter traf, der gelieferte Block passt nicht zum Header-Index."""
+
+
+def _merkle_wurzel(tx_hashes: list[bytes]) -> bytes:
+    """Merkle-Root in interner Byte-Reihenfolge, wie im Block-Header."""
+    from core.p2p import double_sha256
+
+    if not tx_hashes:
+        raise BlockRumpfFehler("Block ohne Transaktion")
+    schicht = list(tx_hashes)
+    while len(schicht) > 1:
+        if len(schicht) % 2:
+            schicht.append(schicht[-1])
+        schicht = [
+            double_sha256(schicht[i] + schicht[i + 1])
+            for i in range(0, len(schicht), 2)
+        ]
+    return schicht[0]
+
+
+def pruefe_block_rumpf(roh: bytes | None, erwartet_hash: bytes) -> bytes:
+    """Rumpf behalten, wenn er die Höhe im Header-Index ist.
+
+    Der Index kennt keine Größe. Er kennt den Header-Hash und, im Header,
+    die Merkle-Root. Ein leerer, abgeschnittener oder fremder Rumpf fällt
+    hier durch, damit der Scan ihn neu anfordert.
+    """
+    from core.p2p import header_hash
+
+    if not roh or len(roh) < 81:
+        raise BlockRumpfFehler(
+            "Block-Rumpf fehlt oder ist kürzer als ein Block"
+        )
+    try:
+        ist = header_hash(roh[:80])
+    except ValueError as exc:
+        raise BlockRumpfFehler("Block-Header zu kurz") from exc
+    if ist != bytes(erwartet_hash):
+        raise BlockRumpfFehler("Header-Hash passt nicht zum Index")
+    try:
+        header, txs = parse_raw_block(roh)
+    except Exception as exc:
+        raise BlockRumpfFehler("Block-Rumpf unlesbar") from exc
+    if not txs:
+        raise BlockRumpfFehler("Block ohne Transaktion")
+    try:
+        blaetter = [bytes(tx.hash()) for tx in txs]
+    except Exception as exc:
+        raise BlockRumpfFehler("Transaktions-Hash fehlt") from exc
+    if header[36:68] != _merkle_wurzel(blaetter):
+        raise BlockRumpfFehler("Merkle-Root passt nicht zum Index")
+    return roh
+
+
+def _hole_block_einmal(peer, block_hash: bytes) -> bytes:
+    """Ein getdata. Peer-Fehler wird zum Rumpf-Fehler, Abbruch bleibt Abbruch."""
+    try:
+        roh = peer.fetch_block(block_hash)
+    except Exception as exc:
+        try:
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
+        except ImportError:
+            pass
+        raise BlockRumpfFehler("Peer lieferte den Block nicht") from exc
+    return pruefe_block_rumpf(roh, block_hash)
+
+
+def _melde_block_erneut(on_log, hoehe: int, versuch: int, grund: BaseException) -> None:
+    if not on_log:
+        return
+    on_log(
+        f"Block {hoehe:,} passt nicht zum Header-Index "
+        f"({grund}) — Versuch {versuch + 2}/{BLOCK_RUMPF_VERSUCHE}"
+        .replace(",", ".")
+    )
+
 
 def plane_union_passes(
     wallets: Sequence[tuple[int, bool, set[bytes], set[bytes]]],
@@ -377,7 +461,20 @@ def _lade_cfilter_chunk(
                 block_queue.put((h, block_hash))
                 roh = _BLOCK_PENDING
             else:
-                roh = peer.fetch_block(block_hash)
+                roh = None
+                for versuch in range(BLOCK_RUMPF_VERSUCHE):
+                    try:
+                        roh = _hole_block_einmal(peer, block_hash)
+                        break
+                    except BlockRumpfFehler as exc:
+                        roh = None
+                        if versuch + 1 >= BLOCK_RUMPF_VERSUCHE:
+                            raise BlockRumpfFehler(
+                                f"Block {h}: Rumpf nach "
+                                f"{BLOCK_RUMPF_VERSUCHE} Versuchen nicht "
+                                f"zum Header-Index passend"
+                            ) from exc
+                        _melde_block_erneut(on_log, h, versuch, exc)
                 try:
                     from core.bip158_wallet import merke_block_bytes
 
@@ -427,6 +524,8 @@ def _zeilen_bloecke_aufloesen(
                 h, block_hash, ergebnisse=ergebnisse, wach=wach,
                 soll_enden=soll_enden,
             )
+        if isinstance(roh, BaseException):
+            raise roh
         aufgeloest.append((h, block_hash, blob, roh))
     return aufgeloest
 
@@ -533,16 +632,29 @@ def verteile_cfilter_chunks(
                 continue
             if auftrag is None:
                 return
-            hoehe, block_hash = auftrag
+            if len(auftrag) == 2:
+                hoehe, block_hash = auftrag
+                versuch = 0
+            else:
+                hoehe, block_hash, versuch = auftrag
             try:
                 with lock:
-                    roh = peer.fetch_block(block_hash)
+                    roh = _hole_block_einmal(peer, block_hash)
                 try:
                     from core.bip158_wallet import merke_block_bytes
 
                     merke_block_bytes(block_hash, roh)
                 except Exception:
                     pass
+            except BlockRumpfFehler as exc:
+                if versuch + 1 < BLOCK_RUMPF_VERSUCHE and not _soll_enden():
+                    _melde_block_erneut(on_log, hoehe, versuch, exc)
+                    block_queue.put((hoehe, block_hash, versuch + 1))
+                    continue
+                roh = BlockRumpfFehler(
+                    f"Block {hoehe}: Rumpf nach {BLOCK_RUMPF_VERSUCHE} "
+                    f"Versuchen nicht zum Header-Index passend"
+                )
             except Exception as exc:
                 try:
                     from core.jobs import ist_abbruch
@@ -551,7 +663,7 @@ def verteile_cfilter_chunks(
                         return
                 except ImportError:
                     pass
-                roh = None
+                roh = exc
             with block_wach:
                 block_ergebnisse[hoehe] = roh
                 block_wach.notify_all()
@@ -616,6 +728,13 @@ def verteile_cfilter_chunks(
                     von, bis, stop = chunk
                     try:
                         zeilen = _chunk_laden(peer, von, bis, stop)
+                    except BlockRumpfFehler as exc:
+                        # Der Rumpf wurde schon mehrfach neu angefordert.
+                        with wach:
+                            fertig[index] = exc
+                            erledigt[0] += 1
+                            wach.notify_all()
+                        return
                     except Exception as exc:
                         try:
                             from core.jobs import ist_abbruch
@@ -1857,6 +1976,8 @@ class Bip158Client:
     start_height: int = 0
     verbose: bool = True
     cache_dir: Path | None = None
+    #: Unbenutzte Indizes je Kette hinter dem letzten Treffer (BIP158_GAP_LIMIT).
+    gap_limit: int = 100
 
 
 def vorab_block_header(

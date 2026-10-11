@@ -9,7 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · P2P-Lücke:** Neben dem ersten Scan-Block steht die Lücke, vorbelegt mit 100, höchstens 10.000. Der nächste Compact-Filter-Scan prüft so viele unbenutzte Indizes je Kette hinter dem letzten Treffer. Ein Cache, der mit einer kleineren Lücke fertig war, wird neu gelesen. Electrs bleibt bei 100.
 - **UTXO-Scan · Empfang:** Jeder neu gefundene UTXO des gerade offenen Wallets spielt die Ka-Ching-Animation eines Mempool-Empfangs. UTXOs, die schon vor dem Scan im Cache lagen, lösen sie nicht aus. Während **Alle Wallets: UTXOs** atmet der QR der offenen Wallet mit, wie bei einem Scan nur dieses Wallets.
+- **Wallets · Alle Wallets:** Läuft **UTXOs** für alle Wallets, sagt die Statuszeile des offenen Wallets „Neu scannen für alle Wallets“. Die Warnung „nicht für dieses Wallet“ bleibt dem Fall vorbehalten, in dem wirklich ein anderes Wallet scannt.
 
 - **P2P · Fortschritt:** „hole Block…“ und das Ergebnis danach bleiben im Log und verdrängen die Prozentzeile nicht mehr. Die Prozentzahl steht in der Statuszeile, nicht als eigene Logzeile, solange Treffer reinkommen.
 - **P2P · gemeinsamer UTXO-Lauf:** Treffer in der Turbo-Phase erscheinen sofort im Log und in der UTXO-Zahl. Bisher blieb die Zeile auf „hole Block…“ und die Zahl auf 0, bis die Historie aller Wallets vorbei war.
