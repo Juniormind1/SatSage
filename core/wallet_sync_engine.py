@@ -1231,6 +1231,330 @@ def _scan_xpub_utxos(
     return utxos
 
 
+def sammel_utxo_modus(env: dict[str, str] | None, fulcrum) -> str:
+    """Quelle für einen UTXO-Lauf über mehrere Wallets.
+
+    ``p2p``: Compact Filter sind die einzige Bestandsquelle — ein
+    gemeinsamer Durchgang. ``electrs``: eigener Server im LAN, Gap-Scan
+    Wallet für Wallet. ``scantxoutset``: ein Core-Lauf, wenn der Node
+    antwortet; sonst der bestehende Einzelweg.
+    """
+    from core.chain_sources import p2p_utxo_entdeckung_frei
+
+    if p2p_utxo_entdeckung_frei(env or {}, fulcrum):
+        return "p2p"
+    if _fulcrum_transport_ist_lan(fulcrum):
+        return "electrs"
+    return "scantxoutset"
+
+
+def _melde_sofort(on_progress, text: str) -> None:
+    if not on_progress:
+        return
+    try:
+        on_progress(text, sofort=True)
+    except TypeError:
+        on_progress(text)
+
+
+def _scanne_xpubs_nacheinander(
+    xpubs: list[str],
+    fetch_wallet_utxos,
+    cache_dir: Path,
+    source: str,
+    *,
+    max_addresses_for,
+    wallet: WalletContext | None,
+    fulcrum,
+    on_progress,
+    on_utxos_update,
+    allow_scantxoutset: bool,
+    p2p_schon: bool,
+) -> list[dict]:
+    """Gap- oder Einzelscan, ein Wallet nach dem anderen, ein Job."""
+    alle: list[dict] = []
+    gesamt = len(xpubs)
+    for nummer, xpub in enumerate(xpubs, start=1):
+        label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."
+        _melde_sofort(on_progress, f"UTXO {nummer}/{gesamt}: {label}")
+        bisher = list(alle)
+
+        def _update(stand: list[dict], _bisher=bisher) -> None:
+            if on_utxos_update:
+                on_utxos_update(_bisher + list(stand or []))
+
+        gefunden = _scan_xpub_utxos(
+            xpub,
+            fetch_wallet_utxos,
+            cache_dir,
+            source,
+            max_addresses_for(xpub),
+            start_index=0,
+            wallet=wallet,
+            fulcrum=fulcrum,
+            on_progress=on_progress,
+            on_utxos_update=_update if on_utxos_update else None,
+            allow_scantxoutset=allow_scantxoutset,
+            _p2p_schon=p2p_schon,
+        )
+        alle.extend(gefunden or [])
+        if on_utxos_update:
+            on_utxos_update(list(alle))
+    return alle
+
+
+def _speichere_bip158_je_xpub(
+    xpubs: list[str],
+    gruppen: dict[str, list[dict]],
+    cache_dir: Path,
+    *,
+    max_addresses_for,
+    wallet: WalletContext | None,
+    on_progress,
+) -> list[dict]:
+    from display import is_list_abort_requested
+
+    from core.bip158_wallet import take_last_scan_tip
+
+    abbruch = is_list_abort_requested()
+    alle: list[dict] = []
+    for xpub in xpubs:
+        utxos = list(gruppen.get(xpub) or [])
+        alle.extend(utxos)
+        max_addresses = max_addresses_for(xpub)
+        scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
+        tip = take_last_scan_tip(xpub)
+        full_ok: bool | None = False if abbruch else True
+        if abbruch:
+            tip = None
+        addresses = derive_addresses(
+            xpub, max_addresses=max(scan_cap * 2, 2),
+        )
+        save_xpub_utxo_cache(
+            xpub,
+            utxos,
+            cache_dir,
+            "bip158",
+            scan_end_index=scan_cap,
+            max_addresses=max_addresses,
+            first_seen=ermittle_first_seen(
+                xpub, addresses, cache_dir, None,
+                on_progress=on_progress, utxos=utxos,
+            ),
+            scan_tip_height=tip,
+            bip158_fullscan_ok=full_ok,
+        )
+    return alle
+
+
+def _scanne_xpubs_p2p(
+    xpubs: list[str],
+    cache_dir: Path,
+    *,
+    env: dict[str, str],
+    fulcrum,
+    max_addresses_for,
+    wallet: WalletContext | None,
+    on_progress,
+    on_utxos_update,
+    immutable_cache_dir: Path | None,
+    start_height: int | None,
+) -> list[dict] | None:
+    """Ein ``scan_union``. None, wenn P2P gerade nicht gebaut werden kann."""
+    from core.chain_sources import baue_p2p_utxo_fetch
+
+    gebaut = baue_p2p_utxo_fetch(
+        env,
+        fulcrum=fulcrum,
+        scantxoutset=False,
+        cache_dir=cache_dir,
+        immutable_cache_dir=immutable_cache_dir,
+        start_height=start_height,
+    )
+    if gebaut is None:
+        return None
+    fetch, schliessen = gebaut
+    max_by: dict[str, int] = {}
+    for xpub in xpubs:
+        cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses_for(xpub))
+        max_by[xpub] = max(cap * 2, 2)
+    gruppen: dict[str, list[dict]] = {xpub: [] for xpub in xpubs}
+    _melde_sofort(on_progress, f"P2P: ein Durchgang für {len(xpubs)} Wallets…")
+    try:
+        fetch(
+            [],
+            filter_scan=True,
+            xpubs=list(xpubs),
+            max_addr=2,
+            max_addresses_by_xpub=max_by,
+            gruppen=gruppen,
+            on_utxos_update=on_utxos_update,
+        )
+    finally:
+        schliessen()
+    return _speichere_bip158_je_xpub(
+        xpubs, gruppen, cache_dir,
+        max_addresses_for=max_addresses_for,
+        wallet=wallet,
+        on_progress=on_progress,
+    )
+
+
+def _speichere_scantxoutset_je_xpub(
+    xpubs: list[str],
+    by_xpub: dict[str, list[dict]],
+    tip: int | None,
+    cache_dir: Path,
+    *,
+    max_addresses_for,
+    wallet: WalletContext | None,
+    on_progress,
+) -> list[dict]:
+    alle: list[dict] = []
+    for xpub in xpubs:
+        utxos = list(by_xpub.get(xpub) or [])
+        alle.extend(utxos)
+        max_addresses = max_addresses_for(xpub)
+        scan_cap = _scan_index_cap_per_chain(xpub, wallet, max_addresses)
+        label = wallet.xpub_label(xpub) if wallet else xpub[:25] + "..."
+        print(
+            f"\nscantxoutset {label}: {len(utxos)} UTXO(s)"
+            + (f" · Tip {tip}" if tip else ""),
+            flush=True,
+        )
+        addresses = derive_addresses(
+            xpub, max_addresses=max(scan_cap * 2, 2),
+        )
+        save_xpub_utxo_cache(
+            xpub,
+            utxos,
+            cache_dir,
+            "bitcoind",
+            scan_end_index=scan_cap,
+            max_addresses=max_addresses,
+            first_seen=ermittle_first_seen(
+                xpub, addresses, cache_dir, None,
+                on_progress=on_progress, utxos=utxos,
+            ),
+            scan_tip_height=tip,
+        )
+    return alle
+
+
+def scanne_alle_xpubs_utxo(
+    xpubs: list[str],
+    fetch_wallet_utxos,
+    cache_dir: Path,
+    source: str,
+    *,
+    max_addresses_for,
+    wallet: WalletContext | None = None,
+    fulcrum=None,
+    on_progress=None,
+    on_utxos_update=None,
+    env: dict[str, str] | None = None,
+    immutable_cache_dir: Path | None = None,
+    start_height: int | None = None,
+) -> tuple[list[dict], str]:
+    """UTXO-Bestand aller übergebenen xPubs in einem Lauf.
+
+    Rückgabe: flache UTXO-Liste und die Quelle, die den Lauf getragen hat.
+    """
+    if not xpubs:
+        return [], source
+    werte = env if env is not None else _load_dotenv()
+    modus = sammel_utxo_modus(werte, fulcrum)
+
+    def nacheinander(*, scantx: bool, p2p_schon: bool) -> list[dict]:
+        return _scanne_xpubs_nacheinander(
+            xpubs,
+            fetch_wallet_utxos,
+            cache_dir,
+            source,
+            max_addresses_for=max_addresses_for,
+            wallet=wallet,
+            fulcrum=fulcrum,
+            on_progress=on_progress,
+            on_utxos_update=on_utxos_update,
+            allow_scantxoutset=scantx,
+            p2p_schon=p2p_schon,
+        )
+
+    if modus == "p2p":
+        try:
+            gefunden = _scanne_xpubs_p2p(
+                xpubs,
+                cache_dir,
+                env=werte,
+                fulcrum=fulcrum,
+                max_addresses_for=max_addresses_for,
+                wallet=wallet,
+                on_progress=on_progress,
+                on_utxos_update=on_utxos_update,
+                immutable_cache_dir=immutable_cache_dir,
+                start_height=start_height,
+            )
+        except Exception as exc:
+            from core.jobs import ist_abbruch
+
+            if ist_abbruch(exc):
+                raise
+            _melde_sofort(
+                on_progress,
+                f"P2P-Sammelscan fehlgeschlagen ({exc}) — nächste Quelle.",
+            )
+            return nacheinander(scantx=False, p2p_schon=True), source
+        if gefunden is not None:
+            return gefunden, "bip158"
+        return nacheinander(scantx=False, p2p_schon=True), source
+
+    if modus == "electrs":
+        _melde_sofort(
+            on_progress,
+            "Electrs im LAN: UTXO-Bestand Wallet für Wallet.",
+        )
+        return nacheinander(scantx=False, p2p_schon=True), source
+
+    from core.bitcoind_rpc import (
+        RpcAllowlistError,
+        ScantxoutsetVerbundenFehler,
+        try_scantxoutset_for_xpubs,
+    )
+
+    def _max(key: str) -> int:
+        return _scan_index_cap_per_chain(key, wallet, max_addresses_for(key))
+
+    try:
+        ergebnis = try_scantxoutset_for_xpubs(
+            werte,
+            list(xpubs),
+            max_addresses_for=_max,
+            default_max=_max(xpubs[0]),
+            wallet=wallet,
+            on_progress=on_progress,
+        )
+    except ScantxoutsetVerbundenFehler:
+        raise
+    except RpcAllowlistError:
+        raise
+    except Exception as exc:
+        from core.jobs import ist_abbruch
+
+        if ist_abbruch(exc):
+            raise
+        _melde_sofort(on_progress, f"scantxoutset übersprungen: {exc}")
+        ergebnis = None
+    if ergebnis is not None:
+        by_xpub, tip = ergebnis
+        return _speichere_scantxoutset_je_xpub(
+            xpubs, by_xpub, tip, cache_dir,
+            max_addresses_for=max_addresses_for,
+            wallet=wallet,
+            on_progress=on_progress,
+        ), "bitcoind"
+    return nacheinander(scantx=False, p2p_schon=False), source
+
+
 def _adressen_bis_index(xpub: str, end_index: int) -> set[str]:
     """Receive- und Change-Adressen Index #0 … #end_index−1."""
     addresses: set[str] = set()

@@ -64,6 +64,8 @@ Bitcoin-P2P Compact Filter ist **keine** allgemeine Datenquelle, solange `p2p_ge
 4. BIP-158 nur für den Bestand, und nur wenn eigener Electrum-Server, Bitcoin Core · RPC und scantxoutset nicht verbunden sind (`p2p_utxo_entdeckung_frei`). Verbunden heißt: die Quelle antwortet. Ein konfigurierter, aber unerreichbarer Slot zählt nicht. Öffentliche Electrum-Server blockieren P2P nicht.
 5. öffentliche Electrum (schlechtere Privatsphäre), falls die P2P-Suche scheitert
 
+Der Knopf **Alle Wallets: UTXOs** (`POST /api/jobs/rescan-alle`, `scanne_alle_xpubs_utxo`) nimmt dieselbe Reihenfolge für alle ableitbaren Wallets in einem Job: ist P2P die einzige Bestandsquelle, ein `scan_union`; bei Electrs im LAN der Gap-Scan Wallet für Wallet; sonst ein `scantxoutset`. Jedes Wallet behält seinen eigenen Start (fertig → inkrementell, sonst Erstscan).
+
 Mit Electrs-LAN entfällt `scantxoutset`. Ohne LAN-Electrs: lokaler pruned Node (`UTXO_RPC_*`) vor remote Lookup-Core.
 
 **Tx/Block-Lookup** (Herkunft ohne Electrs bzw. Electrs-Ausnahme):
@@ -90,7 +92,7 @@ Einzelmodi:
 
 - **Bitcoin-P2P Compact Filter** — Peers mit `NODE_COMPACT_FILTERS` (`peerblockfilters=1`)
   - Filter lokal matchen, Block nur bei Treffer
-  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Gap`, ohne Treffer nur die ersten `gap_limit` Indizes
+  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + UTXO_SCAN_GAP_LIMIT` (100, dieselbe Lücke wie der Electrs-UTXO-Scan), ohne Treffer nur die ersten 100 Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
   - Peer-Reihenfolge: Host im LAN (`FULCRUM_HOST`, P2P-Port 8333), dann gemerkte Filter-Peers, dann `BIP158_PEERS`, dann DNS-Seeds mit `x40.` (NODE_COMPACT_FILTERS). Im Regtest nur der bitcoind auf Port 18444, ohne Merk-Liste und ohne DNS. Ohne Compact Filter am eigenen Node kein Sprung zu öffentlichen Electrum-Servern. LAN-IPs nicht über Tor. Vor dem DNS-Rundlauf: drei parallele TCP-Prüfungen auf 8333; lauter Timeouts = Firewall, Clearnet entfällt. Scheitert Clearnet, folgt Tor: laufender Browser (9150) oder Autostart des `tor`-Binary (`stelle_tor_socks_bereit`, wie beim eigenen Onion-Node).
   - Scan: bis zu 8 Peers parallel für `getcfilters` (Clearnet; über Tor 2); Trefferblöcke auf 2 Workern; Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
   - `server.py` startet `starte_header_vorab`: Header ab SegWit in `p2p_headers.bin`, Job `headers` für das Log

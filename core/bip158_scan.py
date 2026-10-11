@@ -53,7 +53,8 @@ def plane_union_passes(
 
     Jedes Element ist ``(start, erstscan, lookahead, historie_scripts)``.
     Turbo: Vereinigung der Lookaheads im Tip-Fenster, ein Pass.
-    Historie: je Wallet nur dessen used/gap, Höhen vereinigt, ein Pass.
+    Historie: je Wallet nur dessen used/gap, Höhen vereinigt. Der Aufrufer
+    wiederholt den Pass, wenn ein Treffer das Präfix nach oben schiebt.
     Volle Lookahead-Menge über die Historie bleibt draußen.
     """
     if tip < 0 or not wallets:
@@ -157,6 +158,24 @@ def _cfilter_chunks(
         chunks.append((hoehe, ende, hash_at(ende)))
         hoehe = ende + 1
     return chunks
+
+
+def _bestand_nach_block(
+    bestaende: dict[str, Any],
+    neu: dict[str, Any],
+    spent_ours: dict[str, Any],
+) -> None:
+    """Neue Ausgänge übernehmen, Ausgaben danach entfernen.
+
+    Ein Outpoint, der im selben Block entsteht und ausgegeben wird, steht
+    in *neu* und in *spent_ours*. Zuerst einfügen und dann entfernen, sonst
+    schreibt das Update die Ausgabe zurück in den Bestand. Gilt für jedes
+    xpub, dessen Block der Scan auswertet.
+    """
+    if neu:
+        bestaende.update(neu)
+    for key in spent_ours:
+        bestaende.pop(key, None)
 
 
 def _filter_umfang(passe) -> int:
@@ -1179,7 +1198,6 @@ class BIP158Scanner:
         from core.bip158_wallet import (
             derive_script_pubkeys_from_xpub,
             gap_scripts_anfang,
-            scripts_mit_gap_um_treffer,
         )
 
         if not wallets:
@@ -1270,13 +1288,12 @@ class BIP158Scanner:
             aktiv = [w for w in vorbereitet if w["start"] <= h <= end]
             if not aktiv:
                 return
+            # Der Block ist schon geladen. Jedes Wallet liest seinen ganzen
+            # Lookahead, nicht nur die Filter-Keys — sonst bleibt ein Ausgang
+            # auf einem höheren Index unsichtbar und die Lücke wächst nicht.
             watched: dict[bytes, str | None] = {}
             for w in aktiv:
-                kandidaten = w["watched"] if phase == "turbo" else {
-                    spk: addr for spk, addr in w["watched"].items()
-                    if spk in pass_scripts or spk in staende[w["xpub"]]["hit_scripts"]
-                }
-                for spk, addr in kandidaten.items():
+                for spk, addr in w["watched"].items():
                     if spk not in watched:
                         watched[spk] = addr
             if not watched:
@@ -1309,9 +1326,7 @@ class BIP158Scanner:
                     stand["verlauf"], eigene_neu, spent_ours,
                     hoehe=h, block_time=block_time,
                 )
-                for key in spent_ours:
-                    stand["bestaende"].pop(key, None)
-                stand["bestaende"].update(eigene_neu)
+                _bestand_nach_block(stand["bestaende"], eigene_neu, spent_ours)
                 if provisional and w["on_utxos_update"] and (eigene_neu or spent_ours):
                     from core.bip158_wallet import _matched_output_to_utxo
 
@@ -1338,34 +1353,20 @@ class BIP158Scanner:
                     provisional=False, pass_scripts=pass_scripts,
                 )
 
-        for name, von, bis, scripts in passe:
+        def _union_pass(
+            name: str, von: int, bis: int, scripts: frozenset[bytes],
+        ) -> bool:
+            """True bei Abbruch."""
+            nonlocal geprueft
             from display import is_list_abort_requested, melde_zwischenstand
+            from core.p2p import GETCFILTERS_MAX, hash_to_hex
 
-            self._check_abbruch()
-            if is_list_abort_requested():
-                self._log("BIP-158 abgebrochen.")
-                break
-            if name == "historie":
-                nachzug: set[bytes] = set(scripts)
-                for w in vorbereitet:
-                    if w["used"] or w["start"] > bis:
-                        continue
-                    nachzug |= scripts_mit_gap_um_treffer(
-                        w["xpub"],
-                        staende[w["xpub"]]["hit_scripts"],
-                        gap_limit=w["gap_limit"],
-                        max_index=w["max_index"],
-                        include_change=w["include_change"],
-                    )
-                scripts = frozenset(nachzug)
             if not scripts and name == "historie":
-                continue
+                return False
             melde_zwischenstand(
                 f"BIP-158 Union {name}: Block {von:,}–{bis:,} "
                 f"({len(scripts)} Keys)".replace(",", ".")
             )
-            from core.p2p import GETCFILTERS_MAX, hash_to_hex
-
             chunks = _cfilter_chunks(von, bis, chain.hash_at, schritt=GETCFILTERS_MAX)
             geladen = verteile_cfilter_chunks(
                 pool, chunks, scripts, on_log=self._log,
@@ -1375,12 +1376,10 @@ class BIP158Scanner:
                 cache_dir=cache_dir,
                 stats=filter_stats,
             )
-            abgebrochen = False
             for zeilen in geladen:
                 self._check_abbruch()
                 if is_list_abort_requested():
-                    abgebrochen = True
-                    break
+                    return True
                 for h, block_hash, _blob, roh in zeilen:
                     self._check_abbruch()
                     geprueft += 1
@@ -1393,7 +1392,57 @@ class BIP158Scanner:
                         h, display, roh, name,
                         provisional=True, pass_scripts=scripts,
                     )
-            if abgebrochen or is_list_abort_requested():
+            return is_list_abort_requested()
+
+        for name, von, bis, scripts in passe:
+            from display import is_list_abort_requested
+
+            self._check_abbruch()
+            if is_list_abort_requested():
+                self._log("BIP-158 abgebrochen.")
+                break
+            if name == "historie":
+                from core.bip158_wallet import naechste_historie_scripts
+
+                schon: dict[str, set[bytes]] = {
+                    w["xpub"]: set() for w in vorbereitet
+                }
+                # Used-Keys einmal aus dem Pass. Erstscan-Wallets wachsen
+                # über naechste, sobald ein höherer Index getroffen wurde.
+                basis = set(scripts)
+                abgebrochen = False
+                obergrenze = max(w["max_index"] for w in vorbereitet)
+                for runde in range(max(1, obergrenze)):
+                    neue: set[bytes] = set(basis)
+                    basis = set()
+                    for w in vorbereitet:
+                        if w["used"] or w["start"] > bis:
+                            continue
+                        dazu = naechste_historie_scripts(
+                            w["xpub"],
+                            staende[w["xpub"]]["hit_scripts"],
+                            schon[w["xpub"]],
+                            gap_limit=w["gap_limit"],
+                            max_index=w["max_index"],
+                            include_change=w["include_change"],
+                        )
+                        if dazu:
+                            schon[w["xpub"]] |= dazu
+                            neue |= dazu
+                    if not neue:
+                        break
+                    if runde:
+                        self._log(
+                            f"BIP-158 Historie erweitert: {len(neue)} weitere Keys"
+                        )
+                    abgebrochen = _union_pass(name, von, bis, frozenset(neue))
+                    if abgebrochen:
+                        break
+                if abgebrochen:
+                    self._log("BIP-158 abgebrochen.")
+                    break
+                continue
+            if _union_pass(name, von, bis, frozenset(scripts)):
                 self._log("BIP-158 abgebrochen.")
                 break
 
@@ -1492,7 +1541,6 @@ class BIP158Scanner:
         from core.bip158_wallet import (
             _matched_output_to_utxo,
             gap_scripts_anfang,
-            scripts_mit_gap_um_treffer,
         )
         from core.p2p import GETCFILTERS_MAX, hash_to_hex, hole_header
 
@@ -1612,9 +1660,7 @@ class BIP158Scanner:
                 verlauf, neu, spent_ours,
                 hoehe=h, block_time=_header_unixzeit(header),
             )
-            for key in spent_ours:
-                bestaende.pop(key, None)
-            bestaende.update(neu)
+            _bestand_nach_block(bestaende, neu, spent_ours)
             if provisional and on_utxos_update and (neu or spent_ours):
                 on_utxos_update([
                     _matched_output_to_utxo(ausgabe)
@@ -1652,42 +1698,25 @@ class BIP158Scanner:
                     verlauf, neu, spent_ours,
                     hoehe=h, block_time=_header_unixzeit(header),
                 )
-                for key in spent_ours:
-                    bestaende.pop(key, None)
-                bestaende.update(neu)
+                _bestand_nach_block(bestaende, neu, spent_ours)
             if on_utxos_update:
                 on_utxos_update([
                     _matched_output_to_utxo(a) for a in bestaende.values()
                 ])
 
-        for name, von, bis, scripts in passe:
+        def _filterpass(
+            name: str, von: int, bis: int, scripts: frozenset[bytes],
+        ) -> bool:
+            """True bei Abbruch."""
+            nonlocal geprueft
             from display import is_list_abort_requested, melde_zwischenstand
-
-            self._check_abbruch()
-            if is_list_abort_requested():
-                self._log("BIP-158 abgebrochen.")
-                break
-
-            # Historie-Pass beim Erstscan: Präfix 0 … höchster Turbo-Treffer + Gap.
-            if name == "historie" and erstscan and xpub:
-                scripts = frozenset(
-                    scripts_mit_gap_um_treffer(
-                        xpub, hit_scripts,
-                        gap_limit=gap_limit,
-                        max_index=max_index,
-                        include_change=include_change,
-                    )
-                )
-            elif name == "historie" and erstscan:
-                scripts = frozenset(hit_scripts | gap0 | set(scripts))
 
             if not scripts and name == "historie":
                 self._log(
                     f"BIP-158 historie übersprungen (keine Keys) "
                     f"{von:,}–{bis:,}".replace(",", ".")
                 )
-                continue
-
+                return False
             melde_zwischenstand(
                 f"BIP-158 {name}: Block {von:,}–{bis:,} "
                 f"({len(scripts)} Keys)".replace(",", ".")
@@ -1703,12 +1732,10 @@ class BIP158Scanner:
                 cache_dir=cache_dir,
                 stats=filter_stats,
             )
-            abgebrochen = False
             for zeilen in geladen:
                 self._check_abbruch()
                 if is_list_abort_requested():
-                    abgebrochen = True
-                    break
+                    return True
                 for h, block_hash, _blob, roh in zeilen:
                     self._check_abbruch()
                     display = hash_to_hex(block_hash)
@@ -1722,7 +1749,47 @@ class BIP158Scanner:
                         h, display, roh, name,
                         provisional=True,
                     )
-            if abgebrochen or is_list_abort_requested():
+            return is_list_abort_requested()
+
+        for name, von, bis, scripts in passe:
+            from display import is_list_abort_requested
+
+            self._check_abbruch()
+            if is_list_abort_requested():
+                self._log("BIP-158 abgebrochen.")
+                break
+
+            # Historie-Pass beim Erstscan: Präfix wächst mit jedem Treffer,
+            # bis über dem höchsten Index eine leere Lücke liegt.
+            if name == "historie" and erstscan and xpub:
+                from core.bip158_wallet import naechste_historie_scripts
+
+                schon_hist: set[bytes] = set()
+                abgebrochen = False
+                for runde in range(max(1, max_index)):
+                    neue = naechste_historie_scripts(
+                        xpub, hit_scripts, schon_hist,
+                        gap_limit=gap_limit,
+                        max_index=max_index,
+                        include_change=include_change,
+                    )
+                    if not neue:
+                        break
+                    schon_hist |= neue
+                    if runde:
+                        self._log(
+                            f"BIP-158 Historie erweitert: {len(neue)} weitere Keys"
+                        )
+                    abgebrochen = _filterpass(name, von, bis, frozenset(neue))
+                    if abgebrochen:
+                        break
+                if abgebrochen:
+                    self._log("BIP-158 abgebrochen.")
+                    break
+                continue
+            if name == "historie" and erstscan:
+                scripts = frozenset(hit_scripts | gap0 | set(scripts))
+            if _filterpass(name, von, bis, frozenset(scripts)):
                 self._log("BIP-158 abgebrochen.")
                 break
 

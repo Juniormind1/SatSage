@@ -1281,7 +1281,9 @@ def baue_p2p_utxo_fetch(
                     client,
                     xpubs,
                     max_addresses=int(max_addr),
+                    max_addresses_by_xpub=kw.get("max_addresses_by_xpub"),
                     on_utxos_update=kw.get("on_utxos_update"),
+                    gruppen=kw.get("gruppen"),
                 )
             finally:
                 try:

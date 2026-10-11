@@ -74,6 +74,44 @@ class TestHistoriePraefix(unittest.TestCase):
         self.assertNotIn(_spk(xpub, 0, 20), out)
 
 
+class TestBestandGleicherBlock(unittest.TestCase):
+    def test_ausgabe_im_selben_block_bleibt_draussen(self):
+        from core.bip158_scan import _bestand_nach_block
+
+        bestand = {"alt:0": "bleibt"}
+        _bestand_nach_block(
+            bestand,
+            {"neu:1": "entsteht", "gleich:0": "entsteht-und-geht"},
+            {"gleich:0": "spender", "alt:0": "spender"},
+        )
+        self.assertEqual(bestand, {"neu:1": "entsteht"})
+
+
+class TestHistorieWaechst(unittest.TestCase):
+    def test_zweiter_durchgang_nimmt_den_hoeheren_treffer_mit(self):
+        from core.bip158_wallet import naechste_historie_scripts
+
+        xpub = _test_xpub()
+        erste = naechste_historie_scripts(
+            xpub, set(), set(), gap_limit=20, max_index=200,
+        )
+        self.assertIn(_spk(xpub, 0, 19), erste)
+        self.assertNotIn(_spk(xpub, 0, 20), erste)
+        zweite = naechste_historie_scripts(
+            xpub, {_spk(xpub, 0, 30)}, erste, gap_limit=20, max_index=200,
+        )
+        self.assertIn(_spk(xpub, 0, 50), zweite)
+        self.assertNotIn(_spk(xpub, 0, 19), zweite)
+        self.assertNotIn(_spk(xpub, 0, 51), zweite)
+        self.assertEqual(
+            naechste_historie_scripts(
+                xpub, {_spk(xpub, 0, 30)}, erste | zweite,
+                gap_limit=20, max_index=200,
+            ),
+            set(),
+        )
+
+
 class TestErsatzPeerLock(unittest.TestCase):
     def test_neuer_peer_nach_abbruch_ist_kein_keyerror(self):
         from unittest.mock import patch

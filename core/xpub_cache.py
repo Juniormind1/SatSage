@@ -1373,6 +1373,19 @@ def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
         return False
     flag = roh.get("bip158_fullscan_ok")
     if flag is True:
+        # P2P-Bestand gilt erst fertig, wenn die Historie mit derselben
+        # Lücke lief wie der Electrs-UTXO-Scan. Ältere Läufe mit der
+        # kurzen Lücke 20 haben das Flag gesetzt, ohne die Kette zu Ende
+        # zu beobachten. Das gilt für jedes xpub, nicht für eines.
+        if str(roh.get("source") or "") == "bip158":
+            from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
+
+            try:
+                gap = int(roh.get("bip158_scan_gap") or 0)
+            except (TypeError, ValueError):
+                gap = 0
+            if gap < UTXO_SCAN_GAP_LIMIT:
+                return False
         return True
     if flag is False:
         return False
@@ -1572,6 +1585,18 @@ def save_xpub_utxo_cache(
         payload["bip158_fullscan_ok"] = bool(bip158_fullscan_ok)
     elif "bip158_fullscan_ok" in roh_bisher:
         payload["bip158_fullscan_ok"] = bool(roh_bisher["bip158_fullscan_ok"])
+    if payload.get("bip158_fullscan_ok") is True and payload.get("source") == "bip158":
+        from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
+
+        payload["bip158_scan_gap"] = UTXO_SCAN_GAP_LIMIT
+    elif (
+        payload.get("source") == "bip158"
+        and roh_bisher.get("bip158_scan_gap") is not None
+    ):
+        try:
+            payload["bip158_scan_gap"] = int(roh_bisher["bip158_scan_gap"])
+        except (TypeError, ValueError):
+            pass
     gescannt = {
         str(a) for a in (roh_bisher.get("scanned_addresses") or []) if a
     }

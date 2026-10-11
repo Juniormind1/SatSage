@@ -60,6 +60,15 @@ class TestTurboPasses(unittest.TestCase):
             )
         )
         self.assertTrue(main.bip158_fullscan_ist_fertig({"bip158_fullscan_ok": True}))
+        self.assertTrue(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "fulcrum",
+        }))
+        self.assertFalse(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "bip158",
+        }))
+        self.assertTrue(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "bip158", "bip158_scan_gap": 100,
+        }))
         self.assertTrue(main.bip158_fullscan_ist_fertig({"scan_tip_height": 800_000}))
         self.assertFalse(main.bip158_fullscan_ist_fertig({"scan_tip_height": 0}))
 

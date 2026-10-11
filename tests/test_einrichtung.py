@@ -608,6 +608,18 @@ class TestOberflaeche(unittest.TestCase):
             self.html.find('id="herkunft-tief-knopf"', gruppe),
             self.html.find('id="verlauf-knopf"', gruppe),
         )
+        self.assertLess(
+            self.html.find('id="verlauf-knopf"', gruppe),
+            self.html.find("wallet.allWalletsPrefix", gruppe),
+        )
+        self.assertLess(
+            self.html.find("wallet.allWalletsPrefix", gruppe),
+            self.html.find('id="utxos-alle-knopf"', gruppe),
+        )
+        self.assertIn(">Alle Wallets:</span>", self.html)
+        self.assertIn(">UTXOs<", self.html)
+        self.assertIn("starteUtxosAlle", self.wallets_js)
+        self.assertIn("starteUtxosAlle", self.chrome_js)
         # Auch bei „Wallets immer aktuell halten“ sichtbar (leichter Tip-Nachzug).
         self.assertNotIn("tipSync.hidden = autoAktuell", self.wallets_js)
         self.assertIn("tipSync.hidden = false", self.wallets_js)

@@ -245,6 +245,30 @@ def scripts_mit_gap_um_treffer(
     return out
 
 
+def naechste_historie_scripts(
+    xpub: str,
+    hit_scripts: set[bytes],
+    schon: set[bytes],
+    *,
+    gap_limit: int = DEFAULT_GAP_LIMIT,
+    max_index: int = DEFAULT_MAX_INDEX,
+    include_change: bool = True,
+) -> set[bytes]:
+    """Noch nicht beobachtete Historie-Scripts nach dem aktuellen Präfix.
+
+    Leer, wenn ``0 … höchster Treffer + Gap`` schon im Filter war. Der
+    Erstscan ruft das erneut auf, sobald ein Durchgang einen höheren Index
+    getroffen hat — eine Lücke bis *gap_limit* bleibt damit nicht dunkel.
+    """
+    ziel = scripts_mit_gap_um_treffer(
+        xpub,
+        hit_scripts,
+        gap_limit=gap_limit,
+        max_index=max_index,
+        include_change=include_change,
+    )
+    return set(ziel) - set(schon or ())
+
 
 def create_bip158_client_from_env(
     env: dict[str, str],
@@ -869,13 +893,17 @@ def _uebernimm_scan_ergebnis(
     utxos: list[dict],
     *,
     on_utxos_update,
+    gruppen: dict[str, list[dict]] | None = None,
 ) -> None:
     from core.xpub_cache import merke_bip158_verlauf
     from display import melde_zwischenstand
 
     _LAST_SCAN_TIPS[xpub] = int(result.stop_height)
+    vorher = len(utxos)
     for output in result.outputs:
         utxos.append(_matched_output_to_utxo(output))
+    if gruppen is not None:
+        gruppen.setdefault(xpub, []).extend(utxos[vorher:])
     if on_utxos_update:
         on_utxos_update(list(utxos))
     if client.cache_dir is not None and result.verlauf:
@@ -892,15 +920,23 @@ def fetch_wallet_utxos_bip158(
     max_addresses: int = DEFAULT_MAX_ADDRESSES,
     max_addresses_by_xpub: dict[str, int] | None = None,
     on_utxos_update=None,
+    gruppen: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     """
     UTXOs über Compact Filter.
 
     Mehr als ein xPub: ein gemeinsamer Filterdurchgang (``scan_union``),
     Zuordnung danach je Wallet. Ein xPub bleibt der Einzelscan.
+
+    *gruppen*: wenn gesetzt, je xPub die eigenen UTXOs (dieselben Dicts
+    wie in der flachen Rückgabe). Leere Wallets stehen als leere Liste.
     """
     from display import Bip158ProgressLine, melde_zwischenstand
+    from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
 
+    if gruppen is not None:
+        for xpub in xpubs:
+            gruppen.setdefault(xpub, [])
     plaene = [(xpub, scan_start_fuer_xpub(client, xpub)) for xpub in xpubs]
     if len(plaene) > 1:
         return _fetch_wallet_utxos_union(
@@ -909,6 +945,7 @@ def fetch_wallet_utxos_bip158(
             max_addresses=max_addresses,
             max_addresses_by_xpub=max_addresses_by_xpub,
             on_utxos_update=on_utxos_update,
+            gruppen=gruppen,
         )
 
     utxos: list[dict] = []
@@ -942,6 +979,7 @@ def fetch_wallet_utxos_bip158(
         try:
             result = client.scanner.scan_from_xpub(
                 xpub,
+                gap_limit=UTXO_SCAN_GAP_LIMIT,
                 max_index=max(xpub_max // 2, 1),
                 start_height=plan["start"],
                 used_scripts=plan["used"],
@@ -952,7 +990,8 @@ def fetch_wallet_utxos_bip158(
         finally:
             progress_line.finish()
         _uebernimm_scan_ergebnis(
-            client, xpub, result, utxos, on_utxos_update=on_utxos_update,
+            client, xpub, result, utxos,
+            on_utxos_update=on_utxos_update, gruppen=gruppen,
         )
     fertig = f"BIP-158: {len(utxos)} unspent UTXO(s) nach Filter-Scan"
     print(f"\n{fertig}", flush=True)
@@ -967,8 +1006,10 @@ def _fetch_wallet_utxos_union(
     max_addresses: int,
     max_addresses_by_xpub: dict[str, int] | None,
     on_utxos_update,
+    gruppen: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     from display import Bip158ProgressLine, melde_zwischenstand
+    from core.wallet_sync_engine import UTXO_SCAN_GAP_LIMIT
 
     wallets = []
     for xpub, plan in plaene:
@@ -988,6 +1029,7 @@ def _fetch_wallet_utxos_union(
             "xpub": xpub,
             "start_height": plan["start"],
             "used_scripts": plan["used"],
+            "gap_limit": UTXO_SCAN_GAP_LIMIT,
             "max_index": max(xpub_max // 2, 1),
             "seed_outputs": plan["seed_out"] or None,
             "seed_verlauf": plan["seed_verlauf"] or None,
@@ -1014,7 +1056,8 @@ def _fetch_wallet_utxos_union(
         if result is None:
             continue
         _uebernimm_scan_ergebnis(
-            client, xpub, result, utxos, on_utxos_update=on_utxos_update,
+            client, xpub, result, utxos,
+            on_utxos_update=on_utxos_update, gruppen=gruppen,
         )
     fertig = f"BIP-158: {len(utxos)} unspent UTXO(s) nach Filter-Scan"
     print(f"\n{fertig}", flush=True)

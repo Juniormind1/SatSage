@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallets · Alle Wallets:** Rechts neben **Historie** steht „Alle Wallets:“ und der Knopf **UTXOs**. Ein Lauf für jedes ableitbare Wallet. Ist Compact-Filter die einzige Bestandsquelle, ein gemeinsamer Durchgang. Sonst Electrs im LAN (Wallet für Wallet) oder ein `scantxoutset`, wenn der Node verbunden ist.
+- **P2P · UTXO-Bestand:** Die Historie nutzt dieselbe Lücke 100 wie der Electrs-UTXO-Scan und läuft weiter, wenn ein Treffer das Präfix nach oben schiebt. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt nicht im Bestand. Ein früherer P2P-Lauf ohne diese Lücke gilt nicht mehr als fertig; der nächste P2P-Scan holt den Bestand neu. Electrs-Caches bleiben gültig.
 - **Bedienung:** Der Nutzerweg ist die Web-GUI. Das Terminal daneben ist nur 1 Status, 2 Browser öffnen, 3 Server stoppen. `main.py` ist keine zweite Oberfläche.
 - **P2P · nur UTXO-Bestand:** Compact Filter suchen den Bestand wieder, und nur dann, wenn der eigene Electrum-Server, Bitcoin Core · RPC und scantxoutset nicht verbunden sind. Verbunden heißt: die Quelle antwortet, nicht bloß ein Eintrag in der `.env`. Herkunft, Verlauf und der Header-Vorab bleiben aus. Die Zeile in den Datenquellen ist wieder da. Schlägt die P2P-Suche fehl, bleibt der öffentliche Gap-Scan der nächste Weg.
 - **P2P · Regtest:** Im Regtest verbindet Compact Filter nur den bitcoind (Port 18444, Vorgabe `127.0.0.1`). Merk-Liste und DNS-Seeds bleiben aus. Auf Mainnet, Testnet und Signet sucht P2P weiter alle erreichbaren Peers.

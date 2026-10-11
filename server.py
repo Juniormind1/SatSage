@@ -1017,6 +1017,7 @@ from httpserver.api.source import (  # noqa: E402
     api_local_core_accept,
     api_oeffentliche_electrum,
     api_rescan,
+    api_rescan_alle,
     api_mempool_probe,
     api_save_mempool,
     api_save_source,
@@ -1727,6 +1728,8 @@ class Handler(
             return 202, api_p2p_walk_abgleich(state)
         if teile == ["jobs", "rescan"] and methode == "POST":
             return 202, api_rescan(state, self._body())
+        if teile == ["jobs", "rescan-alle"] and methode == "POST":
+            return 202, api_rescan_alle(state)
         if teile == ["gui-bereit"] and methode == "POST":
             # Oberfläche kann „Aktualisieren“ — Start-Nachzug darf loslegen.
             state.merke_gui_bereit()

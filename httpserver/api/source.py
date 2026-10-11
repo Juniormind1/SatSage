@@ -826,6 +826,147 @@ def api_rescan(state: AppState, payload: dict) -> dict:
         raise ApiError(409, str(exc)) from exc
 
 
+# Kennung in der Scan-Warteschlange. Kein Wallet trägt diese ID (Hash).
+ALLE_WALLETS_SCAN_ID = "alle"
+
+
+def api_rescan_alle(state: AppState) -> dict:
+    """UTXO-Bestand aller ableitbaren Wallets in einem Warteschlangen-Job.
+
+    P2P als einzige Quelle: ein gemeinsamer Filterdurchgang. Sonst der
+    schnellste Bestandsweg (Electrs im LAN, sonst ein scantxoutset).
+    """
+    from server import (
+        ApiError,
+        ScanSchonGeplant,
+        _schaerfe_empfang_nach_sync,
+        main,
+        threading,
+    )
+
+    wallets = list(state.analyse_entries)
+    if not wallets:
+        raise ApiError(400, "Keine Wallets zum Scannen.")
+
+    def lauf(job):
+        from core.jobs import Fortschritt, herzschlag
+        from core.wallet_sync_engine import sammel_utxo_modus
+
+        stand = Fortschritt(job)
+        halt = threading.Event()
+        threading.Thread(
+            target=herzschlag, args=(stand, halt), daemon=True,
+        ).start()
+        fetchers = None
+        try:
+            stand.phase(f"Verbinde für {len(wallets)} Wallets…")
+            args = state.args_namespace()
+            args.xpubs = [e.analyse_schluessel for e in wallets]
+            args.rescan = True
+            werte = state.env().values()
+            try:
+                quelle, backend = main._setup_blockchain_client(args, werte)
+            except SystemExit:
+                from core.chain_sources import fetchers_fuer_utxo_entdeckung
+
+                ersatz = fetchers_fuer_utxo_entdeckung(
+                    werte,
+                    args,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
+                if ersatz is None:
+                    raise
+                quelle, fetchers = ersatz
+                backend = None
+            job.raise_if_cancelled()
+            if fetchers is None:
+                fetchers = main._build_blockchain_fetchers(
+                    quelle, backend, args, state.wallet_ctx,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
+            fulcrum = fetchers.get("fulcrum")
+            modus = sammel_utxo_modus(werte, fulcrum)
+            if isinstance(job.meta, dict):
+                job.meta["source"] = "bip158" if modus == "p2p" else (
+                    "bitcoind" if modus == "scantxoutset" else quelle
+                )
+            max_by = {
+                e.analyse_schluessel: int(e.max_addresses)
+                for e in wallets
+            }
+
+            def max_addresses_for(xpub: str) -> int:
+                return int(max_by.get(xpub) or 0) or 20
+
+            def on_utxos_update(stand_utxos: list) -> None:
+                n = len(stand_utxos or [])
+                job.result = {"utxo_count": n, "partial": True}
+                wort = "UTXO" if n == 1 else "UTXOs"
+                stand.tick(f"{n} {wort} bisher gefunden…")
+
+            gefunden, quelle_lauf = wallet_sync_engine.scanne_alle_xpubs_utxo(
+                [e.analyse_schluessel for e in wallets],
+                fetchers["fetch_wallet_utxos"],
+                state.cache_dir,
+                quelle,
+                max_addresses_for=max_addresses_for,
+                wallet=state.wallet_ctx,
+                fulcrum=fulcrum,
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+                on_utxos_update=on_utxos_update,
+                env=werte,
+                immutable_cache_dir=state.immutable_cache_dir,
+                start_height=getattr(args, "bip158_start", None),
+            )
+            if isinstance(job.meta, dict):
+                job.meta["source"] = quelle_lauf
+            job.raise_if_cancelled()
+            n_empfang = _schaerfe_empfang_nach_sync(
+                state,
+                wallets,
+                fulcrum=fulcrum,
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+            )
+            n = len(gefunden)
+            wort = "UTXO" if n == 1 else "UTXOs"
+            stand.phase(
+                f"{n} {wort} in {len(wallets)} Wallets."
+                + (" Empfangsadresse per Electrs geschärft." if n_empfang else "")
+            )
+            return {
+                "utxo_count": n,
+                "wallet_count": len(wallets),
+                "partial": False,
+                "source": quelle_lauf,
+                "empfang_scharf": n_empfang,
+            }
+        finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
+            halt.set()
+            stand.close()
+
+    try:
+        return state.scan_queue.einreihen(
+            kind="rescan",
+            wallet_id=ALLE_WALLETS_SCAN_ID,
+            wallet_name="Alle Wallets",
+            label="UTXO-Scan alle Wallets",
+            factory=lauf,
+        )
+    except ScanSchonGeplant as exc:
+        raise ApiError(409, str(exc)) from exc
+
+
 def api_header_vorab(state: AppState) -> dict:
     """Startet den Header-Download, wenn die Datei noch fehlt."""
     from server import (

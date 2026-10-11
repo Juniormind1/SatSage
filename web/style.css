@@ -1152,6 +1152,9 @@ button, input, select { font: inherit; color: inherit; }
 html[data-theme="dark"] .utxo-aktionen-praefix {
   color: #fff;
 }
+.utxo-aktionen-praefix-alle {
+  margin-left: 8px;
+}
 .meta { margin: 2px 0 0; color: var(--blass); font-size: 12px; }
 
 /* ---------- Bedienelemente ---------- */

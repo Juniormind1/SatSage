@@ -3402,10 +3402,19 @@ function scanZielWalletId() {
   return "";
 }
 
+const ALLE_WALLETS_SCAN_ID = "alle";
+
 function scanBetrifftDieseAnsicht() {
   if (Zustand.ansicht !== "wallet" || !Zustand.walletId) return false;
   const ziel = scanZielWalletId();
   return Boolean(ziel) && ziel === String(Zustand.walletId);
+}
+
+/** Sammelscan schreibt jedes Wallet. Die offene Ansicht danach neu laden. */
+function scanTrifftOffeneWallet(scanId) {
+  if (Zustand.ansicht !== "wallet" || !Zustand.walletId || !scanId) return false;
+  return String(Zustand.walletId) === String(scanId)
+    || String(scanId) === ALLE_WALLETS_SCAN_ID;
 }
 
 /** „für „Name““ nur, wenn der Scan nicht das gerade offene Wallet ist. */
@@ -3499,6 +3508,7 @@ function i18nTitel(el) {
 function setzeWalletScanGesperrt() {
   const rescan = $("#rescan-knopf");
   const verlauf = $("#verlauf-knopf");
+  const alleUtxos = $("#utxos-alle-knopf");
   const tipSync = $("#tip-sync-knopf");
   const tief = $("#herkunft-tief-knopf");
   const wid = Zustand.walletId;
@@ -3519,6 +3529,13 @@ function setzeWalletScanGesperrt() {
     verlauf.title = verlauf.disabled
       ? t("nav.jobAlreadyRunning")
       : i18nTitel(verlauf);
+  }
+  if (alleUtxos) {
+    const alleGeplant = schonGeplant({ id: ALLE_WALLETS_SCAN_ID, art: "utxo" });
+    alleUtxos.disabled = alleGeplant;
+    alleUtxos.title = alleUtxos.disabled
+      ? t("nav.jobAlreadyRunning")
+      : i18nTitel(alleUtxos);
   }
   if (tipSync) {
     setzeTipSyncSichtbarkeit();
@@ -3760,6 +3777,53 @@ function starteVerlaufsscan() {
   stelleScanAn("verlauf");
 }
 
+/** Alle Wallets: ein Lauf. P2P nur gemeinsam, sonst der schnellste Bestandsweg. */
+async function starteUtxosAlle() {
+  const ziel = {
+    id: ALLE_WALLETS_SCAN_ID,
+    name: t("wallet.allWalletsName"),
+    art: "utxo",
+  };
+  if (schonGeplant(ziel)) {
+    logZeile(t("nav.jobAlreadyRunning"), undefined, ziel.name);
+    setzeWalletScanGesperrt();
+    return;
+  }
+  logZeile(t("wallet.allWalletsUtxosStarted"), undefined, ziel.name);
+  const knopf = $("#utxos-alle-knopf");
+  if (knopf) knopf.disabled = true;
+  try {
+    const job = await api("/jobs/rescan-alle", { methode: "POST", daten: {} });
+    if (job.queue_status === "queued" || job.status === "queued") {
+      logZeile(
+        `${t("wallet.allWalletsName")} in die Warteschlange.`,
+        undefined,
+        ziel.name,
+      );
+      await ladeJobsNav();
+      setzeWalletScanGesperrt();
+      return;
+    }
+    bindeWalletScanJob(job, ziel);
+    logZeile(
+      "Browser darf geschlossen werden — Server und Scan laufen im Terminal weiter.",
+      undefined,
+      ziel.name,
+    );
+    await ladeJobsNav();
+  } catch (fehler) {
+    if (fehler && fehler.status === 409) {
+      logZeile(fehler.message || t("nav.jobAlreadyRunning"), true, ziel.name);
+      setzeWalletScanGesperrt();
+      await ladeJobsNav();
+      return;
+    }
+    if (knopf) knopf.disabled = false;
+    logZeile(fehler.message || String(fehler), true, ziel.name);
+    beendeRescan("", true);
+  }
+}
+
 /** Inkrementell bis Chain-Tip — kein Fullscan (anders als UTXO-Scan). */
 async function starteTipSync() {
   const wid = Zustand.walletId;
@@ -3925,7 +3989,7 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   if (utxoZahl != null) Zustand.scanUtxoZahl = utxoZahl;
   try {
     await ladeConfig();
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
+    if (scanTrifftOffeneWallet(scanId)) {
       await zeigeWallet(Zustand.walletId);
     } else {
       zeichneNav();
@@ -4164,7 +4228,7 @@ async function pruefeWalletScan() {
       Zustand.traceListe = null;
       pagerCachesVerwerfen();
       await ladeConfig();
-      if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
+      if (scanTrifftOffeneWallet(scanId)) {
         await zeigeWallet(Zustand.walletId);
       } else {
         zeichneNav();
@@ -4193,7 +4257,7 @@ async function pruefeWalletScan() {
 async function erfrischeWalletNachScan(scanId) {
   try {
     await ladeConfig();
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
+    if (scanTrifftOffeneWallet(scanId)) {
       await zeigeWallet(Zustand.walletId);
     } else {
       zeichneNav();

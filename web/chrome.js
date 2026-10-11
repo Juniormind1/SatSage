@@ -597,6 +597,7 @@ async function start() {
   $("#tip-sync-knopf")?.addEventListener("click", starteTipSync);
   $("#rescan-knopf").addEventListener("click", starteRescan);
   $("#verlauf-knopf").addEventListener("click", starteVerlaufsscan);
+  $("#utxos-alle-knopf")?.addEventListener("click", starteUtxosAlle);
   $("#rescan-abbruch").addEventListener("click", brichRescanAb);
   $("#hinzufuegen").addEventListener("click", fuegeWalletHinzu);
   $("#deskriptor-import").addEventListener("click", oeffneDeskriptorImport);
