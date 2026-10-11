@@ -31,6 +31,43 @@ def _ohne_live_p2p():
     )
 
 
+class TestElectrumSpurVerbunden(unittest.TestCase):
+    """Herkunft braucht eine schon stehende Electrum-Verbindung, keine Suche."""
+
+    def _ohne_watch(self):
+        return mock.patch(
+            "core.wallet_watch.wallet_watch_status",
+            return_value={},
+        )
+
+    def test_p2p_und_core_zaehlen_nicht(self):
+        import core.chain_sources as chain_sources
+
+        quellen = [
+            {"key": "bip158", "reachable": True, "peer_count": 4},
+            {"key": "own_core", "reachable": True, "peer_count": 1},
+            {"key": "own_fulcrum", "reachable": False, "peer_count": 0},
+        ]
+        with self._ohne_watch():
+            self.assertFalse(
+                chain_sources.electrum_fuer_spur_verbunden({}, quellen),
+            )
+
+    def test_eigener_oder_oeffentlicher_electrum(self):
+        import core.chain_sources as chain_sources
+
+        with self._ohne_watch():
+            self.assertTrue(chain_sources.electrum_fuer_spur_verbunden({}, [
+                {"key": "own_fulcrum", "reachable": True},
+            ]))
+            self.assertTrue(chain_sources.electrum_fuer_spur_verbunden({}, [
+                {"key": "clearnet", "peer_count": 2},
+            ]))
+            self.assertFalse(chain_sources.electrum_fuer_spur_verbunden({}, [
+                {"key": "public_onion", "peer_count": 0},
+            ]))
+
+
 class TestEigeneElectrsIpParallel(unittest.TestCase):
     """Eigene IP: vier Versuche gleichzeitig, erster Treffer, kein Timeout-Stau."""
 

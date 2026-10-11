@@ -440,6 +440,9 @@ def api_sanctions_check(state: AppState, payload: dict) -> dict:
         return ergebnis
 
     namen = ", ".join(e.display_name for e in ziele)
+    from httpserver.api.trace import verlange_electrum_fuer_spur
+
+    verlange_electrum_fuer_spur(state)
     job = state.jobs.start(
         "sanctions-check",
         f"Sanktionsprüfung {namen} ({max_hops} Hops)",

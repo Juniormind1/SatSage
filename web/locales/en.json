@@ -174,6 +174,8 @@
   "common.wallet": "Wallet",
   "common.wallets": "Wallets",
   "common.yes": "Yes",
+  "dialog.electrumSpur.body": "P2P can only find UTXOs. Provenance and history need an Electrum server, private or public.",
+  "dialog.electrumSpur.title": "Electrum required",
   "dialog.onchain.body": "SatSage reconstructs from the blockchain when sats reached or left these wallet addresses. That is an on-chain record, not a complete proof of acquisition. It does not replace exchange histories, purchase receipts, bank statements, or similar documents — it can only complement them. Whether a cut-off date or holding period applies is not decided by this program. Whether spending green sats is actually tax-free has not been conclusively settled. No one accepts liability if taxes nevertheless become due.",
   "dialog.onchain.dontShow": "Don't show again",
   "dialog.onchain.okTitle": "Confirms the notice. With the box checked it will not appear again on this installation.",

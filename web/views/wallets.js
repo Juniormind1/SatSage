@@ -3886,6 +3886,13 @@ async function starteTipSync() {
 }
 
 async function starteScanFuer(ziel) {
+  if (
+    ziel.art === "verlauf"
+    && typeof electrumSpurBlockiert === "function"
+    && electrumSpurBlockiert()
+  ) {
+    return;
+  }
   if (ziel.art === "utxo" && brauchtBip158Startdatum(ziel.id)) {
     const wallet = (Zustand.config?.wallets || []).find((w) => w.id === ziel.id);
     const datum = await frageScanDatum(wallet);

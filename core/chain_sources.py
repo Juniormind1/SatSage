@@ -1179,6 +1179,46 @@ def _schliesse_fulcrum(client) -> None:
         pass
 
 
+#: Herkunft, Historie, Klären und andere Spuren. Kein Suchauftrag.
+ELECTRUM_SPUR_FEHLT = (
+    "P2P kann nur UTXOs finden, Herkunft und Historie erfordern "
+    "electrum Server, egal ob privat oder öffentlich."
+)
+
+
+def electrum_fuer_spur_verbunden(
+    env: dict[str, str] | None = None,
+    quellen: list | None = None,
+) -> bool:
+    """True, wenn ein Electrum-Server schon verbunden ist.
+
+    Eigener Node oder öffentliche Server mit gezählten Peers. P2P und
+    Bitcoin Core zählen nicht. Es wird nichts neu angewählt und keine
+    öffentliche Liste durchsucht.
+    """
+    del env  # Verbindung steht oder nicht — kein erneuter Verbindungsversuch.
+    try:
+        from core.wallet_watch import wallet_watch_status
+
+        if wallet_watch_status().get("host"):
+            return True
+    except Exception:
+        pass
+    for eintrag in quellen or []:
+        if not isinstance(eintrag, dict):
+            continue
+        key = eintrag.get("key")
+        if key == "own_fulcrum" and eintrag.get("reachable") is True:
+            return True
+        if key in ("public_onion", "clearnet"):
+            try:
+                if int(eintrag.get("peer_count") or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
 def eigene_electrs_ist_verbunden(
     env: dict[str, str],
     fulcrum=None,

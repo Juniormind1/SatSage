@@ -150,6 +150,55 @@ async function pruefeSkripttyp(wallet, ausgabe, knopf) {
   }
 }
 
+/** Eigener Electrum-Server oder schon verbundene öffentliche Peers. */
+function electrumStehtFuerSpur() {
+  const quellen = (Zustand.config && Zustand.config.sources) || [];
+  for (const q of quellen) {
+    if (!q) continue;
+    if (q.key === "own_fulcrum" && q.reachable === true) return true;
+    if (
+      (q.key === "public_onion" || q.key === "clearnet")
+      && Number(q.peer_count || 0) > 0
+    ) {
+      return true;
+    }
+  }
+  const watch = Zustand.config && Zustand.config.wallet_watch;
+  return Boolean(watch && watch.host);
+}
+
+function zeigeElectrumSpurDialog() {
+  const dlg = $("#electrum-spur-dialog");
+  if (!dlg) {
+    meldung(t("dialog.electrumSpur.body"), "warn");
+    return;
+  }
+  if (!dlg.dataset.gebunden) {
+    dlg.dataset.gebunden = "1";
+    const ok = $("#electrum-spur-ok");
+    const zu = () => { dlg.hidden = true; };
+    if (ok) ok.addEventListener("click", zu);
+    dlg.addEventListener("click", (ev) => {
+      if (ev.target === dlg) zu();
+    });
+    dlg.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape" && ev.key !== "Enter") return;
+      ev.preventDefault();
+      zu();
+    });
+  }
+  dlg.hidden = false;
+  const ok = $("#electrum-spur-ok");
+  if (ok) ok.focus();
+}
+
+/** True: Aktion abgelehnt, Dialog ist offen. Kein Verbindungsversuch. */
+function electrumSpurBlockiert() {
+  if (electrumStehtFuerSpur()) return false;
+  zeigeElectrumSpurDialog();
+  return true;
+}
+
 function meldung(text, art) {
   const kasten = $("#speicher-meldung");
   kasten.className = `hinweis hinweis-${art}`;

@@ -148,6 +148,10 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
         ergebnis["aus_cache"] = True
         return mit_nav(ergebnis)
 
+    from httpserver.api.trace import verlange_electrum_fuer_spur
+
+    verlange_electrum_fuer_spur(state)
+
     def lauf(job):
         def fortschritt(text: str) -> None:
             job.progress(text, log=True)

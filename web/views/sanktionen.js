@@ -283,6 +283,9 @@ function bindeSanktionsCheckJob(jobId, opts = {}) {
 }
 
 async function starteSanktionsCheck() {
+  if (typeof electrumSpurBlockiert === "function" && electrumSpurBlockiert()) {
+    return;
+  }
   if (Zustand.sanktionsCheckJobId) {
     bindeSanktionsCheckJob(Zustand.sanktionsCheckJobId);
     return;

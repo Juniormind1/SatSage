@@ -777,18 +777,49 @@ class TestVerlaufJob(ApiTestBasis):
         )
         self.assertEqual(status, 404)
 
-    def test_einzelnes_wallet_steht_im_label(self):
+    def test_ohne_electrum_kein_suchlauf(self):
+        from core.chain_sources import ELECTRUM_SPUR_FEHLT
+
         kennung = self.wallet_id(BIP84_ZPUB)
         status, körper = self.anfrage(
             "/api/verlauf", methode="POST", daten={"wallet_id": kennung},
         )
+        self.assertEqual(status, 409)
+        self.assertEqual(körper["error"], ELECTRUM_SPUR_FEHLT)
+        self.assertFalse(any(j.kind == "verlauf" for j in self.state.jobs.list()))
+
+    def test_trace_ohne_cache_kein_suchlauf(self):
+        from core.chain_sources import ELECTRUM_SPUR_FEHLT
+
+        status, körper = self.anfrage(
+            "/api/trace",
+            methode="POST",
+            daten={"target": f"{txid('a1')}:0"},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(körper["error"], ELECTRUM_SPUR_FEHLT)
+        self.assertFalse(any(j.kind == "trace" for j in self.state.jobs.list()))
+
+    def test_einzelnes_wallet_steht_im_label(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/verlauf", methode="POST", daten={"wallet_id": kennung},
+            )
         self.assertEqual(status, 202)
         self.assertIn("Cold Storage", körper["label"])
         self.assertNotIn("Ledger", körper["label"])
         self.assertIn("log", körper)
 
     def test_ohne_id_trifft_alle_wallets(self):
-        status, körper = self.anfrage("/api/verlauf", methode="POST", daten={})
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage("/api/verlauf", methode="POST", daten={})
         self.assertEqual(status, 202)
         self.assertIn("aller Wallets", körper["label"])
 
@@ -1804,10 +1835,28 @@ class TestSanktionsCheck(ApiTestBasis):
             json.dumps(list(adressen)), encoding="utf-8"
         )
 
-    def test_ohne_listen_meldet_der_job_den_fehler(self):
+    def test_ohne_electrum_kein_suchlauf(self):
+        from core.chain_sources import ELECTRUM_SPUR_FEHLT
+
+        self.listen_hinterlegen()
         status, körper = self.anfrage(
-            "/api/sanctions/check", methode="POST", daten={"max_hops": 2}
+            "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
         )
+        self.assertEqual(status, 409)
+        self.assertEqual(körper["error"], ELECTRUM_SPUR_FEHLT)
+        self.assertFalse(any(
+            j.kind == "sanctions-check" for j in self.state.jobs.list()
+        ))
+        main.resolve_sanctions_preferred_pool.assert_not_called()
+
+    def test_ohne_listen_meldet_der_job_den_fehler(self):
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/sanctions/check", methode="POST", daten={"max_hops": 2}
+            )
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         self.assertEqual(job["status"], "failed")
@@ -1824,9 +1873,13 @@ class TestSanktionsCheck(ApiTestBasis):
         from core.sanctions import DEFAULT_SANKTION_MAX_HOPS_CAP
 
         self.listen_hinterlegen()
-        status, körper = self.anfrage(
-            "/api/sanctions/check", methode="POST", daten={"max_hops": 99}
-        )
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/sanctions/check", methode="POST", daten={"max_hops": 99}
+            )
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         # Ohne erreichbaren Sanktions-Server scheitert der Lauf — aber das
@@ -1835,9 +1888,13 @@ class TestSanktionsCheck(ApiTestBasis):
 
     def test_ohne_server_scheitert_der_job_ohne_netzzugriff(self):
         self.listen_hinterlegen()
-        status, körper = self.anfrage(
-            "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
-        )
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
+            )
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         self.assertEqual(job["status"], "failed")
@@ -1962,6 +2019,9 @@ class TestSanktionsCheckCache(ApiTestBasis):
         with mock.patch(
             "httpserver.api.labels_sanctions_exchange._sanctions_get_tx_pool",
             side_effect=pool,
+        ), mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
         ):
             status, körper = self.anfrage(
                 "/api/sanctions/check", methode="POST", daten={"max_hops": 1}

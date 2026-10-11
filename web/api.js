@@ -111,6 +111,13 @@ async function api(pfad, { methode = "GET", daten, timeoutMs, signal } = {}) {
     /* leerer Körper ist in Ordnung */
   }
   if (!antwort.ok) {
+    if (
+      antwort.status === 409
+      && /P2P kann nur UTXOs finden/.test(String(koerper.error || ""))
+      && typeof zeigeElectrumSpurDialog === "function"
+    ) {
+      zeigeElectrumSpurDialog();
+    }
     throw new ApiFehler(
       antwort.status,
       übersetzeServerMeldung(koerper.error || `HTTP ${antwort.status}`),

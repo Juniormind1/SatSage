@@ -73,6 +73,23 @@ def _job_ergebnis(
     return meta
 
 
+def verlange_electrum_fuer_spur(state) -> None:
+    """409, wenn weder eigener noch öffentlicher Electrum-Server verbunden ist.
+
+    Der Lauf darf danach nicht selbst eine Verbindung suchen.
+    """
+    from server import ApiError
+
+    from core.chain_sources import ELECTRUM_SPUR_FEHLT, electrum_fuer_spur_verbunden
+
+    if electrum_fuer_spur_verbunden(
+        state.env().values(),
+        getattr(state, "sources_last", None),
+    ):
+        return
+    raise ApiError(409, ELECTRUM_SPUR_FEHLT)
+
+
 def api_trace_alle(state: AppState, payload: dict) -> dict:
     """
     Verfolgt die Herkunft von UTXOs.
@@ -650,6 +667,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     else:
         titel = f"Herkunft für {len(offen)} UTXOs"
         art = "trace-alle"
+    verlange_electrum_fuer_spur(state)
     job = state.jobs.start(
         art,
         titel,
@@ -833,6 +851,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
             halt.set()
             stand.close()
 
+    verlange_electrum_fuer_spur(state)
     # Einzel-Wallet in die Scan-Pipeline; „alle Wallets“ parallel wie bisher
     # (kein wallet_id → kein Dedupe-Konflikt mit Einzelscans).
     if kennung and len(ziele) == 1:
@@ -1413,6 +1432,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     "adressen_seither": treffer.get("adressen_seither"),
                 }
 
+    verlange_electrum_fuer_spur(state)
     titel = f"Herkunft {txid[:12]}…:{vout}"
     if force and resume_origin is not None and followup is None:
         titel = f"Herkunft fortsetzen {txid[:12]}…:{vout}"

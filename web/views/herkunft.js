@@ -1171,6 +1171,19 @@ function gespeicherterKopf(gespeichert, utxo, zweig, klapp) {
 async function starteZweigTrace(
   utxo, zweig, klapp, followup = null, jobIdVorgabe = null, opts = null,
 ) {
+  if (
+    !jobIdVorgabe
+    && typeof electrumSpurBlockiert === "function"
+    && electrumSpurBlockiert()
+  ) {
+    if (zweig && zweig.dataset.geladen === "laeuft") zweig.dataset.geladen = "";
+    if (utxo && utxo.key && Zustand.traceJobs) {
+      const gemerkt = Zustand.traceJobs.get(utxo.key);
+      if (gemerkt === "wartet") Zustand.traceJobs.delete(utxo.key);
+    }
+    if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+    return;
+  }
   const force = Boolean(opts && opts.force);
   zweig.dataset.geladen = "laeuft";
   if (utxo && utxo.key && Zustand.traceJobs) {
@@ -3107,6 +3120,9 @@ function zeigeKlaerenLaeuftSchon() {
  * Ein Objekt ist ebenfalls ein Auftrag — Gelb hängt den grauen Lauf davor.
  */
 async function klaerenNachUngescannten(sammle, starte, nurIds) {
+  if (typeof electrumSpurBlockiert === "function" && electrumSpurBlockiert()) {
+    return;
+  }
   if (Zustand.herkunftAlleLaeuft) {
     zeigeKlaerenLaeuftSchon();
     return;
@@ -3427,6 +3443,9 @@ async function herkunftAllerUtxos(ziele = {
   erzwingen: false,
   graueAnteile: false,
 }) {
+  if (typeof electrumSpurBlockiert === "function" && electrumSpurBlockiert()) {
+    return;
+  }
   // Selector-String oder bereits aufgelöstes Element (Zeilen-„klären“).
   const knopf = typeof ziele.knopf === "string"
     ? $(ziele.knopf)

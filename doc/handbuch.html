@@ -476,7 +476,10 @@ füllt, sieht die Schritte sofort als erledigt:</p>
       (Fulcrum, electrs, ElectrumX) oder Bitcoin Core im eigenen Netz – schneller
       und privat. Ohne verbundenen eigenen Electrum-Server und ohne
       scantxoutset sucht der UTXO-Bestand über Compact Filter (BIP-158).
-      Herkunft und Verlauf nicht. Siehe
+      Herkunft, Historie, Klären und der Sanktionscheck brauchen einen
+      verbundenen Electrum-Server, den eigenen oder einen schon verbundenen
+      öffentlichen. Sonst erscheint ein Hinweis, und es wird nicht nach einem
+      Server gesucht. Siehe
       <a href="#datenquellen">Datenquellen und Privatsphäre</a>.</li>
   <li><strong>Block-Explorer eintragen (optional):</strong> eigene
       mempool.space-Instanz für Links zu UTXOs und Adressen, siehe
@@ -1432,7 +1435,10 @@ prüfen oder über <strong>Ergebnis verwerfen</strong> löschen.</p>
 <p>Sanktionsabfragen laufen über den <strong>eigenen Server, wenn er privat
 adressiert ist</strong> (LAN/Loopback — schnell, und die Anfragen nach
 gelisteten Fremdadressen verlassen das eigene Netz nicht), sonst über
-<strong>Clearnet-Fulcrum</strong>, unabhängig von der Wallet-Datenquelle.</p>
+<strong>Clearnet-Fulcrum</strong>, unabhängig von der Wallet-Datenquelle.
+Ist noch kein Electrum-Server verbunden, startet der Check nicht und
+sucht auch keine öffentlichen Server. Derselbe Hinweis wie bei Herkunft
+und Historie.</p>
 
 <p>Öffentlich konfigurierte eigene Server und Tor werden bewusst übersprungen:
 Sanktionsabfragen sollen nicht mit der eigenen Identität verknüpft werden.
@@ -1606,8 +1612,9 @@ eigener Electrum-Server → öffentliche Onions → Clearnet
 
 <p>Compact Filter (BIP-158) sind dabei keine Sitzungsquelle. Sie suchen nur
 den UTXO-Bestand, und nur solange der eigene Electrum-Server und
-scantxoutset nicht verbunden sind. Herkunft und Verlauf bleiben bei
-Electrs oder, nach Bestätigung, bei öffentlichen Electrum-Servern.</p>
+scantxoutset nicht verbunden sind. Herkunft, Verlauf und der
+Sanktionscheck bleiben bei einem schon verbundenen Electrum-Server.
+Ohne den erscheint ein Hinweis, und es wird nicht gesucht.</p>
 
 <p><strong>P2P-BIP-158 Erstscan:</strong> Zuerst das jüngste Fenster
 (~2016 Blöcke, TurboSync) mit der vollen Lookahead-Menge — danach die Historie

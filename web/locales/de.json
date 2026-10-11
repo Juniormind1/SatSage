@@ -174,6 +174,8 @@
   "common.wallet": "Wallet",
   "common.wallets": "Wallets",
   "common.yes": "Ja",
+  "dialog.electrumSpur.body": "P2P kann nur UTXOs finden, Herkunft und Historie erfordern electrum Server, egal ob privat oder öffentlich.",
+  "dialog.electrumSpur.title": "Electrum nötig",
   "dialog.onchain.body": "SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.",
   "dialog.onchain.dontShow": "Nicht nochmal anzeigen",
   "dialog.onchain.okTitle": "Bestätigt den Hinweis. Mit gesetztem Häkchen erscheint er auf dieser Installation nicht wieder.",

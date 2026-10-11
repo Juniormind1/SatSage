@@ -149,6 +149,24 @@
   </div>
 </div>
 
+<!-- Herkunft, Historie, Klären: ohne Electrum kein Suchlauf. -->
+<div id="electrum-spur-dialog" class="einrichtung" hidden>
+  <div class="einrichtung-karte" role="dialog" aria-modal="true"
+       aria-labelledby="electrum-spur-titel">
+    <h1 id="electrum-spur-titel" data-i18n="dialog.electrumSpur.title">Electrum nötig</h1>
+    <p data-i18n="dialog.electrumSpur.body">
+      P2P kann nur UTXOs finden, Herkunft und Historie erfordern
+      electrum Server, egal ob privat oder öffentlich.
+    </p>
+    <div class="einrichtung-knoepfe">
+      <button type="button" id="electrum-spur-ok" class="knopf knopf-primaer" autofocus
+              data-i18n="common.ok">
+        OK
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- P2P an, öffentliche Electrum noch erlaubt: höhere Privatsphäre anbieten. -->
 <div id="p2p-privatsphaere-dialog" class="einrichtung" hidden>
   <div class="einrichtung-karte" role="dialog" aria-modal="true"
