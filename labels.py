@@ -61,9 +61,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.paths import app_dir
+
 UTC = timezone.utc
 
-LABEL_CACHE_DIR = Path(__file__).resolve().parent / "label_cache"
+# Beschreibbar: im Binary neben der Executable (siehe core.paths.app_dir).
+LABEL_CACHE_DIR = app_dir() / "label_cache"
 
 # Feste Fassung statt „main": Die Dateien sollen sich nicht unter der Hand
 # ändern. Für eine neuere Ausgabe wird hier bewusst nachgezogen.
