@@ -1030,6 +1030,14 @@ class TestFifoNettoMax(unittest.TestCase):
           els["#fifo-ziel-adresse"].value = "bcrt1qfremd";
           pruefeFifoZielAdresse();
           await new Promise((r) => setTimeout(r, FIFO_ZIEL_ENTPRELLEN_MS + FIFO_NETTO_ENTPRELLEN_MS + 50));
+          // Nach der Adressprüfung kommt der Gebührenvorschlag und ändert den
+          // Netto-Schlüssel noch einmal (neues Entprellen). Bis dahin zeigt die
+          // Zeile bewusst das Brutto-Maximum — auf das fertige Netto warten.
+          for (let i = 0; i < 40 && !(Zustand.fifoNetto && Zustand.fifoNetto.zustand === "fertig"
+              && Zustand.fifoNetto.schluessel === fifoNettoSchluessel(Zustand.fifoSpend)); i += 1) {
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          await new Promise((r) => setTimeout(r, 0));
           process.stdout.write(JSON.stringify({
             vorher, eigen, nachMax,
             danach: {
@@ -1506,9 +1514,13 @@ class TestFifoPsbtErzeugen(unittest.TestCase):
           aus.gelb = zustand();   // Gebühr kam als Vorschlag (4 sat/vB)
           fee.value = "abc"; fifoFeeEingabe(); aus.ohneFee = zustand();
           fee.value = "2,5"; fifoFeeEingabe(); aus.mitFee = zustand();
+          // Fremde Adresse: grünes Maximum (50 000) gilt, +1 sperrt.
+          betrag.value = "50001"; pruefeFifoSpendBetrag(); aus.ueberMax = psbt.disabled;
+          betrag.value = "30000"; pruefeFifoSpendBetrag();
           adresse.value = "bcrt1qeigen"; pruefeFifoZielAdresse(); await pause();
           aus.gruen = zustand();
-          betrag.value = "50001"; pruefeFifoSpendBetrag(); aus.ueberMax = psbt.disabled;
+          // Eigenes Wallet (c2f04f7): Maximum = Gesamtsaldo, 50 001 ist frei.
+          betrag.value = "50001"; pruefeFifoSpendBetrag(); aus.eigenUeber50k = psbt.disabled;
           betrag.value = "30000"; pruefeFifoSpendBetrag();
           Zustand.fifoSpend.walletId = "w2"; aktualisiereFifoPsbtErzeugen();
           aus.multisig = zustand();
@@ -1522,6 +1534,7 @@ class TestFifoPsbtErzeugen(unittest.TestCase):
         self.assertFalse(erg["mitFee"][0])
         self.assertFalse(erg["gruen"][0])
         self.assertTrue(erg["ueberMax"])
+        self.assertFalse(erg["eigenUeber50k"])
         # Multisig: frei wie Single-Sig (der Server baut wsh/sh-wsh sortedmulti).
         self.assertEqual(erg["multisig"], [False, "wallet.fifoSpendPsbtTitle", "wallet.fifoSpendPsbtTitle"])
 
