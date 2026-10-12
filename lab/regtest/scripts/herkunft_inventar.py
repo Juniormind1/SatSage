@@ -192,6 +192,21 @@ def lade_inventar(pfad: Path = INVENTAR) -> dict[str, dict]:
     return soll
 
 
+def pruefe_inventar_tip(tip_aktuell: int, pfad: Path = INVENTAR) -> None:
+    """RuntimeError, wenn das Inventar nicht zum aktuellen Tip passt.
+
+    Sonst erscheinen UTXOs späterer Szenarien (z. B. Sanktions-Sinks) in
+    jeder Quelle als ``extra``, obwohl die Quellen richtig zählen.
+    """
+    roh = json.loads(pfad.read_text(encoding="utf-8"))
+    tip_inventar = roh.get("tip_height")
+    if tip_inventar is None or int(tip_inventar) != int(tip_aktuell):
+        raise RuntimeError(
+            f"Inventar veraltet: Tip {tip_inventar} im Inventar, "
+            f"Kette bei {tip_aktuell}. Zuerst herkunft_inventar.py."
+        )
+
+
 def vergleiche_herkunft(soll: dict, ist: dict) -> str | None:
     """None bei Deckung. Sonst ein kurzer Unterschied."""
     if soll == ist:

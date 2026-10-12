@@ -49,6 +49,7 @@ from infra_check import brauche  # noqa: E402
 from herkunft_inventar import (  # noqa: E402
     _signatur,
     lade_inventar,
+    pruefe_inventar_tip,
     vergleiche_bestand,
     vergleiche_herkunft,
 )
@@ -1011,6 +1012,9 @@ def main() -> int:
     leere_labor_cache()
     try:
         soll = lade_inventar()
+        from generate_scenarios import Rpc, choose_native
+
+        pruefe_inventar_tip(int(Rpc(choose_native(False)).call("getblockcount")))
     except (FileNotFoundError, RuntimeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

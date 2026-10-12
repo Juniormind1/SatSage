@@ -139,5 +139,33 @@ class TestP2pKlaeren(unittest.TestCase):
         }))
 
 
+class InventarTipTest(unittest.TestCase):
+    def _schreibe(self, tip):
+        import json
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        p = Path(d) / "inv.json"
+        p.write_text(json.dumps({"tip_height": tip, "utxos": []}), encoding="utf-8")
+        return p
+
+    def test_veraltet_bricht_ab(self):
+        from herkunft_inventar import pruefe_inventar_tip
+
+        with self.assertRaisesRegex(RuntimeError, "Inventar veraltet"):
+            pruefe_inventar_tip(291, self._schreibe(259))
+
+    def test_ohne_tip_bricht_ab(self):
+        from herkunft_inventar import pruefe_inventar_tip
+
+        with self.assertRaisesRegex(RuntimeError, "Inventar veraltet"):
+            pruefe_inventar_tip(291, self._schreibe(None))
+
+    def test_aktuell_ok(self):
+        from herkunft_inventar import pruefe_inventar_tip
+
+        pruefe_inventar_tip(291, self._schreibe(291))
+
+
 if __name__ == "__main__":
     unittest.main()
