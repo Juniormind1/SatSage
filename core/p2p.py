@@ -30,6 +30,8 @@ NODE_NETWORK = 1
 NODE_WITNESS = 8
 NODE_COMPACT_FILTERS = 64
 NODE_NETWORK_LIMITED = 1024
+#: Geprunte Nodes liefern nur so viele Blöcke (BIP 159).
+NETWORK_LIMITED_BLOCKS = 288
 USER_AGENT = "/SatSage:1.0/"
 DEFAULT_P2P_PORT = 8333
 #: Bitcoin Core lauscht im Regtest auf diesem P2P-Port.
@@ -104,10 +106,19 @@ class P2pGesperrt(ConnectionError):
     """P2P ist für Herkunft, Verlauf und Header-Vorab zu."""
 
 
+class PeerHatBlockNicht(ConnectionError):
+    """getdata kam als ``notfound`` zurück."""
+
+
 #: Tiefe von ``p2p_nur_utxo_entdeckung``. Prozessweit, damit Filter-Worker
 #: denselben Stand sehen (``threading.Thread`` kopiert kein ContextVar).
 _utxo_entdeckung_tiefe = 0
 _utxo_entdeckung_lock = threading.Lock()
+
+
+def p2p_socket_erlaubt() -> bool:
+    """True während ``p2p_nur_utxo_entdeckung``, sonst nur wenn P2P offen ist."""
+    return (not p2p_gesperrt()) or _utxo_entdeckung_laeuft()
 
 
 def p2p_gesperrt() -> bool:
@@ -367,7 +378,7 @@ class BitcoinPeer:
             if command == "block":
                 return payload
             if command == "notfound":
-                raise ConnectionError("Peer hat den Block nicht")
+                raise PeerHatBlockNicht("Peer hat den Block nicht")
 
     def fetch_tx(self, txid_internal: bytes) -> bytes:
         self.send("getdata", encode_getdata_tx(txid_internal))
@@ -379,6 +390,89 @@ class BitcoinPeer:
                 return payload
             if command == "notfound":
                 raise ConnectionError("Peer hat die Transaktion nicht")
+
+
+def _peer_services(peer) -> int:
+    try:
+        return int(getattr(peer, "services", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _peer_tip(peer) -> int:
+    try:
+        return int(getattr(peer, "start_height", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def peer_liefert_block(peer, hoehe: int) -> bool:
+    """Ob dieser Peer den vollen Block zu *hoehe* haben kann.
+
+    Compact Filter bleiben. ``NODE_NETWORK_LIMITED`` ohne ``NODE_NETWORK``
+    nur die letzten 288 Blöcke. Nach ``notfound``: ``historie_aus``.
+    Toter Socket: ``tot``.
+    """
+    if peer is None:
+        return False
+    if getattr(peer, "tot", False):
+        return False
+    hoehe_i = int(hoehe)
+    tip = _peer_tip(peer)
+    if getattr(peer, "historie_aus", False):
+        if tip <= 0:
+            return False
+        return hoehe_i > tip - NETWORK_LIMITED_BLOCKS
+    services = _peer_services(peer)
+    if services & NODE_NETWORK:
+        return True
+    if services & NODE_NETWORK_LIMITED:
+        if tip <= 0:
+            return True
+        return hoehe_i > tip - NETWORK_LIMITED_BLOCKS
+    return True
+
+
+def rumpf_peer_ist_verbraucht(grund: BaseException) -> bool:
+    """Dieser Socket hat den Block nicht oder ist tot — anderer Peer."""
+    cur: BaseException | None = grund
+    for _ in range(6):
+        if cur is None:
+            break
+        if isinstance(cur, PeerHatBlockNicht):
+            return True
+        msg = str(cur)
+        if "hat den Block nicht" in msg or "lieferte den Block nicht" in msg:
+            return True
+        cur = cur.__cause__
+    return False
+
+
+def naechster_block_peer(pool, hoehe: int, tried: set[int]):
+    """Erster Pool-Peer, der *hoehe* liefern kann und nicht in *tried* ist.
+
+    ``NODE_NETWORK`` vor Limited, damit der Heim-Node (oft geprunt, zuerst
+    verbunden) den Treffer-Block nicht blockiert.
+    """
+    voll: list = []
+    rest: list = []
+    for peer in pool or []:
+        if peer is None or id(peer) in tried:
+            continue
+        if not peer_liefert_block(peer, hoehe):
+            continue
+        if (
+            _peer_services(peer) & NODE_NETWORK
+            and not getattr(peer, "historie_aus", False)
+        ):
+            voll.append(peer)
+        else:
+            rest.append(peer)
+    if voll:
+        return voll[0]
+    if rest:
+        return rest[0]
+    return None
 
 
 def host_ist_lan(host: str) -> bool:
@@ -787,6 +881,29 @@ def demote_filter_peer(host: str, port: int) -> None:
         _FILTER_PEER_CACHE.remove(paar)
         _FILTER_PEER_CACHE.append(paar)
     _speichere_filter_peers_datei()
+
+
+def markiere_peer_block_ausfall(peer, grund: BaseException) -> None:
+    """Peer für alte getdata merken oder als tot ablegen. Filter bleibt."""
+    if peer is None:
+        return
+    notfound = False
+    cur: BaseException | None = grund
+    for _ in range(6):
+        if cur is None:
+            break
+        if isinstance(cur, PeerHatBlockNicht) or "hat den Block nicht" in str(cur):
+            notfound = True
+            break
+        cur = cur.__cause__
+    if notfound:
+        peer.historie_aus = True
+        host = str(getattr(peer, "host", "") or "").strip()
+        port = int(getattr(peer, "port", 0) or 0)
+        if host:
+            demote_filter_peer(host, port)
+        return
+    peer.tot = True
 
 
 def bekannte_filter_peers() -> list[tuple[str, int]]:

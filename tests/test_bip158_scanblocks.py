@@ -1457,6 +1457,141 @@ class TestBlockRumpfGegenIndex(unittest.TestCase):
                 ))
         self.assertEqual(len(aufrufe), BLOCK_RUMPF_VERSUCHE)
 
+    def test_async_nimmt_den_anderen_peer(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.p2p import NODE_NETWORK, PeerHatBlockNicht
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[str] = []
+        nachruecken: list[int] = []
+
+        class Schlecht:
+            host, port, services = "192.0.2.1", 8333, NODE_NETWORK
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("schlecht")
+                raise PeerHatBlockNicht("Peer hat den Block nicht")
+
+        class Gut:
+            host, port, services = "192.0.2.2", 8333, NODE_NETWORK
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("gut")
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher, patch(
+            "core.p2p.verbinde_compact_filter_peers",
+            side_effect=lambda **k: nachruecken.append(1) or [],
+        ):
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [Schlecht(), Gut()],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertEqual(aufrufe, ["schlecht", "gut"])
+        self.assertEqual(nachruecken, [])
+
+    def test_async_ueberspringt_limited_fuer_alte_hoehe(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.p2p import NODE_NETWORK, NODE_NETWORK_LIMITED
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[str] = []
+
+        class Limited:
+            host, port = "192.0.2.1", 8333
+            services = NODE_NETWORK_LIMITED
+            start_height = 100_000
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("limited")
+                raise AssertionError("geprunter Peer nicht für alte Blöcke")
+
+        class Voll:
+            host, port, services = "192.0.2.2", 8333, NODE_NETWORK
+            start_height = 100_000
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("voll")
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher, patch(
+            "core.p2p.verbinde_compact_filter_peers", return_value=[],
+        ):
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [Limited(), Voll()],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertEqual(aufrufe, ["voll"])
+
+    def test_async_sucht_ersatz_wenn_keiner_liefert(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.p2p import NODE_NETWORK, PeerHatBlockNicht
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[str] = []
+
+        class KeinBlock:
+            def __init__(self, name, host):
+                self.name = name
+                self.host = host
+                self.port = 8333
+                self.services = NODE_NETWORK
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append(self.name)
+                raise PeerHatBlockNicht("Peer hat den Block nicht")
+
+        class Ersatz:
+            host, port, services = "192.0.2.9", 8333, NODE_NETWORK
+
+            def fetch_block(self, _hash):
+                aufrufe.append("ersatz")
+                return roh
+
+        ersatz = Ersatz()
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher, patch(
+            "core.p2p.verbinde_compact_filter_peers", return_value=[ersatz],
+        ), patch(
+            "core.p2p.p2p_socket_erlaubt", return_value=True,
+        ):
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [KeinBlock("a", "192.0.2.1"), KeinBlock("b", "192.0.2.2")],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertIn("ersatz", aufrufe)
+        self.assertTrue(set(aufrufe) >= {"a", "b", "ersatz"})
+
     def test_abbruch_laesst_keinen_leeren_cache_stehen(self):
         import tempfile
         from pathlib import Path

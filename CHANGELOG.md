@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **P2P · Block-Peer:** Kommt der Treffer-Block nicht (`notfound` oder totter Socket), nimmt SatSage den nächsten schon verbundenen Peer. Ein geprunter Peer (`NODE_NETWORK_LIMITED`) bleibt für Compact Filter und liefert nur die letzten 288 Blöcke. Sind alle verbundenen Peers dafür unbrauchbar, sucht SatSage Ersatz unter den Kandidaten, die nach einem Scan-Abbruch oft in der Zählung stehen. Über Tor höchstens zwei Extra-Verbindungen, im Clearnet vier — nicht die ganze Liste auf einmal. Fünfmal derselbe Socket entfällt.
 - **P2P · Ab wann scannen?:** Der Dialog hat wie in den Datenquellen Datum und Blockhöhe nebeneinander; die Felder füllen sich gegenseitig (Datums-Umrechnung erst beim Verlassen des Feldes). Gap-Limit steht daneben, vorbelegt mit dem Wert aus den Datenquellen, und gilt für diesen Scan. Unverändertes Bestätigen startet bei der Datenquellen-Höhe, ohne die 10-Minuten-Schätzung ab Genesis.
 - **P2P · Scan-Fortschritt:** Die Datumsangabe neben der Blockhöhe kommt aus den lokalen Headern (echte Blockzeit). Fehlt der Header, interpoliert SatSage vom letzten bekannten Header zum aktuellen Tip und zur aktuellen Zeit. Ohne Anker steht nur die Höhe.
 - **P2P · First-seen vor Datenquellen-Höhe:** Hat ein Wallet ein First-seen, startet der Compact-Filter-Scan dort — auch wenn „Scan ab Blockhöhe“ in den Datenquellen später liegt. Ein fertiger Tip-Nachzug bleibt davor.

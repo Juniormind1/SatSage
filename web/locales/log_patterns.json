@@ -528,6 +528,10 @@
     "en": " — fetching block…"
   },
   {
+    "re": "^Kein Peer mit dem Block — suche Ersatz…$",
+    "en": "No peer has the block — looking for a replacement…"
+  },
+  {
     "re": "^Chunk (.+)–(.+) fehlgeschlagen (.*)$",
     "en": "Chunk $1–$2 failed $3"
   },

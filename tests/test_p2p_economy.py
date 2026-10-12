@@ -112,6 +112,40 @@ class TestHistorieWaechst(unittest.TestCase):
         )
 
 
+class TestPeerLiefertBlock(unittest.TestCase):
+    def test_network_ja_limited_nur_junge_bloecke(self):
+        from types import SimpleNamespace
+
+        from core.p2p import (
+            NETWORK_LIMITED_BLOCKS,
+            NODE_NETWORK,
+            NODE_NETWORK_LIMITED,
+            naechster_block_peer,
+            peer_liefert_block,
+        )
+
+        voll = SimpleNamespace(
+            services=NODE_NETWORK, start_height=100_000, historie_aus=False, tot=False,
+        )
+        limited = SimpleNamespace(
+            services=NODE_NETWORK_LIMITED, start_height=100_000,
+            historie_aus=False, tot=False,
+        )
+        self.assertTrue(peer_liefert_block(voll, 50_000))
+        self.assertFalse(peer_liefert_block(limited, 50_000))
+        self.assertTrue(
+            peer_liefert_block(limited, 100_000 - NETWORK_LIMITED_BLOCKS + 1)
+        )
+        limited.historie_aus = True
+        self.assertFalse(peer_liefert_block(limited, 50_000))
+        voll.tot = True
+        self.assertFalse(peer_liefert_block(voll, 90_000))
+        a = SimpleNamespace(services=NODE_NETWORK_LIMITED, start_height=100_000)
+        b = SimpleNamespace(services=NODE_NETWORK, start_height=100_000)
+        self.assertIs(naechster_block_peer([a, b], 50_000, set()), b)
+        self.assertIs(naechster_block_peer([a, b], 99_900, set()), b)
+
+
 class TestErsatzPeerLock(unittest.TestCase):
     def test_neuer_peer_nach_abbruch_ist_kein_keyerror(self):
         from unittest.mock import patch

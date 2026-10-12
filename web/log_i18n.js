@@ -203,6 +203,8 @@
     [/^hole Block (.+)$/, "fetching block $1"],
     [/^— hole Block…$/, "— fetching block…"],
     [/ — hole Block…$/, " — fetching block…"],
+    [/^Kein Peer mit dem Block — suche Ersatz…$/,
+      "No peer has the block — looking for a replacement…"],
     [/^Chunk (.+)–(.+) fehlgeschlagen (.*)$/, "Chunk $1–$2 failed $3"],
     [/^Tx (.+)… über Core-RPC…$/, "Tx $1… via Core RPC…"],
     [/^Nur (\d+) Compact-Filter-(Peer|Peers) — Scan wird langsamer\.$/,

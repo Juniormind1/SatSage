@@ -43,6 +43,9 @@ _BLOCK_PENDING = object()
 
 #: Wie oft ein Filter-Treffer den Block-Rumpf neu anfordert.
 BLOCK_RUMPF_VERSUCHE = 5
+#: Extra-Verbindungen, wenn kein Pool-Peer den Treffer-Block hat.
+BLOCK_PEER_NACHRUECKEN_CLEAR = 4
+BLOCK_PEER_NACHRUECKEN_TOR = 2
 
 
 class BlockRumpfFehler(RuntimeError):
@@ -112,6 +115,10 @@ def _hole_block_einmal(peer, block_hash: bytes) -> bytes:
                 raise
         except ImportError:
             pass
+        from core.p2p import PeerHatBlockNicht
+
+        if isinstance(exc, PeerHatBlockNicht):
+            raise BlockRumpfFehler("Peer hat den Block nicht") from exc
         raise BlockRumpfFehler("Peer lieferte den Block nicht") from exc
     return pruefe_block_rumpf(roh, block_hash)
 
@@ -124,6 +131,57 @@ def _melde_block_erneut(on_log, hoehe: int, versuch: int, grund: BaseException) 
         f"({grund}) — Versuch {versuch + 2}/{BLOCK_RUMPF_VERSUCHE}"
         .replace(",", ".")
     )
+
+
+def _block_peer_nachruecken(
+    *,
+    tor_proxy,
+    exclude: set,
+    on_log,
+    rest: list[int],
+    max_neu: int,
+):
+    """Ein neuer Peer, nur wenn der Pool den Treffer-Block nicht hat."""
+    if rest[0] >= max_neu:
+        return None
+    from core.p2p import p2p_socket_erlaubt, verbinde_compact_filter_peers
+
+    if not p2p_socket_erlaubt():
+        return None
+    rest[0] += 1
+    if on_log:
+        on_log("Kein Peer mit dem Block — suche Ersatz…")
+    try:
+        frisch = verbinde_compact_filter_peers(
+            limit=1,
+            tor_proxy=tor_proxy,
+            ruhig=True,
+            versuche=12,
+            dns_fallback=True,
+            exclude=exclude,
+            on_log=on_log,
+        )
+    except Exception:
+        return None
+    if not frisch:
+        return None
+    return frisch[0]
+
+
+def _pool_host_paare(pool) -> set[tuple[str, int]]:
+    from core.p2p import DEFAULT_P2P_PORT
+
+    out: set[tuple[str, int]] = set()
+    for peer in pool or []:
+        host = str(getattr(peer, "host", "") or "").strip()
+        if not host:
+            continue
+        try:
+            port = int(getattr(peer, "port", 0) or DEFAULT_P2P_PORT)
+        except (TypeError, ValueError):
+            port = DEFAULT_P2P_PORT
+        out.add((host, port))
+    return out
 
 
 def plane_union_passes(
@@ -577,6 +635,10 @@ def verteile_cfilter_chunks(
     peer_locks: dict[int, threading.Lock] = {id(p): threading.Lock() for p in peers}
     locks_guard = threading.Lock()
     filter_peers = list(peers)
+    block_pool = list(peers)
+    pool_guard = threading.Lock()
+    nachruecken_zaehler = [0]
+    nachruecken_lock = threading.Lock()
 
     def _lock_fuer(peer) -> threading.Lock:
         """Lock je Socket. Ersatz-Peers nach einem Abbruch fehlen im Start-Dict."""
@@ -621,8 +683,18 @@ def verteile_cfilter_chunks(
 
         raise Cancelled()
 
-    def block_arbeit(peer) -> None:
-        lock = _lock_fuer(peer)
+    def _peer_fuer_block(hoehe: int, tried: set[int]):
+        from core.p2p import naechster_block_peer
+
+        with pool_guard:
+            return naechster_block_peer(block_pool, hoehe, tried)
+
+    def block_arbeit() -> None:
+        from core.p2p import (
+            markiere_peer_block_ausfall,
+            rumpf_peer_ist_verbraucht,
+        )
+
         while not block_stop.is_set():
             if _soll_enden():
                 return
@@ -632,29 +704,67 @@ def verteile_cfilter_chunks(
                 continue
             if auftrag is None:
                 return
-            if len(auftrag) == 2:
-                hoehe, block_hash = auftrag
-                versuch = 0
-            else:
-                hoehe, block_hash, versuch = auftrag
+            hoehe, block_hash = auftrag[0], auftrag[1]
+            versuch = int(auftrag[2]) if len(auftrag) > 2 else 0
+            tried: set[int] = set(auftrag[3]) if len(auftrag) > 3 else set()
+            roh: bytes | BaseException | None = None
             try:
-                with lock:
-                    roh = _hole_block_einmal(peer, block_hash)
-                try:
-                    from core.bip158_wallet import merke_block_bytes
+                while versuch < BLOCK_RUMPF_VERSUCHE:
+                    if _soll_enden():
+                        return
+                    ziel = _peer_fuer_block(hoehe, tried)
+                    if ziel is None:
+                        with nachruecken_lock:
+                            ziel = _peer_fuer_block(hoehe, tried)
+                            if ziel is None:
+                                max_neu = (
+                                    BLOCK_PEER_NACHRUECKEN_TOR
+                                    if tor_proxy
+                                    else BLOCK_PEER_NACHRUECKEN_CLEAR
+                                )
+                                with pool_guard:
+                                    exclude = _pool_host_paare(block_pool)
+                                frisch = _block_peer_nachruecken(
+                                    tor_proxy=tor_proxy,
+                                    exclude=exclude,
+                                    on_log=on_log,
+                                    rest=nachruecken_zaehler,
+                                    max_neu=max_neu,
+                                )
+                                if frisch is not None:
+                                    with pool_guard:
+                                        block_pool.append(frisch)
+                                    ziel = frisch
+                    if ziel is None:
+                        break
+                    try:
+                        with _lock_fuer(ziel):
+                            roh = _hole_block_einmal(ziel, block_hash)
+                        try:
+                            from core.bip158_wallet import merke_block_bytes
 
-                    merke_block_bytes(block_hash, roh)
-                except Exception:
-                    pass
-            except BlockRumpfFehler as exc:
-                if versuch + 1 < BLOCK_RUMPF_VERSUCHE and not _soll_enden():
-                    _melde_block_erneut(on_log, hoehe, versuch, exc)
-                    block_queue.put((hoehe, block_hash, versuch + 1))
-                    continue
-                roh = BlockRumpfFehler(
-                    f"Block {hoehe}: Rumpf nach {BLOCK_RUMPF_VERSUCHE} "
-                    f"Versuchen nicht zum Header-Index passend"
-                )
+                            merke_block_bytes(block_hash, roh)
+                        except Exception:
+                            pass
+                        break
+                    except BlockRumpfFehler as exc:
+                        if rumpf_peer_ist_verbraucht(exc):
+                            markiere_peer_block_ausfall(ziel, exc)
+                            tried.add(id(ziel))
+                        if versuch + 1 >= BLOCK_RUMPF_VERSUCHE:
+                            roh = BlockRumpfFehler(
+                                f"Block {hoehe}: Rumpf nach "
+                                f"{BLOCK_RUMPF_VERSUCHE} Versuchen nicht "
+                                f"zum Header-Index passend"
+                            )
+                            break
+                        _melde_block_erneut(on_log, hoehe, versuch, exc)
+                        versuch += 1
+                if roh is None:
+                    roh = BlockRumpfFehler(
+                        f"Block {hoehe}: Rumpf nach {BLOCK_RUMPF_VERSUCHE} "
+                        f"Versuchen nicht zum Header-Index passend"
+                    )
             except Exception as exc:
                 try:
                     from core.jobs import ist_abbruch
@@ -670,8 +780,8 @@ def verteile_cfilter_chunks(
 
     if async_blocks and peers:
         n_block = min(2, len(peers))
-        for peer in peers[:n_block]:
-            t = threading.Thread(target=block_arbeit, args=(peer,), daemon=True)
+        for _ in range(n_block):
+            t = threading.Thread(target=block_arbeit, daemon=True)
             block_threads.append(t)
             t.start()
 
