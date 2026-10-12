@@ -626,6 +626,16 @@ class JobRegistry:
                     if ist_abbruch(exc):
                         job.status = "cancelled"
                         job.message = "Abgebrochen."
+                    elif isinstance(getattr(exc, "status", None), int) and str(
+                        getattr(exc, "message", "") or ""
+                    ).strip():
+                        # ApiError (server.ApiError, per Duck-Typing ohne
+                        # Import-Zyklus): erwartete Meldung für die Oberfläche,
+                        # z. B. „Keine Sanktionslisten vorhanden …“.
+                        text = str(exc.message).strip()
+                        job.status = "failed"
+                        job.error = text
+                        job.message = text
                     else:
                         job.status = "failed"
                         job.error = f"{type(exc).__name__}: {exc}"

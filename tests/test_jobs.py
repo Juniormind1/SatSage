@@ -1009,6 +1009,42 @@ class TestJobRegistry(unittest.TestCase):
         jobs_mod._reset_herzschlag_stand_fuer_tests()
         jobs_mod._reset_electrum_gate_fuer_tests()
 
+    def test_api_error_text_landet_in_message(self):
+        """Erwarteter ApiError: Meldung statt nur „Fehlgeschlagen.“."""
+        from server import ApiError
+
+        registry = JobRegistry()
+
+        def ohne_listen(_job):
+            raise ApiError(
+                409, "Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren.",
+            )
+
+        job = registry.start("sanctions-check", "HS Alpha", ohne_listen)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.status, "failed")
+        self.assertEqual(
+            job.message, "Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren.",
+        )
+        self.assertEqual(job.error, job.message)
+
+    def test_unerwarteter_fehler_bleibt_fehlgeschlagen(self):
+        registry = JobRegistry()
+
+        def kaputt(_job):
+            raise ValueError("intern")
+
+        job = registry.start("sanctions-check", "HS Alpha", kaputt)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.message, "Fehlgeschlagen.")
+        self.assertEqual(job.error, "ValueError: intern")
+
     def test_systemexit_beendet_den_job(self):
         """Sonst bleibt der UTXO-Scan auf running, letzte Zeile klebt."""
         registry = JobRegistry()

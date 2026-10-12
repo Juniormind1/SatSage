@@ -810,5 +810,9 @@
   {
     "re": "^anderes Wallet$",
     "en": "another wallet"
+  },
+  {
+    "re": "^Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren\\.$",
+    "en": "No sanctions lists available — please update them first."
   }
 ]

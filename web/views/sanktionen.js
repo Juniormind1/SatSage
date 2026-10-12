@@ -260,7 +260,7 @@ function bindeSanktionsCheckJob(jobId, opts = {}) {
         ladeSankCache();
       } else {
         fertig(
-          übersetzeServerMeldung(job.error)
+          übersetzeLogText(übersetzeServerMeldung(job.error))
             || übersetzeLogText(job.message)
             || t("common.failed"),
         );
