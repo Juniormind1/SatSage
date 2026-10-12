@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Wallet · FIFO-Spend · live während Herkunft:** „max … grün ausgebbar“ und der Lot-Donut am Walletnamen folgen demselben Lots-Strom wie die grüne Scorecard (`lots=0`, dann `GET /api/tax/lots`). Die Zahl steigt mit jedem fertigen Herkunftsbaum, statt erst nach einem neuen Öffnen der Wallet. Läuft das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.
+
 ## [1.0.0] — 2026-10-12
 
 Erstes stabiles Release.

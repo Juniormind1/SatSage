@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -221,7 +222,37 @@ async function api(pfad, opts = {}) {
   aufrufe.push(pfad);
   return JSON.parse(JSON.stringify(antwort));
 }
+const lotsAufrufe = [];
+let lotsZeilen = [{ done: true }];
+let lotsWarte = null;
+async function fetch(url, opts = {}) {
+  lotsAufrufe.push(String(url));
+  if (opts && opts.signal && opts.signal.aborted) {
+    const err = new Error("aborted");
+    err.name = "AbortError";
+    throw err;
+  }
+  if (lotsWarte) await lotsWarte;
+  const text = (lotsZeilen || []).map((z) => JSON.stringify(z)).join("\n") + "\n";
+  const bytes = new TextEncoder().encode(text);
+  let sent = false;
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: bytes };
+          },
+        };
+      },
+    },
+  };
+}
 const warte = () => new Promise((r) => setTimeout(r, 10));
+const warteLots = () => new Promise((r) => setTimeout(r, 120));
 const EV = [
   // w1: ganz grün
   { key: "aa:0", wallet_id: "w1", value_sats: 50000, sats_gruen: 50000, sats_orange: 0, sats_grau: 0 },
@@ -259,8 +290,23 @@ _FUNKTIONEN = [
     "function fifoNettoAktuell(",
     "function planeFifoNetto(",
     "function fifoGrueneSats(",
+    "function fifoSpendJahrAbfrage(",
     "function fifoSpendAbfrage(",
+    "function fifoSpendBestandKey(",
+    "function fifoSpendAusSteuer(",
+    "function fifoSpendSteuerStromPasst(",
+    "function fifoSpendEventsAus(",
+    "function fifoSpendLotUiPlanen(",
+    "function fifoSpendLotUiSofort(",
+    "function fifoSpendLotUebernehmen(",
+    "function fifoSpendLotsAbbrechen(",
+    "function fifoSpendTraceLaeuft(",
+    "function fifoSpendLotsNachziehenWennTrace(",
+    "function fifoSpendLotsNimm(",
+    "async function fifoSpendLotsLesen(",
+    "function starteFifoSpendLots(",
     "function holeFifoSpendAuswertung(",
+    "function fifoSpendAusAntwortUebernehmen(",
     "function aktualisiereFifoSpend(",
     "function zeichneFifoSpend(",
     "function zeichneFifoSpendGruenFiat(",
@@ -325,9 +371,21 @@ def _node(skript: str) -> dict:
         + "\n(async () => {\n" + skript
         + "\n})().catch((e) => { console.error(e); process.exit(1); });"
     )
-    aus = subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=30)
+    # Datei statt ``node -e``: der Lots-Strom macht den Lauf zu lang für
+    # Windows CreateProcess (WinError 206).
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".js", delete=False, encoding="utf-8",
+    ) as datei:
+        datei.write(code)
+        pfad = datei.name
+    try:
+        aus = subprocess.run(
+            ["node", pfad], capture_output=True, text=True, timeout=30,
+        )
+    finally:
+        Path(pfad).unlink(missing_ok=True)
     if aus.returncode != 0:
-        raise AssertionError(aus.stderr[-2000:])
+        raise AssertionError(aus.stderr[-2000:] or aus.stdout[-2000:])
     return json.loads(aus.stdout)
 
 
@@ -688,7 +746,7 @@ class TestFifoLeiste(unittest.TestCase):
           antwort = { zeitstrahl: { events: EV } };
           aktualisiereFifoSpend("w1"); await warte();
           els["#fifo-spend-betrag"].value = "40000";
-          Zustand.walletId = "w2"; Zustand.walletLadeGen = 2;
+          Zustand.walletId = "w2";
           aktualisiereFifoSpend("w2");
           const sofort = els["#fifo-spend-betrag"].value;
           await warte();
@@ -702,15 +760,27 @@ class TestFifoLeiste(unittest.TestCase):
     def test_daten_nachladen_holt_neu(self):
         erg = _node(r"""
           antwort = { zeitstrahl: { events: EV } };
+          Zustand._walletUtxoDaten = { total_count: 5, total_sats: 106000 };
           aktualisiereFifoSpend("w1"); await warte();
           antwort = { zeitstrahl: { events: [
             { wallet_id: "w1", value_sats: 80000, sats_gruen: 80000, sats_orange: 0, sats_grau: 0 },
           ] } };
-          Zustand.walletLadeGen += 1;  // zeigeWallet nach Scan/Herkunft
+          Zustand._walletUtxoDaten = { total_count: 6, total_sats: 186000 };  // Scan
           aktualisiereFifoSpend("w1"); await warte();
           process.stdout.write(JSON.stringify({ text: els["#fifo-spend-text"].textContent }));
         """)
         self.assertEqual(erg["text"], f"defensiv max 0,00{NB}080{NB}000 BTC grün ausgebbar")
+
+    def test_herkunft_zwischenstand_ohne_neuen_bestand_kein_abruf(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV } };
+          Zustand._walletUtxoDaten = { total_count: 5, total_sats: 106000 };
+          aktualisiereFifoSpend("w1"); await warte();
+          Zustand.walletLadeGen += 1;  // zeigeWallet nach Herkunfts-Tick
+          aktualisiereFifoSpend("w1"); await warte();
+          process.stdout.write(JSON.stringify({ n: aufrufe.length }));
+        """)
+        self.assertEqual(erg["n"], 1)
 
     def test_ohne_bestand_leiste_weg(self):
         erg = _node(r"""
@@ -815,8 +885,80 @@ class TestFifoLeiste(unittest.TestCase):
         q = erg["q"]
         self.assertRegex(q, r"^\?jahr=\d{4}&frist=1&stichtag=28\.02\.2021&")
         self.assertNotIn("anschaffung", q)
+        self.assertIn("lots=0", q)
         self.assertIn("jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}", STEUER)
         self.assertIn("&stichtag=${encodeURIComponent(stichtag)}", STEUER)
+
+    def test_lots_strom_zieht_gruen_nach(self):
+        erg = _node(r"""
+          const roh = EV.map((e) => Object.assign({}, e, {
+            sats_gruen: null, sats_orange: null, sats_grau: null,
+          }));
+          antwort = { zeitstrahl: { events: roh }, lots_fertig: false };
+          let frei;
+          lotsWarte = new Promise((r) => { frei = r; });
+          lotsZeilen = [
+            { key: "aa:0", erfuellt: true, sats_gruen: 50000, sats_orange: 0, sats_grau: 0 },
+            { done: true, lots_fertig: true },
+          ];
+          aktualisiereFifoSpend("w1"); await warte();
+          const vorher = els["#fifo-spend-text"].textContent;
+          frei();
+          await warteLots();
+          process.stdout.write(JSON.stringify({
+            vorher, danach: els["#fifo-spend-text"].textContent,
+            lots: lotsAufrufe.length, tax: aufrufe.length,
+          }));
+        """)
+        self.assertEqual(erg["vorher"], "defensiv max 0,00" + NB + "000" + NB + "000 BTC grün ausgebbar")
+        self.assertEqual(erg["danach"], f"defensiv max 0,00{NB}050{NB}000 BTC grün ausgebbar")
+        self.assertEqual(erg["tax"], 1)
+        self.assertEqual(erg["lots"], 1)
+
+    def test_steuerjahr_stand_teilt_strom_ohne_zweite_tax(self):
+        erg = _node(r"""
+          const events = EV.map((e) => Object.assign({}, e, {
+            sats_gruen: null, sats_orange: null, sats_grau: null,
+          }));
+          Zustand.steuer = {
+            _abfrage: fifoSpendJahrAbfrage(), lots_fertig: false,
+            zeitstrahl: { events },
+          };
+          aktualisiereFifoSpend("w1"); await warte();
+          const vorher = els["#fifo-spend-text"].textContent;
+          fifoSpendLotUebernehmen({
+            key: "aa:0", erfuellt: true, sats_gruen: 50000, sats_orange: 0, sats_grau: 0,
+          });
+          zeichneFifoSpend(Zustand.fifoSpend);
+          process.stdout.write(JSON.stringify({
+            vorher, danach: els["#fifo-spend-text"].textContent,
+            tax: aufrufe.length, lots: lotsAufrufe.length,
+            gleiche: Zustand.fifoSpend.events[0] === events[0],
+          }));
+        """)
+        self.assertEqual(erg["vorher"], "defensiv max 0,00" + NB + "000" + NB + "000 BTC grün ausgebbar")
+        self.assertEqual(erg["danach"], f"defensiv max 0,00{NB}050{NB}000 BTC grün ausgebbar")
+        self.assertEqual(erg["tax"], 0)
+        self.assertEqual(erg["lots"], 0)
+        self.assertTrue(erg["gleiche"])
+
+    def test_lots_nachziehen_nur_wenn_trace_laeuft(self):
+        erg = _node(r"""
+          antwort = { zeitstrahl: { events: EV }, lots_fertig: true };
+          aktualisiereFifoSpend("w1"); await warte();
+          const ohne = lotsAufrufe.length;
+          fifoSpendLotsNachziehenWennTrace();
+          const still = lotsAufrufe.length;
+          Zustand.herkunftAlleLaeuft = true;
+          fifoSpendLotsNachziehenWennTrace();
+          process.stdout.write(JSON.stringify({
+            ohne, still, mit: lotsAufrufe.length, fertig: Zustand.fifoSpend.lots_fertig,
+          }));
+        """)
+        self.assertEqual(erg["ohne"], 0)
+        self.assertEqual(erg["still"], 0)
+        self.assertEqual(erg["mit"], 1)
+        self.assertFalse(erg["fertig"])
 
     def test_gruen_fiat_kein_kurs_ok_veraltet(self):
         erg = _node(r"""
@@ -1906,7 +2048,10 @@ class TestFifoStatisch(unittest.TestCase):
         self.assertIn('api("/config/fifo-strategie", { methode: "PUT"', teil)
         self.assertIn('api("/psbt/auswahl", { methode: "POST"', teil)
         self.assertIn('api("/psbt/erzeugen", { methode: "POST"', teil)
-        self.assertNotRegex(teil.lower(), r"sign(?!et)|broadcast|sendraw")  # Signet ist ein Netzname
+        # Signet = Netz; AbortController.signal bricht den Lots-Strom ab;
+        # Bestandsschlüssel ist der Cache-Abdruck, kein Signieren.
+        self.assertNotRegex(
+            teil.lower(), r"\bsign(?!et|al|atur)|broadcast|sendraw")
         # Klicks: „Senden ▸“ klappt auf, „PSBT“ erzeugt, „Base64 kopieren“.
         klicks = re.findall(r'addEventListener\("click",\s*(\w+)', teil)
         self.assertEqual(klicks, ["fifoSpendMaxEintragen", "fifoZielUmschalten", "fifoPsbtErzeugen", "fifoPsbtKopieren"])
@@ -1914,6 +2059,16 @@ class TestFifoStatisch(unittest.TestCase):
         koerper = teil[teil.index("function fifoPsbtKoerper("):teil.index("function fifoPsbtDateiname(")]
         self.assertNotIn("utxos", koerper)
         self.assertNotIn("sats_gruen", koerper)
+
+    def test_lots_strom_an_steuerjahr_und_herkunft(self):
+        """Wallet teilt den Lots-Strom mit der Scorecard; Herkunft holt nach."""
+        self.assertIn('p.set("lots", "0")', WALLETS)
+        self.assertIn("fetch(`/api/tax/lots${abfrage}`", WALLETS)
+        self.assertIn("fifoSpendLotUebernehmen(zeile)", STEUER)
+        self.assertIn("fifoSpendLotUiPlanen()", STEUER)
+        self.assertIn("fifoSpendLotsAbbrechen()", STEUER)
+        herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
+        self.assertIn("fifoSpendLotsNachziehenWennTrace()", herkunft)
 
     def test_einstellungen_hook_und_css_theme(self):
         self.assertIn("aktualisiereFifoSpend()", EINST)

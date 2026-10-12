@@ -214,6 +214,7 @@ function steuerLotUiPlanen() {
     zeichneSteuerScorecards(Zustand.steuer);
     const strahl = Zustand.steuer.zeitstrahl;
     if (strahl) zeichneZeitstrahlGeister(strahl);
+    if (typeof fifoSpendLotUiPlanen === "function") fifoSpendLotUiPlanen();
   }, 80);
 }
 
@@ -257,6 +258,7 @@ function steuerLotZeile(zeile) {
       setzeAchseLotAusEvent(punkt, event);
     }
   }
+  if (typeof fifoSpendLotUebernehmen === "function") fifoSpendLotUebernehmen(zeile);
   steuerLotUiPlanen();
 }
 
@@ -284,6 +286,13 @@ function steuerLotsAbschluss(obj) {
   }
   if (typeof ladeSteuerSeitenNeu === "function") {
     ladeSteuerSeitenNeu().catch(() => {});
+  }
+  if (Zustand.fifoSpend
+      && typeof fifoSpendJahrAbfrage === "function"
+      && daten._abfrage === fifoSpendJahrAbfrage()) {
+    Zustand.fifoSpend.lots_fertig = true;
+    Zustand.fifoSpend.zustand = "fertig";
+    if (typeof fifoSpendLotUiSofort === "function") fifoSpendLotUiSofort();
   }
 }
 
@@ -354,6 +363,12 @@ async function ladeSteuerjahr(optionen = {}) {
   const abfrage =
     `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
     `&stichtag=${encodeURIComponent(stichtag)}`;
+  // Denselben Jahr-Strom nicht doppelt: FIFO hängt sich an diesen Lauf.
+  if (typeof fifoSpendJahrAbfrage === "function"
+      && typeof fifoSpendLotsAbbrechen === "function"
+      && fifoSpendJahrAbfrage() === abfrage) {
+    fifoSpendLotsAbbrechen();
+  }
   // Achse sofort, auch wenn der Cache noch gelesen wird. Liegt schon ein
   // Plot, bleibt er stehen, bis die neuen Punkte da sind.
   // fensterBehalten: laufender Plot (Pan/Zoom) — kein leerer Rahmen darüber.

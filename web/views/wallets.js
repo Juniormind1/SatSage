@@ -1296,8 +1296,11 @@ function zeichneUtxos(daten, wallet, seite = null) {
 //
 // Keine Losbuchhaltung: Die grünen sats kommen aus derselben Steuerjahr-
 // Auswertung wie Scorecards und Lot-Ringe (core/tax.py, laufendes Jahr =
-// Stand heute), gefiltert auf dieses Wallet. Je UTXO zählt der aktuelle
-// Trace; ohne ausgewerteten Baum zählt ein UTXO nicht als grün.
+// Stand heute), gefiltert auf dieses Wallet. Erst lots=0 (Punkte), dann
+// derselbe NDJSON-Strom /api/tax/lots wie das Steuerjahr — die Zeile und
+// der Wallet-Lot-Donut ziehen während eines Herkunfts-Laufs nach. Läuft
+// das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.
+// Je UTXO zählt der aktuelle Trace; ohne ausgewerteten Baum nicht grün.
 // ---------------------------------------------------------------------------
 
 /** Lesart aus den Einstellungen: ``aelteste`` = offensiv, sonst defensiv. */
@@ -1389,24 +1392,201 @@ function fifoPendingInfo(daten) {
   return { keys, vollstaendig: keys.size >= erwartet };
 }
 
-/** Dieselbe Abfrage wie die Steuerjahr-Ansicht, damit der Server-Cache greift. */
-function fifoSpendAbfrage() {
+/** Jahr/Frist/Stichtag wie ``ladeSteuerjahr`` — daran hängt der Server-Cache. */
+function fifoSpendJahrAbfrage() {
   const steuer = typeof steuerEinstellungen === "function" ? steuerEinstellungen() : {};
   const jahr = String(new Date().getFullYear());
   const frist = steuer.haltefrist_jahre ?? 1;
-  const abfrage =
+  return (
     `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
-    `&stichtag=${encodeURIComponent(steuer.stichtag || "")}`;
+    `&stichtag=${encodeURIComponent(steuer.stichtag || "")}`
+  );
+}
+
+/** Dieselbe Abfrage wie die Steuerjahr-Ansicht, lots=0: Bäume kommen im Strom. */
+function fifoSpendAbfrage() {
   const p = new URLSearchParams();
   p.set("seite", "1");
   p.set("teil", "alle");
   p.set("limit", "0");
   p.set("limit_abgaenge", "0");
   p.set("lang", typeof uiSprache === "function" ? uiSprache() : "de");
-  return `${abfrage}&${p}`;
+  p.set("lots", "0");
+  return `${fifoSpendJahrAbfrage()}&${p}`;
 }
 
-/** Eine laufende Auswertung teilen sich alle Wallets — sie liefert alle Punkte. */
+/** Bestandsschlüssel: neuer Scan ändert Zahl/Saldo, ein Herkunfts-Lauf nicht. */
+function fifoSpendBestandKey() {
+  const d = Zustand._walletUtxoDaten;
+  if (!d) return "";
+  return `${Number(d.total_count) || 0}|${Number(d.total_sats) || 0}`;
+}
+
+/**
+ * Steuerjahr-Stand desselben Jahres. Events sind dieselben Objekte — der
+ * Lots-Strom der Scorecards färbt sie in-place, die FIFO-Zeile zeichnet mit.
+ */
+function fifoSpendAusSteuer() {
+  const daten = Zustand.steuer;
+  if (!daten || !daten.zeitstrahl || !Array.isArray(daten.zeitstrahl.events)) {
+    return null;
+  }
+  if (String(daten._abfrage || "") !== fifoSpendJahrAbfrage()) return null;
+  return daten;
+}
+
+function fifoSpendSteuerStromPasst() {
+  const daten = fifoSpendAusSteuer();
+  return Boolean(daten && !daten.lots_fertig);
+}
+
+/** Alte Lot-Anteile behalten, solange lots=0 sie noch nicht mitliefert. */
+function fifoSpendEventsAus(alle, walletId, vorher) {
+  const id = String(walletId || "");
+  const neu = (alle || []).filter((e) => e && String(e.wallet_id || "") === id);
+  if (!vorher || !vorher.length) return neu;
+  const alt = new Map();
+  for (const e of vorher) {
+    const k = fifoUtxoKey(e);
+    if (k) alt.set(k, e);
+  }
+  for (const e of neu) {
+    if (e.sats_gruen !== null && e.sats_gruen !== undefined) continue;
+    const altE = alt.get(fifoUtxoKey(e));
+    if (!altE || altE.sats_gruen === null || altE.sats_gruen === undefined) continue;
+    e.sats_gruen = altE.sats_gruen;
+    e.sats_orange = altE.sats_orange;
+    e.sats_grau = altE.sats_grau;
+    if ("erfuellt" in altE) e.erfuellt = altE.erfuellt;
+    if ("sats_ohne_datum" in altE) e.sats_ohne_datum = altE.sats_ohne_datum;
+    if ("neuvermoegen" in altE) e.neuvermoegen = altE.neuvermoegen;
+  }
+  return neu;
+}
+
+function fifoSpendLotUiPlanen() {
+  if (Zustand.fifoSpendLotUiTimer) return;
+  Zustand.fifoSpendLotUiTimer = setTimeout(() => {
+    Zustand.fifoSpendLotUiTimer = null;
+    if (Zustand.fifoSpend) zeichneFifoSpend(Zustand.fifoSpend);
+  }, 80);
+}
+
+function fifoSpendLotUiSofort() {
+  if (Zustand.fifoSpendLotUiTimer) {
+    clearTimeout(Zustand.fifoSpendLotUiTimer);
+    Zustand.fifoSpendLotUiTimer = null;
+  }
+  if (Zustand.fifoSpend) zeichneFifoSpend(Zustand.fifoSpend);
+}
+
+/** Eine NDJSON-Lot-Zeile in die FIFO-Events (Scorecard und eigener Strom). */
+function fifoSpendLotUebernehmen(zeile) {
+  const stand = Zustand.fifoSpend;
+  if (!stand || !stand.events || !zeile || !zeile.key) return false;
+  const key = fifoUtxoKey(zeile);
+  const event = stand.events.find((e) => e && fifoUtxoKey(e) === key);
+  if (!event) return false;
+  event.erfuellt = Boolean(zeile.erfuellt);
+  event.sats_gruen = zeile.sats_gruen;
+  event.sats_orange = zeile.sats_orange;
+  event.sats_grau = zeile.sats_grau;
+  event.sats_ohne_datum = zeile.sats_ohne_datum;
+  if ("neuvermoegen" in zeile) event.neuvermoegen = Boolean(zeile.neuvermoegen);
+  return true;
+}
+
+function fifoSpendLotsAbbrechen() {
+  if (Zustand.fifoSpendLotsAbbruch) {
+    try { Zustand.fifoSpendLotsAbbruch.abort(); } catch (_) { /* schon weg */ }
+    Zustand.fifoSpendLotsAbbruch = null;
+  }
+}
+
+function fifoSpendTraceLaeuft() {
+  if (Zustand.herkunftAlleLaeuft) return true;
+  if (Zustand.traceJobs && Zustand.traceJobs.size > 0) return true;
+  if (typeof herkunftTiefLaeuftFuer === "function"
+      && herkunftTiefLaeuftFuer(Zustand.walletId)) {
+    return true;
+  }
+  return false;
+}
+
+/** Nach einem fertigen Lots-Lauf: neu ziehen, sobald der Trace weitere Bäume legt. */
+function fifoSpendLotsNachziehenWennTrace() {
+  const stand = Zustand.fifoSpend;
+  if (!stand || stand.zustand !== "fertig") return;
+  if (stand.lots_fertig !== true) return;
+  if (!fifoSpendTraceLaeuft()) return;
+  if (fifoSpendSteuerStromPasst()) return;
+  stand.lots_fertig = false;
+  starteFifoSpendLots(stand);
+}
+
+function fifoSpendLotsNimm(stand, obj) {
+  if (!obj || Zustand.fifoSpend !== stand) return;
+  if (obj.done) {
+    if (!obj.error) {
+      stand.lots_fertig = true;
+      stand.zustand = "fertig";
+      fifoSpendLotUiSofort();
+    }
+    return;
+  }
+  if (obj.key && fifoSpendLotUebernehmen(obj)) fifoSpendLotUiPlanen();
+}
+
+async function fifoSpendLotsLesen(antwort, stand) {
+  if (!antwort || !antwort.body) return;
+  const leser = antwort.body.getReader();
+  const decoder = new TextDecoder();
+  let puffer = "";
+  const nimm = (zeile) => {
+    try { fifoSpendLotsNimm(stand, JSON.parse(zeile)); } catch (_) { /* halbe Zeile */ }
+  };
+  while (true) {
+    const gelesen = await leser.read();
+    if (gelesen.done) break;
+    puffer += decoder.decode(gelesen.value, { stream: true });
+    const zeilen = puffer.split("\n");
+    puffer = zeilen.pop();
+    for (const zeile of zeilen) {
+      if (zeile.trim()) nimm(zeile);
+    }
+  }
+  if (puffer.trim()) nimm(puffer);
+}
+
+/** Eigener Lots-Strom, wenn das Steuerjahr nicht schon dasselbe Jahr zieht. */
+function starteFifoSpendLots(stand) {
+  if (!stand || Zustand.fifoSpend !== stand) return;
+  if (fifoSpendSteuerStromPasst()) return;
+  fifoSpendLotsAbbrechen();
+  const ctrl = new AbortController();
+  Zustand.fifoSpendLotsAbbruch = ctrl;
+  const abfrage = fifoSpendJahrAbfrage();
+  const kopf = {
+    ...(typeof tokenKopf === "function" ? tokenKopf() : {}),
+    ...(typeof sprachKopf === "function" ? sprachKopf() : {}),
+    Accept: "application/x-ndjson",
+  };
+  fetch(`/api/tax/lots${abfrage}`, {
+    credentials: "same-origin",
+    referrerPolicy: "same-origin",
+    headers: kopf,
+    signal: ctrl.signal,
+  }).then((antwort) => {
+    if (Zustand.fifoSpend !== stand || !antwort || !antwort.ok) return null;
+    return fifoSpendLotsLesen(antwort, stand);
+  }).catch(() => {
+    /* Abbruch / Netz — der nächste Trace-Tick oder das Öffnen holt nach */
+  }).finally(() => {
+    if (Zustand.fifoSpendLotsAbbruch === ctrl) Zustand.fifoSpendLotsAbbruch = null;
+  });
+}
+
+/** Eine laufende lots=0-Auswertung teilen sich alle Wallets. */
 function holeFifoSpendAuswertung(abfrage) {
   const lauf = Zustand.fifoSpendLauf;
   if (lauf && lauf.abfrage === abfrage) return lauf.promise;
@@ -1419,12 +1599,21 @@ function holeFifoSpendAuswertung(abfrage) {
   return promise;
 }
 
+function fifoSpendAusAntwortUebernehmen(stand, antwort) {
+  const alle = (antwort && antwort.zeitstrahl && antwort.zeitstrahl.events) || [];
+  stand.events = fifoSpendEventsAus(alle, stand.walletId, stand.events);
+  stand.lots_fertig = Boolean(antwort && antwort.lots_fertig);
+  stand.zustand = "fertig";
+}
+
 /**
  * Leiste neu zeichnen und bei Bedarf nachladen.
  *
  * *walletId* null: Leiste weg (kein Bestand). Ohne Argument: das offene
  * Wallet (Einstellung geändert, Sprache gewechselt). Der Mempool-Abzug
  * rechnet bei jedem Zeichnen neu aus der gerade gezeigten Wallet-Antwort.
+ * Herkunfts-Zwischenstände ändern den Bestandsschlüssel nicht — der Lots-
+ * Strom läuft weiter und ``fifoSpendLotsNachziehenWennTrace`` holt nach.
  */
 function aktualisiereFifoSpend(walletId) {
   const leiste = $("#fifo-spend");
@@ -1439,13 +1628,13 @@ function aktualisiereFifoSpend(walletId) {
   if (!id) {
     leiste.hidden = true;
     fifoZielZeigen(false);
+    fifoSpendLotsAbbrechen();
     return;
   }
   leiste.hidden = false;
   const modus = fifoSpendModus();
   const abfrage = fifoSpendAbfrage();
-  const ladeGen = Zustand.walletLadeGen || 0;
-  const schluessel = `${id}|${ladeGen}|${abfrage}|${modus}`;
+  const schluessel = `${id}|${abfrage}|${modus}|${fifoSpendBestandKey()}`;
   // Anderes Wallet: Betrag sofort leeren — er gehört zum vorigen Wallet.
   if (!stand || stand.walletId !== id) {
     const feld = $("#fifo-spend-betrag");
@@ -1458,7 +1647,9 @@ function aktualisiereFifoSpend(walletId) {
     return;
   }
   const neu = {
-    schluessel, walletId: id, modus, zustand: "laedt", events: null, werte: null, fehler: "",
+    schluessel, walletId: id, modus, zustand: "laedt",
+    events: stand && stand.walletId === id ? stand.events : null,
+    werte: null, fehler: "", lots_fertig: false,
   };
   Zustand.fifoSpend = neu;
   // Während des Starts wartet die Auswertung auf den Wallet-Kontext und
@@ -1469,13 +1660,19 @@ function aktualisiereFifoSpend(walletId) {
     return;
   }
   zeichneFifoSpend(neu);
+  const steuer = fifoSpendAusSteuer();
+  if (steuer) {
+    fifoSpendAusAntwortUebernehmen(neu, steuer);
+    zeichneFifoSpend(neu);
+    if (!neu.lots_fertig) starteFifoSpendLots(neu);
+    return;
+  }
   holeFifoSpendAuswertung(abfrage)
     .then((antwort) => {
       if (Zustand.fifoSpend !== neu) return;
-      const alle = (antwort && antwort.zeitstrahl && antwort.zeitstrahl.events) || [];
-      neu.events = alle.filter((e) => e && String(e.wallet_id || "") === String(id));
-      neu.zustand = "fertig";
+      fifoSpendAusAntwortUebernehmen(neu, antwort);
       zeichneFifoSpend(neu);
+      if (!neu.lots_fertig) starteFifoSpendLots(neu);
     })
     .catch((fehler) => {
       if (Zustand.fifoSpend !== neu) return;
@@ -1644,7 +1841,8 @@ function fifoNettoSchluessel(stand) {
   const ziel = Zustand.fifoZielErgebnis || {};
   const adresse = ["meine", "fremd", "keine_wallets", "sanktioniert"].includes(ziel.status) ? (ziel.address || "") : "";
   const pending = [...fifoPendingInfo(Zustand._walletUtxoDaten).keys].sort().join(",");
-  return [stand && stand.schluessel, Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
+  // Brutto mit: Lot-Patches ändern den Schlüssel nicht, die Gebühr muss nach.
+  return [stand && stand.schluessel, fifoSpendBrutto(stand), Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
 }
 
 /** Fertiges Netto-Maximum zum aktuellen Stand, sonst null. */

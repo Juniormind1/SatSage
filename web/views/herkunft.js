@@ -2847,6 +2847,9 @@ async function erfrischeHerkunftZwischenstand() {
   try {
     if (Zustand.ansicht === "wallet" && Zustand.walletId) {
       await zeigeWallet(Zustand.walletId);
+      if (typeof fifoSpendLotsNachziehenWennTrace === "function") {
+        fifoSpendLotsNachziehenWennTrace();
+      }
     } else if (Zustand.ansicht === "trace") {
       if (Zustand.traceFokus) {
         await zeichneTraceFokusAnsicht(Zustand.traceFokus);
