@@ -860,7 +860,8 @@ def scan_start_fuer_xpub(
     Start, Grund, Seeds und used-Scripts für ein Wallet.
 
     Dieselbe Wahl wie der Einzelscan: fertiger Tip vor First-seen,
-    First-seen vor SegWit, jüngerer UI-Start bleibt.
+    First-seen vor der Datenquellen-Höhe — auch wenn die Vorgabe neuer
+    ist — sonst SegWit.
     """
     from core.p2p import SEGWIT_HEIGHT
     from core.xpub_cache import (
@@ -905,10 +906,9 @@ def scan_start_fuer_xpub(
                 puffer=BIP158_REORG_BUFFER,
             )
             if alter_start is not None:
-                if start <= 0 or start <= SEGWIT_HEIGHT:
-                    start = alter_start
-                elif start < alter_start:
-                    start = alter_start
+                # Wallet-Beginn gilt auch dann, wenn BIP158_START_HEIGHT
+                # später liegt — sonst fehlt die Historie vor der Vorgabe.
+                start = alter_start
                 start_grund = "alter"
     if start <= 0:
         start = SEGWIT_HEIGHT

@@ -1953,11 +1953,19 @@ input[type="text"].fifo-ziel-fee.ungueltig {
 .quelle-name { font-size: 12px; }
 .quelle-detail { font-family: var(--mono); font-size: 11px; color: var(--blass); }
 .quelle-rechts { margin-left: auto; display: flex; align-items: center; gap: 9px; }
-.quelle-start-hoehe {
-  /* Breit genug für Placeholder „erster Scan-Block“ (DE) / „first scan block“ (EN). */
-  width: 12.5rem;
-  min-width: 12.5rem;
-  max-width: 40vw;
+.quelle-scan-feld {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--gedaempft);
+  white-space: nowrap;
+}
+.quelle-scan-label {
+  color: var(--gedaempft);
+}
+.quelle-start-hoehe,
+.quelle-start-datum {
   font-family: var(--mono);
   font-size: 11px;
   padding: 3px 6px;
@@ -1966,17 +1974,28 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   background: var(--flaeche);
   color: var(--text);
 }
+.quelle-start-hoehe {
+  width: 7.5rem;
+  min-width: 7.5rem;
+  max-width: 40vw;
+}
+.quelle-start-datum {
+  width: 10.5rem;
+  min-width: 10.5rem;
+  max-width: 40vw;
+}
 .quelle-start-hoehe::placeholder {
   color: var(--blass);
   opacity: 1;
 }
-.quelle-start-hoehe:disabled {
+.quelle-start-hoehe:disabled,
+.quelle-start-datum:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .quelle-gap {
-  width: 6.5rem;
-  min-width: 6.5rem;
+  width: 5.5rem;
+  min-width: 5.5rem;
 }
 .quelle-notiz { flex-basis: 100%; font-size: 11px; color: var(--warn); padding-left: 23px; }
 /* Hoch-Privatsphäre konfiguriert → grün; unkonfiguriert / von besserer Quelle verdrängt → grau */

@@ -140,7 +140,8 @@ WALLET_0_XPUB=zpub6...               # ein Block je Wallet, fortlaufend ab 0
 WALLET_NAMES=Wallet A|Wallet B       # pipe-getrennt; oder WALLET_NAME_0 …
 
 # BIP158_P2P=1                 # Compact Filter über P2P (kein Core)
-# BIP158_START_HEIGHT=481824   # SegWit
+# BIP158_START_HEIGHT=481824   # SegWit; UI-Datum rechnet nur in diese Höhe um.
+#                              # First-seen eines Wallets gilt davor, auch wenn diese Höhe später liegt.
 # BIP158_GAP_LIMIT=100         # 1…10000, Vorgabe 100
 # BIP158_PEERS=                # optional host:port je Zeile
 

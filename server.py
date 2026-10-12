@@ -1019,6 +1019,7 @@ from httpserver.api.source import (  # noqa: E402
     api_rescan,
     api_rescan_alle,
     api_mempool_probe,
+    api_p2p_scan_zeit,
     api_save_mempool,
     api_save_source,
     api_source_status,
@@ -1724,6 +1725,8 @@ class Handler(
             return 200, api_cache_wallet_leeren(state, teile[1])
         if teile == ["headers"] and methode == "POST":
             return 202, api_header_vorab(state)
+        if teile == ["p2p", "scan-zeit"] and methode == "GET":
+            return 200, api_p2p_scan_zeit(state, query)
         if teile == ["p2p", "walk-abgleich"] and methode == "POST":
             return 202, api_p2p_walk_abgleich(state)
         if teile == ["jobs", "rescan"] and methode == "POST":

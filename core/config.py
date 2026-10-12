@@ -1186,6 +1186,88 @@ def mempool_erreichbar(url: str, *, timeout: float = 4.0) -> tuple[bool, str]:
     return False, letzter
 
 
+def mempool_api_praefixe(basis: str) -> list[str]:
+    """API-Wurzeln: Frontend ``/api``, nacktes Backend, bereits gesetzter Pfad."""
+    text = str(basis or "").rstrip("/")
+    if not text:
+        return []
+    if text.endswith("/api/v1"):
+        return [text, text[: -len("/v1")]]
+    if text.endswith("/api"):
+        return [f"{text}/v1", text]
+    return [f"{text}/api/v1", f"{text}/api", text]
+
+
+def mempool_api_get(
+    url: str,
+    pfade: list[str],
+    *,
+    values: dict[str, str] | None = None,
+    timeout: float = 3.0,
+    max_body: int = 16_384,
+) -> bytes | None:
+    """
+    Ein GET gegen die mempool-API. Policy wie die Explorer-Pille.
+
+    Netzfehler (Host schweigt) beendet den Versuch — nicht jeder Pfad
+    wartet den Timeout. HTTP 404 probiert den nächsten Pfad.
+    """
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlparse
+
+    from core.outbound_policy import OutboundPolicyError, ensure_url_allowed, tls_context
+
+    try:
+        basis = normalize_mempool_url(url)
+    except ValueError:
+        return None
+    if not basis:
+        return None
+    try:
+        ensure_url_allowed(basis, service="mempool", values=values)
+    except OutboundPolicyError:
+        return None
+    host = urlparse(basis).hostname or ""
+    gesehen: set[str] = set()
+    for praefix in mempool_api_praefixe(basis):
+        for rel in pfade:
+            ziel = f"{praefix}/{str(rel).lstrip('/')}"
+            if ziel in gesehen:
+                continue
+            gesehen.add(ziel)
+            anfrage = urllib.request.Request(
+                ziel,
+                headers={
+                    "User-Agent": "SatSage",
+                    "Accept": "application/json, text/plain, */*",
+                },
+            )
+            try:
+                with urllib.request.urlopen(
+                    anfrage,
+                    timeout=timeout,
+                    context=tls_context(host=host, values=values),
+                ) as antwort:
+                    status = int(getattr(antwort, "status", 200) or 200)
+                    roh = antwort.read(max_body)
+            except urllib.error.HTTPError as exc:
+                try:
+                    exc.read(max_body)
+                except Exception:
+                    pass
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+                continue
+            except Exception:
+                return None
+            if 200 <= status < 300 and roh:
+                return roh
+    return None
+
+
 def _mempool_probe_eine(
     url: str,
     host: str,

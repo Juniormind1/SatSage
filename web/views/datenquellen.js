@@ -604,6 +604,13 @@ function zeichneQuellen(quellen) {
     }
 
     if (quelle.key === "bip158") {
+      const datum = document.createElement("input");
+      datum.type = "date";
+      datum.className = "quelle-start-datum";
+      datum.min = "2009-01-03";
+      datum.title = t("sources.bip158DateTitle");
+      datum.disabled = bridgeManaged;
+
       const hoehe = document.createElement("input");
       hoehe.type = "number";
       hoehe.className = "quelle-start-hoehe";
@@ -624,8 +631,7 @@ function zeichneQuellen(quellen) {
           hoehe.blur();
         }
       });
-      hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe));
-      rechts.append(hoehe);
+      hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe, datum));
 
       const luecke = document.createElement("input");
       luecke.type = "number";
@@ -647,7 +653,22 @@ function zeichneQuellen(quellen) {
         }
       });
       luecke.addEventListener("change", () => speichereBip158Gap(luecke));
-      rechts.append(luecke);
+
+      datum.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          datum.blur();
+        }
+      });
+      // Erst beim Verlassen — type=date feuert change schon beim Tippen.
+      datum.addEventListener("blur", () => speichereBip158ScanDatum(datum, hoehe));
+      fuelleBip158DatumFeld(datum, startWert);
+
+      rechts.append(
+        quelleScanFeld(t("sources.bip158DateLabel"), datum),
+        quelleScanFeld(t("sources.bip158StartLabel"), hoehe),
+        quelleScanFeld(t("sources.bip158GapLabel"), luecke),
+      );
 
       const verbinden = document.createElement("button");
       verbinden.type = "button";
@@ -817,8 +838,94 @@ async function verbindeOeffentlicheElectrum(quelle, knopf) {
   }
 }
 
+function quelleScanFeld(labelText, eingabe) {
+  const wrap = document.createElement("label");
+  wrap.className = "quelle-scan-feld";
+  if (eingabe.title) wrap.title = eingabe.title;
+  const text = document.createElement("span");
+  text.className = "quelle-scan-label";
+  text.textContent = labelText;
+  wrap.append(text, eingabe);
+  return wrap;
+}
+
+function p2pScanDatumCache() {
+  if (!Zustand._p2pScanDatumNachHoehe) {
+    Zustand._p2pScanDatumNachHoehe = Object.create(null);
+  }
+  return Zustand._p2pScanDatumNachHoehe;
+}
+
+function merkeP2pScanDatum(hoehe, datum) {
+  const h = String(hoehe || "").trim();
+  const d = String(datum || "").trim();
+  if (!h || !d) return;
+  p2pScanDatumCache()[h] = d;
+}
+
+async function p2pScanZeitUmrechnen({ hoehe, datum }) {
+  const params = new URLSearchParams();
+  if (hoehe != null && hoehe !== "") params.set("hoehe", String(hoehe));
+  else if (datum) params.set("datum", String(datum));
+  else return null;
+  return api(`/p2p/scan-zeit?${params.toString()}`);
+}
+
+function fuelleBip158DatumFeld(datumFeld, hoeheWert) {
+  if (!datumFeld) return;
+  const h = String(hoeheWert || "").trim();
+  if (!h) {
+    datumFeld.value = "";
+    datumFeld.dataset.savedValue = "";
+    return;
+  }
+  const cached = p2pScanDatumCache()[h];
+  if (cached) {
+    datumFeld.value = cached;
+    datumFeld.dataset.savedValue = cached;
+    return;
+  }
+  const lauf = (Zustand._p2pDatumLauf = (Zustand._p2pDatumLauf || 0) + 1);
+  p2pScanZeitUmrechnen({ hoehe: h }).then((ergebnis) => {
+    if (lauf !== Zustand._p2pDatumLauf) return;
+    if (!datumFeld.isConnected) return;
+    const iso = ergebnis && ergebnis.date;
+    if (!iso) return;
+    merkeP2pScanDatum(h, iso);
+    datumFeld.value = iso;
+    datumFeld.dataset.savedValue = iso;
+  }).catch(() => {});
+}
+
+/** P2P-Zeile: Datum → Höhe umrechnen, nur die Höhe speichern. */
+async function speichereBip158ScanDatum(datumFeld, hoeheFeld) {
+  if (!datumFeld || datumFeld.disabled || !hoeheFeld) return;
+  const roh = String(datumFeld.value || "").trim();
+  if (!roh) return;
+  if (datumFeld.dataset.savedValue === roh) return;
+  Zustand._p2pDatumLauf = (Zustand._p2pDatumLauf || 0) + 1;
+  datumFeld.disabled = true;
+  try {
+    const ergebnis = await p2pScanZeitUmrechnen({ datum: roh });
+    const n = Number(ergebnis && ergebnis.height);
+    if (!Number.isInteger(n) || n < 0) {
+      meldung(t("sources.bip158DateInvalid"), "krit");
+      return;
+    }
+    hoeheFeld.value = String(n);
+    merkeP2pScanDatum(n, roh);
+    datumFeld.dataset.savedValue = roh;
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+    return;
+  } finally {
+    if (datumFeld.isConnected) datumFeld.disabled = false;
+  }
+  await speichereBip158StartHoehe(hoeheFeld, datumFeld, { datumSchonGesetzt: true });
+}
+
 /** P2P-Zeile: Start­höhe speichern (kein Stift-Dialog mehr). */
-async function speichereBip158StartHoehe(eingabe) {
+async function speichereBip158StartHoehe(eingabe, datumFeld, optionen) {
   if (!eingabe || eingabe.disabled) return;
   const roh = String(eingabe.value || "").trim();
   if (!roh) return;
@@ -828,6 +935,19 @@ async function speichereBip158StartHoehe(eingabe) {
     return;
   }
   const vorher = eingabe.dataset.savedValue;
+  const nurDatum = optionen && optionen.datumSchonGesetzt;
+  if (!nurDatum && datumFeld && datumFeld.isConnected) {
+    try {
+      const ergebnis = await p2pScanZeitUmrechnen({ hoehe: n });
+      if (ergebnis && ergebnis.date) {
+        merkeP2pScanDatum(n, ergebnis.date);
+        datumFeld.value = ergebnis.date;
+        datumFeld.dataset.savedValue = ergebnis.date;
+      }
+    } catch (_) {
+      /* Höhe gilt trotzdem; Datum bleibt leer oder alt. */
+    }
+  }
   if (vorher != null && vorher === String(n)) return;
   eingabe.disabled = true;
   merkeQuellenAenderung();

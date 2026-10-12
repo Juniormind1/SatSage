@@ -1616,6 +1616,14 @@ scantxoutset nicht verbunden sind. Herkunft, Verlauf und der
 Sanktionscheck bleiben bei einem schon verbundenen Electrum-Server.
 Ohne den erscheint ein Hinweis, und es wird nicht gesucht.</p>
 
+<p>In den Datenquellen stehen bei Compact Filter <strong>Frühestes Scan-Datum</strong>,
+<strong>Scan ab Blockhöhe</strong> und <strong>Gap-Limit</strong>. Datum und Höhe
+füllen sich gegenseitig. Ohne bekanntes Wallet-Alter startet der Scan bei der
+eingetragenen Höhe (<code>BIP158_START_HEIGHT</code>). Hat das Wallet ein
+First-seen, gilt dieser Beginn — auch wenn die Datenquellen-Höhe später liegt.
+Die Umrechnung nutzt die lokale Header-Datei,
+sonst einen verbundenen Block-Explorer, sonst eine 10-Minuten-Schätzung ab Genesis.</p>
+
 <p><strong>P2P-BIP-158 Erstscan:</strong> Zuerst das jüngste Fenster
 (~2016 Blöcke, TurboSync) mit der vollen Lookahead-Menge — danach die Historie
 nur mit bereits getroffenen Adressen plus kleiner Gap, nicht mit allen

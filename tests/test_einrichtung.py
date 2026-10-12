@@ -447,6 +447,10 @@ if (fehler.length) {
         self.assertIn("function quelleHochVerdraengt", self.datenquellen_js)
         self.assertIn("loescheElectrumListe", self.datenquellen_js)
         self.assertIn("sources.disableP2pTitle", self.datenquellen_js)
+        self.assertIn("sources.bip158DateLabel", self.datenquellen_js)
+        self.assertIn("sources.bip158StartLabel", self.datenquellen_js)
+        self.assertIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertIn("/p2p/scan-zeit?", self.datenquellen_js)
         self.assertIn("feld.typ === \"checkbox\"", self.datenquellen_js)
         self.assertIn("verbindeP2p", self.datenquellen_js)
         self.assertIn('"sources.reachable": "verbunden"', de)
@@ -760,6 +764,9 @@ class TestOberflaeche(unittest.TestCase):
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn('"sources.connecting": "Verbindung im Aufbau…"', de)
         self.assertIn('"dialog.p2pPrivacy.title"', de)
+        self.assertIn('"sources.bip158DateLabel": "Frühestes Scan-Datum:"', de)
+        self.assertIn('"sources.bip158StartLabel": "Scan ab Blockhöhe:"', de)
+        self.assertIn('"sources.bip158GapLabel": "Gap-Limit:"', de)
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)

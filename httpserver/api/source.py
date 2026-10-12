@@ -90,6 +90,53 @@ def api_mempool_probe(state: AppState) -> dict:
     }
 
 
+def api_p2p_scan_zeit(state: AppState, query: dict) -> dict:
+    """Höhe ↔ Datum für den P2P-Scan-Start. Scan liest nur die Höhe."""
+    from server import ApiError
+
+    from core.scan_zeit import parse_utc_datum, rechne_scan_zeit
+
+    hoehe_roh = str(
+        (query.get("hoehe") or query.get("height") or [""])[0] or ""
+    ).strip()
+    datum_roh = str(
+        (query.get("datum") or query.get("date") or [""])[0] or ""
+    ).strip()
+    if hoehe_roh and datum_roh:
+        raise ApiError(400, "Nur Höhe oder Datum, nicht beides.")
+    if not hoehe_roh and not datum_roh:
+        raise ApiError(400, "Höhe oder Datum angeben.")
+
+    hoehe = None
+    datum = None
+    if hoehe_roh:
+        try:
+            hoehe = int(hoehe_roh)
+        except ValueError as exc:
+            raise ApiError(400, "Scan-Block muss eine ganze Zahl ≥ 0 sein.") from exc
+        if hoehe < 0:
+            raise ApiError(400, "Scan-Block muss eine ganze Zahl ≥ 0 sein.")
+    else:
+        try:
+            parse_utc_datum(datum_roh)
+        except ValueError as exc:
+            raise ApiError(400, f"Startdatum unlesbar: {exc}") from exc
+        datum = datum_roh
+
+    werte = state.env().values()
+    explorer = (werte.get("MEMPOOL_URL") or "").strip() or None
+    try:
+        return rechne_scan_zeit(
+            hoehe=hoehe,
+            datum=datum,
+            cache_root=state.immutable_cache_dir,
+            explorer_url=explorer,
+            values=werte,
+        )
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
+
+
 def api_save_source(state: AppState, payload: dict) -> dict:
     from server import (
         ApiError,
@@ -773,7 +820,8 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 args.bip158_start = start_hoehe
             else:
                 # First-seen überlebt Cache-Löschen — Scan dort ansetzen,
-                # nicht wieder bei SegWit. BIP-158 liest das zusätzlich selbst.
+                # nicht wieder bei SegWit und nicht bei einer späteren
+                # Datenquellen-Höhe. BIP-158 liest das zusätzlich selbst.
                 alter_start = main.bip158_start_aus_first_seen(
                     entry.analyse_schluessel,
                     state.cache_dir,

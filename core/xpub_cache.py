@@ -1077,8 +1077,9 @@ def bip158_start_aus_first_seen(
     """
     Scan-Start ab Wallet-Beginn (First-seen), mit kleinem Vorlauf.
 
-    Für Rescan ohne UTXO-Cache: statt SegWit dort beginnen, wo das Wallet
-    wirklich losging. Rückgabe None, wenn kein Alter bekannt.
+    Für Rescan ohne UTXO-Cache: dort beginnen, wo das Wallet wirklich
+    losging — auch wenn BIP158_START_HEIGHT später liegt. Rückgabe None,
+    wenn kein Alter bekannt.
     """
     if cache_dir is None:
         return None

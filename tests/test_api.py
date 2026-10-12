@@ -1140,6 +1140,26 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             main._load_dotenv(self.env_pfad)["BIP158_START_HEIGHT"], "481824"
         )
 
+    def test_p2p_scan_zeit_hoehe_und_datum(self):
+        from core.scan_zeit import schaetze_datum_aus_hoehe, schaetze_hoehe_aus_datum
+
+        status, koerper = self.anfrage("/api/p2p/scan-zeit?hoehe=481824")
+        self.assertEqual(status, 200)
+        self.assertEqual(koerper["height"], 481824)
+        self.assertEqual(koerper["date"], schaetze_datum_aus_hoehe(481824))
+        self.assertEqual(koerper["source"], "estimate")
+
+        status, koerper = self.anfrage("/api/p2p/scan-zeit?datum=2017-08-24")
+        self.assertEqual(status, 200)
+        self.assertEqual(koerper["date"], "2017-08-24")
+        self.assertEqual(koerper["height"], schaetze_hoehe_aus_datum("2017-08-24"))
+        self.assertEqual(koerper["source"], "estimate")
+
+        status, koerper = self.anfrage("/api/p2p/scan-zeit")
+        self.assertEqual(status, 400)
+        status, koerper = self.anfrage("/api/p2p/scan-zeit?hoehe=1&datum=2017-08-24")
+        self.assertEqual(status, 400)
+
     def test_p2p_luecke_wird_gespeichert_und_begrenzt(self):
         status, _ = self.anfrage(
             "/api/config/source", methode="PUT",
