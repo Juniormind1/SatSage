@@ -13,12 +13,16 @@ import os
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parent
+HERE = SCRIPTS.parent
 REPO = HERE.parents[1]
 REPORT = HERE / ".data" / "scenario-report-txclass.json"
 ENV_PATH = HERE / ".data" / ".regtest.env"
 
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(SCRIPTS))
+
+from infra_check import brauche  # noqa: E402
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -87,6 +91,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", type=Path, default=REPORT)
     args = parser.parse_args()
+    fehl = brauche("bitcoind", "electrs")
+    if fehl is not None:
+        return fehl
     if not args.report.is_file():
         print(f"Report fehlt: {args.report}", file=sys.stderr)
         print("Zuerst generate_scenarios.py laufen lassen.", file=sys.stderr)

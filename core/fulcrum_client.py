@@ -14,7 +14,11 @@ from embit.script import address_to_scriptpubkey
 
 import core.outbound_policy as outbound_policy
 
-from core.fulcrum_transport import _socks5_connect
+from core.fulcrum_transport import (
+    _socks5_connect,
+    merke_kette_socket,
+    vergiss_kette_socket,
+)
 
 
 FULCRUM_DEFAULT_PORT = 50002
@@ -36,6 +40,19 @@ _PROBE_SCRIPT_HASH = "0" * 64
 def _is_unknown_method_error(exc: BaseException, method: str) -> bool:
     msg = str(exc).lower()
     return "unknown method" in msg and method.lower() in msg
+
+
+def _ist_client_nicht_verbunden(exc: BaseException) -> bool:
+    """Socket schon zu — gleicher Fall wie Verbindungsverlust, kein Protokollfehler."""
+    return isinstance(exc, RuntimeError) and "nicht verbunden" in str(exc).lower()
+
+
+def _ist_trennungsfehler(exc: BaseException) -> bool:
+    if isinstance(
+        exc, (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError),
+    ):
+        return True
+    return _ist_client_nicht_verbunden(exc)
 
 
 def parse_electrum_server_software(version_result: Any) -> tuple[str, str]:
@@ -124,6 +141,8 @@ class FulcrumClient:
                 return None
 
     def connect(self) -> None:
+        if outbound_policy.oeffentliche_electrum_suche_prozess_ende():
+            raise ConnectionError("abgebrochen")
         outbound_policy.ensure_resolves_to_allowed_host(
             self.host,
             service="fulcrum",
@@ -136,9 +155,19 @@ class FulcrumClient:
             )
         else:
             raw = socket.create_connection((self.host, self.port), timeout=self.timeout)
+            merke_kette_socket(raw)
+        # Timeout vor dem TLS-Handshake — sonst hängt wrap_socket auf
+        # Klartext-Port 50001 über Tor bis zum Default (oft Minuten).
+        try:
+            raw.settimeout(float(self.timeout))
+        except OSError:
+            pass
         if self.use_ssl:
             ctx = outbound_policy.tls_context(host=self.host)
             self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
+            if self._sock is not raw:
+                vergiss_kette_socket(raw)
+                merke_kette_socket(self._sock)
         else:
             self._sock = raw
         self._handshaked = False
@@ -154,11 +183,17 @@ class FulcrumClient:
 
     def close(self) -> None:
         if self._sock:
+            sock = self._sock
+            self._sock = None
+            vergiss_kette_socket(sock)
             try:
-                self._sock.close()
+                sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-            self._sock = None
+            try:
+                sock.close()
+            except OSError:
+                pass
         self._handshaked = False
 
     def _apply_server_version(self, version_result: Any) -> None:
@@ -302,6 +337,23 @@ class FulcrumClient:
             results.append(self._result_from_response(by_id[rid]))
         return results
 
+    def _nach_trennung(self, versuch: int, exc: BaseException) -> BaseException:
+        """Job-Abbruch oder Reconnect nach Socket-Verlust."""
+        from display import is_list_abort_requested
+        from core.jobs import Cancelled
+
+        if is_list_abort_requested():
+            raise Cancelled() from exc
+        if versuch >= FULCRUM_REQUEST_RETRIES:
+            return exc
+        self.close()
+        try:
+            self.connect()
+            self._handshake_locked()
+        except Exception as reconnect_exc:
+            return reconnect_exc
+        return exc
+
     def request(self, method: str, params: list | None = None) -> Any:
         """
         JSON-RPC-Aufruf. Bei Timeout/Abbrecher (typisch Tor + große Tx)
@@ -309,7 +361,8 @@ class FulcrumClient:
 
         Ein gesetzter Job-Abbruch beendet den laufenden Leseversuch sofort:
         sonst bleibt „Abbruch angefordert“ stehen, bis der Socket-Timeout
-        der großen Transaktion abläuft.
+        der großen Transaktion abläuft. Ein schon geschlossener Socket
+        („nicht verbunden“) zählt als Trennungsfehler, nicht als Crash.
         """
         if method == "server.version":
             # Immer über handshake — kein zweites version auf derselben Session.
@@ -317,26 +370,21 @@ class FulcrumClient:
         letzter: BaseException | None = None
         with self._lock:
             for versuch in range(1, FULCRUM_REQUEST_RETRIES + 1):
+                from display import is_list_abort_requested
+                from core.jobs import Cancelled
+
+                if is_list_abort_requested():
+                    raise Cancelled()
                 try:
                     if not self._handshaked and self._sock is not None:
                         self._handshake_locked()
                     return self._request_once(method, params)
-                except (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError) as exc:
-                    letzter = exc
-                    from display import is_list_abort_requested
-                    from core.jobs import Cancelled
-
-                    if is_list_abort_requested():
-                        raise Cancelled() from exc
-                    if versuch >= FULCRUM_REQUEST_RETRIES:
-                        break
-                    self.close()
-                    try:
-                        self.connect()
-                        self._handshake_locked()
-                    except Exception as reconnect_exc:
-                        letzter = reconnect_exc
-                        continue
+                except Cancelled:
+                    raise
+                except Exception as exc:
+                    if not _ist_trennungsfehler(exc):
+                        raise
+                    letzter = self._nach_trennung(versuch, exc)
             assert letzter is not None
             raise TimeoutError(
                 f"Fulcrum {method} nach {FULCRUM_REQUEST_RETRIES} Versuchen "
@@ -369,29 +417,23 @@ class FulcrumClient:
             letzter: BaseException | None = None
             with self._lock:
                 for versuch in range(1, FULCRUM_REQUEST_RETRIES + 1):
+                    from display import is_list_abort_requested
+                    from core.jobs import Cancelled
+
+                    if is_list_abort_requested():
+                        raise Cancelled()
                     try:
                         if not self._handshaked and self._sock is not None:
                             self._handshake_locked()
                         out.extend(self._request_batch_once(chunk))
                         letzter = None
                         break
-                    except (
-                        TimeoutError,
-                        socket.timeout,
-                        ConnectionError,
-                        BrokenPipeError,
-                        OSError,
-                    ) as exc:
-                        letzter = exc
-                        if versuch >= FULCRUM_REQUEST_RETRIES:
-                            break
-                        self.close()
-                        try:
-                            self.connect()
-                            self._handshake_locked()
-                        except Exception as reconnect_exc:
-                            letzter = reconnect_exc
-                            continue
+                    except Cancelled:
+                        raise
+                    except Exception as exc:
+                        if not _ist_trennungsfehler(exc):
+                            raise
+                        letzter = self._nach_trennung(versuch, exc)
                 if letzter is not None:
                     raise TimeoutError(
                         f"Fulcrum-Batch ({len(chunk)} Calls) nach "
@@ -655,6 +697,11 @@ def connect_fulcrum(
     require_listunspent: bool = False,
 ) -> tuple[FulcrumClient | None, str | None]:
     """Verbindet zu Fulcrum; gibt (client, None) oder (None, Fehlertext) zurück."""
+    try:
+        if outbound_policy.oeffentliche_electrum_suche_prozess_ende():
+            return None, "abgebrochen"
+    except Exception:
+        pass
     client = FulcrumClient(
         host,
         port,
@@ -706,7 +753,18 @@ class RotatingFulcrumPool:
                 if _is_unknown_method_error(exc, method):
                     last_exc = exc
                     continue
-                raise
+                if not _ist_client_nicht_verbunden(exc):
+                    raise
+                last_exc = exc
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                try:
+                    client.connect()
+                except Exception:
+                    pass
+                continue
             except (TimeoutError, socket.timeout, ConnectionError, BrokenPipeError, OSError) as exc:
                 # Nächster Onion/Clearnet-Server — sonst hängt der Verlauf
                 # minutenlang auf einem toten Peer bei „noch 59 von 59“.

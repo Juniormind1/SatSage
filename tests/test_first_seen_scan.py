@@ -34,6 +34,38 @@ class TestFirstSeenScan(unittest.TestCase):
                 700_004,
             )
 
+    def test_scan_start_nimmt_first_seen_auch_wenn_datenquelle_neuer(self):
+        from core.bip158_wallet import scan_start_fuer_xpub
+
+        class Client:
+            def __init__(self, cache, start):
+                self.cache_dir = cache
+                self.start_height = start
+                self.gap_limit = 100
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            main.save_xpub_first_seen(
+                BIP84_ZPUB, cache, {"height": 700_010, "time_ts": 1},
+            )
+            plan = scan_start_fuer_xpub(Client(cache, 850_000), BIP84_ZPUB)
+            self.assertEqual(plan["start"], 700_004)
+            self.assertEqual(plan["start_grund"], "alter")
+
+            leer = scan_start_fuer_xpub(
+                Client(Path(tmp) / "leer", 850_000), BIP84_ZPUB,
+            )
+            self.assertEqual(leer["start"], 850_000)
+            self.assertEqual(leer["start_grund"], "konfiguriert")
+
+            main.save_xpub_utxo_cache(
+                BIP84_ZPUB, [_u(900_000)], cache, "bip158",
+                scan_tip_height=900_000, bip158_fullscan_ok=True,
+            )
+            tip = scan_start_fuer_xpub(Client(cache, 850_000), BIP84_ZPUB)
+            self.assertEqual(tip["start_grund"], "tip")
+            self.assertGreater(tip["start"], 700_004)
+
     def test_ermittle_first_seen_aus_utxos_ohne_fulcrum(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache = Path(tmp)

@@ -1,8 +1,11 @@
 """Fulcrum-Anfragen bei Timeout neu verbinden und wiederholen."""
 from __future__ import annotations
 
+import socket
+import threading
+import time
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import fulcrum
 
@@ -49,6 +52,57 @@ class TestFulcrumRequestRetry(unittest.TestCase):
         self.assertEqual(client.handshake()[0], "/libbitcoin:4.0.0/")
         self.assertEqual(client.request("server.version"), ["/libbitcoin:4.0.0/", "1.4"])
         self.assertEqual(client._request_once.call_count, 1)
+
+    def test_nicht_verbunden_wird_neu_verbunden(self):
+        client = fulcrum.FulcrumClient("127.0.0.1", 50001, use_ssl=False, timeout=1)
+        client._handshaked = True
+        n = {"i": 0}
+
+        def once(method, params=None):
+            n["i"] += 1
+            if n["i"] < 2:
+                raise RuntimeError("Fulcrum-Client nicht verbunden")
+            return []
+
+        client._request_once = once  # type: ignore[method-assign]
+        client.connect = MagicMock()
+        client.close = MagicMock()
+        self.assertEqual(
+            client.request("blockchain.scripthash.get_history", ["00"]),
+            [],
+        )
+        self.assertEqual(n["i"], 2)
+        client.connect.assert_called()
+
+    def test_nicht_verbunden_bei_abbruch_cancelled(self):
+        from core.jobs import Cancelled
+
+        client = fulcrum.FulcrumClient("127.0.0.1", 50001, use_ssl=False, timeout=1)
+        client._handshaked = True
+        client._request_once = MagicMock(
+            side_effect=RuntimeError("Fulcrum-Client nicht verbunden"),
+        )
+        client.connect = MagicMock()
+        client.close = MagicMock()
+        with patch("display.is_list_abort_requested", return_value=True):
+            with self.assertRaises(Cancelled):
+                client.request("blockchain.scripthash.get_history", ["00"])
+        client.connect.assert_not_called()
+
+    def test_rotation_nimmt_naechsten_wenn_nicht_verbunden(self):
+        tot = MagicMock()
+        tot.request.side_effect = RuntimeError("Fulcrum-Client nicht verbunden")
+        tot.close = MagicMock()
+        tot.connect = MagicMock()
+        lebend = MagicMock()
+        lebend.request.return_value = [{"tx_hash": "ab", "height": 1}]
+        pool = fulcrum.RotatingFulcrumPool([tot, lebend])
+        self.assertEqual(
+            pool.request("blockchain.scripthash.get_history", ["00"]),
+            [{"tx_hash": "ab", "height": 1}],
+        )
+        tot.close.assert_called()
+        lebend.request.assert_called()
 
 
 class TestNotifySessionTimeout(unittest.TestCase):
@@ -117,6 +171,47 @@ class TestNotifySessionHandshake(unittest.TestCase):
         sess.handshake()
         sess.handshake()
         sess.request.assert_called_once()
+
+
+class TestKetteSocketsAbbruch(unittest.TestCase):
+    def test_schliesse_gibt_haengenden_recv_frei(self):
+        from core.fulcrum_transport import (
+            merke_kette_socket,
+            schliesse_offene_fulcrum_sockets,
+        )
+
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        peer: list[socket.socket] = []
+
+        def accept() -> None:
+            verb, _addr = srv.accept()
+            peer.append(verb)
+
+        threading.Thread(target=accept, daemon=True).start()
+        cli = socket.create_connection(("127.0.0.1", srv.getsockname()[1]), timeout=2)
+        merke_kette_socket(cli)
+        time.sleep(0.05)
+        fertig = threading.Event()
+
+        def rec() -> None:
+            try:
+                cli.recv(64)
+            except OSError:
+                pass
+            finally:
+                fertig.set()
+
+        threading.Thread(target=rec, daemon=True).start()
+        t0 = time.monotonic()
+        self.assertGreaterEqual(schliesse_offene_fulcrum_sockets(), 1)
+        self.assertTrue(fertig.wait(2.0))
+        self.assertLess(time.monotonic() - t0, 1.5)
+        srv.close()
+        for sock in peer:
+            sock.close()
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ Das Log baut **Vertrauen** und hilft bei der **Fehlersuche** — es ist kein Deb
 
 1. **Ankündigung vor der Arbeit** — nicht danach. Beispiel: *Clearnet ohne Treffer — versuche über Tor…* **bevor** SOCKS-Probe/Binary-Start.
 2. **Ergebnis danach** — `Verbunden.…` / Fehler; nicht dieselbe Arbeitszeile wiederholen.
-3. **„Moment noch“** nur nach ~10 s ohne neue Zeile (global), kein Job-Namen-Spam.
+3. **„Moment noch“** nur nach ~90 s ohne neue Zeile (global), kein Job-Namen-Spam.
 4. **Wallet-Aktionen:** Name nach der Uhrzeit.
 5. **Ein Strom** (`on_log` / NDJSON) — nicht erst im fertigen JSON-Block.
 6. **Terminal** bei offener GUI: Fortschritt primär in der Web-GUI; stdout nicht verdoppeln (Prozess-Steuerung / harte Fehler reichen).

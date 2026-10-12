@@ -247,6 +247,7 @@ async function start() {
   macheLogZiehbar();
   macheDockSpalter();
   macheEmpfangSpalter();
+  if (typeof bindeNavLeiste === "function") bindeNavLeiste();
   setzeLernhinweiseDelegates();
   setzeEmpfangAnimDebug();
   setzeEmpfangLabSenden();
@@ -330,6 +331,7 @@ async function start() {
       if (typeof zeichneLlmPille === "function" && Zustand.llmStatus) {
         zeichneLlmPille();
       }
+      if (typeof aktualisiereNavWerkzeuge === "function") aktualisiereNavWerkzeuge();
       if (Zustand.ansicht === "wallet" && Zustand.walletId) {
         zeigeWallet(Zustand.walletId).catch(() => {});
       } else if (Zustand.ansicht === "steuerjahr" && typeof ladeSteuerjahr === "function") {
@@ -570,7 +572,6 @@ async function start() {
   if (herkunftTief) {
     herkunftTief.addEventListener("click", () => starteHerkunftVollstaendig());
   }
-  $("#verlauf-erheben").addEventListener("click", verlaufErheben);
   $("#export-csv").addEventListener("click", () => ladeExport("export.csv"));
   $("#export-bericht").addEventListener("click", () => ladeExport("bericht.html"));
   const saLaden = $("#sa-laden");
@@ -596,6 +597,7 @@ async function start() {
   $("#tip-sync-knopf")?.addEventListener("click", starteTipSync);
   $("#rescan-knopf").addEventListener("click", starteRescan);
   $("#verlauf-knopf").addEventListener("click", starteVerlaufsscan);
+  $("#utxos-alle-knopf")?.addEventListener("click", starteUtxosAlle);
   $("#rescan-abbruch").addEventListener("click", brichRescanAb);
   $("#hinzufuegen").addEventListener("click", fuegeWalletHinzu);
   $("#deskriptor-import").addEventListener("click", oeffneDeskriptorImport);

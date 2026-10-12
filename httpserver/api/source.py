@@ -90,6 +90,53 @@ def api_mempool_probe(state: AppState) -> dict:
     }
 
 
+def api_p2p_scan_zeit(state: AppState, query: dict) -> dict:
+    """Höhe ↔ Datum für den P2P-Scan-Start. Scan liest nur die Höhe."""
+    from server import ApiError
+
+    from core.scan_zeit import parse_utc_datum, rechne_scan_zeit
+
+    hoehe_roh = str(
+        (query.get("hoehe") or query.get("height") or [""])[0] or ""
+    ).strip()
+    datum_roh = str(
+        (query.get("datum") or query.get("date") or [""])[0] or ""
+    ).strip()
+    if hoehe_roh and datum_roh:
+        raise ApiError(400, "Nur Höhe oder Datum, nicht beides.")
+    if not hoehe_roh and not datum_roh:
+        raise ApiError(400, "Höhe oder Datum angeben.")
+
+    hoehe = None
+    datum = None
+    if hoehe_roh:
+        try:
+            hoehe = int(hoehe_roh)
+        except ValueError as exc:
+            raise ApiError(400, "Scan-Block muss eine ganze Zahl ≥ 0 sein.") from exc
+        if hoehe < 0:
+            raise ApiError(400, "Scan-Block muss eine ganze Zahl ≥ 0 sein.")
+    else:
+        try:
+            parse_utc_datum(datum_roh)
+        except ValueError as exc:
+            raise ApiError(400, f"Startdatum unlesbar: {exc}") from exc
+        datum = datum_roh
+
+    werte = state.env().values()
+    explorer = (werte.get("MEMPOOL_URL") or "").strip() or None
+    try:
+        return rechne_scan_zeit(
+            hoehe=hoehe,
+            datum=datum,
+            cache_root=state.immutable_cache_dir,
+            explorer_url=explorer,
+            values=werte,
+        )
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
+
+
 def api_save_source(state: AppState, payload: dict) -> dict:
     from server import (
         ApiError,
@@ -150,6 +197,16 @@ def api_save_source(state: AppState, payload: dict) -> dict:
 
         if schluessel.endswith(("PORT", "HEIGHT")) and text and not text.isdigit():
             raise ApiError(400, f"„{schluessel}“ muss eine Zahl sein.")
+        if schluessel == "BIP158_GAP_LIMIT":
+            if not text.isdigit():
+                raise ApiError(
+                    400, "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.",
+                )
+            luecke = int(text)
+            if luecke < 1 or luecke > 10_000:
+                raise ApiError(
+                    400, "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.",
+                )
 
         # Start9-GUI kopiert gern https://….onion — SOCKS/IDNA verstehen das nicht.
         if schluessel in ("FULCRUM_HOST", "FULCRUM_TOR", "NODE_IP") and text:
@@ -230,26 +287,35 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
 
     _datenquellen_config_gesperrt(state)
     """
-    Lädt servers.json vom Electrum-Repo.
+    Lädt servers.json vom Electrum-Repo, wenn die lokale Datei fehlt
+    oder mindestens einen Tag alt ist.
 
     filter=onion  → schreibt bis zu zehn Onion-Hosts nach FULCRUM_TOR_0…
     filter=clearnet → legt nur electrum_servers.json an (Clearnet-Pool).
     Die Datei selbst bleibt vollständig, damit beide Abschnitte dieselbe
     Quelle nutzen und sich nicht gegenseitig die Liste zerschneiden.
     """
-    from check_fulcrum_tor import (
+    from core.electrum_servers import (
         ELECTRUM_SERVERS_URL,
-        fetch_electrum_servers_json,
+        lade_oder_aktualisiere_electrum_servers,
         splitte_electrum_server,
     )
 
     art = str(payload.get("filter") or "").strip()
     if art not in ("onion", "clearnet"):
         raise ApiError(400, "filter muss „onion“ oder „clearnet“ sein.")
+    verbinden = bool(payload.get("verbinden"))
+    # „Verbinden“ gilt nur für diese Zeile. Die Liste kommt bei Bedarf mit.
+    # Sonst prüft der folgende Status-Check ohne Wahl und nimmt Clearnet,
+    # weil es schneller antwortet als Onion.
+    source_mod.setze_oeffentliche_electrum_art(art)
+    from httpserver.empfang import _verwerfe_oeffentlichen_empfang_pool
+
+    _verwerfe_oeffentlichen_empfang_pool(state)
 
     ziel = main.ELECTRUM_SERVERS_FILE
     try:
-        servers = fetch_electrum_servers_json(ziel)
+        servers, refreshed = lade_oder_aktualisiere_electrum_servers(ziel)
     except (OSError, ValueError, RuntimeError) as exc:
         raise ApiError(502, f"Download fehlgeschlagen: {exc}") from exc
 
@@ -257,24 +323,28 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
     if art == "onion":
         if not onions:
             raise ApiError(502, "Die geladene Liste enthält keine Onion-Adressen.")
-        updates: dict[str, str | None] = {}
-        for i in range(main.MAX_PUBLIC_ONION_SERVERS):
-            if i < len(onions):
-                host, port, use_ssl = onions[i]
-                updates[f"FULCRUM_TOR_{i}"] = host
-                updates[f"FULCRUM_PORT_{i}"] = str(port)
-                updates[f"FULCRUM_SSL_{i}"] = "true" if use_ssl else "false"
-            else:
-                updates[f"FULCRUM_TOR_{i}"] = None
-                updates[f"FULCRUM_PORT_{i}"] = None
-                updates[f"FULCRUM_SSL_{i}"] = None
         env = state.env()
-        env.apply(updates)
-        try:
-            env.save()
-        except OSError as exc:
-            raise ApiError(500, "Interner Serverfehler.") from exc
-        state.reload()
+        schon_da = bool((env.values().get("FULCRUM_TOR_0") or "").strip())
+        # Frische Liste und schon Einträge: .env nicht bei jedem Verbinden
+        # überschreiben. Nachziehen oder erstes Laden schreibt die Rotation.
+        if refreshed or not schon_da:
+            updates: dict[str, str | None] = {}
+            for i in range(main.MAX_PUBLIC_ONION_SERVERS):
+                if i < len(onions):
+                    host, port, use_ssl = onions[i]
+                    updates[f"FULCRUM_TOR_{i}"] = host
+                    updates[f"FULCRUM_PORT_{i}"] = str(port)
+                    updates[f"FULCRUM_SSL_{i}"] = "true" if use_ssl else "false"
+                else:
+                    updates[f"FULCRUM_TOR_{i}"] = None
+                    updates[f"FULCRUM_PORT_{i}"] = None
+                    updates[f"FULCRUM_SSL_{i}"] = None
+            env.apply(updates)
+            try:
+                env.save()
+            except OSError as exc:
+                raise ApiError(500, "Interner Serverfehler.") from exc
+            state.reload()
         anzahl = min(len(onions), main.MAX_PUBLIC_ONION_SERVERS)
         meldung = (
             f"{anzahl} Onion-Adressen übernommen"
@@ -295,6 +365,9 @@ def api_lade_electrum_server(state: AppState, payload: dict) -> dict:
         "count": zaehler,
         "url": ELECTRUM_SERVERS_URL,
         "message": meldung,
+        "refreshed": refreshed,
+        "verbinden": verbinden,
+        "art": source_mod.oeffentliche_electrum_art(),
         "sources": [q.as_dict() for q in source_mod.describe_sources(werte)],
     }
 
@@ -316,7 +389,12 @@ def api_oeffentliche_electrum(state: AppState, payload: dict) -> dict:
 
     _datenquellen_config_gesperrt(state)
     erlauben = bool(payload.get("erlauben"))
+    art = str(payload.get("art") or "").strip().lower()
+    if art and art not in ("onion", "clearnet"):
+        raise ApiError(400, "art muss „onion“ oder „clearnet“ sein.")
     source_mod.setze_oeffentliche_electrum_session(erlauben)
+    if erlauben and art:
+        source_mod.setze_oeffentliche_electrum_art(art)
     # Dauerhafte Freigabe streichen — Opt-in ist sitzungsweise.
     env = state.env()
     if (env.values().get("OEFFENTLICHE_ELECTRUM") or "").strip():
@@ -392,6 +470,43 @@ def api_local_core_accept(state: AppState, payload: dict | None = None) -> dict:
     }
 
 
+def _kappe_oeffentliche_wenn_indexer_steht(
+    state, quellen: list, werte: dict, *, still: bool, on_log=None,
+) -> tuple[list, dict]:
+    """Eigener Indexer erreichbar → öffentliche Electrum-Reste und Opt-in weg."""
+    from dataclasses import replace
+
+    from server import source_mod
+
+    own = next((q for q in quellen if getattr(q, "key", None) == "own_fulcrum"), None)
+    if own is None or not own.reachable:
+        return quellen, werte
+    from httpserver.empfang import _kappe_oeffentliche_electrum_nach_privater_quelle
+
+    _kappe_oeffentliche_electrum_nach_privater_quelle(
+        state, on_log=None if still else on_log,
+    )
+    nach_kappe = {
+        q.get("key"): q
+        for q in (getattr(state, "sources_last", None) or [])
+        if isinstance(q, dict) and q.get("key")
+    }
+    gekappt: list = []
+    for q in quellen:
+        a = nach_kappe.get(q.key)
+        if a and q.key in source_mod.OEFFENTLICHE_QUELLEN_KEYS:
+            q = replace(
+                q,
+                reachable=a.get("reachable"),
+                peer_count=int(a.get("peer_count") or 0),
+                peer_hosts=list(a.get("peer_hosts") or []),
+                error=str(a.get("error") or ""),
+                note=str(a.get("note") or q.note or ""),
+            )
+        gekappt.append(q)
+    return gekappt, state.env().values()
+
+
 def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     from server import (
         _header_tip,
@@ -443,6 +558,9 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
             aufgefrischt.append(q)
         quellen = aufgefrischt
     quellen = source_mod.anreichere_live_p2p(quellen)
+    quellen, werte = _kappe_oeffentliche_wenn_indexer_steht(
+        state, quellen, werte, still=still, on_log=on_log,
+    )
     stand = source_mod.peer_status(quellen, werte)
     # Kein Header-Tip-Nachzug hier: der Peer-Takt (30 s) würde sonst
     # alle halbe Minute Tor/P2P + „Header-Cache fertig“ spammen.
@@ -459,6 +577,11 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
         "live_p2p_peers": _live_p2p_peers(),
         "header_job_id": state.header_job_id,
         "header_tip": _header_tip(state),
+        "oeffentliche_electrum": source_mod.oeffentliche_electrum_erlaubt(werte),
+        "oeffentliche_electrum_session": (
+            source_mod.oeffentliche_electrum_session_aktiv()
+        ),
+        "oeffentliche_electrum_art": source_mod.oeffentliche_electrum_art(),
         # Dealbreaker T14: Kopfzeile zeigt eine rote Pille, solange gesetzt.
         "rpc_allowlist": rpc_allowlist_status(),
     }
@@ -496,6 +619,8 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
             if not (name == "own_core" and k == "FULCRUM_TOR_PROXY")
         ]
         env.apply({schluessel: None for schluessel in loeschen})
+        for schluessel in loeschen:
+            env.runtime_values.pop(schluessel, None)
         try:
             sicherung = env.save()
         except OSError as exc:
@@ -567,6 +692,145 @@ def api_clear_source(state: AppState, quelle: str) -> dict:
     }
 
 
+def _bekannte_utxo_keys(state: AppState, entries) -> set[str]:
+    """txid:vout, die vor diesem Scan schon im Cache lagen."""
+    from server import main
+
+    keys: set[str] = set()
+    for entry in entries:
+        try:
+            liste = main.load_xpub_utxo_cache(
+                entry.analyse_schluessel, state.cache_dir,
+            ) or []
+        except Exception:
+            continue
+        for utxo in liste:
+            if not isinstance(utxo, dict):
+                continue
+            txid = str(utxo.get("txid") or "").strip().lower()
+            if not txid:
+                continue
+            try:
+                vout = int(utxo.get("vout") or 0)
+            except (TypeError, ValueError):
+                vout = 0
+            keys.add(f"{txid}:{vout}")
+    return keys
+
+
+def _adresse_zu_wallet_id(entries) -> dict[str, str]:
+    """Empfangs- und Wechseladressen → Wallet-Kennung. Für den Sammelscan."""
+    from core.derivation import derive_addresses
+    from core.wallets import eintrag_id
+
+    zu: dict[str, str] = {}
+    for entry in entries:
+        wid = eintrag_id(entry)
+        try:
+            tiefe = max(int(entry.max_addresses or 0), 1000)
+            adressen = derive_addresses(
+                entry.analyse_schluessel,
+                max_addresses=tiefe,
+                script_type=getattr(entry, "script_type", None),
+            )
+        except Exception:
+            continue
+        for addr in adressen or ():
+            if addr and addr not in zu:
+                zu[addr] = wid
+    return zu
+
+
+def _merke_scan_funde(
+    stand_utxos,
+    *,
+    gesehen: set[str],
+    entdeckt: list[dict],
+    wallet_id: str = "",
+    adressen: dict[str, str] | None = None,
+) -> list[dict]:
+    """UTXOs, die in diesem Scan neu sind (nicht der Stand vor dem Start)."""
+    for utxo in stand_utxos or []:
+        if not isinstance(utxo, dict):
+            continue
+        txid = str(utxo.get("txid") or "").strip().lower()
+        if not txid:
+            continue
+        try:
+            vout = int(utxo.get("vout") or 0)
+            sats = int(utxo.get("value") or 0)
+        except (TypeError, ValueError):
+            continue
+        if sats < 0:
+            continue
+        key = f"{txid}:{vout}"
+        if key in gesehen:
+            continue
+        gesehen.add(key)
+        wid = wallet_id or (adressen or {}).get(str(utxo.get("address") or ""), "")
+        entdeckt.append({
+            "key": key,
+            "value_sats": sats,
+            "wallet_id": wid,
+        })
+    return entdeckt
+
+
+def _utxo_zahl_je_wallet(
+    stand_utxos,
+    adressen: dict[str, str] | None = None,
+) -> dict[str, int]:
+    """Offene UTXOs je Wallet-ID — für die Nav-Pille beim Sammelscan."""
+    zaehl: dict[str, int] = {}
+    for utxo in stand_utxos or []:
+        if not isinstance(utxo, dict):
+            continue
+        wid = str(utxo.get("wallet_id") or "").strip()
+        if not wid:
+            wid = (adressen or {}).get(str(utxo.get("address") or ""), "")
+        if not wid:
+            continue
+        zaehl[wid] = zaehl.get(wid, 0) + 1
+    return zaehl
+
+
+def _ganze_payload_zahl(roh: object) -> int | None:
+    """Leer → None. Unlesbar → ValueError."""
+    if roh is None or str(roh).strip() == "":
+        return None
+    try:
+        return int(str(roh).strip())
+    except (TypeError, ValueError):
+        raise ValueError("unlesbar") from None
+
+
+def lese_rescan_scan_grenzen(payload: dict) -> tuple[str, int | None, int | None]:
+    """scan_ab, Start­höhe, Gap-Limit. ``start_height`` sticht die Datumsschätzung."""
+    scan_ab = str(payload.get("scan_ab") or "").strip()
+    try:
+        hoehe = _ganze_payload_zahl(payload.get("start_height"))
+    except ValueError:
+        raise ValueError("Scan-Block muss eine ganze Zahl ≥ 0 sein.") from None
+    if hoehe is not None and hoehe < 0:
+        raise ValueError("Scan-Block muss eine ganze Zahl ≥ 0 sein.")
+    try:
+        gap = _ganze_payload_zahl(payload.get("gap_limit"))
+    except ValueError:
+        raise ValueError(
+            "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein."
+        ) from None
+    if gap is not None and (gap < 1 or gap > 10_000):
+        raise ValueError("Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.")
+    if hoehe is None and scan_ab:
+        try:
+            from core.utxo_report import estimate_block_height_for_date
+
+            hoehe = estimate_block_height_for_date(scan_ab)
+        except ValueError as exc:
+            raise ValueError(f"Startdatum unlesbar: {exc}") from exc
+    return scan_ab, hoehe, gap
+
+
 def api_rescan(state: AppState, payload: dict) -> dict:
     from server import (
         ApiError,
@@ -582,14 +846,10 @@ def api_rescan(state: AppState, payload: dict) -> dict:
     if entry is None:
         raise ApiError(404, "Wallet nicht gefunden.")
 
-    scan_ab = str(payload.get("scan_ab") or "").strip()
-    start_hoehe = None
-    if scan_ab:
-        try:
-            from core.utxo_report import estimate_block_height_for_date
-            start_hoehe = estimate_block_height_for_date(scan_ab)
-        except ValueError as exc:
-            raise ApiError(400, f"Startdatum unlesbar: {exc}") from exc
+    try:
+        scan_ab, start_hoehe, scan_gap = lese_rescan_scan_grenzen(payload)
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
 
     def lauf(job):
         from core.jobs import Fortschritt, herzschlag
@@ -599,6 +859,7 @@ def api_rescan(state: AppState, payload: dict) -> dict:
         threading.Thread(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
+        fetchers = None
         try:
             stand.phase(f"Verbinde für {entry.display_name}…")
             args = state.args_namespace()
@@ -610,7 +871,8 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 args.bip158_start = start_hoehe
             else:
                 # First-seen überlebt Cache-Löschen — Scan dort ansetzen,
-                # nicht wieder bei SegWit. BIP-158 liest das zusätzlich selbst.
+                # nicht wieder bei SegWit und nicht bei einer späteren
+                # Datenquellen-Höhe. BIP-158 liest das zusätzlich selbst.
                 alter_start = main.bip158_start_aus_first_seen(
                     entry.analyse_schluessel,
                     state.cache_dir,
@@ -619,7 +881,24 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 if alter_start is not None:
                     args.bip158_start = alter_start
 
-            quelle, backend = main._setup_blockchain_client(args, state.env().values())
+            werte = dict(state.env().values())
+            if scan_gap is not None:
+                werte["BIP158_GAP_LIMIT"] = str(scan_gap)
+            try:
+                quelle, backend = main._setup_blockchain_client(args, werte)
+            except SystemExit:
+                from core.chain_sources import fetchers_fuer_utxo_entdeckung
+
+                ersatz = fetchers_fuer_utxo_entdeckung(
+                    werte,
+                    args,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
+                if ersatz is None:
+                    raise
+                quelle, fetchers = ersatz
+                backend = None
             job.raise_if_cancelled()
             if isinstance(job.meta, dict):
                 job.meta["source"] = quelle
@@ -629,19 +908,27 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 if scan_ab and bip_start is not None:
                     stand.phase(
                         f"BIP-158 nicht vor {scan_ab} "
-                        f"(ca. Block {bip_start:,})".replace(",", ".")
+                        f"(Block {bip_start:,})".replace(",", ".")
                     )
                 elif bip_start is not None and start_hoehe is None:
                     stand.phase(
                         f"BIP-158 ab Wallet-Beginn "
                         f"(Block {bip_start:,})…".replace(",", ".")
                     )
+                elif bip_start is not None:
+                    stand.phase(
+                        f"BIP-158 ab Block {bip_start:,}".replace(",", ".")
+                    )
 
-            fetchers = main._build_blockchain_fetchers(
-                quelle, backend, args, state.wallet_ctx,
-                immutable_cache_dir=state.immutable_cache_dir,
-            )
+            if fetchers is None:
+                fetchers = main._build_blockchain_fetchers(
+                    quelle, backend, args, state.wallet_ctx,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
             stand.phase(f"Scanne {entry.display_name} über {quelle}…")
+
+            gesehen_funde = _bekannte_utxo_keys(state, [entry])
+            entdeckt_funde: list[dict] = []
 
             def on_utxos_update(stand_utxos: list) -> None:
                 # Zwischenstand schon während des Scans — GUI kann zeichnen.
@@ -668,11 +955,18 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                         "value_sats": sats,
                         "wallet": entry.display_name,
                         "wallet_id": wid,
+                        "address": str(u.get("address") or ""),
                     })
                 job.result = {
                     "utxo_count": len(stand_utxos),
                     "partial": True,
                     "neu": neu,
+                    "entdeckt": _merke_scan_funde(
+                        stand_utxos,
+                        gesehen=gesehen_funde,
+                        entdeckt=entdeckt_funde,
+                        wallet_id=wid,
+                    ),
                 }
                 wort = "UTXO" if len(stand_utxos) == 1 else "UTXOs"
                 stand.tick(f"{len(stand_utxos)} {wort} bisher gefunden…")
@@ -716,6 +1010,12 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 "empfang_scharf": n_empfang,
             }
         finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
             halt.set()
             stand.close()
 
@@ -729,6 +1029,163 @@ def api_rescan(state: AppState, payload: dict) -> dict:
             label=label,
             factory=lauf,
             scan_ab=scan_ab,
+        )
+    except ScanSchonGeplant as exc:
+        raise ApiError(409, str(exc)) from exc
+
+
+# Kennung in der Scan-Warteschlange. Kein Wallet trägt diese ID (Hash).
+ALLE_WALLETS_SCAN_ID = "alle"
+
+
+def api_rescan_alle(state: AppState) -> dict:
+    """UTXO-Bestand aller ableitbaren Wallets in einem Warteschlangen-Job.
+
+    P2P als einzige Quelle: ein gemeinsamer Filterdurchgang. Sonst der
+    schnellste Bestandsweg (Electrs im LAN, sonst ein scantxoutset).
+    """
+    from server import (
+        ApiError,
+        ScanSchonGeplant,
+        _schaerfe_empfang_nach_sync,
+        main,
+        threading,
+    )
+
+    wallets = list(state.analyse_entries)
+    if not wallets:
+        raise ApiError(400, "Keine Wallets zum Scannen.")
+
+    def lauf(job):
+        from core.jobs import Fortschritt, herzschlag
+        from core.wallet_sync_engine import sammel_utxo_modus
+
+        stand = Fortschritt(job)
+        halt = threading.Event()
+        threading.Thread(
+            target=herzschlag, args=(stand, halt), daemon=True,
+        ).start()
+        fetchers = None
+        try:
+            stand.phase(f"Verbinde für {len(wallets)} Wallets…")
+            args = state.args_namespace()
+            args.xpubs = [e.analyse_schluessel for e in wallets]
+            args.rescan = True
+            werte = state.env().values()
+            try:
+                quelle, backend = main._setup_blockchain_client(args, werte)
+            except SystemExit:
+                from core.chain_sources import fetchers_fuer_utxo_entdeckung
+
+                ersatz = fetchers_fuer_utxo_entdeckung(
+                    werte,
+                    args,
+                    cache_dir=state.cache_dir,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
+                if ersatz is None:
+                    raise
+                quelle, fetchers = ersatz
+                backend = None
+            job.raise_if_cancelled()
+            if fetchers is None:
+                fetchers = main._build_blockchain_fetchers(
+                    quelle, backend, args, state.wallet_ctx,
+                    immutable_cache_dir=state.immutable_cache_dir,
+                )
+            fulcrum = fetchers.get("fulcrum")
+            modus = sammel_utxo_modus(werte, fulcrum)
+            if isinstance(job.meta, dict):
+                job.meta["source"] = "bip158" if modus == "p2p" else (
+                    "bitcoind" if modus == "scantxoutset" else quelle
+                )
+            max_by = {
+                e.analyse_schluessel: int(e.max_addresses)
+                for e in wallets
+            }
+
+            def max_addresses_for(xpub: str) -> int:
+                return int(max_by.get(xpub) or 0) or 20
+
+            gesehen_funde = _bekannte_utxo_keys(state, wallets)
+            entdeckt_funde: list[dict] = []
+            adressen_funde = _adresse_zu_wallet_id(wallets)
+
+            def on_utxos_update(stand_utxos: list) -> None:
+                n = len(stand_utxos or [])
+                job.result = {
+                    "utxo_count": n,
+                    "partial": True,
+                    "utxo_je_wallet": _utxo_zahl_je_wallet(
+                        stand_utxos, adressen_funde,
+                    ),
+                    "entdeckt": _merke_scan_funde(
+                        stand_utxos,
+                        gesehen=gesehen_funde,
+                        entdeckt=entdeckt_funde,
+                        adressen=adressen_funde,
+                    ),
+                }
+                wort = "UTXO" if n == 1 else "UTXOs"
+                stand.tick(f"{n} {wort} bisher gefunden…")
+
+            gefunden, quelle_lauf = wallet_sync_engine.scanne_alle_xpubs_utxo(
+                [e.analyse_schluessel for e in wallets],
+                fetchers["fetch_wallet_utxos"],
+                state.cache_dir,
+                quelle,
+                max_addresses_for=max_addresses_for,
+                wallet=state.wallet_ctx,
+                fulcrum=fulcrum,
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+                on_utxos_update=on_utxos_update,
+                env=werte,
+                immutable_cache_dir=state.immutable_cache_dir,
+                start_height=getattr(args, "bip158_start", None),
+            )
+            if isinstance(job.meta, dict):
+                job.meta["source"] = quelle_lauf
+            job.raise_if_cancelled()
+            n_empfang = _schaerfe_empfang_nach_sync(
+                state,
+                wallets,
+                fulcrum=fulcrum,
+                on_progress=lambda text, *, sofort=False: (
+                    stand.phase(text) if sofort else stand.tick(text)
+                ),
+            )
+            n = len(gefunden)
+            wort = "UTXO" if n == 1 else "UTXOs"
+            stand.phase(
+                f"{n} {wort} in {len(wallets)} Wallets."
+                + (" Empfangsadresse per Electrs geschärft." if n_empfang else "")
+            )
+            return {
+                "utxo_count": n,
+                "wallet_count": len(wallets),
+                "partial": False,
+                "source": quelle_lauf,
+                "empfang_scharf": n_empfang,
+            }
+        finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
+            halt.set()
+            stand.close()
+
+    try:
+        return state.scan_queue.einreihen(
+            kind="rescan",
+            wallet_id=ALLE_WALLETS_SCAN_ID,
+            wallet_name="Alle Wallets",
+            label="UTXO-Scan alle Wallets",
+            factory=lauf,
         )
     except ScanSchonGeplant as exc:
         raise ApiError(409, str(exc)) from exc

@@ -32,6 +32,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Kern-Navigation (data-ansicht) — Reihenfolge = typischer Userflow
 NAV_SCHRITTE = (
@@ -320,31 +324,16 @@ def run_userflow(
                 eintrag["fehler"] = str(exc)
             schritte.append(eintrag)
 
-        # DE → EN → DE (Sprache)
+        # EN → DE, danach Roh-Schlüssel und Texte der anderen Sprache.
         try:
-            en = page.locator("#lang-en")
-            de = page.locator("#lang-de")
-            if en.count() and en.first.is_visible():
-                en.first.click(timeout=2000)
-                page.wait_for_timeout(800)
-                lang = page.evaluate("() => document.documentElement.lang || ''")
-                if lang not in ("en", "de"):
-                    # currentLang via i18n
-                    lang = page.evaluate(
-                        "() => (window.SatSageI18n && window.SatSageI18n.currentLang"
-                        " && window.SatSageI18n.currentLang()) || ''"
-                    )
-                if lang != "en":
-                    raise RuntimeError(f"nach EN-Klick lang={lang!r}")
-                de.first.click(timeout=2000)
-                page.wait_for_timeout(600)
-                schritte.append({"schritt": "sprache_en_de", "ok": True, "detail": "EN↔DE"})
-            else:
-                schritte.append({
-                    "schritt": "sprache_en_de",
-                    "ok": True,
-                    "detail": "übersprungen (kein #lang-en)",
-                })
+            from webgui_i18n_check import pruefe_sprachen
+
+            sprache = pruefe_sprachen(page)
+            schritte.append({
+                "schritt": "sprache_en_de",
+                "ok": True,
+                "detail": sprache["detail"],
+            })
         except Exception as exc:
             ok = False
             schritte.append({
@@ -481,6 +470,17 @@ def main(argv: list[str] | None = None) -> int:
         timeout_s=args.timeout,
         channel=args.channel or None,
     )
+    # Nur der Wegwerf-Spawn. --url und --attach zeigen auf eine echte Sitzung.
+    if tmp_hold is not None:
+        from webgui_passwort_flow import lauf_passwort_zyklen
+
+        print("Passwort setzen / ändern / löschen…", flush=True)
+        zyklus = lauf_passwort_zyklen(
+            headless=not args.headed,
+            channel=args.channel or None,
+        )
+        report["schritte"].extend(zyklus["schritte"])
+        report["ok"] = bool(report["ok"] and zyklus["ok"])
 
     out = args.report or (ROOT / "tmp" / "webgui-userflow-report.json")
     out.parent.mkdir(parents=True, exist_ok=True)

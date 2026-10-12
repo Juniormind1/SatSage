@@ -7,7 +7,10 @@ Regel (Entscheidung Maintainer 2026-10-04, ISSUES „Wallet · FIFO-Spend (PSBT)
 ausgewertete Herkunft (``sats_gruen`` fehlt), UTXOs ohne grünen Anteil
 (rein gelb) und UTXOs mit irgendeinem grauen Anteil (``sats_grau`` > 0) —
 in beiden Modi (Entscheidung Maintainer 2026-10-04, wie Testkit
-``psbt_report.py --policy``).
+``psbt_report.py --policy``). Ausnahme *eigenes Ziel* (``eigenes_ziel``):
+das Ziel ist ein hinterlegtes eigenes Wallet. Dann zählt der bestätigte
+Gesamtsaldo; Gelb, Grau, Neuvermögen und UTXOs ohne Herkunft sind Inputs,
+Beitrag = ganzer Betrag. Mempool-Ausgaben bleiben draußen.
 
 - *defensiv*: nur ganz grüne UTXOs (kein gelber, kein grauer Anteil); Beitrag
   = ganzer Betrag.
@@ -124,6 +127,7 @@ def kandidaten(
     *,
     modus: str,
     pending: Iterable[str] = (),
+    eigenes_ziel: bool = False,
 ) -> list[Kandidat]:
     """Zulässige Inputs samt grünem Beitrag (siehe Modul-Doku)."""
     unterwegs = {str(k or "").strip().lower() for k in pending if k}
@@ -143,20 +147,26 @@ def kandidaten(
         vout = _int(u.get("vout")) if u.get("vout") is not None else _int(key.rsplit(":", 1)[1])
         if key in unterwegs or u.get("pending") or u.get("spending_pending"):
             continue
-        if u.get("neuvermoegen") or u.get("sats_gruen") is None:
-            continue
         wert = _int(u.get("value_sats"))
-        gruen = min(wert, _int(u.get("sats_gruen")))
-        if gruen <= 0 or _int(u.get("sats_grau")) > 0:
-            continue  # rein gelb oder mit grauem Anteil: nie Input (beide Modi)
-        if modus == "offensiv":
-            beitrag = gruen
-        else:
-            # „Ganz grün“ wie die Kopfzeile: kein gelber, kein grauer Anteil.
-            # ``sats_gruen`` kann durch BTC-Rundung 1 sat unter dem Wert liegen.
-            if _int(u.get("sats_orange")) > 0:
-                continue
+        if wert <= 0:
+            continue
+        if eigenes_ziel:
+            # Eigenübertrag: ganzer bestätigter Bestand, Farbe egal.
             beitrag = wert
+        else:
+            if u.get("neuvermoegen") or u.get("sats_gruen") is None:
+                continue
+            gruen = min(wert, _int(u.get("sats_gruen")))
+            if gruen <= 0 or _int(u.get("sats_grau")) > 0:
+                continue  # rein gelb oder mit grauem Anteil: nie Input (beide Modi)
+            if modus == "offensiv":
+                beitrag = gruen
+            else:
+                # „Ganz grün“ wie die Kopfzeile: kein gelber, kein grauer Anteil.
+                # ``sats_gruen`` kann durch BTC-Rundung 1 sat unter dem Wert liegen.
+                if _int(u.get("sats_orange")) > 0:
+                    continue
+                beitrag = wert
         zeit = _int(u.get("time_ts")) or _ZEIT_UNBEKANNT
         gesehen.add(key)
         aus.append(Kandidat(key=key, txid=txid, vout=vout, wert=wert, beitrag=beitrag, zeit=zeit))
@@ -528,6 +538,7 @@ def auswahl_vorschau(
     budget: int = BUDGET_KNOTEN,
     strategie: str = STANDARD_STRATEGIE,
     groessen: "Groessen | None" = None,
+    eigenes_ziel: bool = False,
 ) -> dict:
     """
     Kandidaten filtern, Rate nach der Fee-Regel bestimmen, Auswahl suchen.
@@ -541,7 +552,7 @@ def auswahl_vorschau(
     modus = "offensiv" if modus == "offensiv" else "defensiv"
     schaetzung = btc_kvb_zu_sat_vb(feerate_btc_kvb) if feerate_btc_kvb is not None else None
     basis = rate_mit_puffer(schaetzung)
-    kand = kandidaten(utxos, modus=modus, pending=pending)
+    kand = kandidaten(utxos, modus=modus, pending=pending, eigenes_ziel=eigenes_ziel)
     erg = waehle(kand, betrag=betrag, basis_rate=basis, budget=budget, strategie=strategie,
                  groessen=groessen)
     if basis is None:

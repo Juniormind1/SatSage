@@ -12,9 +12,14 @@
     {% if gui and gui.wallet_count is defined %}
     {{ gui.wallet_count }} Wallet(s), Port {{ gui.port }}.
     {% endif %}
-    <a class="btn" href="{{ gui_url }}" target="_blank" rel="noopener"
-       style="margin-left: 0.5rem;">In neuem Tab öffnen</a>
+    <a class="btn action" href="{{ gui_url }}" target="_blank" rel="noopener"
+       style="margin-left: 0.5rem;">In eigenem Tab öffnen</a>
+    {% if not embed %}
+    <a class="btn" href="{{ url_for(service.id + '_endpoint.gui', embed=1) }}"
+       style="margin-left: 0.5rem;">Im Specter-Fenster</a>
+    {% endif %}
 </p>
+{% if embed %}
 <iframe
     id="xpq-gui-frame"
     src="{{ gui_url }}"
@@ -23,7 +28,8 @@
     allow="clipboard-read; clipboard-write"
 ></iframe>
 <p style="margin-top: 0.5rem; font-size: 0.9rem; opacity: 0.7;">
-    Falls der Rahmen leer bleibt (Browser-CSP): „In neuem Tab öffnen“ nutzen.
+    Standard ist ein eigener Tab — mehr Platz als im Specter-Rahmen.
 </p>
+{% endif %}
 {% endif %}
 {% endblock %}

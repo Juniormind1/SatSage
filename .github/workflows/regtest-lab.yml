@@ -3,7 +3,9 @@ name: Regtest-Labor
 # Wiederverwendbar. Auslöser: regtest-lab-dispatch.yml (Merge, Tag v*,
 # manuell), regtest-lab-weekly.yml (Montag, nur bei Delta am Prüfpfad),
 # Image-, Linux- und StartOS-Build. Core und Electrs, Allowlist gegen
-# den echten Node, Szenarien, Klassifikation und Sanktions-Hops.
+# den echten Node, Szenarien, Klassifikation, Sanktions-Hops und
+# jede eigene Datenquelle allein gegen das Herkunfts-Inventar.
+# P2P nur ohne Sperre: Bestand, Grau/Gelb, rote Ringe, dann Electrs.
 # Der Explorer (mempool) bleibt aus.
 on:
   workflow_call:
@@ -66,6 +68,15 @@ jobs:
             sleep 20
           done
           test "$ok" = 1
+
+      - name: Jede Datenquelle allein gegen das Inventar
+        env:
+          TOR_AUTOSTART: "0"
+          NETWORK: regtest
+          SATSAGE_ANSI_MENU: "0"
+          SATSAGE_TERMINAL_MENU: "0"
+          SATSAGE_SPLASH: "0"
+        run: python3 lab/regtest/scripts/verify_quellen_inventar.py
 
       - name: Electrs-Log bei Fehlschlag
         if: failure()

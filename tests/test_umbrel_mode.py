@@ -173,6 +173,83 @@ class TestUmbrelBootstrapPasswort(UmbrelModeTestCase):
                     server._seed_managed_password(state)
             self.assertIn("Umbrel", str(raised.exception))
 
+    def _klartext_state(self, tmp: str, process_env: dict):
+        """Klartext-.env. Eine vorher scrambled Datei würde den Hash als
+        Passwort zählen, auch wenn Umbrel im Betrieb nicht scramblt.
+        """
+        env_path = Path(tmp) / ".env"
+        env_path.write_text(
+            "SATSAGE_MANAGED_BY=umbrel\nUI_LANG=de\n",
+            encoding="utf-8",
+        )
+        with mock.patch.dict(os.environ, process_env, clear=False):
+            state = server.AppState(
+                env_path=env_path,
+                cache_dir=Path(tmp) / "cache",
+                immutable_cache_dir=Path(tmp) / "immutable",
+                managed_by="umbrel",
+            )
+        return state, env_path
+
+    def test_klartext_hash_gilt_als_gesetzt(self):
+        """Der Bootstrap-Hash sperrt die Oberfläche, ohne die .env zu scramblen."""
+        prozess = dict(UMBREL_ENV, SATSAGE_BOOTSTRAP_PASSWORD="umbrel-app-passwort")
+        with tempfile.TemporaryDirectory() as tmp:
+            state, env_path = self._klartext_state(tmp, prozess)
+            with mock.patch.dict(os.environ, prozess, clear=False):
+                server._seed_managed_password(state)
+            self.assertTrue(server._password_is_set(state))
+            self.assertFalse(env_path.read_bytes().startswith(b"SSGB1\n"))
+            self.assertIn("UI_LANG=de", env_path.read_text(encoding="utf-8"))
+            self.assertNotIn("SATSAGE_BOOTSTRAP_PASSWORD", os.environ)
+
+    def test_aendern_und_loeschen_verlangt_das_bootstrap_passwort(self):
+        """Wie die Einstellungen: leeres „Aktuelles Passwort“ ist kein Setzen."""
+        prozess = dict(UMBREL_ENV, SATSAGE_BOOTSTRAP_PASSWORD="umbrel-app-passwort")
+        with tempfile.TemporaryDirectory() as tmp:
+            state, env_path = self._klartext_state(tmp, prozess)
+            with mock.patch.dict(os.environ, prozess, clear=False):
+                server._seed_managed_password(state)
+            with self.assertRaises(server.ApiError) as gefangen:
+                server.api_save_app_password(
+                    state,
+                    {"new_password": "anderes", "confirm": "anderes"},
+                )
+            self.assertEqual(gefangen.exception.status, 403)
+            self.assertIn("Aktuelles Passwort ist falsch", str(gefangen.exception))
+            self.assertTrue(
+                server._verify_password(
+                    "umbrel-app-passwort", server._password_hash(state),
+                )
+            )
+            geaendert = server.api_save_app_password(
+                state,
+                {
+                    "current_password": "umbrel-app-passwort",
+                    "new_password": "anderes",
+                    "confirm": "anderes",
+                },
+            )
+            self.assertTrue(geaendert["password_set"])
+            self.assertFalse(geaendert["env_scramble"]["allowed"])
+            self.assertFalse(geaendert["env_scramble"]["active"])
+            self.assertFalse(env_path.read_bytes().startswith(b"SSGB1\n"))
+            self.assertIn("UI_LANG=de", env_path.read_text(encoding="utf-8"))
+            self.assertTrue(
+                server._verify_password("anderes", server._password_hash(state))
+            )
+            with self.assertRaises(server.ApiError) as gefangen:
+                server.api_delete_app_password(state, {})
+            self.assertEqual(gefangen.exception.status, 403)
+            self.assertTrue(server._password_is_set(state))
+            geloescht = server.api_delete_app_password(
+                state, {"current_password": "anderes"},
+            )
+            self.assertFalse(geloescht["password_set"])
+            self.assertFalse(server._password_is_set(state))
+            self.assertIn("UI_LANG=de", env_path.read_text(encoding="utf-8"))
+            self.assertFalse((env_path.parent / ".satsage-password").is_file())
+
 
 class TestUmbrelProxyVertrauen(UmbrelModeTestCase):
     def test_umbrel_vertraut_keinen_proxy_headern(self):

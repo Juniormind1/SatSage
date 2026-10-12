@@ -877,8 +877,8 @@ def _ui_lang_fuer_web(
     der Browser über ``Accept-Language`` — umbrelOS reicht seine eigene
     Spracheinstellung nicht an Apps durch, das ist also das einzige Signal.
     Gibt auch der nichts her, ist Englisch die Vorgabe: die Web-GUI hat im
-    App Store internationales Publikum. CLI und Terminal-Menü bleiben davon
-    unberührt und antworten weiter auf Deutsch.
+    App Store internationales Publikum. Die Terminal-Steuerung bleibt davon
+    unberührt und antwortet weiter auf Deutsch.
     """
     from core import i18n
 
@@ -1007,6 +1007,9 @@ from httpserver.api.jobs import (  # noqa: E402
 )
 
 
+from httpserver.api.p2p_walk import api_p2p_walk_abgleich  # noqa: E402
+
+
 from httpserver.api.source import (  # noqa: E402
     api_clear_source,
     api_header_vorab,
@@ -1014,7 +1017,9 @@ from httpserver.api.source import (  # noqa: E402
     api_local_core_accept,
     api_oeffentliche_electrum,
     api_rescan,
+    api_rescan_alle,
     api_mempool_probe,
+    api_p2p_scan_zeit,
     api_save_mempool,
     api_save_source,
     api_source_status,
@@ -1068,6 +1073,7 @@ from httpserver.api.tools import (  # noqa: E402
     api_tools_adresse,
     api_tools_cache_suche,
     api_tools_schatzsuche,
+    api_tools_tx_beteiligung,
 )
 
 
@@ -1286,7 +1292,16 @@ def _server_faehrt_runter(state) -> bool:
 
 
 class QuietThreadingHTTPServer(ThreadingHTTPServer):
-    """Unterdrückt Tracebacks bei Client-Abbruch und Server-Shutdown."""
+    """Unterdrückt Tracebacks bei Client-Abbruch und Server-Shutdown.
+
+    Request-Threads sind Daemon-Threads, ``server_close`` joined sie nicht.
+    Sonst hält eine hängende Electrum-Probe (oder SSE) den Prozess nach
+    Taste 3 / Strg+C fest — ``ThreadingMixIn`` wartet standardmäßig auf
+    jeden Request-Thread, und Ctrl-C kommt dort unter Windows nicht durch.
+    """
+
+    daemon_threads = True
+    block_on_close = False
 
     def handle_error(self, request, client_address) -> None:
         err = sys.exc_info()[1]
@@ -1654,6 +1669,9 @@ class Handler(
             return 200, api_tools_adresse(state, self._body())
         if teile == ["tools", "cache-suche"] and methode == "POST":
             return 202, api_tools_cache_suche(state, self._body())
+        if teile == ["tools", "tx-beteiligung"] and methode == "POST":
+            antwort = api_tools_tx_beteiligung(state, self._body())
+            return (202, antwort) if antwort.get("id") else (200, antwort)
         if teile == ["tools", "schatzsuche"] and methode == "POST":
             return 202, api_tools_schatzsuche(state, self._body())
         if teile == ["tax"] and methode == "GET":
@@ -1707,8 +1725,14 @@ class Handler(
             return 200, api_cache_wallet_leeren(state, teile[1])
         if teile == ["headers"] and methode == "POST":
             return 202, api_header_vorab(state)
+        if teile == ["p2p", "scan-zeit"] and methode == "GET":
+            return 200, api_p2p_scan_zeit(state, query)
+        if teile == ["p2p", "walk-abgleich"] and methode == "POST":
+            return 202, api_p2p_walk_abgleich(state)
         if teile == ["jobs", "rescan"] and methode == "POST":
             return 202, api_rescan(state, self._body())
+        if teile == ["jobs", "rescan-alle"] and methode == "POST":
+            return 202, api_rescan_alle(state)
         if teile == ["gui-bereit"] and methode == "POST":
             # Oberfläche kann „Aktualisieren“ — Start-Nachzug darf loslegen.
             state.merke_gui_bereit()
@@ -1882,7 +1906,11 @@ def starte_header_vorab(state: AppState, *, nur_wenn_leer: bool = False) -> None
     from core.jobs import Fortschritt, herzschlag
     from core.p2p import SEGWIT_HEIGHT, header_cache_leer, header_datei_tip
 
+    from core.p2p import p2p_gesperrt
+
     env = state.env().values()
+    if p2p_gesperrt():
+        return
     if env.get("BIP158_P2P", "1").strip().lower() in ("0", "false", "nein", "off"):
         return
     if state.header_job_id:

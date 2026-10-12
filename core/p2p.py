@@ -14,6 +14,7 @@ import socket
 import struct
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
@@ -21,17 +22,25 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 MAINNET_MAGIC = b"\xf9\xbe\xb4\xd9"
+REGTEST_MAGIC = b"\xfa\xbf\xb5\xda"
+TESTNET_MAGIC = b"\x0b\x11\x09\x07"
+SIGNET_MAGIC = b"\x0a\x03\xcf\x40"
 PROTOCOL_VERSION = 70016
 NODE_NETWORK = 1
 NODE_WITNESS = 8
 NODE_COMPACT_FILTERS = 64
 NODE_NETWORK_LIMITED = 1024
+#: Geprunte Nodes liefern nur so viele Blöcke (BIP 159).
+NETWORK_LIMITED_BLOCKS = 288
 USER_AGENT = "/SatSage:1.0/"
 DEFAULT_P2P_PORT = 8333
+#: Bitcoin Core lauscht im Regtest auf diesem P2P-Port.
+REGTEST_P2P_PORT = 18444
 FILTER_TYPE_BASIC = 0
 GETCFILTERS_MAX = 1000
-#: Parallel Compact-Filter-Verbindungen beim Scan.
-FILTER_PEERS_MAX = 4
+#: Parallel Compact-Filter-Verbindungen beim Scan (Clearnet). Über Tor bleibt
+#: die Grenze in ``BIP158Scanner._ensure_peers`` bei 2.
+FILTER_PEERS_MAX = 8
 #: Unter dieser Zahl wird während des Scans eine Peer-Warnung geloggt.
 P2P_SCAN_WARN_PEERS = 3
 #: TCP-Stichprobe, ob ausgehendes 8333 generell gedroppt wird (Firewall).
@@ -93,13 +102,93 @@ def read_compact_size(data: bytes, offset: int = 0) -> tuple[int, int]:
     return struct.unpack_from("<Q", data, offset + 1)[0], offset + 9
 
 
+class P2pGesperrt(ConnectionError):
+    """P2P ist für Herkunft, Verlauf und Header-Vorab zu."""
+
+
+class PeerHatBlockNicht(ConnectionError):
+    """getdata kam als ``notfound`` zurück."""
+
+
+#: Tiefe von ``p2p_nur_utxo_entdeckung``. Prozessweit, damit Filter-Worker
+#: denselben Stand sehen (``threading.Thread`` kopiert kein ContextVar).
+_utxo_entdeckung_tiefe = 0
+_utxo_entdeckung_lock = threading.Lock()
+
+
+def p2p_socket_erlaubt() -> bool:
+    """True während ``p2p_nur_utxo_entdeckung``, sonst nur wenn P2P offen ist."""
+    return (not p2p_gesperrt()) or _utxo_entdeckung_laeuft()
+
+
+def p2p_gesperrt() -> bool:
+    """
+    True: P2P ist keine Herkunfts- und keine Verlaufsquelle.
+
+    Bitcoin Core beantwortet ``getdata`` TX nur aus Mempool und letztem
+    Block. Eine historische Vorgänger-Tx braucht eine Txid-zu-Block-
+    Abbildung, die P2P nicht hat. Key-Path-Taproot lässt sich aus dem
+    Witness nicht rekonstruieren. Deshalb bleiben Herkunft, Verlauf,
+    Header-Vorab und der Walk-Abgleich zu.
+
+    Sockets für den UTXO-Bestand öffnet nur ``p2p_nur_utxo_entdeckung``,
+    und der Aufrufer nur, wenn eigener Electrum-Server und scantxoutset
+    nicht verbunden sind (``core.chain_sources.p2p_utxo_entdeckung_frei``).
+    """
+    return True
+
+
+@contextmanager
+def p2p_nur_utxo_entdeckung():
+    """Erlaubt P2P-Sockets nur für die Dauer eines UTXO-Bestands-Laufs."""
+    global _utxo_entdeckung_tiefe
+    with _utxo_entdeckung_lock:
+        _utxo_entdeckung_tiefe += 1
+    try:
+        yield
+    finally:
+        with _utxo_entdeckung_lock:
+            _utxo_entdeckung_tiefe -= 1
+
+
+def _utxo_entdeckung_laeuft() -> bool:
+    with _utxo_entdeckung_lock:
+        return _utxo_entdeckung_tiefe > 0
+
+
+def p2p_netz_name() -> str:
+    """Aktives P2P-Netz aus ``set_chain_network``. Mainnet, solange nichts gesetzt ist."""
+    from core.derivation import chain_network
+
+    net = chain_network()
+    if net is None:
+        return "main"
+    name = str(net.get("name") or "main").strip().lower()
+    if "regtest" in name:
+        return "regtest"
+    if "signet" in name:
+        return "signet"
+    if "test" in name:
+        return "test"
+    return "main"
+
+
+def p2p_magic() -> bytes:
+    """Nachrichten-Magic des aktiven Netzes. Zur Laufzeit lesen, nicht beim Import."""
+    return {
+        "regtest": REGTEST_MAGIC,
+        "test": TESTNET_MAGIC,
+        "signet": SIGNET_MAGIC,
+    }.get(p2p_netz_name(), MAINNET_MAGIC)
+
+
 def encode_message(command: str, payload: bytes = b"") -> bytes:
     cmd = command.encode("ascii")
     if len(cmd) > 12:
         raise ValueError(f"P2P-Befehl zu lang: {command}")
     cmd = cmd.ljust(12, b"\x00")
     return (
-        MAINNET_MAGIC
+        p2p_magic()
         + cmd
         + struct.pack("<I", len(payload))
         + double_sha256(payload)[:4]
@@ -110,7 +199,7 @@ def encode_message(command: str, payload: bytes = b"") -> bytes:
 def decode_header(header: bytes) -> tuple[str, int, bytes]:
     if len(header) != 24:
         raise ValueError("P2P-Kopf muss 24 Byte haben")
-    if header[:4] != MAINNET_MAGIC:
+    if header[:4] != p2p_magic():
         # Oft Desync nach Tor-Abbruch — als Verbindungsfehler behandeln,
         # damit der Scan den Peer wechselt statt komplett zu stoppen.
         raise ConnectionError(
@@ -289,7 +378,7 @@ class BitcoinPeer:
             if command == "block":
                 return payload
             if command == "notfound":
-                raise ConnectionError("Peer hat den Block nicht")
+                raise PeerHatBlockNicht("Peer hat den Block nicht")
 
     def fetch_tx(self, txid_internal: bytes) -> bytes:
         self.send("getdata", encode_getdata_tx(txid_internal))
@@ -301,6 +390,89 @@ class BitcoinPeer:
                 return payload
             if command == "notfound":
                 raise ConnectionError("Peer hat die Transaktion nicht")
+
+
+def _peer_services(peer) -> int:
+    try:
+        return int(getattr(peer, "services", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _peer_tip(peer) -> int:
+    try:
+        return int(getattr(peer, "start_height", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def peer_liefert_block(peer, hoehe: int) -> bool:
+    """Ob dieser Peer den vollen Block zu *hoehe* haben kann.
+
+    Compact Filter bleiben. ``NODE_NETWORK_LIMITED`` ohne ``NODE_NETWORK``
+    nur die letzten 288 Blöcke. Nach ``notfound``: ``historie_aus``.
+    Toter Socket: ``tot``.
+    """
+    if peer is None:
+        return False
+    if getattr(peer, "tot", False):
+        return False
+    hoehe_i = int(hoehe)
+    tip = _peer_tip(peer)
+    if getattr(peer, "historie_aus", False):
+        if tip <= 0:
+            return False
+        return hoehe_i > tip - NETWORK_LIMITED_BLOCKS
+    services = _peer_services(peer)
+    if services & NODE_NETWORK:
+        return True
+    if services & NODE_NETWORK_LIMITED:
+        if tip <= 0:
+            return True
+        return hoehe_i > tip - NETWORK_LIMITED_BLOCKS
+    return True
+
+
+def rumpf_peer_ist_verbraucht(grund: BaseException) -> bool:
+    """Dieser Socket hat den Block nicht oder ist tot — anderer Peer."""
+    cur: BaseException | None = grund
+    for _ in range(6):
+        if cur is None:
+            break
+        if isinstance(cur, PeerHatBlockNicht):
+            return True
+        msg = str(cur)
+        if "hat den Block nicht" in msg or "lieferte den Block nicht" in msg:
+            return True
+        cur = cur.__cause__
+    return False
+
+
+def naechster_block_peer(pool, hoehe: int, tried: set[int]):
+    """Erster Pool-Peer, der *hoehe* liefern kann und nicht in *tried* ist.
+
+    ``NODE_NETWORK`` vor Limited, damit der Heim-Node (oft geprunt, zuerst
+    verbunden) den Treffer-Block nicht blockiert.
+    """
+    voll: list = []
+    rest: list = []
+    for peer in pool or []:
+        if peer is None or id(peer) in tried:
+            continue
+        if not peer_liefert_block(peer, hoehe):
+            continue
+        if (
+            _peer_services(peer) & NODE_NETWORK
+            and not getattr(peer, "historie_aus", False)
+        ):
+            voll.append(peer)
+        else:
+            rest.append(peer)
+    if voll:
+        return voll[0]
+    if rest:
+        return rest[0]
+    return None
 
 
 def host_ist_lan(host: str) -> bool:
@@ -354,6 +526,10 @@ def _oeffne_socket(
     timeout: float,
     tor_proxy: tuple[str, int] | None,
 ) -> socket.socket:
+    if p2p_gesperrt() and not _utxo_entdeckung_laeuft():
+        raise P2pGesperrt(
+            "P2P ist abgeklemmt: Compact Filter reichen für die Herkunft nicht."
+        )
     if tor_proxy and not host_ist_lan(host):
         from core.fulcrum_transport import _socks5_connect
 
@@ -679,6 +855,8 @@ def _speichere_filter_peers_datei() -> None:
 
 def merke_filter_peer(host: str, port: int) -> None:
     """Erfolgreichen Compact-Filter-Peer merken (RAM + Disk, MRU)."""
+    if p2p_netz_name() == "regtest":
+        return
     _lade_filter_peers_datei()
     paar = (str(host).strip(), int(port) or DEFAULT_P2P_PORT)
     if not paar[0]:
@@ -693,6 +871,8 @@ def merke_filter_peer(host: str, port: int) -> None:
 
 def demote_filter_peer(host: str, port: int) -> None:
     """Fehlgeschlagenen Peer ans Ende schieben (bleibt für Retry)."""
+    if p2p_netz_name() == "regtest":
+        return
     _lade_filter_peers_datei()
     paar = (str(host).strip(), int(port) or DEFAULT_P2P_PORT)
     with _FILTER_PEER_LOCK:
@@ -701,6 +881,29 @@ def demote_filter_peer(host: str, port: int) -> None:
         _FILTER_PEER_CACHE.remove(paar)
         _FILTER_PEER_CACHE.append(paar)
     _speichere_filter_peers_datei()
+
+
+def markiere_peer_block_ausfall(peer, grund: BaseException) -> None:
+    """Peer für alte getdata merken oder als tot ablegen. Filter bleibt."""
+    if peer is None:
+        return
+    notfound = False
+    cur: BaseException | None = grund
+    for _ in range(6):
+        if cur is None:
+            break
+        if isinstance(cur, PeerHatBlockNicht) or "hat den Block nicht" in str(cur):
+            notfound = True
+            break
+        cur = cur.__cause__
+    if notfound:
+        peer.historie_aus = True
+        host = str(getattr(peer, "host", "") or "").strip()
+        port = int(getattr(peer, "port", 0) or 0)
+        if host:
+            demote_filter_peer(host, port)
+        return
+    peer.tot = True
 
 
 def bekannte_filter_peers() -> list[tuple[str, int]]:
@@ -748,6 +951,8 @@ def dns_seed_hosts(
     ungefilterten Seeds liefern fast nur Nodes ohne Filter — der Scan
     darf damit nicht nach acht Versuchen aufgeben.
     """
+    if p2p_netz_name() != "main":
+        return []
     seeds = (seed,) if seed else DNS_SEEDS
     gefiltert: list[tuple[str, int]] = []
     rest: list[tuple[str, int]] = []
@@ -791,12 +996,25 @@ def parse_peer_liste(roh: str) -> list[tuple[str, int]]:
     return paare
 
 
-#: Mainnet-Genesis, 80 Byte.
-GENESIS_HEADER = bytes.fromhex(
-    "0100000000000000000000000000000000000000000000000000000000000000"
-    "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
-    "4b1e5e4a29ab5f49ffff001d1dac2b7c"
-)
+#: Genesis-Header, 80 Byte. Regtest-Hash beginnt mit ``0f9188f1``.
+_GENESIS_HEADER_NACH_NETZ = {
+    "main": bytes.fromhex(
+        "0100000000000000000000000000000000000000000000000000000000000000"
+        "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
+        "4b1e5e4a29ab5f49ffff001d1dac2b7c"
+    ),
+    "regtest": bytes.fromhex(
+        "0100000000000000000000000000000000000000000000000000000000000000"
+        "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
+        "4b1e5e4adae5494dffff7f2002000000"
+    ),
+}
+GENESIS_HEADER = _GENESIS_HEADER_NACH_NETZ["main"]
+
+
+def genesis_header() -> bytes:
+    """Genesis des aktiven Netzes. Mainnet, solange kein Netz gesetzt ist."""
+    return _GENESIS_HEADER_NACH_NETZ.get(p2p_netz_name(), GENESIS_HEADER)
 
 #: Bekannte Mainnet-Hashes (Anzeige-Byteorder). Locator springt hierhin,
 #: statt die Kette von Genesis zu holen. Filter-Scan braucht nur Header
@@ -924,7 +1142,12 @@ def lege_header_archiv_aus(dest: Path | None, *, on_log=None) -> int | None:
 
 
 def checkpoint_fuer(start_height: int) -> tuple[int, bytes]:
-    """Höchster bekannter Anker-Hash mit Höhe ≤ ``start_height``."""
+    """Höchster bekannter Anker-Hash mit Höhe ≤ ``start_height``.
+
+    Außerhalb von Mainnet gibt es kein SegWit-Archiv. Anker ist Genesis.
+    """
+    if p2p_netz_name() != "main":
+        return 0, header_hash(genesis_header())
     hoehe, anzeige = MAINNET_CHECKPOINTS[0]
     for kandidat, hexhash in MAINNET_CHECKPOINTS:
         if kandidat <= start_height:
@@ -961,7 +1184,7 @@ class HeaderChain:
     def __init__(self, path: Path | None = None, *, start_height: int = 0):
         self.path = Path(path) if path else None
         self._anchor_height = 0
-        self._anchor_hash = header_hash(GENESIS_HEADER)
+        self._anchor_hash = header_hash(genesis_header())
         self._data = bytearray()
         geladen = False
         if self.path and self.path.is_file():
@@ -987,7 +1210,7 @@ class HeaderChain:
 
     def header_at(self, height: int) -> bytes:
         if height == 0 and self._anchor_height == 0:
-            return GENESIS_HEADER
+            return genesis_header()
         if height <= self._anchor_height:
             raise IndexError(f"kein voller Header bei Höhe {height} (Anker {self._anchor_height})")
         idx = height - self._anchor_height - 1
@@ -1021,6 +1244,7 @@ class HeaderChain:
         if prev != self.hash_at(self.tip_height()):
             raise ConnectionError("Header-Kette reißt (prev-Hash)")
         self._data.extend(header)
+        self._hash_nach_hoehe = None
 
     def truncate_to(self, height: int) -> None:
         """Kürzt die Kette auf ``height`` (inkl.). Darf nicht unter den Anker."""
@@ -1030,9 +1254,22 @@ class HeaderChain:
             )
         if height == self._anchor_height:
             self._data = bytearray()
+            self._hash_nach_hoehe = None
             return
         n = height - self._anchor_height
         self._data = self._data[: n * 80]
+        self._hash_nach_hoehe = None
+
+    def _hash_index(self) -> dict[bytes, int]:
+        """Hash → Höhe, einmal je geladener Kette. Reorg-Suche bleibt linear."""
+        index = getattr(self, "_hash_nach_hoehe", None)
+        if isinstance(index, dict):
+            return index
+        index = {self._anchor_hash: self._anchor_height}
+        for hoehe in range(self._anchor_height + 1, self.tip_height() + 1):
+            index[header_hash(self.header_at(hoehe))] = hoehe
+        self._hash_nach_hoehe = index
+        return index
 
     def hoehe_fuer_hash(
         self, intern: bytes, *, max_tiefe: int | None = 4_096,
@@ -1041,12 +1278,15 @@ class HeaderChain:
         Höhe zu einem internen Block-Hash, oder None.
 
         Sucht vom Tip rückwärts. ``max_tiefe`` begrenzt den Scan (None = bis
-        Anker) — reicht für Overlap und typische Kurz-Reorgs.
+        Anker) — reicht für Overlap und typische Kurz-Reorgs. Die volle
+        Suche nutzt den Hash-Index, sonst würde jede alte Tx die Kette
+        Header für Header ablaufen.
         """
+        if max_tiefe is None:
+            return self._hash_index().get(intern)
         tip = self.tip_height()
         unten = self._anchor_height
-        if max_tiefe is not None:
-            unten = max(unten, tip - max_tiefe)
+        unten = max(unten, tip - max_tiefe)
         for hoehe in range(tip, unten - 1, -1):
             if self.hash_at(hoehe) == intern:
                 return hoehe
@@ -1069,7 +1309,9 @@ class HeaderChain:
             return
         i = 0
         while i < len(batch):
-            vorhanden = self.hoehe_fuer_hash(header_hash(batch[i]))
+            vorhanden = self.hoehe_fuer_hash(
+                header_hash(batch[i]), max_tiefe=None,
+            )
             if vorhanden is None:
                 break
             i += 1
@@ -1088,8 +1330,11 @@ class HeaderChain:
             tip = self.tip_height()
             if prev == self.hash_at(tip):
                 self._data.extend(header)
+                idx = getattr(self, "_hash_nach_hoehe", None)
+                if isinstance(idx, dict):
+                    idx[header_hash(header)] = self.tip_height()
                 continue
-            eltern = self.hoehe_fuer_hash(prev)
+            eltern = self.hoehe_fuer_hash(prev, max_tiefe=None)
             if eltern is None:
                 raise ConnectionError("Header-Kette reißt (prev-Hash)")
             if eltern < tip:
@@ -1115,11 +1360,13 @@ class HeaderChain:
             self._anchor_height = hoehe
             self._anchor_hash = intern
             self._data = bytearray(rest)
+            self._hash_nach_hoehe = None
             return True
-        if roh and len(roh) % 80 == 0 and roh[:80] == GENESIS_HEADER:
+        if roh and len(roh) % 80 == 0 and roh[:80] == genesis_header():
             self._anchor_height = 0
-            self._anchor_hash = header_hash(GENESIS_HEADER)
+            self._anchor_hash = header_hash(genesis_header())
             self._data = bytearray(roh[80:])
+            self._hash_nach_hoehe = None
             return True
         return False
 
@@ -1209,12 +1456,23 @@ def hole_header(
         _sag(on_log, "Warte, bis der Header-Download im Hintergrund fertig ist…")
         _HEADER_LOCK.acquire()
     try:
-        lege_header_archiv_aus(path, on_log=on_log)
+        if p2p_netz_name() == "main":
+            lege_header_archiv_aus(path, on_log=on_log)
         chain = HeaderChain(path, start_height=start_height)
         chain.sync(peer, on_log=on_log)
         return chain
     finally:
         _HEADER_LOCK.release()
+
+
+def regtest_bitcoind_peer(
+    peers: list[tuple[str, int]] | None = None,
+) -> tuple[str, int]:
+    """Der eine Regtest-bitcoind. Kein DNS, keine Merk-Liste, kein Port 8333."""
+    for host, port in peers or []:
+        if host_ist_lan(host) and int(port) == REGTEST_P2P_PORT:
+            return (host, REGTEST_P2P_PORT)
+    return ("127.0.0.1", REGTEST_P2P_PORT)
 
 
 def _kandidaten_ohne_dns(
@@ -1286,8 +1544,14 @@ def _p2p_kandidaten(
     Wirkt Port 8333 blockiert, entfällt DNS und jeder Internet-Host —
     übrig bleibt nur das LAN.
 
+    Im Regtest gibt es nur den lokalen bitcoind (Port 18444).
+
     *dns_sofort=False*: nur fest + Merk-Liste (DNS später nachziehen).
     """
+    if p2p_netz_name() == "regtest":
+        peer = regtest_bitcoind_peer(peers)
+        _sag(on_log, f"Regtest: nur bitcoind {peer[0]}:{peer[1]}")
+        return [peer]
     if tor_proxy is None and dns_fallback and dns_sofort:
         if clearnet_p2p_port_blockiert(peers, on_log=on_log):
             # 8333 blockiert: kein Internet, auch keine gemerkten Clearnet-IPs.

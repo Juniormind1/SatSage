@@ -74,7 +74,7 @@ Dealbreaker **T14**. Jeder bitcoind-Aufruf geht durch `BitcoinRpcClient.call` in
 
 ## Zweck
 
-**SatSage – know your sats** zeigt, woher Sats kamen und wann sie ein xPub-Wallet betraten oder verließen (Haltedauer, Stichtage). Signiert nicht. Einstieg: `server.py` (Web), `main.py` (CLI-Fallback).
+**SatSage – know your sats** zeigt, woher Sats kamen und wann sie ein xPub-Wallet betraten oder verließen (Haltedauer, Stichtage). Signiert nicht. Einziger Nutzerweg: `server.py` (Web-GUI). Das Terminal daneben ist nur die Steuerung: **1** Status, **2** Browser öffnen, **3** Server stoppen. `main.py` ist Engine-Fassade, kein Bedienweg.
 
 ## Context-Laden
 

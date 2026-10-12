@@ -415,19 +415,95 @@ function quelleZeigtVerbindungsaufbau(quelle, quellen) {
   if (quelle.key === "public_onion" || quelle.key === "clearnet") {
     if (!Zustand.config?.oeffentliche_electrum) return false;
     if (quelleHochVerdraengt(quellen)) return false;
+    // Gewählte Zeile allein: die andere Familie wird nicht mitgeprüft.
+    const art = String(Zustand.oeffentlicheArt || "");
+    if (art === "onion" && quelle.key !== "public_onion") return false;
+    if (art === "clearnet" && quelle.key !== "clearnet") return false;
   }
   return true;
+}
+
+function liesEingabeWert(eingabe) {
+  return eingabe.type === "checkbox"
+    ? (eingabe.checked ? "true" : "false")
+    : String(eingabe.value ?? "");
+}
+
+function setzeEingabeWert(eingabe, wert) {
+  if (eingabe.type === "checkbox") eingabe.checked = wert === "true";
+  else eingabe.value = wert;
+}
+
+/**
+ * Offene Bearbeitungsformulare überstehen das Neuzeichnen der Liste.
+ * Geänderte Felder (noch nicht übernommen) bleiben, inklusive Fokus.
+ * Unberührte Felder übernehmen den neuen Serverstand.
+ */
+function merkeOffeneQuellenFormulare() {
+  const offen = new Map();
+  for (const form of document.querySelectorAll("#quellen-liste .quelle-formular")) {
+    if (form.hidden) continue;
+    const key = form.closest("[data-quelle-key]")?.dataset.quelleKey;
+    if (!key) continue;
+    const werte = {};
+    let fokus = "";
+    let selectionStart = null;
+    let selectionEnd = null;
+    const aktiv = document.activeElement;
+    for (const eingabe of form.querySelectorAll("[data-key]")) {
+      const feldKey = eingabe.dataset.key;
+      if (!feldKey) continue;
+      const wert = liesEingabeWert(eingabe);
+      const server = eingabe.dataset.serverValue ?? "";
+      if (wert !== server) werte[feldKey] = wert;
+      if (eingabe === aktiv) {
+        fokus = feldKey;
+        if (typeof eingabe.selectionStart === "number") {
+          selectionStart = eingabe.selectionStart;
+          selectionEnd = eingabe.selectionEnd;
+        }
+      }
+    }
+    offen.set(key, { werte, fokus, selectionStart, selectionEnd });
+  }
+  return offen;
+}
+
+function stelleQuellenFokusWiederHer(form, gemerkt) {
+  if (!gemerkt || !gemerkt.fokus || !form) return;
+  let ziel = null;
+  for (const eingabe of form.querySelectorAll("[data-key]")) {
+    if (eingabe.dataset.key === gemerkt.fokus) {
+      ziel = eingabe;
+      break;
+    }
+  }
+  if (!ziel || ziel.disabled) return;
+  if (typeof ziel.focus === "function") ziel.focus();
+  if (
+    gemerkt.selectionStart != null
+    && typeof ziel.setSelectionRange === "function"
+  ) {
+    try {
+      ziel.setSelectionRange(gemerkt.selectionStart, gemerkt.selectionEnd);
+    } catch (_) {
+      /* Zahl- oder Auswahlfeld hat keine Textauswahl */
+    }
+  }
 }
 
 function zeichneQuellen(quellen) {
   const behaelter = $("#quellen-liste");
   if (!behaelter) return;
+  const formularOffen = merkeOffeneQuellenFormulare();
   behaelter.replaceChildren();
   const liste = quellen || [];
 
   for (const quelle of liste) {
+    if (quelle.ausgeblendet) continue;
     const bridgeManaged = start9BridgeManaged(quelle);
     const block = document.createElement("div");
+    block.dataset.quelleKey = quelle.key || "";
     const zeile = document.createElement("div");
     zeile.className = "quelle-zeile";
     if (!quelle.configured) zeile.classList.add("nicht-konfiguriert");
@@ -481,6 +557,14 @@ function zeichneQuellen(quellen) {
         formular.hidden = !auf;
         stift.setAttribute("aria-expanded", String(auf));
       });
+      if (formularOffen.has(quelle.key)) {
+        const gemerkt = formularOffen.get(quelle.key);
+        const form = quellenFormular(quelle, formular, gemerkt);
+        formular.append(form);
+        formular.hidden = false;
+        stift.setAttribute("aria-expanded", "true");
+        stelleQuellenFokusWiederHer(form, gemerkt);
+      }
       rechts.append(stift);
     }
 
@@ -500,19 +584,12 @@ function zeichneQuellen(quellen) {
     }
 
     if (quelle.laden_url && quelle.laden_filter) {
-      const listeDa = Boolean(quelle.configured);
       const laden = document.createElement("button");
       laden.type = "button";
       laden.className = "knopf knopf-klein";
-      laden.textContent = listeDa ? t("sources.connect") : t("sources.loadList");
-      laden.title = listeDa
-        ? t("sources.connectPublicTitle")
-        : t("sources.loadElectrumTitle", { url: quelle.laden_url });
-      laden.addEventListener("click", () => (
-        listeDa
-          ? verbindeOeffentlicheElectrum(quelle, laden)
-          : ladeElectrumServer(quelle, laden)
-      ));
+      laden.textContent = t("sources.connect");
+      laden.title = t("sources.connectPublicTitle");
+      laden.addEventListener("click", () => verbindeOeffentlicheElectrum(quelle, laden));
       rechts.append(laden);
       // Papierkorb hinter dem Verbinden-Knopf: nur die Serverliste, nicht Opt-in.
       if (quelle.configured) {
@@ -527,6 +604,13 @@ function zeichneQuellen(quellen) {
     }
 
     if (quelle.key === "bip158") {
+      const datum = document.createElement("input");
+      datum.type = "date";
+      datum.className = "quelle-start-datum";
+      datum.min = "2009-01-03";
+      datum.title = t("sources.bip158DateTitle");
+      datum.disabled = bridgeManaged;
+
       const hoehe = document.createElement("input");
       hoehe.type = "number";
       hoehe.className = "quelle-start-hoehe";
@@ -547,8 +631,44 @@ function zeichneQuellen(quellen) {
           hoehe.blur();
         }
       });
-      hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe));
-      rechts.append(hoehe);
+      hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe, datum));
+
+      const luecke = document.createElement("input");
+      luecke.type = "number";
+      luecke.className = "quelle-start-hoehe quelle-gap";
+      luecke.min = "1";
+      luecke.max = "10000";
+      luecke.step = "1";
+      luecke.inputMode = "numeric";
+      luecke.placeholder = t("sources.bip158GapPlaceholder");
+      luecke.title = t("sources.bip158GapTitle");
+      luecke.disabled = bridgeManaged;
+      const gapWert = quelle.gap_limit != null ? String(quelle.gap_limit) : "100";
+      luecke.value = gapWert;
+      luecke.dataset.savedValue = gapWert;
+      luecke.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          luecke.blur();
+        }
+      });
+      luecke.addEventListener("change", () => speichereBip158Gap(luecke));
+
+      datum.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          datum.blur();
+        }
+      });
+      // Erst beim Verlassen — type=date feuert change schon beim Tippen.
+      datum.addEventListener("blur", () => speichereBip158ScanDatum(datum, hoehe));
+      fuelleBip158DatumFeld(datum, startWert);
+
+      rechts.append(
+        quelleScanFeld(t("sources.bip158DateLabel"), datum),
+        quelleScanFeld(t("sources.bip158StartLabel"), hoehe),
+        quelleScanFeld(t("sources.bip158GapLabel"), luecke),
+      );
 
       const verbinden = document.createElement("button");
       verbinden.type = "button";
@@ -558,6 +678,15 @@ function zeichneQuellen(quellen) {
       verbinden.disabled = bridgeManaged;
       verbinden.addEventListener("click", () => verbindeP2p(quelle, verbinden));
       rechts.append(verbinden);
+
+      const abgleich = document.createElement("button");
+      abgleich.type = "button";
+      abgleich.className = "knopf knopf-klein";
+      abgleich.textContent = t("sources.checkP2pWalks");
+      abgleich.title = t("sources.checkP2pWalksTitle");
+      abgleich.disabled = bridgeManaged;
+      abgleich.addEventListener("click", () => starteP2pWalkAbgleich(abgleich));
+      rechts.append(abgleich);
       if (quelle.verwerfbar) {
         const korb = document.createElement("button");
         korb.type = "button";
@@ -600,6 +729,7 @@ async function verwerfeQuelle(quelle) {
       : t("sources.confirmDiscard", { name: quelleName(quelle) }),
   );
   if (!ok) return;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
@@ -647,6 +777,7 @@ async function verwerfeQuelle(quelle) {
         return q;
       });
     }
+    merkeQuellenAenderung();
     zeichneDatenquellenAnsicht();
     zeichneKopfStatus(Zustand.config.sources);
     meldung(
@@ -663,24 +794,43 @@ async function verwerfeQuelle(quelle) {
 }
 
 /**
- * Liste ist schon da: „Verbinden“ fragt die Freigabe und prüft danach
- * die öffentlichen Server. Ohne Ja bleibt alles unverbunden.
+ * „Verbinden“ holt die Liste, wenn sie fehlt oder älter als einen Tag ist,
+ * fragt die Freigabe und prüft danach nur diese Server-Art.
+ * Ohne Ja bleibt alles unverbunden.
  */
 async function verbindeOeffentlicheElectrum(quelle, knopf) {
   const vorher = knopf.textContent;
   knopf.disabled = true;
   knopf.textContent = t("common.loadingEllipsis");
   Zustand._oeffentlichVerbindenLaeuft = true;
+  Zustand._oeffentlichWahl = quelle.laden_filter;
+  Zustand.oeffentlicheArt = quelle.laden_filter;
   try {
     if (!Zustand.config?.oeffentliche_electrum) {
       const erlaubt = await frageOeffentlicheElectrum();
       if (!erlaubt || !Zustand.config?.oeffentliche_electrum) return;
+    }
+    // Familie festlegen, bevor irgendein Check Clearnet und Onion mischt.
+    await api("/source/oeffentlich", {
+      methode: "POST",
+      daten: { erlauben: true, art: quelle.laden_filter },
+    });
+    const liste = await api("/config/electrum-servers", {
+      methode: "POST",
+      daten: { filter: quelle.laden_filter, verbinden: true },
+    });
+    if (Array.isArray(liste.sources) && Zustand.config) {
+      Zustand.config.sources = liste.sources;
+    }
+    if (liste.refreshed) {
+      meldung(übersetzeLogText(liste.message || t("sources.listAdopted")), "gut");
     }
     await testeEigenenNode(knopf);
   } catch (fehler) {
     meldung(fehler.message, "krit");
   } finally {
     Zustand._oeffentlichVerbindenLaeuft = false;
+    Zustand._oeffentlichWahl = "";
     if (knopf.isConnected) {
       knopf.disabled = false;
       knopf.textContent = vorher;
@@ -688,28 +838,94 @@ async function verbindeOeffentlicheElectrum(quelle, knopf) {
   }
 }
 
-async function ladeElectrumServer(quelle, knopf) {
-  const vorher = knopf.textContent;
-  knopf.disabled = true;
-  knopf.textContent = t("common.loadingEllipsis");
+function quelleScanFeld(labelText, eingabe) {
+  const wrap = document.createElement("label");
+  wrap.className = "quelle-scan-feld";
+  if (eingabe.title) wrap.title = eingabe.title;
+  const text = document.createElement("span");
+  text.className = "quelle-scan-label";
+  text.textContent = labelText;
+  wrap.append(text, eingabe);
+  return wrap;
+}
+
+function p2pScanDatumCache() {
+  if (!Zustand._p2pScanDatumNachHoehe) {
+    Zustand._p2pScanDatumNachHoehe = Object.create(null);
+  }
+  return Zustand._p2pScanDatumNachHoehe;
+}
+
+function merkeP2pScanDatum(hoehe, datum) {
+  const h = String(hoehe || "").trim();
+  const d = String(datum || "").trim();
+  if (!h || !d) return;
+  p2pScanDatumCache()[h] = d;
+}
+
+async function p2pScanZeitUmrechnen({ hoehe, datum }) {
+  const params = new URLSearchParams();
+  if (hoehe != null && hoehe !== "") params.set("hoehe", String(hoehe));
+  else if (datum) params.set("datum", String(datum));
+  else return null;
+  return api(`/p2p/scan-zeit?${params.toString()}`);
+}
+
+function fuelleBip158DatumFeld(datumFeld, hoeheWert) {
+  if (!datumFeld) return;
+  const h = String(hoeheWert || "").trim();
+  if (!h) {
+    datumFeld.value = "";
+    datumFeld.dataset.savedValue = "";
+    return;
+  }
+  const cached = p2pScanDatumCache()[h];
+  if (cached) {
+    datumFeld.value = cached;
+    datumFeld.dataset.savedValue = cached;
+    return;
+  }
+  const lauf = (Zustand._p2pDatumLauf = (Zustand._p2pDatumLauf || 0) + 1);
+  p2pScanZeitUmrechnen({ hoehe: h }).then((ergebnis) => {
+    if (lauf !== Zustand._p2pDatumLauf) return;
+    if (!datumFeld.isConnected) return;
+    const iso = ergebnis && ergebnis.date;
+    if (!iso) return;
+    merkeP2pScanDatum(h, iso);
+    datumFeld.value = iso;
+    datumFeld.dataset.savedValue = iso;
+  }).catch(() => {});
+}
+
+/** P2P-Zeile: Datum → Höhe umrechnen, nur die Höhe speichern. */
+async function speichereBip158ScanDatum(datumFeld, hoeheFeld) {
+  if (!datumFeld || datumFeld.disabled || !hoeheFeld) return;
+  const roh = String(datumFeld.value || "").trim();
+  if (!roh) return;
+  if (datumFeld.dataset.savedValue === roh) return;
+  Zustand._p2pDatumLauf = (Zustand._p2pDatumLauf || 0) + 1;
+  datumFeld.disabled = true;
   try {
-    const ergebnis = await api("/config/electrum-servers", {
-      methode: "POST",
-      daten: { filter: quelle.laden_filter },
-    });
-    await ladeConfig();
-    zeichneQuellen(Zustand.config.sources);
-    meldung(übersetzeLogText(ergebnis.message || t("sources.listAdopted")), "gut");
-    pruefeNodeStatus();
+    const ergebnis = await p2pScanZeitUmrechnen({ datum: roh });
+    const n = Number(ergebnis && ergebnis.height);
+    if (!Number.isInteger(n) || n < 0) {
+      meldung(t("sources.bip158DateInvalid"), "krit");
+      return;
+    }
+    hoeheFeld.value = String(n);
+    merkeP2pScanDatum(n, roh);
+    datumFeld.dataset.savedValue = roh;
   } catch (fehler) {
     meldung(fehler.message, "krit");
-    knopf.disabled = false;
-    knopf.textContent = vorher;
+    return;
+  } finally {
+    if (datumFeld.isConnected) datumFeld.disabled = false;
   }
+  await speichereBip158StartHoehe(hoeheFeld, datumFeld, { datumSchonGesetzt: true });
 }
 
 /** P2P-Zeile: Start­höhe speichern (kein Stift-Dialog mehr). */
-async function speichereBip158StartHoehe(eingabe) {
+async function speichereBip158StartHoehe(eingabe, datumFeld, optionen) {
   if (!eingabe || eingabe.disabled) return;
   const roh = String(eingabe.value || "").trim();
   if (!roh) return;
@@ -719,8 +935,22 @@ async function speichereBip158StartHoehe(eingabe) {
     return;
   }
   const vorher = eingabe.dataset.savedValue;
+  const nurDatum = optionen && optionen.datumSchonGesetzt;
+  if (!nurDatum && datumFeld && datumFeld.isConnected) {
+    try {
+      const ergebnis = await p2pScanZeitUmrechnen({ hoehe: n });
+      if (ergebnis && ergebnis.date) {
+        merkeP2pScanDatum(n, ergebnis.date);
+        datumFeld.value = ergebnis.date;
+        datumFeld.dataset.savedValue = ergebnis.date;
+      }
+    } catch (_) {
+      /* Höhe gilt trotzdem; Datum bleibt leer oder alt. */
+    }
+  }
   if (vorher != null && vorher === String(n)) return;
   eingabe.disabled = true;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api("/config/source", {
       methode: "PUT",
@@ -729,6 +959,7 @@ async function speichereBip158StartHoehe(eingabe) {
         values: { BIP158_START_HEIGHT: String(n) },
       },
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     if (Array.isArray(ergebnis.sources) && Zustand.config) {
       Zustand.config.sources = ergebnis.sources;
@@ -742,17 +973,112 @@ async function speichereBip158StartHoehe(eingabe) {
   }
 }
 
+/** P2P-Zeile: Lücke je Kette speichern. Leer lässt den gespeicherten Wert. */
+async function speichereBip158Gap(eingabe) {
+  if (!eingabe || eingabe.disabled) return;
+  const roh = String(eingabe.value || "").trim();
+  if (!roh) {
+    eingabe.value = eingabe.dataset.savedValue || "100";
+    return;
+  }
+  const n = Number(roh);
+  if (!Number.isInteger(n) || n < 1 || n > 10000) {
+    meldung(t("sources.bip158GapInvalid"), "krit");
+    eingabe.value = eingabe.dataset.savedValue || "100";
+    return;
+  }
+  const vorher = eingabe.dataset.savedValue;
+  if (vorher != null && vorher === String(n)) return;
+  eingabe.disabled = true;
+  merkeQuellenAenderung();
+  try {
+    const ergebnis = await api("/config/source", {
+      methode: "PUT",
+      daten: {
+        source: "bip158",
+        values: { BIP158_GAP_LIMIT: String(n) },
+      },
+    });
+    merkeQuellenAenderung();
+    await ladeConfig();
+    if (Array.isArray(ergebnis.sources) && Zustand.config) {
+      Zustand.config.sources = ergebnis.sources;
+    }
+    eingabe.dataset.savedValue = String(n);
+    zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
+    meldung(t("sources.bip158GapSaved", { n }), "gut");
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+    eingabe.disabled = false;
+  }
+}
+
+function beobachteP2pWalk(jobId) {
+  const timer = setInterval(async () => {
+    try {
+      const job = await api(`/jobs/${jobId}`);
+      if (job.running) return;
+      clearInterval(timer);
+      const stand = job.result || {};
+      const ent = stand.entdeckung || {};
+      const entText = ent.ok
+        ? `${ent.gefunden}/${ent.soll}`
+        : `${ent.gefunden ?? "?"}/${ent.soll ?? "?"}, fehlend ${ent.fehlend ?? "?"}`;
+      if (job.status === "done" && stand.ok) {
+        meldung(
+          t("sources.checkP2pWalksDone", { n: stand.verglichen, g: stand.gesamt }),
+          "gut",
+        );
+      } else if (job.status === "done") {
+        meldung(
+          t("sources.checkP2pWalksDiff", {
+            e: entText,
+            n: stand.verglichen, g: stand.gesamt, d: stand.abweichungen,
+          }),
+          "krit",
+        );
+      } else if (job.status === "cancelled") {
+        meldung(t("sources.checkP2pWalksCancelled"), "warn");
+      } else {
+        meldung(job.error || t("sources.checkP2pWalksFailed"), "krit");
+      }
+    } catch (_) {
+      clearInterval(timer);
+    }
+  }, 1500);
+}
+
+/** Reiner P2P-Walk gegen gespeicherte Electrs-Herkunft. */
+async function starteP2pWalkAbgleich(knopf) {
+  const vorher = knopf.textContent;
+  knopf.disabled = true;
+  knopf.textContent = t("common.loadingEllipsis");
+  try {
+    const ergebnis = await api("/p2p/walk-abgleich", { methode: "POST" });
+    meldung(t("sources.checkP2pWalksStarted", { n: ergebnis.utxos || 0 }), "gut");
+    await ladeJobsNav();
+    if (ergebnis.job_id) beobachteP2pWalk(ergebnis.job_id);
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  } finally {
+    knopf.disabled = false;
+    knopf.textContent = vorher;
+  }
+}
+
 /** P2P-Zeile: „Verbinden“ schaltet Compact Filter ein (früher Checkbox). */
 async function verbindeP2p(quelle, knopf) {
   const vorher = knopf.textContent;
   knopf.disabled = true;
   knopf.textContent = t("common.loadingEllipsis");
   const hatteOeffentlich = oeffentlicheElectrumNochAktiv();
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api("/config/source", {
       methode: "PUT",
       daten: { source: "bip158", values: { BIP158_P2P: "true" } },
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     const pending = Array.isArray(ergebnis.pending_sources)
       && ergebnis.pending_sources.length
@@ -785,10 +1111,12 @@ async function loescheElectrumListe(quelle) {
     t("sources.confirmClearList", { name: quelleName(quelle) }),
   );
   if (!ok) return;
+  merkeQuellenAenderung();
   try {
     const ergebnis = await api(`/config/source/${encodeURIComponent(quelle.key)}`, {
       methode: "DELETE",
     });
+    merkeQuellenAenderung();
     await ladeConfig();
     zeichneQuellen(ergebnis.sources || Zustand.config.sources);
     meldung(t("sources.listCleared", { name: quelleName(quelle) }), "warn");
@@ -799,7 +1127,7 @@ async function loescheElectrumListe(quelle) {
 }
 
 /** Baut das Bearbeitungsformular einer Datenquelle. */
-function quellenFormular(quelle, behaelter) {
+function quellenFormular(quelle, behaelter, gemerkt) {
   const form = document.createElement("div");
   const bridgeManaged = start9BridgeManaged(quelle);
   const eingaben = new Map();
@@ -844,6 +1172,11 @@ function quellenFormular(quelle, behaelter) {
       }
     }
     eingabe.dataset.key = feld.key;
+    eingabe.dataset.serverValue = liesEingabeWert(eingabe);
+    const roh = gemerkt && gemerkt.werte;
+    if (roh && Object.prototype.hasOwnProperty.call(roh, feld.key)) {
+      setzeEingabeWert(eingabe, roh[feld.key]);
+    }
     if (bridgeManaged) eingabe.disabled = true;
     eingaben.set(feld.key, eingabe);
     zeile.append(eingabe);
@@ -886,11 +1219,15 @@ function quellenFormular(quelle, behaelter) {
         ? (eingabe.checked ? "true" : "false")
         : eingabe.value;
     }
+    // Checks, die vor dem Speichern losliefen, haben den Host noch nicht.
+    merkeQuellenAenderung();
     try {
       const ergebnis = await api("/config/source", {
         methode: "PUT",
         daten: { source: quelle.key, values: werte },
       });
+      // Checks, die während des Speicherns die alte .env gelesen haben.
+      merkeQuellenAenderung();
       await ladeConfig();
       // Alte grüne Pille verwerfen: grau bis der neue Connect steht.
       // Electrum: IP und Onion gelten beide als frisch — der Check probiert
@@ -917,7 +1254,8 @@ function quellenFormular(quelle, behaelter) {
       }
     } catch (fehler) {
       meldungsfeld.textContent = fehler.message;
-      speichern.disabled = false;
+    } finally {
+      if (speichern.isConnected) speichern.disabled = false;
     }
   });
 
@@ -1169,6 +1507,7 @@ async function testeEigenenNode(knopf, opts = {}) {
   if (eigenerNode(Zustand.config?.sources) || knopf) {
     logZeile(t("ui.hard.7c5b3235d4"));
   }
+  const epoch = Zustand.quellenEpoch || 0;
   Zustand.peerCheckLaeuft = true;
   // Sofort „Verbindung im Aufbau…“ in Datenquellen, solange der Check läuft.
   if ($("#quellen-liste")?.childElementCount) {
@@ -1176,6 +1515,9 @@ async function testeEigenenNode(knopf, opts = {}) {
   }
   try {
     const ergebnis = await apiSourceCheck();
+    if ((Zustand.quellenEpoch || 0) !== epoch) {
+      return peerStatusAusQuellen(Zustand.config?.sources || []);
+    }
     const stand = nimmPeerStand(ergebnis, false);
     // Staub bei jedem erfolgreichen Speichern/Test einer hoch-privaten
     // Verbindung (Indexer/P2P) — auch nach IP-/Software-Wechsel.

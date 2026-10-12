@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Startet Specter Desktop mit xPubQuery-Plugin (DevConfig).
+# Startet Specter Desktop mit SatSage-Plugin (DevConfig).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${SPECTER_VENV:-$ROOT/.venv}"
 
-if [[ ! -f "$VENV/bin/activate" ]]; then
+if [[ -x "$VENV/bin/python" ]]; then
+  VENV_PY="$VENV/bin/python"
+elif [[ -x "$VENV/Scripts/python.exe" ]]; then
+  VENV_PY="$VENV/Scripts/python.exe"
+else
   echo "Kein venv unter $VENV — zuerst: $ROOT/scripts/setup_dev.sh" >&2
   exit 1
 fi
-
-# shellcheck disable=SC1091
-source "$VENV/bin/activate"
 
 if [[ -f "$ROOT/.run/env.sh" ]]; then
   # shellcheck disable=SC1091
@@ -30,9 +31,9 @@ echo "    url  : http://${HOST}:${PORT}"
 echo "    cfg  : satsage.specterext.satsage.app_config.DevConfig"
 echo ""
 echo "Login-Default (falls Auth aktiv): admin / admin"
-echo "Plugin: Sidebar → Plugins / Choose plugins → xPubQuery"
+echo "Plugin: Sidebar → Plugins / Choose plugins → SatSage"
 echo ""
 
-exec python -m cryptoadvance.specter server \
+exec "$VENV_PY" -m cryptoadvance.specter server \
   --config satsage.specterext.satsage.app_config.DevConfig \
   --debug

@@ -64,6 +64,7 @@ function zeigeAnsicht(n) { Zustand.ansicht = n; }
 function ladeEmpfang() { return Promise.resolve(null); }
 function empfangSonderAtemLaeuft() { return false; }
 function setzeWalletTitel() {}
+function setzeWalletLotDonut() {}
 function setzeText() {}
 function zeichneUtxos() {}
 function zeigeLeer() {}

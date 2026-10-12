@@ -183,12 +183,17 @@ def core_fuer_scantxoutset(env: dict[str, str]):
         stelle_utxo_core_client_bereit,
         verify_core_rpc,
     )
+    from core.local_bitcoind import utxo_rpc_dedicated
 
     client = stelle_utxo_core_client_bereit(env, timeout=20.0)
     if client is None:
         return None
+
     try:
-        verify_core_rpc(client)
+        verify_core_rpc(
+            client,
+            txindex_erforderlich=not utxo_rpc_dedicated(env),
+        )
     except RpcAllowlistError:
         raise  # Dealbreaker T14
     except Exception:

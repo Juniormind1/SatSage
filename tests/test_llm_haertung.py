@@ -101,9 +101,22 @@ class TestHandbuchUndSpecter(unittest.TestCase):
     def test_specter_iframe_laesst_dock_zu(self):
         jinja = GUI_JINJA.read_text(encoding="utf-8")
         self.assertIn("xpq-gui-frame", jinja)
+        self.assertIn("embed", jinja)
         treffer = re.search(r"min-height:(\d+)px", jinja)
         self.assertIsNotNone(treffer)
         self.assertGreaterEqual(int(treffer.group(1)), 640)
+        controller = (
+            WEB.parent
+            / "specter_plugin/src/satsage/specterext/satsage/controller.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('request.args.get("embed") == "1"', controller)
+        self.assertIn("return redirect(gui_url)", controller)
+        base = (
+            WEB.parent
+            / "specter_plugin/src/satsage/specterext/satsage/templates/satsage/base.jinja"
+        ).read_text(encoding="utf-8")
+        self.assertIn('target="_blank"', base)
+        self.assertIn("endpoint.gui", base)
 
 
 class TestChatStartetKeinenJob(unittest.TestCase):

@@ -39,12 +39,12 @@ function zeichneSankErgebnis(daten) {
   // der UTXO-Bestand auch.
   const zusatz = $("#sank-check-zusatz");
   if (daten.erstellt) {
-    const teile = [`Stand ${daten.erstellt}`, `${daten.max_hops} Hop(s)`];
+    const teile = [t("sanctions.metaAsOf", { datum: daten.erstellt }), t("sanctions.metaHops", { n: daten.max_hops })];
     if (daten.listen_adressen) {
-      teile.push(`${formatZahl(daten.listen_adressen)} Listenadressen`);
+      teile.push(t("sanctions.metaListAddresses", { n: formatZahl(daten.listen_adressen) }));
     }
-    if (daten.verbindungen > 1) teile.push(`${daten.verbindungen} Verbindungen`);
-    if (daten.vollstaendig === false) teile.push("abgebrochen");
+    if (daten.verbindungen > 1) teile.push(t("sanctions.metaConnections", { n: daten.verbindungen }));
+    if (daten.vollstaendig === false) teile.push(t("sanctions.metaAborted"));
     setzeText(zusatz, teile.join(" · "));
   } else {
     setzeText(zusatz, "");
@@ -260,7 +260,7 @@ function bindeSanktionsCheckJob(jobId, opts = {}) {
         ladeSankCache();
       } else {
         fertig(
-          übersetzeServerMeldung(job.error)
+          übersetzeLogText(übersetzeServerMeldung(job.error))
             || übersetzeLogText(job.message)
             || t("common.failed"),
         );
@@ -283,6 +283,9 @@ function bindeSanktionsCheckJob(jobId, opts = {}) {
 }
 
 async function starteSanktionsCheck() {
+  if (typeof electrumSpurBlockiert === "function" && electrumSpurBlockiert()) {
+    return;
+  }
   if (Zustand.sanktionsCheckJobId) {
     bindeSanktionsCheckJob(Zustand.sanktionsCheckJobId);
     return;

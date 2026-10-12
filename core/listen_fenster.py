@@ -528,12 +528,17 @@ class Fenster:
         if text_schon_ok or not f["terms"]:
             return True
         key = schluessel(e)
-        roh = " ".join([key, key.split(":")[0], str(e.get("address") or ""), zeit_label(e)]).lower()
+        ausgabe = str(e.get("spent_txid") or e.get("abgang_txid") or "")
+        roh = " ".join([
+            key, key.split(":")[0], str(e.get("address") or ""), zeit_label(e), ausgabe,
+        ]).lower()
         if self._text_ok(roh, f["terms"]):
             return True
         # Labels (Mix-Formen, Börsen, Ausgabe-Ziele) gibt es erst angereichert.
         voll = self.label_quelle(e)
-        heu = roh + " " + filter_label_text(voll, self.lang).lower() + " "
+        if not ausgabe:
+            ausgabe = str(voll.get("spent_txid") or voll.get("abgang_txid") or "")
+        heu = roh + " " + filter_label_text(voll, self.lang).lower() + " " + ausgabe.lower()
         return self._text_ok(heu, f["terms"])
 
     def gruppe_ok(self, g: dict, f: dict) -> bool:

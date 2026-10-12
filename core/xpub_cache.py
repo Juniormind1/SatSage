@@ -464,6 +464,57 @@ def _p2p_header_chain(immutable_cache_dir: Path | None):
     _sync_main_cache_scalars()
     return chain
 
+def p2p_header_ntime(
+    height: int,
+    cache_root: Path | None = None,
+) -> int | None:
+    """
+    nTime eines Blocks aus ``p2p_headers.bin``.
+
+    Kein JSON-Cache und kein Schreiben — für häufige Anzeigen
+    (Scan-Fortschritt). Anker-Höhe hat keinen vollen Header.
+    """
+    try:
+        hoehe = int(height)
+    except (TypeError, ValueError):
+        return None
+    if hoehe <= 0:
+        return None
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        anker = int(getattr(chain, "_anchor_height", 0))
+        if hoehe > chain.tip_height() or hoehe <= anker:
+            return None
+        header = chain.header_at(hoehe)
+        if header is None or len(header) < 72:
+            return None
+        block_time = int.from_bytes(header[68:72], "little")
+    except (IndexError, OSError, ValueError, TypeError):
+        return None
+    if block_time <= 0:
+        return None
+    return block_time
+
+
+def p2p_header_tip_stand(
+    cache_root: Path | None = None,
+) -> tuple[int, int] | None:
+    """(Höhe, nTime) des lokalen Header-Tips, oder None."""
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        tip = int(chain.tip_height())
+    except (TypeError, ValueError):
+        return None
+    ntime = p2p_header_ntime(tip, cache_root)
+    if ntime is None:
+        return None
+    return tip, ntime
+
+
 def block_time_for_height(
     height: int,
     cache_root: Path | None = None,
@@ -485,28 +536,85 @@ def block_time_for_height(
     if cached is not None:
         return cached
 
-    chain = _p2p_header_chain(root)
-    if chain is None:
-        return None
-    try:
-        if hoehe > chain.tip_height() or hoehe < getattr(chain, "_anchor_height", 0):
-            return None
-        header = chain.header_at(hoehe) if hoehe != chain._anchor_height else None
-        if header is None and hoehe == chain._anchor_height:
-            # Anker-Höhe: nur Hash bekannt, kein voller Header in der Datei.
-            return None
-        if header is None or len(header) < 72:
-            return None
-        block_time = int.from_bytes(header[68:72], "little")
-    except (IndexError, OSError, ValueError, TypeError):
-        return None
-    if block_time <= 0:
+    block_time = p2p_header_ntime(hoehe, root)
+    if block_time is None:
         return None
     try:
         save_cached_block_time(hoehe, block_time, root, "p2p_headers")
     except Exception:
         pass
     return block_time
+
+
+def hoehe_fuer_blockhash(
+    blockhash: str,
+    cache_root: Path | None = None,
+) -> int | None:
+    """
+    Höhe eines bestätigten Blocks aus ``p2p_headers.bin``.
+
+    Der Hash ist der aus der ausführlichen Transaktion (Anzeige-Byteorder).
+    Liegt er über dem lokalen Tip oder vor dem Anker, ist das Ergebnis None —
+    der Aufrufer fragt dann nur das Reststück beim Server.
+    """
+    text = str(blockhash or "").strip().lower()
+    if len(text) != 64:
+        return None
+    try:
+        from core.p2p import hex_to_hash
+        intern = hex_to_hash(text)
+    except ValueError:
+        return None
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        return chain.hoehe_fuer_hash(intern, max_tiefe=None)
+    except (IndexError, OSError, ValueError, TypeError):
+        return None
+
+
+def hoehe_zur_blockzeit(
+    ziel: int,
+    cache_root: Path | None = None,
+) -> int | None:
+    """
+    Erste lokale Höhe, deren Header-Zeit ``ziel`` erreicht.
+
+    Halbierung über ``p2p_headers.bin``. Miner dürfen die Zeit kurz
+    zurücksetzen, deshalb kann das Ergebnis um wenige Blöcke neben der
+    echten Höhe liegen. Es ist eine Obergrenze, keine gespeicherte
+    Transaktionshöhe. Liegt ``ziel`` über dem lokalen Tip, None.
+    """
+    try:
+        ziel_ts = int(ziel)
+    except (TypeError, ValueError):
+        return None
+    if ziel_ts <= 0:
+        return None
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        tip = int(chain.tip_height())
+        anker = int(getattr(chain, "_anchor_height", 0))
+    except (TypeError, ValueError):
+        return None
+    if tip <= anker:
+        return None
+    tip_zeit = block_time_for_height(tip, cache_root)
+    if tip_zeit is None or tip_zeit < ziel_ts:
+        return None
+    unten = anker + 1
+    oben = tip
+    while unten < oben:
+        mitte = (unten + oben) // 2
+        zeit = block_time_for_height(mitte, cache_root)
+        if zeit is None or zeit < ziel_ts:
+            unten = mitte + 1
+        else:
+            oben = mitte
+    return unten
 
 def enrich_utxos_with_block_times(
     utxos: list[dict],
@@ -693,7 +801,9 @@ def load_unspent_outpoint_values(utxo_cache_dir: Path | None = None) -> dict[str
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            continue
+        if not isinstance(data, dict):
             continue
         utxos = data.get("utxos")
         if not isinstance(utxos, list):
@@ -757,10 +867,12 @@ def load_xpub_cache_entry(xpub: str, cache_dir: Path) -> dict | None:
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeError):
         return None
 
-    if data.get("xpub") != xpub:
+    # Gültiges JSON in der falschen Form (Liste, Zahl, Text) ist ein Miss.
+    # Sonst wirft ``.get`` und ``/api/config`` antwortet 500.
+    if not isinstance(data, dict) or data.get("xpub") != xpub:
         return None
 
     utxos = data.get("utxos")
@@ -1002,8 +1114,9 @@ def bip158_start_aus_first_seen(
     """
     Scan-Start ab Wallet-Beginn (First-seen), mit kleinem Vorlauf.
 
-    Für Rescan ohne UTXO-Cache: statt SegWit dort beginnen, wo das Wallet
-    wirklich losging. Rückgabe None, wenn kein Alter bekannt.
+    Für Rescan ohne UTXO-Cache: dort beginnen, wo das Wallet wirklich
+    losging — auch wenn BIP158_START_HEIGHT später liegt. Rückgabe None,
+    wenn kein Alter bekannt.
     """
     if cache_dir is None:
         return None
@@ -1285,7 +1398,11 @@ def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
         save_xpub_first_seen(xpub, cache_dir, gefunden)
     return gefunden
 
-def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
+def bip158_fullscan_ist_fertig(
+    roh: dict | None,
+    *,
+    gap_soll: int | None = None,
+) -> bool:
     """
     True, wenn der UTXO-Bestand am Chain-Tip bekannt ist.
 
@@ -1298,6 +1415,24 @@ def bip158_fullscan_ist_fertig(roh: dict | None) -> bool:
         return False
     flag = roh.get("bip158_fullscan_ok")
     if flag is True:
+        # P2P-Bestand gilt erst fertig, wenn die Historie mit derselben
+        # Lücke lief wie der Electrs-UTXO-Scan. Ältere Läufe mit der
+        # kurzen Lücke 20 haben das Flag gesetzt, ohne die Kette zu Ende
+        # zu beobachten. Das gilt für jedes xpub, nicht für eines.
+        if str(roh.get("source") or "") == "bip158":
+            from core.bip158_wallet import BIP158_GAP_DEFAULT, normalisiere_bip158_gap
+
+            soll = (
+                normalisiere_bip158_gap(gap_soll)
+                if gap_soll is not None
+                else BIP158_GAP_DEFAULT
+            )
+            try:
+                gap = int(roh.get("bip158_scan_gap") or 0)
+            except (TypeError, ValueError):
+                gap = 0
+            if gap < soll:
+                return False
         return True
     if flag is False:
         return False
@@ -1397,6 +1532,7 @@ def save_xpub_utxo_cache(
     extra_scanned: list[str] | None = None,
     derived_addresses: list[str] | None = None,
     scan_end_je_chain: dict | None = None,
+    bip158_scan_gap: int | None = None,
 ) -> Path:
     """
     Speichert UTXOs eines XPUB als JSON-Flatfile.
@@ -1497,6 +1633,28 @@ def save_xpub_utxo_cache(
         payload["bip158_fullscan_ok"] = bool(bip158_fullscan_ok)
     elif "bip158_fullscan_ok" in roh_bisher:
         payload["bip158_fullscan_ok"] = bool(roh_bisher["bip158_fullscan_ok"])
+    if payload.get("bip158_fullscan_ok") is True and payload.get("source") == "bip158":
+        from core.bip158_wallet import (
+            BIP158_GAP_DEFAULT,
+            normalisiere_bip158_gap,
+            peek_scan_gap,
+        )
+
+        if bip158_scan_gap is not None:
+            payload["bip158_scan_gap"] = normalisiere_bip158_gap(bip158_scan_gap)
+        else:
+            geguckt = peek_scan_gap(xpub)
+            payload["bip158_scan_gap"] = (
+                geguckt if geguckt is not None else BIP158_GAP_DEFAULT
+            )
+    elif (
+        payload.get("source") == "bip158"
+        and roh_bisher.get("bip158_scan_gap") is not None
+    ):
+        try:
+            payload["bip158_scan_gap"] = int(roh_bisher["bip158_scan_gap"])
+        except (TypeError, ValueError):
+            pass
     gescannt = {
         str(a) for a in (roh_bisher.get("scanned_addresses") or []) if a
     }
@@ -1541,8 +1699,10 @@ def schreibe_utxo_zwischenstand(
     # War schon ein Fullscan ok, Flag behalten (Rescan-Abbruch).
     full_ok = None
     if source == "bip158":
+        from core.bip158_wallet import peek_scan_gap
+
         roh = (entry or {}).get("raw") or {}
-        if not bip158_fullscan_ist_fertig(roh):
+        if not bip158_fullscan_ist_fertig(roh, gap_soll=peek_scan_gap(xpub)):
             full_ok = False
     return save_xpub_utxo_cache(
         xpub,

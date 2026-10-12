@@ -206,6 +206,7 @@ Halbautomatik für Wiederholung und Regression.
 - öffnet die GUI (Playwright, falls installiert; sonst Anleitung + `harness.js` zum Einspeisen)
 - injiziert `scripts/webgui_chaos_harness.js`
 - zufällige **Klicks** (Nav, DE/EN, Limit/Sort, Klappzeilen) **und Texteingaben** (Leer, Überlänge, Unicode, Injection-Attrappen, Pseudo-TxID/XPUB/URL, Chat-Slash-Commands; oft Enter/Primärknopf)
+- bei `--spawn` vorher ein fester Playwright-Lauf: Passwort setzen, ändern, löschen für Desktop, Specter und Umbrel (`scripts/webgui_passwort_flow.py`). Schlägt der fehl, startet der Zufall nicht. `--url` bleibt davon unberührt
 - meidet Passwort/API-Key-Felder und Danger-Zone (außer `--destructive`)
 - sammelt `window.onerror`, `unhandledrejection`
 - schreibt Report nach `tmp/webgui-chaos-report-*.json` (bzw. `--report`)

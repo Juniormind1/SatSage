@@ -436,6 +436,235 @@ function bindeCacheSuche() {
 
 bindeCacheSuche();
 
+let txJobId = null;
+let txTimer = null;
+let txLogStand = { index: 0, knoten: [], texte: [] };
+let txListeAnzeigen = false;
+
+function txKnopfStand() {
+  const suche = $("#tools-tx");
+  const abbruch = $("#tools-tx-abbruch");
+  const laeuft = Boolean(txJobId);
+  if (suche) suche.disabled = laeuft;
+  if (abbruch) abbruch.hidden = !laeuft;
+}
+
+function txStatus(text) {
+  const el = $("#tools-tx-status");
+  if (!el) return;
+  setzeText(el, text || "");
+  el.hidden = !text;
+}
+
+function zeigeTxErgebnis(daten) {
+  if (!daten) {
+    zeichneTxListe(null);
+    return;
+  }
+  const quelle = daten.aus_cache ? t("tools.txFromCache") : t("tools.txFromNet");
+  const n = (Number(daten.eigene_inputs) || 0) + (Number(daten.eigene_outputs) || 0);
+  txStatus(n
+    ? t("tools.txSummary", {
+        eigeneIn: daten.eigene_inputs || 0,
+        eigeneOut: daten.eigene_outputs || 0,
+        quelle,
+      })
+    : `${t("tools.txNone")} · ${quelle}`);
+  zeichneTxListe(daten);
+}
+
+function txZeileTeile(art, z) {
+  const kopf = art === "in"
+    ? t("tools.txInput", { n: z.n })
+    : t("tools.txOutput", { n: z.n });
+  const betrag = formatSats(z.value_sats || 0);
+  let wer = t("tools.txForeign");
+  if (z.coinbase) wer = t("tools.txCoinbase");
+  else if (z.wallet) wer = z.wallet;
+  const addr = z.address ? kuerze(z.address, 12, 8) : "";
+  return { kopf, betrag, wer, addr };
+}
+
+function txZeileText(art, z) {
+  const tle = txZeileTeile(art, z);
+  return [tle.kopf, tle.betrag, tle.wer, tle.addr].filter(Boolean).join(" · ");
+}
+
+function oeffneTxBeteiligungZeile(z) {
+  const wid = z && z.wallet_id;
+  if (!wid) return;
+  const key = String(z.key || "");
+  if (z.ziel === "bestand" && key && typeof springeZuWalletUtxo === "function") {
+    springeZuWalletUtxo(wid, key, z.address || "").then((ok) => {
+      if (!ok && typeof zeigeWallet === "function") zeigeWallet(wid).catch(() => {});
+    });
+    return;
+  }
+  if (z.ziel === "verlauf" && key && typeof springeZuAusgegebenemUtxo === "function") {
+    springeZuAusgegebenemUtxo(wid, key).then((ok) => {
+      if (!ok && typeof zeigeWallet === "function") zeigeWallet(wid).catch(() => {});
+    });
+    return;
+  }
+  if (typeof zeigeWallet === "function") zeigeWallet(wid).catch(() => {});
+}
+
+function txZeileKnoten(art, z) {
+  const li = document.createElement("li");
+  if (z.eigen) li.className = "tools-tx-eigen";
+  const tle = txZeileTeile(art, z);
+  if (z.eigen && z.wallet_id && tle.wer) {
+    const vor = [tle.kopf, tle.betrag].filter(Boolean).join(" · ");
+    if (vor) li.append(vor, " · ");
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "ankunft-link";
+    knopf.textContent = tle.wer;
+    knopf.title = z.ziel === "uebersicht"
+      ? t("tools.txOpenWallet")
+      : t("tools.txOpenTree");
+    knopf.addEventListener("click", () => oeffneTxBeteiligungZeile(z));
+    li.append(knopf);
+    if (tle.addr) li.append(" · ", tle.addr);
+  } else {
+    li.textContent = txZeileText(art, z);
+  }
+  return li;
+}
+
+function zeichneTxListe(daten) {
+  const liste = $("#tools-tx-liste");
+  if (!liste) return;
+  liste.replaceChildren();
+  if (!txListeAnzeigen || Zustand.ansicht !== "tools" || !daten) {
+    liste.hidden = true;
+    return;
+  }
+  const zeilen = [];
+  for (const z of daten.inputs || []) zeilen.push(txZeileKnoten("in", z));
+  for (const z of daten.outputs || []) zeilen.push(txZeileKnoten("out", z));
+  if (!zeilen.length) {
+    liste.hidden = true;
+    return;
+  }
+  liste.append(...zeilen);
+  liste.hidden = false;
+}
+
+function txPollStop() {
+  if (txTimer) clearInterval(txTimer);
+  txTimer = null;
+  txJobId = null;
+  txKnopfStand();
+}
+
+async function pruefeTxJob() {
+  if (!txJobId) return;
+  try {
+    const job = await api("/jobs/" + txJobId);
+    nimmLogZeilen(job, txLogStand);
+    if (job.running) {
+      txStatus(job.message || t("tools.txRunning"));
+      return;
+    }
+    const daten = job.result || null;
+    if (txListeAnzeigen && Zustand.ansicht === "tools" && job.status === "done" && daten) {
+      zeigeTxErgebnis(daten);
+    } else if (Zustand.ansicht === "tools" && job.status !== "done") {
+      txStatus(job.error || job.message || t("common.netError"));
+      zeichneTxListe(null);
+    } else {
+      txStatus("");
+    }
+    txPollStop();
+  } catch (fehler) {
+    txStatus((fehler && fehler.message) || t("common.netError"));
+    txPollStop();
+  }
+}
+
+function bindeTxJob(id) {
+  txJobId = id;
+  txLogStand = { index: 0, knoten: [], texte: [] };
+  txKnopfStand();
+  if (txTimer) clearInterval(txTimer);
+  txTimer = setInterval(pruefeTxJob, 1000);
+  pruefeTxJob();
+}
+
+async function starteTxAnalyse() {
+  const feld = $("#tools-tx-q");
+  const knopf = $("#tools-tx");
+  if (!feld || !knopf || knopf.disabled) return;
+  const roh = (feld.value || "").trim();
+  if (!roh) {
+    feld.focus();
+    return;
+  }
+  txListeAnzeigen = true;
+  zeichneTxListe(null);
+  txStatus(t("tools.txRunning"));
+  knopf.disabled = true;
+  try {
+    const antwort = await api("/tools/tx-beteiligung", {
+      methode: "POST",
+      daten: { txid: roh },
+    });
+    if (antwort && Array.isArray(antwort.inputs)) {
+      zeigeTxErgebnis(antwort);
+      knopf.disabled = false;
+      return;
+    }
+    if (!antwort || !antwort.id) {
+      txStatus(t("common.netError"));
+      knopf.disabled = false;
+      return;
+    }
+    bindeTxJob(antwort.id);
+  } catch (fehler) {
+    const status = fehler && fehler.status;
+    txStatus(
+      status === 400
+        ? t("tools.txInvalid")
+        : ((fehler && fehler.message) || t("common.netError")),
+    );
+    txPollStop();
+  }
+}
+
+async function brichTxAnalyseAb() {
+  if (!txJobId) return;
+  try {
+    await api("/jobs/" + txJobId, { methode: "DELETE" });
+  } catch (_) { /* Poll zeigt den Stand */ }
+}
+
+function merkeLaufendeTxAnalyse() {
+  const jobs = Zustand.jobsNav?.jobs || [];
+  const laufend = jobs.find((j) => j.kind === "tx_beteiligung" && j.running);
+  if (!laufend || !laufend.id || txJobId) return;
+  txListeAnzeigen = false;
+  bindeTxJob(laufend.id);
+}
+
+function bindeTxAnalyse() {
+  const knopf = $("#tools-tx");
+  const feld = $("#tools-tx-q");
+  const abbruch = $("#tools-tx-abbruch");
+  if (!knopf || !feld || knopf.dataset.gebunden) return;
+  knopf.dataset.gebunden = "1";
+  knopf.addEventListener("click", starteTxAnalyse);
+  feld.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    starteTxAnalyse();
+  });
+  if (abbruch) abbruch.addEventListener("click", brichTxAnalyseAb);
+  txKnopfStand();
+}
+
+bindeTxAnalyse();
+
 function bindeSchatzKnopf() {
   const knopf = $("#tools-schatz");
   if (!knopf || knopf.dataset.gebunden) return;

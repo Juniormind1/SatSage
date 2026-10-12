@@ -18,6 +18,14 @@ Protokoll [`../doc/testprotokoll-webgui-stabilitaet.md`](../doc/testprotokoll-we
 
 Protokoll [`../doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`](../doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md) — P2P vs Electrum, Job-Snapshot, Cache-Flags, Queue. Fachregeln der Priorität: [`../core/AGENTS.md`](../core/AGENTS.md).
 
+## Scan-Abbruch und Cache
+
+Protokoll [`../doc/testprotokoll-scan-abbruch-cache.md`](../doc/testprotokoll-scan-abbruch-cache.md). Runner und Proxy liegen im Labor (`lab/regtest/scripts/verify_scan_abort_cache.py`, `electrs_delay_proxy.py`), nicht hier. Windows: kein Docker starten.
+
+## P2P nicht testen
+
+P2P ist keine ausreichende Datenquelle. `verify_p2p_traces.py` nicht starten. Im Scan-Abbruch `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen. Grund: [`../doc/issues/p2p-herkunft.md`](../doc/issues/p2p-herkunft.md). Suite: [`../doc/test-inventar.md`](../doc/test-inventar.md). Frühestens 2027-01-08.
+
 ## Commit und Push
 
 Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Identitäts-Abweichung ab; `--fix-identity` setzt name/email/hooks). Identität, Branches und Remote-Pflicht stehen in [`../githooks/AGENTS.md`](../githooks/AGENTS.md).

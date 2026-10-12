@@ -82,6 +82,130 @@ def api_fee_suggestion(state: Any, query: dict | None) -> dict:
     return gebuehr_vorschlag(feerate, betrag_sats=betrag, inputs=inputs, fehler=fehler)
 
 
+def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
+    """
+    Prüft Inputs und Outputs einer Tx gegen die hinterlegten Wallets.
+
+    Liegt die Tx samt Input-Vorgängern im Cache, Antwort sofort (200).
+    Sonst Job: Cache zuerst, Electrs erst bei Lücke. 409, solange schon
+    eine Analyse läuft.
+    """
+    from server import ApiError, main
+
+    from core.tx_beteiligung import (
+        analysiere_tx,
+        anreichern_navigation,
+        cache_deckt_analyse,
+        parse_txid,
+    )
+    from core.xpub_cache import load_cached_tx
+
+    if not state.context_bereit():
+        raise ApiError(409, "Wallets werden noch vorbereitet. Einen Moment.")
+
+    for job in state.jobs.list():
+        if job.kind == "tx_beteiligung" and job.status == "running":
+            raise ApiError(409, "Die Tx-Analyse läuft schon.")
+
+    koerper = payload or {}
+    roh = str(koerper.get("txid") or koerper.get("q") or "").strip()
+    txid = parse_txid(roh)
+    if not txid:
+        raise ApiError(400, "Das ist keine Transaktions-ID.")
+
+    cache_root = state.immutable_cache_dir
+    wallet_ctx = state.wallet_ctx_fuer_ansicht()
+
+    def mit_nav(ergebnis: dict) -> dict:
+        wallets = [
+            {
+                "name": e.display_name,
+                "id": e.wallet_id(),
+                "schluessel": e.analyse_schluessel,
+            }
+            for e in state.analyse_entries
+        ]
+        return anreichern_navigation(
+            ergebnis,
+            wallets,
+            lambda s: main.load_xpub_utxo_cache(s, state.cache_dir),
+            lambda s: main.load_xpub_verlauf_cache(s, state.cache_dir),
+        )
+
+    def nur_cache(t: str):
+        tx = load_cached_tx(t, cache_root)
+        if tx is None:
+            raise LookupError(t)
+        return tx
+
+    if cache_deckt_analyse(txid, cache_root):
+        ergebnis = analysiere_tx(
+            txid,
+            get_tx=nur_cache,
+            wallet=wallet_ctx,
+            cache_root=cache_root,
+        )
+        ergebnis["aus_cache"] = True
+        return mit_nav(ergebnis)
+
+    from httpserver.api.trace import verlange_electrum_fuer_spur
+
+    verlange_electrum_fuer_spur(state)
+
+    def lauf(job):
+        def fortschritt(text: str) -> None:
+            job.progress(text, log=True)
+
+        netz = []
+
+        def hole_netz():
+            if netz:
+                return netz[0]
+            fortschritt("Verbinde mit Electrs…")
+            args = state.args_namespace()
+            quelle, backend = main._setup_blockchain_client(
+                args, state.env().values(),
+            )
+            job.raise_if_cancelled()
+            fetchers = main._build_blockchain_fetchers(
+                quelle, backend, args, wallet_ctx,
+                immutable_cache_dir=cache_root,
+            )
+            netz.append(fetchers["get_tx"])
+            return netz[0]
+
+        def get_tx(t: str):
+            cached = load_cached_tx(t, cache_root)
+            if cached is not None:
+                return cached
+            return hole_netz()(t)
+
+        ergebnis = analysiere_tx(
+            txid,
+            get_tx=get_tx,
+            wallet=wallet_ctx,
+            cache_root=cache_root,
+            on_progress=fortschritt,
+            raise_if_cancelled=job.raise_if_cancelled,
+        )
+        ergebnis["aus_cache"] = not netz
+        ergebnis = mit_nav(ergebnis)
+        n = int(ergebnis["eigene_inputs"]) + int(ergebnis["eigene_outputs"])
+        job.progress(
+            f"{n} eigene Zu-/Abgänge." if n else "Kein eigenes Wallet in dieser Tx.",
+            log=True,
+        )
+        return ergebnis
+
+    job = state.jobs.start(
+        "tx_beteiligung",
+        "Gezielte Tx-Analyse",
+        lauf,
+        meta={"art": "tx_beteiligung", "txid": txid},
+    )
+    return job.as_dict()
+
+
 def api_tools_cache_suche(state: Any, payload: dict | None = None) -> dict:
     """
     Durchsucht UTXO- und Verlaufs-Cache aller Wallets.

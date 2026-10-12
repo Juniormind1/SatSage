@@ -89,7 +89,8 @@ class TestAllowlistKonstanten(unittest.TestCase):
         self.assertEqual(
             set(RPC_KERN),
             {"getblockchaininfo", "getblockhash", "getblockheader", "getblock",
-             "getrawtransaction", "scantxoutset", "estimatesmartfee"},
+             "getrawtransaction", "scantxoutset", "estimatesmartfee",
+             "getindexinfo"},
         )
         self.assertEqual(
             set(RPC_WALLET_IMPORT),

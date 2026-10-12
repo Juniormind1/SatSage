@@ -211,7 +211,11 @@ def _tx_block_height(tx: dict) -> int | None:
 
 def _tx_block_time(tx: dict) -> int | None:
     """Unix-Zeitstempel der Tx (Electrum oder RPC)."""
-    status = tx.get("status", {})
+    if not isinstance(tx, dict):
+        return None
+    status = tx.get("status") or {}
+    if not isinstance(status, dict):
+        status = {}
     if status.get("block_time"):
         return status["block_time"]
     if tx.get("blocktime"):

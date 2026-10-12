@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import ssl
+import threading
 import warnings
 from urllib.parse import urlparse
 
@@ -21,6 +22,15 @@ class OutboundPolicyError(ValueError):
 #: Gilt nur für den laufenden Prozess — nach Server-Neustart wieder aus.
 _SESSION_OEFFENTLICHE_ELECTRUM = False
 
+#: Welche öffentliche Familie der Nutzer verbunden hat: ``clearnet``,
+#: ``onion`` oder ``None`` (noch keine Wahl / CLI-Fallback).
+_SESSION_OEFFENTLICHE_ELECTRUM_ART: str | None = None
+
+#: Laufende öffentliche Electrum-Probes (Clearnet/Onion-Stichprobe,
+#: Wallet-Clearnet-Pool, Onion-Rotation) — nicht der Sanktions-Pool.
+_OEFFENTLICHE_ELECTRUM_STOP = threading.Event()
+_OEFFENTLICHE_ELECTRUM_PROZESS_ENDE = threading.Event()
+
 
 def oeffentliche_electrum_session_aktiv() -> bool:
     """True wenn diese Prozess-Sitzung öffentliche Electrum freigegeben hat."""
@@ -31,6 +41,132 @@ def setze_oeffentliche_electrum_session(erlaubt: bool) -> None:
     """Sitzungs-Freigabe setzen (kein Schreiben in die .env)."""
     global _SESSION_OEFFENTLICHE_ELECTRUM
     _SESSION_OEFFENTLICHE_ELECTRUM = bool(erlaubt)
+    if erlaubt:
+        erlaube_oeffentliche_electrum_suche()
+    else:
+        setze_oeffentliche_electrum_art(None)
+
+
+def oeffentliche_electrum_art() -> str | None:
+    """``clearnet``, ``onion`` oder ``None`` (keine GUI-Wahl)."""
+    return _SESSION_OEFFENTLICHE_ELECTRUM_ART
+
+
+def setze_oeffentliche_electrum_art(art: str | None) -> None:
+    """
+    Merkt, welche öffentliche Familie der Nutzer verbunden hat.
+
+    ``None`` / leer = keine Wahl (CLI: Clearnet, danach Onion).
+    """
+    global _SESSION_OEFFENTLICHE_ELECTRUM_ART
+    if art is None or str(art).strip() == "":
+        _SESSION_OEFFENTLICHE_ELECTRUM_ART = None
+        return
+    wert = str(art).strip().lower()
+    if wert not in ("clearnet", "onion"):
+        raise ValueError(f"Unbekannte öffentliche Electrum-Art: {art}")
+    _SESSION_OEFFENTLICHE_ELECTRUM_ART = wert
+
+
+def oeffentliche_familie_aktiv(familie: str) -> bool:
+    """False, wenn der Nutzer ausdrücklich die andere Familie gewählt hat."""
+    art = _SESSION_OEFFENTLICHE_ELECTRUM_ART
+    if art is None:
+        return True
+    return art == familie
+
+
+def widerrufe_oeffentliche_electrum_freigabe() -> bool:
+    """Sitzungs-Opt-in zurücknehmen. True, wenn sie aktiv war."""
+    if not oeffentliche_electrum_session_aktiv():
+        return False
+    setze_oeffentliche_electrum_session(False)
+    return True
+
+
+def stoppe_oeffentliche_electrum_suche(*, prozess_ende: bool = False) -> None:
+    """
+    Bricht laufende öffentliche Electrum-Probes ab.
+
+    Aufruf sobald der eigene Indexer verbunden ist, und beim Server-Ende
+    (Taste 3 / Strg+C) — sonst wartet ``httpd.shutdown`` auf die Probe.
+    """
+    _OEFFENTLICHE_ELECTRUM_STOP.set()
+    if prozess_ende:
+        _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.set()
+
+
+def erlaube_oeffentliche_electrum_suche() -> None:
+    """Stopp lösen — Nutzer hat öffentliche Electrum erneut bestätigt."""
+    if not _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set():
+        _OEFFENTLICHE_ELECTRUM_STOP.clear()
+
+
+def oeffentliche_electrum_suche_abgebrochen() -> bool:
+    """True, wenn öffentliche Wallet-Probes sofort enden sollen."""
+    return (
+        _OEFFENTLICHE_ELECTRUM_STOP.is_set()
+        or _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set()
+    )
+
+
+def oeffentliche_electrum_suche_prozess_ende() -> bool:
+    """True nach Taste 3 / Strg+C — kein weiteres Probe-Log."""
+    return _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set()
+
+
+def melde_oeffentliche_electrum_abbruch(log_fn=None) -> None:
+    """
+    Loggt den Abbruch nur, wenn ein privater Indexer die Suche beendet.
+
+    Beim Prozess-Ende (Taste 3) bleibt es still — sonst steht nach
+    „Beendet.“ noch „eigener Indexer verbunden“ in der Konsole.
+    """
+    if _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set():
+        return
+    if log_fn is None:
+        return
+    log_fn("Öffentliche Electrum-Suche beendet — eigener Indexer verbunden.")
+
+
+def futures_bis_oeffentliche_electrum_stopp(
+    futures, *, poll_s: float = 0.2, weiter=None,
+):
+    """
+    Liefert fertige Futures, bis alle durch sind oder die öffentliche
+    Suche gestoppt wurde (privater Indexer / Job-Abbruch / Prozess-Ende).
+
+    ``weiter`` liefert False, sobald diese Probe der anderen Familie
+    weichen muss (Nutzer hat Onion oder Clearnet ausdrücklich gewählt).
+    """
+    from concurrent.futures import FIRST_COMPLETED, wait
+
+    pending = set(futures)
+    while pending:
+        if oeffentliche_electrum_suche_abgebrochen():
+            return
+        if weiter is not None and not weiter():
+            return
+        try:
+            from core.jobs import job_abgebrochen
+
+            if job_abgebrochen():
+                return
+        except Exception:
+            pass
+        done, pending = wait(
+            pending, timeout=max(0.05, float(poll_s)), return_when=FIRST_COMPLETED,
+        )
+        for fut in done:
+            yield fut
+
+
+def _reset_oeffentliche_electrum_suche_fuer_tests() -> None:
+    """Nur Tests: Stopp-Flags und Sitzungs-Art zurücksetzen."""
+    global _SESSION_OEFFENTLICHE_ELECTRUM_ART
+    _OEFFENTLICHE_ELECTRUM_STOP.clear()
+    _OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.clear()
+    _SESSION_OEFFENTLICHE_ELECTRUM_ART = None
 
 
 def _truthy(value: object) -> bool:
@@ -41,6 +177,26 @@ def _setting(values: dict[str, str] | None, key: str) -> str:
     if values and values.get(key) is not None:
         return str(values.get(key) or "").strip()
     return str(os.environ.get(key, "") or "").strip()
+
+
+_IPV4_ZEICHEN = set("0123456789.,")
+_IPV6_ZEICHEN = set("0123456789abcdef:.")
+
+
+def _sieht_aus_wie_ip(host: str) -> bool:
+    """True, wenn der Text eine IP sein soll und kein Hostname.
+
+    ``superelectrs.local`` und kurze Namen bleiben Hostnamen. Ein Komma
+    oder nur Ziffern und Punkte (``192,.168.2.168``, ``192.168.2``) ist
+    ein gescheiterter IP-Versuch.
+    """
+    name = str(host or "").strip().lower()
+    if not name or not any(ch.isdigit() for ch in name):
+        return False
+    zeichen = set(name)
+    if zeichen <= _IPV4_ZEICHEN and ("." in name or "," in name):
+        return True
+    return ":" in name and zeichen <= _IPV6_ZEICHEN
 
 
 def normalize_host(host: str) -> str:
@@ -122,6 +278,13 @@ def ensure_host_allowed(host: str, *, service: str = "", values=None, opt_in=Non
     normalized = normalize_host(host)
     if not normalized:
         raise OutboundPolicyError("Outbound-Ziel enthält keinen Host.")
+    if _sieht_aus_wie_ip(normalized):
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError as exc:
+            raise OutboundPolicyError(
+                f"Ungültige IP-Adresse „{normalized}“."
+            ) from exc
     if not allowed_host(normalized, service=service, values=values, opt_in=opt_in):
         label = service or "dieser Dienst"
         raise OutboundPolicyError(

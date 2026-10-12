@@ -48,6 +48,7 @@ from core.bip158_scan import (
     TURBO_WINDOW,
     _BLOCK_PENDING,
     plane_filter_passes,
+    plane_union_passes,
     _cfilter_chunks,
     _filter_umfang,
     _filter_prozent_text,

@@ -73,6 +73,33 @@ def _job_ergebnis(
     return meta
 
 
+def verlange_electrum_fuer_spur(state) -> None:
+    """409, wenn weder eigener noch öffentlicher Electrum-Server verbunden ist.
+
+    Der Lauf darf danach nicht selbst eine Verbindung suchen.
+    """
+    from server import ApiError
+
+    from core.chain_sources import ELECTRUM_SPUR_FEHLT, electrum_fuer_spur_verbunden
+
+    werte = state.env().values()
+    quellen = getattr(state, "sources_last", None)
+    if electrum_fuer_spur_verbunden(werte, quellen):
+        return
+    if not quellen:
+        # Frisch gestartet: noch kein Quellen-Check gelaufen (den macht sonst
+        # der Browser). Einmal den eigenen Electrs prüfen — gecacht, ohne
+        # öffentliche Server und ohne Tor-Autostart.
+        from core.chain_sources import eigene_electrs_ist_verbunden
+
+        try:
+            if eigene_electrs_ist_verbunden(werte):
+                return
+        except Exception:
+            pass
+    raise ApiError(409, ELECTRUM_SPUR_FEHLT)
+
+
 def api_trace_alle(state: AppState, payload: dict) -> dict:
     """
     Verfolgt die Herkunft von UTXOs.
@@ -296,6 +323,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     "key": schluessel,
                     "time_ts": ts,
                     "oldest_time_ts": alt,
+                    "vollstaendig": True,
                 })
 
             def _marker(stand: dict) -> None:
@@ -649,6 +677,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
     else:
         titel = f"Herkunft für {len(offen)} UTXOs"
         art = "trace-alle"
+    verlange_electrum_fuer_spur(state)
     job = state.jobs.start(
         art,
         titel,
@@ -832,6 +861,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
             halt.set()
             stand.close()
 
+    verlange_electrum_fuer_spur(state)
     # Einzel-Wallet in die Scan-Pipeline; „alle Wallets“ parallel wie bisher
     # (kein wallet_id → kein Dedupe-Konflikt mit Einzelscans).
     if kennung and len(ziele) == 1:
@@ -1241,7 +1271,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     or t.startswith("→")
                 ):
                     # Jeder Hop und jeder Ziel-Scan sofort — sonst klebt
-                    # zehn Sekunden „Moment noch“ über demselben Text.
+                    # INTERVALL Sekunden „Moment noch“ über demselben Text.
                     stand.phase(t)
                 else:
                     stand.tick(t)
@@ -1412,6 +1442,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
                     "adressen_seither": treffer.get("adressen_seither"),
                 }
 
+    verlange_electrum_fuer_spur(state)
     titel = f"Herkunft {txid[:12]}…:{vout}"
     if force and resume_origin is not None and followup is None:
         titel = f"Herkunft fortsetzen {txid[:12]}…:{vout}"

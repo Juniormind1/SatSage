@@ -8,6 +8,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -65,8 +66,8 @@ const NETZ = {
   verfolgt_vollstaendig: false, gekappt: false,
   vorfahren: [
     { key: "%(K)s", typ: "eigen", pos_output: 70, y: 50, value_sats: 1000, anteil_sats: 1000, zeit: "01.06.2024 12:00", wallet: "Hot" },
-    { key: "%(V)s", typ: "eigen", pos_output: 40, y: 60, value_sats: 5000, anteil_sats: 600, zeit: "01.02.2024 12:00", wallet: "Cold" },
-    { key: "%(F)s", typ: "fremd", pos_output: -10, y: 120, value_sats: 9000, anteil_sats: 400, zeit: "01.01.2020 12:00" },
+    { key: "%(V)s", typ: "eigen", pos_output: 40, y: 60, value_sats: 5000, anteil_sats: 600, zeit: "01.02.2024 12:00", wallet: "Cold", ende: true },
+    { key: "%(F)s", typ: "fremd", pos_output: -10, y: 120, value_sats: 9000, anteil_sats: 400, zeit: "01.01.2020 12:00", ende: true },
   ],
   kanten: [
     { von: "%(V)s", nach: "%(K)s", sats: 600, eigen: true },
@@ -90,12 +91,23 @@ const stand = () => {
 
 
 def _node(szenario: str) -> dict:
-    aus = subprocess.run(
-        ["node", "-e", STUB + UMGEBUNG + NETZ + "\n(async () => {\n" + szenario + "\n})();"],
-        capture_output=True, text=True, timeout=30,
-    )
+    # Datei statt ``node -e``: der zusammengeklebte Lauf übersteigt
+    # auf Windows die CreateProcess-Grenze (WinError 206).
+    script = STUB + UMGEBUNG + NETZ + "\n(async () => {\n" + szenario + "\n})();\n"
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".js", delete=False, encoding="utf-8",
+    ) as datei:
+        datei.write(script)
+        pfad = datei.name
+    try:
+        aus = subprocess.run(
+            ["node", pfad],
+            capture_output=True, text=True, timeout=30,
+        )
+    finally:
+        Path(pfad).unlink(missing_ok=True)
     if aus.returncode != 0:
-        raise AssertionError(aus.stderr)
+        raise AssertionError(aus.stderr or aus.stdout)
     return json.loads(aus.stdout)
 
 
@@ -112,20 +124,32 @@ class TestEinbindung(unittest.TestCase):
     def test_punktklick_und_neuzeichnen_und_ansichtswechsel(self):
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("herkunftsnetzUmschalten(key)", steuer)
+        self.assertIn("function bindeAchsePunktKlick", steuer)
+        self.assertIn("bindeAchsePunktKlick(punkt, key, eintrag.address)", steuer)
         self.assertIn("herkunftsnetzZumBaum(v)", NETZ)
         self.assertIn("function herkunftsnetzBaumVorladen", NETZ)
         self.assertIn("kopiereInZwischenablage(outpoint)", NETZ)
-        self.assertIn("kopiereInZwischenablage(eintrag.address)", steuer)
+        self.assertIn("kopiereInZwischenablage(adresse)", steuer)
         self.assertIn("herkunftsnetzSpringbar", NETZ)
         herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
         self.assertIn("function springeImHerkunftsbaum", herkunft)
         self.assertIn("function springeZuTraceUtxo", herkunft)
+        self.assertIn("Zustand.traceKlaerenUeberSprung = key", herkunft)
         self.assertIn("setzeKlapp(kopf, klapp, zweig, true)", herkunft)
         self.assertIn("herkunftsnetzBericht(key)", steuer)
         self.assertIn('addEventListener("dblclick"', steuer)
         self.assertIn("herkunftsnetzZeichnen()", steuer)
         self.assertIn("function herkunftsnetzOhneHerkunft", NETZ)
         self.assertIn("springeZuTraceUtxo(key, punkt)", NETZ)
+        self.assertIn('classList.contains("achse-lot")', NETZ)
+        self.assertIn("function setzeAchseLotAusEvent", NETZ)
+        self.assertIn("function achseLotMischungAusEvent", NETZ)
+        self.assertIn("setzeAchseLotAusEvent(punkt, event)", steuer)
+        css = (WEB / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".achse-punkt.achse-lot:hover::before", css)
+        self.assertIn("calc(50% + 16px)", css)
+        self.assertIn("function achsePunktTipText", steuer)
+        self.assertIn("springeZuTraceUtxo(key, meta)", NETZ)
         # Zeitstrahl-Rechnung unberührt: kein Overlay in events.
         self.assertNotIn("events.push", NETZ)
         nav = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
@@ -219,13 +243,83 @@ class TestEinUndAusstieg(unittest.TestCase):
         zeilen = r["mit"].split("\n")
         self.assertEqual(zeilen[0], "04.03.2021")
         self.assertEqual(zeilen[1], "2,00 BTC")
+        self.assertEqual(len(zeilen), 4)
         self.assertIn("tax.netzLotGruen", zeilen[2])
         self.assertIn("99,9 %", zeilen[2])
-        self.assertIn("tax.netzLotGelb", zeilen[3])
-        self.assertIn("0,0 %", zeilen[3])
-        self.assertIn("tax.netzLotGrau", zeilen[4])
-        self.assertIn("0,12 %", zeilen[4])
+        self.assertIn("tax.netzLotGrau", zeilen[3])
+        self.assertIn("0,12 %", zeilen[3])
+        self.assertTrue(all("tax.netzLotGelb" not in z for z in zeilen))
         self.assertEqual(r["ohne"], "04.03.2021\n2,00 BTC")
+
+    def test_lot_ring_hover_aus_event_ohne_netz(self):
+        """Mix-Zahlen am Event: Lot-Ring liegt am Punkt, Klick holt erst das Netz."""
+        r = _node("""
+          globalThis.setzeLotDonut = (punkt) => { punkt.classList.add("lot-donut"); };
+          const tip = new El("span");
+          tip.className = "achse-punkt-tip";
+          tip.textContent = "04.03.2021\\n2,00 BTC";
+          pA.append(tip);
+          ZeitstrahlAnsicht.daten = {
+            zeitstrahl: {
+              frist_pos: 50,
+              events: [{ key: "%s", sats_gruen: 70, sats_orange: 20, sats_grau: 10 }],
+            },
+          };
+          herkunftsnetzZeichnen();
+          const hover = {
+            lot: pA.classList.contains("achse-lot"),
+            an: stand().an,
+            api: aufrufe.api.slice(),
+            tip: tip.textContent,
+            trace: traceSpruenge.slice(),
+          };
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          console.log(JSON.stringify({
+            hover,
+            nachKlick: {
+              an: stand().an, api: aufrufe.api.slice(), trace: traceSpruenge.slice(),
+            },
+          }));
+        """ % K)
+        self.assertTrue(r["hover"]["lot"])
+        self.assertFalse(r["hover"]["an"])
+        self.assertEqual(r["hover"]["api"], [])
+        self.assertEqual(r["hover"]["trace"], [])
+        self.assertIn("tax.netzLotGruen", r["hover"]["tip"])
+        self.assertTrue(r["nachKlick"]["an"])
+        self.assertTrue(any("/tax/herkunftsnetz" in p for p in r["nachKlick"]["api"]))
+        self.assertEqual(r["nachKlick"]["trace"], [])
+
+    def test_lot_ring_klick_springt_zum_utxo(self):
+        """Netz an, Lot-Ring da: Klick auf den Fokus springt, Klick daneben blendet aus."""
+        r = _node("""
+          globalThis.setzeLotDonut = (punkt) => { punkt.classList.add("lot-donut"); };
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          const lot = pA.classList.contains("achse-lot");
+          pA.fire("click");
+          const nachRing = {
+            an: stand().an, trace: traceSpruenge.slice(), wallet: walletSpruenge.slice(),
+          };
+          antworten.push(NETZ);
+          pA.fire("click");
+          await warte();
+          viewport.fire("click");
+          console.log(JSON.stringify({
+            lot, nachRing, nachLeer: {
+              an: stand().an, trace: traceSpruenge.slice(),
+            },
+          }));
+        """)
+        self.assertTrue(r["lot"])
+        self.assertFalse(r["nachRing"]["an"])
+        self.assertEqual(r["nachRing"]["wallet"], [])
+        self.assertEqual(r["nachRing"]["trace"][0][0], K)
+        self.assertFalse(r["nachLeer"]["an"])
+        self.assertEqual(len(r["nachLeer"]["trace"]), 1)
 
     def test_grauer_punkt_oeffnet_herkunft_aufgeklappt(self):
         """Ohne Herkunft gibt es kein Netz. Der Klick öffnet den Trace aufgeklappt."""

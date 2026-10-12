@@ -1,6 +1,6 @@
 # SatSage-Regtest-Labor
 
-Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
+Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
 
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
@@ -22,6 +22,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 ```
 
 `start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf macOS und Linux, nicht hier.
+
+Szenario Dachboden (GUI muss schon laufen, bitcoind und Electrs auch): `scripts/verify_gui_dachboden.py`. Es legt `Dachprobe` an, erwartet sie unter Dachboden, schickt 100 000 sats vom Faucet, mined einen Block und erwartet den Sprung in die normale Liste ohne Reload. Danach Sweep zurück an `lab-faucet` und wieder Dachboden. macOS/Linux starten das gebündelte Chromium ohne `channel`, Windows mit `channel=chrome`.
 
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 
@@ -129,6 +131,33 @@ Verify (Lab muss laufen):
 ```bash
 py -3 lab/regtest/scripts/verify_sanctions_hops.py
 ```
+
+### Scan-Abbruch und Cache-Hinterlassenschaften
+
+Ein Scan, der mittendrin stirbt (Abbruch-Knopf, Electrs weg, `kill -9`), plus Start-Sync oder ungeduldiger Scan **bevor** Electrs steht, darf keinen Cache hinterlassen, an dem die nächste Instanz hängt. Der Prüfer verlangsamt den Scan über einen Loopback-Proxy, bricht ab, startet SatSage neu gegen denselben Cache.
+
+Protokoll: [`doc/testprotokoll-scan-abbruch-cache.md`](../../doc/testprotokoll-scan-abbruch-cache.md). Noch nicht Teil von Q6.
+
+```bash
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --list
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --group abort
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --group quelle
+python3 lab/regtest/scripts/verify_scan_abort_cache.py --group synthetic
+```
+
+Windows: `py -3 lab\regtest\scripts\verify_scan_abort_cache.py`. Isolierte Caches unter `.data/abort-scan/` (nicht der GUI-Cache). Der Proxy lauscht auf `127.0.0.1:15001`. Labor muss schon laufen — der Prüfer startet Docker nicht.
+
+### Jede Datenquelle allein
+
+Teil von Q6, nach den Szenarien. Für Quelle 1–3 (eigener Electrum-Server, Pruned Node, Bitcoin Core · RPC) löscht der Prüfer den Cache, trägt nur diese Verbindung ein und vergleicht UTXO-Bestand und Herkunft jedes Inventar-UTXOs. P2P ist der vierte Lauf und startet nur, wenn `p2p_gesperrt()` falsch ist. Die App darf Compact Filter schon vorher für den UTXO-Bestand nutzen; dieser Lauf klärt danach mit P2P-`get_tx` und bleibt deshalb aus. Wenn er läuft: UTXO-Bestand nur über Compact Filter, dann die Knöpfe Grau und Gelb. Danach müssen rote Ringe stehen. Electrs kommt auf denselben Cache, Grau und Gelb laufen noch einmal, die Ringe müssen weg sein und jedes UTXO geklärt (vollständig verfolgt, oder ohne Baum schon außerhalb der Haltefrist). `verify_p2p_traces.py` bleibt davon unberührt.
+
+```bash
+python3 lab/regtest/scripts/verify_quellen_inventar.py
+```
+
+### P2P-only Traces — nicht fahren
+
+P2P ist keine ausreichende Datenquelle (Herkunft, Haltefrist, Stichtag fehlen). `verify_p2p_traces.py` nicht starten. Der Harness und das Protokoll [`doc/testprotokoll-p2p-traces.md`](../../doc/testprotokoll-p2p-traces.md) bleiben liegen. Wiederaufnahme frühestens 2027-01-08, siehe [`doc/issues/p2p-herkunft.md`](../../doc/issues/p2p-herkunft.md) und [`doc/test-inventar.md`](../../doc/test-inventar.md). Nicht Teil von Q6.
 
 ### Core-Allowlist (harte Regel, jeder PR nach main)
 

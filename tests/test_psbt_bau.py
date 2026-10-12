@@ -644,6 +644,22 @@ class TestZusammenfuehren(unittest.TestCase):
         self.assertEqual([u["key"] for u in aus], ["aa" * 32 + ":0", "bb" * 32 + ":1"])
         self.assertEqual([u["bestaetigt"] for u in aus], [True, False])
 
+    def test_zusammenfuehren_eigenes_ziel_ohne_lot(self):
+        bestand = [
+            {"txid": "AA" * 32, "vout": 0, "value": 1000, "address": "a",
+             "status": {"confirmed": True}},
+            {"txid": "ee" * 32, "vout": 0, "value": 4000, "address": "e",
+             "status": {"confirmed": True}},
+        ]
+        lots = [
+            {"txid": "aa" * 32, "vout": 0, "value_sats": 1000, "sats_gruen": 1000},
+        ]
+        aus = pb.zusammenfuehren(bestand, lots, eigenes_ziel=True)
+        self.assertEqual([u["key"] for u in aus], ["aa" * 32 + ":0", "ee" * 32 + ":0"])
+        ohne = [u for u in aus if u["key"].startswith("ee")][0]
+        self.assertEqual(ohne["sats_gruen"], None)
+        self.assertEqual(ohne["sats_grau"], 4000)
+
 
 class TestServerPruefung(unittest.TestCase):
     """``_erzeugen``: Bestand, Lots und Mempool kommen vom Server, nie vom Browser."""

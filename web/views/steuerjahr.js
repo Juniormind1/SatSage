@@ -214,6 +214,7 @@ function steuerLotUiPlanen() {
     zeichneSteuerScorecards(Zustand.steuer);
     const strahl = Zustand.steuer.zeitstrahl;
     if (strahl) zeichneZeitstrahlGeister(strahl);
+    if (typeof fifoSpendLotUiPlanen === "function") fifoSpendLotUiPlanen();
   }, 80);
 }
 
@@ -248,7 +249,16 @@ function steuerLotZeile(zeile) {
   if (punkt) {
     punkt.classList.remove("ungeprueft", "offen", "erfuellt");
     punkt.classList.add(steuerPunktFarbe(event));
+    const netzFokus = typeof herkunftsnetzAktiv === "function"
+      && herkunftsnetzAktiv()
+      && typeof Herkunftsnetz !== "undefined"
+      && Herkunftsnetz.key === zeile.key
+      && Herkunftsnetz.daten;
+    if (!netzFokus && typeof setzeAchseLotAusEvent === "function") {
+      setzeAchseLotAusEvent(punkt, event);
+    }
   }
+  if (typeof fifoSpendLotUebernehmen === "function") fifoSpendLotUebernehmen(zeile);
   steuerLotUiPlanen();
 }
 
@@ -276,6 +286,13 @@ function steuerLotsAbschluss(obj) {
   }
   if (typeof ladeSteuerSeitenNeu === "function") {
     ladeSteuerSeitenNeu().catch(() => {});
+  }
+  if (Zustand.fifoSpend
+      && typeof fifoSpendJahrAbfrage === "function"
+      && daten._abfrage === fifoSpendJahrAbfrage()) {
+    Zustand.fifoSpend.lots_fertig = true;
+    Zustand.fifoSpend.zustand = "fertig";
+    if (typeof fifoSpendLotUiSofort === "function") fifoSpendLotUiSofort();
   }
 }
 
@@ -332,7 +349,8 @@ async function steuerLotsNachziehen(lauf) {
   }
 }
 
-async function ladeSteuerjahr() {
+async function ladeSteuerjahr(optionen = {}) {
+  const fensterBehalten = Boolean(optionen && optionen.fensterBehalten);
   Zustand.steuerPlotLauf = (Zustand.steuerPlotLauf || 0) + 1;
   const lauf = Zustand.steuerPlotLauf;
   if (Zustand.steuerLotsAbbruch) {
@@ -345,10 +363,17 @@ async function ladeSteuerjahr() {
   const abfrage =
     `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
     `&stichtag=${encodeURIComponent(stichtag)}`;
+  // Denselben Jahr-Strom nicht doppelt: FIFO hängt sich an diesen Lauf.
+  if (typeof fifoSpendJahrAbfrage === "function"
+      && typeof fifoSpendLotsAbbrechen === "function"
+      && fifoSpendJahrAbfrage() === abfrage) {
+    fifoSpendLotsAbbrechen();
+  }
   // Achse sofort, auch wenn der Cache noch gelesen wird. Liegt schon ein
   // Plot, bleibt er stehen, bis die neuen Punkte da sind.
+  // fensterBehalten: laufender Plot (Pan/Zoom) — kein leerer Rahmen darüber.
   const karte = $("#zeitstrahl-karte");
-  if (!karte || karte.hidden) zeichneSteuerLeerenRahmen();
+  if (!fensterBehalten && (!karte || karte.hidden)) zeichneSteuerLeerenRahmen();
   // Seitenweise (ISSUES P2): Summen, Kennzahlen und Zeitstrahl über alles,
   // Zeilen nur im Fenster — die erste Anfrage bringt je Liste zwei Seiten.
   // lots=0: Punkte aus UTXO und Ingress, Bäume folgen im Strom.
@@ -366,7 +391,7 @@ async function ladeSteuerjahr() {
     daten._abfrage = abfrage;
     daten._q = filter.toString();
     Zustand.steuer = daten;
-    zeichneSteuerjahr(daten);
+    zeichneSteuerjahr(daten, { fensterBehalten });
     if (daten.lots_fertig) {
       Zustand.steuerLots = Promise.resolve();
     } else {
@@ -445,25 +470,23 @@ function fuelleJahresauswahl(jahre, gewaehlt) {
   if (gewaehlt) wahl.value = gewaehlt;
 }
 
+/**
+ * Scorecard-Betrag: sats/BTC plus Spot-Gegenwert (DE € / EN $).
+ * Kein Einstand — die Karten zählen den Bestand heute.
+ */
+function steuerScorecardWert(sats) {
+  return formatSats(Number(sats) || 0);
+}
+
 /** Scorecards oben im Steuerjahr. id bleibt stabil, solange die Farbe steht. */
 function steuerScorecardModelle(daten) {
   const k = daten.kennzahlen || {};
-  const alleE = daten.eintraege || [];
-  const erfuelltE = alleE.filter((e) => e.erfuellt);
-  const offenE = alleE.filter((e) => !e.erfuellt);
-  const ungeprueftE = alleE.filter((e) => !e.geprueft);
-  // Seitenweise liegt nur ein Fenster vor: Der Server nennt den gemeinsamen
-  // Bewertungstag je Menge (sonst null → kein Fiat, wie bisher).
-  const kts = daten.seitenweise ? (daten.kennzahlen_ts || {}) : null;
-  const fiatE = (sats, liste, name) => (kts
-    ? steuerSatsGemeinsam(sats, kts[name])
-    : formatSatsGemeinsam(sats, liste));
 
   const karten = [
     {
       id: "gesamt",
       titel: t("tax.hard.ee18fac200"),
-      wert: fiatE(k.gesamt_sats, alleE, "gesamt"),
+      wert: steuerScorecardWert(k.gesamt_sats),
       zusatz: `${k.gesamt_count} UTXOs`,
       art: "",
       klaeren: false,
@@ -471,7 +494,7 @@ function steuerScorecardModelle(daten) {
     {
       id: "erfuellt",
       titel: t("tax.hard.91a2ea86bd"),
-      wert: fiatE(k.erfuellt_sats, erfuelltE, "erfuellt"),
+      wert: steuerScorecardWert(k.erfuellt_sats),
       zusatz: `${k.erfuellt_count} UTXOs`,
       art: "gut",
       klaeren: false,
@@ -479,7 +502,7 @@ function steuerScorecardModelle(daten) {
     {
       id: "offen",
       titel: t("tax.hard.innerhalbHaltefrist"),
-      wert: fiatE(k.offen_sats, offenE, "offen"),
+      wert: steuerScorecardWert(k.offen_sats),
       zusatz: k.naechste_frist
         ? t("tax.hard.ed098d09aa", { naechste_frist: k.naechste_frist })
         : `${k.offen_count} UTXOs`,
@@ -487,12 +510,18 @@ function steuerScorecardModelle(daten) {
       klaeren: true,
     },
   ];
-  if (k.ungeprueft_count > 0) {
+  if ((Number(k.ungeprueft_sats) || 0) > 0 || (Number(k.ungeprueft_count) || 0) > 0) {
     karten.push({
       id: "ungeprueft",
-      titel: "Ohne Herkunftsanalyse",
-      wert: fiatE(k.ungeprueft_sats, ungeprueftE, "ungeprueft"),
-      zusatz: `${k.ungeprueft_count} UTXOs — Frist evtl. länger`,
+      titel: t("tax.tileNoOrigin") !== "tax.tileNoOrigin"
+        ? t("tax.tileNoOrigin")
+        : "Ohne Herkunftsanalyse",
+      wert: steuerScorecardWert(k.ungeprueft_sats),
+      zusatz: k.ungeprueft_count > 0
+        ? t("tax.tileNoOriginNote", { anzahl: k.ungeprueft_count })
+        : (t("tax.tileLotGrayNote") !== "tax.tileLotGrayNote"
+          ? t("tax.tileLotGrayNote")
+          : "undatierte Herkunftsenden"),
       art: "ungeprueft",
       klaeren: true,
     });
@@ -603,7 +632,7 @@ function zeichneSteuerScorecards(daten) {
   }
 }
 
-function zeichneSteuerjahr(daten) {
+function zeichneSteuerjahr(daten, optionen = {}) {
   fuelleJahresauswahl(daten.verfuegbare_jahre || [], daten.jahr);
   fuelleHaltefristAuswahl(
     $("#frist-wahl"),
@@ -617,7 +646,9 @@ function zeichneSteuerjahr(daten) {
   ScanPunktStand.gezahlt.clear();
   zeichneSteuerScorecards(daten);
 
-  zeichneZeitstrahl(daten);
+  zeichneZeitstrahl(daten, {
+    fensterBehalten: Boolean(optionen && optionen.fensterBehalten),
+  });
 
   setzeText(
     $("#steuer-zusatz"),
@@ -627,6 +658,9 @@ function zeichneSteuerjahr(daten) {
   );
 
   zeichneSteuerUtxoGruppen(daten);
+  if (typeof saAuswahlMitschreiben === "function") {
+    saAuswahlMitschreiben($("#steuer-tabelle"));
+  }
 
   setzeText($("#steuer-vorbehalt"), (daten.hinweise || []).join(" "));
   $("#steuer-meldung").hidden = true;
@@ -674,7 +708,20 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
 
   const datum = document.createElement("td");
   datum.className = "zahl";
-  datum.textContent = eintrag.datum;
+  const wahl = document.createElement("label");
+  wahl.className = "steuer-utxo-wahl";
+  if (schluessel) {
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.art = "utxo";
+    box.value = `utxo:${schluessel}`;
+    box.addEventListener("click", (e) => e.stopPropagation());
+    wahl.append(box);
+  }
+  const datumText = document.createElement("span");
+  datumText.textContent = eintrag.datum;
+  wahl.append(datumText);
+  datum.append(wahl);
   if (eintrag.herkunft) {
     const h = document.createElement("div");
     h.className = "zart";
@@ -759,18 +806,26 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
   }
 
   const status = document.createElement("td");
-  status.className = "r";
+  status.className = "r steuer-utxo-status";
   const hatStichtag = Boolean(daten.stichtag_regel);
   let statusText = haltefristBeschriftung(eintrag, hatStichtag);
   if (!eintrag.erfuellt && eintrag.frist_ende && !eintrag.neuvermoegen) {
     statusText += ` · ab ${eintrag.frist_ende}`;
   }
   status.append(pille(eintrag.erfuellt ? "gut" : "warn", statusText));
-
-  const extern = mempoolVerweis("tx", eintrag.txid);
-  if (extern) status.append(extern);
+  if (schluessel && typeof saZeilenReportAktionen === "function") {
+    status.append(saZeilenReportAktionen({
+      art: "utxo",
+      id: schluessel,
+      txid: eintrag.txid,
+    }));
+  } else {
+    const extern = mempoolVerweis("tx", eintrag.txid);
+    if (extern) status.append(extern);
+  }
 
   zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status);
+  if (typeof saZeileMitAuswahl === "function") saZeileMitAuswahl(zeile);
   return zeile;
 }
 
@@ -922,7 +977,9 @@ function zeichneSteuerUtxoGruppen(daten) {
   const fenster = daten.seitenweise ? (daten.steuer_gruppen || {}) : null;
   const liste = daten.eintraege || [];
   const leer = fenster
-    ? !(Number(fenster.erfuellt?.voll_count) || Number(fenster.offen?.voll_count))
+    ? !(Number(fenster.erfuellt?.voll_count)
+      || Number(fenster.offen?.voll_count)
+      || Number(fenster.ungeprueft?.voll_count))
     : liste.length === 0;
   if (leer) {
     const koerper = document.createElement("tbody");
@@ -939,9 +996,14 @@ function zeichneSteuerUtxoGruppen(daten) {
     return;
   }
 
-  // Reihenfolge wie Scorecard: außerhalb (grün), dann innerhalb (gelb).
+  // Reihenfolge wie Scorecard: grün, gelb, grau.
+  const gruppen = [
+    ["erfuellt", "tax.haltefristOut"],
+    ["offen", "tax.haltefristIn"],
+    ["ungeprueft", "tax.tileNoOrigin"],
+  ];
   if (fenster) {
-    for (const [teil, titel] of [["erfuellt", "tax.haltefristOut"], ["offen", "tax.haltefristIn"]]) {
+    for (const [teil, titel] of gruppen) {
       const f = fenster[teil];
       if (!f || !Number(f.voll_count)) continue;
       tabelle.append(zeichneSteuerUtxoGruppe(t(titel), [], { art: teil, daten, fenster: f }));
@@ -950,21 +1012,14 @@ function zeichneSteuerUtxoGruppen(daten) {
   }
 
   const erfuellt = liste.filter((e) => e.erfuellt);
-  const offen = liste.filter((e) => !e.erfuellt);
+  const offen = liste.filter((e) => e.geprueft && !e.erfuellt);
+  const ungeprueft = liste.filter((e) => !e.geprueft && !e.erfuellt);
+  const listen = { erfuellt, offen, ungeprueft };
 
-  if (erfuellt.length) {
-    tabelle.append(zeichneSteuerUtxoGruppe(
-      t("tax.haltefristOut"),
-      erfuellt,
-      { art: "erfuellt", daten },
-    ));
-  }
-  if (offen.length) {
-    tabelle.append(zeichneSteuerUtxoGruppe(
-      t("tax.haltefristIn"),
-      offen,
-      { art: "offen", daten },
-    ));
+  for (const [teil, titel] of gruppen) {
+    const items = listen[teil];
+    if (!items.length) continue;
+    tabelle.append(zeichneSteuerUtxoGruppe(t(titel), items, { art: teil, daten }));
   }
 }
 
@@ -1045,6 +1100,50 @@ function scanPunktGroesse(sats, maxSats) {
   return "klein";
 }
 
+/** Hover-Text am Plot-Punkt: Datum, Betrag plus Spot-Fiat, Wallet. Keine Haltefrist. */
+function achsePunktTipText({ datum, sats, wallet, hinweis }) {
+  let betrag = "";
+  if (sats != null && sats !== "") {
+    if (typeof formatZeitstrahlBetragMitFiat === "function") {
+      betrag = formatZeitstrahlBetragMitFiat(sats);
+    } else if (typeof formatZeitstrahlBetrag === "function") {
+      betrag = formatZeitstrahlBetrag(sats);
+    }
+  }
+  return [datum || "", betrag, wallet || "unbekannt", hinweis || ""]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Einfachklick: Herkunftsnetz oder Sprung zum UTXO. Doppelklick: Bericht. */
+function bindeAchsePunktKlick(punkt, key, adresse) {
+  if (!punkt || !key) return;
+  punkt.classList.add("klickbar");
+  let einfach = null;
+  punkt.addEventListener("click", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (ereignis.detail > 1) return;
+    if (adresse && typeof kopiereInZwischenablage === "function") {
+      kopiereInZwischenablage(adresse);
+    }
+    if (einfach) clearTimeout(einfach);
+    einfach = setTimeout(() => {
+      einfach = null;
+      herkunftsnetzUmschalten(key);
+    }, 280);
+  });
+  punkt.addEventListener("dblclick", (ereignis) => {
+    ereignis.preventDefault();
+    ereignis.stopPropagation();
+    if (einfach) {
+      clearTimeout(einfach);
+      einfach = null;
+    }
+    herkunftsnetzBericht(key);
+  });
+}
+
 function zeichneScanPunkte(liste) {
   if (Zustand.ansicht !== "steuerjahr") return 0;
   const spur = $("#achse-spur");
@@ -1089,6 +1188,7 @@ function zeichneScanPunkte(liste) {
     punkt.dataset.scanNeu = "1";
     if (eintrag.wallet) punkt.dataset.wallet = eintrag.wallet;
     if (eintrag.wallet_id) punkt.dataset.walletId = eintrag.wallet_id;
+    if (eintrag.address) punkt.dataset.address = eintrag.address;
     punkt.dataset.valueSats = String(sats);
     punkt.dataset.eventTs = String(ts);
     punkt.style.left = `${sicht}%`;
@@ -1098,15 +1198,11 @@ function zeichneScanPunkte(liste) {
     const datum = `${dd}.${mm}.${wann.getFullYear()}`;
     const tip = document.createElement("span");
     tip.className = sicht > 70 ? "achse-punkt-tip links" : "achse-punkt-tip";
-    const lage = t("tax.legendUnchecked") !== "tax.legendUnchecked"
-      ? t("tax.legendUnchecked")
-      : "innerhalb Frist, ohne Herkunft";
-    tip.textContent = [
-      datum,
-      typeof formatZeitstrahlBetrag === "function" ? formatZeitstrahlBetrag(sats) : "",
-      `${eintrag.wallet || "unbekannt"} · ${lage}`,
-    ].filter(Boolean).join("\n");
+    tip.textContent = achsePunktTipText({
+      datum, sats, wallet: eintrag.wallet,
+    });
     punkt.append(tip);
+    bindeAchsePunktKlick(punkt, key, eintrag.address);
     spur.append(punkt);
     ScanPunktStand.keys.add(key);
     dazu += 1;
@@ -1146,15 +1242,17 @@ function setzeTraceMarke(key, art) {
   if (art === "fertig") punkt.classList.add("trace-fertig");
 }
 
-/** Anschaffungszeit, die der Dotplot für diesen Abschluss zeichnet. */
+/** Anschaffungszeit, die der Dotplot für diesen Abschluss zeichnet.
+ *  Während des Laufs immer der jüngste Stempel. Offensiv (ältester)
+ *  gilt erst, wenn der Baum vollständig ist — sonst läge der Punkt
+ *  links von seiner endgültigen X. */
 function traceSollTs(info) {
-  const art = (typeof steuerEinstellungen === "function"
-    && steuerEinstellungen().anschaffung === "aelteste")
-    ? "aelteste"
-    : "juengste";
   const jung = Number(info && info.time_ts || 0);
   const alt = Number(info && info.oldest_time_ts || 0);
-  if (art === "aelteste" && alt > 0) return alt;
+  const offensiv = typeof steuerEinstellungen === "function"
+    && steuerEinstellungen().anschaffung === "aelteste"
+    && info && info.vollstaendig;
+  if (offensiv && alt > 0) return alt;
   return jung;
 }
 
@@ -1255,6 +1353,7 @@ function traceVollstaendigMerken(liste) {
       TracePunktMarke.warten.set(key, {
         time_ts: Number(roh.time_ts || 0),
         oldest_time_ts: Number(roh.oldest_time_ts || 0),
+        vollstaendig: Boolean(roh.vollstaendig),
         seit: jetzt,
       });
     }
@@ -1292,17 +1391,58 @@ function traceMarkenNachZeichnen() {
 }
 
 /**
+ * Einzel-Trace („vervollständigen“, „Scan neu“) ist zu Ende.
+ *
+ * Der Massenlauf lädt das Steuerjahr nach dem Job neu. Dieser Pfad bisher
+ * nicht: der rote Ring blieb am gezeichneten Punkt, bis ein späteres
+ * Neuzeichnen den Server-Stand holte. Voller Baum nimmt den Ring sofort
+ * vom Punkt und aus dem gemerkten Event — ein Pan dazwischen zeichnet
+ * ihn sonst aus dem alten Stand wieder. Danach derselbe Abruf wie beim
+ * Öffnen des Steuerjahrs, das X/Y-Fenster bleibt.
+ */
+function steuerPlotNachEinzelTrace(key, ergebnis) {
+  const voll = Boolean(ergebnis && ergebnis.verfolgt_vollstaendig);
+  if (voll && key) {
+    const daten = typeof Zustand !== "undefined" ? Zustand.steuer : null;
+    const events = daten && daten.zeitstrahl && daten.zeitstrahl.events;
+    if (Array.isArray(events)) {
+      const event = events.find((e) => e && e.key === key);
+      if (event) event.herkunft_offen = false;
+    }
+    const punkt = typeof tracePunktImPlot === "function" ? tracePunktImPlot(key) : null;
+    if (punkt) {
+      punkt.classList.remove("herkunft-offen-marke");
+      const tip = punkt.querySelector(".achse-punkt-tip");
+      const hinweis = typeof t === "function" ? t("tax.plotIncomplete") : "";
+      if (tip && hinweis) {
+        tip.textContent = String(tip.textContent || "")
+          .split("\n")
+          .filter((zeile) => zeile && zeile !== hinweis)
+          .join("\n");
+      }
+    }
+  }
+  if (
+    typeof Zustand !== "undefined"
+    && Zustand.ansicht === "steuerjahr"
+    && typeof ladeSteuerjahr === "function"
+  ) {
+    ladeSteuerjahr({ fensterBehalten: true }).catch(() => {});
+  }
+}
+
+/**
  * Laufender Trace: Punkt nur verschieben, wenn das Datum schon feststeht.
  *
- * Defensiv wandert X nur nach rechts (jünger). Fest ist Gelb, sobald der
- * jüngste bekannte externe Zufluss innerhalb der Frist liegt. Offensiv
- * wandert X nur nach links; fest ist dann Grün. Alles andere wartet auf
- * den fertigen Trace — ein späterer Hop könnte die Farbe umkehren.
+ * Immer defensiv, auch bei offensiver Lesart: X wandert nur nach rechts
+ * (jünger). Fest ist Gelb, sobald der jüngste bekannte externe Zufluss
+ * innerhalb der Frist liegt. Der älteste Stempel gilt erst nach dem
+ * vollständigen Baum. Alles andere wartet — ein späterer Hop könnte
+ * jünger sein.
  */
 function wendeLivePunktAn(live) {
   if (!live || !live.key || Zustand.ansicht !== "steuerjahr") return false;
   const ts = Number(live.time_ts || 0);
-  const altTs = Number(live.oldest_time_ts || 0);
   if (!(ts > 0)) return false;
   const spur = $("#achse-spur");
   if (!spur) return false;
@@ -1318,10 +1458,10 @@ function wendeLivePunktAn(live) {
   const gesamtMs = bis.getTime() - von.getTime();
   if (!(gesamtMs > 0)) return false;
 
-  const anschaffung = (steuerEinstellungen().anschaffung || "juengste") === "aelteste"
-    ? "aelteste"
-    : "juengste";
-  const wirksamTs = anschaffung === "aelteste" ? (altTs || ts) : ts;
+  // Laufender Trace ist immer defensiv: der älteste Stempel kann noch
+  // nach rechts wandern, sobald ein jüngerer externer Zufluss kommt.
+  const anschaffung = "juengste";
+  const wirksamTs = ts;
   const fristJahre = Number(
     ($("#frist-wahl") && $("#frist-wahl").value)
     || steuerEinstellungen().haltefrist_jahre
@@ -1337,10 +1477,9 @@ function wendeLivePunktAn(live) {
   if (Number.isNaN(anschaffungDate.getTime())) return false;
 
   let erfuellt = false;
-  let neuvermoegen = false;
   if (stichtag && !Number.isNaN(stichtag.getTime())
       && anschaffungDate.getTime() > stichtag.getTime()) {
-    neuvermoegen = true;
+    erfuellt = false;
   } else if (!(fristJahre > 0)) {
     erfuellt = true;
   } else {
@@ -1348,10 +1487,9 @@ function wendeLivePunktAn(live) {
     fristEnde.setFullYear(fristEnde.getFullYear() + fristJahre);
     erfuellt = fristEnde.getTime() <= bezug.getTime();
   }
-  // Nur die Richtung, die ein späterer Hop nicht mehr umkehren kann.
-  const sicherGelb = anschaffung === "juengste" && !erfuellt;
-  const sicherGruen = anschaffung === "aelteste" && erfuellt;
-  if (!sicherGelb && !sicherGruen) return false;
+  // Defensiv: fest ist nur Gelb. Ein späterer Hop kann jünger sein und
+  // ein heute grünes Datum wieder in die Frist schieben.
+  if (erfuellt) return false;
 
   const pos = Math.max(
     0,
@@ -1359,29 +1497,24 @@ function wendeLivePunktAn(live) {
   );
   const bisher = Number(punkt.dataset.livePos);
   if (Number.isFinite(bisher)) {
-    const rueckwaerts = anschaffung === "juengste" ? pos < bisher - 0.05 : pos > bisher + 0.05;
-    if (rueckwaerts) return false;
+    if (pos < bisher - 0.05) return false;
   }
   punkt.dataset.livePos = String(pos);
   punkt.style.left = `${zeitstrahlSichtPos(pos)}%`;
   punkt.classList.remove("ungeprueft", "offen", "erfuellt");
-  punkt.classList.add(sicherGruen ? "erfuellt" : "offen");
+  punkt.classList.add("offen");
   punkt.classList.add("herkunft-offen-marke");
   const tip = punkt.querySelector(".achse-punkt-tip");
   if (tip) {
     const dd = String(anschaffungDate.getDate()).padStart(2, "0");
     const mm = String(anschaffungDate.getMonth() + 1).padStart(2, "0");
     const datum = `${dd}.${mm}.${anschaffungDate.getFullYear()}`;
-    const lage = sicherGruen
-      ? (t("tax.haltefristOut") !== "tax.haltefristOut" ? t("tax.haltefristOut") : "außerhalb Haltefrist")
-      : (t("tax.haltefristIn") !== "tax.haltefristIn" ? t("tax.haltefristIn") : "innerhalb Haltefrist");
-    const wallet = punkt.dataset.wallet || "unbekannt";
-    const betrag = punkt.dataset.valueSats
-      ? formatZeitstrahlBetrag(Number(punkt.dataset.valueSats))
-      : "";
-    tip.textContent = [datum, betrag, `${wallet} · ${lage}`, t("tax.plotIncomplete")]
-      .filter(Boolean)
-      .join("\n");
+    tip.textContent = achsePunktTipText({
+      datum,
+      sats: punkt.dataset.valueSats,
+      wallet: punkt.dataset.wallet,
+      hinweis: t("tax.plotIncomplete"),
+    });
   }
   return true;
 }
@@ -2007,7 +2140,6 @@ function zeichneZeitstrahl(daten, optionen = {}) {
     punkt.dataset.filterLabels = [
       eintrag.wallet, eintrag.txid, lage,
     ].filter(Boolean).join(" ");
-    if (key) punkt.classList.add("klickbar");
     punkt.style.left = `${sicht}%`;
     punkt.style.bottom = `${y}%`;
     // Betrag/Datum/Wallet nur im Hover-Tooltip — feste Labels überladen den Plot.
@@ -2020,39 +2152,14 @@ function zeichneZeitstrahl(daten, optionen = {}) {
         ? t("tax.legendUnchecked")
         : t("ui.hard.e66ad7aa49"))
       : "";
-    tip.textContent = [
-      eintrag.datum || "",
-      formatZeitstrahlBetrag(eintrag.value_sats),
-      `${eintrag.wallet || "unbekannt"} · ${lage}`,
-      herkunftHinweis,
-    ].filter(Boolean).join("\n");
+    tip.textContent = achsePunktTipText({
+      datum: eintrag.datum,
+      sats: eintrag.value_sats,
+      wallet: eintrag.wallet,
+      hinweis: herkunftHinweis,
+    });
     punkt.append(tip);
-    if (key) {
-      // Einfachklick wartet, bis klar ist, dass kein Doppelklick folgt.
-      let einfach = null;
-      punkt.addEventListener("click", (ereignis) => {
-        ereignis.preventDefault();
-        ereignis.stopPropagation();
-        if (ereignis.detail > 1) return;
-        if (eintrag.address && typeof kopiereInZwischenablage === "function") {
-          kopiereInZwischenablage(eintrag.address);
-        }
-        if (einfach) clearTimeout(einfach);
-        einfach = setTimeout(() => {
-          einfach = null;
-          herkunftsnetzUmschalten(key);
-        }, 280);
-      });
-      punkt.addEventListener("dblclick", (ereignis) => {
-        ereignis.preventDefault();
-        ereignis.stopPropagation();
-        if (einfach) {
-          clearTimeout(einfach);
-          einfach = null;
-        }
-        herkunftsnetzBericht(key);
-      });
-    }
+    bindeAchsePunktKlick(punkt, key, eintrag.address);
     spur.append(punkt);
   }
 
@@ -2096,19 +2203,9 @@ function zeichneZeitstrahl(daten, optionen = {}) {
  * statt auf dem bloßen Entstehungsdatum des Outputs.
  */
 /**
- * Erhebt den vollständigen Verlauf aller Wallets.
- *
- * Ohne ihn rechnet das Steuerjahr nur mit dem heutigen Bestand: Ein 2023
- * empfangener und 2024 verkaufter Betrag taucht nirgends auf — obwohl gerade
- * die Veräußerung der steuerlich maßgebliche Vorgang ist.
- *
- * Kostet eine Abfrage je Adresse und braucht einen Electrum-Server, läuft
- * deshalb nur auf ausdrücklichen Wunsch.
- */
-/**
  * Zeigt, was im Steuerjahr veräußert wurde.
  *
- * Die Karte bleibt verborgen, solange kein Verlauf vorliegt — dort wäre eine
+ * Die Karte bleibt verborgen, solange keine Wallet-Historie vorliegt — dort wäre eine
  * leere Liste keine Aussage („nichts verkauft"), sondern ein Nichtwissen.
  */
 function zeichneAbgaenge(daten) {
@@ -2306,7 +2403,8 @@ Zustand.saDaten = null;
 Zustand.saGewaehlt = new Set();
 
 /**
- * FiFo-/Report-Kandidaten aus dem Cache (Abflüsse + Was-wäre-wenn-UTXOs).
+ * FiFo-/Report-Kandidaten aus dem Cache (Abflüsse). Offene UTXOs
+ * stehen in der Haltefrist-Tabelle darunter.
  *
  * Technisch: GET /tax/selbstanzeige/kandidaten — reiner Cache-Read, kein Trace.
  * Wird beim Öffnen des Steuerjahrs und bei Tip-Nachzug/Jahr-Wechsel oft
@@ -2338,7 +2436,7 @@ async function ladeSelbstanzeigeKandidaten(opts = {}) {
     const p = new URLSearchParams(filter);
     p.set("seite", "1");
     p.set("limit", String(2 * pagerGroesse("sa_abfluesse")));
-    p.set("limit_utxos", String(2 * pagerGroesse("sa_utxos")));
+    p.set("limit_utxos", "0");
     p.set("lang", uiSprache());
     const daten = await api(`/tax/selbstanzeige/kandidaten${abfrage}&${p}`);
     if (lauf !== Zustand.saLadeLauf) return;
@@ -2347,21 +2445,21 @@ async function ladeSelbstanzeigeKandidaten(opts = {}) {
     Zustand.saDaten = daten;
     // Neu geladen = neue Liste: Häkchen wie bisher aus der Vorauswahl.
     const vorab = daten.ausgewaehlt || {};
+    const utxoHaken = [...(Zustand.saGewaehlt || [])].filter((id) =>
+      String(id).startsWith("utxo:"));
     Zustand.saGewaehlt = new Set([
       ...(vorab.abfluss || []).map((w) => `abfluss:${w}`),
+      ...utxoHaken,
       ...(vorab.utxo || []).map((w) => `utxo:${w}`),
     ]);
     Zustand.saKandidaten = daten.abfluesse_fenster?.items || [];
-    Zustand.saUtxos = daten.utxos_fenster?.items || [];
+    Zustand.saUtxos = [];
     Zustand.saVerlauf = daten.verlauf || null;
     Zustand.saStichtag = daten.stichtag_hypothese || "";
     zeichneSelbstanzeigeKandidaten();
     if (laut) {
       const n = Number(daten.abfluesse_fenster?.voll_count) || 0;
-      const u = Number(daten.utxos_fenster?.voll_count) || 0;
-      logZeile(
-        t("ui.hard.92999accba", { n, u }),
-      );
+      logZeile(t("ui.hard.92999accba", { n }));
     }
   } catch (fehler) {
     if (lauf !== Zustand.saLadeLauf) return;
@@ -2395,7 +2493,7 @@ async function ladeSaSeitenNeu() {
   p.set("seite", "1");
   p.set("teil", "zeilen");
   p.set("limit", String(2 * pagerGroesse("sa_abfluesse")));
-  p.set("limit_utxos", String(2 * pagerGroesse("sa_utxos")));
+  p.set("limit_utxos", "0");
   p.set("lang", uiSprache());
   const neu = await api(`/tax/selbstanzeige/kandidaten${daten._abfrage}&${p}`);
   if (lauf !== Zustand.saZeilenLauf || Zustand.saDaten !== daten) return;
@@ -2723,9 +2821,7 @@ function zeichneSelbstanzeigeKandidaten() {
 
   const daten = Zustand.saDaten || {};
   const abFenster = daten.abfluesse_fenster || { items: [], total: 0, voll_count: 0 };
-  const utFenster = daten.utxos_fenster || { items: [], total: 0, voll_count: 0 };
   const nAb = Number(abFenster.voll_count) || 0;
-  const nUt = Number(utFenster.voll_count) || 0;
   const verlauf = Zustand.saVerlauf;
 
   const ab = saAbschnitt(
@@ -2754,65 +2850,6 @@ function zeichneSelbstanzeigeKandidaten() {
   }
   liste.append(ab.details);
 
-  const stichtag = Zustand.saStichtag
-    ? t("ui.hard.11361714f6", { stichtag: Zustand.saStichtag })
-    : "";
-  // UTXOs aufklappen, wenn keine Abflüsse — sonst sieht man keine Checkboxen.
-  const ut = saAbschnitt(
-    t("tax.hard.bb993ba73a"),
-    nUt
-      ? `${nUt} UTXO(s)${stichtag}`
-      : `keine${stichtag}`,
-    {
-      offen: nUt > 0 && nAb === 0,
-      ausklappbar: nUt > 0,
-      leerText: nUt
-        ? ""
-        : t("ui.hard.3939cbbda7"),
-    },
-  );
-  if (nUt) {
-    const hinweis = document.createElement("p");
-    hinweis.className = "sa-leer";
-    hinweis.textContent =
-      "Checkbox ankreuzen → Report. Angekreuzte UTXOs werden fiktiv zum Stichtag " +
-      t("ui.hard.c5ddd7fafe");
-    ut.innen.append(hinweis);
-
-    const werkzeug = document.createElement("div");
-    werkzeug.className = "sa-werkzeug";
-    const alle = document.createElement("button");
-    alle.type = "button";
-    alle.className = "knopf knopf-klein";
-    alle.textContent = t("ui.hard.b0ca3442c8");
-    alle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      saUtxosAlleKeine(true).catch(() => {});
-    });
-    const keine = document.createElement("button");
-    keine.type = "button";
-    keine.className = "knopf knopf-klein";
-    keine.textContent = "Keine";
-    keine.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      saUtxosAlleKeine(false).catch(() => {});
-    });
-    werkzeug.append(alle, keine);
-    ut.innen.append(werkzeug);
-    zeichneSaSeiten({
-      abschnitt: ut.details,
-      innen: ut.innen,
-      teil: "utxos",
-      fenster: utFenster,
-      zeichneZeile: zeichneSaUtxoZeile,
-      ansicht: "sa_utxos",
-      hostKlasse: "sa-utxo-host",
-    });
-  }
-  liste.append(ut.details);
-
   if (verlauf) {
     const teile = [];
     if (verlauf.vorhanden) teile.push("Verlaufsdaten vorhanden");
@@ -2828,9 +2865,7 @@ function zeichneSelbstanzeigeKandidaten() {
     }
     const vl = saAbschnitt(t("tax.hard.c8a4f137db"), teile.join(" · "), {
       ausklappbar: false,
-      leerText:
-        "Nur Orientierung: Abflüsse oben brauchen Verlauf; " +
-        "UTXOs kommen aus dem Bestand.",
+      leerText: t("tax.historyHint"),
     });
     liste.append(vl.details);
   }

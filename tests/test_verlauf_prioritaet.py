@@ -34,6 +34,29 @@ class TestVerlaufPrioritaet(unittest.TestCase):
         )
         self._log.start()
         self.addCleanup(self._log.stop)
+        # Prozessweiten Stand der öffentlichen Electrum-Suche isolieren:
+        # andere Tests setzen Stopp-/Prozessende-Events oder die Sitzungs-Art.
+        from core import outbound_policy as op
+
+        vorher = (
+            op._SESSION_OEFFENTLICHE_ELECTRUM,
+            op._SESSION_OEFFENTLICHE_ELECTRUM_ART,
+            op._OEFFENTLICHE_ELECTRUM_STOP.is_set(),
+            op._OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set(),
+        )
+        op._SESSION_OEFFENTLICHE_ELECTRUM = False
+        op._SESSION_OEFFENTLICHE_ELECTRUM_ART = None
+        op._OEFFENTLICHE_ELECTRUM_STOP.clear()
+        op._OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.clear()
+
+        def _zurueck():
+            (op._SESSION_OEFFENTLICHE_ELECTRUM,
+             op._SESSION_OEFFENTLICHE_ELECTRUM_ART, stop, ende) = vorher
+            for ev, an in ((op._OEFFENTLICHE_ELECTRUM_STOP, stop),
+                           (op._OEFFENTLICHE_ELECTRUM_PROZESS_ENDE, ende)):
+                ev.set() if an else ev.clear()
+
+        self.addCleanup(_zurueck)
 
     def test_lan_electrs_gewinnt_ohne_bip158_oder_public(self):
         client = object()
@@ -171,6 +194,10 @@ class TestVerlaufPrioritaet(unittest.TestCase):
             )
         bip.assert_not_called()
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_setup_verlauf_explizit_bip158(self):
         backend = {"client": MagicMock()}
         with patch.object(
@@ -200,6 +227,33 @@ class TestVerlaufPrioritaet(unittest.TestCase):
         )
         self.assertIn("fetch_wallet_history", fetchers)
         self.assertTrue(callable(fetchers["fetch_wallet_history"]))
+
+
+class TestIndexerWarteNachPapierkorb(unittest.TestCase):
+    def test_geloeschte_adresse_beendet_die_warte(self):
+        args = SimpleNamespace(
+            fulcrum_host=None,
+            rpchost=None,
+            fulcrum_port=None,
+            fulcrum_no_ssl=False,
+        )
+        env = {
+            "FULCRUM_HOST": "192.0.2.9",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "false",
+        }
+        ladungen = iter([dict(env), {"NETWORK": "main"}])
+        with patch.object(
+            chain_sources, "_try_own_fulcrum_client", return_value=None,
+        ) as versuch, patch(
+            "core.env_bootstrap._load_dotenv",
+            side_effect=lambda *a, **k: next(ladungen),
+        ), patch(
+            "core.env_scramble.is_env_scrambled", return_value=False,
+        ), patch("time.sleep") as schlaf:
+            self.assertIsNone(chain_sources._warte_auf_eigenen_indexer(args, env))
+        self.assertEqual(versuch.call_count, 1)
+        schlaf.assert_not_called()
 
 
 if __name__ == "__main__":

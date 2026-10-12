@@ -17,7 +17,12 @@ UTC = timezone.utc
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-SANCTIONED_CACHE_DIR = Path(__file__).resolve().parent / "sanctioned_cache"
+from core.paths import app_dir
+
+# Beschreibbar: im PyInstaller-Binary neben der Executable (app_dir), nicht im
+# Entpack-Ordner _MEIPASS, der beim Beenden verschwindet. Im Quellbetrieb
+# ist app_dir() der Projektroot — derselbe Ort wie bisher.
+SANCTIONED_CACHE_DIR = app_dir() / "sanctioned_cache"
 SANCTIONED_JSON_NAME = "sanctioned_addresses_XBT.json"
 SANCTIONED_TXT_NAME = "sanctioned_addresses_XBT.txt"
 SANCTIONED_META_NAME = "sanctioned_addresses_XBT.meta.json"

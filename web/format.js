@@ -369,6 +369,13 @@ function formatZeitstrahlBetrag(sats) {
   return `${btcText} btc`;
 }
 
+/** Zeitstrahl-Betrag plus Spot-Fiat der Kopfzeile, falls ein Kurs da ist. */
+function formatZeitstrahlBetragMitFiat(sats) {
+  const basis = formatZeitstrahlBetrag(sats);
+  const fiat = formatEurAusSats(sats);
+  return fiat ? `${basis} (≈ ${fiat})` : basis;
+}
+
 /** @deprecated Alias — Punkt/Achse nutzen formatZeitstrahlBetrag. */
 function formatBtcDrei(sats) {
   return formatZeitstrahlBetrag(sats);
@@ -699,11 +706,15 @@ function formatKurzdatum(wert) {
 
 function formatHaltedauer(tage) {
   if (tage === null || tage === undefined) return "—";
-  if (tage < 31) return `${tage} T`;
+  if (tage < 31) return t("format.durDays", { n: tage });
   const jahre = Math.floor(tage / 365);
   const monate = Math.floor((tage % 365) / 30);
-  if (jahre > 0) return monate > 0 ? `${jahre} J ${monate} M` : `${jahre} J`;
-  return `${monate} M`;
+  if (jahre > 0) {
+    return monate > 0
+      ? t("format.durYearsMonths", { j: jahre, m: monate })
+      : t("format.durYears", { j: jahre });
+  }
+  return t("format.durMonths", { m: monate });
 }
 
 function kuerze(text, vorne = 10, hinten = 6) {
@@ -803,6 +814,7 @@ const T_FALLBACK = {
   "header.sourceElectrumImpl": "{name}",
   "header.sourceElectrumImplTitle": "Eigener Electrum-Indexer: {name} ({raw}). {detail}",
   "header.sourceElectrumPublic": "Electrum öffentlich",
+  "header.sourceElectrumPublicN": "Electrum öffentlich {n}",
   "privacy.pillHigh": "Privatsphäre hoch",
   "privacy.pillMedium": "Privatsphäre mittel",
   "privacy.pillNone": "keine Privatsphäre",
@@ -949,6 +961,17 @@ function utxoAlterGeklaert(utxo) {
 }
 
 /**
+ * True, wenn „Alter klären“ für dieses UTXO überflüssig ist: der Trace
+ * läuft schon (Dotplot-Sprung oder laufender Job).
+ */
+function alterKlaerenVerborgen(key) {
+  if (!key || typeof Zustand === "undefined") return false;
+  if (Zustand.traceKlaerenUeberSprung === key) return true;
+  if (Zustand.traceJobs && Zustand.traceJobs.has(key)) return true;
+  return false;
+}
+
+/**
  * Fehlt das grüne Label, steht hier der Knopf, der den Trace dafür startet.
  * Unvollständig: vorhandenen Baum fortsetzen. Sonst neu bis außen.
  */
@@ -956,6 +979,7 @@ function alterKlaerenKnopf(utxo) {
   if (!utxo || !utxo.key || utxoAlterGeklaert(utxo)) return null;
   // Unvollständig hat schon „vervollständigen“ — kein zweiter Start-Knopf.
   if (utxo.verfolgt && utxoHerkunftUnvollstaendig(utxo)) return null;
+  if (alterKlaerenVerborgen(utxo.key)) return null;
   const knopf = document.createElement("button");
   knopf.type = "button";
   knopf.className = "trace-link alter-klaeren";
@@ -1302,6 +1326,16 @@ function traceKnopfZeile(anker) {
     : null;
 }
 
+/** txid:vout der Zeile — am Element, sonst an der UTXO-Wurzel. */
+function traceZeileKey(zeile) {
+  if (!zeile) return "";
+  if (zeile.dataset && zeile.dataset.key) return zeile.dataset.key;
+  const wurzel = zeile.closest && zeile.closest(".utxo-wurzel");
+  if (wurzel && wurzel.dataset && wurzel.dataset.key) return wurzel.dataset.key;
+  const innen = zeile.querySelector && zeile.querySelector("[data-key]");
+  return (innen && innen.dataset && innen.dataset.key) || "";
+}
+
 /** „Scan neu“ in derselben Zeile — nicht „Alter klären“ oder „vervollständigen“. */
 function scanNeuKnopfIn(zeile) {
   if (!zeile) return null;
@@ -1314,16 +1348,17 @@ function scanNeuKnopfIn(zeile) {
 }
 
 /**
- * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht
- * oder das Alter noch nicht geklärt ist. Ist die rote Marke weg und das
- * grüne „jüngste sats“ da, kommt der Knopf wieder.
+ * „Scan neu“ ausblenden, solange in derselben Zeile „vervollständigen“ steht,
+ * das Alter noch nicht geklärt ist oder der Trace schon läuft (Dotplot-Sprung).
+ * Ist die rote Marke weg und das grüne „jüngste sats“ da, kommt der Knopf wieder.
  */
 function blendeScanNeuNebenVervollstaendigen(anker) {
   const zeile = traceKnopfZeile(anker);
   const scan = scanNeuKnopfIn(zeile);
   if (!scan) return;
   const alterOffen = Boolean(zeile.querySelector(".alter-klaeren"));
-  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen")) || alterOffen;
+  const laeuft = alterKlaerenVerborgen(traceZeileKey(zeile));
+  const zeigt = Boolean(zeile.querySelector(".vervollstaendigen")) || alterOffen || laeuft;
   scan.hidden = zeigt;
 }
 
@@ -1337,13 +1372,11 @@ function blendeAlterKlaerenUndScan(anker) {
   const oben = zeile.classList.contains("utxo-zeile")
     ? zeile
     : (zeile.querySelector(".knoten-oben") || zeile);
+  const key = traceZeileKey(zeile);
   const geklaert = Boolean(oben.querySelector(".juengste-sats-marke"));
-  if (geklaert) {
+  if (geklaert || alterKlaerenVerborgen(key)) {
     for (const knopf of oben.querySelectorAll(".alter-klaeren")) knopf.remove();
   } else if (!oben.querySelector(".alter-klaeren, .vervollstaendigen")) {
-    const key = zeile.dataset.key
-      || zeile.querySelector("[data-key]")?.dataset.key
-      || "";
     const klaeren = key ? alterKlaerenKnopf({ key }) : null;
     if (klaeren) {
       const juengstePlatz = oben.querySelector(
@@ -1788,6 +1821,9 @@ const EmpfangPuls = (() => {
   let sonderQueue = [];
   let sonder = null; // { typ, t0, phase?, walletId? }
   const BTC_ORANGE = { r: 247, g: 147, b: 26 };
+  // 80er-Neon: Innenkante der Maske, Farbe wechselt mit jedem Atemzug.
+  const NEON_MAGENTA = { r: 255, g: 0, b: 255 };
+  const NEON_CYAN = { r: 0, g: 245, b: 255 };
 
   function wuerfleWortAtemRest() {
     return 2 + Math.floor(Math.random() * 3); // 2, 3 oder 4
@@ -2227,6 +2263,52 @@ const EmpfangPuls = (() => {
     ctx.restore();
   }
 
+  function neonFarbeFuerZyklus() {
+    return (maskeIx % 2 === 0) ? NEON_MAGENTA : NEON_CYAN;
+  }
+
+  /**
+   * Neon auf der Innenseite der Maskengrenze (Löcher und Innenkante).
+   * Außenpixel und Canvas-Rand bleiben dunkel. Kern = 255, Bloom fällt nach innen ab.
+   */
+  function neonInnenGlowKarte(innen, seite) {
+    const kern = new Uint8Array(seite * seite);
+    for (let y = 1, p = seite; y < seite - 1; y++) {
+      p = y * seite;
+      for (let x = 0; x < seite; x++, p++) {
+        if (!innen[p] || x === 0 || x === seite - 1) continue;
+        if (
+          !innen[p - 1] || !innen[p + 1]
+          || !innen[p - seite] || !innen[p + seite]
+        ) {
+          kern[p] = 1;
+        }
+      }
+    }
+    const glow = new Uint8Array(seite * seite);
+    const splat = [
+      [0, 0, 255],
+      [-1, 0, 150], [1, 0, 150], [0, -1, 150], [0, 1, 150],
+      [-1, -1, 95], [-1, 1, 95], [1, -1, 95], [1, 1, 95],
+      [-2, 0, 55], [2, 0, 55], [0, -2, 55], [0, 2, 55],
+    ];
+    for (let y = 0, p = 0; y < seite; y++) {
+      for (let x = 0; x < seite; x++, p++) {
+        if (!kern[p]) continue;
+        for (let s = 0; s < splat.length; s++) {
+          const nx = x + splat[s][0];
+          const ny = y + splat[s][1];
+          if (nx < 0 || ny < 0 || nx >= seite || ny >= seite) continue;
+          const np = ny * seite + nx;
+          if (!innen[np]) continue;
+          const v = splat[s][2];
+          if (v > glow[np]) glow[np] = v;
+        }
+      }
+    }
+    return glow;
+  }
+
   async function zeichneGlyphAtem(
     sichtQr,
     { art, orange = false, nurSchwarz = false, bScale } = {},
@@ -2236,7 +2318,6 @@ const EmpfangPuls = (() => {
     const seite = c.width;
     const dark = (typeof liesUiTheme === "function" ? liesUiTheme() : "dark") !== "light";
     const bg = dark ? 0 : 255;
-    const glow = dark ? 255 : 0;
     const aScale = Math.max(0, Math.min(1, sichtQr));
     // Herzschlag: Maske 10 %↔100 % mitskalieren (parallel zum Fade).
     const herzScale = 0.1 + 0.9 * aScale;
@@ -2289,7 +2370,7 @@ const EmpfangPuls = (() => {
     const od = out.data;
     const qd = qr ? qr.data : null;
     const innen = new Uint8Array(seite * seite);
-    // Innen-Karte in Canvas-Koordinaten (skalierte Maske → Glow-Rand).
+    // Innen-Karte in Canvas-Koordinaten (skalierte Maske → Neon-Innenkante).
     if (luma && !orange) {
       const inv = maskSeite > 0 ? lumaSeite / maskSeite : 1;
       for (let y = 0, p = 0; y < seite; y++) {
@@ -2302,6 +2383,8 @@ const EmpfangPuls = (() => {
         }
       }
     }
+    const neon = orange ? null : neonFarbeFuerZyklus();
+    const neonGlow = neon ? neonInnenGlowKarte(innen, seite) : null;
 
     for (let y = 0, p = 0; y < seite; y++) {
       for (let x = 0; x < seite; x++, p++) {
@@ -2339,22 +2422,17 @@ const EmpfangPuls = (() => {
             r = g = b = Math.round(qg * a + bg * (1 - a));
           }
         }
-        if (innen[p] && !orange) {
-          let rand = false;
-          if (x === 0 || y === 0 || x === seite - 1 || y === seite - 1) {
-            rand = true;
-          } else if (
-            !innen[p - 1] || !innen[p + 1]
-            || !innen[p - seite] || !innen[p + seite]
-          ) {
-            rand = true;
-          }
-          if (rand && aScale > 0.01) {
-            const glowA = aScale;
-            r = Math.round(glow * glowA + r * (1 - glowA));
-            g = Math.round(glow * glowA + g * (1 - glowA));
-            b = Math.round(glow * glowA + b * (1 - glowA));
-          }
+        const nv = neonGlow ? neonGlow[p] : 0;
+        if (nv && aScale > 0.01) {
+          const inf = nv / 255;
+          const glowA = inf * aScale;
+          const hot = inf > 0.85;
+          const nr = hot ? 255 : neon.r;
+          const ng = hot ? (neon.g > 128 ? 255 : 210) : neon.g;
+          const nb = hot ? 255 : neon.b;
+          r = Math.round(nr * glowA + r * (1 - glowA));
+          g = Math.round(ng * glowA + g * (1 - glowA));
+          b = Math.round(nb * glowA + b * (1 - glowA));
         }
         od[i] = r;
         od[i + 1] = g;
@@ -2404,7 +2482,7 @@ const EmpfangPuls = (() => {
   /**
    * Kalibrierte Defaults (animdebug-Regler / Lab):
    * Impuls 500, Streu 80 %, Grav 5, Luft 2, Winkel 30–80°, Dauer 3 s,
-   * Gold ab 1 Mio, +25 Staub je Schuss.
+   * Gold ab 1 Mio, +75 Staub je Schuss.
    */
   const KONFETTI_DEFAULTS = {
     goldAb: 1_000_000,
@@ -2415,7 +2493,7 @@ const EmpfangPuls = (() => {
     winkelMin: 30,
     winkelMax: 80,
     dauer: 3000,
-    staubExtra: 25,
+    staubExtra: 75,
   };
 
   function konfettiParamsAusSats(sats, overrides) {
@@ -3410,6 +3488,10 @@ async function leseSourceCheckStream(antwort) {
   let peers = null;
   let peer_status = null;
   let rpc_allowlist = null;
+  let oeffentliche_electrum;
+  let oeffentliche_electrum_session;
+  let oeffentliche_electrum_art;
+  let artGesetzt = false;
   let fehler = "";
 
   const nimm = (obj) => {
@@ -3418,6 +3500,16 @@ async function leseSourceCheckStream(antwort) {
     if (obj.peers != null) peers = obj.peers;
     if (obj.peer_status) peer_status = obj.peer_status;
     if (obj.rpc_allowlist) rpc_allowlist = obj.rpc_allowlist;
+    if (obj.oeffentliche_electrum != null) {
+      oeffentliche_electrum = obj.oeffentliche_electrum;
+    }
+    if (obj.oeffentliche_electrum_session != null) {
+      oeffentliche_electrum_session = obj.oeffentliche_electrum_session;
+    }
+    if ("oeffentliche_electrum_art" in obj) {
+      oeffentliche_electrum_art = obj.oeffentliche_electrum_art;
+      artGesetzt = true;
+    }
     if (obj.error) fehler = obj.error;
   };
 
@@ -3434,7 +3526,15 @@ async function leseSourceCheckStream(antwort) {
   }
   if (puffer.trim()) nimm(JSON.parse(puffer));
   if (fehler && !sources) throw new ApiFehler(500, fehler);
-  return { sources: sources || [], peers, peer_status, rpc_allowlist };
+  return {
+    sources: sources || [],
+    peers,
+    peer_status,
+    rpc_allowlist,
+    oeffentliche_electrum,
+    oeffentliche_electrum_session,
+    ...(artGesetzt ? { oeffentliche_electrum_art } : {}),
+  };
 }
 
 async function apiSourceCheck(optionen = {}) {

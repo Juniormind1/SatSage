@@ -1,0 +1,21 @@
+{% extends "satsage/base.jinja" %}
+
+{% block satsage_content %}
+<section>
+    <h2>Einstellungen</h2>
+    <form action="{{ url_for(service.get_blueprint_name() + '.settings_post') }}" method="POST">
+        <input type="hidden" class="csrf-token" name="csrf_token" value="{{ csrf_token() }}"/>
+        <p>
+            <label for="show_menu">Menüeintrag anzeigen</label>
+        </p>
+        <p style="opacity:0.8; margin-top:0;">Blendet SatSage in der Seitenleiste ein.</p>
+        <select name="show_menu" id="show_menu">
+            <option value="yes" {% if show_menu == 'yes' %}selected{% endif %}>Ja</option>
+            <option value="no" {% if show_menu != 'yes' %}selected{% endif %}>Nein</option>
+        </select>
+        <p style="margin-top:1rem;">
+            <button type="submit" class="btn action">Speichern</button>
+        </p>
+    </form>
+</section>
+{% endblock %}

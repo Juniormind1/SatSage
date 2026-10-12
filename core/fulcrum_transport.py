@@ -3,6 +3,48 @@ from __future__ import annotations
 
 import socket
 import struct
+import threading
+
+
+_offene_sockets: set[socket.socket] = set()
+_offene_sockets_lock = threading.Lock()
+
+
+def merke_kette_socket(sock: socket.socket) -> None:
+    """Taste 3 kann den Socket von einem anderen Thread schließen."""
+    with _offene_sockets_lock:
+        _offene_sockets.add(sock)
+
+
+def vergiss_kette_socket(sock: socket.socket | None) -> None:
+    if sock is None:
+        return
+    with _offene_sockets_lock:
+        _offene_sockets.discard(sock)
+
+
+def schliesse_offene_fulcrum_sockets() -> int:
+    """
+    Bricht hängende Connect/SOCKS/TLS ab.
+
+    Unter Python 3.14 sind ThreadPool-Worker keine Daemons; ohne schließende
+    Sockets joint der Interpreter sie bis zum Onion-Timeout (bis 180 s).
+    """
+    with _offene_sockets_lock:
+        socks = list(_offene_sockets)
+        _offene_sockets.clear()
+    n = 0
+    for sock in socks:
+        n += 1
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            sock.close()
+        except OSError:
+            pass
+    return n
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -25,6 +67,7 @@ def _socks5_connect(
     timeout: int,
 ) -> socket.socket:
     sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
+    merke_kette_socket(sock)
     try:
         sock.sendall(b"\x05\x01\x00")
         greeting = sock.recv(2)
@@ -55,6 +98,7 @@ def _socks5_connect(
 
         return sock
     except Exception:
+        vergiss_kette_socket(sock)
         sock.close()
         raise
 

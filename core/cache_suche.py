@@ -4,7 +4,8 @@ Gesamten UTXO- und Verlaufs-Cache durchsuchen.
 Dieselbe Grammatik wie der Kopf-Filter (``listen_fenster.parse_filter`` /
 ``Fenster.blatt_ok``): Freitext, Betrag, Datum. Der Suchraum ist der Cache
 aller Wallets, Bestand und bereits ausgegeben — nicht die gezeichnete Seite
-und nicht ein noch nicht gebauter Herkunftsbaum.
+und nicht ein noch nicht gebauter Herkunftsbaum. Ausgabe-TxIDs
+(``spent_txid``, z. B. Börsen-Einzahlung) treffen die Verlaufszeilen.
 """
 from __future__ import annotations
 

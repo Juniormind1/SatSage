@@ -1,4 +1,4 @@
-"""Fortschritt langer Jobs: Phasen sofort, Zwischenstand spätestens alle 10s."""
+"""Fortschritt langer Jobs: Phasen sofort, Zwischenstand spätestens nach INTERVALL."""
 import threading
 import time
 import unittest
@@ -14,6 +14,7 @@ from display import (
     Bip158ProgressLine,
     format_block_height_with_date,
     melde_zwischenstand,
+    schaetze_zeit_aus_ankern,
 )
 
 
@@ -31,14 +32,15 @@ class TestFortschritt(unittest.TestCase):
         self.assertEqual(self.job.message, "Verbinde…")
         self.assertEqual(self.job.as_dict()["log"], ["Verbinde…"])
 
-    def test_tick_innerhalb_von_zehn_sekunden_nicht_ins_log(self):
+    def test_tick_innerhalb_des_intervalls_nicht_ins_log(self):
         self.stand.phase("Verbinde…")
         self.stand.tick("Gap-Scan Index #3…")
         self.assertEqual(self.job.message, "Gap-Scan Index #3…")
         self.assertEqual(self.job.as_dict()["log"], ["Verbinde…"])
 
-    def test_tick_nach_zehn_sekunden_schreibt_eine_zeile(self):
+    def test_tick_nach_intervall_schreibt_eine_zeile(self):
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -48,7 +50,7 @@ class TestFortschritt(unittest.TestCase):
             jobs_mod._reset_herzschlag_stand_fuer_tests(start)
             stand = Fortschritt(self.job)
             stand.phase("Verbinde…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick("Gap-Scan Index #40…")
             stand.close()
         self.assertEqual(
@@ -59,6 +61,7 @@ class TestFortschritt(unittest.TestCase):
     def test_herzschlag_bei_gleichem_stand_schreibt_moment_noch(self):
         """Dieselbe Arbeitszeile nicht nochmal — nur ein Lebenszeichen."""
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -68,9 +71,9 @@ class TestFortschritt(unittest.TestCase):
             jobs_mod._reset_herzschlag_stand_fuer_tests(start)
             stand = Fortschritt(self.job)
             stand.phase("Prüfe Adresse 101 von 101…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick()
-            _jetzt.wert = start + 20.0
+            _jetzt.wert = start + 2 * iv
             stand.tick()
             stand.close()
         self.assertEqual(
@@ -80,8 +83,9 @@ class TestFortschritt(unittest.TestCase):
         self.assertEqual(self.job.message, "Prüfe Adresse 101 von 101…")
 
     def test_phase_setzt_herzschlag_zurueck(self):
-        """Filter-Treffer (phase) zählt als Meldung — kein „Moment noch“ nach 10s ab Start."""
+        """Filter-Treffer (phase) zählt als Meldung — kein „Moment noch“ nach INTERVALL ab Start."""
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -93,7 +97,7 @@ class TestFortschritt(unittest.TestCase):
             stand.phase("Filter 0/481.375 (0,0 %)")
             _jetzt.wert = start + 6.0
             stand.phase("Filter-Treffer Block 850.123 — hole Block…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick()
             stand.close()
         log = self.job.as_dict()["log"]
@@ -105,10 +109,11 @@ class TestFortschritt(unittest.TestCase):
 
     def test_herzschlag_wartet_nach_jeder_log_zeile(self):
         """
-        „Moment noch“ erst 10s nach der letzten Log-Meldung — auch wenn die
+        „Moment noch“ erst INTERVALL nach der letzten Log-Meldung — auch wenn die
         Zeile nicht über phase/tick kam (direkter Job-Log).
         """
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -118,13 +123,13 @@ class TestFortschritt(unittest.TestCase):
             jobs_mod._reset_herzschlag_stand_fuer_tests(start)
             stand = Fortschritt(self.job)
             stand.phase("Start…")
-            _jetzt.wert = start + 9.0
+            _jetzt.wert = start + iv - 1.0
             # Frische Log-Zeile außerhalb von Fortschritt — setzt Stille zurück.
             self.job.progress("Zwischenergebnis…", log=True)
-            _jetzt.wert = start + 12.0  # nur 3s nach der Log-Zeile
+            _jetzt.wert = start + iv + 2.0  # nur 3s nach der Log-Zeile
             stand.tick()
             self.assertNotIn("Moment noch", self.job.as_dict()["log"])
-            _jetzt.wert = start + 19.0  # 10s nach Zwischenergebnis
+            _jetzt.wert = start + 2 * iv - 1.0  # INTERVALL nach Zwischenergebnis
             stand.tick()
             stand.close()
         self.assertEqual(
@@ -138,6 +143,7 @@ class TestFortschritt(unittest.TestCase):
         nennt keinen Job, also kein Spam pro Job.
         """
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -151,7 +157,7 @@ class TestFortschritt(unittest.TestCase):
             sb = Fortschritt(job_b)
             sa.phase("A arbeitet…")
             sb.phase("B arbeitet…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             sa.tick()
             sb.tick()
             sa.close()
@@ -165,6 +171,7 @@ class TestFortschritt(unittest.TestCase):
     def test_herzschlag_durch_anderen_job_unterdrueckt(self):
         """Ausgabe von Job B verhindert Herzschlag von Job A."""
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -177,9 +184,9 @@ class TestFortschritt(unittest.TestCase):
             sa = Fortschritt(job_a)
             sb = Fortschritt(job_b)
             sa.phase("A start…")
-            _jetzt.wert = start + 9.0
+            _jetzt.wert = start + iv - 1.0
             sb.phase("B meldet…")  # globale Stille zurück
-            _jetzt.wert = start + 12.0  # nur 3s nach B
+            _jetzt.wert = start + iv + 2.0  # nur 3s nach B
             sa.tick()
             sa.close()
             sb.close()
@@ -218,6 +225,7 @@ class TestFortschritt(unittest.TestCase):
 
     def test_neuer_stand_nach_intervall_steht_ausgeschrieben(self):
         start = 1000.0
+        iv = Fortschritt.INTERVALL
 
         def _jetzt():
             return _jetzt.wert
@@ -226,7 +234,7 @@ class TestFortschritt(unittest.TestCase):
         with patch("core.jobs.time.monotonic", side_effect=_jetzt):
             stand = Fortschritt(self.job)
             stand.phase("Prüfe Adresse 94 von 101…")
-            _jetzt.wert = start + 10.0
+            _jetzt.wert = start + iv
             stand.tick("Prüfe Adresse 101 von 101…")
             stand.close()
         self.assertEqual(
@@ -245,6 +253,35 @@ class TestBip158ImJobLog(unittest.TestCase):
     def test_melde_zwischenstand_schreibt_ins_log(self):
         melde_zwischenstand("BIP-158-Scan …")
         self.assertIn("BIP-158-Scan …", self.job.as_dict()["log"])
+
+    def test_filter_treffer_verdraengt_die_prozentzeile_nicht(self):
+        from core.bip158_scan import BIP158Scanner
+
+        melde_zwischenstand(
+            "Filter Block 929.000–930.000 · 12.000/481.375 (2,5 %)",
+            log=False,
+        )
+        BIP158Scanner._log(
+            object(),
+            "Filter-Treffer Block 929.002 — hole Block…",
+        )
+        BIP158Scanner._log(
+            object(),
+            "Filter-Treffer Block 929.002 — False Positive",
+            ersetze_praefix="Filter-Treffer Block 929.002",
+        )
+        self.assertEqual(
+            self.job.message,
+            "Filter Block 929.000–930.000 · 12.000/481.375 (2,5 %)",
+        )
+        log = self.job.as_dict()["log"]
+        self.assertIn(
+            "Filter-Treffer Block 929.002 — False Positive",
+            log,
+        )
+        self.assertFalse(
+            any("hole Block" in z for z in log),
+        )
 
     def test_filter_treffer_aus_worker_thread_landet_im_log(self):
         """ContextVar gilt nicht in Filter-Peers — Fallback muss greifen."""
@@ -271,7 +308,11 @@ class TestBip158ImJobLog(unittest.TestCase):
     def test_progress_line_landet_im_log(self):
         """Dieselben Scan-Zeilen wie auf stdout sollen im Web-Log stehen."""
         with patch.object(Bip158ProgressLine, "_tty", False, create=True):
-            line = Bip158ProgressLine(verbose=True)
+            # Seit 8153b36: Datum nur mit Anker (Header-nTime oder Tip);
+            # ohne Anker zeigt die Zeile bewusst nur die Höhe.
+            line = Bip158ProgressLine(
+                verbose=True, tip_height=852_100, tip_time=1_720_000_000,
+            )
             line._tty = False
             line.update(850_000, "aa" * 32 + ":0")
             line.update(850_100, "aa" * 32 + ":0")  # unter 2000 Blöcken → nur tick
@@ -282,19 +323,93 @@ class TestBip158ImJobLog(unittest.TestCase):
         self.assertTrue(any("≈" in z for z in log), log)
         self.assertEqual(self.job.message.count("Scanne UTXO"), 1)
 
-    def test_blockhoehe_traegt_geschaetztes_datum(self):
-        text = format_block_height_with_date(850_000)
-        self.assertIn("850,000", text)
-        self.assertRegex(text, r"≈ \d{2}\.\d{2}\.\d{4}")
+    def test_blockhoehe_ohne_anker_ohne_datum(self):
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand", return_value=None,
+        ):
+            text = format_block_height_with_date(850_000)
+        self.assertEqual(text, "Block 850,000")
 
     def test_blockdatum_vom_tip_ist_treffsicherer(self):
-        """Rückwärts vom Tip: 850 000 ≈ Juni 2024, nicht die Genesis-Schätzung."""
+        """Rückwärts vom Tip: 850 000 ≈ Juni 2024."""
         from datetime import datetime, timezone
         tip_ts = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
-        text = format_block_height_with_date(
-            850_000, tip_height=963_080, tip_time=tip_ts,
-        )
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand", return_value=None,
+        ):
+            text = format_block_height_with_date(
+                850_000, tip_height=963_080, tip_time=tip_ts,
+            )
         self.assertIn("≈ 23.06.2024", text)
+
+    def test_blockdatum_zehn_minuten_vom_letzten_header(self):
+        from datetime import datetime, timezone
+        bekannt_ts = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand",
+            return_value=(963_080, bekannt_ts),
+        ):
+            text = format_block_height_with_date(850_000)
+        self.assertIn("≈ 23.06.2024", text)
+
+    def test_blockdatum_mini_tip_luecke_bleibt_zehn_minuten(self):
+        """Ein Block Vorsprung plus Wanduhr ist keine Blockdauer."""
+        from datetime import datetime, timezone
+        bekannt_ts = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(
+            schaetze_zeit_aus_ankern(
+                850_000,
+                bekannt_hoehe=963_080,
+                bekannt_zeit=bekannt_ts,
+                tip_hoehe=963_081,
+                tip_zeit=bekannt_ts + 60,
+            ),
+            bekannt_ts + (850_000 - 963_080) * 600,
+        )
+
+    def test_blockdatum_interpoliert_header_zu_tip(self):
+        from datetime import datetime, timezone
+        bekannt_ts = int(datetime(2024, 6, 23, tzinfo=timezone.utc).timestamp())
+        tip_ts = int(datetime(2026, 10, 12, tzinfo=timezone.utc).timestamp())
+        stempel = schaetze_zeit_aus_ankern(
+            910_000,
+            bekannt_hoehe=850_000,
+            bekannt_zeit=bekannt_ts,
+            tip_hoehe=970_000,
+            tip_zeit=tip_ts,
+        )
+        datum = datetime.fromtimestamp(stempel, tz=timezone.utc).strftime("%d.%m.%Y")
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand",
+            return_value=(850_000, bekannt_ts),
+        ):
+            text = format_block_height_with_date(
+                910_000, tip_height=970_000, tip_time=tip_ts,
+            )
+        self.assertIn(f"≈ {datum}", text)
+
+    def test_blockdatum_tip_ohne_zeit_nimmt_jetzt(self):
+        from datetime import datetime, timezone
+        jetzt = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand", return_value=None,
+        ):
+            text = format_block_height_with_date(
+                850_000, tip_height=963_080, jetzt=jetzt,
+            )
+        self.assertIn("≈ 23.06.2024", text)
+
+    def test_blockdatum_nimmt_header_ntime(self):
+        """Echte Header-Zeit schlägt Tip-Schätzung."""
+        from datetime import datetime, timezone
+        ts = int(datetime(2025, 8, 15, 12, 0, tzinfo=timezone.utc).timestamp())
+        tip_ts = int(datetime(2026, 10, 12, tzinfo=timezone.utc).timestamp())
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=ts):
+            text = format_block_height_with_date(
+                908_145, tip_height=970_000, tip_time=tip_ts,
+            )
+        self.assertIn("908,145", text)
+        self.assertIn("≈ 15.08.2025", text)
 
 
 class TestDatenquelleImJobLog(unittest.TestCase):
@@ -893,6 +1008,42 @@ class TestJobRegistry(unittest.TestCase):
     def setUp(self):
         jobs_mod._reset_herzschlag_stand_fuer_tests()
         jobs_mod._reset_electrum_gate_fuer_tests()
+
+    def test_api_error_text_landet_in_message(self):
+        """Erwarteter ApiError: Meldung statt nur „Fehlgeschlagen.“."""
+        from server import ApiError
+
+        registry = JobRegistry()
+
+        def ohne_listen(_job):
+            raise ApiError(
+                409, "Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren.",
+            )
+
+        job = registry.start("sanctions-check", "HS Alpha", ohne_listen)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.status, "failed")
+        self.assertEqual(
+            job.message, "Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren.",
+        )
+        self.assertEqual(job.error, job.message)
+
+    def test_unerwarteter_fehler_bleibt_fehlgeschlagen(self):
+        registry = JobRegistry()
+
+        def kaputt(_job):
+            raise ValueError("intern")
+
+        job = registry.start("sanctions-check", "HS Alpha", kaputt)
+        for _ in range(80):
+            if job.status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.message, "Fehlgeschlagen.")
+        self.assertEqual(job.error, "ValueError: intern")
 
     def test_systemexit_beendet_den_job(self):
         """Sonst bleibt der UTXO-Scan auf running, letzte Zeile klebt."""

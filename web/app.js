@@ -150,6 +150,55 @@ async function pruefeSkripttyp(wallet, ausgabe, knopf) {
   }
 }
 
+/** Eigener Electrum-Server oder schon verbundene öffentliche Peers. */
+function electrumStehtFuerSpur() {
+  const quellen = (Zustand.config && Zustand.config.sources) || [];
+  for (const q of quellen) {
+    if (!q) continue;
+    if (q.key === "own_fulcrum" && q.reachable === true) return true;
+    if (
+      (q.key === "public_onion" || q.key === "clearnet")
+      && Number(q.peer_count || 0) > 0
+    ) {
+      return true;
+    }
+  }
+  const watch = Zustand.config && Zustand.config.wallet_watch;
+  return Boolean(watch && watch.host);
+}
+
+function zeigeElectrumSpurDialog() {
+  const dlg = $("#electrum-spur-dialog");
+  if (!dlg) {
+    meldung(t("dialog.electrumSpur.body"), "warn");
+    return;
+  }
+  if (!dlg.dataset.gebunden) {
+    dlg.dataset.gebunden = "1";
+    const ok = $("#electrum-spur-ok");
+    const zu = () => { dlg.hidden = true; };
+    if (ok) ok.addEventListener("click", zu);
+    dlg.addEventListener("click", (ev) => {
+      if (ev.target === dlg) zu();
+    });
+    dlg.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape" && ev.key !== "Enter") return;
+      ev.preventDefault();
+      zu();
+    });
+  }
+  dlg.hidden = false;
+  const ok = $("#electrum-spur-ok");
+  if (ok) ok.focus();
+}
+
+/** True: Aktion abgelehnt, Dialog ist offen. Kein Verbindungsversuch. */
+function electrumSpurBlockiert() {
+  if (electrumStehtFuerSpur()) return false;
+  zeigeElectrumSpurDialog();
+  return true;
+}
+
 function meldung(text, art) {
   const kasten = $("#speicher-meldung");
   kasten.className = `hinweis hinweis-${art}`;
@@ -1000,11 +1049,19 @@ function startePeerTakt(quellen) {
   setzePeerTakt(quellen || Zustand.config?.sources);
 }
 
+/** Datenquelle wurde gerade geändert. Laufende Status-Checks haben die
+ *  .env von vorher gelesen und dürfen die Oberfläche nicht zurücksetzen. */
+function merkeQuellenAenderung() {
+  Zustand.quellenEpoch = (Zustand.quellenEpoch || 0) + 1;
+}
+
 async function pruefePeersLeise() {
   if (Zustand.peerCheckLaeuft) return;
+  const epoch = Zustand.quellenEpoch || 0;
   Zustand.peerCheckLaeuft = true;
   try {
     const ergebnis = await apiSourceCheck({ still: true });
+    if ((Zustand.quellenEpoch || 0) !== epoch) return;
     nimmPeerStand(ergebnis, true);
   } catch (_) {
     /* letzter Stand bleibt */
@@ -1022,6 +1079,49 @@ async function pruefePeersLeise() {
  * ein paralleler Check meldet dann fälschlich „nicht erreichbar“. Den letzten
  * positiven Stand behalten, bis der Scan durch ist.
  */
+function quelleEndpointSchluessel(q) {
+  const felder = (q && q.felder) || [];
+  if (!felder.length) return "";
+  const wert = (key) => {
+    const f = felder.find((x) => x && x.key === key);
+    return String(f?.value || "").trim();
+  };
+  return [
+    wert("FULCRUM_HOST"), wert("FULCRUM_TOR"), wert("FULCRUM_PORT"),
+    wert("FULCRUM_SSL"), wert("NODE_IP"), wert("RPCPORT"),
+  ].join("|");
+}
+
+function indexerVerbundenInQuellen(neuListe, altListe) {
+  const neuOwn = (neuListe || []).find((q) => q && q.key === "own_fulcrum");
+  if (neuOwn && neuOwn.configured && neuOwn.reachable === true) return true;
+  const altOwn = (altListe || []).find((q) => q && q.key === "own_fulcrum");
+  if (!neuOwn || !neuOwn.configured || !altOwn) return false;
+  if (altOwn.reachable !== true && !(altOwn.peer_count > 0)) return false;
+  const altEp = quelleEndpointSchluessel(altOwn);
+  const neuEp = quelleEndpointSchluessel(neuOwn);
+  if (altEp && neuEp && altEp !== neuEp) return false;
+  return true;
+}
+
+function kappeOeffentlicheElectrumLokal() {
+  if (!Zustand.config) return false;
+  let geaendert = false;
+  if (Zustand.config.oeffentliche_electrum || Zustand.config.oeffentliche_electrum_session) {
+    Zustand.config.oeffentliche_electrum = false;
+    Zustand.config.oeffentliche_electrum_session = false;
+    geaendert = true;
+  }
+  Zustand.oeffentlicheGefragt = false;
+  Zustand.config.sources = (Zustand.config.sources || []).map((q) => {
+    if (q.key !== "public_onion" && q.key !== "clearnet") return q;
+    if (q.reachable == null && !(q.peer_count > 0)) return q;
+    geaendert = true;
+    return { ...q, reachable: null, peer_count: 0, peer_hosts: [] };
+  });
+  return geaendert;
+}
+
 function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
   behaltePositivBeiNegativ = false,
 } = {}) {
@@ -1031,8 +1131,17 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
   for (const q of altListe) {
     if (q && q.key) altNach[q.key] = q;
   }
+  const indexerOk = indexerVerbundenInQuellen(neuListe, altListe);
   return neuListe.map((neu) => {
     const alt = altNach[neu.key];
+    if (indexerOk && (neu.key === "public_onion" || neu.key === "clearnet")) {
+      return {
+        ...neu,
+        reachable: null,
+        peer_count: 0,
+        peer_hosts: [],
+      };
+    }
     if (!alt) return neu;
     // .env gelöscht / Host geleert: kein alter „verbunden“-Stand behalten.
     if (!neu.configured) {
@@ -1052,7 +1161,23 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
       };
     }
     if (neu.reachable == null) {
+      // „Nicht genutzt“ ist das Ergebnis der anderen Familie, kein fehlender Check.
+      if (
+        (neu.key === "public_onion" || neu.key === "clearnet")
+        && String(neu.note || "").startsWith("Nicht genutzt")
+      ) {
+        return {
+          ...neu,
+          reachable: null,
+          peer_count: 0,
+          peer_hosts: [],
+        };
+      }
       if (alt.reachable == null && !(alt.peer_count > 0)) return neu;
+      // Onion → IP (oder anderer Host): alten „verbunden“-Stand nicht übernehmen.
+      const altEp = quelleEndpointSchluessel(alt);
+      const neuEp = quelleEndpointSchluessel(neu);
+      if (altEp && neuEp && altEp !== neuEp) return neu;
       return {
         ...neu,
         reachable: alt.reachable,
@@ -1067,8 +1192,12 @@ function uebernehmeQuellenErreichbarkeit(altListe, neuListe, {
         detail: neu.detail || alt.detail || "",
       };
     }
+    const altEpScan = quelleEndpointSchluessel(alt);
+    const neuEpScan = quelleEndpointSchluessel(neu);
+    const gleicherEndpoint = !altEpScan || !neuEpScan || altEpScan === neuEpScan;
     if (
       behaltePositivBeiNegativ
+      && gleicherEndpoint
       && neu.reachable === false
       && alt.reachable === true
     ) {
@@ -1166,6 +1295,11 @@ function nimmOwnFulcrumStand(info) {
     };
   });
   Zustand.peersGeprueft = true;
+  if (info.reachable !== false) {
+    if (kappeOeffentlicheElectrumLokal()) {
+      logZeile(t("ui.hard.667be59b8a"));
+    }
+  }
   const stand = peerStatusAusQuellen(Zustand.config.sources);
   Zustand.peerStatus = stand;
   Zustand.peers = stand.n;
@@ -1189,6 +1323,25 @@ function nimmPeerStand(ergebnis, still) {
     }
     if (ergebnis.header_tip != null) {
       Zustand.config.header_tip = ergebnis.header_tip;
+    }
+    if (ergebnis.oeffentliche_electrum != null) {
+      Zustand.config.oeffentliche_electrum = Boolean(ergebnis.oeffentliche_electrum);
+    }
+    if (ergebnis.oeffentliche_electrum_session != null) {
+      Zustand.config.oeffentliche_electrum_session = Boolean(
+        ergebnis.oeffentliche_electrum_session,
+      );
+    }
+    if ("oeffentliche_electrum_art" in ergebnis) {
+      Zustand.oeffentlicheArt = String(ergebnis.oeffentliche_electrum_art || "");
+    }
+  }
+  const ownNachCheck = (Zustand.config?.sources || quellen || []).find(
+    (q) => q && q.key === "own_fulcrum",
+  );
+  if (ownNachCheck && ownNachCheck.reachable === true) {
+    if (kappeOeffentlicheElectrumLokal() && !still) {
+      logZeile(t("ui.hard.667be59b8a"));
     }
   }
   const liveHosts = Array.isArray(ergebnis.live_p2p_peers)
@@ -1298,9 +1451,10 @@ async function erlaubeOeffentlicheElectrum() {
     t("ui.hard.81909b08fe"),
   );
   try {
+    const art = String(Zustand._oeffentlichWahl || "");
     await api("/source/oeffentlich", {
       methode: "POST",
-      daten: { erlauben: true },
+      daten: art ? { erlauben: true, art } : { erlauben: true },
     });
     if (Zustand.config) {
       Zustand.config.oeffentliche_electrum = true;
@@ -1512,9 +1666,12 @@ function zeichneKopfStatus(quellen) {
     && !p2pVerbunden
     && (!Zustand.peersGeprueft || Zustand.peerCheckLaeuft);
   const oeffentlichVerbunden =
-    kopfQuelleVerbunden(oeffentlichOnion)
-    || kopfQuelleVerbunden(oeffentlichClear)
-    || (Zustand.peerStatus && Zustand.peerStatus.kind === "public");
+    !electrsVerbunden
+    && (
+      kopfQuelleVerbunden(oeffentlichOnion)
+      || kopfQuelleVerbunden(oeffentlichClear)
+      || (Zustand.peerStatus && Zustand.peerStatus.kind === "public")
+    );
 
   const p2pHosts = [
     ...new Set([
@@ -1526,7 +1683,7 @@ function zeichneKopfStatus(quellen) {
     (liveN > 0
       ? t("ui.hard.30afd7b333", { n: liveN }) + " "
       : "")
-    + "Bitcoin-P2P mit BIP-158 Compact Filters. "
+    + "Bitcoin-P2P, nur UTXO-Bestand (BIP-158). "
     + (p2pHosts.length ? p2pHosts.slice(0, 6).join(", ") : "");
 
   const eintraege = [];
@@ -1545,7 +1702,7 @@ function zeichneKopfStatus(quellen) {
     });
   }
 
-  if (p2pVerbunden || p2pAufbau) {
+  if ((p2pVerbunden || p2pAufbau) && !p2p?.ausgeblendet) {
     const n = p2pVerbunden ? p2pAnzahl : 0;
     eintraege.push({
       key: "bip158",
@@ -1601,10 +1758,16 @@ function zeichneKopfStatus(quellen) {
   }
 
   if (oeffentlichVerbunden) {
+    const art = String(Zustand.oeffentlicheArt || "");
+    const onionZahl = Number(oeffentlichOnion?.peer_count || 0);
+    const clearZahl = Number(oeffentlichClear?.peer_count || 0);
+    const oeffentlichZahl = art === "onion"
+      ? onionZahl
+      : (art === "clearnet" ? clearZahl : onionZahl + clearZahl);
     eintraege.push({
       key: "public",
       lern: "privatsphaere",
-      label: t("header.sourceElectrumPublic"),
+      label: t("header.sourceElectrumPublicN", { n: oeffentlichZahl }),
       stufe: "krit",
       title: `${t("header.sourceConnectionUp")} ${t("header.sourceElectrumPublicTitle")}`,
     });
@@ -1623,16 +1786,12 @@ function zeichneKopfStatus(quellen) {
     let beStufe;
     let beTitle;
     if (!mp.configured) {
-      beLabel = t("header.blockExplorer") !== "header.blockExplorer"
-        ? t("header.blockExplorer")
-        : "Block-Explorer";
+      beLabel = t("header.blockExplorer");
       beStufe = "neutral";
-      beTitle = t("header.blockExplorerNoneTitle") !== "header.blockExplorerNoneTitle"
-        ? t("header.blockExplorerNoneTitle")
-        : t("header.blockExplorerNoneTitle");
+      beTitle = t("header.blockExplorerNoneTitle");
     } else if (!(mp.local || mp.stufe === "lokal")) {
       beLabel = t("header.blockExplorerPublic");
-      beStufe = "warn";
+      beStufe = "krit";
       beTitle = t("header.blockExplorerPublicTitle");
     } else if (mp.reachable === false) {
       beLabel = t("header.blockExplorerUnreachable");
@@ -1641,14 +1800,10 @@ function zeichneKopfStatus(quellen) {
       if (mp.host) beTitle += ` (${mp.host})`;
       if (mp.probeReason) beTitle += ` — ${mp.probeReason}`;
     } else if (mp.local || mp.stufe === "lokal") {
-      beLabel = t("header.blockExplorerPrivate") !== "header.blockExplorerPrivate"
-        ? t("header.blockExplorerPrivate")
-        : t("header.blockExplorerPrivate");
+      beLabel = t("header.blockExplorerPrivate");
       // Noch kein Test: grau. Grün erst, wenn der kurze Abruf klappt.
       beStufe = mp.reachable === true ? "gut" : "neutral";
-      beTitle = t("header.blockExplorerPrivateTitle") !== "header.blockExplorerPrivateTitle"
-        ? t("header.blockExplorerPrivateTitle")
-        : `Eigener/LAN-Explorer${mp.host ? `: ${mp.host}` : ""} — Aufrufe bleiben bei dir.`;
+      beTitle = t("header.blockExplorerPrivateTitle");
     }
     eintraege.push({
       key: "mempool",
@@ -1735,6 +1890,7 @@ function zeichneKopfStatus(quellen) {
   zeichneLlmPille();
   zeichneRpcSperrePille();
   aktualisiereKopfFilterFuerAnsicht();
+  if (typeof aktualisiereNavKompakt === "function") aktualisiereNavKompakt();
   if (typeof aktualisiereSchatzKnopf === "function") aktualisiereSchatzKnopf();
   if (lernhinweiseAn()) {
     wendeAlleLernTooltipsAn().catch(() => {});
@@ -1789,6 +1945,19 @@ function kopfFilterGelesen() {
 }
 
 function aktualisiereKopfFilterFuerAnsicht() {
+  if (
+    Zustand.ansicht === "wallet"
+    && typeof fifoZielZeileOffen === "function"
+    && fifoZielZeileOffen()
+  ) {
+    setzeKopfFilterAktiv(false);
+    const feld = $("#kopf-filter");
+    if (feld) {
+      feld.title = t("header.filterTitleFifoSpend");
+      feld.setAttribute("data-i18n-title", "header.filterTitleFifoSpend");
+    }
+    return;
+  }
   setzeKopfFilterAktiv(kopfFilterAnsichtAktiv(Zustand.ansicht));
 }
 
@@ -1919,6 +2088,8 @@ function _kopfFilterHaystack(el) {
     String(el.dataset.timeLabel || ""),
     // Börsen (Kraken, …) und CJ-Formen (Wasabi, Whirlpool, …)
     String(el.dataset.filterLabels || ""),
+    // Ausgabe-Tx (Börsen-Einzahlung): Verlaufs-``spent_txid``
+    String(el.dataset.spentTxid || ""),
     // Sichtbarer Pillen-/Icon-Text (aria-label), falls schon gerendert
     String(el.getAttribute("aria-label") || ""),
   ].join(" ").toLowerCase();
@@ -2360,8 +2531,6 @@ function formatKursTooltip(preis) {
 }
 
 function zeichneKursPille() {
-  const pillen = $("#quelle-pillen") || $("#quelle-status");
-  if (!pillen) return;
   const preis = Zustand.kurs;
   const stufe = preis && Number(preis.amount) > 0 ? "gut" : "neutral";
   const neu = pille(stufe, formatKursLabel(preis));
@@ -2375,9 +2544,11 @@ function zeichneKursPille() {
     if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
     return;
   }
-  const llm = $("#llm-pille");
-  if (llm) pillen.insertBefore(neu, llm);
-  else pillen.append(neu);
+  const ziel = document.querySelector(".kopf-end")
+    || $("#quelle-pillen")
+    || $("#quelle-status");
+  if (!ziel) return;
+  ziel.append(neu);
   if (lernhinweiseAn()) ergaenzeLernTooltip(neu);
 }
 
@@ -2527,6 +2698,7 @@ function zeichneLlmPille() {
   const alt = $("#llm-pille");
   if (alt) alt.replaceWith(neu);
   else pillen.append(neu);
+  setzeChatSichtbar();
 }
 
 function übersetzeLlmLabel(roh) {
@@ -2543,7 +2715,17 @@ function übersetzeLlmLabel(roh) {
   return text;
 }
 
+function setzeChatSichtbar() {
+  const s = Zustand.llmStatus || Zustand.config?.llm || {};
+  // Rot (offline) und Grau (aus / ungeprüft): kein Chat.
+  // Grün (lokal) und Gelb (remote, verbunden): Chat.
+  const an = s.pille === "gut" || s.pille === "warn";
+  const buehne = document.querySelector(".buehne");
+  if (buehne) buehne.classList.toggle("chat-an", an);
+}
+
 function zeichneChatAnbindung() {
+  setzeChatSichtbar();
   const kasten = $("#chat-anbindung");
   if (!kasten) return;
   const s = Zustand.llmStatus || Zustand.config?.llm || {};

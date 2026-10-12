@@ -14,6 +14,30 @@ import time
 #: Verbindungs-Timeout (~8 s) ab.
 MEMPOOL_NODE_PAUSE_S = 45.0
 
+
+def _schliesse_fulcrum_hintergrund(client) -> None:
+    """``close()`` an SOCKS/Tor darf den Aufrufer nicht blockieren."""
+    if client is None:
+        return
+
+    def _lauf() -> None:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=_lauf, name="satsage-fulcrum-close", daemon=True,
+    ).start()
+
+
+def _empfang_lock(state) -> threading.Lock:
+    lock = getattr(state, "_empfang_fulcrum_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+    return lock
+
 def _sortierung(query: dict) -> str:
     roh = (query.get("sort") or ["betrag"])[0]
     return roh if roh in ("betrag", "datum") else "betrag"
@@ -60,6 +84,70 @@ def _verlaufs_anhang(state: AppState, entries, *, limit: int | None = None,
         "hat_verlauf": bool(verlauf),
     }
 
+def _kappe_oeffentliche_electrum_nach_privater_quelle(
+    state, *, on_log=None,
+) -> bool:
+    """
+    Öffentliche Electrum abklemmen, sobald der eigene Indexer steht.
+
+    Sitzungs-Opt-in wird ungültig, ein altes ``OEFFENTLICHE_ELECTRUM`` in der
+    ``.env`` fällt weg, der Empfangs-Pool zum öffentlichen Server schließt.
+    """
+    from server import LOGGER, source_mod
+    from core.outbound_policy import stoppe_oeffentliche_electrum_suche
+
+    stoppe_oeffentliche_electrum_suche()
+    session_weg = source_mod.widerrufe_oeffentliche_electrum_freigabe()
+    streiche = getattr(state, "_streiche_dauerhafte_oeffentliche_electrum", None)
+    if callable(streiche):
+        try:
+            streiche()
+        except Exception:
+            LOGGER.debug(
+                "OEFFENTLICHE_ELECTRUM aus .env streichen fehlgeschlagen",
+                exc_info=True,
+            )
+    last = getattr(state, "sources_last", None) or []
+    neu: list = []
+    stand_weg = False
+    for eintrag in last:
+        if (
+            isinstance(eintrag, dict)
+            and eintrag.get("key") in source_mod.OEFFENTLICHE_QUELLEN_KEYS
+        ):
+            if source_mod.oeffentliche_quelle_wirkt_verbunden(eintrag):
+                stand_weg = True
+            neu.append(source_mod.oeffentliche_quelle_dict_als_ungenutzt(eintrag))
+        else:
+            neu.append(eintrag)
+    if neu != last:
+        state.sources_last = neu
+    if _verwerfe_oeffentlichen_empfang_pool(state):
+        stand_weg = True
+    if session_weg:
+        text = (
+            "Öffentliche Electrum-Freigabe ungültig — "
+            "eigener Indexer verbunden."
+        )
+        if on_log:
+            on_log(text)
+        else:
+            LOGGER.info("%s", text)
+    return session_weg or stand_weg
+
+
+def _verwerfe_oeffentlichen_empfang_pool(state) -> bool:
+    """Schließt den öffentlichen Empfangs-Pool (Familienwechsel / Kappen)."""
+    lock = _empfang_lock(state)
+    with lock:
+        pub = getattr(state, "_empfang_public_fulcrum", None)
+        state._empfang_public_fulcrum = None
+    if pub is None:
+        return False
+    _schliesse_fulcrum_hintergrund(pub)
+    return True
+
+
 def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
     """
     Eigener Electrum-Connect → sources_last + Job-tauglicher Stand.
@@ -84,6 +172,7 @@ def _merke_own_fulcrum_client(state: AppState, client) -> dict | None:
             frisch,
             stand,
         )
+        _kappe_oeffentliche_electrum_nach_privater_quelle(state)
     except Exception:
         LOGGER.debug("own_fulcrum Stand merken fehlgeschlagen", exc_info=True)
     return stand
@@ -108,34 +197,44 @@ def _eigener_fulcrum_client(state: AppState):
     ):
         return None
 
-    lock = getattr(state, "_empfang_fulcrum_lock", None)
-    if lock is None:
-        lock = threading.Lock()
-        state._empfang_fulcrum_lock = lock
-
+    # Ping und Connect außerhalb des Locks: sonst wartet PUT /config/source
+    # (Onion→IP) auf einen hängenden Tor-Ping, und „Übernehmen“ bleibt tot.
+    lock = _empfang_lock(state)
     with lock:
         alt = getattr(state, "_empfang_fulcrum", None)
-        if alt is not None:
-            try:
-                alt.request("server.ping")
+
+    if alt is not None:
+        try:
+            alt.request("server.ping")
+            with lock:
+                noch = getattr(state, "_empfang_fulcrum", None) is alt
+            if noch:
                 _merke_own_fulcrum_client(state, alt)
                 return alt
-            except Exception:
-                try:
-                    alt.close()
-                except Exception:
-                    pass
-                state._empfang_fulcrum = None
-        try:
-            client = main._try_own_fulcrum_client(
-                state.args_namespace(), werte,
-            )
+            _schliesse_fulcrum_hintergrund(alt)
         except Exception:
-            return None
+            _schliesse_fulcrum_hintergrund(alt)
+            with lock:
+                if getattr(state, "_empfang_fulcrum", None) is alt:
+                    state._empfang_fulcrum = None
+
+    try:
+        client = main._try_own_fulcrum_client(
+            state.args_namespace(), werte,
+        )
+    except Exception:
+        return None
+
+    with lock:
+        jetzt = getattr(state, "_empfang_fulcrum", None)
+        if jetzt is not None:
+            if client is not None and client is not jetzt:
+                _schliesse_fulcrum_hintergrund(client)
+            return jetzt
         state._empfang_fulcrum = client
-        if client is not None:
-            _merke_own_fulcrum_client(state, client)
-        return client
+    if client is not None:
+        _merke_own_fulcrum_client(state, client)
+    return client
 
 def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
     """
@@ -156,32 +255,47 @@ def _oeffentlicher_fulcrum_fuer_empfang(state: AppState):
     if not source_mod.oeffentliche_electrum_erlaubt(werte):
         return None
 
-    lock = getattr(state, "_empfang_fulcrum_lock", None)
-    if lock is None:
-        lock = threading.Lock()
-        state._empfang_fulcrum_lock = lock
-
+    lock = _empfang_lock(state)
     with lock:
         alt = getattr(state, "_empfang_public_fulcrum", None)
-        if alt is not None:
-            try:
-                alt.request("server.ping")
-                return alt
-            except Exception:
-                try:
-                    alt.close()
-                except Exception:
-                    pass
-                state._empfang_public_fulcrum = None
+
+    if alt is not None:
         try:
-            args = state.args_namespace()
+            alt.request("server.ping")
+            with lock:
+                if getattr(state, "_empfang_public_fulcrum", None) is alt:
+                    return alt
+            _schliesse_fulcrum_hintergrund(alt)
+        except Exception:
+            _schliesse_fulcrum_hintergrund(alt)
+            with lock:
+                if getattr(state, "_empfang_public_fulcrum", None) is alt:
+                    state._empfang_public_fulcrum = None
+
+    try:
+        args = state.args_namespace()
+        art = source_mod.oeffentliche_electrum_art()
+        if art == "onion":
             pool = main._try_public_onion_fulcrum(
                 args, werte, interactive=False,
             )
+        elif art == "clearnet":
+            pool = main._setup_public_clearnet_fulcrum(args, werte)
+        else:
+            pool = main._setup_public_clearnet_fulcrum(args, werte)
             if pool is None:
-                pool = main._setup_public_clearnet_fulcrum(args, werte)
-        except Exception:
-            return None
+                pool = main._try_public_onion_fulcrum(
+                    args, werte, interactive=False,
+                )
+    except Exception:
+        return None
+
+    with lock:
+        jetzt = getattr(state, "_empfang_public_fulcrum", None)
+        if jetzt is not None:
+            if pool is not None and pool is not jetzt:
+                _schliesse_fulcrum_hintergrund(pool)
+            return jetzt
         state._empfang_public_fulcrum = pool
         return pool
 

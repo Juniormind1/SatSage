@@ -152,8 +152,8 @@ function zeichneEmpfangReadOnly(walletName, { puls = false } = {}) {
 
 /**
  * Empfangspanel im „beschäftigt“-Zustand: QR weg, Atem an.
- * Gilt für UTXO-Scan, Historie, Tip-Nachzug, Herkunft und die
- * Sammel-Jobs Historien / Herkünfte UTXOs — auch Read-only-Wallets.
+ * Gilt für UTXO-Scan, Historie, Tip-Nachzug, Herkunft und klären —
+ * auch Read-only-Wallets.
  */
 function zeichneEmpfangBeschaeftigt(walletId) {
   // Laufender Atem bleibt. Ein neuer Log-Tick darf den Takt nicht zurücksetzen.
@@ -290,12 +290,19 @@ function jobIstAktiv(job) {
 }
 
 /**
- * Scan über alle Wallets: Steuerjahr „Historien“ und Massen-Herkunft
- * („Herkünfte UTXOs“ / klären). Atem unabhängig vom gerade offenen Wallet.
+ * Scan über alle Wallets: Massen-Herkunft („klären“), Sammel-Verlauf
+ * und der UTXO-Lauf „Alle Wallets“. Atem unabhängig vom offenen Wallet.
  */
 function empfangGlobalerScanLaeuft() {
   if (Zustand.contextBereit === false) return true;
   if (Zustand.herkunftAlleLaeuft || Zustand.verlaufAlleLaeuft) return true;
+  if (
+    Zustand.rescanJob
+    && String(Zustand.scanWalletId) === "alle"
+    && Zustand.scanArt === "utxo"
+  ) {
+    return true;
+  }
   const jobs = Zustand.jobsNav?.jobs || [];
   return jobs.some((job) => {
     if (!jobIstAktiv(job) || job.meta?.still) return false;
@@ -306,7 +313,7 @@ function empfangGlobalerScanLaeuft() {
 
 /**
  * Empfang noch unsicher: UTXO-Scan, Historie, Tip-Nachzug, Wallet-Herkunft
- * oder ein globaler Scan (Historien / Herkünfte UTXOs).
+ * oder ein globaler Scan (klären / Sammel-Verlauf).
  */
 function empfangScanLaeuftFuer(walletId) {
   if (empfangGlobalerScanLaeuft()) return true;
@@ -476,6 +483,29 @@ async function ladeEmpfang(walletId, { still = false } = {}) {
   }
 }
 
+function dockChatAn() {
+  return Boolean(document.querySelector(".buehne")?.classList.contains("chat-an"));
+}
+
+function setzeEmpfangSpaltePct(spalten, startPct, startX, clientX) {
+  const breite = spalten.getBoundingClientRect().width;
+  if (breite < 40) return;
+  // Nach rechts ziehen → QR-Spalte schmaler, bis das Quadrat an beide Ränder stößt.
+  const delta = ((startX - clientX) / breite) * 100;
+  const minPct = Math.max(4, (64 / breite) * 100);
+  const pct = Math.min(48, Math.max(minPct, startPct + delta));
+  spalten.style.setProperty("--dock-empfang-pct", `${Math.round(pct)}%`);
+}
+
+function merkeCssVar(schluessel, wert) {
+  if (!wert) return;
+  try {
+    localStorage.setItem(schluessel, wert);
+  } catch (_) {
+    /* gleichgültig */
+  }
+}
+
 function macheDockSpalter() {
   const spalter = $("#dock-spalter");
   const spalten = document.querySelector(".dock-spalten");
@@ -491,14 +521,7 @@ function macheDockSpalter() {
   let startX = 0;
   let startPct = 40;
   let zieht = false;
-
-  const merken = (wert) => {
-    try {
-      localStorage.setItem(DOCK_SPALTE_MERKER, wert);
-    } catch (_) {
-      /* gleichgültig */
-    }
-  };
+  let ziehtEmpfang = false;
 
   const beenden = (ereignis) => {
     if (!zieht) return;
@@ -508,8 +531,18 @@ function macheDockSpalter() {
     } catch (_) {
       /* Capture war schon weg */
     }
-    const wert = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
-    if (wert) merken(wert);
+    if (ziehtEmpfang) {
+      merkeCssVar(
+        EMPFANG_SPALTE_MERKER,
+        getComputedStyle(spalten).getPropertyValue("--dock-empfang-pct").trim(),
+      );
+    } else {
+      merkeCssVar(
+        DOCK_SPALTE_MERKER,
+        getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim(),
+      );
+    }
+    ziehtEmpfang = false;
   };
 
   spalter.addEventListener("pointerdown", (ereignis) => {
@@ -517,14 +550,24 @@ function macheDockSpalter() {
     const buehne = document.querySelector(".buehne");
     if (!buehne || !buehne.classList.contains("log-an")) return;
     zieht = true;
+    ziehtEmpfang = !dockChatAn();
     startX = ereignis.clientX;
-    const roh = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
-    startPct = Number.parseFloat(roh) || 40;
+    if (ziehtEmpfang) {
+      const roh = getComputedStyle(spalten).getPropertyValue("--dock-empfang-pct").trim();
+      startPct = Number.parseFloat(roh) || 28;
+    } else {
+      const roh = getComputedStyle(spalten).getPropertyValue("--dock-log-pct").trim();
+      startPct = Number.parseFloat(roh) || 40;
+    }
     spalter.setPointerCapture(ereignis.pointerId);
     ereignis.preventDefault();
   });
   spalter.addEventListener("pointermove", (ereignis) => {
     if (!zieht) return;
+    if (ziehtEmpfang) {
+      setzeEmpfangSpaltePct(spalten, startPct, startX, ereignis.clientX);
+      return;
+    }
     const breite = spalten.getBoundingClientRect().width;
     if (breite < 40) return;
     const delta = ((ereignis.clientX - startX) / breite) * 100;
@@ -553,14 +596,6 @@ function macheEmpfangSpalter() {
   let startPct = 22;
   let zieht = false;
 
-  const merken = (wert) => {
-    try {
-      localStorage.setItem(EMPFANG_SPALTE_MERKER, wert);
-    } catch (_) {
-      /* gleichgültig */
-    }
-  };
-
   const beenden = (ereignis) => {
     if (!zieht) return;
     zieht = false;
@@ -569,10 +604,10 @@ function macheEmpfangSpalter() {
     } catch (_) {
       /* Capture war schon weg */
     }
-    const wert = getComputedStyle(spalten)
-      .getPropertyValue("--dock-empfang-pct")
-      .trim();
-    if (wert) merken(wert);
+    merkeCssVar(
+      EMPFANG_SPALTE_MERKER,
+      getComputedStyle(spalten).getPropertyValue("--dock-empfang-pct").trim(),
+    );
   };
 
   spalter.addEventListener("pointerdown", (ereignis) => {
@@ -588,12 +623,7 @@ function macheEmpfangSpalter() {
   });
   spalter.addEventListener("pointermove", (ereignis) => {
     if (!zieht) return;
-    const breite = spalten.getBoundingClientRect().width;
-    if (breite < 40) return;
-    // Nach rechts ziehen → QR schmaler; nach links → QR breiter (Anteil der Dock-Breite).
-    const delta = ((startX - ereignis.clientX) / breite) * 100;
-    const pct = Math.min(48, Math.max(12, startPct + delta));
-    spalten.style.setProperty("--dock-empfang-pct", `${Math.round(pct)}%`);
+    setzeEmpfangSpaltePct(spalten, startPct, startX, ereignis.clientX);
   });
   spalter.addEventListener("pointerup", beenden);
   spalter.addEventListener("pointercancel", beenden);
@@ -665,6 +695,69 @@ function setzeWalletTitel(wallet, sats) {
   setzeText(el, `${base} (${klammer})`);
 }
 
+/**
+ * Lot-Anteile aller aktuellen UTXOs dieses Wallets.
+ * Ohne Herkunft (ungeprüft / ohne Lot-Felder) zählt der ganze Betrag grau.
+ */
+function walletLotMischungAusEvents(events) {
+  const acc = { gruen: 0, orange: 0, grau: 0 };
+  for (const e of events || []) {
+    const wert = Math.max(0, Math.floor(Number(e.value_sats) || 0));
+    const hatLot = e.sats_gruen !== null && e.sats_gruen !== undefined;
+    if (!hatLot || e.geprueft === false) {
+      acc.grau += wert;
+      continue;
+    }
+    acc.gruen += Math.max(0, Math.floor(Number(e.sats_gruen) || 0));
+    acc.orange += Math.max(0, Math.floor(Number(e.sats_orange) || 0));
+    acc.grau += Math.max(0, Math.floor(Number(e.sats_grau) || 0));
+  }
+  return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
+}
+
+function setzeWalletLotDonut(mischung) {
+  const punkt = $("#wallet-lot");
+  if (!punkt) return;
+  if (!mischung || typeof setzeLotDonut !== "function") {
+    if (typeof entferneLotDonut === "function") entferneLotDonut(punkt);
+    punkt.hidden = true;
+    punkt.setAttribute("aria-hidden", "true");
+    return;
+  }
+  setzeLotDonut(punkt, mischung);
+  const da = punkt.classList.contains("lot-donut");
+  punkt.hidden = !da;
+  if (da) punkt.removeAttribute("aria-hidden");
+  else punkt.setAttribute("aria-hidden", "true");
+}
+
+/** Ring links vom Namen: Steuer-Lots, sonst der ganze Bestand grau. */
+function aktualisiereWalletLotDonut() {
+  const id = Zustand.walletId;
+  const stand = Zustand.fifoSpend;
+  if (
+    id
+    && stand
+    && String(stand.walletId || "") === String(id)
+    && stand.zustand === "fertig"
+  ) {
+    const mix = walletLotMischungAusEvents(stand.events);
+    if (mix) {
+      setzeWalletLotDonut(mix);
+      return;
+    }
+  }
+  const daten = Zustand._walletUtxoDaten;
+  const grau = daten && daten.has_cache
+    ? Math.max(0, Math.floor(Number(daten.total_sats) || 0))
+    : 0;
+  if (grau > 0) {
+    setzeWalletLotDonut({ gruen: 0, orange: 0, grau });
+    return;
+  }
+  setzeWalletLotDonut(null);
+}
+
 async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletId = walletId;
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
@@ -681,6 +774,7 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
 
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId);
   setzeWalletTitel(wallet);
+  if (typeof setzeWalletLotDonut === "function") setzeWalletLotDonut(null);
   // Erst Cache (schnell), Mempool-Pending danach im Hintergrund.
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
@@ -1013,9 +1107,11 @@ async function zeigeWalletSeite(offset) {
   if (Zustand.walletQuelle !== quelle) return;
   const koerper = $("#adress-koerper");
   koerper.replaceChildren();
+  Zustand._walletUtxoSeite = seite;
   for (const gruppe of seite.items) koerper.append(zeichneAdressGruppe(gruppe));
   koerper.append(walletPager(seite));
   wendeKopfFilterAn();
+  if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
 }
 
 function walletPager(seite) {
@@ -1039,11 +1135,13 @@ function zeigeLeer(titel, text) {
   kasten.hidden = false;
   $("#adress-liste").hidden = true;
   $("#sanktions-karte").hidden = true;
+  if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
 }
 
 function zeichneUtxos(daten, wallet, seite = null) {
   // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
   Zustand._walletUtxoDaten = daten || null;
+  Zustand._walletUtxoSeite = seite;
   const hatVerlauf = Boolean(daten.hat_verlauf);
   const hatUtxos = Boolean(daten.has_cache && daten.total_count);
 
@@ -1114,7 +1212,7 @@ function zeichneUtxos(daten, wallet, seite = null) {
     const pendingN = Number(daten.verlauf.pending_count || daten.pending_spends || 0);
     teile.push(
       daten.verlauf.total_count
-        ? `${daten.verlauf.total_count} ausgegeben`
+        ? t("wallet.metaSpent", { n: daten.verlauf.total_count })
           + (pendingN > 0 ? ` · ${t("wallet.spentPendingCount", { n: pendingN })}` : "")
         : t("wallet.metaHistoryNoSpends"),
     );
@@ -1188,6 +1286,8 @@ function zeichneUtxos(daten, wallet, seite = null) {
   $("#adress-liste").hidden = false;
   aktualisiereKopfFilterFuerAnsicht();
   wendeKopfFilterAn();
+  if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
+  if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
 }
 
 /* --- wallet-fifo-spend --- */
@@ -1196,8 +1296,11 @@ function zeichneUtxos(daten, wallet, seite = null) {
 //
 // Keine Losbuchhaltung: Die grünen sats kommen aus derselben Steuerjahr-
 // Auswertung wie Scorecards und Lot-Ringe (core/tax.py, laufendes Jahr =
-// Stand heute), gefiltert auf dieses Wallet. Je UTXO zählt der aktuelle
-// Trace; ohne ausgewerteten Baum zählt ein UTXO nicht als grün.
+// Stand heute), gefiltert auf dieses Wallet. Erst lots=0 (Punkte), dann
+// derselbe NDJSON-Strom /api/tax/lots wie das Steuerjahr — die Zeile und
+// der Wallet-Lot-Donut ziehen während eines Herkunfts-Laufs nach. Läuft
+// das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.
+// Je UTXO zählt der aktuelle Trace; ohne ausgewerteten Baum nicht grün.
 // ---------------------------------------------------------------------------
 
 /** Lesart aus den Einstellungen: ``aelteste`` = offensiv, sonst defensiv. */
@@ -1289,24 +1392,201 @@ function fifoPendingInfo(daten) {
   return { keys, vollstaendig: keys.size >= erwartet };
 }
 
-/** Dieselbe Abfrage wie die Steuerjahr-Ansicht, damit der Server-Cache greift. */
-function fifoSpendAbfrage() {
+/** Jahr/Frist/Stichtag wie ``ladeSteuerjahr`` — daran hängt der Server-Cache. */
+function fifoSpendJahrAbfrage() {
   const steuer = typeof steuerEinstellungen === "function" ? steuerEinstellungen() : {};
   const jahr = String(new Date().getFullYear());
   const frist = steuer.haltefrist_jahre ?? 1;
-  const abfrage =
+  return (
     `?jahr=${encodeURIComponent(jahr)}&frist=${encodeURIComponent(frist)}` +
-    `&stichtag=${encodeURIComponent(steuer.stichtag || "")}`;
+    `&stichtag=${encodeURIComponent(steuer.stichtag || "")}`
+  );
+}
+
+/** Dieselbe Abfrage wie die Steuerjahr-Ansicht, lots=0: Bäume kommen im Strom. */
+function fifoSpendAbfrage() {
   const p = new URLSearchParams();
   p.set("seite", "1");
   p.set("teil", "alle");
   p.set("limit", "0");
   p.set("limit_abgaenge", "0");
   p.set("lang", typeof uiSprache === "function" ? uiSprache() : "de");
-  return `${abfrage}&${p}`;
+  p.set("lots", "0");
+  return `${fifoSpendJahrAbfrage()}&${p}`;
 }
 
-/** Eine laufende Auswertung teilen sich alle Wallets — sie liefert alle Punkte. */
+/** Bestandsschlüssel: neuer Scan ändert Zahl/Saldo, ein Herkunfts-Lauf nicht. */
+function fifoSpendBestandKey() {
+  const d = Zustand._walletUtxoDaten;
+  if (!d) return "";
+  return `${Number(d.total_count) || 0}|${Number(d.total_sats) || 0}`;
+}
+
+/**
+ * Steuerjahr-Stand desselben Jahres. Events sind dieselben Objekte — der
+ * Lots-Strom der Scorecards färbt sie in-place, die FIFO-Zeile zeichnet mit.
+ */
+function fifoSpendAusSteuer() {
+  const daten = Zustand.steuer;
+  if (!daten || !daten.zeitstrahl || !Array.isArray(daten.zeitstrahl.events)) {
+    return null;
+  }
+  if (String(daten._abfrage || "") !== fifoSpendJahrAbfrage()) return null;
+  return daten;
+}
+
+function fifoSpendSteuerStromPasst() {
+  const daten = fifoSpendAusSteuer();
+  return Boolean(daten && !daten.lots_fertig);
+}
+
+/** Alte Lot-Anteile behalten, solange lots=0 sie noch nicht mitliefert. */
+function fifoSpendEventsAus(alle, walletId, vorher) {
+  const id = String(walletId || "");
+  const neu = (alle || []).filter((e) => e && String(e.wallet_id || "") === id);
+  if (!vorher || !vorher.length) return neu;
+  const alt = new Map();
+  for (const e of vorher) {
+    const k = fifoUtxoKey(e);
+    if (k) alt.set(k, e);
+  }
+  for (const e of neu) {
+    if (e.sats_gruen !== null && e.sats_gruen !== undefined) continue;
+    const altE = alt.get(fifoUtxoKey(e));
+    if (!altE || altE.sats_gruen === null || altE.sats_gruen === undefined) continue;
+    e.sats_gruen = altE.sats_gruen;
+    e.sats_orange = altE.sats_orange;
+    e.sats_grau = altE.sats_grau;
+    if ("erfuellt" in altE) e.erfuellt = altE.erfuellt;
+    if ("sats_ohne_datum" in altE) e.sats_ohne_datum = altE.sats_ohne_datum;
+    if ("neuvermoegen" in altE) e.neuvermoegen = altE.neuvermoegen;
+  }
+  return neu;
+}
+
+function fifoSpendLotUiPlanen() {
+  if (Zustand.fifoSpendLotUiTimer) return;
+  Zustand.fifoSpendLotUiTimer = setTimeout(() => {
+    Zustand.fifoSpendLotUiTimer = null;
+    if (Zustand.fifoSpend) zeichneFifoSpend(Zustand.fifoSpend);
+  }, 80);
+}
+
+function fifoSpendLotUiSofort() {
+  if (Zustand.fifoSpendLotUiTimer) {
+    clearTimeout(Zustand.fifoSpendLotUiTimer);
+    Zustand.fifoSpendLotUiTimer = null;
+  }
+  if (Zustand.fifoSpend) zeichneFifoSpend(Zustand.fifoSpend);
+}
+
+/** Eine NDJSON-Lot-Zeile in die FIFO-Events (Scorecard und eigener Strom). */
+function fifoSpendLotUebernehmen(zeile) {
+  const stand = Zustand.fifoSpend;
+  if (!stand || !stand.events || !zeile || !zeile.key) return false;
+  const key = fifoUtxoKey(zeile);
+  const event = stand.events.find((e) => e && fifoUtxoKey(e) === key);
+  if (!event) return false;
+  event.erfuellt = Boolean(zeile.erfuellt);
+  event.sats_gruen = zeile.sats_gruen;
+  event.sats_orange = zeile.sats_orange;
+  event.sats_grau = zeile.sats_grau;
+  event.sats_ohne_datum = zeile.sats_ohne_datum;
+  if ("neuvermoegen" in zeile) event.neuvermoegen = Boolean(zeile.neuvermoegen);
+  return true;
+}
+
+function fifoSpendLotsAbbrechen() {
+  if (Zustand.fifoSpendLotsAbbruch) {
+    try { Zustand.fifoSpendLotsAbbruch.abort(); } catch (_) { /* schon weg */ }
+    Zustand.fifoSpendLotsAbbruch = null;
+  }
+}
+
+function fifoSpendTraceLaeuft() {
+  if (Zustand.herkunftAlleLaeuft) return true;
+  if (Zustand.traceJobs && Zustand.traceJobs.size > 0) return true;
+  if (typeof herkunftTiefLaeuftFuer === "function"
+      && herkunftTiefLaeuftFuer(Zustand.walletId)) {
+    return true;
+  }
+  return false;
+}
+
+/** Nach einem fertigen Lots-Lauf: neu ziehen, sobald der Trace weitere Bäume legt. */
+function fifoSpendLotsNachziehenWennTrace() {
+  const stand = Zustand.fifoSpend;
+  if (!stand || stand.zustand !== "fertig") return;
+  if (stand.lots_fertig !== true) return;
+  if (!fifoSpendTraceLaeuft()) return;
+  if (fifoSpendSteuerStromPasst()) return;
+  stand.lots_fertig = false;
+  starteFifoSpendLots(stand);
+}
+
+function fifoSpendLotsNimm(stand, obj) {
+  if (!obj || Zustand.fifoSpend !== stand) return;
+  if (obj.done) {
+    if (!obj.error) {
+      stand.lots_fertig = true;
+      stand.zustand = "fertig";
+      fifoSpendLotUiSofort();
+    }
+    return;
+  }
+  if (obj.key && fifoSpendLotUebernehmen(obj)) fifoSpendLotUiPlanen();
+}
+
+async function fifoSpendLotsLesen(antwort, stand) {
+  if (!antwort || !antwort.body) return;
+  const leser = antwort.body.getReader();
+  const decoder = new TextDecoder();
+  let puffer = "";
+  const nimm = (zeile) => {
+    try { fifoSpendLotsNimm(stand, JSON.parse(zeile)); } catch (_) { /* halbe Zeile */ }
+  };
+  while (true) {
+    const gelesen = await leser.read();
+    if (gelesen.done) break;
+    puffer += decoder.decode(gelesen.value, { stream: true });
+    const zeilen = puffer.split("\n");
+    puffer = zeilen.pop();
+    for (const zeile of zeilen) {
+      if (zeile.trim()) nimm(zeile);
+    }
+  }
+  if (puffer.trim()) nimm(puffer);
+}
+
+/** Eigener Lots-Strom, wenn das Steuerjahr nicht schon dasselbe Jahr zieht. */
+function starteFifoSpendLots(stand) {
+  if (!stand || Zustand.fifoSpend !== stand) return;
+  if (fifoSpendSteuerStromPasst()) return;
+  fifoSpendLotsAbbrechen();
+  const ctrl = new AbortController();
+  Zustand.fifoSpendLotsAbbruch = ctrl;
+  const abfrage = fifoSpendJahrAbfrage();
+  const kopf = {
+    ...(typeof tokenKopf === "function" ? tokenKopf() : {}),
+    ...(typeof sprachKopf === "function" ? sprachKopf() : {}),
+    Accept: "application/x-ndjson",
+  };
+  fetch(`/api/tax/lots${abfrage}`, {
+    credentials: "same-origin",
+    referrerPolicy: "same-origin",
+    headers: kopf,
+    signal: ctrl.signal,
+  }).then((antwort) => {
+    if (Zustand.fifoSpend !== stand || !antwort || !antwort.ok) return null;
+    return fifoSpendLotsLesen(antwort, stand);
+  }).catch(() => {
+    /* Abbruch / Netz — der nächste Trace-Tick oder das Öffnen holt nach */
+  }).finally(() => {
+    if (Zustand.fifoSpendLotsAbbruch === ctrl) Zustand.fifoSpendLotsAbbruch = null;
+  });
+}
+
+/** Eine laufende lots=0-Auswertung teilen sich alle Wallets. */
 function holeFifoSpendAuswertung(abfrage) {
   const lauf = Zustand.fifoSpendLauf;
   if (lauf && lauf.abfrage === abfrage) return lauf.promise;
@@ -1319,12 +1599,21 @@ function holeFifoSpendAuswertung(abfrage) {
   return promise;
 }
 
+function fifoSpendAusAntwortUebernehmen(stand, antwort) {
+  const alle = (antwort && antwort.zeitstrahl && antwort.zeitstrahl.events) || [];
+  stand.events = fifoSpendEventsAus(alle, stand.walletId, stand.events);
+  stand.lots_fertig = Boolean(antwort && antwort.lots_fertig);
+  stand.zustand = "fertig";
+}
+
 /**
  * Leiste neu zeichnen und bei Bedarf nachladen.
  *
  * *walletId* null: Leiste weg (kein Bestand). Ohne Argument: das offene
  * Wallet (Einstellung geändert, Sprache gewechselt). Der Mempool-Abzug
  * rechnet bei jedem Zeichnen neu aus der gerade gezeigten Wallet-Antwort.
+ * Herkunfts-Zwischenstände ändern den Bestandsschlüssel nicht — der Lots-
+ * Strom läuft weiter und ``fifoSpendLotsNachziehenWennTrace`` holt nach.
  */
 function aktualisiereFifoSpend(walletId) {
   const leiste = $("#fifo-spend");
@@ -1339,24 +1628,28 @@ function aktualisiereFifoSpend(walletId) {
   if (!id) {
     leiste.hidden = true;
     fifoZielZeigen(false);
+    fifoSpendLotsAbbrechen();
     return;
   }
   leiste.hidden = false;
   const modus = fifoSpendModus();
   const abfrage = fifoSpendAbfrage();
-  const ladeGen = Zustand.walletLadeGen || 0;
-  const schluessel = `${id}|${ladeGen}|${abfrage}|${modus}`;
+  const schluessel = `${id}|${abfrage}|${modus}|${fifoSpendBestandKey()}`;
   // Anderes Wallet: Betrag sofort leeren — er gehört zum vorigen Wallet.
   if (!stand || stand.walletId !== id) {
     const feld = $("#fifo-spend-betrag");
     if (feld) feld.value = "";
+    const fiat = $("#fifo-spend-fiat");
+    if (fiat) fiat.value = "";
   }
   if (stand && stand.schluessel === schluessel && stand.zustand !== "start") {
     zeichneFifoSpend(stand);
     return;
   }
   const neu = {
-    schluessel, walletId: id, modus, zustand: "laedt", events: null, werte: null, fehler: "",
+    schluessel, walletId: id, modus, zustand: "laedt",
+    events: stand && stand.walletId === id ? stand.events : null,
+    werte: null, fehler: "", lots_fertig: false,
   };
   Zustand.fifoSpend = neu;
   // Während des Starts wartet die Auswertung auf den Wallet-Kontext und
@@ -1367,13 +1660,19 @@ function aktualisiereFifoSpend(walletId) {
     return;
   }
   zeichneFifoSpend(neu);
+  const steuer = fifoSpendAusSteuer();
+  if (steuer) {
+    fifoSpendAusAntwortUebernehmen(neu, steuer);
+    zeichneFifoSpend(neu);
+    if (!neu.lots_fertig) starteFifoSpendLots(neu);
+    return;
+  }
   holeFifoSpendAuswertung(abfrage)
     .then((antwort) => {
       if (Zustand.fifoSpend !== neu) return;
-      const alle = (antwort && antwort.zeitstrahl && antwort.zeitstrahl.events) || [];
-      neu.events = alle.filter((e) => e && String(e.wallet_id || "") === String(id));
-      neu.zustand = "fertig";
+      fifoSpendAusAntwortUebernehmen(neu, antwort);
       zeichneFifoSpend(neu);
+      if (!neu.lots_fertig) starteFifoSpendLots(neu);
     })
     .catch((fehler) => {
       if (Zustand.fifoSpend !== neu) return;
@@ -1386,6 +1685,8 @@ function aktualisiereFifoSpend(walletId) {
 
 /** Schmales geschütztes Leerzeichen (U+202F) als Gruppentrenner der Satcomma-Schreibweise. */
 const FIFO_SATCOMMA_LUECKE = "\u202F";
+/** Spotkurs älter als ein Tag gilt in der FIFO-Spend-Zeile als veraltet. */
+const FIFO_KURS_MAX_ALTER_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Satcomma nur für die FIFO-Spend-Zeile: BTC mit allen 8 Nachkommastellen,
@@ -1411,14 +1712,111 @@ function fifoBetragMitFiat(sats) {
   return fiat ? `${fifoBetragText(sats)} ≈ ${fiat}` : fifoBetragText(sats);
 }
 
+/** true, wenn *feld* gerade den Tastaturfokus hat. */
+function fifoFeldFokus(feld) {
+  return typeof document !== "undefined" && !!feld && document.activeElement === feld;
+}
+
+/**
+ * Spotkurs für die FIFO-Spend-Zeile: ``ok``, ``kein`` oder ``veraltet``
+ * (Tagesdatum vor heute, Zeitstempel älter als ein Tag, oder Historie-Warnung).
+ */
+function fifoKursStand() {
+  const kurs = Zustand.kurs;
+  if (!kurs || !(Number(kurs.amount) > 0)) return { zustand: "kein", kurs: null };
+  const heute = new Date().toISOString().slice(0, 10);
+  let veraltet = false;
+  if (kurs.day && String(kurs.day) < heute) veraltet = true;
+  const ts = Number(kurs.time);
+  if (!veraltet && Number.isFinite(ts) && ts > 0) {
+    const ms = ts > 1e12 ? ts : ts * 1000;
+    if (Date.now() - ms > FIFO_KURS_MAX_ALTER_MS) veraltet = true;
+  }
+  if (!veraltet && kurs.warning && !(kurs.day && String(kurs.day) >= heute)) {
+    veraltet = true;
+  }
+  return { zustand: veraltet ? "veraltet" : "ok", kurs };
+}
+
+/** Fiat-Zahl zum Spotkurs, sonst null. */
+function fifoSatsZuFiatZahl(sats) {
+  const stand = fifoKursStand();
+  if (stand.zustand === "kein") return null;
+  return (Math.max(0, Number(sats) || 0) / 1e8) * Number(stand.kurs.amount);
+}
+
+/** Ganze sats aus einer Fiat-Zahl zum Spotkurs, sonst null. */
+function fifoFiatZuSats(zahl) {
+  const stand = fifoKursStand();
+  if (stand.zustand === "kein") return null;
+  const kurs = Number(stand.kurs.amount);
+  if (!(kurs > 0) || !Number.isFinite(zahl) || zahl < 0) return null;
+  const sats = Math.round((Number(zahl) * 1e8) / kurs);
+  if (!Number.isFinite(sats) || sats < 0 || sats > FIFO_MAX_SATS) return null;
+  return sats;
+}
+
+/**
+ * Fiat-Eingabe: Leerzeichen zählen nicht, genau ein Komma oder Punkt als
+ * Dezimalzeichen, höchstens 2 Nachkommastellen, optional €/EUR/$/USD.
+ */
+function fifoFiatZuZahl(roh) {
+  let text = String(roh ?? "").replace(/[\s\u00A0\u2007\u2009\u202F]+/g, "");
+  if (!text) return { leer: true };
+  text = text.replace(/(€|eur|\$|usd)$/i, "");
+  if (!text) return { leer: true };
+  if (!/[0-9]/.test(text) || !/^[0-9]*[.,]?[0-9]*$/.test(text)) return { fehler: "format" };
+  const teile = text.split(/[.,]/);
+  const nachkomma = teile.length > 1 ? teile[1] : "";
+  if (nachkomma.length > 2) return { fehler: "format" };
+  const zahl = Number(`${teile[0] || "0"}.${nachkomma}`);
+  if (!Number.isFinite(zahl) || zahl < 0) return { fehler: "format" };
+  return { zahl };
+}
+
+/** Fiat-Zahl fürs Eingabefeld (immer 2 Nachkommastellen, Locale-Trenner). */
+function fifoFiatFeldText(zahl) {
+  if (!Number.isFinite(zahl)) return "";
+  const locale = typeof formatLocale === "function" ? formatLocale() : "de-DE";
+  return zahl.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 /** Betrag in der FIFO-Spend-Zeile (Anzeige und Tooltip). */
 function fifoBetragText(sats) {
   return formatSatcomma(sats);
 }
 
+/** Zieladresse ist ein hinterlegtes eigenes Wallet (grünes Status-Label). */
+function fifoZielEigenesWallet() {
+  return (Zustand.fifoZielErgebnis || {}).status === "meine";
+}
+
+/**
+ * Bestätigter Gesamtsaldo dieses Wallets in sats, ohne Mempool-Ausgaben.
+ * Quelle: Zeitstrahl-Punkte (alle Farben), Fallback ``total_sats``.
+ */
+function fifoSpendGesamtSaldo(stand) {
+  const pending = fifoPendingInfo(Zustand._walletUtxoDaten).keys;
+  let summe = 0;
+  let n = 0;
+  for (const e of (stand && stand.events) || []) {
+    const key = fifoUtxoKey(e);
+    if (pending.has(key)) continue;
+    const wert = Math.max(0, Math.floor(Number(e.value_sats) || 0));
+    if (!wert) continue;
+    summe += wert;
+    n += 1;
+  }
+  if (n > 0) return summe;
+  const daten = Zustand._walletUtxoDaten;
+  const total = Number(daten && daten.total_sats);
+  return Number.isFinite(total) && total > 0 ? total : 0;
+}
+
 /** Grünes Maximum ohne Gebühr (Summe der grünen Beiträge), exakt in sats; null = keiner. */
 function fifoSpendBrutto(stand) {
   if (!stand || stand.zustand !== "fertig" || !stand.werte || stand.unvollstaendig) return null;
+  if (fifoZielEigenesWallet()) return fifoSpendGesamtSaldo(stand);
   return Number(stand.werte[stand.modus]) || 0;
 }
 
@@ -1443,7 +1841,8 @@ function fifoNettoSchluessel(stand) {
   const ziel = Zustand.fifoZielErgebnis || {};
   const adresse = ["meine", "fremd", "keine_wallets", "sanktioniert"].includes(ziel.status) ? (ziel.address || "") : "";
   const pending = [...fifoPendingInfo(Zustand._walletUtxoDaten).keys].sort().join(",");
-  return [stand && stand.schluessel, Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
+  // Brutto mit: Lot-Patches ändern den Schlüssel nicht, die Gebühr muss nach.
+  return [stand && stand.schluessel, fifoSpendBrutto(stand), Zustand.fifoZielFeeMilli || "", adresse, pending].join("|");
 }
 
 /** Fertiges Netto-Maximum zum aktuellen Stand, sonst null. */
@@ -1515,24 +1914,28 @@ function zeichneFifoSpend(stand) {
   let zahl = "—";
   if (max !== null) zahl = fifoBetragText(max);
   else if (stand.zustand === "laedt" || stand.zustand === "start") zahl = "…";
-  const schluessel = stand.modus === "offensiv"
-    ? "wallet.fifoSpendOffensive"
-    : "wallet.fifoSpendDefensive";
+  const eigen = fifoZielEigenesWallet();
+  const schluessel = eigen
+    ? "wallet.fifoSpendOwn"
+    : (stand.modus === "offensiv" ? "wallet.fifoSpendOffensive" : "wallet.fifoSpendDefensive");
   setzeText(text, t(schluessel, { n: zahl }));
   text.dataset.modus = stand.modus;
+  text.dataset.eigen = eigen ? "1" : "";
   text.dataset.zustand = max !== null ? "fertig" : (stand.unvollstaendig ? "fehler" : stand.zustand);
   let titel;
   if (max !== null) {
     const teile = [
-      t(stand.modus === "offensiv"
-        ? "wallet.fifoSpendTitleOffensive"
-        : "wallet.fifoSpendTitleDefensive", { betrag: fifoBetragMitFiat(max) }),
+      t(eigen
+        ? "wallet.fifoSpendTitleOwn"
+        : (stand.modus === "offensiv"
+          ? "wallet.fifoSpendTitleOffensive"
+          : "wallet.fifoSpendTitleDefensive"), { betrag: fifoBetragMitFiat(max) }),
       t("wallet.fifoSpendTitleExact", { sats: formatZahl(max) }),
       t("wallet.fifoSpendTitleBasis"),
     ];
     const netto = fifoNettoAktuell(stand);
     if (netto) {
-      teile.push(t("wallet.fifoSpendTitleNet", {
+      teile.push(t(eigen ? "wallet.fifoSpendTitleNetOwn" : "wallet.fifoSpendTitleNet", {
         fee: formatZahl(netto.max_netto_fee_sats || 0),
         rate: formatZahl(netto.sat_vb || 0),
         inputs: netto.max_netto_inputs || 0,
@@ -1571,11 +1974,124 @@ function zeichneFifoSpend(stand) {
       feld.title = "";
     }
     // Sprache gewechselt / neu gezeichnet: nicht fokussierte Eingabe neu setzen.
-    const fokus = typeof document !== "undefined" && document.activeElement === feld;
-    if (!fokus) fifoBetragNeuSchreiben(feld);
+    if (!fifoFeldFokus(feld)) fifoBetragNeuSchreiben(feld);
     pruefeFifoSpendBetrag();
   }
+  zeichneFifoSpendGruenFiat(max);
+  zeichneFifoSpendFiatEinheit(max);
+  zeichneFifoSpendMaxKnopf(max);
+  const fiatFeld = $("#fifo-spend-fiat");
+  if (fiatFeld && !fifoFeldFokus(fiatFeld) && !fifoFeldFokus(feld)) {
+    schreibeFifoSpendFiatAusSats();
+  }
   planeFifoNetto();
+  if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
+}
+
+/** Knopf „max“ nur bei Zieladresse eines eigenen Wallets, zwischen Sat- und Fiat-Feld. */
+function zeichneFifoSpendMaxKnopf(max) {
+  const knopf = $("#fifo-spend-max");
+  if (!knopf) return;
+  const an = fifoZielEigenesWallet() && max !== null && max > 0;
+  knopf.hidden = !an;
+  knopf.disabled = !an;
+  knopf.title = t("wallet.fifoSpendMaxButtonTitle");
+}
+
+/** Gesamtsaldo minus Gebühr ins Sat-Feld — nur bei eigenem Wallet-Ziel. */
+function fifoSpendMaxEintragen() {
+  if (!fifoZielEigenesWallet()) return;
+  const max = fifoSpendMax(Zustand.fifoSpend);
+  if (max === null || !(max > 0)) return;
+  const feld = $("#fifo-spend-betrag");
+  if (!feld || feld.disabled) return;
+  const bisher = fifoBetragZuSats(feld.value);
+  const einheit = bisher.einheit === "btc" ? "btc" : "sats";
+  feld.value = fifoBetragFeldText(max, einheit);
+  formatiereFifoSpendBetrag();
+}
+
+/** EUR der grünen ausgebbaren sats neben der Summe; ohne/veralteter Kurs als Hinweis. */
+function zeichneFifoSpendGruenFiat(max) {
+  const el = $("#fifo-spend-gruen-fiat");
+  if (!el) return;
+  if (max === null) {
+    el.hidden = true;
+    setzeText(el, "");
+    el.title = "";
+    el.dataset.zustand = "";
+    return;
+  }
+  el.hidden = false;
+  const stand = fifoKursStand();
+  if (stand.zustand === "kein") {
+    setzeText(el, t("wallet.fifoSpendNoRate"));
+    el.dataset.zustand = "kein";
+    el.title = t("wallet.fifoSpendNoRateTitle");
+    return;
+  }
+  const fiat = typeof formatEurAusSats === "function" ? formatEurAusSats(max) : "";
+  if (stand.zustand === "veraltet") {
+    const tag = stand.kurs.day || "";
+    setzeText(el, fiat
+      ? `≈ ${fiat} · ${t("wallet.fifoSpendStaleRate")}`
+      : t("wallet.fifoSpendStaleRate"));
+    el.dataset.zustand = "veraltet";
+    el.title = t("wallet.fifoSpendStaleRateTitle", { stand: tag || "?" });
+    return;
+  }
+  setzeText(el, fiat ? `≈ ${fiat}` : "");
+  el.dataset.zustand = "ok";
+  el.title = "";
+}
+
+/** Einheit und Sperre des Fiat-Felds: €/$, „kein Kurs“, „veralteter Kurs“. */
+function zeichneFifoSpendFiatEinheit(max) {
+  const label = $("#fifo-spend-fiat-einheit");
+  const feld = $("#fifo-spend-fiat");
+  if (!label || !feld) return;
+  const stand = fifoKursStand();
+  const satSperre = max === null;
+  feld.disabled = satSperre || stand.zustand === "kein";
+  feld.classList.toggle("veraltet", stand.zustand === "veraltet");
+  label.dataset.zustand = stand.zustand;
+  if (stand.zustand === "kein") {
+    setzeText(label, t("wallet.fifoSpendNoRate"));
+    const titel = t("wallet.fifoSpendNoRateTitle");
+    label.title = titel;
+    feld.title = titel;
+    return;
+  }
+  const w = String((stand.kurs && stand.kurs.currency) || (typeof fiatWaehrung === "function" ? fiatWaehrung() : "EUR")).toUpperCase();
+  if (stand.zustand === "veraltet") {
+    setzeText(label, t("wallet.fifoSpendStaleRate"));
+    const titel = t("wallet.fifoSpendStaleRateTitle", { stand: (stand.kurs && stand.kurs.day) || "?" });
+    label.title = titel;
+    feld.title = titel;
+    return;
+  }
+  setzeText(label, w === "USD" ? t("wallet.fifoSpendUnitUsd") : t("wallet.fifoSpendUnitEur"));
+  label.title = "";
+  feld.title = t("wallet.fifoSpendFiatTitle", { waehrung: w });
+}
+
+/** Fiat-Feld aus dem Sat-Feld füllen — nur Anzeige, keine Coin-Auswahl. */
+function schreibeFifoSpendFiatAusSats() {
+  const fiatFeld = $("#fifo-spend-fiat");
+  const satFeld = $("#fifo-spend-betrag");
+  if (!fiatFeld || fifoFeldFokus(fiatFeld)) return;
+  if (fifoKursStand().zustand === "kein") {
+    fiatFeld.value = "";
+    return;
+  }
+  const p = fifoBetragZuSats(satFeld && satFeld.value);
+  if (p.leer) {
+    fiatFeld.value = "";
+    return;
+  }
+  if (p.fehler || p.sats === undefined) return;
+  const zahl = fifoSatsZuFiatZahl(p.sats);
+  fiatFeld.value = zahl === null ? "" : fifoFiatFeldText(zahl);
 }
 
 /** Ganze sats in 3er-Gruppen mit U+202F (``12 345 678``), ohne Einheit. */
@@ -1717,12 +2233,60 @@ function fifoBetragNeuSchreiben(feld) {
   if (p.sats !== undefined) feld.value = fifoBetragFeldText(p.sats, p.einheit);
 }
 
-/** Beim Verlassen und mit Enter. */
+/** Beim Verlassen und mit Enter: Sat-Feld formatieren, dann EUR daraus setzen. */
 function formatiereFifoSpendBetrag() {
   const feld = $("#fifo-spend-betrag");
   if (!feld) return;
   fifoBetragNeuSchreiben(feld);
   pruefeFifoSpendBetrag();
+  if (!fifoFeldFokus($("#fifo-spend-fiat"))) schreibeFifoSpendFiatAusSats();
+}
+
+/**
+ * Fiat-Feld nur auf Format prüfen. Keine Coin-Auswahl — die hängt am Sat-Feld.
+ */
+function pruefeFifoSpendFiat() {
+  const feld = $("#fifo-spend-fiat");
+  if (!feld) return;
+  const p = fifoFiatZuZahl(feld.value);
+  const ok = !p.fehler;
+  feld.classList.toggle("ungueltig", !ok);
+  if (ok) feld.removeAttribute("aria-invalid");
+  else feld.setAttribute("aria-invalid", "true");
+}
+
+/**
+ * Beim Verlassen des Fiat-Felds: in ganze sats umrechnen, ins Sat-Feld
+ * schreiben. Spend und Coin-Auswahl lesen nur das Sat-Feld.
+ */
+function formatiereFifoSpendFiat() {
+  const fiatFeld = $("#fifo-spend-fiat");
+  const satFeld = $("#fifo-spend-betrag");
+  if (!fiatFeld || !satFeld) return;
+  const p = fifoFiatZuZahl(fiatFeld.value);
+  if (p.leer) {
+    fiatFeld.value = "";
+    pruefeFifoSpendFiat();
+    return;
+  }
+  if (p.fehler) {
+    pruefeFifoSpendFiat();
+    return;
+  }
+  if (!(p.zahl > 0)) {
+    fiatFeld.classList.toggle("ungueltig", true);
+    fiatFeld.setAttribute("aria-invalid", "true");
+    return;
+  }
+  const sats = fifoFiatZuSats(p.zahl);
+  if (sats === null) {
+    pruefeFifoSpendFiat();
+    return;
+  }
+  const bisher = fifoBetragZuSats(satFeld.value);
+  const einheit = bisher.einheit === "btc" ? "btc" : "sats";
+  satFeld.value = fifoBetragFeldText(sats, einheit);
+  formatiereFifoSpendBetrag();
 }
 
 // --- Ziel-Zeile: „Senden ▸/▾“ klappt auf, Zieladresse live, Gebühr, „PSBT“ erzeugt die Datei ---
@@ -1731,6 +2295,12 @@ function formatiereFifoSpendBetrag() {
 function fifoNetzName(netz) {
   const namen = { main: "Mainnet", test: "Testnet", regtest: "Regtest", signet: "Signet" };
   return namen[String(netz || "")] || String(netz || "?");
+}
+
+/** Ziel-Zeile sichtbar? (Senden ▾). */
+function fifoZielZeileOffen() {
+  const zeile = $("#fifo-spend-ziel");
+  return Boolean(zeile && !zeile.hidden);
 }
 
 /** Ziel-Zeile auf- oder zuklappen; der Knopf trägt aria-expanded. */
@@ -1751,31 +2321,49 @@ function fifoZielZeigen(offen) {
     if (adresse && typeof adresse.focus === "function") adresse.focus();
     planeFifoFeeVorschlag();
   }
+  if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
 }
 
 /**
- * „Senden ▸“ nur mit gültigem Betrag (0 < sats ≤ max). Wird der Betrag leer
- * oder ungültig, klappt die Ziel-Zeile zu — Adresse und Gebühr bleiben stehen.
+ * „Senden ▸“ mit gültigem Betrag (0 < sats ≤ max). Ohne grünen Betrag, aber
+ * mit Gesamtsaldo: die Zeile geht trotzdem auf, damit eine eigene
+ * Wallet-Adresse das Maximum auf den Bestand heben kann. Wird der Betrag
+ * leer oder im Format ungültig, klappt die Ziel-Zeile zu — außer das Ziel
+ * ist schon ein eigenes Wallet. Adresse und Gebühr bleiben stehen.
  */
 function aktualisiereFifoPsbtKnopf() {
   const knopf = $("#fifo-spend-psbt");
   if (!knopf) return;
   const zeile = $("#fifo-spend-ziel");
-  const bereit = Zustand.fifoSpendBetragSats !== null && Zustand.fifoSpendBetragSats !== undefined
-    && fifoSpendMax(Zustand.fifoSpend) !== null;
+  const stand = Zustand.fifoSpend;
+  const max = fifoSpendMax(stand);
+  const feld = $("#fifo-spend-betrag");
+  const pruef = fifoSpendBetragPruefen(feld && feld.value, max);
+  const eigen = fifoZielEigenesWallet();
+  const gesamt = fifoSpendGesamtSaldo(stand);
+  const gruen = stand && stand.werte ? Number(stand.werte[stand.modus]) || 0 : 0;
+  const ohneGruenZumEigenen = pruef.status === "leer" && max !== null && gruen <= 0 && gesamt > 0;
+  const bereit = (Zustand.fifoSpendBetragSats !== null && Zustand.fifoSpendBetragSats !== undefined
+    && max !== null) || ohneGruenZumEigenen;
   knopf.disabled = !bereit;
   const offen = Boolean(zeile && !zeile.hidden);
-  if (!bereit && offen) fifoZielZeigen(false);
+  const zuklappen = !bereit && offen && pruef.status !== "bereich" && !eigen;
+  if (zuklappen) fifoZielZeigen(false);
   // Nach einem Sprachwechsel setzt data-i18n wieder „▸“ — hier zum Zustand passend.
   setzeText(knopf, t(zeile && !zeile.hidden ? "wallet.fifoSpendPsbtExpanded" : "wallet.fifoSpendPsbtOpen"));
-  const titel = !bereit
-    ? t("wallet.fifoSpendPsbtNeedsAmount")
-    : t(zeile && !zeile.hidden ? "wallet.fifoSpendPsbtClose" : "wallet.fifoSpendPsbtOpenTitle");
+  let titel;
+  if (!bereit) {
+    titel = t(ohneGruenZumEigenen || (max === 0 && gesamt > 0)
+      ? "wallet.fifoSpendPsbtNeedsOwnAddress"
+      : "wallet.fifoSpendPsbtNeedsAmount");
+  } else {
+    titel = t(zeile && !zeile.hidden ? "wallet.fifoSpendPsbtClose" : "wallet.fifoSpendPsbtOpenTitle");
+  }
   knopf.title = titel;
   const huelle = $("#fifo-spend-psbt-huelle");
   if (huelle) huelle.title = titel;
   // Status-Label neben der Adresse in der aktuellen Sprache nachziehen.
-  if (Zustand.fifoZielErgebnis) zeigeFifoZielAdresse(Zustand.fifoZielErgebnis);
+  if (Zustand.fifoZielErgebnis) zeigeFifoZielAdresse(Zustand.fifoZielErgebnis, true);
   aktualisiereFifoPsbtErzeugen();
 }
 
@@ -1798,7 +2386,7 @@ const FIFO_ZIEL_ENTPRELLEN_MS = 300;
  * (Bezeichnung). Leer = kein Label; prüfend = „…“.
  * Der Tooltip beginnt mit der vollen Adresse — das Feld kann schmaler sein.
  */
-function zeigeFifoZielAdresse(erg) {
+function zeigeFifoZielAdresse(erg, ohneMaximum) {
   const feld = $("#fifo-ziel-adresse");
   if (!feld) return;
   const status = (erg && erg.status) || "";
@@ -1851,7 +2439,11 @@ function zeigeFifoZielAdresse(erg) {
   }
   aktualisiereFifoPsbtErzeugen();
   // Zieltyp (P2WPKH/P2TR/P2WSH) ändert die Gebühr und damit das Netto-Maximum.
-  planeFifoNetto();
+  // Eigenes Wallet hebt das eingebbare Maximum auf den Gesamtsaldo.
+  if (!ohneMaximum) {
+    planeFifoNetto();
+    if (Zustand.fifoSpend) zeichneFifoSpend(Zustand.fifoSpend);
+  }
 }
 
 /** Entprellt: erst nach der Tipp-Pause fragen; späte Antworten verwerfen. */
@@ -1862,12 +2454,12 @@ function pruefeFifoZielAdresse() {
   const roh = String(feld.value || "").trim();
   const lauf = (Zustand.fifoZielLauf || 0) + 1;
   Zustand.fifoZielLauf = lauf;
-  Zustand.fifoZielErgebnis = null;
   if (!roh) {
+    Zustand.fifoZielErgebnis = null;
     zeigeFifoZielAdresse(null);
     return;
   }
-  zeigeFifoZielAdresse({ status: "pruefe" });
+  zeigeFifoZielAdresse({ status: "pruefe" }, true);
   Zustand.fifoZielTimer = setTimeout(async () => {
     let erg;
     try {
@@ -1967,6 +2559,7 @@ function fifoAuswahlKoerper(stand, sats) {
     strategie: fifoStrategie(),
     utxos,
     pending,
+    eigenes_ziel: fifoZielEigenesWallet(),
     // Nur für die vbytes (Multisig-Inputs sind größer) — kein Bestand vom Server.
     wallet_id: id,
   };
@@ -2043,7 +2636,7 @@ function planeFifoFeeVorschlag() {
   const koerper = fifoAuswahlKoerper(stand, sats);
   // Neu fragen bei anderem Betrag, Modus, Wallet oder Bestand (inkl. Mempool).
   const schluessel = [sats, koerper.modus, koerper.strategie, stand.walletId || "", koerper.utxos.length,
-    koerper.pending.slice().sort().join(",")].join("|");
+    koerper.pending.slice().sort().join(","), koerper.eigenes_ziel ? "1" : "0"].join("|");
   if (Zustand.fifoFeeSchluessel === schluessel) return;
   Zustand.fifoFeeSchluessel = schluessel;
   clearTimeout(Zustand.fifoFeeTimer);
@@ -2067,7 +2660,178 @@ function planeFifoFeeVorschlag() {
       feld.dataset.vorschlag = "1";
     }
     pruefeFifoZielFee();
+    if (typeof aktualisiereFifoAuswahlListe === "function") aktualisiereFifoAuswahlListe();
   }, FIFO_FEE_ENTPRELLEN_MS);
+}
+
+/**
+ * Anteil jedes ausgewählten Inputs am Zielbetrag: die Coin-Auswahl liefert
+ * die Inputs bereits älteste zuerst. Grün (``sats_gruen``) füllt nacheinander
+ * den Betrag an die Zieladresse; Rest (Gebühr, Wechselgeld) steht nicht in
+ * der UTXO-Zeile.
+ */
+function fifoZielAnteile(inputs, betrag) {
+  let rest = Math.max(0, Math.floor(Number(betrag) || 0));
+  const aus = [];
+  for (const inp of inputs || []) {
+    const gruen = Math.max(0, Math.floor(Number(inp && inp.sats_gruen) || 0));
+    const ziel = Math.min(gruen, rest);
+    rest -= ziel;
+    aus.push({ input: inp, ziel_sats: ziel });
+  }
+  return aus;
+}
+
+/** Fertige Coin-Auswahl zur offenen Ziel-Zeile, sonst null. */
+function fifoAuswahlAktuell() {
+  if (!fifoZielZeileOffen()) return null;
+  const v = Zustand.fifoFeeVorschlag;
+  if (!v || v.status !== "ok" || !Array.isArray(v.inputs)) return null;
+  if (!(Zustand.fifoSpendBetragSats > 0)) return null;
+  // Erste Antwort abwarten; eine schon gezeigte Vorschau bleibt während des
+  // Nachladens stehen (Strategiewechsel), statt kurz die ganze Liste zu zeigen.
+  if (Zustand.fifoFeeLaedt && !Zustand.fifoAuswahlListeAktiv) return null;
+  return v;
+}
+
+/** UTXO der aktuellen Wallet-Seite zum Schlüssel. */
+function fifoUtxoAusBestand(key) {
+  const k = String(key || "");
+  if (!k) return null;
+  const daten = Zustand._walletUtxoDaten;
+  if (!daten) return null;
+  const trifft = (u) => u && fifoUtxoKey(u) === k;
+  for (const u of daten.utxos || []) {
+    if (trifft(u)) return u;
+  }
+  for (const g of daten.addresses || []) {
+    for (const u of (g && g.utxos) || []) {
+      if (trifft(u)) return u;
+    }
+  }
+  const seite = Zustand._walletUtxoSeite;
+  for (const g of (seite && seite.items) || []) {
+    if (trifft(g)) return g;
+    for (const u of (g && g.utxos) || []) {
+      if (trifft(u)) return u;
+    }
+  }
+  return null;
+}
+
+/** Zeilen-Objekt: Bestand, sonst Steuer-Punkt, sonst die Auswahl-Antwort. */
+function fifoUtxoFuerAuswahl(input) {
+  const key = fifoUtxoKey(input);
+  const bestand = fifoUtxoAusBestand(key);
+  if (bestand) return bestand;
+  const stand = Zustand.fifoSpend;
+  for (const e of (stand && stand.events) || []) {
+    if (fifoUtxoKey(e) !== key) continue;
+    return {
+      key: e.key || key,
+      txid: e.txid,
+      vout: e.vout,
+      value_sats: e.value_sats,
+      address: e.address,
+      time_label: e.datum,
+      block_time: e.time_ts,
+    };
+  }
+  return {
+    key,
+    txid: input && input.txid,
+    vout: input && input.vout,
+    value_sats: input && input.value_sats,
+    block_time: input && input.time_ts,
+  };
+}
+
+/** UTXO-Saldo durch die Sats an die Zieladresse ersetzen (grün). */
+function setzeFifoUtxoZielBetrag(zeile, sats) {
+  if (!zeile) return;
+  const betrag = zeile.querySelector(":scope > .betrag");
+  if (!betrag) return;
+  betrag.classList.add("fifo-betrag-gruen");
+  const n = Math.max(0, Math.floor(Number(sats) || 0));
+  if (typeof setzeSatsBetrag === "function") setzeSatsBetrag(betrag, n);
+  else betrag.textContent = typeof formatSats === "function" ? formatSats(n) : String(n);
+  betrag.title = t("wallet.fifoUtxoToDestTitle", {
+    sats: typeof formatZahl === "function" ? formatZahl(n) : String(n),
+  });
+}
+
+/** Eine Zeile unter den Inputs: Wechselgeld in Gelb. */
+function zeichneFifoChangeZeile(sats) {
+  const zeile = document.createElement("div");
+  zeile.className = "utxo-zeile fifo-change-zeile";
+  zeile.dataset.rolle = "wechsel";
+  const n = Math.max(0, Math.floor(Number(sats) || 0));
+  const betrag = document.createElement("span");
+  betrag.className = "betrag fifo-betrag-gelb";
+  if (typeof setzeSatsBetrag === "function") setzeSatsBetrag(betrag, n);
+  else betrag.textContent = typeof formatSats === "function" ? formatSats(n) : String(n);
+  betrag.title = t("wallet.fifoChangeRowTitle", {
+    sats: typeof formatZahl === "function" ? formatZahl(n) : String(n),
+  });
+  const name = document.createElement("span");
+  name.className = "fifo-change-label";
+  name.textContent = t("wallet.fifoChangeRow");
+  zeile.append(betrag, name);
+  return zeile;
+}
+
+/** ``#adress-koerper`` durch die ausgewählten Inputs ersetzen; Pager weg. */
+function zeichneFifoAuswahlListe(v) {
+  const koerper = $("#adress-koerper");
+  if (!koerper || typeof zeichneUtxoZeile !== "function") return;
+  const anteile = fifoZielAnteile(v.inputs, Zustand.fifoSpendBetragSats);
+  const liste = document.createElement("div");
+  liste.className = "fifo-auswahl-liste";
+  for (const a of anteile) {
+    const zeile = zeichneUtxoZeile(fifoUtxoFuerAuswahl(a.input));
+    setzeFifoUtxoZielBetrag(zeile, a.ziel_sats);
+    liste.append(zeile);
+  }
+  liste.append(zeichneFifoChangeZeile(v.wechselgeld_sats));
+  koerper.replaceChildren(liste);
+  Zustand.fifoAuswahlListeAktiv = true;
+  const zusatz = $("#adress-zusatz");
+  if (zusatz) {
+    setzeText(zusatz, t("wallet.utxoCount", {
+      count: typeof formatZahl === "function" ? formatZahl(anteile.length) : String(anteile.length),
+    }));
+  }
+}
+
+/** Bestand inkl. Pager, wie vor der Sende-Vorschau. */
+function stelleWalletUtxoListeWiederHer() {
+  if (typeof zeichneUtxos !== "function") return;
+  const daten = Zustand._walletUtxoDaten;
+  if (!daten) return;
+  const id = Zustand.walletId;
+  const wallet = ((Zustand.config && Zustand.config.wallets) || []).find(
+    (w) => String(w.id) === String(id),
+  );
+  zeichneUtxos(daten, wallet, Zustand._walletUtxoSeite);
+}
+
+/**
+ * Offene Ziel-Zeile + fertige Auswahl: nur die Inputs, Ziel-Sats grün,
+ * Change gelb. Sonst die normale UTXO-Liste. Kopf-Filter folgt der Zeile.
+ */
+function aktualisiereFifoAuswahlListe() {
+  if (typeof aktualisiereKopfFilterFuerAnsicht === "function") {
+    aktualisiereKopfFilterFuerAnsicht();
+  }
+  const v = fifoAuswahlAktuell();
+  if (v) {
+    zeichneFifoAuswahlListe(v);
+    return;
+  }
+  if (Zustand.fifoAuswahlListeAktiv) {
+    Zustand.fifoAuswahlListeAktiv = false;
+    stelleWalletUtxoListeWiederHer();
+  }
 }
 
 /** Tippen im Gebührenfeld: ab jetzt eigener Wert — leer heißt zurück zum Vorschlag. */
@@ -2317,6 +3081,18 @@ function bindeFifoSpend() {
     ev.preventDefault();
     formatiereFifoSpendBetrag();
   });
+  const fiat = $("#fifo-spend-fiat");
+  if (fiat) {
+    fiat.addEventListener("input", pruefeFifoSpendFiat);
+    fiat.addEventListener("blur", formatiereFifoSpendFiat);
+    fiat.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.isComposing) return;
+      ev.preventDefault();
+      formatiereFifoSpendFiat();
+    });
+  }
+  const maxKnopf = $("#fifo-spend-max");
+  if (maxKnopf) maxKnopf.addEventListener("click", fifoSpendMaxEintragen);
   // „Senden ▸/▾“ klappt nur die Ziel-Zeile auf — keine PSBT, keine Unterschrift, kein Versand.
   const knopf = $("#fifo-spend-psbt");
   if (knopf) knopf.addEventListener("click", fifoZielUmschalten);
@@ -2669,6 +3445,8 @@ function setzeUtxoTraceDaten(el, utxo) {
     el.dataset.blockHeight = String(utxo.block_height);
   }
   if (utxo.time_label) el.dataset.timeLabel = String(utxo.time_label);
+  if (utxo.spent_txid) el.dataset.spentTxid = String(utxo.spent_txid);
+  else delete el.dataset.spentTxid;
   if (utxo.juengste_sats_ts) {
     el.dataset.juengsteSatsTs = String(utxo.juengste_sats_ts);
   } else {
@@ -2829,10 +3607,24 @@ function scanZielWalletId() {
   return "";
 }
 
+const ALLE_WALLETS_SCAN_ID = "alle";
+
 function scanBetrifftDieseAnsicht() {
   if (Zustand.ansicht !== "wallet" || !Zustand.walletId) return false;
   const ziel = scanZielWalletId();
   return Boolean(ziel) && ziel === String(Zustand.walletId);
+}
+
+/** „Alle Wallets: UTXOs“ schreibt auch das offene Wallet. */
+function scanIstAlleWallets() {
+  return scanZielWalletId() === ALLE_WALLETS_SCAN_ID;
+}
+
+/** Sammelscan schreibt jedes Wallet. Die offene Ansicht danach neu laden. */
+function scanTrifftOffeneWallet(scanId) {
+  if (Zustand.ansicht !== "wallet" || !Zustand.walletId || !scanId) return false;
+  return String(Zustand.walletId) === String(scanId)
+    || String(scanId) === ALLE_WALLETS_SCAN_ID;
 }
 
 /** „für „Name““ nur, wenn der Scan nicht das gerade offene Wallet ist. */
@@ -2912,9 +3704,21 @@ function setzeTipSyncSichtbarkeit() {
   tipSync.hidden = false;
 }
 
+function i18nTitel(el) {
+  // dataset.titel würde den deutschen HTML-Titel festnageln. Der Schlüssel
+  // bleibt, die sichtbare Sprache kommt aus dem aktuellen Katalog.
+  const key = el && el.getAttribute("data-i18n-title");
+  if (key) {
+    const text = t(key);
+    if (text && text !== key) return text;
+  }
+  return (el && el.title) || "";
+}
+
 function setzeWalletScanGesperrt() {
   const rescan = $("#rescan-knopf");
   const verlauf = $("#verlauf-knopf");
+  const alleUtxos = $("#utxos-alle-knopf");
   const tipSync = $("#tip-sync-knopf");
   const tief = $("#herkunft-tief-knopf");
   const wid = Zustand.walletId;
@@ -2925,39 +3729,40 @@ function setzeWalletScanGesperrt() {
   const tipLaeuft = Boolean(wid && walletSyncLaeuftFuer(wid));
   const tiefLaeuft = Boolean(wid && herkunftTiefLaeuftFuer(wid));
   if (rescan) {
-    if (!rescan.dataset.titel) rescan.dataset.titel = rescan.title || "";
     rescan.disabled = utxoGeplant;
     rescan.title = rescan.disabled
       ? t("nav.jobAlreadyRunning")
-      : rescan.dataset.titel;
+      : i18nTitel(rescan);
   }
   if (verlauf) {
-    if (!verlauf.dataset.titel) verlauf.dataset.titel = verlauf.title || "";
     verlauf.disabled = verlaufGeplant;
     verlauf.title = verlauf.disabled
       ? t("nav.jobAlreadyRunning")
-      : verlauf.dataset.titel;
+      : i18nTitel(verlauf);
+  }
+  if (alleUtxos) {
+    const alleGeplant = schonGeplant({ id: ALLE_WALLETS_SCAN_ID, art: "utxo" });
+    alleUtxos.disabled = alleGeplant;
+    alleUtxos.title = alleUtxos.disabled
+      ? t("nav.jobAlreadyRunning")
+      : i18nTitel(alleUtxos);
   }
   if (tipSync) {
     setzeTipSyncSichtbarkeit();
-    if (!tipSync.dataset.titel) tipSync.dataset.titel = tipSync.title || "";
     const hatCache = (Zustand.config?.wallets || []).some(
       (w) => w.id === wid && w.has_cache,
     );
     tipSync.disabled = Boolean(tipLaeuft || !hatCache || !wid);
     tipSync.title = tipLaeuft
       ? t("nav.jobAlreadyRunning")
-      : (!hatCache ? t("wallet.tipSyncNeedCache") : tipSync.dataset.titel);
+      : (!hatCache ? t("wallet.tipSyncNeedCache") : i18nTitel(tipSync));
   }
   if (tief) {
-    if (!tief.dataset.titel) tief.dataset.titel = tief.title || "";
-    const hatCache = (Zustand.config?.wallets || []).some(
-      (w) => w.id === wid && w.has_cache,
-    );
-    tief.disabled = Boolean(tiefLaeuft || !hatCache || !wid);
-    tief.title = tiefLaeuft
+    const klaerenLaeuft = Boolean(Zustand.herkunftAlleLaeuft);
+    tief.disabled = Boolean(tiefLaeuft || klaerenLaeuft || !wid);
+    tief.title = (tiefLaeuft || klaerenLaeuft)
       ? t("nav.jobAlreadyRunning")
-      : (!hatCache ? t("wallet.originDeepNeedCache") : tief.dataset.titel);
+      : i18nTitel(tief);
   }
 }
 
@@ -2988,6 +3793,14 @@ function aktualisiereScanAnzeige(stand) {
   if (!Zustand.rescanJob && !pipe.current) {
     leiste.classList.remove("hinweis-fremd");
     setzeText($("#rescan-text"), (danach || "").trim() || t("common.runningEllipsis"));
+  } else if (scanIstAlleWallets() && Zustand.ansicht === "wallet" && Zustand.walletId) {
+    // Der Lauf heißt „alle“, trifft aber genau diese Ansicht. „Nicht für
+    // dieses Wallet“ wäre falsch und die Warnfarbe auch.
+    leiste.classList.remove("hinweis-fremd");
+    setzeText(
+      $("#rescan-text"),
+      t("wallet.allWalletsScanStatus", { art, schritt, danach }),
+    );
   } else if (scanBetrifftDieseAnsicht()) {
     // Das Wallet ist schon gewählt — den Namen nicht noch einmal nennen.
     leiste.classList.remove("hinweis-fremd");
@@ -3065,44 +3878,204 @@ function brauchtBip158Startdatum(walletId) {
   return true;
 }
 
-function vorschlagScanDatum(wallet) {
-  const typ = (wallet && (wallet.script_type_effective || wallet.script_type)) || "";
-  if (typ === "taproot" || typ === "tr") return "2021-11-14";
-  if (typ === "legacy") return "2009-01-03";
-  return "2017-08-24";
+function p2pScanStartHoehe() {
+  const liste = Zustand.config?.sources || [];
+  const bip = liste.find((q) => q && q.key === "bip158");
+  const n = Number(bip && bip.start_height);
+  if (!Number.isInteger(n) || n < 0) return 481824;
+  return n;
 }
 
-function frageScanDatum(wallet) {
+function p2pScanGapLimit() {
+  const liste = Zustand.config?.sources || [];
+  const bip = liste.find((q) => q && q.key === "bip158");
+  const n = Number(bip && bip.gap_limit);
+  if (!Number.isInteger(n) || n < 1) return 100;
+  return n > 10000 ? 10000 : n;
+}
+
+function scanDialogEnterBlur(feld) {
+  return (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    e.stopPropagation();
+    feld.blur();
+  };
+}
+
+async function scanDialogDatumNachHoehe(datumFeld, hoeheFeld) {
+  if (!datumFeld || !hoeheFeld || typeof p2pScanZeitUmrechnen !== "function") {
+    return;
+  }
+  const roh = String(datumFeld.value || "").trim();
+  if (!roh) return;
+  if (datumFeld.dataset.savedValue === roh) return;
+  Zustand._p2pDatumLauf = (Zustand._p2pDatumLauf || 0) + 1;
+  const lauf = Zustand._p2pDatumLauf;
+  datumFeld.disabled = true;
+  try {
+    const ergebnis = await p2pScanZeitUmrechnen({ datum: roh });
+    if (lauf !== Zustand._p2pDatumLauf) return;
+    const n = Number(ergebnis && ergebnis.height);
+    if (!Number.isInteger(n) || n < 0) {
+      meldung(t("sources.bip158DateInvalid"), "krit");
+      return;
+    }
+    hoeheFeld.value = String(n);
+    hoeheFeld.dataset.savedValue = String(n);
+    if (typeof merkeP2pScanDatum === "function") merkeP2pScanDatum(n, roh);
+    datumFeld.dataset.savedValue = roh;
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  } finally {
+    if (datumFeld.isConnected) datumFeld.disabled = false;
+  }
+}
+
+async function scanDialogHoeheNachDatum(hoeheFeld, datumFeld) {
+  if (!hoeheFeld || !datumFeld || typeof p2pScanZeitUmrechnen !== "function") {
+    return;
+  }
+  const roh = String(hoeheFeld.value || "").trim();
+  if (!roh) return;
+  const n = Number(roh);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    meldung(t("sources.bip158StartInvalid"), "krit");
+    return;
+  }
+  if (hoeheFeld.dataset.savedValue === String(n) && datumFeld.value) return;
+  hoeheFeld.dataset.savedValue = String(n);
+  try {
+    const ergebnis = await p2pScanZeitUmrechnen({ hoehe: n });
+    if (ergebnis && ergebnis.date) {
+      if (typeof merkeP2pScanDatum === "function") {
+        merkeP2pScanDatum(n, ergebnis.date);
+      }
+      datumFeld.value = ergebnis.date;
+      datumFeld.dataset.savedValue = ergebnis.date;
+    }
+  } catch (_) { /* Höhe gilt trotzdem. */ }
+}
+
+async function vorschlagScanDatum() {
+  const hoehe = p2pScanStartHoehe();
+  const gap = p2pScanGapLimit();
+  let datum = "";
+  if (typeof p2pScanDatumCache === "function") {
+    const cached = p2pScanDatumCache()[String(hoehe)];
+    if (cached) datum = cached;
+  }
+  if (!datum && typeof p2pScanZeitUmrechnen === "function") {
+    try {
+      const ergebnis = await p2pScanZeitUmrechnen({ hoehe });
+      if (ergebnis && ergebnis.date) {
+        datum = ergebnis.date;
+        if (typeof merkeP2pScanDatum === "function") {
+          merkeP2pScanDatum(hoehe, datum);
+        }
+      }
+    } catch (_) { /* Hinweis trägt die Höhe. */ }
+  }
+  return { datum, hoehe, gap };
+}
+
+async function frageScanDatum(wallet) {
+  const dlg = $("#scan-datum-dialog");
+  const datum = $("#scan-datum-feld");
+  const hoehe = $("#scan-hoehe-feld");
+  const gap = $("#scan-gap-feld");
+  const hinweis = $("#scan-datum-hinweis");
+  const ok = $("#scan-datum-ok");
+  const abbruch = $("#scan-datum-abbruch");
+  const vorschlag = await vorschlagScanDatum(wallet);
+  const hoeheText = typeof formatZahl === "function"
+    ? formatZahl(vorschlag.hoehe)
+    : String(vorschlag.hoehe);
   return new Promise((resolve) => {
-    const dlg = $("#scan-datum-dialog");
-    const feld = $("#scan-datum-feld");
-    const hinweis = $("#scan-datum-hinweis");
-    const ok = $("#scan-datum-ok");
-    const abbruch = $("#scan-datum-abbruch");
-    feld.value = vorschlagScanDatum(wallet);
-    const typ = (wallet && (wallet.script_type_effective || wallet.script_type)) || "";
-    hinweis.textContent =
-      typ === "legacy"
-        ? t("dialog.scanDate.hintGenesis")
-        : typ === "taproot" || typ === "tr"
-          ? t("dialog.scanDate.hintTaproot")
-          : t("dialog.scanDate.hintSegwit");
+    hoehe.value = String(vorschlag.hoehe);
+    hoehe.dataset.savedValue = String(vorschlag.hoehe);
+    datum.value = vorschlag.datum || "";
+    datum.dataset.savedValue = vorschlag.datum || "";
+    if (!vorschlag.datum && typeof fuelleBip158DatumFeld === "function") {
+      fuelleBip158DatumFeld(datum, vorschlag.hoehe);
+    }
+    gap.value = String(vorschlag.gap);
+    gap.dataset.savedValue = String(vorschlag.gap);
+    hinweis.textContent = t("dialog.scanDate.hintSource", { n: hoeheText });
     dlg.hidden = false;
-    feld.focus();
+    datum.focus();
+
+    let geschlossen = false;
+    let umrechnung = Promise.resolve();
+    const onDatumBlur = () => {
+      umrechnung = umrechnung.then(() => scanDialogDatumNachHoehe(datum, hoehe));
+    };
+    const onHoeheChange = () => {
+      umrechnung = umrechnung.then(() => scanDialogHoeheNachDatum(hoehe, datum));
+    };
+    const onGapChange = () => {
+      const roh = String(gap.value || "").trim();
+      if (!roh) {
+        gap.value = gap.dataset.savedValue || "100";
+        return;
+      }
+      const n = Number(roh);
+      if (!Number.isInteger(n) || n < 1 || n > 10000) {
+        meldung(t("sources.bip158GapInvalid"), "krit");
+        gap.value = gap.dataset.savedValue || "100";
+        return;
+      }
+      gap.dataset.savedValue = String(n);
+    };
+    const onDatumEnter = scanDialogEnterBlur(datum);
+    const onHoeheEnter = scanDialogEnterBlur(hoehe);
+    const onGapEnter = scanDialogEnterBlur(gap);
 
     const fertig = (wert) => {
+      if (geschlossen) return;
+      geschlossen = true;
       ok.removeEventListener("click", onOk);
       abbruch.removeEventListener("click", onAbbruch);
       dlg.removeEventListener("keydown", onTaste);
+      datum.removeEventListener("blur", onDatumBlur);
+      datum.removeEventListener("keydown", onDatumEnter);
+      hoehe.removeEventListener("change", onHoeheChange);
+      hoehe.removeEventListener("keydown", onHoeheEnter);
+      gap.removeEventListener("change", onGapChange);
+      gap.removeEventListener("keydown", onGapEnter);
       dlg.hidden = true;
       resolve(wert);
     };
-    const onOk = () => fertig(feld.value || null);
+    const onOk = () => {
+      umrechnung.then(() => {
+        const hoeheN = Number(String(hoehe.value || "").trim());
+        if (!Number.isInteger(hoeheN) || hoeheN < 0) {
+          meldung(t("sources.bip158StartInvalid"), "krit");
+          return;
+        }
+        const gapN = Number(String(gap.value || "").trim());
+        if (!Number.isInteger(gapN) || gapN < 1 || gapN > 10000) {
+          meldung(t("sources.bip158GapInvalid"), "krit");
+          return;
+        }
+        fertig({
+          datum: String(datum.value || "").trim(),
+          hoehe: hoeheN,
+          gap: gapN,
+        });
+      });
+    };
     const onAbbruch = () => fertig(undefined);
     const onTaste = (ev) => {
       if (ev.key === "Escape") onAbbruch();
-      if (ev.key === "Enter") onOk();
+      if (ev.key === "Enter" && ev.target === ok) onOk();
     };
+    datum.addEventListener("blur", onDatumBlur);
+    datum.addEventListener("keydown", onDatumEnter);
+    hoehe.addEventListener("change", onHoeheChange);
+    hoehe.addEventListener("keydown", onHoeheEnter);
+    gap.addEventListener("change", onGapChange);
+    gap.addEventListener("keydown", onGapEnter);
     ok.addEventListener("click", onOk);
     abbruch.addEventListener("click", onAbbruch);
     dlg.addEventListener("keydown", onTaste);
@@ -3182,6 +4155,53 @@ function starteVerlaufsscan() {
   stelleScanAn("verlauf");
 }
 
+/** Alle Wallets: ein Lauf. P2P nur gemeinsam, sonst der schnellste Bestandsweg. */
+async function starteUtxosAlle() {
+  const ziel = {
+    id: ALLE_WALLETS_SCAN_ID,
+    name: t("wallet.allWalletsName"),
+    art: "utxo",
+  };
+  if (schonGeplant(ziel)) {
+    logZeile(t("nav.jobAlreadyRunning"), undefined, ziel.name);
+    setzeWalletScanGesperrt();
+    return;
+  }
+  logZeile(t("wallet.allWalletsUtxosStarted"), undefined, ziel.name);
+  const knopf = $("#utxos-alle-knopf");
+  if (knopf) knopf.disabled = true;
+  try {
+    const job = await api("/jobs/rescan-alle", { methode: "POST", daten: {} });
+    if (job.queue_status === "queued" || job.status === "queued") {
+      logZeile(
+        `${t("wallet.allWalletsName")} in die Warteschlange.`,
+        undefined,
+        ziel.name,
+      );
+      await ladeJobsNav();
+      setzeWalletScanGesperrt();
+      return;
+    }
+    bindeWalletScanJob(job, ziel);
+    logZeile(
+      "Browser darf geschlossen werden — Server und Scan laufen im Terminal weiter.",
+      undefined,
+      ziel.name,
+    );
+    await ladeJobsNav();
+  } catch (fehler) {
+    if (fehler && fehler.status === 409) {
+      logZeile(fehler.message || t("nav.jobAlreadyRunning"), true, ziel.name);
+      setzeWalletScanGesperrt();
+      await ladeJobsNav();
+      return;
+    }
+    if (knopf) knopf.disabled = false;
+    logZeile(fehler.message || String(fehler), true, ziel.name);
+    beendeRescan("", true);
+  }
+}
+
 /** Inkrementell bis Chain-Tip — kein Fullscan (anders als UTXO-Scan). */
 async function starteTipSync() {
   const wid = Zustand.walletId;
@@ -3224,11 +4244,22 @@ async function starteTipSync() {
 }
 
 async function starteScanFuer(ziel) {
+  if (
+    ziel.art === "verlauf"
+    && typeof electrumSpurBlockiert === "function"
+    && electrumSpurBlockiert()
+  ) {
+    return;
+  }
   if (ziel.art === "utxo" && brauchtBip158Startdatum(ziel.id)) {
     const wallet = (Zustand.config?.wallets || []).find((w) => w.id === ziel.id);
-    const datum = await frageScanDatum(wallet);
-    if (datum === undefined) return;
-    ziel.scan_ab = datum;
+    const wahl = await frageScanDatum(wallet);
+    if (wahl === undefined) return;
+    if (wahl) {
+      ziel.scan_ab = wahl.datum || "";
+      ziel.start_height = wahl.hoehe;
+      ziel.gap_limit = wahl.gap;
+    }
   }
 
   if (schonGeplant(ziel)) {
@@ -3252,6 +4283,11 @@ async function starteScanFuer(ziel) {
       undefined,
       ziel.name,
     );
+  } else if (ziel.start_height != null) {
+    const hoeheText = typeof formatZahl === "function"
+      ? formatZahl(ziel.start_height)
+      : String(ziel.start_height);
+    logZeile(`BIP-158 ab Block ${hoeheText}.`, undefined, ziel.name);
   }
 
   try {
@@ -3259,7 +4295,12 @@ async function starteScanFuer(ziel) {
       ? await api("/verlauf", { methode: "POST", daten: { wallet_id: ziel.id } })
       : await api("/jobs/rescan", {
           methode: "POST",
-          daten: { wallet_id: ziel.id, scan_ab: ziel.scan_ab || "" },
+          daten: {
+            wallet_id: ziel.id,
+            scan_ab: ziel.scan_ab || "",
+            start_height: ziel.start_height,
+            gap_limit: ziel.gap_limit,
+          },
         });
 
     if (job.queue_status === "queued" || job.status === "queued") {
@@ -3295,6 +4336,8 @@ function bindeWalletScanJob(job, ziel) {
   Zustand.scanWalletName = ziel.name || walletNameZu(ziel.id);
   Zustand.scanArt = ziel.art;
   Zustand.scanUtxoZahl = null;
+  Zustand.scanUtxoJeWallet = {};
+  Zustand.scanFundKeys = new Set();
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
   Zustand.scanLogIndex = 0;
@@ -3308,11 +4351,15 @@ function bindeWalletScanJob(job, ziel) {
   nimmJobLog(job);
   aktualisiereScanAnzeige(job.message || "wird gestartet…");
   zeichneNav();
-  // Empfangs-Pane: Herzschlag wenn dieses Wallet gewählt (Lern-QR weichen).
-  if (Zustand.walletId === ziel.id) {
+  // Empfangs-Pane: Herzschlag, wenn dieses Wallet gescannt wird oder der
+  // UTXO-Lauf alle Wallets läuft (Lern-QR weichen).
+  const pulsWallet = Zustand.walletId === ziel.id
+    ? ziel.id
+    : (String(ziel.id) === ALLE_WALLETS_SCAN_ID ? Zustand.walletId : "");
+  if (pulsWallet) {
     Zustand.lernThema = null;
     EmpfangPuls.stop();
-    ladeEmpfang(ziel.id).catch(() => {});
+    ladeEmpfang(pulsWallet).catch(() => {});
   }
   if (Zustand.rescanTimer) clearInterval(Zustand.rescanTimer);
   Zustand.rescanTimer = setInterval(pruefeWalletScan, 900);
@@ -3320,6 +4367,30 @@ function bindeWalletScanJob(job, ziel) {
 
 /** Während UTXO-Scan: Cache-Zwischenstand höchstens alle ~2,5 s in die GUI. */
 const SCAN_REFRESH_MS = 2500;
+
+/**
+ * Jeder in diesem Scan neu gefundene UTXO des offenen Wallets
+ * spielt dieselbe Ka-Ching-Animation wie ein Mempool-Empfang.
+ */
+function spieleScanFunde(job) {
+  const liste = job && job.result && job.result.entdeckt;
+  if (!Array.isArray(liste) || !Zustand.walletId) return;
+  if (!Zustand.scanFundKeys) Zustand.scanFundKeys = new Set();
+  for (const fund of liste) {
+    if (!fund || !fund.key) continue;
+    const key = String(fund.key);
+    if (Zustand.scanFundKeys.has(key)) continue;
+    Zustand.scanFundKeys.add(key);
+    if (String(fund.wallet_id || "") !== String(Zustand.walletId)) continue;
+    const sats = Number(fund.value_sats);
+    if (typeof EmpfangPuls !== "undefined" && EmpfangPuls.flashIncoming) {
+      EmpfangPuls.flashIncoming(
+        Zustand.walletId,
+        Number.isFinite(sats) ? sats : undefined,
+      );
+    }
+  }
+}
 
 async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   if (Zustand.scanRefreshLaeuft) return;
@@ -3329,25 +4400,12 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
   const jetzt = Date.now();
   if (jetzt - Zustand.scanRefreshUm < SCAN_REFRESH_MS && vorher != null) return;
 
-  // Erster Fund-Schub: ein oranger ₿-Atemzug (nur wenn Betrag ≥ 500 sats
-  // bekannt — Zwischenstand hat oft nur die Anzahl, dann kein Flash).
-  // Weitere Funde während der Animation → still, Animation läuft aus.
-  if (
-    Zustand.walletId === scanId
-    && typeof utxoZahl === "number"
-    && utxoZahl > 0
-    && (vorher == null || utxoZahl > vorher)
-  ) {
-    // Ohne Einzelbetrag: Mindestgröße (Dust = 500 → 15 %).
-    EmpfangPuls.flashOrangeB(500);
-  }
-
   Zustand.scanRefreshLaeuft = true;
   Zustand.scanRefreshUm = jetzt;
   if (utxoZahl != null) Zustand.scanUtxoZahl = utxoZahl;
   try {
     await ladeConfig();
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
+    if (scanTrifftOffeneWallet(scanId)) {
       await zeigeWallet(Zustand.walletId);
     } else {
       zeichneNav();
@@ -3570,10 +4628,18 @@ async function pruefeWalletScan() {
     aktualisiereScanAnzeige(job.message);
     if (job.running) {
       if (Zustand.scanArt === "utxo") {
+        spieleScanFunde(job);
         const zahl = job.result?.utxo_count;
+        const je = job.result?.utxo_je_wallet;
+        let jeAnders = false;
+        if (je && typeof je === "object" && !Array.isArray(je)) {
+          jeAnders = JSON.stringify(je) !== JSON.stringify(Zustand.scanUtxoJeWallet || {});
+          Zustand.scanUtxoJeWallet = je;
+        }
         if (typeof zahl === "number") {
           await erfrischeScanZwischenstand(scanId, zahl);
         }
+        if (jeAnders) zeichneNav();
         if (Array.isArray(job.result?.neu) && typeof zeichneScanPunkte === "function") {
           zeichneScanPunkte(job.result.neu);
         }
@@ -3586,7 +4652,7 @@ async function pruefeWalletScan() {
       Zustand.traceListe = null;
       pagerCachesVerwerfen();
       await ladeConfig();
-      if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
+      if (scanTrifftOffeneWallet(scanId)) {
         await zeigeWallet(Zustand.walletId);
       } else {
         zeichneNav();
@@ -3615,7 +4681,7 @@ async function pruefeWalletScan() {
 async function erfrischeWalletNachScan(scanId) {
   try {
     await ladeConfig();
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === scanId) {
+    if (scanTrifftOffeneWallet(scanId)) {
       await zeigeWallet(Zustand.walletId);
     } else {
       zeichneNav();
@@ -3635,6 +4701,7 @@ function beendeRescan(_meldung, _istFehler = false) {
   Zustand.scanWalletName = "";
   Zustand.scanSchritt = "";
   Zustand.scanUtxoZahl = null;
+  Zustand.scanUtxoJeWallet = {};
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
   if (scanId) {
@@ -3651,8 +4718,13 @@ function beendeRescan(_meldung, _istFehler = false) {
   // Wallet-Inhalt kommt vom Cache-Zwischenstand (Caller refreshed) —
   // hier keine Leer-Meldung mehr, die gefundene UTXOs verdecken würde.
   zeichneNav();
-  if (scanId && Zustand.walletId === scanId && !Zustand.lernThema) {
-    ladeEmpfang(scanId).catch(() => {});
+  const offen = Zustand.walletId;
+  const pulsEnde = scanId && offen && (
+    String(scanId) === String(offen)
+    || String(scanId) === ALLE_WALLETS_SCAN_ID
+  );
+  if (pulsEnde && !Zustand.lernThema) {
+    ladeEmpfang(offen).catch(() => {});
   }
 }
 

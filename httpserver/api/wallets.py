@@ -987,10 +987,7 @@ def api_lab_faucet_senden(state: AppState, payload: dict) -> dict:
     Nur bei ``NETWORK=regtest``. Lässt die Tx im Mempool (kein Auto-Mine),
     damit Incoming-Animationen testbar bleiben.
     """
-    from server import (
-        ApiError,
-        _LAB_FAUCET_WALLET,
-    )
+    from server import ApiError
 
     werte = state.env().values()
     netz = (werte.get("NETWORK") or "").strip().lower()

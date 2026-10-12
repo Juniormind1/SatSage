@@ -684,12 +684,23 @@ def _eigener_watch_client(state):
     if not lan:
         return chain_sources._try_own_fulcrum_client(args, werte)
     host, port, use_ssl = lan
+    if chain_sources.host_ist_klare_ip(host):
+        client, _port, _ssl, _fehler = chain_sources.verbinde_eigenen_electrs_ip(
+            host,
+            timeout=FULCRUM_CONNECT_TIMEOUT,
+            require_listunspent=False,
+            port=port,
+            use_ssl=use_ssl,
+        )
+        return client
     client, fehler = connect_fulcrum(
         host, port, use_ssl=use_ssl, timeout=FULCRUM_CONNECT_TIMEOUT,
     )
     if client:
         return client
-    if fehler and chain_sources.tls_should_try_opposite(fehler):
+    if fehler and chain_sources.tls_should_try_opposite(
+        fehler, use_ssl=use_ssl, port=port,
+    ):
         client, _fehler = connect_fulcrum(
             host, port, use_ssl=not use_ssl, timeout=FULCRUM_CONNECT_TIMEOUT,
         )

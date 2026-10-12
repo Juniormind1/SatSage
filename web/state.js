@@ -29,6 +29,8 @@ const Zustand = {
   scanLogStand: { index: 0, knoten: [], texte: [] },
   /** Bisherige UTXO-Zahl aus Job-Zwischenstand (während UTXO-Scan). */
   scanUtxoZahl: null,
+  /** UTXO-Zahl je Wallet-ID beim Sammelscan „Alle Wallets“. */
+  scanUtxoJeWallet: {},
   /** Zeitpunkt des letzten Wallet-/Nav-Refresh während Scan (ms). */
   scanRefreshUm: 0,
   scanRefreshLaeuft: false,
@@ -41,6 +43,9 @@ const Zustand = {
   peerTakt: null,
   peerTaktMs: null,
   peerCheckLaeuft: false,
+  /** Steigt bei jedem Speichern einer Quelle. Ältere Status-Antworten
+   *  dürfen Felder (z. B. Host im LAN) nicht zurücksetzen. */
+  quellenEpoch: 0,
   /** Laufender Sanktions-Hop-Check (UI nach Seitenwechsel wieder anbinden). */
   sanktionsCheckJobId: null,
   sanktionsCheckTimer: null,
@@ -88,13 +93,15 @@ const Zustand = {
   traceJobs: new Map(),
   /** Massen-Herkunft (Steuerjahr klären / „Herkünfte UTXOs“) — Empfangs-Atem. */
   herkunftAlleLaeuft: false,
-  /** Steuerjahr „Historien“ (Verlauf aller Wallets) — Empfangs-Atem. */
+  /** Sammel-Verlauf (alle Wallets), falls noch ein Job läuft — Empfangs-Atem. */
   verlaufAlleLaeuft: false,
   /** Wallet-„Herkunft“ (trace-tief) für diese Wallet-ID — Empfangs-Atem. */
   herkunftTiefWalletId: null,
   traceListe: null,
   /** Sprung aus Wallet: nur dieses UTXO — null = volle Herkunftsliste. */
   traceFokus: null,
+  /** Dotplot-Sprung hat den Trace für dieses UTXO schon gestartet — „Alter klären“ aus. */
+  traceKlaerenUeberSprung: null,
   steuer: null,
   onchainHinweisSitzungWeg: false,
 };

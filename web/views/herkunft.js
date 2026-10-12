@@ -250,6 +250,16 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
   } else {
     await oeffneZweig(utxo, zweig, klapp, jobId);
   }
+  if (
+    Zustand.traceKlaerenUeberSprung === schluessel
+    && zweig.dataset.geladen !== "laeuft"
+    && !(Zustand.traceJobs && Zustand.traceJobs.has(schluessel))
+  ) {
+    Zustand.traceKlaerenUeberSprung = null;
+    if (typeof blendeAlterKlaerenUndScan === "function") {
+      blendeAlterKlaerenUndScan(block);
+    }
+  }
   aktualisiereTraceWurzelKopf(utxo, block);
   if (zweig.dataset.geladen === "ja") aktualisiereLotDonut(block, zweig);
   huelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -275,6 +285,7 @@ async function zeichneTraceFokusAnsicht(fokus, { neu = false, jobId = null } = {
  */
 async function springeZuTraceUtxo(key, meta = null) {
   if (!key || typeof zeigeHerkunftFuer !== "function") return false;
+  Zustand.traceKlaerenUeberSprung = key;
   const ausSteuer = typeof utxoMetaAusSteuerjahr === "function"
     ? utxoMetaAusSteuerjahr(key)
     : null;
@@ -1160,10 +1171,27 @@ function gespeicherterKopf(gespeichert, utxo, zweig, klapp) {
 async function starteZweigTrace(
   utxo, zweig, klapp, followup = null, jobIdVorgabe = null, opts = null,
 ) {
+  if (
+    !jobIdVorgabe
+    && typeof electrumSpurBlockiert === "function"
+    && electrumSpurBlockiert()
+  ) {
+    if (zweig && zweig.dataset.geladen === "laeuft") zweig.dataset.geladen = "";
+    if (utxo && utxo.key && Zustand.traceJobs) {
+      const gemerkt = Zustand.traceJobs.get(utxo.key);
+      if (gemerkt === "wartet") Zustand.traceJobs.delete(utxo.key);
+    }
+    if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+    return;
+  }
   const force = Boolean(opts && opts.force);
   zweig.dataset.geladen = "laeuft";
   if (utxo && utxo.key && Zustand.traceJobs) {
     Zustand.traceJobs.set(utxo.key, Zustand.traceJobs.get(utxo.key) || "wartet");
+  }
+  if (typeof blendeAlterKlaerenUndScan === "function") {
+    const wurzel = zweig.closest(".utxo-wurzel");
+    if (wurzel) blendeAlterKlaerenUndScan(wurzel);
   }
   if (typeof stoesseEmpfangScanPuls === "function") stoesseEmpfangScanPuls();
   delete zweig._lotKinder;
@@ -1197,6 +1225,9 @@ async function starteZweigTrace(
     clearInterval(timer);
     const gemerkt = Zustand.traceJobs.get(utxo.key);
     if (gemerkt === jobId || gemerkt === "wartet") Zustand.traceJobs.delete(utxo.key);
+    if (Zustand.traceKlaerenUeberSprung === utxo.key) {
+      Zustand.traceKlaerenUeberSprung = null;
+    }
     if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
   };
 
@@ -1224,6 +1255,10 @@ async function starteZweigTrace(
     aufraeumen();
     zweig.dataset.geladen = "";
     zweig.replaceChildren(hinweisZeile(meldung));
+    const wurzel = zweig.closest(".utxo-wurzel");
+    if (wurzel && typeof blendeAlterKlaerenUndScan === "function") {
+      blendeAlterKlaerenUndScan(wurzel);
+    }
   };
 
   const statusText = (job) => {
@@ -1330,6 +1365,16 @@ async function starteZweigTrace(
 
   const fertigAusJob = (job) => {
     aufraeumen();
+    // „vervollständigen“ und „Scan neu“: Plot nachziehen, sobald der Lauf
+    // endet. Sonst bleibt der rote Ring, bis das Steuerjahr neu geladen wird.
+    if (
+      (force || followup)
+      && job
+      && job.status === "done"
+      && typeof steuerPlotNachEinzelTrace === "function"
+    ) {
+      steuerPlotNachEinzelTrace(utxo.key, job.result);
+    }
     if (job.status === "done" && job.result?.baum_im_cache) {
       // Fertig und gespeichert: Baum einzeln aus dem Cache holen.
       delete zweig.dataset.teilbaum;
@@ -1847,7 +1892,7 @@ function lotDonutTitel(mischung) {
     );
     return `${text} %`;
   };
-  return `Grün ${zahl(mischung.gruen)} · Gelb ${zahl(mischung.orange)} · Grau ${zahl(mischung.grau)}`;
+  return t("origin.lotMixTooltip", { gruen: zahl(mischung.gruen), gelb: zahl(mischung.orange), grau: zahl(mischung.grau) });
 }
 
 /** Mischung für die zugeklappte Zeile. Der Zweig selbst bleibt ungezeichnet. */
@@ -2230,6 +2275,93 @@ function knotenIstWalletAustritt(eltern, kind) {
   return true;
 }
 
+/**
+ * Herkunft unter diesem Knoten: true = jedes Blatt extern/Coinbase,
+ * false = Lücke, null = Kinder noch nicht geladen.
+ */
+function teilbaumHerkunftStand(knoten, gesehen) {
+  if (!knoten || typeof knoten !== "object") return false;
+  const vis = gesehen || new Set();
+  if (vis.has(knoten)) return false;
+  vis.add(knoten);
+  const typ = knoten.type;
+  if (typ === "external" || typ === "coinbase") return true;
+  if (typ !== "internal") return false;
+  if (!Array.isArray(knoten.children)) return null;
+  if (!knoten.children.length) return false;
+  let unbekannt = false;
+  for (const kind of knoten.children) {
+    const stand = teilbaumHerkunftStand(kind, vis);
+    if (stand === false) return false;
+    if (stand === null) unbekannt = true;
+  }
+  return unbekannt ? null : true;
+}
+
+function knotenEndeFristKlasse(knoten, elternKnoten) {
+  const farbe = lotFarbeBlatt(knoten, lotZeitTs(elternKnoten));
+  if (farbe === "gruen") return "knoten-frist-ok";
+  if (farbe === "orange") return "knoten-frist-offen";
+  return "knoten-frist-grau";
+}
+
+function knotenPunktTitel(key, fallback) {
+  const text = t(key);
+  return text !== key ? text : fallback;
+}
+
+/** Punkt vor der Zeile, oder null (intern und vollständig). */
+function macheKnotenPunkt(knoten, elternKnoten) {
+  if (!knoten) return null;
+  if (knoten.type === "internal") {
+    if (teilbaumHerkunftStand(knoten) !== false) return null;
+    const punkt = document.createElement("span");
+    punkt.className = "knoten-punkt knoten-luecke";
+    punkt.textContent = "?";
+    punkt.title = knotenPunktTitel("trace.incompleteTitle", t("trace.incomplete"));
+    return punkt;
+  }
+  if (knoten.type === "external" || knoten.type === "coinbase") {
+    const punkt = document.createElement("span");
+    const frist = knotenEndeFristKlasse(knoten, elternKnoten);
+    punkt.className = `knoten-punkt knoten-extern ${frist}`;
+    const titelKey = frist === "knoten-frist-ok"
+      ? "trace.legendHeld"
+      : frist === "knoten-frist-offen"
+        ? "trace.legendUnheld"
+        : "trace.legendUndated";
+    const fallback = frist === "knoten-frist-ok"
+      ? "außerhalb Haltefrist"
+      : frist === "knoten-frist-offen"
+        ? "innerhalb Haltefrist"
+        : "ohne Datum";
+    punkt.title = knotenPunktTitel(titelKey, fallback);
+    return punkt;
+  }
+  const punkt = document.createElement("span");
+  punkt.className = `knoten-punkt ${PUNKT_KLASSE[knoten.type] || "knoten-extern"}`;
+  return punkt;
+}
+
+function setzeInternenKnotenPunkt(block) {
+  const knoten = BAUM_KNOTEN_DATEN.get(block);
+  if (!knoten || knoten.type !== "internal") return;
+  const zeile = block.querySelector(":scope > .kopf-mit-verweis > .baum-knoten");
+  if (!zeile) return;
+  const alt = zeile.querySelector(":scope > .knoten-punkt");
+  const neu = macheKnotenPunkt(knoten);
+  if (!neu) {
+    if (alt) alt.remove();
+    return;
+  }
+  if (alt) alt.replaceWith(neu);
+  else {
+    const info = zeile.querySelector(":scope > .knoten-info");
+    if (info) zeile.insertBefore(neu, info);
+    else zeile.append(neu);
+  }
+}
+
 function zeichneKnotenListe(knoten, elternWallet, elternKnoten) {
   const huelle = document.createDocumentFragment();
   for (const k of knoten) {
@@ -2300,6 +2432,7 @@ function expandiereKnotenBlock(block) {
   kinder.hidden = false;
   if (klapp && !klapp.classList.contains("leer")) klapp.textContent = "▾";
   if (zeile) zeile.setAttribute("aria-expanded", "true");
+  setzeInternenKnotenPunkt(block);
   return true;
 }
 
@@ -2377,6 +2510,11 @@ function zeichneBaumSeiten(behaelter, ziel, pfad, { elternWallet, elternKnoten, 
     const seite = await q.seite(offset);
     if (q !== quelle) return;
     behaelter.replaceChildren(zeichneKnotenListe(seite.items, elternWallet, elternKnoten));
+    if (elternKnoten && Array.isArray(seite.items)
+        && seite.items.some((k) => teilbaumHerkunftStand(k) === false)) {
+      if (!Array.isArray(elternKnoten.children)) elternKnoten.children = seite.items;
+      setzeInternenKnotenPunkt(behaelter.closest(".baum-knoten-block"));
+    }
     behaelter.append(zeichnePager({
       total: seite.total,
       offset: seite.offset,
@@ -2482,8 +2620,7 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
   // Soft-Label am Mix-Icon (native title am Button gewinnt über Kinder).
   if (knoten.expandable) klapp.title = "Zweig auf- und zuklappen";
 
-  const punkt = document.createElement("span");
-  punkt.className = `knoten-punkt ${PUNKT_KLASSE[knoten.type] || "knoten-extern"}`;
+  const punkt = macheKnotenPunkt(knoten, elternKnoten);
 
   const info = document.createElement("span");
   info.className = "knoten-info";
@@ -2587,7 +2724,8 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
     info.append(notiz);
   }
 
-  zeile.append(klapp, punkt, info);
+  if (punkt) zeile.append(klapp, punkt, info);
+  else zeile.append(klapp, info);
 
   const kopfzeile = document.createElement("div");
   kopfzeile.className = "kopf-mit-verweis";
@@ -2629,149 +2767,47 @@ function zeichneKnoten(knoten, elternWallet, elternKnoten) {
 
 
 /**
- * Wallet-Knopf: jedes UTXO wie „Herkunftslücken schließen“ (gebündelte
- * Eingänge + Vorgänger-Txs) bis external/coinbase.
- * Bewusst mit Confirm — kann Stunden dauern, füllt den Herkunfts-Cache.
+ * Wallet-Knopf Herkunft: Steuerjahr/Dotplot, dann derselbe Klären-Lauf
+ * nur für die grauen UTXOs dieses Wallets. Ohne Bestand zuerst scannen.
  */
 async function starteHerkunftVollstaendig() {
   const wid = Zustand.walletId;
   if (!wid) return;
   const wallet = (Zustand.config?.wallets || []).find((w) => w.id === wid);
-  if (!wallet || !wallet.has_cache) {
-    meldung(t("wallet.originDeepNeedCache"), "warn");
-    return;
+  if (!wallet) return;
+  if (typeof zeigeAnsicht === "function") zeigeAnsicht("steuerjahr");
+  if (typeof ladeSteuerjahrMitKandidaten === "function") {
+    try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Plot folgt nach dem Scan */ }
+  } else if (typeof ladeSteuerjahr === "function") {
+    try { await ladeSteuerjahr(); } catch (_) { /* Plot folgt nach dem Scan */ }
   }
-  if (herkunftTiefLaeuftFuer(wid)) {
-    meldung(t("nav.jobAlreadyRunning"), "warn");
+  if (Zustand.herkunftAlleLaeuft) {
+    if (typeof zeigeKlaerenLaeuftSchon === "function") zeigeKlaerenLaeuftSchon();
     return;
   }
   const name = wallet.name || wid;
-  if (!window.confirm(t("wallet.originDeepConfirm", { name }))) return;
-
-  Zustand.herkunftTiefWalletId = wid;
-  stoesseEmpfangScanPuls();
-
-  const knopf = $("#herkunft-tief-knopf");
-  const leiste = $("#herkunft-tief-lauf");
-  const textEl = $("#herkunft-tief-text");
-  if (knopf) knopf.disabled = true;
-  if (leiste) leiste.hidden = false;
-  setzeText(textEl, t("wallet.originDeepRunning"));
-
-  let jobId = null;
-  let timer = null;
-  const logStand = { index: 0 };
-  let zuletztVerfolgt = -1;
-  let refreshUm = 0;
-  let refreshLaeuft = false;
-
-  const fertig = async (meldungText, art) => {
-    clearInterval(timer);
-    Zustand.herkunftTiefWalletId = null;
-    merkeScanJobBeendet(jobId);
-    if (leiste) leiste.hidden = true;
-    setzeWalletScanGesperrt();
-    if (meldungText) meldung(meldungText, art || "gut");
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === wid) {
-      try { await zeigeWallet(wid); } catch (_) { /* ignore */ }
-    } else {
-      loeseEmpfangScanPuls();
-    }
-    await ladeJobsNav();
-  };
-
   logZeile(t("wallet.originDeepStarted", { name }), undefined, name);
-  logZeile(
-    "Browser darf geschlossen werden — Server und Scan laufen im Terminal weiter.",
-    undefined,
-    name,
-  );
-  try {
-    const antwort = await api("/trace/alle", {
-      methode: "POST",
-      daten: { wallet_id: wid, vollstaendig: true },
-    });
-    if (antwort.nichts_zu_tun) {
-      if (antwort.keine_utxos) {
-        await fertig(t("wallet.originDeepNeedCache"), "warn");
-      } else {
-        await fertig(t("wallet.originDeepNothing"), "gut");
-      }
-      return;
-    }
-    jobId = antwort.id;
-    nimmJobLogAb(antwort, logStand, name);
-  } catch (fehler) {
-    await fertig(fehler.message || String(fehler), "krit");
-    return;
-  }
-
-  const abbruch = $("#herkunft-tief-abbruch");
-  if (abbruch) {
-    abbruch.onclick = async () => {
-      setzeText(textEl, t("common.abortRequested"));
-      try {
-        await api(`/jobs/${jobId}`, { methode: "DELETE" });
-      } catch (_) {
-        /* schon beendet */
-      }
-    };
-  }
-
-  timer = setInterval(async () => {
-    try {
-      const job = await api(`/jobs/${jobId}`);
-      nimmJobLogAb(job, logStand, name);
-      const zahl = job.result?.verfolgt;
-      const vollOk = job.result?.vollstaendig_ok;
-      let standText = übersetzeLogText(job.message || t("common.runningEllipsis"));
-      if (typeof vollOk === "number" && vollOk > 0) {
-        standText += t("ui.hard.4a3387f537", { n: vollOk });
-      }
-      setzeText(textEl, standText);
-
-      if (job.running) {
-        if (
-          typeof zahl === "number"
-          && zahl > zuletztVerfolgt
-          && !refreshLaeuft
-        ) {
-          const jetzt = Date.now();
-          if (zuletztVerfolgt < 0 || jetzt - refreshUm >= HERKUNFT_REFRESH_MS) {
-            zuletztVerfolgt = zahl;
-            refreshUm = jetzt;
-            refreshLaeuft = true;
-            try {
-              if (Zustand.ansicht === "wallet" && Zustand.walletId === wid) {
-                await zeigeWallet(wid);
-              }
-            } finally {
-              refreshLaeuft = false;
-            }
-          }
+  return klaerenNachUngescannten(
+    async () => {
+      const keys = grauKeysFuerWallet(
+        await steuerStandFuerKlaeren(),
+        wid,
+        wallet.name,
+      );
+      if (!keys.length) {
+        const k = $("#steuer-meldung");
+        if (k) {
+          k.className = "hinweis hinweis-warn";
+          setzeText(k, t("wallet.originDeepNothing"));
+          k.hidden = false;
         }
-        return;
+        return null;
       }
-
-      if (job.status === "done") {
-        await fertig(
-          t("wallet.originDeepDone", {
-            msg: job.message || t("common.running"),
-          }),
-          "gut",
-        );
-      } else if (job.status === "cancelled") {
-        await fertig(
-          "Abgebrochen — bereits ermittelte Herkunft bleibt erhalten.",
-          "warn",
-        );
-      } else {
-        await fertig(job.error || t("trace.analyseFailShort"), "krit");
-      }
-    } catch (fehler) {
-      await fertig(fehler.message, "krit");
-    }
-  }, 1200);
+      return keys;
+    },
+    (keys, uebernommen) => starteGrauKlaerung(keys, uebernommen),
+    [wid],
+  );
 }
 
 /**
@@ -2811,6 +2847,9 @@ async function erfrischeHerkunftZwischenstand() {
   try {
     if (Zustand.ansicht === "wallet" && Zustand.walletId) {
       await zeigeWallet(Zustand.walletId);
+      if (typeof fifoSpendLotsNachziehenWennTrace === "function") {
+        fifoSpendLotsNachziehenWennTrace();
+      }
     } else if (Zustand.ansicht === "trace") {
       if (Zustand.traceFokus) {
         await zeichneTraceFokusAnsicht(Zustand.traceFokus);
@@ -2927,7 +2966,7 @@ async function scanneAlleWalletsUtxo({
   if (!liste.length) {
     throw new Error(t("wallets.emptyList"));
   }
-  let scanAb = "";
+  let scanVorgabe;
   for (let i = 0; i < liste.length; i += 1) {
     const wallet = liste[i];
     if (sollAbbrechen()) {
@@ -2952,21 +2991,27 @@ async function scanneAlleWalletsUtxo({
       wallet.name,
     );
 
-    let datum = scanAb;
+    const daten = { wallet_id: wallet.id, scan_ab: "" };
     if (brauchtBip158Startdatum(wallet.id)) {
-      const gewählt = await frageScanDatum(wallet);
-      if (gewählt === undefined) {
-        const err = new Error("abgebrochen");
-        err.abgebrochen = true;
-        throw err;
+      if (scanVorgabe === undefined) {
+        const gewählt = await frageScanDatum(wallet);
+        if (gewählt === undefined) {
+          const err = new Error("abgebrochen");
+          err.abgebrochen = true;
+          throw err;
+        }
+        scanVorgabe = gewählt || null;
       }
-      datum = gewählt || "";
-      scanAb = datum;
+      if (scanVorgabe) {
+        daten.scan_ab = scanVorgabe.datum || "";
+        if (scanVorgabe.hoehe != null) daten.start_height = scanVorgabe.hoehe;
+        if (scanVorgabe.gap != null) daten.gap_limit = scanVorgabe.gap;
+      }
     }
 
     const job = await api("/jobs/rescan", {
       methode: "POST",
-      daten: { wallet_id: wallet.id, scan_ab: datum || "" },
+      daten,
     });
     const jid = job.id || job.job_id;
     if (!jid) {
@@ -3001,7 +3046,7 @@ async function scanneAlleWalletsUtxo({
  * Scorecard „klären“: fehlende UTXO-Scans zuerst, dann die eigentliche Routine.
  * Hält die Sperre, solange der Scan lief und die Routine ihn übernehmen soll.
  */
-async function scanneUngescannteVorKlaeren() {
+async function scanneUngescannteVorKlaeren(nurIds) {
   if (
     Zustand.config?.context_bereit === false
     && typeof ladeConfig === "function"
@@ -3009,7 +3054,16 @@ async function scanneUngescannteVorKlaeren() {
     try { await ladeConfig(); } catch (_) { /* alter Stand bleibt */ }
   }
   const tip = typeof chainTipHoehe === "function" ? chainTipHoehe() : null;
-  const offen = walletsOhneUtxoScan(Zustand.config, tip);
+  let offen = walletsOhneUtxoScan(Zustand.config, tip);
+  if (Array.isArray(nurIds) && nurIds.length) {
+    const want = new Set(nurIds.map(String));
+    offen = offen.filter((w) => want.has(String(w.id)));
+    for (const id of want) {
+      if (offen.some((w) => String(w.id) === id)) continue;
+      const w = (Zustand.config?.wallets || []).find((x) => String(x.id) === id);
+      if (w && !w.has_cache && !w.is_new) offen.push(w);
+    }
+  }
   if (!offen.length) return { gescannt: false, haeltSperre: false };
 
   Zustand.herkunftAlleLaeuft = true;
@@ -3074,7 +3128,10 @@ function zeigeKlaerenLaeuftSchon() {
  * *sammle* liefert die Schlüssel oder null, wenn nichts zu tun ist (Meldung selbst).
  * Ein Objekt ist ebenfalls ein Auftrag — Gelb hängt den grauen Lauf davor.
  */
-async function klaerenNachUngescannten(sammle, starte) {
+async function klaerenNachUngescannten(sammle, starte, nurIds) {
+  if (typeof electrumSpurBlockiert === "function" && electrumSpurBlockiert()) {
+    return;
+  }
   if (Zustand.herkunftAlleLaeuft) {
     zeigeKlaerenLaeuftSchon();
     return;
@@ -3082,7 +3139,7 @@ async function klaerenNachUngescannten(sammle, starte) {
   let vorab = { gescannt: false, haeltSperre: false };
   let keys = null;
   try {
-    vorab = await scanneUngescannteVorKlaeren();
+    vorab = await scanneUngescannteVorKlaeren(nurIds);
     if (vorab.abbruch) return;
     if (vorab.gescannt) Zustand.steuer = null;
     keys = await sammle();
@@ -3128,6 +3185,47 @@ function grauKeysAus(daten) {
   return Array.isArray(daten?.grau_keys) ? daten.grau_keys : [];
 }
 
+function lotGrauKeysAus(daten) {
+  if (Array.isArray(daten?.lot_grau_keys)) return daten.lot_grau_keys;
+  const keys = [];
+  for (const e of daten.eintraege || []) {
+    if (!e || !e.geprueft) continue;
+    if ((Number(e.sats_grau) || 0) > 0 || (Number(e.sats_ohne_datum) || 0) > 0) {
+      keys.push(e.txid != null ? `${e.txid}:${e.vout}` : e.key);
+    }
+  }
+  return keys.filter(Boolean);
+}
+
+/** UTXO-Schlüssel im Steuerjahr, die zu diesem Wallet gehören. */
+function steuerKeysDiesesWallets(daten, walletId, walletName) {
+  const id = String(walletId || "");
+  const name = String(walletName || "").trim();
+  const keys = new Set();
+  const listen = [
+    (daten && daten.zeitstrahl && daten.zeitstrahl.events) || [],
+    (daten && daten.eintraege) || [],
+  ];
+  for (const liste of listen) {
+    for (const e of liste) {
+      if (!e) continue;
+      const key = e.key || (e.txid != null ? `${e.txid}:${e.vout}` : "");
+      if (!key) continue;
+      if (id && String(e.wallet_id || "") === id) {
+        keys.add(String(key));
+        continue;
+      }
+      if (name && String(e.wallet || "").trim() === name) keys.add(String(key));
+    }
+  }
+  return keys;
+}
+
+function grauKeysFuerWallet(daten, walletId, walletName) {
+  const erlaubt = steuerKeysDiesesWallets(daten, walletId, walletName);
+  return grauKeysAus(daten).filter((k) => erlaubt.has(String(k)));
+}
+
 function gelbKeysAus(daten) {
   if (!daten) return [];
   const keys = new Set();
@@ -3159,16 +3257,80 @@ function zeigeKeinGelbZumKlaeren() {
   k.hidden = false;
 }
 
+/**
+ * Nach dem normalen Grau-Lauf: Zeitnachzug für Lot-Grau.
+ * Abbruch und Fehler beenden hier — *danach* (Gelb) startet nicht.
+ */
+function lotGrauNachGrauFortsetzen(danach) {
+  return Promise.resolve()
+    .then(async () => {
+      if (typeof ladeSteuerjahrMitKandidaten === "function") {
+        try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Schlüssel unten */ }
+      }
+      let daten = Zustand.steuer;
+      if (
+        !daten
+        || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.lot_grau_keys))
+      ) {
+        Zustand.steuer = null;
+        daten = await steuerStandFuerKlaeren();
+      }
+      const keys = lotGrauKeysAus(daten);
+      const weiter = danach || ladeSteuerjahrMitKandidaten;
+      if (!keys.length) {
+        // Frischer Stand ohne weiteren Lauf dazwischen: an die Fortsetzung
+        // geben, damit sie /tax nicht gleich noch einmal holt.
+        if (typeof weiter === "function") return weiter({ art: "gut", daten });
+        return;
+      }
+      return herkunftAllerUtxos({
+        knopf: "#herkunft-grau",
+        lauf: "#herkunft-lauf",
+        text: "#herkunft-text",
+        abbruch: "#herkunft-abbruch",
+        meldung: "#steuer-meldung",
+        danach: weiter,
+        utxo_keys: keys,
+        steuer: false,
+        gelbVertiefen: false,
+        graueAnteile: true,
+        erzwingen: false,
+        uebernommen: true,
+        keinPauschalScan: true,
+      });
+    })
+    .catch((fehler) => {
+      Zustand.herkunftAlleLaeuft = false;
+      if (typeof loeseEmpfangScanPuls === "function") loeseEmpfangScanPuls();
+      const kasten = $("#steuer-meldung");
+      if (!kasten) return;
+      kasten.className = "hinweis hinweis-krit";
+      setzeText(kasten, fehler.message || String(fehler));
+      kasten.hidden = false;
+    });
+}
+
 /** Dieselben Argumente wie der graue Scorecard-Knopf. *danach* nur für Gelb. */
 function starteGrauKlaerung(keys, uebernommen, danach) {
+  const weiter = (info) => {
+    if (!info || info.art !== "gut") {
+      if (typeof danach === "function") return danach(info);
+      return;
+    }
+    return lotGrauNachGrauFortsetzen(danach);
+  };
+  const liste = Array.isArray(keys) ? keys : [];
+  if (!liste.length) {
+    return lotGrauNachGrauFortsetzen(danach);
+  }
   return herkunftAllerUtxos({
     knopf: "#herkunft-grau",
     lauf: "#herkunft-lauf",
     text: "#herkunft-text",
     abbruch: "#herkunft-abbruch",
     meldung: "#steuer-meldung",
-    danach: danach || ladeSteuerjahrMitKandidaten,
-    utxo_keys: keys,
+    danach: weiter,
+    utxo_keys: liste,
     steuer: false,
     gelbVertiefen: false,
     erzwingen: true,
@@ -3207,10 +3369,11 @@ function gelbNachGrauFortsetzen(info) {
         try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Schlüssel unten */ }
       }
       let daten = Zustand.steuer;
-      if (
-        !daten
-        || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.gelb_keys))
-      ) {
+      const hatGelb = (d) => d
+        && (Array.isArray(d.eintraege) || Array.isArray(d.gelb_keys));
+      if (!hatGelb(daten) && hatGelb(info.daten)) {
+        daten = info.daten;
+      } else if (!hatGelb(daten)) {
         Zustand.steuer = null;
         daten = await steuerStandFuerKlaeren();
       }
@@ -3233,13 +3396,13 @@ function gelbNachGrauFortsetzen(info) {
 }
 
 async function herkunftGrauUtxos() {
-  // Graue Scorecard: noch nie analysiert. Der Massenlauf ohne Schlüssel
-  // nimmt nur UTXOs ohne vollen Baum — ein grauer Punkt kann einen
-  // unvollständigen Cache haben und würde sonst sofort als „nichts zu tun“
-  // enden. Deshalb dieselben Schlüssel wie der Punkt selbst.
+  // Graue Scorecard: zuerst UTXOs ohne Baum, danach Extra-Lauf Lot-Grau
+  // (undatierte Fremdenden, graue_anteile).
   return klaerenNachUngescannten(async () => {
-    const keys = grauKeysAus(await steuerStandFuerKlaeren());
-    if (!keys.length) {
+    const daten = await steuerStandFuerKlaeren();
+    const grau = grauKeysAus(daten);
+    const lot = lotGrauKeysAus(daten);
+    if (!grau.length && !lot.length) {
       const k = $("#steuer-meldung");
       if (!k) return null;
       k.className = "hinweis hinweis-warn";
@@ -3247,7 +3410,7 @@ async function herkunftGrauUtxos() {
       k.hidden = false;
       return null;
     }
-    return keys;
+    return grau;
   }, (keys, uebernommen) => starteGrauKlaerung(keys, uebernommen));
 }
 
@@ -3292,6 +3455,9 @@ async function herkunftAllerUtxos(ziele = {
   erzwingen: false,
   graueAnteile: false,
 }) {
+  if (typeof electrumSpurBlockiert === "function" && electrumSpurBlockiert()) {
+    return;
+  }
   // Selector-String oder bereits aufgelöstes Element (Zeilen-„klären“).
   const knopf = typeof ziele.knopf === "string"
     ? $(ziele.knopf)

@@ -69,7 +69,7 @@ Erstes `make x86` zieht das Python-Image und kann mehrere Minuten dauern. ARM: M
 
 ### Version
 
-StartOS-Version steht in `packaging/startos/versions/current.ts` und folgt dem App-Release: `VERSION` + `:0` (jetzt `0.9.9.5:0`). `scripts/build_startos_s9pk` bricht ab, wenn die beiden auseinanderlaufen. Vor einem Update-Sideload die alte Version in `versions/` behalten, sonst scheitert die Migration auf Geräten mit dem vorherigen Paket.
+StartOS-Version steht in `packaging/startos/versions/current.ts` und folgt dem App-Release: `VERSION` + `:0` (jetzt `1.0.0:0`). `scripts/build_startos_s9pk` bricht ab, wenn die beiden auseinanderlaufen. Vor einem Update-Sideload die alte Version in `versions/` behalten, sonst scheitert die Migration auf Geräten mit dem vorherigen Paket.
 
 ---
 
@@ -118,6 +118,7 @@ CI: Workflow „Build StartOS s9pk“ nur manuell (`workflow_dispatch`) — Arti
 | App ohne Node | StartOS-Deps `bitcoind` + gewÃ¤hlter Indexer (`electrs` **oder** `fulcrum`) mÃ¼ssen running sein |
 | Fulcrum statt Electrs | Action **Select Indexer** in SatSage; Fulcrum-Paket installieren/starten; siehe [`START9-fulcrum-indexer.md`](START9-fulcrum-indexer.md) |
 | `gh: not logged in` | `gh auth login`; privates Repo |
+| `CERTIFICATE_VERIFY_FAILED` … `certificate has expired` beim BTC-Preis-Bundle | Zertifikat von `cryptodatadownload.com` abgelaufen (Stand 2026-10-05). `scripts/refresh_btc_price_bundle.py` fällt dann auf Mempool zurück und hängt nur die fehlenden Tage an das vorhandene Bundle. Ohne lokales Bundle oder ohne Netz: `SKIP_BTC_PRICE_REFRESH=1` |
 
 App-Start im Container (schon im Entrypoint): `--env /data/.env`, Caches unter `/data`, `SATSAGE_MANAGED_BY=start9`, Cookie `/mnt/bitcoind/.cookie`. Das nicht in `server.py` â€žneu erfindenâ€œ.
 

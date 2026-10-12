@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from flask import current_app as app
 from flask import redirect, render_template, request, url_for
@@ -22,9 +21,6 @@ logger = logging.getLogger(__name__)
 
 satsage_endpoint = SatsageService.blueprint
 
-_PLUGIN_DIR = Path(__file__).resolve().parents[4]
-_SATSAGE_ROOT = _PLUGIN_DIR.parent
-
 
 def _session(force: bool = False):
     from .specter_session import get_session
@@ -36,11 +32,11 @@ def _session(force: bool = False):
 @login_required
 def gui():
     """
-    Volle Web-GUI (server.py + web/) per iframe.
+    Volle Web-GUI (server.py + web/).
 
-    Startet den lokalen GUI-Server bei Bedarf und speist Specter-Wallets ein.
-    Fallback-Link öffnet dieselbe URL in einem neuen Tab (falls CSP das
-    iframe blockiert).
+    Standard: Redirect auf die GUI-URL. Der Knopf „Oberfläche“ öffnet
+    ``/gui`` mit ``target=_blank``, damit Specter offen bleibt.
+    ``?embed=1`` behält das iframe im Specter-Fenster.
     """
     gui_info = None
     error = None
@@ -52,55 +48,29 @@ def gui():
         logger.exception("GUI-Server")
         error = str(exc)
 
+    gui_url = (gui_info or {}).get("url") or ""
+    embed = request.args.get("embed") == "1"
+    if gui_url and not error and not embed:
+        return redirect(gui_url)
+
     return render_template(
         "satsage/gui.jinja",
         service=SatsageService,
         gui=gui_info,
-        gui_url=(gui_info or {}).get("url") or "",
+        gui_url=gui_url,
         error=error,
         active_tab="gui",
+        embed=embed,
     )
 
 
 @satsage_endpoint.route("/")
 @login_required
 def index():
-    ctx = build_context(app.specter)
-    preview_limit = int(app.config.get("SATSAGE_PREVIEW_LIMIT", 25))
-    show_sensitive = bool(app.config.get("SATSAGE_SHOW_SENSITIVE", False))
-    session_info = None
-    session_error = None
-    try:
-        sess = _session()
-        session_info = {
-            "source": sess.source,
-            "address_count": len(sess.own_addresses),
-            "utxo_count": len(sess.specter_utxos),
-            "privacy": None,
-        }
-        from .specter_session import ensure_satsage_on_path
-
-        ensure_satsage_on_path()
-        import main as xq_main
-
-        session_info["privacy"] = xq_main.privacy_notice_for_source(
-            sess.source, fulcrum=sess.fetchers.get("fulcrum")
-        )
-    except Exception as exc:
-        logger.exception("Session-Init")
-        session_error = str(exc)
-
+    """Startseite ohne Diagnose. Übersicht, Wallets und Analyse bleiben per URL."""
     return render_template(
         "satsage/index.jinja",
         service=SatsageService,
-        ctx=ctx.to_dict(include_secrets=show_sensitive),
-        wallet_count=len(ctx.wallets),
-        xpub_count=len(ctx.all_xpubs()),
-        node=ctx.node,
-        satsage_root=str(_SATSAGE_ROOT),
-        preview_limit=preview_limit,
-        session_info=session_info,
-        session_error=session_error,
         active_tab="index",
     )
 
@@ -178,6 +148,33 @@ def reload_session():
             active_tab="analyze",
         )
     return redirect(url_for(f"{SatsageService.get_blueprint_name()}.index"))
+
+
+@satsage_endpoint.route("/settings", methods=["GET"])
+@login_required
+def settings_get():
+    """Menüeintrag in der Specter-Seitenleiste, analog Development Helper."""
+    user = app.specter.user_manager.get_user()
+    show_menu = "yes" if user is not None and SatsageService.id in user.services else "no"
+    return render_template(
+        "satsage/settings.jinja",
+        service=SatsageService,
+        show_menu=show_menu,
+        active_tab="settings",
+    )
+
+
+@satsage_endpoint.route("/settings", methods=["POST"])
+@login_required
+def settings_post():
+    show_menu = request.form.get("show_menu")
+    user = app.specter.user_manager.get_user()
+    if user is not None:
+        if show_menu == "yes":
+            user.add_service(SatsageService.id)
+        else:
+            user.remove_service(SatsageService.id)
+    return redirect(url_for(f"{SatsageService.get_blueprint_name()}.settings_get"))
 
 
 @satsage_endpoint.route("/analyze", methods=["GET", "POST"])

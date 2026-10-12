@@ -181,21 +181,29 @@ class TestKennzahlen(unittest.TestCase):
         kennzahlen = self.ergebnis["kennzahlen"]
         self.assertEqual(kennzahlen["gesamt_sats"], 135_124_500)
         self.assertEqual(kennzahlen["erfuellt_sats"], 135_000_000)
-        self.assertEqual(kennzahlen["offen_sats"], 124_500)
+        # Ohne Herkunft in der Frist: grau, nicht gelb.
+        self.assertEqual(kennzahlen["offen_sats"], 0)
+        self.assertEqual(kennzahlen["ungeprueft_sats"], 124_500)
 
     def test_summen_ergaenzen_sich(self):
         kennzahlen = self.ergebnis["kennzahlen"]
         self.assertEqual(
-            kennzahlen["erfuellt_sats"] + kennzahlen["offen_sats"],
+            kennzahlen["erfuellt_sats"]
+            + kennzahlen["offen_sats"]
+            + kennzahlen["ungeprueft_sats"],
             kennzahlen["gesamt_sats"],
         )
         self.assertEqual(
-            kennzahlen["erfuellt_count"] + kennzahlen["offen_count"],
+            kennzahlen["erfuellt_count"]
+            + kennzahlen["offen_count"]
+            + kennzahlen["ungeprueft_count"],
             kennzahlen["gesamt_count"],
         )
 
-    def test_naechste_frist_wird_genannt(self):
-        self.assertEqual(self.ergebnis["kennzahlen"]["naechste_frist"], "28.11.2027")
+    def test_naechste_frist_nur_gelbe(self):
+        # Der einzige UTXO in der Frist hat keine Herkunft → grau, nicht gelb.
+        self.assertEqual(self.ergebnis["kennzahlen"]["naechste_frist"], "")
+        self.assertEqual(self.ergebnis["kennzahlen"]["offen_count"], 0)
 
     def test_stichtag_und_erstelldatum_dabei(self):
         self.assertEqual(self.ergebnis["stichtag"], "31.12.2026")
@@ -432,6 +440,39 @@ class TestAnschaffungsdatum(unittest.TestCase):
         self.assertEqual(kennzahlen["geprueft_count"], 1)
         self.assertEqual(kennzahlen["ungeprueft_count"], 2)
         self.assertEqual(kennzahlen["ungeprueft_sats"], 6000)
+        self.assertEqual(kennzahlen["erfuellt_sats"], 1000)
+        self.assertEqual(kennzahlen["offen_sats"], 0)
+        self.assertEqual(
+            kennzahlen["erfuellt_sats"]
+            + kennzahlen["offen_sats"]
+            + kennzahlen["ungeprueft_sats"],
+            kennzahlen["gesamt_sats"],
+        )
+
+    def test_alte_ungepruefte_bleiben_gruen_nicht_grau(self):
+        """Output schon außerhalb der Frist: grün, auch ohne Trace."""
+        ergebnis = auswerten_zum_jahresende(
+            [utxo(5000, "01.01.2020 12:00")],
+            immutable_cache_dir=self.cache,
+        )
+        k = ergebnis["kennzahlen"]
+        self.assertEqual(k["erfuellt_sats"], 5000)
+        self.assertEqual(k["offen_sats"], 0)
+        self.assertEqual(k["ungeprueft_sats"], 0)
+        self.assertEqual(k["ungeprueft_count"], 0)
+        self.assertFalse(ergebnis["eintraege"][0]["geprueft"])
+        self.assertTrue(ergebnis["eintraege"][0]["erfuellt"])
+
+    def test_naechste_frist_nach_herkunft_in_gelb(self):
+        self.herkunft_hinterlegen("c3", 0, "28.11.2026 04:00")
+        ergebnis = auswerten_zum_jahresende(
+            [utxo(124_500, "28.11.2026 04:00", marker="c3")],
+            immutable_cache_dir=self.cache,
+        )
+        k = ergebnis["kennzahlen"]
+        self.assertEqual(k["offen_sats"], 124_500)
+        self.assertEqual(k["ungeprueft_sats"], 0)
+        self.assertEqual(k["naechste_frist"], "28.11.2027")
 
     def test_hinweis_nennt_die_richtung_des_fehlers(self):
         """
@@ -530,12 +571,23 @@ class TestExternerZuflussDatum(unittest.TestCase):
         self.assertFalse(eintrag["untergrenze"])
 
     def test_offensiv_nimmt_aeltesten_zufluss(self):
-        """STEUER_ANSCHAFFUNG=aelteste: ältester externer Zufluss zählt."""
+        """STEUER_ANSCHAFFUNG=aelteste: ältester Zufluss, sobald der Baum vollständig ist."""
+        from core import trace_cache
+
         self.hinterlegen(
             "a1", 0,
             external_time_ts=zeitstempel("15.06.2022 12:00"),
             external_oldest_time_ts=zeitstempel("01.03.2021 12:00"),
         )
+        trace_cache.speichern(txid("a1"), 0, {
+            "found": True,
+            "root": {"txid": txid("a1"), "vout": 0, "type": "utxo"},
+            "children": [{
+                "type": "external", "from_utxo": f"{txid('e1')}:0",
+                "amount_sats": 1000, "time_label": "01.03.2021 12:00:00",
+                "children": [],
+            }],
+        }, self.cache)
         ergebnis = auswerten_zum_jahresende(
             [utxo(1000, "01.10.2026 12:00", marker="a1")],
             immutable_cache_dir=self.cache,
@@ -1455,6 +1507,7 @@ class TestLotSummen(unittest.TestCase):
         offensiv = self._aus("a1", anschaffung="aelteste")
         d = defensiv["eintraege"][0]
         o = offensiv["eintraege"][0]
+        # Vollständig: offensiv sitzt auf dem ältesten Stempel.
         self.assertEqual(
             (d["sats_gruen"], d["sats_orange"], d["sats_grau"]),
             (500, 500, 0),
@@ -1523,8 +1576,27 @@ class TestLotSummen(unittest.TestCase):
         )
         self.assertFalse(defensiv["eintraege"][0]["erfuellt"])
         self.assertEqual(defensiv["kennzahlen"]["erfuellt_sats"], 0)
+        self.assertEqual(defensiv["kennzahlen"]["lot_grau_sats"], 500)
+        self.assertEqual(defensiv["kennzahlen"]["ungeprueft_sats"], 500)
+        self.assertEqual(defensiv["kennzahlen"]["offen_sats"], 500)
+        self.assertEqual(defensiv["kennzahlen"]["ungeprueft_count"], 0)
         self.assertEqual(offensiv["kennzahlen"]["erfuellt_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["lot_grau_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["ungeprueft_sats"], 500)
+        self.assertEqual(offensiv["kennzahlen"]["offen_sats"], 0)
         self.assertFalse(offensiv["eintraege"][0]["erfuellt"])
+
+    def test_offensiv_offen_bleibt_auf_juengstem_stempel(self):
+        """Grauer Rest: offensiv darf nicht auf den ältesten Stempel springen."""
+        self._speichern("d5", [
+            self._extern("h1", 500, "01.01.2020 12:00:00"),
+            {"type": "external_unresolved", "amount_sats": 500, "children": []},
+        ])
+        ergebnis = self._aus("d5", anschaffung="aelteste")
+        eintrag = ergebnis["eintraege"][0]
+        self.assertTrue(eintrag["offensiv_fallback"])
+        self.assertEqual(eintrag["datum"], "01.01.2020")
+        self.assertTrue(eintrag["herkunft_offen"])
 
     def test_undatiertes_ende_wird_aus_tx_cache_gruen(self):
         from core import xpub_cache

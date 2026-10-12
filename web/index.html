@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=0.9.9-psbt">
+  <link rel="stylesheet" href="/style.css?v=0.9.9-scandialog">
 </head>
 <body>
 
@@ -149,6 +149,24 @@
   </div>
 </div>
 
+<!-- Herkunft, Historie, Klären: ohne Electrum kein Suchlauf. -->
+<div id="electrum-spur-dialog" class="einrichtung" hidden>
+  <div class="einrichtung-karte" role="dialog" aria-modal="true"
+       aria-labelledby="electrum-spur-titel">
+    <h1 id="electrum-spur-titel" data-i18n="dialog.electrumSpur.title">Electrum nötig</h1>
+    <p data-i18n="dialog.electrumSpur.body">
+      P2P kann nur UTXOs finden, Herkunft und Historie erfordern
+      electrum Server, egal ob privat oder öffentlich.
+    </p>
+    <div class="einrichtung-knoepfe">
+      <button type="button" id="electrum-spur-ok" class="knopf knopf-primaer" autofocus
+              data-i18n="common.ok">
+        OK
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- P2P an, öffentliche Electrum noch erlaubt: höhere Privatsphäre anbieten. -->
 <div id="p2p-privatsphaere-dialog" class="einrichtung" hidden>
   <div class="einrichtung-karte" role="dialog" aria-modal="true"
@@ -185,15 +203,37 @@
     <h1 id="scan-datum-titel" data-i18n="dialog.scanDate.title">Ab wann scannen?</h1>
     <p data-i18n="dialog.scanDate.body">
       Für dieses Wallet ist kein Alter bekannt, und der Cache ist leer.
-      BIP-158 durchsucht die Kette erst ab dem gewählten Tag — früher
-      entstandene Outputs bleiben unsichtbar.
+      BIP-158 durchsucht die Kette erst ab der gewählten Blockhöhe —
+      früher entstandene Outputs bleiben unsichtbar. Die Lücke gilt für
+      diesen Scan; Vorgabe ist das Gap-Limit aus den Datenquellen.
     </p>
-    <label class="feld">
-      <span class="feld-titel" data-i18n="dialog.scanDate.label">Nicht vor</span>
-      <input type="date" id="scan-datum-feld"
-             data-i18n-title="dialog.scanDate.fieldTitle"
-             title="Blöcke vor diesem Tag werden nicht durchsucht. SegWit: 24.08.2017. Früher = vollständiger und langsamer.">
-    </label>
+    <div class="scan-datum-felder">
+      <label class="quelle-scan-feld">
+        <span class="quelle-scan-label" data-i18n="sources.bip158DateLabel">Frühestes Scan-Datum:</span>
+        <input type="date" id="scan-datum-feld" class="quelle-start-datum"
+               min="2009-01-03"
+               data-i18n-title="sources.bip158DateTitle"
+               title="Füllt die Blockhöhe. Der Scan liest nur die Höhe. Umrechnung über lokale Header, sonst den verbundenen Block-Explorer.">
+      </label>
+      <label class="quelle-scan-feld">
+        <span class="quelle-scan-label" data-i18n="sources.bip158StartLabel">Scan ab Blockhöhe:</span>
+        <input type="number" id="scan-hoehe-feld" class="quelle-start-hoehe"
+               min="0" step="1" inputmode="numeric"
+               data-i18n-placeholder="sources.bip158StartPlaceholder"
+               placeholder="Höhe"
+               data-i18n-title="sources.bip158StartTitle"
+               title="Ab welcher Blockhöhe Compact Filter laufen. Vorgabe SegWit (481824). Diese Höhe gilt für den Scan, nicht das Datum.">
+      </label>
+      <label class="quelle-scan-feld">
+        <span class="quelle-scan-label" data-i18n="sources.bip158GapLabel">Gap-Limit:</span>
+        <input type="number" id="scan-gap-feld" class="quelle-start-hoehe quelle-gap"
+               min="1" max="10000" step="1" inputmode="numeric"
+               data-i18n-placeholder="sources.bip158GapPlaceholder"
+               placeholder="Lücke"
+               data-i18n-title="dialog.scanDate.gapTitle"
+               title="Unbenutzte Indizes je Kette hinter dem letzten Treffer. Vorgabe ist das Gap-Limit aus den Datenquellen. Gilt für diesen Scan.">
+      </label>
+    </div>
     <p class="klein" id="scan-datum-hinweis"></p>
     <div class="einrichtung-knoepfe">
       <button type="button" id="scan-datum-ok" class="knopf knopf-primaer" data-i18n="common.scan">
@@ -245,16 +285,34 @@
 
 <div id="app" hidden>
 
+  <div id="nav-rand" class="nav-rand" hidden aria-hidden="true"
+       data-i18n-title="nav.edgeTitle"
+       title="Navigation einblenden"></div>
+
   <header class="kopf">
-    <div class="marke">
-      <img class="marke-logo" src="/img/sat-logo.png" width="36" height="36"
-           alt="" decoding="async">
-      <div class="marke-text">
-        <span class="marke-name">SatSage</span>
-        <span class="marke-zusatz">know your sats</span>
+    <div class="kopf-start">
+      <button type="button" id="nav-toggle" class="nav-werkzeug nav-toggle" hidden
+              aria-expanded="false" aria-controls="seitenleiste"
+              data-i18n-title="nav.toggleTitle"
+              data-i18n-aria-label="nav.toggleAria"
+              title="Navigation ein- oder ausblenden. Am linken Fensterrand fahren blendet sie auch ein."
+              aria-label="Navigation ein- oder ausblenden">
+        <svg class="nav-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="1.5"
+                fill="none" stroke="currentColor" stroke-width="1.25"/>
+          <path d="M6.25 2.25v11.5" stroke="currentColor" stroke-width="1.25"/>
+          <rect class="nav-icon-fill" x="2.35" y="3.05" width="3.15" height="9.9" rx="0.4"
+                fill="currentColor"/>
+        </svg>
+      </button>
+      <div class="marke">
+        <img class="marke-logo" src="/img/sat-logo.png" width="36" height="36"
+             alt="" decoding="async">
+        <div class="marke-text">
+          <span class="marke-name">SatSage</span>
+          <span class="marke-zusatz">know your sats</span>
+        </div>
       </div>
-    </div>
-    <div id="quelle-status" class="quelle" aria-live="polite">
       <!-- Globaler Listen-Filter (MVP: immer inaktiv; Aktivierung schrittweise). -->
       <label class="kopf-filter-wrap" for="kopf-filter">
         <span class="visually-hidden" data-i18n="header.filterAria">Listen filtern</span>
@@ -267,29 +325,46 @@
                title="Filter noch nicht aktiv — kommt schrittweise für filterbare Ansichten."
                aria-disabled="true">
       </label>
+    </div>
+    <div id="quelle-status" class="quelle" aria-live="polite">
       <div id="quelle-pillen" class="quelle-pillen" role="group"
            data-i18n-aria-label="header.pillsAria" aria-label="Status">
-        <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
         <span id="llm-pille" class="pille pille-neutral">LLM</span>
       </div>
     </div>
-    <div class="kopf-lang">
-      <button type="button" id="log-anzeige" class="lang-knopf log-knopf aktiv"
-              data-i18n="header.showLog"
-              data-i18n-title="header.showLogTitle"
-              data-i18n-aria-label="header.showLogAria"
-              title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an."
-              aria-label="Log ein- oder ausblenden"
-              aria-pressed="true">Log</button>
-      <button type="button" id="lang-de" class="lang-knopf" data-lang="de" aria-label="Deutsch">DE</button>
-      <button type="button" id="lang-en" class="lang-knopf" data-lang="en" aria-label="English">EN</button>
+    <div class="kopf-end">
+      <div class="kopf-lang">
+        <button type="button" id="log-anzeige" class="lang-knopf log-knopf aktiv"
+                data-i18n="header.showLog"
+                data-i18n-title="header.showLogTitle"
+                data-i18n-aria-label="header.showLogAria"
+                title="Blendet unten links das Log ein. Rechts bleibt der Assistent. Höhe am oberen Rand der Leiste ziehen. Standard an."
+                aria-label="Log ein- oder ausblenden"
+                aria-pressed="true">Log</button>
+        <button type="button" id="lang-de" class="lang-knopf" data-lang="de" aria-label="Deutsch">DE</button>
+        <button type="button" id="lang-en" class="lang-knopf" data-lang="en" aria-label="English">EN</button>
+      </div>
+      <span id="kurs-pille" class="pille pille-neutral" data-lern="preis" data-i18n-title="header.btcTitle" title="Bitcoin-Kurs — Angebot und Nachfrage am Markt bilden den Preis.">BTC —</span>
     </div>
   </header>
 
-  <div class="buehne log-an chat-an">
+  <div class="buehne log-an">
   <div class="rahmen">
 
-    <nav class="seitenleiste" aria-label="Bereiche" data-i18n-aria-label="nav.aria">
+    <nav id="seitenleiste" class="seitenleiste" aria-label="Bereiche" data-i18n-aria-label="nav.aria">
+      <div class="nav-leiste-kopf">
+        <button type="button" id="nav-pin" class="nav-werkzeug nav-pin"
+                aria-pressed="false"
+                data-i18n-title="nav.pinTitle"
+                data-i18n-aria-label="nav.pinAria"
+                title="Navigation angeheftet lassen — bleibt sichtbar."
+                aria-label="Navigation anheften">
+          <svg class="nav-pin-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor"
+                  d="M10.15 1.22a.75.75 0 0 0-1.06 0L7.22 3.09A2.5 2.5 0 0 0 6.5 4.86v.62l-2.4.7a.75.75 0 0 0-.32 1.24l2.9 2.9-3.22 3.22a.75.75 0 1 0 1.06 1.06l3.22-3.22 2.9 2.9a.75.75 0 0 0 1.24-.32l.7-2.4h.62a2.5 2.5 0 0 0 1.77-.72l1.87-1.87a.75.75 0 0 0 0-1.06L10.15 1.22Zm-.53 1.59 3.57 3.57-1.06 1.06a1 1 0 0 1-.71.3h-.86l-.22.75-3.63-3.63.75-.22v-.86a1 1 0 0 1 .3-.71l1.06-1.06Z"/>
+          </svg>
+        </button>
+      </div>
       <div class="nav-titel" data-i18n="nav.sectionWallets">Wallets</div>
       <div id="wallet-nav" class="nav-liste"></div>
       <div class="nav-titel" data-i18n="nav.sectionAnalyze">Auswerten</div>
@@ -343,9 +418,12 @@
       <!-- ---------- Wallet-Ansicht ---------- -->
       <section id="ansicht-wallet" hidden>
         <div class="bereich-kopf">
-          <div>
-            <h1 id="wallet-titel">Wallet</h1>
-            <p id="wallet-meta" class="meta"></p>
+          <div class="wallet-kopf-stand">
+            <span id="wallet-lot" class="knoten-punkt knoten-eigen wallet-lot-donut" hidden aria-hidden="true"></span>
+            <div>
+              <h1 id="wallet-titel">Wallet</h1>
+              <p id="wallet-meta" class="meta"></p>
+            </div>
           </div>
           <div class="bereich-aktionen">
             <label class="feld-inline">
@@ -359,8 +437,10 @@
               <span class="utxo-aktionen-praefix" data-i18n="wallet.utxoPrefix">UTXO:</span>
               <button type="button" id="tip-sync-knopf" data-lern="node" data-i18n="wallet.tipSync" data-i18n-title="wallet.tipSyncTitle" title="Leichter Tip-Nachzug wie beim Start mit „Wallets immer aktuell halten“: bestehender Cache bis zum Chain-Tip (BIP-158 inkrementell oder Electrs light). Kein Fullscan — dafür Neu scannen." class="knopf">Aktualisieren</button>
               <button type="button" id="rescan-knopf" data-lern="utxo" data-i18n="wallet.utxoScan" data-i18n-title="wallet.utxoScanTitle" title="Fragt die Adressen dieses Wallets neu beim Node ab und erneuert den Bestand. Nötig nach neuen Transaktionen. Ausgegebene Beträge gehören nicht dazu — die holt Historie daneben." class="knopf">Neu scannen</button>
+              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Öffnet das Steuerjahr und klärt die Herkunft der UTXOs dieses Wallets. Fehlt der Bestand, scannt SatSage zuerst dieses Wallet — die Punkte erscheinen im Dotplot." class="knopf">Herkunft</button>
               <button type="button" id="verlauf-knopf" data-i18n="wallet.historyScan" data-i18n-title="wallet.historyScanTitle" title="Holt die vollständige Historie dieses Wallets — auch längst ausgegebene Beträge. Schreibt denselben Cache, den Steuerjahr und „Bereits ausgegeben“ lesen. Braucht einen Electrum-Server. Herkunft/Anschaffungsdatum ist ein anderer Schritt." class="knopf">Historie</button>
-              <button type="button" id="herkunft-tief-knopf" data-i18n="wallet.originDeep" data-i18n-title="wallet.originDeepTitle" title="Verfolgt jedes UTXO dieses Wallets wie „Herkunftslücken schließen“: große Sammel-Txs und eigene Vorgänger bis externe Adresse oder Coinbase. Kann sehr lange dauern (über Nacht ok). Danach sitzt alles im Cache. Braucht Neu scannen." class="knopf">Herkunft</button>
+              <span class="utxo-aktionen-praefix utxo-aktionen-praefix-alle" data-i18n="wallet.allWalletsPrefix">Alle Wallets:</span>
+              <button type="button" id="utxos-alle-knopf" data-i18n="wallet.allWalletsUtxos" data-i18n-title="wallet.allWalletsUtxosTitle" title="UTXO-Bestand aller Wallets in einem Lauf. Ist Compact-Filter die einzige Quelle, ein gemeinsamer Durchgang. Sonst der schnellste Weg: Electrs im LAN, sonst scantxoutset, wenn der Node verbunden ist." class="knopf">UTXOs</button>
             </div>
           </div>
         </div>
@@ -391,12 +471,22 @@
             <div id="fifo-spend" class="fifo-spend" role="group"
                  data-i18n-aria-label="wallet.fifoSpendAria" aria-label="FIFO-Spend" hidden>
               <span id="fifo-spend-text" class="fifo-spend-text"></span>
+              <span id="fifo-spend-gruen-fiat" class="fifo-spend-gruen-fiat" hidden></span>
               <!-- Ohne Komma/Punkt ganze sats, mit Komma oder Punkt BTC; intern ganze sats.
-                   Die erkannte Einheit steht live daneben. -->
+                   Die erkannte Einheit steht live daneben. EUR daneben: nur Umrechnung
+                   beim Verlassen, Spend und Coin-Auswahl nehmen das Sat-Feld. -->
               <input type="text" id="fifo-spend-betrag" class="fifo-spend-betrag"
                      inputmode="decimal" autocomplete="off" spellcheck="false" disabled
                      data-i18n-placeholder="wallet.fifoSpendAmountPlaceholder" placeholder="sats oder BTC">
               <span id="fifo-spend-einheit" class="fifo-spend-einheit" aria-live="polite"></span>
+              <button type="button" id="fifo-spend-max" class="knopf knopf-klein fifo-spend-max" hidden
+                      data-i18n="wallet.fifoSpendMaxButton"
+                      data-i18n-title="wallet.fifoSpendMaxButtonTitle"
+                      title="Gesamtsaldo abzüglich Gebühr eintragen">max</button>
+              <input type="text" id="fifo-spend-fiat" class="fifo-spend-betrag fifo-spend-fiat"
+                     inputmode="decimal" autocomplete="off" spellcheck="false" disabled
+                     data-i18n-placeholder="wallet.fifoSpendFiatPlaceholder" placeholder="EUR">
+              <span id="fifo-spend-fiat-einheit" class="fifo-spend-einheit fifo-spend-fiat-einheit" aria-live="polite"></span>
               <!-- Aufklapp-Dreieck: „Senden ▸“ zu, „Senden ▾“ auf (en „Send ▸/▾“) (aria-expanded); klappt die Ziel-Zeile auf, nur mit gültigem Betrag. Text und Tooltip setzt wallets.js. -->
               <span id="fifo-spend-psbt-huelle" class="fifo-spend-psbt-huelle">
                 <button type="button" id="fifo-spend-psbt" class="knopf knopf-klein" disabled
@@ -501,8 +591,9 @@
               </select>
             </span>
             <span class="karte-zusatz legende">
-              <span class="punkt punkt-eigen"></span> <span data-i18n="trace.legendOwn">eigenes Wallet</span>
-              <span class="punkt punkt-extern"></span> <span data-i18n="trace.legendExternal">extern</span>
+              <span class="punkt punkt-frist-erfuellt"></span> <span data-i18n="trace.legendHeld">außerhalb Haltefrist</span>
+              <span class="punkt punkt-frist-offen"></span> <span data-i18n="trace.legendUnheld">innerhalb Haltefrist</span>
+              <span class="punkt punkt-luecke">?</span> <span data-i18n="trace.legendIncomplete">unvollständig</span>
               <span class="punkt punkt-offen"></span> <span data-i18n="trace.legendOpen">nicht aufgelöst</span>
             </span>
           </div>
@@ -587,7 +678,7 @@
           <div>
             <h1 data-i18n="tools.heading">Tools</h1>
             <p class="meta" data-i18n="tools.meta">
-              Drei getrennte Werkzeuge. Jedes startet erst auf Knopf oder Return.
+              Vier getrennte Werkzeuge. Jedes startet erst auf Knopf oder Return.
             </p>
           </div>
         </div>
@@ -651,6 +742,37 @@
 
         <div class="karte">
           <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="tools.txHeading">Gezielte Tx-Analyse: eigene Wallets im Input oder Output?</span>
+          </div>
+          <p class="meta tools-erklaerung" data-i18n="tools.txLead">
+            Sämtliche Zu- und Abgänge in der Transaktion werden daraufhin geprüft,
+            ob eines unserer Wallets beteiligt war.
+          </p>
+          <div class="tools-zeile">
+            <input type="text" id="tools-tx-q" class="tools-eingabe mono"
+                   data-i18n-placeholder="tools.txPlaceholder"
+                   data-i18n-aria-label="tools.txAria"
+                   data-i18n-title="tools.txFieldTitle"
+                   placeholder="TxID"
+                   aria-label="Transaktions-ID"
+                   title="Tx aus dem Cache, sonst Electrs. Alle Inputs und Outputs gegen die hinterlegten Wallets."
+                   autocomplete="off" spellcheck="false">
+            <button type="button" id="tools-tx" class="knopf"
+                    data-i18n="tools.go" data-i18n-title="tools.txTitle"
+                    title="Tx aus dem Cache, sonst Electrs. Alle Inputs und Outputs gegen die hinterlegten Wallets.">
+              Los
+            </button>
+            <button type="button" id="tools-tx-abbruch" class="knopf" hidden
+                    data-i18n="tools.cacheCancel">
+              Abbrechen
+            </button>
+            <p id="tools-tx-status" class="meta" hidden></p>
+            <ul id="tools-tx-liste" class="tools-schatz-liste" hidden></ul>
+          </div>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
             <span class="karte-titel" data-i18n="tools.treasureHeading">Außergewöhnlich gründlicher Wallet-Scan nach bisher unentdeckten UTXOs</span>
           </div>
           <p class="meta tools-erklaerung" data-i18n="tools.treasureLead">
@@ -684,11 +806,10 @@
             </p>
             <p class="meta" id="steuer-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
             <p class="meta" data-i18n-html="tax.metaHtml">
-              <strong>Historien</strong> holt <em>welche</em>
-              Beträge es je gab, auch längst ausgegebene — erst damit werden
-              Veräußerungen sichtbar.
+              Veräußerungen erscheinen, wenn in der Wallet-Ansicht
+              <strong>Historie</strong> erhoben wurde.
               Fehlt die Herkunft (Scorecard grau), klärt <strong>klären</strong>
-              dort die Anschaffung bis Stichtag/Haltefrist.
+              dort die Anschaffung.
             </p>
           </div>
           <div class="bereich-aktionen">
@@ -700,13 +821,10 @@
               <span data-i18n="tax.holding">Haltefrist</span>
               <select id="frist-wahl" data-lern="haltefrist" data-i18n-title="tax.holdingTitle" title="Jahre bis zur Steuerfreiheit. Vorgabe 1 Jahr (Deutschland). Mehrjährige Fristen im Dropdown."></select>
             </label>
-            <button type="button" id="verlauf-erheben" data-i18n="tax.historyAll" data-i18n-title="tax.historyAllTitle" title="Holt die Historien aller Wallets — auch ausgegebene Beträge. Einzelnes Wallet: Historie in der Wallet-Ansicht. Derselbe Cache. Braucht einen Electrum-Server." class="knopf">
-              Historien
+            <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf">
+              HTML
             </button>
             <button type="button" id="export-csv" data-i18n="tax.csv" data-i18n-title="tax.csvTitle" title="Aufstellung als CSV für Tabellenkalkulation und Steuerberatung — mit Semikolon und Dezimalkomma, damit Excel sie ohne Nacharbeit liest." class="knopf">CSV</button>
-            <button type="button" id="export-bericht" data-i18n="tax.report" data-i18n-title="tax.reportTitle" title="Druckbarer Bericht als eigenständige HTML-Datei. Im Browser öffnen und über „Drucken → Als PDF sichern“ in ein PDF wandeln." class="knopf">
-              Bericht
-            </button>
           </div>
         </div>
 
@@ -746,12 +864,13 @@
           <div class="karte-kopf">
             <span class="karte-titel" data-i18n="tax.selfReport">Bericht Sat-Geschichte</span>
             <span class="karte-zusatz" data-i18n="tax.selfReportZusatz">
-              FiFo · Abflüsse + Was-wäre-wenn · Vorbereitung
+              FiFo · Abflüsse · Vorbereitung
             </span>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="tax.selfReportHint">
-            Abflüsse und Was-wäre-wenn-UTXOs werden beim Öffnen aus dem Cache
+            Abflüsse des Steuerjahres werden beim Öffnen aus dem Cache
             geladen — markieren (z. B. Börsen-Einzahlung) und Report erzeugen.
+            Offene UTXOs kreuzt du in der Tabelle darunter an.
             Personendaten sind vorerst Platzhalter (Donald Duck / 0/8/15 /
             Entenhausen). Keine Steuerberatung.
           </p>
@@ -1171,8 +1290,7 @@
               <button type="button" id="app-passwort-setzen" class="knopf"
                       data-i18n="settings.password.save"
                       data-i18n-title="settings.password.saveTitle"
-                      title="Speichert nur, wenn beide neuen Passwörter übereinstimmen."
-                      onclick="typeof speichereAppPasswort==='function'&&speichereAppPasswort();return false;">
+                      title="Speichert nur, wenn beide neuen Passwörter übereinstimmen.">
                 Passwort setzen
               </button>
             </div>
@@ -1901,23 +2019,23 @@
 <script src="/i18n.js?v=0.9.9"></script>
 <script src="/log_i18n.js?v=0.9.9-hoehe"></script>
 <script src="/api.js?v=0.9.9-startoslogin"></script>
-<script src="/state.js?v=0.9.9"></script>
-<script src="/format.js?v=0.9.9-alterweg"></script>
-<script src="/app.js?v=0.9.9-mempool"></script>
+<script src="/state.js?v=0.9.9-hostkeep"></script>
+<script src="/format.js?v=0.9.9-staub75"></script>
+<script src="/app.js?v=0.9.9-hostkeep"></script>
 <script src="/mempool_links.js?v=0.9.9"></script>
 <script src="/views/pager.js?v=0.9.9"></script>
 <script src="/views/einstellungen.js?v=0.9.9-fifospend"></script>
-<script src="/views/datenquellen.js?v=0.9.9-pubconn"></script>
+<script src="/views/datenquellen.js?v=0.9.9-p2pdatum-blur"></script>
 <script src="/views/sanktionen.js?v=0.9.9"></script>
 <script src="/views/einrichtung.js?v=0.9.9"></script>
 <script src="/views/adress_labels.js?v=0.9.9"></script>
-<script src="/views/wallets.js?v=0.9.9-psbt"></script>
-<script src="/views/herkunft.js?v=0.9.9-lotkopf"></script>
-<script src="/views/steuerjahr.js?v=0.9.9-plotsofort"></script>
-<script src="/views/herkunftsnetz.js?v=0.9.9-grauklapp"></script>
+<script src="/views/wallets.js?v=0.9.9-scandialog"></script>
+<script src="/views/herkunft.js?v=0.9.9-scandialog"></script>
+<script src="/views/steuerjahr.js?v=0.9.9-plotring"></script>
+<script src="/views/herkunftsnetz.js?v=0.9.9-lottip"></script>
 <script src="/views/tools.js?v=0.9.9-cache"></script>
-<script src="/chrome_nav.js?v=0.9.9"></script>
-<script src="/chrome.js?v=0.9.9-startoslogin"></script>
+<script src="/chrome_nav.js?v=0.9.9-dachboden"></script>
+<script src="/chrome.js?v=0.9.9-utxos-alle"></script>
 <script src="/boot.js?v=0.9.9"></script>
 </body>
 </html>

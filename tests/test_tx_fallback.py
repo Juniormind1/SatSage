@@ -92,16 +92,14 @@ class TestFallbackKette(unittest.TestCase):
         self.assertEqual(kw["local_pruneheight"], 100)
         mock_p2p.assert_not_called()
 
-    def test_block_nach_notfound(self):
+    def test_mit_hoehe_kein_getdata_tx(self):
+        """Bekannte Höhe: Block zuerst, kein nutzloses getdata TX."""
         client = MagicMock()
         txid = "ab" * 32
         note_tx_height(txid, 962_859)
         block_tx = {"txid": txid, "vin": [], "vout": [], "status": {"block_height": 962_859}}
 
-        with patch(
-            "core.bip158_wallet.fetch_tx_p2p",
-            side_effect=ConnectionError("Peer hat die Transaktion nicht"),
-        ):
+        with patch("core.bip158_wallet.fetch_tx_p2p") as mock_p2p:
             with patch(
                 "core.bip158_wallet.fetch_tx_from_block_p2p",
                 return_value=block_tx,
@@ -110,6 +108,7 @@ class TestFallbackKette(unittest.TestCase):
         self.assertEqual(out["status"]["block_height"], 962_859)
         mock_block.assert_called_once()
         self.assertEqual(mock_block.call_args.args[2], 962_859)
+        mock_p2p.assert_not_called()
 
     def test_ohne_hoehe_klarer_fehler(self):
         client = MagicMock()

@@ -6,7 +6,7 @@ Gilt beim Arbeiten an `githooks/` **und** bei jedem Commit/Push aus diesem Clone
 
 ## Branches
 
-- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung. Vor dem Merge und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket): Unittests grün und Regtest-Labor grün (Workflow `Regtest-Labor`, Core + Electrs, `verify_rpc_allowlist.py`, `verify_tx_classify.py` und `verify_sanctions_hops.py`). Wochenlauf auf `dev-juniormind` nur, wenn der Prüfpfad seit dem letzten grünen Labor geändert wurde.
+- main — nur **stabiles**, öffentliches Material (Release-tauglich). Merge egal von wem, aber nur nach Prüfung. Vor dem Merge und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket): Unittests grün und Regtest-Labor grün (Workflow `Regtest-Labor`, Core + Electrs, `verify_rpc_allowlist.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py` und `verify_quellen_inventar.py`). Wochenlauf auf `dev-juniormind` nur, wenn der Prüfpfad seit dem letzten grünen Labor geändert wurde.
 - dev-juniormind — laufende Entwicklung von Juniormind1; hier committen/pushen für Work-in-Progress.
 - Andere Contributor-Branches/PRs: nach Review in main mergen, wenn stabil; nicht ungeprüft aus dev-* übernehmen.
 
@@ -27,7 +27,7 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten. Hooks ersetzen diese Prüfung nicht.
+Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). `pre-push` fährt die Unit-Suite nur bei Push nach `main` (inkl. Hart-Tests, `SATSAGE_HARD_TESTS=1`); `dev-juniormind` bleibt ohne Suite. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten. Hooks ersetzen diese Prüfung nicht.
 
 **Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 

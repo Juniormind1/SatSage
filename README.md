@@ -7,10 +7,12 @@
   <em>Woher die Sats wann kamen — On-Chain-Alter für Steuer und Überblick</em>
 </p>
 
+<p align="center"><a href="README.en.md">🇬🇧 English version</a></p>
+
 https://github.com/user-attachments/assets/4078fbfa-0516-4372-8001-ff06609d5f5e
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-0.9.2-f7931a?style=flat-square" alt="Version 0.9.2"></a>
+  <a href="https://github.com/Juniormind1/SatSage/tags"><img src="https://img.shields.io/github/v/tag/Juniormind1/SatSage?sort=semver&style=flat-square&color=f7931a&label=version" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/UI-localhost%20Web--GUI-111111?style=flat-square" alt="Web-GUI">
@@ -22,7 +24,7 @@ https://github.com/user-attachments/assets/4078fbfa-0516-4372-8001-ff06609d5f5e
 
 | | |
 |:--|:--|
-| **Version** | [`VERSION`](VERSION) → aktuell **0.9.2** (einzige Quelle; Fußzeile der Web-GUI) |
+| **Version** | aktueller Git-Tag (siehe Badge); Fußzeile der Web-GUI zeigt `git describe`, ohne Git-Checkout die Datei [`VERSION`](VERSION) |
 | **Oberfläche** | Web (`py server.py`) + Terminal-Steuerung · Specter-Plugin · StartOS-Sideload |
 | **Sprache** | DE/EN in der UI (`UI_LANG` / Einstellungen); Handbuch vorerst DE |
 | **IDs** | `satsage` · Binary `satsage-linux` / `satsage-macos` / `satsage-windows.exe` · Specter `satsage.specterext.satsage` |
@@ -83,14 +85,8 @@ Kopiere `.env.example` nach `.env` und passe Werte an. Wallets stehen dort als B
 ## Schnellstart
 
 ```bash
-# Empfohlen: Web-GUI + Terminal-Steuerung (localhost, Token in der URL)
+# Web-GUI + Terminal-Steuerung (localhost, Token in der URL)
 py server.py
-
-# Einmal-Analysen ohne GUI (XPUBs aus .env oder --xpubs)
-py main.py --xpubs zpub6... --txid <txid>
-py main.py --xpubs zpub6... --address bc1q...
-py main.py --xpubs zpub6... --address bc1q... --utxo <txid>:<vout>
-py main.py --xpubs zpub6... --cli --top-utxos 10
 ```
 
 Ohne `--wallet-names` bzw. ohne `WALLET_NAMES` / `WALLET_0_NAME`… in `.env` wird pro XPUB ein **SHA256-Hex** des Keys als Anzeigename verwendet.
@@ -139,27 +135,15 @@ Ausführlich: [`doc/handbuch.html`](doc/handbuch.html). Offene Lücke (gründlic
 - OpenSanctions: Israel NBCTF, US FBI Lazarus Group, ransomwhe.re
 - Badd-Boyz Bitcoin Scammers
 
-**Automatische Priorität** beim Start (wenn weder CLI-Flag noch manuelle Wahl in den Einstellungen gesetzt):
+**Automatische Priorität** beim Start (ohne manuelle Wahl in den Datenquellen):
 
-1. eigener Electrum-Server → 2. P2P-BIP-158 → 3./4. öffentliche Onions bzw. Clearnet **nur nach Bestätigung** (Web-Dialog: nur bis Server-Neustart; CLI: `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1`)
+1. eigener Electrum-Server → 2. P2P-BIP-158 nur für den UTXO-Bestand, wenn eigener Electrum-Server, Bitcoin Core und scantxoutset nicht verbunden sind → 3./4. öffentliche Onions bzw. Clearnet **nur nach Bestätigung** (Web-Dialog: nur bis Server-Neustart; sonst `OEFFENTLICHE_ELECTRUM=1`)
 
 Ohne Bestätigung bleiben nur eigener Node und BIP-158. Extra-Scan-Verbindungen gelten nur für den eigenen LAN-Fulcrum. `BIP158_P2P=0` lässt Compact Filter in der Auto-Kette aus.
 
 **Verlaufsscan** hat eine eigene Kette (Core `scantxoutset` liefert keinen Verlauf): Electrs/Fulcrum LAN → Onion → BIP-158 Blockwalk/Cache → öffentliche Electrum (nach Bestätigung).
 
-`BIP158_P2P=1` in `.env` erzwingt **keine** Quelle — nur `--bip158`, `--rpc-only` oder die manuelle Wahl unter Einstellungen.
-
-```bash
-# Compact Filter über Bitcoin-P2P
-py main.py --bip158 --bip158-start 481824 --xpubs zpub6...
-
-# Eigener Electrum-Server
-py main.py --rpc-only --xpubs zpub6...
-
-# Öffentliche Electrum-Server (Adressen gehen an Dritte)
-py main.py --oeffentliche-electrum --xpubs zpub6...
-
-```
+`BIP158_P2P=1` in `.env` erzwingt **keine** Sitzungsquelle. Die Wahl steht in den Datenquellen. Compact Filter suchen nur den UTXO-Bestand, und nur wenn eigener Electrum-Server, Bitcoin Core und scantxoutset nicht verbunden sind.
 
 Öffentliche Fulcrum-Server und der **Sanktions-Clearnet-Pool** nutzen `electrum_servers.json` (lokal, optional per `check_fulcrum_tor.py` aktualisiert).
 
@@ -235,7 +219,7 @@ FULCRUM_TOR_PROXY=127.0.0.1:9150
 
 ```ini
 rpcauth=satsage:<salt>$<hash>
-rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee
+rpcwhitelist=satsage:getblockchaininfo,getblockhash,getblockheader,getblock,getrawtransaction,scantxoutset,estimatesmartfee,getindexinfo
 rpcwhitelistdefault=0
 ```
 
@@ -257,10 +241,7 @@ Wallet-spezifisch, **veränderlich** (UTXOs kommen und gehen).
 - Beim Ranglisten-Abruf: Cache laden → optional Salden-Check → Light-/Full-Rescan
 - Unter **5 % freiem Speicherplatz** am Cache-Laufwerk werden neue Cache-Schreibvorgänge pausiert (Warnung einmalig)
 
-```bash
-py main.py --xpubs zpub6... --rescan          # Full-Rescan erzwingen
-py main.py --xpubs zpub6... --cache-dir ./mein_utxo_cache
-```
+Ein Full-Rescan und das Cache-Verzeichnis stellt die Web-GUI ein (Datenquellen, Danger Zone, Server-Start mit `--cache-dir`).
 
 **Ablauf bei vorhandenem Cache:**
 
@@ -281,9 +262,7 @@ py main.py --xpubs zpub6... --cache-dir ./mein_utxo_cache
 
 Wird automatisch beim Tracen befüllt; beschleunigt wiederholte Analysen und Vorgänger-Ketten auch nach Neustart.
 
-```bash
-py main.py --immutable-cache-dir ./mein_immutable_cache ...
-```
+Das Verzeichnis setzt der Server-Start mit `--immutable-cache-dir`.
 
 `utxo_ingress/` kann **Wallet-Anzeigenamen** enthalten — bei Teilen des Repos oder Backups neutrale Namen verwenden.
 
@@ -300,28 +279,6 @@ Lokal gecachte Blacklists (Download in der Web-GUI unter Einstellungen oder aus 
 | `sdn_advanced.xml` | OFAC SDN-Rohdaten (optional) |
 
 ---
-
-## Wichtige CLI-Optionen
-
-| Option | Beschreibung |
-|--------|--------------|
-| `--xpubs XPUB [XPUB ...]` | Extended Public Keys (sonst `WALLET_0_XPUB`… aus `.env`) |
-| `--wallet-names NAME [NAME ...]` | Anzeigenamen (sonst `WALLET_NAMES` / `WALLET_NAME_0`… aus `.env`) |
-| `--txid TXID` | Spending-Tx analysieren (Einmal-Lauf) |
-| `--address ADDR` | Unspent UTXOs + Herkunft |
-| `--utxo TXID:VOUT` | Einzelnes UTXO (mit `--address`) |
-| `--cli` | Einmal-Lauf: Top-UTXOs ausgeben und beenden |
-| `--top-utxos N` | Anzahl Top-UTXOs mit `--cli` (Default: 10) |
-| `--max-addresses N` | Abgeleitete Adressen pro XPUB (Default: 50) |
-| `--max-addresses-per-xpub N [N ...]` | Individuelles Limit pro XPUB (Reihenfolge wie `--xpubs`) |
-| `--rescan` | Full-Rescan aller XPUBs |
-| `--cache-dir DIR` | UTXO-Cache-Verzeichnis |
-| `--immutable-cache-dir DIR` | Cache unveränderlicher Daten |
-| `--bip158` | Compact Filter über Bitcoin-P2P (kein Core-RPC) |
-| `--bip158-start HEIGHT` | Erster Scan-Block (Default: 481 824, SegWit) |
-| `--rpc-only` | Fulcrum erzwingen |
-| `--no-verbose` | Gekürzte TxIDs/Adressen erzwingen |
-| `--fulcrum-host`, `--fulcrum-port`, `--fulcrum-no-ssl` | Fulcrum-Verbindung |
 
 ---
 
@@ -351,10 +308,10 @@ Unter `specter_plugin/` liegt eine **Specter-Desktop-Extension** (Package `satsa
 
 | Bereich | Inhalt |
 |---------|--------|
-| **Übersicht** | Node, XPUB-Anzahl, Session-Status (Datenquelle, Privatsphäre), Adress-/UTXO-Counts |
-| **Wallets** | Specter-Wallets inkl. XPUBs, Saldo, UTXO-/Tx-Vorschau; Detailseite pro Alias |
-| **Analyse** | Tx-Trace (TxID), UTXO-Trace (`txid:vout`), UTXO-Rangfolge, Top-N-UTXOs tracen |
-| **Kontext** | `context.json` (exportierbarer Bridge-Snapshot; Secrets nur mit Dev-Flag) |
+| **Oberfläche** | Dieselbe Web-GUI wie `py server.py`, in einem eigenen Tab |
+| **Einstellungen** | Menüeintrag in der Specter-Seitenleiste |
+
+Übersicht, Wallet-Vorschau, Plaintext-Analyse und `context.json` bleiben als Adressen (`/svc/satsage/wallets`, `/analyze`, `/context.json`), ohne Eintrag in der Navigation.
 
 Die Analyse ruft dieselbe Logik wie die CLI auf (`analyze.analyze_tx`, `analyze_address_utxos`, `list_top_wallet_utxos`, `trace_known_utxos`). XPUBs und Node kommen aus Specter; Caches liegen im Repo-Root (`utxo_cache/`, `immutable_cache/`). Bevorzugt wird **Bitcoin Core + BIP-158**, wenn Specter einen Core-Node mit RPC-Credentials hat.
 
@@ -378,7 +335,7 @@ chmod +x scripts/*.sh
 2. Node verbinden (Regtest: `localhost:18443`, User `bitcoin`, Pass `secret`)
 3. Device + Watch-Only-Wallet mit XPUB anlegen (oder Hot-Wallet im Regtest)
 4. **Plugins → SatSage** aktivieren
-5. Sidebar → **SatSage**: Übersicht, Wallets, Analyse
+5. Sidebar → **SatSage** → **Oberfläche**
 
 Offline-Checks:
 

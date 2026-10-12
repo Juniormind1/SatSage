@@ -194,6 +194,8 @@ NUTZER_JOB_KINDS = frozenset({
     "export_adressen",  # Adressen nach Wallet-Export (Electrs-Batch)
     "schatzsuche",  # scantxoutset jenseits des Suchfensters
     "cache_suche",  # UTXO- und Verlaufs-Cache aller Wallets
+    "tx_beteiligung",  # Eine Tx: eigene Wallets in Inputs/Outputs
+    "p2p-walk",  # Herkunftsabgleich gegen gespeicherten Electrs-Walk
 })
 
 
@@ -212,6 +214,7 @@ ELECTRUM_SERIAL_KINDS = frozenset({
     "trace-tief",
     "wallet_sync",
     "export_adressen",
+    "tx_beteiligung",
 })
 
 
@@ -365,7 +368,14 @@ class Job:
             zuletzt = self._log_zuletzt
         return max(0.0, time.monotonic() - zuletzt)
 
-    def progress(self, message: str, *, log: bool = False, sofort: bool = False) -> None:
+    def progress(
+        self,
+        message: str,
+        *,
+        log: bool = False,
+        sofort: bool = False,
+        nur_log: bool = False,
+    ) -> None:
         """
         Fortschritts-Callback, kompatibel zu trace_engine.ProgressCallback.
 
@@ -375,10 +385,13 @@ class Job:
         *log=True* oder *sofort=True* hängt die Zeile an die Job-Liste, damit
         die Oberfläche sie im Log-Bereich zeigen kann — vor dem Schritt,
         nicht nur als „Moment noch“ im Terminal.
+
+        *nur_log*: Zeile ins Log, die Statuszeile (Prozent) bleibt.
         """
         self.raise_if_cancelled()
-        self.message = message
-        if log or sofort:
+        if not nur_log:
+            self.message = message
+        if log or sofort or nur_log:
             self._haenge_log_an(message)
 
     def _haenge_log_an(self, text: str) -> None:
@@ -388,16 +401,21 @@ class Job:
         _merke_globale_log_aktivitaet()
         _rufe_log_spiegel(self, text)
 
-    def ersetze_log_mit_praefix(self, praefix: str, text: str) -> bool:
+    def ersetze_log_mit_praefix(
+        self, praefix: str, text: str, *, status: bool = True,
+    ) -> bool:
         """
         Ersetzt die letzte Log-Zeile, die mit *praefix* beginnt.
 
         Für Filter-Treffer: „… — hole Block…“ wird zu „… — False Positive“
         bzw. „… — +n UTXO…“, ohne eine zweite Zeile. Fehlt die Zeile,
         wird *text* angehängt. Rückgabe: True wenn ersetzt.
+
+        *status=False*: die Statuszeile (Filter-Prozent) bleibt stehen.
         """
         self.raise_if_cancelled()
-        self.message = text
+        if status:
+            self.message = text
         nadel = (praefix or "").strip()
         ersetzt = False
         with self._log_lock:
@@ -445,8 +463,8 @@ class Fortschritt:
     """
 
     #: Sekunden ohne Log-Ausgabe, bevor Herzschlag oder nachgezogener Tick.
-    #: Bewusst 10 — nicht kürzer (AGENTS.md / Changelog).
-    INTERVALL = 10.0
+    #: Bewusst 90 — nicht kürzer (AGENTS.md / Changelog).
+    INTERVALL = 90.0
     HERZSCHLAG = "Moment noch"
 
     def __init__(self, job: Job):
@@ -471,12 +489,18 @@ class Fortschritt:
             self._geloggt = text
             self.job.progress(text, log=True)
 
-    def ersetze(self, praefix: str, text: str) -> None:
+    def ersetze(self, praefix: str, text: str, *, status: bool = True) -> None:
         """Letzte passende Log-Zeile überschreiben (Filter-Treffer-Ergebnis)."""
         with self._lock:
-            self._text = text
-            self._geloggt = text
-            self.job.ersetze_log_mit_praefix(praefix, text)
+            if status:
+                self._text = text
+                self._geloggt = text
+            self.job.ersetze_log_mit_praefix(praefix, text, status=status)
+
+    def nur_ins_log(self, text: str) -> None:
+        """Log-Zeile, ohne die Statuszeile zu verdrängen."""
+        with self._lock:
+            self.job.progress(text, nur_log=True)
 
     def tick(self, text: str | None = None) -> None:
         """
@@ -602,6 +626,16 @@ class JobRegistry:
                     if ist_abbruch(exc):
                         job.status = "cancelled"
                         job.message = "Abgebrochen."
+                    elif isinstance(getattr(exc, "status", None), int) and str(
+                        getattr(exc, "message", "") or ""
+                    ).strip():
+                        # ApiError (server.ApiError, per Duck-Typing ohne
+                        # Import-Zyklus): erwartete Meldung für die Oberfläche,
+                        # z. B. „Keine Sanktionslisten vorhanden …“.
+                        text = str(exc.message).strip()
+                        job.status = "failed"
+                        job.error = text
+                        job.message = text
                     else:
                         job.status = "failed"
                         job.error = f"{type(exc).__name__}: {exc}"

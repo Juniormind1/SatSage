@@ -116,6 +116,37 @@ class TestCacheSuche(unittest.TestCase):
         )
         self.assertEqual([t["address"] for t in ergebnis["treffer"]], ["bc1qgross"])
 
+    def test_ausgabe_txid_trifft_verlauf(self):
+        """Börsen-Einzahl-TxID steht als spent_txid am ausgegebenen Output."""
+        ausgabe = "ee" * 32
+        empfang = "cc" * 32
+        verlauf = [{
+            "txid": empfang, "vout": 1, "value": 12_000, "spent": True,
+            "spent_txid": ausgabe, "address": "bc1qalt",
+        }]
+
+        ergebnis = suche_cache(
+            eintraege=[_Wallet("A", "A")],
+            roh=ausgabe,
+            lang="de",
+            lade_bestand=lambda _s: [],
+            lade_verlauf=lambda _s: verlauf,
+            anreichere_bestand=lambda e: e,
+            anreichere_verlauf=lambda e: {
+                "key": f"{e['txid']}:{e['vout']}",
+                "value_sats": e["value"],
+                "address": e["address"],
+                "txid": e["txid"],
+                "vout": e["vout"],
+                "spent": True,
+                "spent_txid": e["spent_txid"],
+                "time_label": "",
+            },
+        )
+        self.assertEqual(ergebnis["total"], 1)
+        self.assertEqual(ergebnis["treffer"][0]["key"], f"{empfang}:1")
+        self.assertTrue(ergebnis["treffer"][0]["spent"])
+
 
 if __name__ == "__main__":
     unittest.main()

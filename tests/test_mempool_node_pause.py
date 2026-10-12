@@ -1,6 +1,7 @@
 """Mempool-Abgleich: gescheiterte Verbindung zum eigenen Node wird gemerkt."""
 from __future__ import annotations
 
+import threading
 import unittest
 from unittest import mock
 
@@ -76,6 +77,44 @@ class TestMempoolNodePause(unittest.TestCase):
         state = _State({})
         self.assertIsNone(empfang._mempool_node_client(state))
         self.assertIsNone(getattr(state, "_mempool_node_pause", None))
+
+
+class TestEmpfangLockGibtNetzFrei(unittest.TestCase):
+    """PUT Datenquelle darf nicht hinter einem Onion-Ping warten."""
+
+    def test_ping_haelt_den_lock_nicht(self):
+        ping_laeuft = threading.Event()
+        ping_weiter = threading.Event()
+
+        class FakeClient:
+            def request(self, _method):
+                ping_laeuft.set()
+                ping_weiter.wait(timeout=5)
+                return "pong"
+
+            def close(self):
+                pass
+
+        state = mock.Mock()
+        state.env.return_value.values.return_value = {
+            "FULCRUM_HOST": "192.0.2.1",
+        }
+        lock = threading.Lock()
+        state._empfang_fulcrum_lock = lock
+        state._empfang_fulcrum = FakeClient()
+        state.sources_last = None
+
+        t = threading.Thread(
+            target=lambda: empfang._eigener_fulcrum_client(state),
+            name="test-empfang-ping",
+        )
+        t.start()
+        self.assertTrue(ping_laeuft.wait(1.0))
+        self.assertTrue(lock.acquire(timeout=0.3))
+        lock.release()
+        ping_weiter.set()
+        t.join(timeout=2.0)
+        self.assertFalse(t.is_alive())
 
 
 if __name__ == "__main__":

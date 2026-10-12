@@ -25,6 +25,9 @@ WORKDIR /opt/satsage
 # server.py ein lokales Modul importiert, das nicht im Image liegt.
 COPY . .
 COPY packaging/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+# Preis-Bundle gehört ins Image (scripts/refresh_btc_price_bundle.py vor dem Build).
+RUN test -s data/btc_price/EUR.csv && test -s data/btc_price/USD.csv \
+ || { echo "Preis-Bundle fehlt: data/btc_price/EUR.csv/USD.csv — vorher scripts/refresh_btc_price_bundle.py" >&2; exit 1; }
 RUN python3 - <<'PY'
 import ast
 import sys

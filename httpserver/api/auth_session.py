@@ -39,14 +39,20 @@ def _password_hash(state) -> str:
 
 
 def _password_is_set(state) -> bool:
-    """Passwort gibt es nur zusammen mit einer scrambled ``.env``.
+    """Ob der Login-Hash die Oberfläche sperrt.
 
-    Ein Hash in ``.satsage-password`` allein sperrt nichts. StartOS legt
-    keinen Hash an; ein Rest aus einem älteren Paket zählt nicht, solange
-    die ``.env`` im Klartext liegt.
+    Desktop und StartOS zählen nur zusammen mit einer scrambled ``.env``.
+    Ein Hash allein ist dort ein Rest und sperrt nichts.
+
+    Specter und Umbrel verschlüsseln die ``.env`` nicht. Dort ist der Hash
+    selbst das Passwort.
     """
     if not _password_hash(state):
         return False
+    from httpserver.scramble import _env_scramble_erlaubt
+
+    if not _env_scramble_erlaubt(state):
+        return True
     from core import env_scramble as sc
 
     return sc.is_scramble_file_present(state.env_path)
@@ -93,40 +99,54 @@ def _verify_password(password: str, stored: str) -> bool:
 
 
 def _write_password_hash(state, password: str) -> None:
-    """Schreibt den Login-Hash atomar (tmp + replace), ohne fd-chmod-APIs."""
+    """Schreibt den Login-Hash atomar (tmp + replace), ohne fd-chmod-APIs.
+
+    Der temporäre Name ist eindeutig. Zwei gleichzeitige Setz-Vorgänge
+    (Doppelklick, zwei Handler) dürfen sich nicht dieselbe ``.tmp`` teilen:
+    ``os.replace`` des Verlierers sieht die Datei nicht mehr und wirft ENOENT.
+    """
     path = _auth_file(state)
     path.parent.mkdir(parents=True, exist_ok=True)
     value = (_hash_password(password) + "\n").encode("utf-8")
-    tmp = path.with_name(path.name + ".tmp")
-    if tmp.is_file() and os.name == "nt":
+    tmp = path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp"
+    )
+    try:
+        if tmp.is_file() and os.name == "nt":
+            try:
+                os.chmod(tmp, 0o666)
+            except OSError:
+                pass
+        tmp.write_bytes(value)
         try:
-            os.chmod(tmp, 0o666)
+            os.chmod(tmp, 0o600)
         except OSError:
             pass
-    tmp.write_bytes(value)
-    try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    if path.is_file() and os.name == "nt":
-        try:
-            os.chmod(path, 0o666)
-        except OSError:
-            pass
-    try:
-        os.replace(tmp, path)
-    except PermissionError:
-        if path.is_file():
+        if path.is_file() and os.name == "nt":
             try:
                 os.chmod(path, 0o666)
             except OSError:
                 pass
-            path.unlink()
-        os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        try:
+            os.replace(tmp, path)
+        except PermissionError:
+            if path.is_file():
+                try:
+                    os.chmod(path, 0o666)
+                except OSError:
+                    pass
+                path.unlink()
+            os.replace(tmp, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    finally:
+        if tmp.is_file():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _clear_password_hash(state) -> None:
@@ -162,8 +182,12 @@ def api_save_app_password(state: AppState, payload: dict) -> dict:
     confirm = str(
         payload.get("confirm") or payload.get("password_confirm") or password
     )
-    stored = _password_hash(state)
-    if stored and not _verify_password(current, stored):
+    # Nur ein wirklich gesetztes Passwort verlangt das aktuelle. Ein Hash ohne
+    # Cipher (Desktop/StartOS) ist kein Passwort — sonst scheitert das Setzen
+    # mit leerem Feld, obwohl die Oberfläche „nicht gesetzt“ zeigt.
+    # Merken vor dem Schreiben: danach existiert der Hash schon.
+    gesetzt = _password_is_set(state)
+    if gesetzt and not _verify_password(current, _password_hash(state)):
         raise ApiError(403, "Aktuelles Passwort ist falsch.")
     if not password or password != confirm:
         raise ApiError(400, "Passwörter stimmen nicht überein oder sind leer.")
@@ -176,7 +200,7 @@ def api_save_app_password(state: AppState, payload: dict) -> dict:
     try:
         from core import env_scramble as sc_mod
 
-        if stored and sc_mod.is_scramble_file_present(state.env_path):
+        if gesetzt and sc_mod.is_scramble_file_present(state.env_path):
             _scramble_change_password(state, current, password)
         else:
             _scramble_enable_for_password(state, password)

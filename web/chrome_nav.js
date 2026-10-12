@@ -53,8 +53,9 @@ function aktualisiereSpecterUi() {
 
 /**
  * Ein Wallet, sobald sein Cache gelesen ist — nicht erst mit dem letzten.
- * Reihenfolge bleibt die der Konfiguration. Der Cache-Stand (UTXO-Zahl,
- * Frische) kommt mit „Cache gelesen.“ und ersetzt den Platzhalter.
+ * Die Liste bleibt in Konfigurationsreihenfolge; die Navigation sortiert
+ * beim Zeichnen alphabetisch. Der Cache-Stand (UTXO-Zahl, Frische) kommt
+ * mit „Cache gelesen.“ und ersetzt den Platzhalter.
  */
 function nimmWalletSobaldFertig(wallet) {
   if (!wallet || !wallet.id) return;
@@ -93,12 +94,182 @@ function einstiegsWalletId() {
   return liste[0].id;
 }
 
+/**
+ * Navigationsleiste: Namen A–Z in der UI-Sprache, Groß/Klein egal.
+ * Gleiche Namen: id als Tie-Break, damit die Reihenfolge stabil bleibt.
+ * Die Konfiguration selbst bleibt unsortiert (Speichern schreibt .env).
+ */
+function walletsFuerNav(liste) {
+  const sprache = typeof uiSprache === "function" && uiSprache() === "en" ? "en" : "de";
+  return [...(liste || [])].sort((a, b) => {
+    const namen = String(a?.name || "").localeCompare(String(b?.name || ""), sprache, {
+      sensitivity: "base",
+      numeric: true,
+    });
+    if (namen) return namen;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+}
+
+/** UTXO-Lauf „Alle Wallets“ — eine Job-ID, Pille trotzdem je Wallet. */
+function alleUtxoScanLaeuft() {
+  return Boolean(
+    Zustand.rescanJob
+    && String(Zustand.scanWalletId) === "alle"
+    && Zustand.scanArt !== "verlauf",
+  );
+}
+
+function utxoScanLaeuftFuer(wallet) {
+  if (!Zustand.rescanJob || !wallet || !wallet.id) return false;
+  if (Zustand.scanArt === "verlauf") return false;
+  if (Zustand.scanWalletId === wallet.id) return true;
+  return alleUtxoScanLaeuft();
+}
+
+/** Live-Stand dieses Wallets während des UTXO-Scans. */
+function navUtxoScanZahl(wallet) {
+  if (alleUtxoScanLaeuft()) {
+    const je = Zustand.scanUtxoJeWallet || {};
+    if (je[wallet.id] != null) return Number(je[wallet.id]) || 0;
+    return Number(wallet.utxo_count) || 0;
+  }
+  if (Zustand.scanUtxoZahl != null) return Number(Zustand.scanUtxoZahl) || 0;
+  return 0;
+}
+
+function navScanMarkerText(wallet) {
+  if (Zustand.scanArt === "verlauf") return t("wallet.historyScanShort");
+  const n = navUtxoScanZahl(wallet);
+  if (n > 0) {
+    return n === 1 ? t("wallet.navUtxoOne") : t("wallet.navUtxoMany", { n });
+  }
+  return t("wallet.utxoScanShort");
+}
+
+/**
+ * Bekannt leer: Cache gelesen, keine offenen UTXOs. Solche Wallets braucht
+ * nur die Herkunft (ausgegebene Sätze). Nie gescannt bleibt in der Hauptliste,
+ * sonst verschwindet ein neues Wallet, bevor der Bestand feststeht.
+ * Ein laufender Scan, der schon UTXOs gemeldet hat, zählt nicht mehr als leer.
+ */
+function walletLiegtAufDemDachboden(wallet) {
+  if (!wallet || !wallet.id) return false;
+  if (Number(wallet.utxo_count) > 0) return false;
+  if (typeof Zustand !== "undefined" && Zustand.rescanJob) {
+    if (Zustand.scanWalletId === wallet.id && Number(Zustand.scanUtxoZahl) > 0) {
+      return false;
+    }
+    if (alleUtxoScanLaeuft() && navUtxoScanZahl(wallet) > 0) {
+      return false;
+    }
+  }
+  return Boolean(wallet.has_cache);
+}
+
+/** Oben die Wallets mit Bestand (oder noch unbekannt), unten der Dachboden. */
+function teileWalletsFuerNav(liste) {
+  const oben = [];
+  const dachboden = [];
+  for (const wallet of walletsFuerNav(liste)) {
+    if (walletLiegtAufDemDachboden(wallet)) dachboden.push(wallet);
+    else oben.push(wallet);
+  }
+  return { oben, dachboden };
+}
+
+/** Sitzungsweit: Dachboden startet zu und bleibt so über jedes Neuzeichnen. */
+let dachbodenAufgeklappt = false;
+
+function navWalletKnopf(wallet) {
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  knopf.className = "nav-eintrag";
+  knopf.dataset.ansicht = "wallet";
+  knopf.dataset.walletId = wallet.id;
+  if (Zustand.ansicht === "wallet" && Zustand.walletId === wallet.id) {
+    knopf.classList.add("aktiv");
+  }
+  const name = document.createElement("span");
+  name.className = "nav-name";
+  name.textContent = wallet.name;
+  knopf.append(name);
+  if (
+    utxoScanLaeuftFuer(wallet)
+    || (Zustand.rescanJob && Zustand.scanArt === "verlauf" && Zustand.scanWalletId === wallet.id)
+  ) {
+    const marker = document.createElement("span");
+    marker.className = "nav-marker";
+    marker.textContent = navScanMarkerText(wallet);
+    knopf.append(marker);
+  } else if (
+    (scanPipeline().queued || []).some((s) => s.wallet_id === wallet.id)
+  ) {
+    const marker = document.createElement("span");
+    marker.className = "nav-marker";
+    marker.textContent = t("wallet.navWaiting");
+    knopf.append(marker);
+  } else if (wallet.has_cache || walletSyncLaeuftFuer(wallet.id)) {
+    const frisch = cacheFrische(wallet);
+    const marker = document.createElement("span");
+    marker.className = "nav-marker";
+    if (frisch.stufe === "gut") marker.classList.add("nav-marker-gut");
+    else if (frisch.stufe === "warn") marker.classList.add("nav-marker-warn");
+    marker.textContent = frisch.kurz || cacheHinweis(wallet);
+    marker.title = frisch.title || frisch.lang || t("wallet.cachePresentTitle");
+    knopf.append(marker);
+  }
+  knopf.addEventListener("click", () => zeigeWallet(wallet.id));
+  return knopf;
+}
+
+function zeichneDachboden(behaelter, wallets) {
+  if (!wallets.length) return;
+  const offen = dachbodenAufgeklappt;
+  const gruppe = document.createElement("div");
+  gruppe.className = "nav-dachboden";
+  const kopf = document.createElement("button");
+  kopf.type = "button";
+  kopf.className = "nav-eintrag nav-dachboden-kopf";
+  kopf.setAttribute("aria-expanded", offen ? "true" : "false");
+  kopf.title = t("nav.dachbodenTitle");
+  const gewaehlt = wallets.some(
+    (w) => Zustand.ansicht === "wallet" && Zustand.walletId === w.id,
+  );
+  if (gewaehlt && !offen) kopf.classList.add("aktiv");
+  const zeile = document.createElement("span");
+  zeile.className = "nav-dachboden-zeile";
+  const klapp = document.createElement("span");
+  klapp.className = "klapp";
+  klapp.setAttribute("aria-hidden", "true");
+  klapp.textContent = offen ? "▾" : "▸";
+  const name = document.createElement("span");
+  name.className = "nav-name";
+  name.textContent = t("nav.dachboden");
+  const zahl = document.createElement("span");
+  zahl.className = "nav-marker nav-dachboden-zahl";
+  zahl.textContent = String(wallets.length);
+  zeile.append(klapp, name, zahl);
+  kopf.append(zeile);
+  kopf.addEventListener("click", () => {
+    dachbodenAufgeklappt = !dachbodenAufgeklappt;
+    zeichneNav();
+  });
+  gruppe.append(kopf);
+  const liste = document.createElement("div");
+  liste.className = "nav-dachboden-liste";
+  liste.hidden = !offen;
+  for (const wallet of wallets) liste.append(navWalletKnopf(wallet));
+  gruppe.append(liste);
+  behaelter.append(gruppe);
+}
+
 function zeichneNav() {
   const behaelter = $("#wallet-nav");
   behaelter.replaceChildren();
 
-  const wallets = Zustand.config?.wallets || [];
-  if (wallets.length === 0) {
+  const { oben, dachboden } = teileWalletsFuerNav(Zustand.config?.wallets);
+  if (oben.length === 0 && dachboden.length === 0) {
     // Neunutzer: Klick → Verwaltung · Wallets (nicht nur toter Hinweis).
     const leer = document.createElement("button");
     leer.type = "button";
@@ -111,51 +282,8 @@ function zeichneNav() {
     behaelter.append(leer);
   }
 
-  for (const wallet of wallets) {
-    const knopf = document.createElement("button");
-    knopf.type = "button";
-    knopf.className = "nav-eintrag";
-    knopf.dataset.ansicht = "wallet";
-    knopf.dataset.walletId = wallet.id;
-    if (Zustand.ansicht === "wallet" && Zustand.walletId === wallet.id) {
-      knopf.classList.add("aktiv");
-    }
-    const name = document.createElement("span");
-    name.className = "nav-name";
-    name.textContent = wallet.name;
-    knopf.append(name);
-    if (Zustand.rescanJob && Zustand.scanWalletId === wallet.id) {
-      const marker = document.createElement("span");
-      marker.className = "nav-marker";
-      if (Zustand.scanArt === "verlauf") {
-        marker.textContent = t("wallet.historyScanShort");
-      } else if (Zustand.scanUtxoZahl != null && Zustand.scanUtxoZahl > 0) {
-        const n = Zustand.scanUtxoZahl;
-        marker.textContent = n === 1 ? "1 UTXO…" : `${n} UTXOs…`;
-      } else {
-        marker.textContent = t("wallet.utxoScanShort");
-      }
-      knopf.append(marker);
-    } else if (
-      (scanPipeline().queued || []).some((s) => s.wallet_id === wallet.id)
-    ) {
-      const marker = document.createElement("span");
-      marker.className = "nav-marker";
-      marker.textContent = t("wallet.navWaiting");
-      knopf.append(marker);
-    } else if (wallet.has_cache || walletSyncLaeuftFuer(wallet.id)) {
-      const frisch = cacheFrische(wallet);
-      const marker = document.createElement("span");
-      marker.className = "nav-marker";
-      if (frisch.stufe === "gut") marker.classList.add("nav-marker-gut");
-      else if (frisch.stufe === "warn") marker.classList.add("nav-marker-warn");
-      marker.textContent = frisch.kurz || cacheHinweis(wallet);
-      marker.title = frisch.title || frisch.lang || t("wallet.cachePresentTitle");
-      knopf.append(marker);
-    }
-    knopf.addEventListener("click", () => zeigeWallet(wallet.id));
-    behaelter.append(knopf);
-  }
+  for (const wallet of oben) behaelter.append(navWalletKnopf(wallet));
+  zeichneDachboden(behaelter, dachboden);
 
   for (const name of [
     "steuerjahr", "trace", "sanktionen", "tools",
@@ -189,6 +317,7 @@ function zeigeAnsicht(name) {
   }
   zeichneNav();
   aktualisiereKopfFilterFuerAnsicht();
+  if (typeof schliesseNavWennUngepinnt === "function") schliesseNavWennUngepinnt();
 }
 
 function setzeEnvPfad(pfad) {
@@ -222,6 +351,52 @@ function nimmBlockEvent(daten) {
   } catch (_) {
     /* Animation optional */
   }
+}
+
+/**
+ * Jobs-Takt liefert leichte Cache-Stände. Weicht die UTXO-Zahl ab,
+ * hängt zeichneNav das Wallet um (Dachboden ↔ Liste) — ohne Reload.
+ */
+function nimmWalletNavStaende(daten) {
+  const staende = daten && daten.wallet_nav;
+  if (!Array.isArray(staende) || !Zustand.config || Zustand.contextBereit === false) {
+    return false;
+  }
+  const liste = Zustand.config.wallets || [];
+  let anders = false;
+  for (const stand of staende) {
+    if (!stand || !stand.id) continue;
+    const wallet = liste.find((eintrag) => eintrag && eintrag.id === stand.id);
+    if (!wallet) continue;
+    const has = Boolean(stand.has_cache);
+    if (Boolean(wallet.has_cache) !== has) {
+      wallet.has_cache = has;
+      anders = true;
+    }
+    if (stand.utxo_count != null && Number(wallet.utxo_count) !== Number(stand.utxo_count)) {
+      wallet.utxo_count = Number(stand.utxo_count) || 0;
+      anders = true;
+    }
+    if (stand.cache_mtime != null && wallet.cache_mtime !== stand.cache_mtime) {
+      wallet.cache_mtime = stand.cache_mtime;
+      anders = true;
+    }
+  }
+  return anders;
+}
+
+/** Live-Zahlen je Wallet aus dem Sammelscan — sonst bleibt „gerade eben“. */
+function nimmScanUtxoJeWallet(daten) {
+  if (!alleUtxoScanLaeuft()) return false;
+  const jobs = (daten && daten.jobs) || [];
+  const job = jobs.find((j) => j && j.id === Zustand.rescanJob);
+  const stand = job && job.result && job.result.utxo_je_wallet;
+  if (!stand || typeof stand !== "object" || Array.isArray(stand)) return false;
+  const alt = JSON.stringify(Zustand.scanUtxoJeWallet || {});
+  const neu = JSON.stringify(stand);
+  if (alt === neu) return false;
+  Zustand.scanUtxoJeWallet = { ...stand };
+  return true;
 }
 
 /** Wallet-Watch-Zeilen aus dem Jobs-Poll ins Web-Log (Reconnect, Subscribe, …). */
@@ -273,6 +448,9 @@ async function ladeJobsNav() {
     nimmBlockEvent(daten);
     nimmBootLogAusJobs(daten);
     nimmWalletWatchLog(daten);
+    const navNeu = nimmWalletNavStaende(daten);
+    const scanNeu = nimmScanUtxoJeWallet(daten);
+    if (navNeu || scanNeu) zeichneNav();
   } catch (fehler) {
     /* offline / alter Server ohne /api/jobs */
     Zustand.jobsNavFehler = (fehler && fehler.message) || t("common.netError");
@@ -292,6 +470,7 @@ async function ladeJobsNav() {
         art,
       },
     );
+    if (nimmScanUtxoJeWallet(Zustand.jobsNav)) zeichneNav();
   }
   // Tip-Sync-Job aus Nav übernehmen (Watcher/Start), falls noch kein Poller.
   // Stille Watch-Fallbacks mitverfolgen (Log), aber Nav-Marker bleiben aus.
@@ -388,7 +567,9 @@ function jobIstKlickbar(job) {
   if (kind === "labels" || kind === "sanctions" || kind === "sanctions-check") {
     return true;
   }
-  if (kind === "schatzsuche" || kind === "cache_suche") return true;
+  if (kind === "schatzsuche" || kind === "cache_suche" || kind === "tx_beteiligung" || kind === "p2p-walk") {
+    return true;
+  }
   if (kind === "wallet_sync") {
     const ids = job.meta?.wallet_ids;
     return Array.isArray(ids) && ids.length > 0;
@@ -406,6 +587,10 @@ function springeZuJob(job) {
   if (kind === "wallet_sync") {
     const ids = job.meta?.wallet_ids;
     if (Array.isArray(ids) && ids[0]) zeigeWallet(ids[0]);
+    return;
+  }
+  if (kind === "p2p-walk") {
+    zeigeAnsicht("datenquellen");
     return;
   }
   if (kind === "trace" || kind === "trace-alle" || kind === "trace-tief") {
@@ -434,13 +619,16 @@ function springeZuJob(job) {
     oeffneVerwaltung("datenquellen");
     return;
   }
-  if (kind === "schatzsuche" || kind === "cache_suche") {
+  if (kind === "schatzsuche" || kind === "cache_suche" || kind === "tx_beteiligung") {
     zeigeAnsicht("tools");
     if (kind === "schatzsuche" && typeof merkeLaufendeSchatzsuche === "function") {
       merkeLaufendeSchatzsuche();
     }
     if (kind === "cache_suche" && typeof merkeLaufendeCacheSuche === "function") {
       merkeLaufendeCacheSuche();
+    }
+    if (kind === "tx_beteiligung" && typeof merkeLaufendeTxAnalyse === "function") {
+      merkeLaufendeTxAnalyse();
     }
     return;
   }
@@ -627,88 +815,6 @@ async function brichRescanAb() {
 }
 
 
-async function verlaufErheben() {
-  const knopf = $("#verlauf-erheben");
-  knopf.disabled = true;
-  $("#herkunft-lauf").hidden = false;
-  setzeText($("#herkunft-text"), "Verlauf wird vorbereitet…");
-  Zustand.verlaufAlleLaeuft = true;
-  stoesseEmpfangScanPuls();
-
-  let jobId = null;
-  let timer = null;
-  const logStand = { index: 0 };
-
-  const fertig = async (meldung, art) => {
-    clearInterval(timer);
-    Zustand.verlaufAlleLaeuft = false;
-    merkeScanJobBeendet(jobId);
-    knopf.disabled = false;
-    $("#herkunft-lauf").hidden = true;
-    if (meldung) {
-      const kasten = $("#steuer-meldung");
-      kasten.className = `hinweis hinweis-${art}`;
-      setzeText(kasten, meldung);
-      kasten.hidden = false;
-    }
-    // UTXO-Cache-mtime / scan_tip → Nav „gerade eben“ (wie Einzel-Verlaufsscan).
-    // Ohne ladeConfig blieb Zustand.config alt, bis zum Browser-Refresh.
-    try {
-      await ladeConfig();
-    } catch (_) {
-      zeichneNav();
-    }
-    await ladeSteuerjahrMitKandidaten();
-    await ladeJobsNav();
-    loeseEmpfangScanPuls();
-  };
-
-  logZeile(t("ui.hard.81c16e3fef"));
-  try {
-    const start = await api("/verlauf", { methode: "POST", daten: {} });
-    jobId = start.id;
-    nimmJobLogAb(start, logStand);
-  } catch (fehler) {
-    await fertig(`Verlauf fehlgeschlagen: ${fehler.message}`, "krit");
-    return;
-  }
-
-  $("#herkunft-abbruch").onclick = async () => {
-    setzeText($("#herkunft-text"), "Abbruch angefordert…");
-    try {
-      await api(`/jobs/${jobId}`, { methode: "DELETE" });
-    } catch (_) {
-      /* war bereits beendet */
-    }
-  };
-
-  timer = setInterval(async () => {
-    if (!timer) return;
-    try {
-      const job = await api(`/jobs/${jobId}`);
-      nimmJobLogAb(job, logStand);
-      setzeText($("#herkunft-text"), übersetzeLogText(job.message || t("common.runningEllipsis")));
-      if (job.running) return;
-      // Intervall sofort stoppen — sonst läuft der nächste Tick parallel zu fertig.
-      clearInterval(timer);
-      timer = null;
-      if (job.status === "done") {
-        await fertig(job.message || "Verlauf erfasst.", "gut");
-      } else if (job.status === "cancelled") {
-        await fertig("Abgebrochen — bereits erfasste Wallets bleiben erhalten.", "warn");
-      } else {
-        await fertig(job.error || "Verlauf fehlgeschlagen.", "krit");
-      }
-    } catch (fehler) {
-      clearInterval(timer);
-      timer = null;
-      await fertig(fehler.message, "krit");
-    }
-  }, 1200);
-}
-
-
-
 function oeffneVerwaltung(ansicht) {
   if ((ansicht === "wallets" && walletsManaged()) || (ansicht === "datenquellen" && sourcesFullyManaged())) {
     zeigeAnsicht("einstellungen");
@@ -755,4 +861,238 @@ function aktualisiereSpeicherleiste() {
     const zeile = zeilen[index];
     if (zeile) setzeZeileAktualisieren(zeile, wallet);
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// Kompakte Navigation: Pillen umgebrochen → Overlay am linken Rand, pinbar
+// ---------------------------------------------------------------------------
+
+const NAV_PIN_MERKER = "satsage-nav-pin";
+let navKompaktGebunden = false;
+let navHoverTimer = 0;
+let navBeobachter = null;
+
+function navPinGemerkt() {
+  try {
+    return localStorage.getItem(NAV_PIN_MERKER) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function merkeNavPin(an) {
+  try {
+    localStorage.setItem(NAV_PIN_MERKER, an ? "1" : "0");
+  } catch (_) {
+    /* ohne Speicher bleibt die Sitzung */
+  }
+}
+
+function navInEinbettung() {
+  try {
+    return window.self !== window.top;
+  } catch (_) {
+    return true;
+  }
+}
+
+function navKompaktErzwungen() {
+  // Start9-Dienst-UI und jedes iframe (StartOS/Specter/Umbrel) haben wenig Breite.
+  if (navInEinbettung()) return true;
+  return Zustand.config?.managed_by === "start9";
+}
+
+function kopfPillenUmgebrochen() {
+  const app = document.getElementById("app");
+  const kopf = document.querySelector(".kopf");
+  const pillen = document.getElementById("quelle-pillen");
+  if (!app || app.hidden || !kopf || !pillen) return false;
+  const sichtbare = Array.from(pillen.children).filter(
+    (el) => el.getClientRects().length > 0,
+  );
+  if (sichtbare.length >= 2) {
+    const oben = sichtbare[0].getBoundingClientRect().top;
+    const unten = sichtbare[sichtbare.length - 1].getBoundingClientRect().top;
+    if (unten - oben > 8) return true;
+  }
+  const start = kopf.querySelector(".kopf-start") || kopf.querySelector(".marke");
+  const quelle = kopf.querySelector(".quelle");
+  if (start && quelle) {
+    if (quelle.getBoundingClientRect().top - start.getBoundingClientRect().top > 8) {
+      return true;
+    }
+  }
+  return kopf.scrollHeight - kopf.clientHeight > 6;
+}
+
+function navIstOffen() {
+  const app = document.getElementById("app");
+  return Boolean(app && app.classList.contains("nav-offen"));
+}
+
+function navIstGepinnt() {
+  const app = document.getElementById("app");
+  return Boolean(app && app.classList.contains("nav-gepinnt"));
+}
+
+function navIstKompakt() {
+  const app = document.getElementById("app");
+  return Boolean(app && app.classList.contains("nav-kompakt"));
+}
+
+function setzeNavOffen(an) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.classList.toggle("nav-offen", Boolean(an));
+  aktualisiereNavWerkzeuge();
+}
+
+function setzeNavPin(an) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const pin = Boolean(an);
+  app.classList.toggle("nav-gepinnt", pin);
+  merkeNavPin(pin);
+  if (pin) app.classList.add("nav-offen");
+  aktualisiereNavKompakt();
+}
+
+function aktualisiereNavWerkzeuge() {
+  const toggle = document.getElementById("nav-toggle");
+  const pin = document.getElementById("nav-pin");
+  const rand = document.getElementById("nav-rand");
+  const kompakt = navIstKompakt();
+  const offen = navIstOffen() || navIstGepinnt();
+  const gepinnt = navIstGepinnt();
+  if (toggle) {
+    toggle.hidden = !kompakt;
+    toggle.setAttribute("aria-expanded", offen ? "true" : "false");
+    toggle.tabIndex = kompakt ? 0 : -1;
+    const titel = offen ? t("nav.toggleHideTitle") : t("nav.toggleTitle");
+    toggle.title = titel;
+    toggle.setAttribute("aria-label", t("nav.toggleAria"));
+    toggle.setAttribute("data-i18n-title", offen ? "nav.toggleHideTitle" : "nav.toggleTitle");
+  }
+  if (pin) {
+    pin.setAttribute("aria-pressed", gepinnt ? "true" : "false");
+    pin.title = gepinnt ? t("nav.unpinTitle") : t("nav.pinTitle");
+    pin.setAttribute("aria-label", gepinnt ? t("nav.unpinAria") : t("nav.pinAria"));
+    pin.setAttribute("data-i18n-title", gepinnt ? "nav.unpinTitle" : "nav.pinTitle");
+    pin.setAttribute("data-i18n-aria-label", gepinnt ? "nav.unpinAria" : "nav.pinAria");
+  }
+  if (rand) {
+    rand.hidden = !kompakt || gepinnt;
+  }
+}
+
+function aktualisiereNavKompakt() {
+  const app = document.getElementById("app");
+  if (!app || app.hidden) return;
+  const umbruch = kopfPillenUmgebrochen();
+  const gepinnt = navPinGemerkt();
+  app.classList.toggle("nav-gepinnt", gepinnt);
+  const kompakt = umbruch || navKompaktErzwungen();
+  app.classList.toggle("nav-kompakt", kompakt);
+  if (!kompakt) {
+    app.classList.remove("nav-offen");
+  } else if (gepinnt) {
+    app.classList.add("nav-offen");
+  }
+  aktualisiereNavWerkzeuge();
+}
+
+function schliesseNavWennUngepinnt() {
+  if (!navIstKompakt() || navIstGepinnt()) return;
+  setzeNavOffen(false);
+}
+
+function navZeigerUeberLeiste(ziel) {
+  if (!ziel || typeof ziel.closest !== "function") return false;
+  return Boolean(
+    ziel.closest("#seitenleiste")
+    || ziel.closest("#nav-toggle")
+    || ziel.closest("#nav-rand")
+    || ziel.closest("#nav-pin"),
+  );
+}
+
+function bindeNavLeiste() {
+  if (navKompaktGebunden) {
+    aktualisiereNavKompakt();
+    return;
+  }
+  navKompaktGebunden = true;
+  const app = document.getElementById("app");
+  const toggle = document.getElementById("nav-toggle");
+  const pin = document.getElementById("nav-pin");
+  const rand = document.getElementById("nav-rand");
+  const leiste = document.getElementById("seitenleiste");
+  const kopf = document.querySelector(".kopf");
+  const pillen = document.getElementById("quelle-pillen");
+
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      if (!navIstKompakt()) return;
+      if (navIstGepinnt()) {
+        setzeNavPin(false);
+        setzeNavOffen(false);
+        return;
+      }
+      setzeNavOffen(!navIstOffen());
+    });
+  }
+  if (pin) {
+    pin.addEventListener("click", () => {
+      setzeNavPin(!navIstGepinnt());
+    });
+  }
+
+  const navHatFokus = () => navZeigerUeberLeiste(document.activeElement);
+  const hoverAn = () => {
+    if (!navIstKompakt() || navIstGepinnt()) return;
+    window.clearTimeout(navHoverTimer);
+    setzeNavOffen(true);
+  };
+  const hoverAus = () => {
+    if (!navIstKompakt() || navIstGepinnt()) return;
+    window.clearTimeout(navHoverTimer);
+    navHoverTimer = window.setTimeout(() => {
+      if (navIstGepinnt() || navHatFokus()) return;
+      setzeNavOffen(false);
+    }, 280);
+  };
+  if (rand) {
+    rand.addEventListener("pointerenter", hoverAn);
+    rand.addEventListener("pointerleave", hoverAus);
+  }
+  if (leiste) {
+    leiste.addEventListener("pointerenter", hoverAn);
+    leiste.addEventListener("pointerleave", hoverAus);
+    leiste.addEventListener("focusin", hoverAn);
+    leiste.addEventListener("focusout", hoverAus);
+  }
+  if (toggle) {
+    toggle.addEventListener("focus", hoverAn);
+  }
+
+  document.addEventListener("pointerdown", (ereignis) => {
+    if (!navIstKompakt() || navIstGepinnt() || !navIstOffen()) return;
+    if (navZeigerUeberLeiste(ereignis.target)) return;
+    setzeNavOffen(false);
+  });
+  document.addEventListener("keydown", (ereignis) => {
+    if (ereignis.key !== "Escape") return;
+    if (!navIstKompakt() || navIstGepinnt() || !navIstOffen()) return;
+    setzeNavOffen(false);
+  });
+
+  if (typeof ResizeObserver === "function") {
+    navBeobachter = new ResizeObserver(() => aktualisiereNavKompakt());
+    if (kopf) navBeobachter.observe(kopf);
+    if (pillen) navBeobachter.observe(pillen);
+    if (app) navBeobachter.observe(app);
+  }
+  window.addEventListener("resize", () => aktualisiereNavKompakt());
+  aktualisiereNavKompakt();
 }

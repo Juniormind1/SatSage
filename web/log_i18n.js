@@ -47,6 +47,8 @@
     [/^Hole Bitcoin-Kurs…$/, "Fetching Bitcoin price…"],
     [/^FiFo-Kandidaten: aus Cache…$/,
       "FiFo candidates: from cache…"],
+    [/^FiFo-Kandidaten: (\d+) Abfluss\(e\)\.$/,
+      "FiFo candidates: $1 outflow(s)."],
     [/^FiFo-Kandidaten: (\d+) Abfluss\(e\) · (\d+) UTXO\(s\) Was-wäre-wenn\.$/,
       "FiFo candidates: $1 outflow(s) · $2 what-if UTXO(s)."],
     [/^FiFo-Kandidaten: fehlgeschlagen — (.+)$/,
@@ -97,6 +99,10 @@
     [/^Öffentliche Electrum-Server nicht genutzt \(Bestätigung fehlt\)\.$/,
       "Public Electrum servers not used (confirmation missing)."],
     [/^Öffentliche Electrum-Server nicht angefragt(.*)$/, "Public Electrum servers not requested$1"],
+    [/^Öffentliche Electrum-Verbindung nicht mehr aktiv \(höhere Quelle\)\.$/,
+      "Public Electrum connection no longer active (higher-privacy source)."],
+    [/^Öffentliche Electrum-Freigabe ungültig — eigener Indexer verbunden\.$/,
+      "Public Electrum permission revoked — own indexer connected."],
 
     // --- Verbindung ---
     [/^Verbinde mit dem Sanktions-Server…$/, "Connecting to the sanctions server…"],
@@ -197,6 +203,8 @@
     [/^hole Block (.+)$/, "fetching block $1"],
     [/^— hole Block…$/, "— fetching block…"],
     [/ — hole Block…$/, " — fetching block…"],
+    [/^Kein Peer mit dem Block — suche Ersatz…$/,
+      "No peer has the block — looking for a replacement…"],
     [/^Chunk (.+)–(.+) fehlgeschlagen (.*)$/, "Chunk $1–$2 failed $3"],
     [/^Tx (.+)… über Core-RPC…$/, "Tx $1… via Core RPC…"],
     [/^Nur (\d+) Compact-Filter-(Peer|Peers) — Scan wird langsamer\.$/,

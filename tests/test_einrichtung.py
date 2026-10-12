@@ -8,6 +8,8 @@ Hinweis stillschweigend „nicht eingetragen", obwohl alles konfiguriert ist.
 Genau diese Kopplung prüfen die folgenden Tests.
 """
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -39,6 +41,204 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('t("sources.appliedTesting")', self.datenquellen_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("teste Verbindung", de)
+
+    def test_uebernehmen_wird_wieder_aktiv(self):
+        """Nach Onion→IP bleibt der Knopf sonst tot, neue Änderungen gehen nicht."""
+        self.assertIn("speichern.isConnected", self.datenquellen_js)
+        self.assertIn("merkeOffeneQuellenFormulare", self.datenquellen_js)
+        self.assertIn("dataset.quelleKey", self.datenquellen_js)
+        self.assertIn("[data-quelle-key]", self.datenquellen_js)
+        self.assertIn("quelleEndpointSchluessel", self.js)
+        self.assertIn("function merkeQuellenAenderung()", self.js)
+        self.assertIn(
+            "if ((Zustand.quellenEpoch || 0) !== epoch) return;",
+            self.js,
+        )
+        self.assertIn("dataset.serverValue", self.datenquellen_js)
+        self.assertIn("stelleQuellenFokusWiederHer", self.datenquellen_js)
+        self.assertIn("quellenEpoch: 0", (WEB / "state.js").read_text(encoding="utf-8"))
+
+    def test_host_im_lan_uebersteht_neuzeichnen(self):
+        """Status-Takt darf eine noch nicht übernommene IP nicht leeren."""
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node fehlt")
+        skript = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+function hatKlasse(node, name) {
+  return String(node.className || "").split(/\s+/).includes(name);
+}
+function passt(node, sel) {
+  sel = sel.trim();
+  if (sel.startsWith("#")) return node.id === sel.slice(1);
+  if (sel.startsWith(".")) return hatKlasse(node, sel.slice(1));
+  const attr = sel.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
+  if (!attr) return false;
+  const key = attr[1].replace(/^data-/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  if (!(key in (node.dataset || {}))) return false;
+  if (attr[2] != null) return String(node.dataset[key]) === attr[2];
+  return true;
+}
+function alle(node) {
+  const out = [];
+  for (const kind of node.children || []) {
+    out.push(kind, ...alle(kind));
+  }
+  return out;
+}
+function sammle(root, sel) {
+  let current = [root];
+  for (const teil of sel.trim().split(/\s+/)) {
+    const next = [];
+    for (const basis of current) {
+      for (const kind of alle(basis)) {
+        if (passt(kind, teil)) next.push(kind);
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+function el(tag) {
+  const node = {
+    tag,
+    id: "",
+    className: "",
+    textContent: "",
+    title: "",
+    hidden: false,
+    disabled: false,
+    type: "",
+    value: "",
+    checked: false,
+    placeholder: "",
+    autocomplete: "",
+    children: [],
+    parentElement: null,
+    dataset: {},
+    childElementCount: 0,
+    listeners: {},
+  };
+  node.classList = { add(name) { node.className = (node.className + " " + name).trim(); } };
+  node.append = (...kids) => {
+    for (const kind of kids) {
+      if (!kind) continue;
+      kind.parentElement = node;
+      node.children.push(kind);
+    }
+    node.childElementCount = node.children.length;
+  };
+  node.replaceChildren = (...kids) => {
+    node.children = [];
+    node.childElementCount = 0;
+    if (kids.length) node.append(...kids);
+  };
+  node.setAttribute = () => {};
+  node.addEventListener = (ev, fn) => {
+    (node.listeners[ev] || (node.listeners[ev] = [])).push(fn);
+  };
+  node.focus = () => { document.activeElement = node; };
+  node.setSelectionRange = (anfang, ende) => {
+    node.selectionStart = anfang;
+    node.selectionEnd = ende;
+  };
+  node.closest = (sel) => {
+    let p = node;
+    while (p) {
+      if (passt(p, sel)) return p;
+      p = p.parentElement;
+    }
+    return null;
+  };
+  node.querySelectorAll = (sel) => sammle(node, sel);
+  node.querySelector = (sel) => sammle(node, sel)[0] || null;
+  return node;
+}
+
+const root = el("body");
+const liste = el("div");
+liste.id = "quellen-liste";
+root.append(liste);
+const document = {
+  activeElement: null,
+  createElement: (tag) => el(tag),
+  querySelectorAll: (sel) => sammle(root, sel),
+  querySelector: (sel) => sammle(root, sel)[0] || null,
+};
+globalThis.document = document;
+globalThis.$ = (sel) => document.querySelector(sel);
+globalThis.t = (key) => key;
+globalThis.Zustand = { peerCheckLaeuft: false, config: {} };
+globalThis.start9BridgeManaged = () => false;
+globalThis.quelleName = (q) => q.name;
+globalThis.quelleDetail = (q) => q.detail || "";
+globalThis.pille = () => el("span");
+globalThis.privacyLabel = () => "hoch";
+globalThis.quelleNotiz = () => "";
+globalThis.quelleFeldLabel = (feld) => feld.key;
+globalThis.quelleFeldHinweis = () => "";
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"), { filename: process.argv[1] });
+
+function quelle(host, port) {
+  return {
+    key: "own_fulcrum",
+    name: "Eigener Electrum-Server",
+    rank: 1,
+    detail: "",
+    privacy: "hoch",
+    configured: false,
+    editierbar: true,
+    reachable: null,
+    felder: [
+      { key: "FULCRUM_HOST", typ: "text", value: host, hinweis: "" },
+      { key: "FULCRUM_PORT", typ: "port", value: port, hinweis: "" },
+    ],
+  };
+}
+function feld(key) {
+  return liste.querySelector('[data-key="' + key + '"]');
+}
+function oeffne() {
+  const stift = liste.querySelectorAll(".stift").find((k) => k.textContent === "✎");
+  if (!stift) throw new Error("kein Stift");
+  stift.listeners.click[0]();
+}
+
+const fehler = [];
+zeichneQuellen([quelle("", "50002")]);
+oeffne();
+const host = feld("FULCRUM_HOST");
+host.value = "192.0.2.50";
+host.selectionStart = 4;
+host.selectionEnd = 7;
+host.focus();
+zeichneQuellen([quelle("", "50001")]);
+const danach = feld("FULCRUM_HOST");
+const port = feld("FULCRUM_PORT");
+if (!danach || danach.value !== "192.0.2.50") fehler.push("host:" + (danach && danach.value));
+if (!port || port.value !== "50001") fehler.push("port:" + (port && port.value));
+if (document.activeElement !== danach) fehler.push("fokus");
+if (danach.selectionStart !== 4 || danach.selectionEnd !== 7) fehler.push("caret");
+const leer = liste.querySelector(".quelle-formular");
+if (!leer || leer.hidden) fehler.push("zu");
+if (fehler.length) {
+  console.error(fehler.join(","));
+  process.exit(1);
+}
+"""
+        lauf = subprocess.run(
+            [node, "-e", skript, str(WEB / "views" / "datenquellen.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            lauf.returncode,
+            0,
+            (lauf.stdout or "") + (lauf.stderr or ""),
+        )
 
     def test_electrum_hat_einen_papierkorb(self):
         """Sonst bleibt eine Onion in der .env und der Node-Test startet Tor."""
@@ -229,10 +429,15 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('"header.p2pPeers": "P2P {n}"', de)
         self.assertIn('"header.sourceIndexer": "Indexer"', de)
         self.assertIn('"header.sourceElectrumPublic": "Electrum öffentlich"', de)
+        self.assertIn('"header.sourceElectrumPublicN": "Electrum öffentlich {n}"', de)
+        self.assertIn('t("header.sourceElectrumPublicN"', self.js)
         self.assertIn('"privacy.pillNone": "keine Privatsphäre"', de)
         self.assertIn('"privacy.pillUnclear": "Privatsphäre unklar"', de)
         # Nach Scan: /config ohne Check darf grüne Pillen nicht rot blitzen.
         self.assertIn("function uebernehmeQuellenErreichbarkeit", self.js)
+        self.assertIn("function kappeOeffentlicheElectrumLokal", self.js)
+        self.assertIn("function indexerVerbundenInQuellen", self.js)
+        self.assertIn("!electrsVerbunden", self.js)
         self.assertIn("behaltePositivBeiNegativ", self.js)
         self.assertIn(
             "uebernehmeQuellenErreichbarkeit(\n    Zustand.config?.sources",
@@ -242,6 +447,10 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("function quelleHochVerdraengt", self.datenquellen_js)
         self.assertIn("loescheElectrumListe", self.datenquellen_js)
         self.assertIn("sources.disableP2pTitle", self.datenquellen_js)
+        self.assertIn("sources.bip158DateLabel", self.datenquellen_js)
+        self.assertIn("sources.bip158StartLabel", self.datenquellen_js)
+        self.assertIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertIn("/p2p/scan-zeit?", self.datenquellen_js)
         self.assertIn("feld.typ === \"checkbox\"", self.datenquellen_js)
         self.assertIn("verbindeP2p", self.datenquellen_js)
         self.assertIn('"sources.reachable": "verbunden"', de)
@@ -249,7 +458,7 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('"sources.connect": "Verbinden"', de)
         self.assertIn('"header.sourceConnectionUp": "Verbindung steht."', de)
         self.assertIn('"header.sourceElectrumPublicFailed": "Verbindung hat nicht geklappt"', de)
-        self.assertIn('"sources.loadList": "Liste laden"', de)
+        self.assertNotIn("sources.loadList", self.datenquellen_js)
         self.assertIn('"sources.connectP2pTitle"', de)
         en = (WEB / "locales" / "en.json").read_text(encoding="utf-8")
         self.assertIn('"sources.reachable": "Connected"', en)
@@ -277,9 +486,47 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn("macheDockSpalter", self.chrome_js)
         self.assertIn("macheEmpfangSpalter", self.chrome_js)
         self.assertIn("--dock-empfang-pct", css)
+        self.assertIn("minmax(4rem, var(--dock-empfang-pct", css)
         self.assertIn(".dock-spalten", css)
+        self.assertIn("align-items: center", css)
+        self.assertIn("setzeEmpfangSpaltePct", self.wallets_js)
         self.assertIn(".chat-pane", css)
         self.assertIn(".buehne:not(.log-an)", css)
+
+    def test_chat_nur_mit_llm_und_nav_pin_bei_pillenumbruch(self):
+        """Ohne LLM kein Chat; schmale Kopfzeile → Overlay-Navi mit Pin."""
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        css = (WEB / "style.css").read_text(encoding="utf-8")
+        nav_js = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        en = (WEB / "locales" / "en.json").read_text(encoding="utf-8")
+        self.assertRegex(html, r'class="buehne log-an"')
+        self.assertNotRegex(html, r'class="buehne[^"]*chat-an')
+        self.assertIn('id="nav-toggle"', html)
+        self.assertIn('class="kopf-start"', html)
+        self.assertLess(html.index('id="kopf-filter"'), html.index('id="quelle-pillen"'))
+        self.assertLess(html.index("kopf-start"), html.index('id="kopf-filter"'))
+        self.assertGreater(html.index('class="kopf-lang"'), html.index('id="quelle-pillen"'))
+        self.assertGreater(html.index('id="kurs-pille"'), html.index('class="kopf-lang"'))
+        self.assertIn('class="kopf-end"', html)
+        self.assertIn('id="nav-pin"', html)
+        self.assertIn('id="nav-rand"', html)
+        self.assertIn("setzeChatSichtbar", self.js)
+        self.assertIn('s.pille === "gut" || s.pille === "warn"', self.js)
+        self.assertIn('buehne.classList.toggle("chat-an", an)', self.js)
+        self.assertIn("kopfPillenUmgebrochen", nav_js)
+        self.assertIn("navKompaktErzwungen", nav_js)
+        self.assertIn("navInEinbettung", nav_js)
+        self.assertIn("bindeNavLeiste", nav_js)
+        self.assertIn("satsage-nav-pin", nav_js)
+        self.assertIn(".nav-kompakt", css)
+        self.assertIn(".nav-gepinnt", css)
+        self.assertIn(".buehne:not(.chat-an) #chat-pane", css)
+        self.assertIn(".buehne.chat-an .chat-pane", css)
+        self.assertIn('"nav.pinTitle"', de)
+        self.assertIn('"nav.toggleTitle"', de)
+        self.assertIn('"nav.pinTitle"', en)
+        self.assertIn('"nav.toggleTitle"', en)
 
     def test_assistent_slash_phase2(self):
         """Phase 2: Slash liest Cache, startet keine Jobs, kein Completion."""
@@ -339,6 +586,10 @@ class TestVertragMitDerApi(unittest.TestCase):
         self.assertIn('id="oeffentliche-electrum-ja"', html)
         self.assertIn("frageOeffentlicheElectrum", self.js)
         self.assertIn("verbindeOeffentlicheElectrum", self.datenquellen_js)
+        # „Verbinden“ zieht die Liste nach, wenn sie älter als einen Tag ist.
+        self.assertIn('"/config/electrum-servers"', self.datenquellen_js)
+        self.assertIn("verbinden: true", self.datenquellen_js)
+        self.assertIn("liste.refreshed", self.datenquellen_js)
         self.assertIn("hatOeffentlicheElectrumListen", self.js)
         self.assertIn("header.sourceElectrumPublicFailed", self.js)
         self.assertIn("erlaubeOeffentlicheElectrum", self.js)
@@ -420,6 +671,10 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("border-style: dotted", self.css)
         steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("_setzeSteuerGruppe", steuer)
+        self.assertIn("steuer-utxo-wahl", steuer)
+        self.assertIn("saZeilenReportAktionen", steuer)
+        self.assertNotIn('ansicht: "sa_utxos"', steuer)
+        self.assertIn("steuer-utxo-wahl", self.css)
         # Kandidaten des Berichts: Filter über alle Seiten (Server, ISSUES P2).
         self.assertIn("async function ladeSaSeitenNeu", steuer)
         self.assertIn("dataset.filterAus", steuer)
@@ -493,9 +748,20 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_bip158_fragt_startdatum_ohne_alter(self):
         self.assertIn('id="scan-datum-dialog"', self.html)
+        self.assertIn('id="scan-datum-feld"', self.html)
+        self.assertIn('id="scan-hoehe-feld"', self.html)
+        self.assertIn('id="scan-gap-feld"', self.html)
         self.assertIn("brauchtBip158Startdatum", self.wallets_js)
         self.assertIn("frageScanDatum", self.wallets_js)
-        self.assertIn("2017-08-24", self.wallets_js)
+        self.assertIn("p2pScanStartHoehe", self.wallets_js)
+        self.assertIn("p2pScanGapLimit", self.wallets_js)
+        self.assertIn("scanDialogDatumNachHoehe", self.wallets_js)
+        self.assertIn("dialog.scanDate.hintSource", self.wallets_js)
+        self.assertIn("start_height: ziel.start_height", self.wallets_js)
+        self.assertIn("gap_limit: ziel.gap_limit", self.wallets_js)
+        self.assertIn("scan-datum-felder", self.css)
+        self.assertIn("daten.start_height = scanVorgabe.hoehe", self.herkunft_js)
+        self.assertIn("daten.gap_limit = scanVorgabe.gap", self.herkunft_js)
         # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
         # konfiguriertem, aber unerreichbarem eigenem Electrum.
         self.assertIn("q.reachable === true", self.js)
@@ -509,6 +775,9 @@ class TestOberflaeche(unittest.TestCase):
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn('"sources.connecting": "Verbindung im Aufbau…"', de)
         self.assertIn('"dialog.p2pPrivacy.title"', de)
+        self.assertIn('"sources.bip158DateLabel": "Frühestes Scan-Datum:"', de)
+        self.assertIn('"sources.bip158StartLabel": "Scan ab Blockhöhe:"', de)
+        self.assertIn('"sources.bip158GapLabel": "Gap-Limit:"', de)
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)
@@ -541,20 +810,50 @@ class TestOberflaeche(unittest.TestCase):
             self.html.find("utxo-aktionen-praefix", gruppe),
             self.html.find('id="tip-sync-knopf"', gruppe),
         )
+        self.assertLess(
+            self.html.find('id="rescan-knopf"', gruppe),
+            self.html.find('id="herkunft-tief-knopf"', gruppe),
+        )
+        self.assertLess(
+            self.html.find('id="herkunft-tief-knopf"', gruppe),
+            self.html.find('id="verlauf-knopf"', gruppe),
+        )
+        self.assertLess(
+            self.html.find('id="verlauf-knopf"', gruppe),
+            self.html.find("wallet.allWalletsPrefix", gruppe),
+        )
+        self.assertLess(
+            self.html.find("wallet.allWalletsPrefix", gruppe),
+            self.html.find('id="utxos-alle-knopf"', gruppe),
+        )
+        self.assertIn(">Alle Wallets:</span>", self.html)
+        self.assertIn(">UTXOs<", self.html)
+        self.assertIn("starteUtxosAlle", self.wallets_js)
+        self.assertIn("starteUtxosAlle", self.chrome_js)
         # Auch bei „Wallets immer aktuell halten“ sichtbar (leichter Tip-Nachzug).
         self.assertNotIn("tipSync.hidden = autoAktuell", self.wallets_js)
         self.assertIn("tipSync.hidden = false", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.wallets_js)
         self.assertIn("starteVerlaufsscan", self.chrome_js)
-        self.assertIn('id="verlauf-erheben"', self.html)
-        self.assertIn("tax.historyAll", self.html)
+        self.assertNotIn('id="verlauf-erheben"', self.html)
+        self.assertNotIn("tax.historyAll", self.html)
+        self.assertLess(
+            self.html.find('id="export-bericht"'),
+            self.html.find('id="export-csv"'),
+        )
+        import json
+        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
+        self.assertEqual(de.get("tax.report"), "HTML")
         # Steuerjahr „klären“: Scorecard-Knopf, dynamisch in views/steuerjahr.js
         steuer_js = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
         self.assertIn("tax.originAll", steuer_js)
         self.assertIn("herkunft-alle", self.chrome_js)
-        import json
-        de = json.loads((WEB / "locales" / "de.json").read_text(encoding="utf-8"))
         self.assertEqual(de.get("tax.originAll"), "klären")
+        self.assertIn('zeigeAnsicht("steuerjahr")', self.herkunft_js)
+        self.assertIn("grauKeysFuerWallet", self.herkunft_js)
+        self.assertIn("starteGrauKlaerung(keys, uebernommen)", self.herkunft_js)
+        self.assertIn("klaerenNachUngescannten", self.herkunft_js)
+        self.assertIn("[wid]", self.herkunft_js)
 
     def test_der_hinweis_fuehrt_zu_den_einstellungen(self):
         """Ohne diesen Weg wäre der Hinweis eine Sackgasse."""
@@ -716,10 +1015,13 @@ class TestOberflaeche(unittest.TestCase):
         )
         self.assertIn('t("trace.youngestSats"', self.format_js)
         self.assertIn("function alterKlaerenKnopf", self.format_js)
+        self.assertIn("function alterKlaerenVerborgen", self.format_js)
         self.assertIn("function blendeAlterKlaerenUndScan", self.format_js)
         self.assertIn("alterKlaerenKnopf", self.wallets_js)
         self.assertIn("blendeAlterKlaerenUndScan", self.wallets_js)
         self.assertIn("blendeAlterKlaerenUndScan", self.herkunft_js)
+        self.assertIn("Zustand.traceKlaerenUeberSprung = key", self.herkunft_js)
+        self.assertIn("traceKlaerenUeberSprung", self.format_js)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
         self.assertIn("jüngste sats vom", de)
         self.assertIn("verfolgt_vollstaendig", self.format_js)
@@ -737,6 +1039,18 @@ class TestOberflaeche(unittest.TestCase):
             2,
             "Marke muss in Wallet-Zeile und Herkunfts-UTXO stehen",
         )
+
+    def test_wallet_kopf_hat_lot_ring(self):
+        """Lot-Ring links vom Namen; UTXOs ohne Herkunft zählen grau."""
+        html = self.html
+        self.assertLess(html.index('id="wallet-lot"'), html.index('id="wallet-titel"'))
+        self.assertIn("wallet-kopf-stand", html)
+        self.assertIn("function walletLotMischungAusEvents", self.wallets_js)
+        self.assertIn("e.geprueft === false", self.wallets_js)
+        self.assertIn("acc.grau += wert", self.wallets_js)
+        self.assertIn("function aktualisiereWalletLotDonut", self.wallets_js)
+        self.assertIn("aktualisiereWalletLotDonut()", self.wallets_js)
+        self.assertIn("#wallet-lot.wallet-lot-donut.lot-donut", self.css)
 
     def test_herkunftsbaum_lazy_hoechstens_einer(self):
         """

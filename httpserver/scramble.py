@@ -132,9 +132,13 @@ def _scramble_discard_locked(state) -> None:
     from core import env_scramble as sc
     from httpserver.api.auth_session import _clear_password_hash
 
-    if sc.get_session_key() is not None:
-        raise RuntimeError("Sitzung ist entsperrt — Passwort in den Einstellungen entfernen.")
-    sc.discard_locked_env(state.env_path)
+    if sc.is_scramble_file_present(state.env_path):
+        if sc.get_session_key() is not None:
+            raise RuntimeError(
+                "Sitzung ist entsperrt — Passwort in den Einstellungen entfernen."
+            )
+        sc.discard_locked_env(state.env_path)
+    # Klartext-.env (Specter, Umbrel) bleibt. Vergessen löscht nur den Hash.
     _clear_password_hash(state)
     state.env_scramble_unlocked = True
     try:

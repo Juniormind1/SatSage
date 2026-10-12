@@ -49,6 +49,7 @@ function Write-BitcoinConf {
         'server=1'
         'txindex=1'
         'blockfilterindex=1'
+        'peerblockfilters=1'
         'fallbackfee=0.0001'
         "rpcuser=$RpcUser"
         "rpcpassword=$RpcPassword"

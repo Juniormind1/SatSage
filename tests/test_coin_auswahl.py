@@ -57,6 +57,26 @@ class TestKandidaten(unittest.TestCase):
         for modus in ("defensiv", "offensiv"):
             self.assertEqual(ca.kandidaten(utxos, modus=modus, pending=["mp:0"]), [], modus)
 
+    def test_eigenes_ziel_nimmt_gelb_grau_und_ohne_herkunft(self):
+        utxos = [
+            u("aa:0", 50_000),
+            u("ge:0", 80_000, 0, orange=80_000),
+            u("gr:0", 80_000, 0, grau=80_000),
+            u("nv:0", 9_000, neu=True),
+            {"key": "oh:0", "value_sats": 7_000, "sats_gruen": None},
+            u("mp:0", 40_000),
+        ]
+        k = {x.key: x.beitrag for x in ca.kandidaten(
+            utxos, modus="defensiv", pending=["mp:0"], eigenes_ziel=True)}
+        self.assertEqual(k, {
+            "aa:0": 50_000, "ge:0": 80_000, "gr:0": 80_000, "nv:0": 9_000, "oh:0": 7_000,
+        })
+        # Ohne Flag bleibt die alte Regel.
+        self.assertEqual(
+            {x.key for x in ca.kandidaten(utxos, modus="defensiv", pending=["mp:0"])},
+            {"aa:0"},
+        )
+
     def test_mempool_und_doppelte_raus(self):
         utxos = [u("AA:0", 50_000), u("aa:0", 50_000), u("bb:0", 60_000),
                  {**u("cc:0", 70_000), "spending_pending": True}]

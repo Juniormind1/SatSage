@@ -607,13 +607,12 @@ class HandlerAuthMixin:
             except ApiError as exc:
                 self._fehler(exc.status, exc.message)
                 return True
-            stored = _password_hash(self.state)
-            if stored and not _verify_password(current, stored) and not self._loopback_request():
-                self._fehler(403, "Aktuelles Passwort ist falsch.")
-                return True
-            # Auch lokal: bei gesetztem Passwort muss das aktuelle stimmen
-            # (Einstellungen-UI), außer Ersteinrichtung ohne Hash.
-            if stored and not _verify_password(current, stored):
+            # Wie api_save_app_password: Hash ohne Cipher ist auf Desktop
+            # und StartOS kein gesetztes Passwort. Stand vor dem Schreiben.
+            gesetzt = _password_is_set(self.state)
+            if gesetzt and not _verify_password(
+                current, _password_hash(self.state),
+            ):
                 self._fehler(403, "Aktuelles Passwort ist falsch.")
                 return True
             if not password or password != confirm:
@@ -628,7 +627,7 @@ class HandlerAuthMixin:
             try:
                 from core import env_scramble as sc_mod
 
-                if stored and sc_mod.is_scramble_file_present(self.state.env_path):
+                if gesetzt and sc_mod.is_scramble_file_present(self.state.env_path):
                     _scramble_change_password(self.state, current, password)
                 else:
                     # Ersteinrichtung oder Hash ohne Cipher (Feature neu): enable.

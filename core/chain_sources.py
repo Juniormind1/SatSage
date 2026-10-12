@@ -10,9 +10,10 @@ importiert den Clearnet-Pool lazy von dort (kein Top-Level-Zyklus).
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -79,6 +80,13 @@ def wrap_get_tx_with_immutable_cache(
             return cached
         schritt(f"cache-fehl {txid}")
         tx = fetch_tx(txid)
+        # Start9/Electrs liefern trotz verbose-Anfrage Roh-Hex. Ungeparst
+        # landet der String im Cache und der nächste Herkunfts-Walk bricht
+        # mit „'str' object has no attribute 'get'“.
+        if isinstance(tx, str):
+            from core.trace import _tx_als_dict
+
+            tx = _tx_als_dict(tx)
         schritt(f"cache-schreibe {txid}")
         save_cached_tx(txid, tx, cache_root, source)
         return tx
@@ -114,6 +122,10 @@ def _mache_prefetch(pool, cache_root: Path, source: str):
 
         def hole(client, txid: str) -> None:
             tx = fetch_tx_fulcrum(client, txid, roh=True)
+            if isinstance(tx, str):
+                from core.trace import _tx_als_dict
+
+                tx = _tx_als_dict(tx)
             save_cached_tx(txid, tx, cache_root, source)
 
         # Im Hintergrund: die Herkunft wartet sonst auf den langsamsten
@@ -232,10 +244,20 @@ def _default_fulcrum_port(args, env: dict[str, str]) -> int:
     return 50002
 
 
-def _default_fulcrum_ssl(args, env: dict[str, str]) -> bool:
+def _default_fulcrum_ssl(args, env: dict[str, str], port: int | None = None) -> bool:
+    """TLS-Default: Port 50001 Klartext (electrs/Start9), sonst an.
+
+    Explizites ``FULCRUM_SSL`` sticht. Leerer Wert gilt als nicht gesetzt —
+    wie die Anzeige in ``describe_sources``.
+    """
     if getattr(args, "fulcrum_no_ssl", False):
         return False
-    return _parse_env_bool(env.get("FULCRUM_SSL"), default=True)
+    if port is None:
+        port = _default_fulcrum_port(args, env)
+    raw = env.get("FULCRUM_SSL")
+    if raw is None or not str(raw).strip():
+        return int(port) != 50001
+    return _parse_env_bool(raw, default=(int(port) != 50001))
 
 
 def _resolve_own_lan_endpoint(
@@ -249,7 +271,7 @@ def _resolve_own_lan_endpoint(
     """
     host_raw = (
         getattr(args, "fulcrum_host", None)
-        or args.rpchost
+        or getattr(args, "rpchost", None)
         or env.get("FULCRUM_HOST")
     )
     if not host_raw:
@@ -257,7 +279,8 @@ def _resolve_own_lan_endpoint(
     host = _normalize_fulcrum_host(host_raw)
     if host.endswith(".onion"):
         return None
-    return host, _default_fulcrum_port(args, env), _default_fulcrum_ssl(args, env)
+    port = _default_fulcrum_port(args, env)
+    return host, port, _default_fulcrum_ssl(args, env, port)
 
 
 def _resolve_own_tor_endpoint(
@@ -276,7 +299,7 @@ def _resolve_own_tor_endpoint(
     if ssl_raw:
         use_ssl = _parse_env_bool(ssl_raw, default=True)
     else:
-        use_ssl = _default_fulcrum_ssl(args, env)
+        use_ssl = _default_fulcrum_ssl(args, env, port)
     return host, port, use_ssl
 
 
@@ -286,7 +309,6 @@ def _load_public_onion_endpoints(
 ) -> list[tuple[int, str, int, bool]]:
     """FULCRUM_TOR_0…9 aus .env; Rückgabe: (index, host, port, use_ssl)."""
     default_port = _default_fulcrum_port(args, env)
-    default_ssl = _default_fulcrum_ssl(args, env)
     endpoints: list[tuple[int, str, int, bool]] = []
     for index in range(MAX_PUBLIC_ONION_SERVERS):
         host_raw = env.get(f"FULCRUM_TOR_{index}")
@@ -296,6 +318,7 @@ def _load_public_onion_endpoints(
         port_raw = env.get(f"FULCRUM_PORT_{index}")
         port = int(port_raw) if port_raw else default_port
         ssl_raw = env.get(f"FULCRUM_SSL_{index}")
+        default_ssl = _default_fulcrum_ssl(args, env, port)
         use_ssl = _parse_env_bool(ssl_raw, default_ssl) if ssl_raw else default_ssl
         endpoints.append((index, host, port, use_ssl))
     return endpoints
@@ -316,6 +339,10 @@ def _probe_public_onion_endpoint(
     tor_proxy: tuple[str, int],
 ) -> tuple[int, object | None, str | None]:
     from core.fulcrum_client import FULCRUM_ONION_TIMEOUT, connect_fulcrum
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        return index, None, "abgebrochen"
 
     client, error = connect_fulcrum(
         host,
@@ -328,11 +355,158 @@ def _probe_public_onion_endpoint(
     return index, client, error
 
 
-def tls_should_try_opposite(error: str | None) -> bool:
+#: Eigener Electrs im LAN: diese vier gleichzeitig, nicht nacheinander.
+EIGENE_ELECTRS_IP_VERSUCHE: tuple[tuple[int, bool], ...] = (
+    (50001, False),
+    (50001, True),
+    (50002, False),
+    (50002, True),
+)
+
+
+def host_ist_klare_ip(host: str) -> bool:
+    """True für eine IP. Hostname und Onion bleiben beim eingestellten Port."""
+    import ipaddress
+
+    text = (host or "").strip().strip("[]")
+    if not text or text.endswith(".onion"):
+        return False
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
+#: Standard-Ports, bei denen sofort parallel probiert wird.
+EIGENE_ELECTRS_STANDARD_PORTS: frozenset[int] = frozenset({50001, 50002})
+
+
+def verbinde_eigenen_electrs_ip(
+    host: str,
+    *,
+    timeout: float,
+    require_listunspent: bool = True,
+    port: int | None = None,
+    use_ssl: bool | None = None,
+) -> tuple[object | None, int, bool, str | None]:
+    """Eigener Electrs per IP.
+
+    Ist ``port`` gesetzt und weder 50001 noch 50002, wird zuerst NUR dieser
+    Port mit dem eingestellten TLS-Flag probiert. Erst wenn das scheitert,
+    folgen die vier Parallelversuche. Bei 50001/50002 (oder ohne Port)
+    sofort die vier Parallelversuche.
+    """
+    eigener_fehler: str | None = None
+    if port and int(port) not in EIGENE_ELECTRS_STANDARD_PORTS:
+        from core.fulcrum_client import connect_fulcrum
+
+        ssl_flag = bool(use_ssl)
+        try:
+            client, fehler = connect_fulcrum(
+                host,
+                int(port),
+                use_ssl=ssl_flag,
+                timeout=timeout,
+                tor_proxy=None,
+                require_listunspent=require_listunspent,
+            )
+        except Exception as exc:
+            client, fehler = None, str(exc)
+        if client is not None:
+            return client, int(port), ssl_flag, None
+        weg = "TLS" if ssl_flag else "ohne TLS"
+        eigener_fehler = f"{int(port)} {weg}: {fehler or 'nicht erreichbar'}"
+    client, p, s, fehler = _verbinde_eigenen_electrs_parallel(
+        host, timeout=timeout, require_listunspent=require_listunspent,
+    )
+    if client is None and eigener_fehler:
+        fehler = f"{eigener_fehler}; {fehler}" if fehler else eigener_fehler
+    return client, p, s, fehler
+
+
+def _verbinde_eigenen_electrs_parallel(
+    host: str,
+    *,
+    timeout: float,
+    require_listunspent: bool = True,
+) -> tuple[object | None, int, bool, str | None]:
+    """Vier Kombinationen gleichzeitig. Der erste Treffer gewinnt.
+
+    50001 und 50002, jeweils mit und ohne TLS. Nur für die IP des eigenen
+    Nodes. Sobald eine Verbindung steht, kehrt der Aufruf zurück. Die
+    übrigen Versuche laufen aus und schließen ihren Client, ohne dass
+    ihre Timeouts abgewartet werden. Scheitern alle vier, kommt der
+    Fehler erst, wenn der langsamste fertig ist.
+    """
+    from core.fulcrum_client import connect_fulcrum
+
+    stop = threading.Event()
+    entscheidung = threading.Lock()
+    ergebnisse: queue.Queue = queue.Queue()
+
+    def _versuch(port: int, use_ssl: bool) -> None:
+        if stop.is_set():
+            ergebnisse.put((None, port, use_ssl, None))
+            return
+        client = None
+        fehler: str | None = None
+        try:
+            client, fehler = connect_fulcrum(
+                host,
+                port,
+                use_ssl=use_ssl,
+                timeout=timeout,
+                tor_proxy=None,
+                require_listunspent=require_listunspent,
+            )
+        except Exception as exc:
+            fehler = str(exc)
+        with entscheidung:
+            if client is not None and stop.is_set():
+                _schliesse_fulcrum(client)
+                client = None
+                fehler = None
+            elif client is not None:
+                stop.set()
+        ergebnisse.put((client, port, use_ssl, fehler))
+
+    for port, use_ssl in EIGENE_ELECTRS_IP_VERSUCHE:
+        threading.Thread(
+            target=_versuch,
+            args=(port, use_ssl),
+            daemon=True,
+            name=f"electrs-{port}-{int(use_ssl)}",
+        ).start()
+
+    rest = len(EIGENE_ELECTRS_IP_VERSUCHE)
+    letzter_port, letztes_ssl = EIGENE_ELECTRS_IP_VERSUCHE[0]
+    fehlertexte: list[str] = []
+    while rest:
+        client, port, use_ssl, fehler = ergebnisse.get()
+        rest -= 1
+        letzter_port, letztes_ssl = port, use_ssl
+        if client is not None:
+            return client, port, use_ssl, None
+        if fehler:
+            weg = "TLS" if use_ssl else "ohne TLS"
+            fehlertexte.append(f"{port} {weg}: {fehler}")
+    kurz = "; ".join(fehlertexte) if fehlertexte else "nicht erreichbar"
+    return None, letzter_port, letztes_ssl, kurz
+
+
+def tls_should_try_opposite(
+    error: str | None,
+    *,
+    use_ssl: bool = False,
+    port: int | None = None,
+) -> bool:
     """
     Ob nach Fehlversuch die andere TLS-Einstellung sinnvoll ist.
 
     Reine Netzfehler (Timeout, refused) nicht — da hilft SSL-Umschalten nicht.
+    Ausnahme: TLS auf Port 50001 hängt über Tor oft, statt WRONG_VERSION
+    zu liefern; dann Klartext mitprobieren.
     Protokoll-Mismatch (wrong version, EOF, SSL) und unklare Handshake-Fehler ja.
     """
     if not error:
@@ -354,6 +528,12 @@ def tls_should_try_opposite(error: str | None) -> bool:
             "temporary failure in name resolution",
         )
     ):
+        if (
+            use_ssl
+            and port == 50001
+            and any(x in text for x in ("timed out", "timeout"))
+        ):
+            return True
         return False
     return True
 
@@ -391,13 +571,33 @@ def connection_error_hint(error: str | None, use_ssl: bool) -> str | None:
     return None
 
 
+#: Letzte Quellen-/Probe-Zeile (Dedup bei Watch/Reconnect und Onion-Probes).
+_quelle_log_zuletzt: str = ""
+_quelle_log_lock = threading.Lock()
+
+
 def _quelle_zeile(text: str) -> None:
     """Verbindungsprobe: Terminal und, wenn ein Job läuft, GUI-Log."""
-    print(text, flush=True)
+    global _quelle_log_zuletzt
+    try:
+        from core.outbound_policy import oeffentliche_electrum_suche_prozess_ende
+
+        if oeffentliche_electrum_suche_prozess_ende():
+            return
+    except Exception:
+        pass
+    zeile = (text or "").rstrip("\n")
+    if not zeile.strip():
+        return
+    with _quelle_log_lock:
+        if zeile == _quelle_log_zuletzt:
+            return
+        _quelle_log_zuletzt = zeile
+    print(zeile, flush=True)
     try:
         from display import melde_zwischenstand
 
-        melde_zwischenstand(text.strip())
+        melde_zwischenstand(zeile.strip())
     except Exception:
         pass
 
@@ -419,16 +619,24 @@ def _print_public_onion_probe_result(
     client: object | None,
     error: str | None,
 ) -> None:
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        return
     route = _format_fulcrum_route(use_ssl, tor_proxy)
     label = f"[{index}] öffentlicher Server"
     target = f"{label}: {host}:{port} ({route})"
     if client:
-        print(f"  → {target} — erreichbar", flush=True)
+        _quelle_zeile(f"  → {target} — erreichbar")
         return
     if error and "listunspent" in error:
-        print(f"  → {target} — ungeeignet: {error}", flush=True)
+        _quelle_zeile(f"  → {target} — ungeeignet: {error}")
     else:
         _print_connection_error(f"  → {target} — ", error, use_ssl)
+
+
+def _client_ziel(client, host: str, port: int) -> str:
+    return f"{getattr(client, 'host', None) or host}:{getattr(client, 'port', None) or port}"
 
 
 def _try_fulcrum_endpoint(
@@ -438,6 +646,37 @@ def _try_fulcrum_endpoint(
     use_ssl: bool,
     tor_proxy: tuple[str, int] | None,
 ):
+    # Eigene IP: alle vier Kombinationen gleichzeitig. Onion und Hostname
+    # bleiben beim eingestellten Port (darunter die TLS-Gegenprobe).
+    if tor_proxy is None and host_ist_klare_ip(host):
+        if port and int(port) not in EIGENE_ELECTRS_STANDARD_PORTS:
+            _quelle_zeile(
+                f"Prüfe {label}: {host}:{port} "
+                f"({'TLS' if use_ssl else 'ohne TLS'}), sonst 50001 und 50002…"
+            )
+        else:
+            _quelle_zeile(
+                f"Prüfe {label}: {host} auf 50001 und 50002, mit und ohne TLS…"
+            )
+        client, treffer_port, treffer_ssl, error = verbinde_eigenen_electrs_ip(
+            host,
+            timeout=FULCRUM_CONNECT_TIMEOUT,
+            require_listunspent=True,
+            port=port,
+            use_ssl=use_ssl,
+        )
+        if client:
+            _quelle_zeile(
+                f"  → {label} erreichbar "
+                f"({treffer_port}, {'TLS' if treffer_ssl else 'ohne TLS'})"
+            )
+            return client
+        if error and "listunspent" in error:
+            _quelle_zeile(f"  → ungeeignet: {error}")
+        else:
+            _print_connection_error("  → ", error, use_ssl)
+        return None
+
     route = _format_fulcrum_route(use_ssl, tor_proxy)
     _quelle_zeile(f"Prüfe {label}: {host}:{port} ({route})...")
     if tor_proxy:
@@ -460,7 +699,9 @@ def _try_fulcrum_endpoint(
             require_listunspent=True,
         )
     # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung (LAN + Onion).
-    if not client and error and tls_should_try_opposite(error):
+    if not client and error and tls_should_try_opposite(
+        error, use_ssl=use_ssl, port=port,
+    ):
         alt = not use_ssl
         _quelle_zeile(
             f"  → {'TLS' if use_ssl else 'ohne TLS'} fehlgeschlagen "
@@ -635,6 +876,19 @@ def _setup_public_onion_rotation(
             "Nutze check_fulcrum_tor.py --onion-list-only für Vorschläge."
         )
 
+    from core.outbound_policy import (
+        futures_bis_oeffentliche_electrum_stopp,
+        melde_oeffentliche_electrum_abbruch,
+        oeffentliche_electrum_suche_abgebrochen,
+        oeffentliche_familie_aktiv,
+    )
+
+    if not oeffentliche_familie_aktiv("onion"):
+        return None
+    if oeffentliche_electrum_suche_abgebrochen():
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
+        return None
+
     tor_proxy = _require_tor_proxy(env)
     workers = min(PUBLIC_ONION_PROBE_WORKERS, len(endpoints))
     print(
@@ -649,7 +903,9 @@ def _setup_public_onion_rotation(
         for index, host, port, use_ssl in endpoints
     }
     reachable_by_index: dict[int, object] = {}
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
         futures = {
             executor.submit(
                 _probe_public_onion_endpoint,
@@ -661,13 +917,23 @@ def _setup_public_onion_rotation(
             ): index
             for index, host, port, use_ssl in endpoints
         }
-        for future in as_completed(futures):
+        for future in futures_bis_oeffentliche_electrum_stopp(futures):
             index = futures[future]
             host, port, use_ssl = endpoint_by_index[index]
             try:
                 _index, client, error = future.result()
             except Exception as exc:
                 client, error = None, str(exc)
+            if (
+                oeffentliche_electrum_suche_abgebrochen()
+                or not oeffentliche_familie_aktiv("onion")
+            ):
+                if client:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                break
             _print_public_onion_probe_result(
                 index,
                 host,
@@ -679,6 +945,21 @@ def _setup_public_onion_rotation(
             )
             if client:
                 reachable_by_index[index] = client
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if (
+        oeffentliche_electrum_suche_abgebrochen()
+        or not oeffentliche_familie_aktiv("onion")
+    ):
+        for client in reachable_by_index.values():
+            try:
+                client.close()
+            except Exception:
+                pass
+        if oeffentliche_electrum_suche_abgebrochen():
+            melde_oeffentliche_electrum_abbruch(_log_quelle)
+        return None
 
     reachable_clients = [
         reachable_by_index[index]
@@ -719,11 +1000,6 @@ def _setup_public_onion_rotation(
     return RotatingFulcrumPool(reachable_clients)
 
 
-#: Letzte _log_quelle-Zeile (Dedup bei Watch/Reconnect/Setup-Wiederholung).
-_quelle_log_zuletzt: str = ""
-_quelle_log_lock = threading.Lock()
-
-
 def _log_quelle(text: str) -> None:
     """
     Eine Zeile nach stdout und in den Web-Log.
@@ -736,6 +1012,13 @@ def _log_quelle(text: str) -> None:
     Sekunden mit derselben Datenquellen-Zeile).
     """
     global _quelle_log_zuletzt
+    try:
+        from core.outbound_policy import oeffentliche_electrum_suche_prozess_ende
+
+        if oeffentliche_electrum_suche_prozess_ende():
+            return
+    except Exception:
+        pass
     zeile = (text or "").strip()
     if not zeile:
         return
@@ -775,12 +1058,43 @@ def _indexer_ist_konfiguriert(args, env: dict[str, str]) -> bool:
     )
 
 
+def _indexer_konfig_jetzt(
+    args, env: dict[str, str],
+) -> tuple[bool, dict[str, str]]:
+    """
+    Frische .env für die Warte-Schleife.
+
+    Der Papierkorb löscht FULCRUM_HOST, während ein Job noch die alte
+    Adresse wiederholt. Ohne diese Lesung läuft die Frist zu Ende.
+    """
+    try:
+        from core import env_scramble as scramble_mod
+        from core.env_bootstrap import ENV_FILE, _load_dotenv
+
+        pfad = ENV_FILE
+        import sys
+
+        main_mod = sys.modules.get("main")
+        if main_mod is not None and getattr(main_mod, "ENV_FILE", None):
+            pfad = main_mod.ENV_FILE
+        if pfad.is_file() and scramble_mod.is_env_scrambled(pfad):
+            try:
+                scramble_mod.load_plaintext_or_scramble(pfad)
+            except scramble_mod.ScrambleLocked:
+                return _indexer_ist_konfiguriert(args, env), env
+        frisch = _load_dotenv()
+    except Exception:
+        return _indexer_ist_konfiguriert(args, env), env
+    return _indexer_ist_konfiguriert(args, frisch), frisch
+
+
 def _warte_auf_eigenen_indexer(args, env: dict[str, str]):
     """
     Ein Versuch, dann Wiederholungen, bis der Indexer steht oder die Frist um ist.
 
     P2P darf den Scan nicht starten, solange der eigene Electrum-Server
     noch verbindet. Nach der Frist gilt er als nicht erreichbar.
+    Verschwindet die Adresse (Papierkorb), endet die Warte sofort.
     """
     import time
 
@@ -790,12 +1104,27 @@ def _warte_auf_eigenen_indexer(args, env: dict[str, str]):
     frist = time.monotonic() + INDEXER_WARTEN_SEKUNDEN
     versuch = 0
     while True:
+        konfiguriert, env = _indexer_konfig_jetzt(args, env)
+        if not konfiguriert:
+            if versuch:
+                _log_quelle(
+                    "Eigener Electrum-Server entfernt — "
+                    "kein weiterer Verbindungsversuch."
+                )
+            return None
         versuch += 1
         client = _try_own_fulcrum_client(args, env)
         if client:
             return client
         if is_list_abort_requested():
             raise Cancelled()
+        konfiguriert, env = _indexer_konfig_jetzt(args, env)
+        if not konfiguriert:
+            _log_quelle(
+                "Eigener Electrum-Server entfernt — "
+                "kein weiterer Verbindungsversuch."
+            )
+            return None
         if time.monotonic() >= frist:
             _log_quelle(
                 "Eigener Electrum-Server nach "
@@ -828,7 +1157,8 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
             client = None
         if client:
             _log_quelle(
-                f"Datenquelle: eigener Electrum-Server (LAN) {host}:{port}"
+                "Datenquelle: eigener Electrum-Server (LAN) "
+                + _client_ziel(client, host, port)
             )
             return client
         if _resolve_own_tor_endpoint(args, env):
@@ -847,14 +1177,402 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
         )
         if client:
             _log_quelle(
-                f"Datenquelle: eigener Electrum-Server (Tor) {host}:{port}"
+                "Datenquelle: eigener Electrum-Server (Tor) "
+                + _client_ziel(client, host, port)
             )
             return client
     return None
 
 
+def _p2p_schalter_aus(env: dict[str, str]) -> bool:
+    return (env.get("BIP158_P2P", "1") or "").strip().lower() in (
+        "0", "false", "nein", "off",
+    )
+
+
+_ELECTRS_VERBUNDEN_CACHE: dict[tuple, tuple[float, bool]] = {}
+_ELECTRS_VERBUNDEN_TTL = 30.0
+
+
+def _tor_proxy_aus_env(env: dict[str, str]) -> tuple[str, int] | None:
+    roh = (env.get("FULCRUM_TOR_PROXY") or env.get("TOR_PROXY") or "").strip()
+    if not roh:
+        return None
+    if ":" not in roh:
+        return (roh, 9050)
+    host, port = roh.rsplit(":", 1)
+    if not port.isdigit():
+        return None
+    return (host, int(port))
+
+
+def _tcp_offen(host: str, port: int, timeout: float) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _electrs_args():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        fulcrum_host=None,
+        rpchost=None,
+        fulcrum_port=None,
+        fulcrum_no_ssl=False,
+    )
+
+
+def _schliesse_fulcrum(client) -> None:
+    try:
+        client.close()
+    except Exception:
+        pass
+
+
+#: Herkunft, Historie, Klären und andere Spuren. Kein Suchauftrag.
+ELECTRUM_SPUR_FEHLT = (
+    "P2P kann nur UTXOs finden, Herkunft und Historie erfordern "
+    "electrum Server, egal ob privat oder öffentlich."
+)
+
+
+def electrum_fuer_spur_verbunden(
+    env: dict[str, str] | None = None,
+    quellen: list | None = None,
+) -> bool:
+    """True, wenn ein Electrum-Server schon verbunden ist.
+
+    Eigener Node oder öffentliche Server mit gezählten Peers. P2P und
+    Bitcoin Core zählen nicht. Es wird nichts neu angewählt und keine
+    öffentliche Liste durchsucht.
+    """
+    del env  # Verbindung steht oder nicht — kein erneuter Verbindungsversuch.
+    try:
+        from core.wallet_watch import wallet_watch_status
+
+        if wallet_watch_status().get("host"):
+            return True
+    except Exception:
+        pass
+    for eintrag in quellen or []:
+        if not isinstance(eintrag, dict):
+            continue
+        key = eintrag.get("key")
+        if key == "own_fulcrum" and eintrag.get("reachable") is True:
+            return True
+        if key in ("public_onion", "clearnet"):
+            try:
+                if int(eintrag.get("peer_count") or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
+def eigene_electrs_ist_verbunden(
+    env: dict[str, str],
+    fulcrum=None,
+    *,
+    timeout: int = 3,
+) -> bool:
+    """True, wenn der eigene Electrum-Server jetzt antwortet.
+
+    Ein schon gehaltener ``FulcrumClient`` zählt. Der öffentliche Pool nicht.
+    Onion nur, wenn der SOCKS-Proxy schon lauscht — kein Tor-Autostart.
+    """
+    if is_own_fulcrum_backend(fulcrum):
+        return True
+    args = _electrs_args()
+    lan = _resolve_own_lan_endpoint(args, env)
+    tor = None if lan else _resolve_own_tor_endpoint(args, env)
+    if lan:
+        ziel = ("lan", lan[0], int(lan[1]), bool(lan[2]))
+    elif tor:
+        ziel = ("tor", tor[0], int(tor[1]), bool(tor[2]))
+    else:
+        return False
+    jetzt = time.monotonic()
+    getroffen = _ELECTRS_VERBUNDEN_CACHE.get(ziel)
+    if getroffen is not None and jetzt - getroffen[0] < _ELECTRS_VERBUNDEN_TTL:
+        return getroffen[1]
+    ok = _eigene_electrs_probe(env, lan=lan, tor=tor, timeout=timeout)
+    _ELECTRS_VERBUNDEN_CACHE[ziel] = (jetzt, ok)
+    return ok
+
+
+def _eigene_electrs_probe(env, *, lan, tor, timeout: int) -> bool:
+    from core.fulcrum_client import connect_fulcrum
+
+    if lan:
+        if host_ist_klare_ip(lan[0]):
+            client, _port, _ssl, _fehler = verbinde_eigenen_electrs_ip(
+                lan[0], timeout=timeout, require_listunspent=False,
+                port=int(lan[1]), use_ssl=bool(lan[2]),
+            )
+        else:
+            client, _fehler = connect_fulcrum(
+                lan[0], int(lan[1]), use_ssl=bool(lan[2]),
+                timeout=timeout, tor_proxy=None,
+            )
+        if client is None:
+            return False
+        _schliesse_fulcrum(client)
+        return True
+    proxy = _tor_proxy_aus_env(env)
+    if proxy is None or not _tcp_offen(proxy[0], proxy[1], 0.4):
+        return False
+    client, _fehler = connect_fulcrum(
+        tor[0], int(tor[1]), use_ssl=bool(tor[2]),
+        timeout=timeout, tor_proxy=proxy,
+    )
+    if client is None:
+        return False
+    _schliesse_fulcrum(client)
+    return True
+
+
+def scantxoutset_ist_verbunden(
+    env: dict[str, str],
+    *,
+    timeout: float = 5.0,
+) -> bool:
+    """True, wenn der scantxoutset-Client ``getblockchaininfo`` beantwortet.
+
+    Pruned Node ohne ``txindex``. Ein später fehlgeschlagener Scan bleibt
+    verbunden. ``RpcAllowlistError`` wandert nach oben.
+    """
+    from core.bitcoind_rpc import (
+        RpcAllowlistError,
+        stelle_utxo_core_client_bereit,
+        verify_core_rpc,
+    )
+    from core.local_bitcoind import utxo_rpc_dedicated
+
+    client = stelle_utxo_core_client_bereit(env, timeout=timeout)
+    if client is None:
+        return False
+    try:
+        verify_core_rpc(
+            client,
+            txindex_erforderlich=not utxo_rpc_dedicated(env),
+        )
+    except RpcAllowlistError:
+        raise
+    except Exception:
+        return False
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+    return True
+
+
+def lookup_core_ist_verbunden(
+    env: dict[str, str],
+    *,
+    timeout: float = 5.0,
+) -> bool:
+    """True, wenn Bitcoin Core · RPC (``NODE_IP``) antwortet.
+
+    Das ist der Lookup-Slot, nicht der Pruned Node. ``txindex`` bleibt
+    Pflicht. ``RpcAllowlistError`` wandert nach oben.
+    """
+    from core.bitcoind_rpc import (
+        RpcAllowlistError,
+        stelle_core_client_bereit,
+        verify_core_rpc,
+    )
+
+    client = stelle_core_client_bereit(env, timeout=timeout)
+    if client is None:
+        return False
+    try:
+        verify_core_rpc(client, txindex_erforderlich=True)
+    except RpcAllowlistError:
+        raise
+    except Exception:
+        return False
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+    return True
+
+
+def p2p_utxo_entdeckung_frei(
+    env: dict[str, str],
+    fulcrum=None,
+    *,
+    eigene_electrs: bool | None = None,
+    scantxoutset: bool | None = None,
+    core: bool | None = None,
+) -> bool:
+    """P2P darf den UTXO-Bestand suchen.
+
+    Nur wenn ``BIP158_P2P`` nicht aus ist und weder der eigene
+    Electrum-Server noch Bitcoin Core · RPC noch scantxoutset verbunden
+    ist. Öffentliche Electrum-Server zählen nicht als eigener Server.
+    """
+    if _p2p_schalter_aus(env):
+        return False
+    if is_own_fulcrum_backend(fulcrum):
+        return False
+    if eigene_electrs is None:
+        eigene_electrs = eigene_electrs_ist_verbunden(env, fulcrum)
+    if eigene_electrs:
+        return False
+    if scantxoutset is None:
+        scantxoutset = scantxoutset_ist_verbunden(env)
+    if scantxoutset:
+        return False
+    if core is None:
+        from core.local_bitcoind import utxo_rpc_dedicated
+
+        # Ohne eigenen Pruned-Node-Slot ist der Lookup-Core schon der
+        # scantxoutset-Client und oben geprüft.
+        core = lookup_core_ist_verbunden(env) if utxo_rpc_dedicated(env) else False
+    return not core
+
+
+def baue_p2p_utxo_fetch(
+    env: dict[str, str],
+    *,
+    fulcrum=None,
+    eigene_electrs: bool | None = None,
+    scantxoutset: bool | None = None,
+    cache_dir: Path | None = None,
+    immutable_cache_dir: Path | None = None,
+    start_height: int | None = None,
+    args=None,
+):
+    """``(fetch, close)`` nur für den UTXO-Bestand, sonst None.
+
+    ``fetch`` hat kein ``get_tx``. Sockets laufen in
+    ``p2p_nur_utxo_entdeckung``.
+    """
+    if not p2p_utxo_entdeckung_frei(
+        env,
+        fulcrum,
+        eigene_electrs=eigene_electrs,
+        scantxoutset=scantxoutset,
+        core=None,
+    ):
+        return None
+    if start_height is None and args is not None:
+        start_height = getattr(args, "bip158_start", None)
+    if start_height is None:
+        try:
+            start_height = int(
+                env.get("BIP158_START_HEIGHT", str(DEFAULT_BIP158_START_HEIGHT))
+            )
+        except (TypeError, ValueError):
+            start_height = DEFAULT_BIP158_START_HEIGHT
+    if cache_dir is None and args is not None:
+        roh = getattr(args, "cache_dir", None)
+        if roh:
+            cache_dir = Path(roh)
+
+    def fetch(_addrs, **kw):
+        from core.bip158_scan import verify_p2p_filters
+        from core.bip158_wallet import (
+            create_bip158_client_from_env,
+            fetch_wallet_utxos_bip158,
+        )
+        from core.p2p import p2p_nur_utxo_entdeckung
+
+        xpubs = list(kw.get("xpubs") or [])
+        if not xpubs:
+            raise RuntimeError("P2P-UTXO-Suche ohne xpub")
+        with p2p_nur_utxo_entdeckung():
+            client = create_bip158_client_from_env(
+                env,
+                start_height=int(start_height),
+                verbose=resolve_verbose_from_env(env),
+                cache_dir=cache_dir,
+                immutable_dir=immutable_cache_dir,
+            )
+            try:
+                verify_p2p_filters(client)
+                max_addr = kw.get("max_addr") or DEFAULT_MAX_ADDRESSES
+                return fetch_wallet_utxos_bip158(
+                    client,
+                    xpubs,
+                    max_addresses=int(max_addr),
+                    max_addresses_by_xpub=kw.get("max_addresses_by_xpub"),
+                    on_utxos_update=kw.get("on_utxos_update"),
+                    gruppen=kw.get("gruppen"),
+                )
+            finally:
+                try:
+                    client.scanner.close()
+                except Exception:
+                    pass
+
+    return fetch, (lambda: None)
+
+
+def fetchers_fuer_utxo_entdeckung(
+    env: dict[str, str],
+    args=None,
+    *,
+    cache_dir: Path | None = None,
+    immutable_cache_dir: Path | None = None,
+):
+    """UTXO-Scan, wenn keine allgemeine Datenquelle steht.
+
+    ``None``, wenn der eigene Electrum-Server verbunden ist oder weder
+    scantxoutset noch P2P den Bestand tragen. Kein ``get_tx``.
+    """
+    if eigene_electrs_ist_verbunden(env, None):
+        return None
+    if scantxoutset_ist_verbunden(env):
+        def _kein_adress_scan(*_a, **_k):
+            raise RuntimeError(
+                "scantxoutset hat keinen Bestand geliefert."
+            )
+
+        return "bitcoind", {
+            "fetch_wallet_utxos": _kein_adress_scan,
+            "fetch_address_utxos": _kein_adress_scan,
+            "fetch_addresses_utxos": _kein_adress_scan,
+            "fulcrum": None,
+            "verify_utxo_spent": None,
+            "close": lambda: None,
+        }
+    gebaut = baue_p2p_utxo_fetch(
+        env,
+        eigene_electrs=False,
+        scantxoutset=False,
+        cache_dir=cache_dir,
+        immutable_cache_dir=immutable_cache_dir,
+        args=args,
+    )
+    if gebaut is None:
+        return None
+    fetch, close = gebaut
+    return "bip158", {
+        "fetch_wallet_utxos": fetch,
+        "fetch_address_utxos": fetch,
+        "fetch_addresses_utxos": fetch,
+        "fulcrum": None,
+        "verify_utxo_spent": None,
+        "close": close,
+    }
+
+
 def _try_bip158_backend(args, env: dict[str, str]):
-    """Priorität 2: Compact Filter über Bitcoin-P2P (kein eigener Core)."""
+    """Kein Sitzungs-Backend. P2P trägt Herkunft und Verlauf nicht."""
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        return None
     if env.get("BIP158_P2P", "1").strip() in ("0", "false", "nein", "off"):
         return None
     try:
@@ -872,23 +1590,27 @@ def try_bip158_fetch_for_tip_sync(
     immutable_cache_dir: Path | None = None,
 ):
     """
-    Optionaler BIP-158-``fetch_wallet_utxos`` für Tip-Nachzug.
+    Optionaler BIP-158-``fetch_wallet_utxos`` für den UTXO-Nachzug.
 
-    Unabhängig von der aktiven allgemeinen Datenquelle (Electrs/Core).
-    ``None``, wenn Compact-Filter-Peers fehlen oder ``BIP158_P2P=0``.
+    Nur wenn eigener Electrum-Server und scantxoutset nicht verbunden sind.
+    Liefert keinen ``get_tx``. ``None`` bei ``BIP158_P2P=0`` oder wenn eine
+    der beiden Quellen verbunden ist.
     """
+    _ = wallet_ctx
     env = env or _load_dotenv()
-    backend = _try_bip158_backend(args, env)
-    if backend is None:
-        return None
-    fetchers = _build_blockchain_fetchers(
-        "bip158",
-        backend,
-        args,
-        wallet_ctx,
+    cache = None
+    roh = getattr(args, "cache_dir", None) if args is not None else None
+    if roh:
+        cache = Path(roh)
+    gebaut = baue_p2p_utxo_fetch(
+        env,
+        cache_dir=cache,
         immutable_cache_dir=immutable_cache_dir,
+        args=args,
     )
-    return fetchers.get("fetch_wallet_utxos")
+    if gebaut is None:
+        return None
+    return gebaut[0]
 
 
 def _try_public_onion_fulcrum(
@@ -897,8 +1619,20 @@ def _try_public_onion_fulcrum(
     *,
     interactive: bool = False,
 ):
-    """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt."""
+    """Öffentliche Fulcrum-Onions — nur wenn Clearnet öffentlich fehlt oder Onion gewählt."""
+    from core.outbound_policy import (
+        melde_oeffentliche_electrum_abbruch,
+        oeffentliche_electrum_suche_abgebrochen,
+        oeffentliche_familie_aktiv,
+    )
+
+    if not oeffentliche_familie_aktiv("onion"):
+        return None
     if not _load_public_onion_endpoints(args, env):
+        return None
+
+    if oeffentliche_electrum_suche_abgebrochen():
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
         return None
     try:
         return _setup_public_onion_rotation(args, env, interactive=interactive)
@@ -1027,9 +1761,29 @@ def _nach_oeffentlichem_onion_latenz(
     return "fulcrum", pool
 
 
+def _eigen_nach_abbruch_oeffentlicher_suche(args, env: dict[str, str]):
+    """Privater Indexer kam während der öffentlichen Suche — den nehmen."""
+    from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+    if not oeffentliche_electrum_suche_abgebrochen():
+        return None
+    return _try_own_fulcrum_client(args, env)
+
+
 def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     """Öffentliche Fulcrum-Server über Clearnet (vor öffentlichem Onion)."""
     from core.fulcrum_client import RotatingFulcrumPool
+    from core.outbound_policy import (
+        melde_oeffentliche_electrum_abbruch,
+        oeffentliche_electrum_suche_abgebrochen,
+        oeffentliche_familie_aktiv,
+    )
+
+    if not oeffentliche_familie_aktiv("clearnet"):
+        return None
+    if oeffentliche_electrum_suche_abgebrochen():
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
+        return None
 
     # Vor der Suche ansagen — sonst wiederholt der 10s-Herzschlag die
     # letzte Probe, während Clearnet nur nach stdout schreibt.
@@ -1037,7 +1791,15 @@ def _setup_public_clearnet_fulcrum(args, env: dict[str, str]):
     # Sanctions-Pool in core.sanctions_pool; lazy, kein Top-Level-Zyklus.
     from core.sanctions_pool import resolve_sanctions_clearnet_pool
 
-    pool, _from_cache = resolve_sanctions_clearnet_pool(env)
+    pool, _from_cache = resolve_sanctions_clearnet_pool(env, abbrechbar=True)
+    if oeffentliche_electrum_suche_abgebrochen():
+        if pool is not None:
+            try:
+                pool.close()
+            except Exception:
+                pass
+        melde_oeffentliche_electrum_abbruch(_log_quelle)
+        return None
     if pool is None:
         _log_quelle("→ kein Clearnet-Electrum für Wallet-Zugriff gefunden")
         return None
@@ -1103,11 +1865,25 @@ def _try_data_source_priority_chain(
         )
         return None
 
-    # Clearnet vor öffentlichem Onion: nach Opt-in kein Tor-Flaschenhals,
-    # solange Clearnet-Electrs erreichbar sind.
-    pool = _setup_public_clearnet_fulcrum(args, env)
-    if pool:
-        return "fulcrum", pool, None
+    # Ausdrückliche GUI-Wahl: nur diese Familie. Kein Wechsel, weil die
+    # andere schneller antwortet. Ohne Wahl (CLI): Clearnet, sonst Onion.
+    from core.outbound_policy import (
+        oeffentliche_electrum_art,
+        oeffentliche_electrum_suche_abgebrochen,
+    )
+
+    art = oeffentliche_electrum_art()
+    if art != "onion":
+        pool = _setup_public_clearnet_fulcrum(args, env)
+        if pool:
+            return "fulcrum", pool, None
+    eigen = _eigen_nach_abbruch_oeffentlicher_suche(args, env)
+    if eigen:
+        return "fulcrum", eigen, None
+    if oeffentliche_electrum_suche_abgebrochen():
+        return None
+    if art == "clearnet":
+        return None
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
@@ -1155,13 +1931,27 @@ def _try_public_electrum_fuer_verlauf(
         )
         return None
 
-    pool = _setup_public_clearnet_fulcrum(args, env)
-    if pool:
-        _log_quelle(
-            "Verlauf: öffentliche Electrum-Server (Clearnet) — get_history "
-            "(Privatsphäre mäßig)."
-        )
-        return "fulcrum", pool
+    from core.outbound_policy import (
+        oeffentliche_electrum_art,
+        oeffentliche_electrum_suche_abgebrochen,
+    )
+
+    art = oeffentliche_electrum_art()
+    if art != "onion":
+        pool = _setup_public_clearnet_fulcrum(args, env)
+        if pool:
+            _log_quelle(
+                "Verlauf: öffentliche Electrum-Server (Clearnet) — get_history "
+                "(Privatsphäre mäßig)."
+            )
+            return "fulcrum", pool
+    eigen = _eigen_nach_abbruch_oeffentlicher_suche(args, env)
+    if eigen:
+        return "fulcrum", eigen
+    if oeffentliche_electrum_suche_abgebrochen():
+        return None
+    if art == "clearnet":
+        return None
 
     pool = _try_public_onion_fulcrum(args, env, interactive=interactive_onion)
     if pool:
@@ -1181,10 +1971,18 @@ def _try_public_electrum_fuer_verlauf(
                 "Blockwalk/Cache (Onion zu langsam)."
             )
             return quelle, backend
-        _log_quelle(
-            "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
-            "(Privatsphäre mäßig; Clearnet nicht erreichbar)."
-        )
+        from core.outbound_policy import oeffentliche_electrum_art
+
+        if oeffentliche_electrum_art() == "onion":
+            _log_quelle(
+                "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
+                "(Privatsphäre mäßig)."
+            )
+        else:
+            _log_quelle(
+                "Verlauf: öffentliche Electrum-Server (Onion) — get_history "
+                "(Privatsphäre mäßig; Clearnet nicht erreichbar)."
+            )
         return "fulcrum", backend
     return None
 
@@ -1221,8 +2019,9 @@ def _try_verlauf_priority_chain(
         )
         if client:
             _log_quelle(
-                f"Verlauf: eigener Electrum-Server (LAN) {host}:{port} "
-                f"— get_history."
+                "Verlauf: eigener Electrum-Server (LAN) "
+                + _client_ziel(client, host, port)
+                + " — get_history."
             )
             return "fulcrum", client
 
@@ -1239,8 +2038,9 @@ def _try_verlauf_priority_chain(
         )
         if client:
             _log_quelle(
-                f"Verlauf: eigener Electrum-Server (Tor) {host}:{port} "
-                f"— get_history."
+                "Verlauf: eigener Electrum-Server (Tor) "
+                + _client_ziel(client, host, port)
+                + " — get_history."
             )
             return "fulcrum", client
 
@@ -1369,6 +2169,10 @@ def _resolve_data_source(args, env: dict[str, str]) -> None:
 
 def _wants_bip158(args, env: dict[str, str]) -> bool:
     """P2P-BIP-158 wenn --bip158 oder BIP158_P2P=1 (ohne 0)."""
+    from core.p2p import p2p_gesperrt
+
+    if p2p_gesperrt():
+        return False
     if getattr(args, "bip158", False):
         return True
     return _parse_env_bool(env.get("BIP158_P2P"), default=False)

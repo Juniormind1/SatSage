@@ -7,6 +7,7 @@ Job-Log (wie im Web-Log) wird parallel nach stdout gespiegelt.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import sys
@@ -16,6 +17,23 @@ import webbrowser
 from collections import deque
 from datetime import datetime
 from typing import Any, TextIO
+
+#: ``httpd.shutdown()`` darf den Menü-Thread nicht blockieren (Windows:
+#: ``serve_forever`` wacht erst am ``poll_interval`` auf; Request-Threads
+#: können in Socket-Timeouts stecken).
+_HTTPD_SHUTDOWN_TIMEOUT_S = 1.0
+
+_HARTES_ENDE_ATEXIT_GESETZT = False
+
+#: Aktive ANSI-Fußleiste + Tees — Taste 3 muss die Scrollregion lösen,
+#: bevor noch eine Log-Zeile die Leiste neu zeichnet.
+_aktive_fussleiste: Fussleiste | None = None
+_aktive_tees: tuple[Any, ...] = ()
+
+#: Nach Taste 3 / Strg+C: Probe-Threads dürfen stdout nicht mehr anfassen.
+#: Sonst landet z. B. „9050) — erreichbar“ in der schon gelösten Scrollregion
+#: und die Windows-Konsole bleibt kaputt.
+_AUSGABE_STUMM = False
 
 
 LOG_PUFFER_MAX = 400
@@ -67,8 +85,12 @@ class StdoutTee:
     def write(self, data: str) -> int:
         if not isinstance(data, str):
             data = str(data)
+        if _AUSGABE_STUMM:
+            return len(data)
         fertig = 0
         with self._lock:
+            if _AUSGABE_STUMM:
+                return len(data)
             if self._fuss is not None:
                 self._fuss.schreibe_log_text(data)
             else:
@@ -100,6 +122,65 @@ class StdoutTee:
 
     def fileno(self) -> int:
         return self._original.fileno()
+
+
+class _StummesStdout:
+    """Nach Taste 3: print() von Probe-Threads verwerfen, Konsole nicht anfassen."""
+
+    def __init__(self, original: TextIO):
+        self._original = original
+
+    def write(self, data: str) -> int:
+        if not isinstance(data, str):
+            data = str(data)
+        return len(data)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return bool(getattr(self._original, "isatty", lambda: False)())
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._original, "encoding", None) or "utf-8"
+
+    def fileno(self) -> int:
+        return self._original.fileno()
+
+    def __getattr__(self, name: str):
+        return getattr(self._original, name)
+
+
+def _stumme_ausgabe() -> None:
+    """Stdout/Tee/Fußleiste: keine Zeichen mehr an die Konsole."""
+    global _AUSGABE_STUMM
+    _AUSGABE_STUMM = True
+
+
+def _ausgabe_ist_stumm() -> bool:
+    return bool(_AUSGABE_STUMM)
+
+
+def _stdout_nach_ende(original: TextIO) -> TextIO:
+    """Nach Beenden originalen Stream nicht zurückgeben — Probe-print bleibt tot."""
+    if _AUSGABE_STUMM:
+        return _StummesStdout(original)  # type: ignore[return-value]
+    return original
+
+
+def _schreibe_direkt(text: str) -> None:
+    """An die echte Konsole, auch wenn der Tee schon stumm ist."""
+    try:
+        sys.__stdout__.write(text)
+        sys.__stdout__.flush()
+        return
+    except Exception:
+        pass
+    try:
+        os.write(1, text.encode("utf-8", "replace"))
+    except Exception:
+        pass
 
 
 def format_job_log_zeile(job: Any, text: str) -> str:
@@ -198,6 +279,180 @@ def _ansi_ok(stream: TextIO) -> bool:
     return True
 
 
+def _ansi_reset_bytes(hoehe: int) -> bytes:
+    """
+    Volle Scrollregion, Fußzeilen leer, Cursor bleibt auf der Log-Position.
+
+    Nicht an den Fensterrand springen — sonst entsteht nach „Beende Server…“
+    eine Lücke bis „Beendet.“ am unteren Rand.
+    """
+    hoehe = max(int(hoehe), FUSS_ZEILEN + 1)
+    start = max(1, hoehe - FUSS_ZEILEN + 1)
+    # DECSTBM setzt den Cursor auf (1,1). Deshalb zuerst speichern.
+    teile = [
+        "\033[s",
+        f"\033[1;{hoehe}r",
+        "\033[0m",
+        "\033[?25h",
+        "\033[?7h",
+    ]
+    for i in range(FUSS_ZEILEN):
+        teile.append(f"\033[{start + i};1H\033[2K")
+    teile.append("\033[u")
+    return "".join(teile).encode("ascii")
+
+
+def _windows_konsole_zuruecksetzen() -> bool:
+    """
+    DECSTBM und Cursor über die Console-API — die Sequenz muss in dem
+    conhost ankommen, den PowerShell nach Prozessende weiterbenutzt.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class COORD(ctypes.Structure):
+            _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
+
+        class SMALL_RECT(ctypes.Structure):
+            _fields_ = [
+                ("Left", wintypes.SHORT),
+                ("Top", wintypes.SHORT),
+                ("Right", wintypes.SHORT),
+                ("Bottom", wintypes.SHORT),
+            ]
+
+        class CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", COORD),
+                ("dwCursorPosition", COORD),
+                ("wAttributes", wintypes.WORD),
+                ("srWindow", SMALL_RECT),
+                ("dwMaximumWindowSize", COORD),
+            ]
+
+        _windows_vt_aktivieren()
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetStdHandle.restype = ctypes.c_void_p
+        handle = kernel32.GetStdHandle(-11)
+        invalid = ctypes.c_void_p(-1).value
+        if not handle or handle == invalid:
+            return False
+        info = CONSOLE_SCREEN_BUFFER_INFO()
+        if not kernel32.GetConsoleScreenBufferInfo(
+            ctypes.c_void_p(handle), ctypes.byref(info),
+        ):
+            return False
+        fenster = max(1, int(info.srWindow.Bottom) - int(info.srWindow.Top) + 1)
+        # DECSTBM homed den Cursor. Position vor CSI merken und danach
+        # wiederherstellen — sonst steht „Beendet.“ in Zeile 1.
+        pos = COORD(info.dwCursorPosition.X, info.dwCursorPosition.Y)
+        fuss_start = int(info.srWindow.Bottom) - FUSS_ZEILEN + 1
+        if pos.Y >= fuss_start:
+            pos = COORD(0, max(int(info.srWindow.Top), fuss_start - 1))
+        seq = f"\x1b[1;{fenster}r\x1b[0m\x1b[?25h\x1b[?7h"
+        geschrieben = wintypes.DWORD(0)
+        kernel32.WriteConsoleW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_wchar_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.c_void_p,
+        ]
+        kernel32.WriteConsoleW(
+            ctypes.c_void_p(handle),
+            seq,
+            len(seq),
+            ctypes.byref(geschrieben),
+            None,
+        )
+
+        class CONSOLE_CURSOR_INFO(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("bVisible", wintypes.BOOL),
+            ]
+
+        cursor = CONSOLE_CURSOR_INFO(25, True)
+        kernel32.SetConsoleCursorInfo.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(CONSOLE_CURSOR_INFO),
+        ]
+        kernel32.SetConsoleCursorInfo(
+            ctypes.c_void_p(handle), ctypes.byref(cursor),
+        )
+        kernel32.SetConsoleCursorPosition.argtypes = [ctypes.c_void_p, COORD]
+        kernel32.SetConsoleCursorPosition(ctypes.c_void_p(handle), pos)
+        return True
+    except Exception:
+        return False
+
+
+def _ansi_terminal_zuruecksetzen(stream: TextIO) -> None:
+    """Scrollregion, Attribute und Cursor — sonst bleibt die Konsole kaputt."""
+    try:
+        stream.flush()
+    except Exception:
+        pass
+    hoehe = 24
+    try:
+        hoehe = shutil.get_terminal_size(fallback=(80, 24)).lines
+    except Exception:
+        pass
+    try:
+        if stream.isatty():
+            _windows_konsole_zuruecksetzen()
+    except Exception:
+        pass
+    roh = _ansi_reset_bytes(hoehe)
+    try:
+        fd = stream.fileno()
+        os.write(fd, roh)
+        try:
+            stream.flush()
+        except Exception:
+            pass
+        return
+    except Exception:
+        pass
+    try:
+        stream.write(roh.decode("ascii"))
+        stream.flush()
+    except Exception:
+        pass
+
+
+def _loese_terminal_fuss() -> None:
+    """Fußleiste und Log-Spiegel aus, bevor nach Taste 3 noch etwas druckt."""
+    global _aktive_fussleiste, _aktive_tees
+    for tee in _aktive_tees:
+        try:
+            tee.setze_nach_zeile(None)
+        except Exception:
+            pass
+    fuss = _aktive_fussleiste
+    if fuss is not None:
+        try:
+            fuss.deaktivieren()
+        except Exception:
+            pass
+    for tee in _aktive_tees:
+        try:
+            tee.setze_fussleiste(None)
+        except Exception:
+            pass
+    _aktive_fussleiste = None
+    _aktive_tees = ()
+    try:
+        from core.jobs import setze_log_spiegel
+
+        setze_log_spiegel(None)
+    except Exception:
+        pass
+
+
 class Fussleiste:
     """
     Feste Menüzeilen am unteren Rand per ANSI-Scrollregion.
@@ -232,16 +487,14 @@ class Fussleiste:
         return True
 
     def deaktivieren(self) -> None:
-        if not self._aktiv:
-            return
         with self._lock:
-            self._stream.write("\033[r")  # Scrollregion zurücksetzen
-            # Cursor unter die Fußzeile / ans Ende
-            hoehe = shutil.get_terminal_size(fallback=(80, 24)).lines
-            self._stream.write(f"\033[{hoehe};1H\n")
-            self._stream.flush()
+            if not self._aktiv:
+                return
+            if self._cursor_auf_menue:
+                self._stream.write("\033[u")
+                self._cursor_auf_menue = False
             self._aktiv = False
-            self._cursor_auf_menue = False
+            _ansi_terminal_zuruecksetzen(self._stream)
 
     def setze_hinweis(self, text: str) -> None:
         self._hinweis = text or "Taste 1–3"
@@ -253,8 +506,16 @@ class Fussleiste:
 
         Stellt zuvor die gemerkte Log-Cursorposition wieder her, falls der
         Cursor auf der Menüzeile steht. Hält denselben Lock wie ``zeichnen``.
+        Nach ``deaktivieren`` keine ESC-Sequenzen mehr — sonst bleibt die
+        Scrollregion in der Windows-Konsole stehen.
         """
         with self._lock:
+            if _AUSGABE_STUMM:
+                return
+            if not self._aktiv:
+                self._stream.write(text)
+                self._stream.flush()
+                return
             if self._cursor_auf_menue:
                 self._stream.write("\033[u")
                 self._cursor_auf_menue = False
@@ -273,6 +534,8 @@ class Fussleiste:
         ):
             return
         with self._lock:
+            if not self._aktiv:
+                return
             hoehe = shutil.get_terminal_size(fallback=(80, 24)).lines
             breite = shutil.get_terminal_size(fallback=(80, 24)).columns
             start = max(1, hoehe - FUSS_ZEILEN + 1)
@@ -381,6 +644,135 @@ def _zeige_status(state: Any, puffer: LogPuffer) -> None:
     print(flush=True)
 
 
+def _unterdruecke_executor_atexit() -> None:
+    """
+    ThreadPoolExecutor joint Worker beim Interpreter-Ende ohne Timeout.
+
+    Ab Python 3.9 hängt das an ``threading._register_atexit``, nicht an
+    ``atexit``. Ab 3.14 sind die Worker keine Daemons — Onion-SOCKS (bis
+    180 s) hält dann die Shell fest, obwohl Taste 3 schon „Beendet.“ schrieb.
+    """
+    try:
+        import concurrent.futures.thread as _ft
+    except Exception:
+        return
+    try:
+        _ft._threads_queues.clear()
+    except Exception:
+        pass
+    try:
+        atexit.unregister(_ft._python_exit)
+    except Exception:
+        pass
+    try:
+        callbacks = getattr(threading, "_threading_atexits", None)
+        if not isinstance(callbacks, list):
+            return
+        def _ruft_python_exit(cb: Any) -> bool:
+            for cell in getattr(cb, "__closure__", None) or ():
+                try:
+                    if cell.cell_contents is _ft._python_exit:
+                        return True
+                except Exception:
+                    pass
+            return False
+
+        callbacks[:] = [cb for cb in callbacks if not _ruft_python_exit(cb)]
+    except Exception:
+        pass
+
+
+def _hartes_ende_atexit() -> None:
+    """Letzte Chance: Konsole zurücksetzen, Prozess normal beenden."""
+    try:
+        _loese_terminal_fuss()
+    except Exception:
+        pass
+    try:
+        _ansi_terminal_zuruecksetzen(sys.__stdout__)
+    except Exception:
+        pass
+
+
+def plane_hartes_prozessende() -> None:
+    """
+    Nach Taste 3 / Strg+C: Interpreter-Ende nicht auf Probe-Sockets warten.
+
+    ``concurrent.futures`` joined seine Worker sonst in einem atexit-Handler.
+    Die Konsole wird zurückgesetzt; der Prozess endet über ``return`` /
+    ``SystemExit``, nicht über ``os._exit``.
+    """
+    global _HARTES_ENDE_ATEXIT_GESETZT
+    if _HARTES_ENDE_ATEXIT_GESETZT:
+        return
+    _HARTES_ENDE_ATEXIT_GESETZT = True
+    _unterdruecke_executor_atexit()
+    atexit.register(_hartes_ende_atexit)
+
+
+def _reset_hartes_prozessende_fuer_tests() -> None:
+    """Nur Tests: atexit-Handler wieder abmelden."""
+    global _HARTES_ENDE_ATEXIT_GESETZT, _AUSGABE_STUMM
+    _HARTES_ENDE_ATEXIT_GESETZT = False
+    _AUSGABE_STUMM = False
+    try:
+        atexit.unregister(_hartes_ende_atexit)
+    except Exception:
+        pass
+    try:
+        import concurrent.futures.thread as _ft
+
+        callbacks = getattr(threading, "_threading_atexits", None)
+        if isinstance(callbacks, list):
+            vorhanden = False
+            for cb in callbacks:
+                for cell in getattr(cb, "__closure__", None) or ():
+                    try:
+                        if cell.cell_contents is _ft._python_exit:
+                            vorhanden = True
+                            break
+                    except Exception:
+                        pass
+                if vorhanden:
+                    break
+            if not vorhanden:
+                threading._register_atexit(_ft._python_exit)
+    except Exception:
+        pass
+    _loese_terminal_fuss()
+
+
+def httpd_stopp_ohne_join(httpd: Any, *, timeout_s: float = _HTTPD_SHUTDOWN_TIMEOUT_S) -> None:
+    """
+    ``serve_forever`` stoppen, ohne auf Request-Threads zu warten.
+
+    ``shutdown()`` läuft in einem Daemon-Thread — hängt er (Windows-select),
+    kehrt der Menü-Thread nach *timeout_s* zurück. ``server_close`` joined
+    bei ``block_on_close=False`` niemanden.
+    """
+    fertig = threading.Event()
+
+    def _shutdown() -> None:
+        try:
+            httpd.shutdown()
+        except Exception:
+            pass
+        finally:
+            fertig.set()
+
+    threading.Thread(
+        target=_shutdown, name="satsage-http-shutdown", daemon=True,
+    ).start()
+    try:
+        fertig.wait(timeout=max(0.1, float(timeout_s)))
+    except KeyboardInterrupt:
+        pass
+    try:
+        httpd.server_close()
+    except Exception:
+        pass
+
+
 def _beende_server(state: Any, httpd: Any) -> None:
     # Zuerst Shutdown-Markierung + stop-Flag — laufende Browser-Requests
     # und der HTTP-Neustart-Thread sollen still enden, nicht neu speien.
@@ -395,23 +787,30 @@ def _beende_server(state: Any, httpd: Any) -> None:
         except Exception:
             pass
     try:
-        httpd.shutdown()
+        from core.outbound_policy import stoppe_oeffentliche_electrum_suche
+
+        stoppe_oeffentliche_electrum_suche(prozess_ende=True)
     except Exception:
         pass
+    try:
+        from core.fulcrum_transport import schliesse_offene_fulcrum_sockets
+
+        schliesse_offene_fulcrum_sockets()
+    except Exception:
+        pass
+    _stumme_ausgabe()
+    _loese_terminal_fuss()
+    plane_hartes_prozessende()
     laufend = _jobs_laufend(state)
     for job in laufend:
         try:
             label = getattr(job, "label", None) or getattr(job, "kind", "Job")
-            print(f"  → Abbruch angefordert: {label}", flush=True)
+            _schreibe_direkt(f"  → Abbruch angefordert: {label}\n")
             job.cancel()
         except Exception:
             pass
-    # Kurz warten, damit Request-Threads den Shutdown sehen und abbrechen.
-    time.sleep(0.15)
-    try:
-        httpd.server_close()
-    except Exception:
-        pass
+    httpd_stopp_ohne_join(httpd)
+    _schreibe_direkt("Beendet.\n")
 
 
 def _drain_stdin() -> None:
@@ -528,6 +927,7 @@ def lauf_steuerung(
     Mit ANSI: feste Fußzeile + nicht-blockierende Tasten.
     Fallback: blockierendes ``input`` wie zuvor.
     """
+    global _aktive_fussleiste, _aktive_tees
     from core.jobs import setze_log_spiegel
 
     puffer = LogPuffer()
@@ -541,8 +941,12 @@ def lauf_steuerung(
     fuss: Fussleiste | None = None
 
     def spiegel(job: Any, text: str) -> None:
+        if _AUSGABE_STUMM:
+            return
         zeile = format_job_log_zeile(job, text)
         with tee_out._lock:
+            if _AUSGABE_STUMM:
+                return
             if fuss is not None:
                 fuss.schreibe_log_text(zeile + "\n")
             else:
@@ -566,6 +970,8 @@ def lauf_steuerung(
 
         if ansi and fuss_kandidat.aktivieren():
             fuss = fuss_kandidat
+            _aktive_fussleiste = fuss
+            _aktive_tees = (tee_out, tee_err)
             tee_out.setze_fussleiste(fuss)
             tee_err.setze_fussleiste(fuss)
             tee_out.setze_nach_zeile(lambda: fuss.zeichnen() if fuss else None)
@@ -581,11 +987,11 @@ def lauf_steuerung(
         _beende_server(state, httpd)
         raise
     finally:
-        if fuss is not None:
-            fuss.deaktivieren()
-        setze_log_spiegel(None)
-        sys.stdout = original_out  # type: ignore[assignment]
-        sys.stderr = original_err  # type: ignore[assignment]
+        _loese_terminal_fuss()
+        # Nach Taste 3 nicht original_out zurück — Probe-Threads würden sonst
+        # noch „…9050) — erreichbar“ in die gelöste Konsole schreiben.
+        sys.stdout = _stdout_nach_ende(original_out)  # type: ignore[assignment]
+        sys.stderr = _stdout_nach_ende(original_err)  # type: ignore[assignment]
 
 
 def _schleife_ansi(
@@ -616,97 +1022,95 @@ def _schleife_ansi_tasten(
     while True:
         try:
             taste = _lese_taste(0.25)
-        except KeyboardInterrupt:
-            print("\nBeendet.", flush=True)
-            _beende_server(state, httpd)
-            return 0
 
-        fuss.zeichnen()
+            fuss.zeichnen()
 
-        if taste is None:
-            continue
-        if taste == "\x03":  # Ctrl+C
-            print("\nBeendet.", flush=True)
-            _beende_server(state, httpd)
-            return 0
-        # Ctrl+D: unter Unix übliches EOF/Quit. Unter Windows/ConPTY nicht —
-        # dort kann \x04 spontan kommen und den Server ungewollt beenden.
-        if taste == "\x04" and sys.platform != "win32":
-            print("\nBeendet.", flush=True)
-            _beende_server(state, httpd)
-            return 0
-
-        wahl = taste.lower()
-
-        if warte_bestaetigung:
-            # j/y = Server aus (Jobs abbrechen). n = weiter.
-            # Enter/Space ignorieren (Rest von „3↵“ oder versehentlich).
-            if wahl in ("j", "y"):
-                print("  Beende Server (breche laufende Jobs ab)…", flush=True)
-                _drucke_laufende_jobs(state, einleitung="  Noch aktiv:")
+            if taste is None:
+                continue
+            if taste == "\x03":  # Ctrl+C
+                print("\n", end="", flush=True)
                 _beende_server(state, httpd)
-                print("Beendet.", flush=True)
                 return 0
-            if wahl in ("\n", "\r", "\t"):
-                continue
-            if wahl in ("n", " ", "1", "2"):
-                warte_bestaetigung = False
-                fuss.setze_hinweis("Taste 1–3")
-                print("  Abbruch — Server läuft weiter.", flush=True)
-                fuss.zeichnen(erzwingen=True)
-                continue
-            # 3 während Bestätigung: Hinweis, Zustand behalten (kein Abbruch)
-            print(
-                "  Bitte j (Server beenden) oder n (weiter) drücken.",
-                flush=True,
-            )
-            fuss.zeichnen(erzwingen=True)
-            continue
+            # Ctrl+D: unter Unix übliches EOF/Quit. Unter Windows/ConPTY nicht —
+            # dort kann \x04 spontan kommen und den Server ungewollt beenden.
+            if taste == "\x04" and sys.platform != "win32":
+                print("\n", end="", flush=True)
+                _beende_server(state, httpd)
+                return 0
 
-        if wahl in ("1", "s"):
-            _zeige_status(state, puffer)
-            fuss.zeichnen(erzwingen=True)
-            continue
-        if wahl in ("2", "b"):
-            print("  Öffne Browser…", flush=True)
-            try:
-                _oeffne_browser_sicher(adresse)
-            except Exception as exc:
-                print(f"  ⚠️  Browser: {exc}", flush=True)
-            fuss.zeichnen(erzwingen=True)
-            continue
-        if wahl in ("3", "q"):
-            # Rest von „3↵“ verwerfen, sonst killt Enter die Bestätigung.
-            _drain_stdin()
-            laufend = _jobs_laufend(state)
-            if laufend:
-                warte_bestaetigung = True
-                fuss.setze_hinweis(
-                    f"{len(laufend)} Job(s) — j=Server aus · n=weiter"
-                )
+            wahl = taste.lower()
+
+            if warte_bestaetigung:
+                # j/y = Server aus (Jobs abbrechen). n = weiter.
+                # Enter/Space ignorieren (Rest von „3↵“ oder versehentlich).
+                if wahl in ("j", "y"):
+                    print("  Beende Server (breche laufende Jobs ab)…", flush=True)
+                    _drucke_laufende_jobs(state, einleitung="  Noch aktiv:")
+                    _beende_server(state, httpd)
+                    return 0
+                if wahl in ("\n", "\r", "\t"):
+                    continue
+                if wahl in ("n", " ", "1", "2"):
+                    warte_bestaetigung = False
+                    fuss.setze_hinweis("Taste 1–3")
+                    print("  Abbruch — Server läuft weiter.", flush=True)
+                    fuss.zeichnen(erzwingen=True)
+                    continue
+                # 3 während Bestätigung: Hinweis, Zustand behalten (kein Abbruch)
                 print(
-                    f"  {len(laufend)} Job(s) laufen noch "
-                    "(auch Auto: Header/Wallet-Sync — nicht in der Web-Nav):",
-                    flush=True,
-                )
-                _drucke_laufende_jobs(state)
-                print(
-                    "  Server wirklich beenden? "
-                    "j = ja (bricht Jobs ab und stoppt), "
-                    "n = weiterlaufen lassen",
+                    "  Bitte j (Server beenden) oder n (weiter) drücken.",
                     flush=True,
                 )
                 fuss.zeichnen(erzwingen=True)
                 continue
-            print("  Beende Server…", flush=True)
+
+            if wahl in ("1", "s"):
+                _zeige_status(state, puffer)
+                fuss.zeichnen(erzwingen=True)
+                continue
+            if wahl in ("2", "b"):
+                print("  Öffne Browser…", flush=True)
+                try:
+                    _oeffne_browser_sicher(adresse)
+                except Exception as exc:
+                    print(f"  ⚠️  Browser: {exc}", flush=True)
+                fuss.zeichnen(erzwingen=True)
+                continue
+            if wahl in ("3", "q"):
+                # Rest von „3↵“ verwerfen, sonst killt Enter die Bestätigung.
+                _drain_stdin()
+                laufend = _jobs_laufend(state)
+                if laufend:
+                    warte_bestaetigung = True
+                    fuss.setze_hinweis(
+                        f"{len(laufend)} Job(s) — j=Server aus · n=weiter"
+                    )
+                    print(
+                        f"  {len(laufend)} Job(s) laufen noch "
+                        "(auch Auto: Header/Wallet-Sync — nicht in der Web-Nav):",
+                        flush=True,
+                    )
+                    _drucke_laufende_jobs(state)
+                    print(
+                        "  Server wirklich beenden? "
+                        "j = ja (bricht Jobs ab und stoppt), "
+                        "n = weiterlaufen lassen",
+                        flush=True,
+                    )
+                    fuss.zeichnen(erzwingen=True)
+                    continue
+                print("  Beende Server…", flush=True)
+                _beende_server(state, httpd)
+                return 0
+
+            # Unbekannte Taste: ignorieren (kein Spam bei Pfeiltasten-Resten)
+            if wahl.isprintable() and wahl not in ("\n", "\r", " "):
+                print("  ⚠️  1, 2 oder 3 wählen.", flush=True)
+                fuss.zeichnen(erzwingen=True)
+        except KeyboardInterrupt:
+            print("\n", end="", flush=True)
             _beende_server(state, httpd)
-            print("Beendet.", flush=True)
             return 0
-
-        # Unbekannte Taste: ignorieren (kein Spam bei Pfeiltasten-Resten)
-        if wahl.isprintable() and wahl not in ("\n", "\r", " "):
-            print("  ⚠️  1, 2 oder 3 wählen.", flush=True)
-            fuss.zeichnen(erzwingen=True)
 
 
 def _oeffne_browser_sicher(adresse: str, *, verzoegerung_s: float = 1.2) -> None:
@@ -746,7 +1150,7 @@ def _warte_auf_strg_c(state: Any, httpd: Any, adresse: str) -> int:
         while True:
             time.sleep(3600)
     except KeyboardInterrupt:
-        print("\nBeendet.", flush=True)
+        print("\n", end="", flush=True)
         _beende_server(state, httpd)
         return 0
 
@@ -766,7 +1170,7 @@ def _schleife_input(
             # sofort EOF — Server darf deshalb nicht sterben.
             return _warte_auf_strg_c(state, httpd, adresse)
         except KeyboardInterrupt:
-            print("\nBeendet.", flush=True)
+            print("\n", end="", flush=True)
             _beende_server(state, httpd)
             return 0
 
@@ -806,7 +1210,6 @@ def _schleife_input(
                     continue
             print("  Beende Server…", flush=True)
             _beende_server(state, httpd)
-            print("Beendet.", flush=True)
             return 0
 
         print("  ⚠️  1, 2 oder 3 wählen.", flush=True)

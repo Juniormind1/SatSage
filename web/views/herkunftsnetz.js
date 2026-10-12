@@ -1,14 +1,17 @@
 /*
  * Steuerjahr · Herkunftsnetz als Overlay (ISSUES, Schritt 1).
  *
- * Klick auf einen Bestandspunkt im Zeitstrahl blendet ephemer das eigene
- * Vorgängernetz dieses UTXO ein: Layer A (Bestand) bleibt, ungewählte Punkte
- * werden gedimmt; Layer B zeichnet Vorfahren als orange Ringe an ihrer
- * Output-Zeit, Kanten orange mit Dicke ~ Sat-Anteil am gewählten Output.
+ * Hover auf einem Bestandspunkt mit Lot-Mix zeigt den 32-px-Lot-Ring
+ * aus den Zeitstrahl-Zahlen (sats_gruen/orange/grau), ohne Request.
+ * Klick blendet ephemer das eigene Vorgängernetz ein: Layer A (Bestand)
+ * bleibt, ungewählte Punkte werden gedimmt; Layer B zeichnet Vorfahren
+ * als orange Ringe an ihrer Output-Zeit, Kanten orange mit Dicke ~
+ * Sat-Anteil am gewählten Output.
  *
  * Nur das flache Netz vom Server liegt im Speicher (GET /api/tax/herkunftsnetz)
  * — nie ein Baum. Nichts davon landet in zeitstrahl.events[].
- * Ende: Esc, Klick ins Leere, zweiter Klick auf denselben Punkt, Ansichtswechsel.
+ * Ende: Esc, Klick ins Leere, Ansichtswechsel.
+ * Klick auf den Lot-Ring des Fokus (Netz an) springt zum UTXO in „Herkunft tracen“.
  * Klick auf einen eigenen Vorgänger-Ring springt in den Herkunftsbaum
  * dieses UTXO unter „Bereits ausgegeben“ des zugehörigen Wallets.
  */
@@ -60,11 +63,25 @@ function herkunftsnetzOhneHerkunft(key) {
   return Boolean(treffer && treffer.geprueft === false && !treffer.erfuellt);
 }
 
-/** Klick auf einen Bestandspunkt: ein-, bei zweitem Klick ausblenden. */
+/** Klick auf einen Bestandspunkt: Netz einblenden.
+ *  Liegt der Lot-Ring schon auf diesem Punkt, springt der Klick zum UTXO.
+ *  Klick ins Leere blendet das Netz aus.
+ */
 function herkunftsnetzUmschalten(key) {
   if (!key) return;
   if (Herkunftsnetz.key === key) {
+    const punktEl = herkunftsnetzPunktEl(key);
+    // Sprung nur mit sichtbarem Netz-Ring, nicht schon durch Hover-Mix.
+    const lot = Boolean(
+      Herkunftsnetz.daten
+      && punktEl
+      && punktEl.classList.contains("achse-lot"),
+    );
+    const meta = herkunftsnetzPunkt(key);
     herkunftsnetzBeenden();
+    if (lot && typeof springeZuTraceUtxo === "function") {
+      springeZuTraceUtxo(key, meta);
+    }
     return;
   }
   if (herkunftsnetzOhneHerkunft(key)) {
@@ -115,6 +132,9 @@ function herkunftsnetzPunkt(key) {
     walletId: (punkt && punkt.dataset.walletId) || treffer.wallet_id || "",
     wallet: (punkt && punkt.dataset.wallet) || treffer.wallet || "",
     address: (punkt && punkt.dataset.address) || treffer.address || "",
+    value_sats: (punkt && punkt.dataset.valueSats)
+      ? Number(punkt.dataset.valueSats)
+      : (treffer.value_sats ?? null),
   };
 }
 
@@ -455,15 +475,21 @@ function herkunftsnetzLotMischung(daten) {
   return acc.gruen + acc.orange + acc.grau > 0 ? acc : null;
 }
 
-/** Drei Zeilen für den Hover des Lot-Rings. Kleine Anteile bleiben sichtbar. */
+/** Lot-Zeilen für den Hover. Nur Farben mit Anteil, kleine Reste bleiben sichtbar. */
 function herkunftsnetzLotZeilen(mischung) {
   const summe = mischung.gruen + mischung.orange + mischung.grau;
   if (!(summe > 0)) return [];
-  return [
-    t("tax.netzLotGruen", { pct: herkunftsnetzProzent(mischung.gruen / summe) }),
-    t("tax.netzLotGelb", { pct: herkunftsnetzProzent(mischung.orange / summe) }),
-    t("tax.netzLotGrau", { pct: herkunftsnetzProzent(mischung.grau / summe) }),
-  ];
+  const zeilen = [];
+  if (mischung.gruen > 0) {
+    zeilen.push(t("tax.netzLotGruen", { pct: herkunftsnetzProzent(mischung.gruen / summe) }));
+  }
+  if (mischung.orange > 0) {
+    zeilen.push(t("tax.netzLotGelb", { pct: herkunftsnetzProzent(mischung.orange / summe) }));
+  }
+  if (mischung.grau > 0) {
+    zeilen.push(t("tax.netzLotGrau", { pct: herkunftsnetzProzent(mischung.grau / summe) }));
+  }
+  return zeilen;
 }
 
 function setzeAchseLotTooltip(punkt, mischung) {
@@ -481,21 +507,43 @@ function entferneAchseLotTooltip(punkt) {
   delete tip.dataset.lotBasis;
 }
 
-/** Doughnut auf dem angeklickten Bestandspunkt. Kein title, kein aria-label. */
-function setzeAchseLotDonut(punkt, daten) {
-  if (!punkt || typeof setzeLotDonut !== "function") return;
-  const mischung = herkunftsnetzLotMischung(daten);
+/** Lot-Mix aus den Zeitstrahl-Zahlen. Fehlt sats_gruen, gibt es keinen Ring. */
+function achseLotMischungAusEvent(eintrag) {
+  if (!eintrag) return null;
+  if (eintrag.sats_gruen === null || eintrag.sats_gruen === undefined) return null;
+  const gruen = Math.max(0, Number(eintrag.sats_gruen) || 0);
+  const orange = Math.max(0, Number(eintrag.sats_orange) || 0);
+  const grau = Math.max(0, Number(eintrag.sats_grau) || 0);
+  if (!(gruen + orange + grau > 0)) return null;
+  return { gruen, orange, grau };
+}
+
+/** Doughnut-Daten auf dem Punkt. Kein title, kein aria-label. */
+function setzeAchseLotAusMischung(punkt, mischung) {
+  if (!punkt) return;
   if (!mischung) {
     entferneAchseLotDonut(punkt);
     return;
   }
+  if (typeof setzeLotDonut !== "function") return;
   const vorher = punkt.style.background;
   setzeLotDonut(punkt, mischung);
   if (!punkt.classList.contains("lot-donut")) return;
   punkt.classList.add("achse-lot");
   punkt.style.background = "";
   if (vorher) punkt.style.background = vorher;
+  punkt.removeAttribute("title");
   setzeAchseLotTooltip(punkt, mischung);
+}
+
+/** Doughnut aus dem Herkunftsnetz des angeklickten Punkts. */
+function setzeAchseLotDonut(punkt, daten) {
+  setzeAchseLotAusMischung(punkt, herkunftsnetzLotMischung(daten));
+}
+
+/** Doughnut aus dem Zeitstrahl-Event — Hover ohne extra Request. */
+function setzeAchseLotAusEvent(punkt, eintrag) {
+  setzeAchseLotAusMischung(punkt, achseLotMischungAusEvent(eintrag));
 }
 
 function entferneAchseLotDonut(punkt) {
@@ -656,11 +704,16 @@ function herkunftsnetzZeichnen() {
   }
   const aktiv = herkunftsnetzAktiv();
   spur.classList.toggle("netz-an", aktiv);
+  const events = (ZeitstrahlAnsicht.daten?.zeitstrahl?.events) || [];
+  const nachKey = new Map();
+  for (const event of events) {
+    if (event && event.key) nachKey.set(event.key, event);
+  }
   for (const punkt of spur.querySelectorAll(".achse-punkt[data-key]")) {
     const fokus = aktiv && punkt.dataset.key === Herkunftsnetz.key;
     punkt.classList.toggle("netz-fokus", fokus);
     if (fokus && Herkunftsnetz.daten) setzeAchseLotDonut(punkt, Herkunftsnetz.daten);
-    else entferneAchseLotDonut(punkt);
+    else setzeAchseLotAusEvent(punkt, nachKey.get(punkt.dataset.key));
   }
   herkunftsnetzHinweis();
   const d = Herkunftsnetz.daten;

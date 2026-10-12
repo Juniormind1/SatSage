@@ -128,7 +128,8 @@ class TestScanXpubZwischenstand(unittest.TestCase):
                 return [_utxo("final")]
 
             with patch("core.wallet_sync_engine.discover_wallet_scan_addresses", side_effect=fake_discover), \
-                 patch("core.wallet_sync_engine._try_scantxoutset_xpub", return_value=None):
+                 patch("core.wallet_sync_engine._try_scantxoutset_xpub", return_value=None), \
+                 patch("core.chain_sources.baue_p2p_utxo_fetch", return_value=None):
                 out = main._scan_xpub_utxos(
                     BIP84_ZPUB,
                     fake_fetch,

@@ -1,7 +1,7 @@
 #!/bin/sh
 # SatSage Maintainer-Hook (core.hooksPath=githooks):
 # 1) Tip-Autor muss Juniormind1 sein (wie bisher)
-# 2) NEU: Unit-Suite muss auf dem gepushten Commit grün sein
+# 2) Unit-Suite nur bei Push nach main (dev-juniormind = WIP, ohne Suite)
 #
 # Getestet wird der *gepushte* Stand (git worktree des local_sha), nicht der
 # Arbeitsbaum — fremde, ungestagte Änderungen (parallele Worker) zählen nicht.
@@ -41,9 +41,9 @@ do
     echo "  git commit --amend --reset-author --no-edit" >&2
     exit 1
   fi
-  # Tags zeigen auf schon gepushte Commits — nur Branches testen.
+  # Unit-Suite nur nach main. Tags und WIP-Branches (dev-juniormind, …) ohne Lauf.
   case "$remote_ref" in
-    refs/heads/*) zu_testen="$zu_testen $local_sha" ;;
+    refs/heads/main) zu_testen="$zu_testen $local_sha" ;;
   esac
 done
 
@@ -55,9 +55,19 @@ fi
 
 wurzel="$(git rev-parse --show-toplevel)"
 gitdir="$(git rev-parse --git-common-dir)"
-py="$wurzel/.venv/bin/python"
-if [ ! -x "$py" ]; then
-  echo "ERROR: $py fehlt — Unit-Suite nicht lauffähig (SATSAGE_SKIP_TESTS=1 zum Übergehen)." >&2
+py=""
+for kandidat in \
+  "$wurzel/.venv/bin/python" \
+  "$wurzel/.venv/Scripts/python.exe"
+do
+  # Windows-Git setzt auf .exe oft kein +x — -f reicht, -x fängt Unix.
+  if [ -x "$kandidat" ] || [ -f "$kandidat" ]; then
+    py="$kandidat"
+    break
+  fi
+done
+if [ -z "$py" ]; then
+  echo "ERROR: .venv Python fehlt (bin/python oder Scripts/python.exe) — Unit-Suite nicht lauffähig (SATSAGE_SKIP_TESTS=1 zum Übergehen)." >&2
   exit 1
 fi
 marken="$gitdir/satsage-gruen"
@@ -71,7 +81,7 @@ for sha in $(printf '%s\n' $zu_testen | sort -u); do
   echo "pre-push: Unit-Suite auf ${sha%"${sha#???????}"} (~5½ min, Log: $log) …" >&2
   start=$(date +%s)
   set +e
-  ( cd "$baum" && "$py" -m unittest discover -s tests -t . ) >"$log" 2>&1
+  ( cd "$baum" && SATSAGE_HARD_TESTS=1 "$py" -m unittest discover -s tests -t . ) >"$log" 2>&1
   rc=$?
   set -e
   git worktree remove --force "$baum" >/dev/null 2>&1 || rm -rf "$baum"

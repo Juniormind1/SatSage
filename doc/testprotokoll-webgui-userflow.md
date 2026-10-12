@@ -10,7 +10,7 @@
 | Navigation | Jede Kernansicht sichtbar nach Klick | Section bleibt `hidden` |
 | Laden | „Lade aus Cache…“ verschwindet ≤ ~30 s | Hängt minutenlang |
 | Inhalt | Marker-Elemente existieren (auch leere Listen) | Fehlermeldung „Interner Serverfehler“ / „Auswertung fehlgeschlagen“ |
-| Sprache | EN/DE-Umschalter wechselt `lang` | Klick ohne Wirkung |
+| Sprache | EN, dann zurück nach DE. Sichtbare Texte sind die der gewählten Sprache, keine Roh-Schlüssel (`settings.password.title`) | Umschalter ohne Wirkung, deutscher Text bleibt in EN stehen, Schlüssel sichtbar |
 | Console | Keine schweren `pageerror` | Uncaught Exceptions |
 
 ## Kern-Schritte (Reihenfolge)
@@ -22,8 +22,9 @@
 5. Wallets (Verwaltung)  
 6. Einstellungen  
 7. Datenquellen  
-8. Sprache EN → DE  
+8. Sprache EN → DE, danach Prüfung auf Roh-Schlüssel und Texte der anderen Sprache (`scripts/webgui_i18n_check.py`). Das Log bleibt ausgenommen.  
 9. Steuerjahr: Report HTML ohne Auswahl (Warnung, kein Crash)
+10. Nur bei `--spawn`: Passwort setzen, ändern und löschen, je für Desktop, Specter und Umbrel (`scripts/webgui_passwort_flow.py`). `--url` und `--attach` lassen die echte Sitzung in Ruhe.
 
 ## Aufruf
 

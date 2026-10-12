@@ -35,6 +35,7 @@ Thumbs.db
 logs/
 utxo_cache/
 immutable_cache/
+# Vom Maintainer neben den Cache gelegte Wallet-Snapshots (xpub-Kennung).
 sanctioned_cache/
 tor_data/
 label_cache/

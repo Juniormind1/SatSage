@@ -263,7 +263,9 @@ def write_consolidation_psbts(
     output_dir: Path | None = None,
 ) -> list[Path]:
     """Schreibt Konsolidierungs-PSBTs auf Platte; gibt Pfade zurück."""
-    out_dir = output_dir or Path(__file__).resolve().parent / "psbt_out"
+    from core.paths import app_dir
+
+    out_dir = output_dir or app_dir() / "psbt_out"
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     written: list[Path] = []

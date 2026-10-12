@@ -173,7 +173,11 @@ def hole_historie_mempool_luecke(
     serie: dict[str, float] = {}
     d = ab
     geholt = 0
-    max_tage = 400
+    # Volle Historie (leerer Cache) bleibt begrenzt. Eine kurze Lücke am Tip
+    # — etwa wenn Bitstamp/CDD wegen abgelaufenem Zertifikat ausfällt — darf
+    # auch über 400 Tage gehen, solange der Aufrufer ein enges Fenster gibt.
+    span = (bis - ab).days + 1
+    max_tage = span if span <= 800 else 400
     while d <= bis and geholt < max_tage:
         ds = d.isoformat()
         preis = None

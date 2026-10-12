@@ -777,18 +777,49 @@ class TestVerlaufJob(ApiTestBasis):
         )
         self.assertEqual(status, 404)
 
-    def test_einzelnes_wallet_steht_im_label(self):
+    def test_ohne_electrum_kein_suchlauf(self):
+        from core.chain_sources import ELECTRUM_SPUR_FEHLT
+
         kennung = self.wallet_id(BIP84_ZPUB)
         status, körper = self.anfrage(
             "/api/verlauf", methode="POST", daten={"wallet_id": kennung},
         )
+        self.assertEqual(status, 409)
+        self.assertEqual(körper["error"], ELECTRUM_SPUR_FEHLT)
+        self.assertFalse(any(j.kind == "verlauf" for j in self.state.jobs.list()))
+
+    def test_trace_ohne_cache_kein_suchlauf(self):
+        from core.chain_sources import ELECTRUM_SPUR_FEHLT
+
+        status, körper = self.anfrage(
+            "/api/trace",
+            methode="POST",
+            daten={"target": f"{txid('a1')}:0"},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(körper["error"], ELECTRUM_SPUR_FEHLT)
+        self.assertFalse(any(j.kind == "trace" for j in self.state.jobs.list()))
+
+    def test_einzelnes_wallet_steht_im_label(self):
+        kennung = self.wallet_id(BIP84_ZPUB)
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/verlauf", methode="POST", daten={"wallet_id": kennung},
+            )
         self.assertEqual(status, 202)
         self.assertIn("Cold Storage", körper["label"])
         self.assertNotIn("Ledger", körper["label"])
         self.assertIn("log", körper)
 
     def test_ohne_id_trifft_alle_wallets(self):
-        status, körper = self.anfrage("/api/verlauf", methode="POST", daten={})
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage("/api/verlauf", methode="POST", daten={})
         self.assertEqual(status, 202)
         self.assertIn("aller Wallets", körper["label"])
 
@@ -958,6 +989,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertIn("header_tip", körper)
         self.assertIsNone(körper["header_job_id"])
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_header_vorab_legt_einen_job_an(self):
         with mock.patch(
             "bip158_scanner.vorab_block_header", return_value=900_000,
@@ -974,6 +1009,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(job.status, "done")
         self.assertEqual(job.result["tip"], 900_000)
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_header_vorab_laeuft_trotz_wallet_wenn_cache_leer(self):
         """Wallet im Cache ändert nichts — ohne Header-Datei muss geladen werden."""
         self.assertTrue(self.state.entries)
@@ -989,6 +1028,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             time.sleep(0.05)
         vorab.assert_called()
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_header_vorab_nicht_doppelt_solange_laufend(self):
         def langsam(*_a, **_k):
             time.sleep(0.4)
@@ -1000,6 +1043,10 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             server.starte_header_vorab(self.state, nur_wenn_leer=True)
             self.assertEqual(self.state.header_job_id, erste)
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_post_headers_startet_job(self):
         with mock.patch(
             "bip158_scanner.vorab_block_header", return_value=900_000,
@@ -1031,6 +1078,29 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_HOST"], "192.0.2.50")
         self.assertEqual(werte["FULCRUM_PORT"], "50001")
         self.assertEqual(werte["FULCRUM_SSL"], "false")
+
+    def test_leere_onion_wird_geloescht_wenn_ip_kommt(self):
+        """Formular: IP eintragen, Onion leeren — FULCRUM_TOR muss weg."""
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad)
+            + "\nFULCRUM_TOR=abc.onion\nFULCRUM_PORT=50002\nFULCRUM_SSL=true\n",
+        )
+        status, koerper = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "FULCRUM_HOST": "192.0.2.50",
+                "FULCRUM_TOR": "",
+                "FULCRUM_PORT": "50001",
+                "FULCRUM_SSL": "false",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(koerper["saved"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte["FULCRUM_HOST"], "192.0.2.50")
+        self.assertNotIn("FULCRUM_TOR", werte)
+        self.assertEqual(werte.get("FULCRUM_PORT"), "50001")
 
     def test_port_speichern_loescht_stale_tor_port(self):
         """UI-Port muss Tor-Endpoint steuern — altes FULCRUM_TOR_PORT weg."""
@@ -1068,6 +1138,44 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 200)
         self.assertEqual(
             main._load_dotenv(self.env_pfad)["BIP158_START_HEIGHT"], "481824"
+        )
+
+    def test_p2p_scan_zeit_hoehe_und_datum(self):
+        from core.scan_zeit import schaetze_datum_aus_hoehe, schaetze_hoehe_aus_datum
+
+        status, koerper = self.anfrage("/api/p2p/scan-zeit?hoehe=481824")
+        self.assertEqual(status, 200)
+        self.assertEqual(koerper["height"], 481824)
+        self.assertEqual(koerper["date"], schaetze_datum_aus_hoehe(481824))
+        self.assertEqual(koerper["source"], "estimate")
+
+        status, koerper = self.anfrage("/api/p2p/scan-zeit?datum=2017-08-24")
+        self.assertEqual(status, 200)
+        self.assertEqual(koerper["date"], "2017-08-24")
+        self.assertEqual(koerper["height"], schaetze_hoehe_aus_datum("2017-08-24"))
+        self.assertEqual(koerper["source"], "estimate")
+
+        status, koerper = self.anfrage("/api/p2p/scan-zeit")
+        self.assertEqual(status, 400)
+        status, koerper = self.anfrage("/api/p2p/scan-zeit?hoehe=1&datum=2017-08-24")
+        self.assertEqual(status, 400)
+
+    def test_p2p_luecke_wird_gespeichert_und_begrenzt(self):
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_GAP_LIMIT": "250"}},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["BIP158_GAP_LIMIT"], "250",
+        )
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_GAP_LIMIT": "10001"}},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["BIP158_GAP_LIMIT"], "250",
         )
 
     def test_fremdes_feld_wird_abgelehnt(self):
@@ -1364,6 +1472,62 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertFalse(körper["erlaubt"])
         self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
 
+    def test_source_status_kappe_oeffentliche_wenn_eigener_indexer(self):
+        """Nach erfolgreichem eigenem Indexer ist die Sitzungs-Freigabe weg."""
+        from dataclasses import replace
+
+        server.source_mod.setze_oeffentliche_electrum_session(True)
+        self.addCleanup(
+            lambda: server.source_mod.setze_oeffentliche_electrum_session(False)
+        )
+        from core.outbound_policy import _reset_oeffentliche_electrum_suche_fuer_tests
+
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+        self.state.sources_last = [
+            {
+                "key": "clearnet",
+                "configured": True,
+                "reachable": True,
+                "peer_count": 2,
+                "peer_hosts": ["e.example:50002"],
+            },
+        ]
+
+        def fake_check(info, values, *, timeout=5, on_log=None):
+            if info.key == "own_fulcrum" and info.configured:
+                return replace(
+                    info, reachable=True, peer_count=1,
+                    peer_hosts=["192.0.2.1:50002"], software="libbitcoin",
+                    log=["Verbunden (libbitcoin)."],
+                )
+            return replace(info, log=[])
+
+        with mock.patch(
+            "server.source_mod.check_reachable", side_effect=fake_check,
+        ), mock.patch(
+            "core.p2p.zaehle_compact_filter_peers", return_value=[],
+        ), mock.patch(
+            "core.p2p.stelle_p2p_tor_bereit", return_value=None,
+        ), mock.patch(
+            "core.source._pruefe_oeffentliche_electrum",
+            side_effect=lambda gefunden, *a, **k: gefunden,
+        ):
+            status, körper = self.anfrage("/api/source/status?check=1")
+        self.assertEqual(status, 200)
+        self.assertFalse(server.source_mod.oeffentliche_electrum_session_aktiv())
+        self.assertFalse(körper.get("oeffentliche_electrum"))
+        self.assertFalse(körper.get("oeffentliche_electrum_session"))
+        nach = {q["key"]: q for q in körper["sources"]}
+        self.assertTrue(nach["own_fulcrum"]["reachable"])
+        self.assertTrue(
+            nach["clearnet"]["reachable"] is None
+            or nach["clearnet"]["reachable"] is False
+            or int(nach["clearnet"].get("peer_count") or 0) == 0
+        )
+        from core.outbound_policy import oeffentliche_electrum_suche_abgebrochen
+
+        self.assertTrue(oeffentliche_electrum_suche_abgebrochen())
+
     def test_source_status_streamt_log_zeilen(self):
         """Die Oberfläche soll Zeilen sehen, bevor die Prüfung fertig ist."""
         from dataclasses import replace
@@ -1414,13 +1578,14 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
 
         ziel = Path(self._tmp.name) / "electrum_servers.json"
         with mock.patch(
-            "check_fulcrum_tor.fetch_electrum_servers_json", side_effect=fake
+            "core.electrum_servers.fetch_electrum_servers_json", side_effect=fake
         ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
             status, körper = self.anfrage(
                 "/api/config/electrum-servers",
                 methode="POST", daten={"filter": "onion"},
             )
         self.assertEqual(status, 200)
+        self.assertTrue(körper["refreshed"])
         self.assertEqual(körper["count"], 2)
         self.assertIn("Onion", körper["message"])
         werte = main._load_dotenv(self.env_pfad)
@@ -1430,6 +1595,38 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(werte["FULCRUM_TOR_1"], "zzz.onion")
         self.assertEqual(werte["FULCRUM_SSL_1"], "true")
         self.assertNotIn("FULCRUM_TOR_2", werte)
+        from core.outbound_policy import (
+            _reset_oeffentliche_electrum_suche_fuer_tests,
+            oeffentliche_electrum_art,
+        )
+
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+        self.assertEqual(körper["art"], "onion")
+        self.assertEqual(oeffentliche_electrum_art(), "onion")
+
+    def test_electrum_laden_onion_frisch_laesst_env_in_ruhe(self):
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad) + "FULCRUM_TOR_0=keep.onion\n",
+        )
+        self.state.reload()
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            json.dumps({"neu.onion": {"s": "50002"}}), encoding="utf-8",
+        )
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "onion"},
+            )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["refreshed"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_TOR_0"), "keep.onion")
+        self.assertNotIn("FULCRUM_TOR_1", werte)
 
     def test_electrum_laden_clearnet_laesst_onion_env_in_ruhe(self):
         write_env_scrambled(
@@ -1448,17 +1645,125 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
 
         ziel = Path(self._tmp.name) / "electrum_servers.json"
         with mock.patch(
-            "check_fulcrum_tor.fetch_electrum_servers_json", side_effect=fake
+            "core.electrum_servers.fetch_electrum_servers_json", side_effect=fake
         ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
             status, körper = self.anfrage(
                 "/api/config/electrum-servers",
                 methode="POST", daten={"filter": "clearnet"},
             )
         self.assertEqual(status, 200)
+        self.assertTrue(körper["refreshed"])
         self.assertEqual(körper["count"], 2)
         self.assertIn("Clearnet", körper["message"])
         werte = main._load_dotenv(self.env_pfad)
         self.assertEqual(werte.get("FULCRUM_TOR_0"), "keep.onion")
+
+    def test_electrum_verbinden_setzt_sitzungs_art(self):
+        from core.outbound_policy import (
+            _reset_oeffentliche_electrum_suche_fuer_tests,
+            oeffentliche_electrum_art,
+        )
+
+        self.addCleanup(_reset_oeffentliche_electrum_suche_fuer_tests)
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"a.example": {"s": "50002"}, "n.onion": {"s": "50002"}}',
+            encoding="utf-8",
+        )
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST",
+                daten={"filter": "clearnet", "verbinden": True},
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["verbinden"])
+        self.assertEqual(körper["art"], "clearnet")
+        self.assertEqual(oeffentliche_electrum_art(), "clearnet")
+
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST",
+                daten={"filter": "onion", "verbinden": True},
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(körper["art"], "onion")
+        self.assertEqual(oeffentliche_electrum_art(), "onion")
+
+    def test_electrum_laden_ueberspringt_frische_liste(self):
+        import os
+
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"a.example": {"s": "50002"}}', encoding="utf-8",
+        )
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=AssertionError("kein Download"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "clearnet"},
+            )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["refreshed"])
+        self.assertEqual(körper["count"], 1)
+        self.assertTrue(os.path.isfile(ziel))
+
+    def test_electrum_laden_zieht_alte_liste_neu(self):
+        import os
+
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"alt.example": {"s": "50002"}}', encoding="utf-8",
+        )
+        stamp = time.time() - 2 * 86400
+        os.utime(ziel, (stamp, stamp))
+        neu = {"neu.example": {"s": "50002"}}
+
+        def fake(dest, url=None):
+            Path(dest).write_text(json.dumps(neu), encoding="utf-8")
+            return neu
+
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=fake,
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "clearnet"},
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(körper["refreshed"])
+        self.assertEqual(körper["count"], 1)
+
+    def test_electrum_laden_behaelt_alte_liste_wenn_download_scheitert(self):
+        import os
+
+        ziel = Path(self._tmp.name) / "electrum_servers.json"
+        ziel.write_text(
+            '{"alt.example": {"s": "50002"}}', encoding="utf-8",
+        )
+        stamp = time.time() - 2 * 86400
+        os.utime(ziel, (stamp, stamp))
+        with mock.patch(
+            "core.electrum_servers.fetch_electrum_servers_json",
+            side_effect=RuntimeError("offline"),
+        ), mock.patch.object(main, "ELECTRUM_SERVERS_FILE", ziel):
+            status, körper = self.anfrage(
+                "/api/config/electrum-servers",
+                methode="POST", daten={"filter": "clearnet"},
+            )
+        self.assertEqual(status, 200)
+        self.assertFalse(körper["refreshed"])
+        self.assertEqual(körper["count"], 1)
 
 
 class TestSanktionen(ApiTestBasis):
@@ -1550,10 +1855,28 @@ class TestSanktionsCheck(ApiTestBasis):
             json.dumps(list(adressen)), encoding="utf-8"
         )
 
-    def test_ohne_listen_meldet_der_job_den_fehler(self):
+    def test_ohne_electrum_kein_suchlauf(self):
+        from core.chain_sources import ELECTRUM_SPUR_FEHLT
+
+        self.listen_hinterlegen()
         status, körper = self.anfrage(
-            "/api/sanctions/check", methode="POST", daten={"max_hops": 2}
+            "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
         )
+        self.assertEqual(status, 409)
+        self.assertEqual(körper["error"], ELECTRUM_SPUR_FEHLT)
+        self.assertFalse(any(
+            j.kind == "sanctions-check" for j in self.state.jobs.list()
+        ))
+        main.resolve_sanctions_preferred_pool.assert_not_called()
+
+    def test_ohne_listen_meldet_der_job_den_fehler(self):
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/sanctions/check", methode="POST", daten={"max_hops": 2}
+            )
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         self.assertEqual(job["status"], "failed")
@@ -1570,9 +1893,13 @@ class TestSanktionsCheck(ApiTestBasis):
         from core.sanctions import DEFAULT_SANKTION_MAX_HOPS_CAP
 
         self.listen_hinterlegen()
-        status, körper = self.anfrage(
-            "/api/sanctions/check", methode="POST", daten={"max_hops": 99}
-        )
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/sanctions/check", methode="POST", daten={"max_hops": 99}
+            )
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         # Ohne erreichbaren Sanktions-Server scheitert der Lauf — aber das
@@ -1581,9 +1908,13 @@ class TestSanktionsCheck(ApiTestBasis):
 
     def test_ohne_server_scheitert_der_job_ohne_netzzugriff(self):
         self.listen_hinterlegen()
-        status, körper = self.anfrage(
-            "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
-        )
+        with mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
+        ):
+            status, körper = self.anfrage(
+                "/api/sanctions/check", methode="POST", daten={"max_hops": 1}
+            )
         self.assertEqual(status, 202)
         job = self.warte_auf_job(körper["id"])
         self.assertEqual(job["status"], "failed")
@@ -1708,6 +2039,9 @@ class TestSanktionsCheckCache(ApiTestBasis):
         with mock.patch(
             "httpserver.api.labels_sanctions_exchange._sanctions_get_tx_pool",
             side_effect=pool,
+        ), mock.patch(
+            "core.chain_sources.electrum_fuer_spur_verbunden",
+            return_value=True,
         ):
             status, körper = self.anfrage(
                 "/api/sanctions/check", methode="POST", daten={"max_hops": 1}

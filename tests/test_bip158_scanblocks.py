@@ -8,8 +8,10 @@ from bip158_scanner import (
     _filter_prozent_text,
     _filter_umfang,
     plane_filter_passes,
+    plane_union_passes,
     verteile_cfilter_chunks,
 )
+from core.bip158_scan import _gesamt_nach_extra_runde
 from core.p2p import (
     GENESIS_HEADER,
     HeaderChain,
@@ -59,6 +61,18 @@ class TestTurboPasses(unittest.TestCase):
             )
         )
         self.assertTrue(main.bip158_fullscan_ist_fertig({"bip158_fullscan_ok": True}))
+        self.assertTrue(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "fulcrum",
+        }))
+        self.assertFalse(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "bip158",
+        }))
+        self.assertTrue(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "bip158", "bip158_scan_gap": 100,
+        }))
+        self.assertFalse(main.bip158_fullscan_ist_fertig({
+            "bip158_fullscan_ok": True, "source": "bip158", "bip158_scan_gap": 100,
+        }, gap_soll=500))
         self.assertTrue(main.bip158_fullscan_ist_fertig({"scan_tip_height": 800_000}))
         self.assertFalse(main.bip158_fullscan_ist_fertig({"scan_tip_height": 0}))
 
@@ -116,6 +130,59 @@ class TestTurboPasses(unittest.TestCase):
             ein = main.load_xpub_cache_entry(xpub, cache)
             self.assertTrue(ein["raw"].get("bip158_fullscan_ok"))
 
+    def test_hoehere_luecke_liest_historie_neu(self):
+        import tempfile
+        from pathlib import Path
+
+        import main
+        from core.bip158_wallet import _SCAN_GAPS, merke_scan_gap, scan_start_fuer_xpub
+
+        xpub = (
+            "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3N"
+            "o2dFDFGTsxxpG5uJh7n7epu4trkrX7x7DogT5Uf1nxASY"
+        )
+        utxo = [{
+            "txid": "ab" * 32,
+            "vout": 0,
+            "value": 1000,
+            "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        }]
+
+        class Client:
+            def __init__(self, cache, gap):
+                self.cache_dir = cache
+                self.start_height = 0
+                self.gap_limit = gap
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            main.save_xpub_utxo_cache(
+                xpub, utxo, cache, "bip158",
+                scan_tip_height=900_000, bip158_fullscan_ok=True,
+            )
+            self.assertEqual(
+                scan_start_fuer_xpub(Client(cache, 100), xpub)["start_grund"],
+                "tip",
+            )
+            self.assertNotEqual(
+                scan_start_fuer_xpub(Client(cache, 500), xpub)["start_grund"],
+                "tip",
+            )
+            merke_scan_gap(xpub, 400)
+            try:
+                main.save_xpub_utxo_cache(
+                    xpub, utxo, cache, "bip158",
+                    scan_tip_height=900_000, bip158_fullscan_ok=True,
+                )
+                ein = main.load_xpub_cache_entry(xpub, cache)
+                self.assertEqual(ein["raw"].get("bip158_scan_gap"), 400)
+                self.assertEqual(
+                    scan_start_fuer_xpub(Client(cache, 400), xpub)["start_grund"],
+                    "tip",
+                )
+            finally:
+                _SCAN_GAPS.pop(xpub, None)
+
     def test_erstscan_ohne_gap_historie_leer(self):
         alle = {b"\x01", b"\x02"}
         passe = plane_filter_passes(481_824, 900_000, alle, set())
@@ -157,6 +224,40 @@ class TestTurboPasses(unittest.TestCase):
         )
         self.assertGreater(_filter_umfang(zwei), 0)
 
+    def test_union_turbo_vereinigt_lookahead_historie_bleibt_eng(self):
+        tip = 900_000
+        turbo_from = tip - TURBO_WINDOW + 1
+        passe = plane_union_passes(
+            [
+                (481_824, True, {b"\x01", b"\x02"}, {b"\x01"}),
+                (800_000, False, {b"\x03", b"\x04"}, {b"\x03"}),
+            ],
+            tip,
+        )
+        self.assertEqual([p[0] for p in passe], ["turbo", "historie"])
+        turbo, histo = passe
+        self.assertEqual(turbo[3], frozenset({b"\x01", b"\x02", b"\x03", b"\x04"}))
+        self.assertEqual(turbo[1], turbo_from)
+        self.assertEqual(histo[3], frozenset({b"\x01", b"\x03"}))
+        self.assertNotIn(b"\x02", histo[3])
+        self.assertEqual(histo[1], 481_824)
+        self.assertEqual(histo[2], turbo_from - 1)
+
+    def test_union_spaeter_start_hebt_nur_dieses_wallet(self):
+        tip = 900_000
+        turbo_from = tip - TURBO_WINDOW + 1
+        passe = plane_union_passes(
+            [
+                (481_824, True, {b"\x01", b"\x0a"}, {b"\x01"}),
+                (turbo_from + 10, True, {b"\x02", b"\x0b"}, {b"\x02"}),
+            ],
+            tip,
+        )
+        self.assertEqual([p[0] for p in passe], ["turbo", "historie"])
+        self.assertEqual(passe[1][1], 481_824)
+        self.assertEqual(passe[1][3], frozenset({b"\x01"}))
+        self.assertIn(b"\x02", passe[0][3])
+
     def test_filter_prozent_text(self):
         self.assertEqual(_filter_prozent_text(0, 0), "")
         self.assertEqual(
@@ -166,6 +267,17 @@ class TestTurboPasses(unittest.TestCase):
         self.assertIn("(2,5 %)", _filter_prozent_text(12_035, 481_375))
         self.assertIn("(100 %)", _filter_prozent_text(481_375, 481_375))
         self.assertIn("(12 %)", _filter_prozent_text(60_000, 481_375))
+
+    def test_extra_historie_runde_bleibt_unter_100(self):
+        """Zweite Runde über dieselbe Spanne darf nicht bei 100 % kleben."""
+        von, bis = 907_914, 968_874
+        erste = bis - von + 1
+        self.assertIn("(100 %)", _filter_prozent_text(erste, erste))
+        gesamt = _gesamt_nach_extra_runde(erste, von, bis)
+        # 8.000 Blöcke in der zweiten Runde: 68.961 / 121.922 → 56 %.
+        text = _filter_prozent_text(erste + 8_000, gesamt)
+        self.assertNotIn("100 %", text)
+        self.assertIn("(56 %)", text)
 
 
 class TestFilterParallel(unittest.TestCase):
@@ -207,12 +319,26 @@ class TestFilterParallel(unittest.TestCase):
     def test_vorab_header_achtet_auf_abschalten(self):
         from bip158_scanner import vorab_block_header
 
+        from unittest.mock import patch as _patch
+
         logs: list[str] = []
-        tip = vorab_block_header(
-            {"BIP158_P2P": "0"}, on_log=logs.append,
-        )
+        with _patch("core.p2p.p2p_gesperrt", return_value=False):
+            tip = vorab_block_header(
+                {"BIP158_P2P": "0"}, on_log=logs.append,
+            )
         self.assertEqual(tip, 0)
-        self.assertTrue(any("BIP158_P2P=0" in z for z in logs))
+        self.assertTrue(any("BIP158_P2P=0" in z for z in logs), logs)
+
+    def test_vorab_header_aus_wenn_p2p_abgeklemmt(self):
+        from unittest.mock import patch as _patch
+
+        from bip158_scanner import vorab_block_header
+
+        logs: list[str] = []
+        with _patch("core.p2p.p2p_gesperrt", return_value=True):
+            tip = vorab_block_header({"BIP158_P2P": "1"}, on_log=logs.append)
+        self.assertEqual(tip, 0)
+        self.assertTrue(any("abgeklemmt" in z for z in logs), logs)
 
     def test_ein_peer_bleibt_sequentiell(self):
         class FakePeer:
@@ -272,15 +398,16 @@ class TestFilterParallel(unittest.TestCase):
         from bip158_scanner import _lade_cfilter_chunk
 
         logs: list[str] = []
+        block_hash, roh = _gueltiger_block()
 
         class FakePeer:
             def fetch_cfilters(self, start, stop, expect):
-                return [(b"\x11" * 32, b"\x01")]
+                return [(block_hash, b"\x01")]
 
-            def fetch_block(self, block_hash):
+            def fetch_block(self, gesehen_hash):
                 self.gesehen = list(logs)
-                self.hash = block_hash
-                return b"\x00" * 80
+                self.hash = gesehen_hash
+                return roh
 
         peer = FakePeer()
         with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
@@ -290,9 +417,8 @@ class TestFilterParallel(unittest.TestCase):
                 frozenset({b"\x01"}), on_log=logs.append,
             )
         self.assertTrue(any("hole Block" in z for z in peer.gesehen), peer.gesehen)
-        self.assertEqual(peer.hash, b"\x11" * 32)
-        self.assertIsNotNone(zeilen[0][3])
-        self.assertIsNot(zeilen[0][3], object())
+        self.assertEqual(peer.hash, block_hash)
+        self.assertEqual(zeilen[0][3], roh)
 
     def test_cfilter_cache_zweiter_scan_ohne_netz(self):
         import tempfile
@@ -347,16 +473,18 @@ class TestFilterParallel(unittest.TestCase):
         fetch_block_calls: list = []
         filter_done = threading.Event()
 
+        block_hash, roh = _gueltiger_block()
+
         class FakePeer:
             def fetch_cfilters(self, start, stop, expect):
                 time.sleep(0.02)
                 filter_done.set()
-                return [(b"\x11" * 32, b"\x01") for _ in range(expect)]
+                return [(block_hash, b"\x01") for _ in range(expect)]
 
-            def fetch_block(self, block_hash):
-                fetch_block_calls.append((block_hash, filter_done.is_set()))
+            def fetch_block(self, gesehen_hash):
+                fetch_block_calls.append((gesehen_hash, filter_done.is_set()))
                 time.sleep(0.05)
-                return b"\x00" * 80
+                return roh
 
         peer = FakePeer()
         with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
@@ -367,7 +495,7 @@ class TestFilterParallel(unittest.TestCase):
                 frozenset({b"\x01"}),
             ))
         self.assertEqual(len(out), 1)
-        self.assertEqual(out[0][0][3], b"\x00" * 80)
+        self.assertEqual(out[0][0][3], roh)
         self.assertEqual(len(fetch_block_calls), 1)
         self.assertTrue(fetch_block_calls[0][1], "Filter-Match vor Block-Fetch")
 
@@ -492,6 +620,21 @@ class TestP2pCodec(unittest.TestCase):
         self.assertTrue(roh.startswith(b"\xf9\xbe\xb4\xd9"))
         self.assertEqual(len(roh), 24)
 
+    def test_regtest_magic_und_genesis(self):
+        import main
+        from core.p2p import genesis_header, p2p_magic
+
+        main.set_chain_network("regtest")
+        try:
+            roh = encode_message("verack")
+            self.assertTrue(roh.startswith(b"\xfa\xbf\xb5\xda"))
+            self.assertEqual(p2p_magic(), b"\xfa\xbf\xb5\xda")
+            display = hash_to_hex(header_hash(genesis_header()))
+            self.assertTrue(display.startswith("0f9188f1"), display)
+            self.assertEqual(checkpoint_fuer(1), (0, header_hash(genesis_header())))
+        finally:
+            main.set_chain_network(None)
+
     def test_getcfilters_und_cfilter(self):
         stop = b"\x11" * 32
         payload = encode_getcfilters(481_824, stop)
@@ -505,6 +648,46 @@ class TestP2pCodec(unittest.TestCase):
     def test_genesis_header_hash(self):
         display = hash_to_hex(header_hash(GENESIS_HEADER))
         self.assertTrue(display.startswith("000000000019d668"))
+
+    def test_regtest_nur_bitcoind(self):
+        import main
+        from unittest.mock import patch
+
+        import core.p2p as p2p_mod
+        from core.p2p import _p2p_kandidaten, merke_filter_peer
+
+        p2p_mod._FILTER_PEER_CACHE.clear()
+        p2p_mod._FILTER_PEER_LOADED = True
+        main.set_chain_network("regtest")
+        try:
+            logs: list[str] = []
+            kandidaten = _p2p_kandidaten(
+                [
+                    ("192.168.1.50", 8333),
+                    ("198.51.100.1", 8333),
+                    ("10.0.0.8", 18444),
+                ],
+                dns_fallback=True,
+                tor_proxy=None,
+                on_log=logs.append,
+            )
+            self.assertEqual(kandidaten, [("10.0.0.8", 18444)])
+            self.assertTrue(any("nur bitcoind" in z for z in logs), logs)
+            leer = _p2p_kandidaten(
+                [("198.51.100.9", 8333)],
+                dns_fallback=True,
+                tor_proxy=None,
+                on_log=None,
+            )
+            self.assertEqual(leer, [("127.0.0.1", 18444)])
+            with patch.object(p2p_mod, "_speichere_filter_peers_datei") as speichern:
+                merke_filter_peer("127.0.0.1", 18444)
+            speichern.assert_not_called()
+            self.assertEqual(p2p_mod._FILTER_PEER_CACHE, [])
+        finally:
+            main.set_chain_network(None)
+            p2p_mod._FILTER_PEER_CACHE.clear()
+            p2p_mod._FILTER_PEER_LOADED = False
 
     def test_p2p_peers_from_env_nimmt_lan_zuerst(self):
         from core.p2p import p2p_peers_from_env
@@ -628,6 +811,7 @@ class TestP2pCodec(unittest.TestCase):
             self.assertEqual(again.tip_height(), 850_001)
             self.assertEqual(again.hash_at(850_000), prev)
             self.assertEqual(again.header_at(850_001), fake)
+
 
     def test_altes_genesis_file_wird_gelesen(self):
         import tempfile
@@ -1130,3 +1314,333 @@ class TestP2pCodec(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def _gueltiger_block(anzahl: int = 1) -> tuple[bytes, bytes]:
+    """Kleiner Block, dessen Header-Hash und Merkle-Root zusammenpassen."""
+    from embit.script import Script
+    from embit.transaction import Transaction, TransactionInput, TransactionOutput
+
+    from core.bip158_scan import _merkle_wurzel
+    from core.p2p import header_hash
+
+    txs = [
+        Transaction(
+            vin=[TransactionInput(b"\x00" * 32, 0xFFFFFFFF)],
+            vout=[TransactionOutput(i + 1, Script(bytes([81])))],
+        )
+        for i in range(anzahl)
+    ]
+    merk = _merkle_wurzel([bytes(tx.hash()) for tx in txs])
+    header = (
+        (1).to_bytes(4, "little")
+        + b"\x22" * 32
+        + merk
+        + (1_700_000_000).to_bytes(4, "little")
+        + (0x1D00FFFF).to_bytes(4, "little")
+        + (7).to_bytes(4, "little")
+    )
+    body = bytes([anzahl])
+    for tx in txs:
+        body += tx.serialize()
+    roh = header + body
+    return header_hash(header), roh
+
+
+class TestBlockRumpfGegenIndex(unittest.TestCase):
+
+    def test_gueltiger_rumpf_bleibt(self):
+        from core.bip158_scan import pruefe_block_rumpf
+
+        block_hash, roh = _gueltiger_block(3)
+        self.assertEqual(pruefe_block_rumpf(roh, block_hash), roh)
+
+    def test_leer_kurz_und_fremder_hash_fallen_durch(self):
+        from core.bip158_scan import BlockRumpfFehler, pruefe_block_rumpf
+
+        block_hash, roh = _gueltiger_block()
+        for kaputt in (None, b"", b"\x00" * 80):
+            with self.assertRaises(BlockRumpfFehler):
+                pruefe_block_rumpf(kaputt, block_hash)
+        with self.assertRaises(BlockRumpfFehler) as ctx:
+            pruefe_block_rumpf(roh, b"\x11" * 32)
+        self.assertIn("Header-Hash", str(ctx.exception))
+
+    def test_falsche_merkle_root_faellt_durch(self):
+        from core.bip158_scan import BlockRumpfFehler, pruefe_block_rumpf
+
+        block_hash, roh = _gueltiger_block()
+        kaputt = roh[:-1] + bytes([roh[-1] ^ 0x01])
+        with self.assertRaises(BlockRumpfFehler) as ctx:
+            pruefe_block_rumpf(kaputt, block_hash)
+        self.assertIn("Merkle-Root", str(ctx.exception))
+
+    def test_sync_holt_den_block_erneut(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import _lade_cfilter_chunk
+
+        block_hash, roh = _gueltiger_block()
+        versuche: list[int] = []
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01")]
+
+            def fetch_block(self, _hash):
+                versuche.append(1)
+                if len(versuche) < 3:
+                    return b""
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            zeilen = _lade_cfilter_chunk(
+                FakePeer(), 100, 100, b"\x22" * 32, frozenset({b"\x01"}),
+            )
+        self.assertEqual(len(versuche), 3)
+        self.assertEqual(zeilen[0][3], roh)
+
+    def test_sync_gibt_nach_fuenf_versuchen_auf(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import _lade_cfilter_chunk
+        from core.bip158_scan import BLOCK_RUMPF_VERSUCHE, BlockRumpfFehler
+
+        block_hash, _roh = _gueltiger_block()
+        versuche: list[int] = []
+
+        class FakePeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01")]
+
+            def fetch_block(self, _hash):
+                versuche.append(1)
+                return b"\x00" * 80
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            with self.assertRaises(BlockRumpfFehler):
+                _lade_cfilter_chunk(
+                    FakePeer(), 100, 100, b"\x22" * 32, frozenset({b"\x01"}),
+                )
+        self.assertEqual(len(versuche), BLOCK_RUMPF_VERSUCHE)
+
+    def test_async_holt_erneut_und_bricht_danach_ab(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.bip158_scan import BLOCK_RUMPF_VERSUCHE, BlockRumpfFehler
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[bytes] = []
+
+        class ErstLeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append(b"")
+                if len(aufrufe) < 2:
+                    return b""
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [ErstLeer()], [(100, 100, b"\x22" * 32)], frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertEqual(len(aufrufe), 2)
+
+        class ImmerLeer:
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append(b"x")
+                return b""
+
+        aufrufe.clear()
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher:
+            matcher.return_value.match_any.return_value = True
+            with self.assertRaises(BlockRumpfFehler):
+                list(verteile_cfilter_chunks(
+                    [ImmerLeer()],
+                    [(100, 100, b"\x22" * 32)],
+                    frozenset({b"\x01"}),
+                ))
+        self.assertEqual(len(aufrufe), BLOCK_RUMPF_VERSUCHE)
+
+    def test_async_nimmt_den_anderen_peer(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.p2p import NODE_NETWORK, PeerHatBlockNicht
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[str] = []
+        nachruecken: list[int] = []
+
+        class Schlecht:
+            host, port, services = "192.0.2.1", 8333, NODE_NETWORK
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("schlecht")
+                raise PeerHatBlockNicht("Peer hat den Block nicht")
+
+        class Gut:
+            host, port, services = "192.0.2.2", 8333, NODE_NETWORK
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("gut")
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher, patch(
+            "core.p2p.verbinde_compact_filter_peers",
+            side_effect=lambda **k: nachruecken.append(1) or [],
+        ):
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [Schlecht(), Gut()],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertEqual(aufrufe, ["schlecht", "gut"])
+        self.assertEqual(nachruecken, [])
+
+    def test_async_ueberspringt_limited_fuer_alte_hoehe(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.p2p import NODE_NETWORK, NODE_NETWORK_LIMITED
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[str] = []
+
+        class Limited:
+            host, port = "192.0.2.1", 8333
+            services = NODE_NETWORK_LIMITED
+            start_height = 100_000
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("limited")
+                raise AssertionError("geprunter Peer nicht für alte Blöcke")
+
+        class Voll:
+            host, port, services = "192.0.2.2", 8333, NODE_NETWORK
+            start_height = 100_000
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append("voll")
+                return roh
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher, patch(
+            "core.p2p.verbinde_compact_filter_peers", return_value=[],
+        ):
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [Limited(), Voll()],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertEqual(aufrufe, ["voll"])
+
+    def test_async_sucht_ersatz_wenn_keiner_liefert(self):
+        from unittest.mock import patch
+
+        from bip158_scanner import verteile_cfilter_chunks
+        from core.p2p import NODE_NETWORK, PeerHatBlockNicht
+
+        block_hash, roh = _gueltiger_block()
+        aufrufe: list[str] = []
+
+        class KeinBlock:
+            def __init__(self, name, host):
+                self.name = name
+                self.host = host
+                self.port = 8333
+                self.services = NODE_NETWORK
+
+            def fetch_cfilters(self, start, stop, expect):
+                return [(block_hash, b"\x01") for _ in range(expect)]
+
+            def fetch_block(self, _hash):
+                aufrufe.append(self.name)
+                raise PeerHatBlockNicht("Peer hat den Block nicht")
+
+        class Ersatz:
+            host, port, services = "192.0.2.9", 8333, NODE_NETWORK
+
+            def fetch_block(self, _hash):
+                aufrufe.append("ersatz")
+                return roh
+
+        ersatz = Ersatz()
+
+        with patch("core.bip158_scan._CoreBasicFilterMatcher") as matcher, patch(
+            "core.p2p.verbinde_compact_filter_peers", return_value=[ersatz],
+        ), patch(
+            "core.p2p.p2p_socket_erlaubt", return_value=True,
+        ):
+            matcher.return_value.match_any.return_value = True
+            out = list(verteile_cfilter_chunks(
+                [KeinBlock("a", "192.0.2.1"), KeinBlock("b", "192.0.2.2")],
+                [(100, 100, b"\x22" * 32)],
+                frozenset({b"\x01"}),
+            ))
+        self.assertEqual(out[0][0][3], roh)
+        self.assertIn("ersatz", aufrufe)
+        self.assertTrue(set(aufrufe) >= {"a", "b", "ersatz"})
+
+    def test_abbruch_laesst_keinen_leeren_cache_stehen(self):
+        import tempfile
+        from pathlib import Path
+
+        from core.bip158_scan import BlockRumpfFehler
+        from core.wallet_sync_engine import _scan_xpub_utxos
+        from core.xpub_cache import _xpub_cache_path
+
+        xpub = (
+            "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3N"
+        )
+
+        def fetch(_addresses, **kwargs):
+            rueck = kwargs.get("on_utxos_update")
+            if rueck:
+                rueck([])
+            raise BlockRumpfFehler("Block 9: Rumpf fehlt")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            pfad = _xpub_cache_path(xpub, cache)
+            pfad.write_bytes(b"ALT")
+            with self.assertRaises(BlockRumpfFehler):
+                _scan_xpub_utxos(
+                    xpub, fetch, cache, "bip158",
+                    allow_scantxoutset=False,
+                )
+            self.assertEqual(pfad.read_bytes(), b"ALT")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            pfad = _xpub_cache_path(xpub, cache)
+            with self.assertRaises(BlockRumpfFehler):
+                _scan_xpub_utxos(
+                    xpub, fetch, cache, "bip158",
+                    allow_scantxoutset=False,
+                )
+            self.assertFalse(pfad.exists())

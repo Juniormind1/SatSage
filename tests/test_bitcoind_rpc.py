@@ -11,6 +11,7 @@ from core.bitcoind_rpc import (
     config_from_env,
     config_utxo_from_env,
     descriptors_for_key,
+    fetch_tx_core,
     fetch_tx_core_mit_rollen,
     normalize_rpc_host,
     scantxoutset_status_prozent,
@@ -92,6 +93,24 @@ class TestBitcoindRpc(unittest.TestCase):
         self.assertEqual(mock_fetch.call_count, 1)
         self.assertIs(mock_fetch.call_args.args[0], archival)
 
+    def test_fetch_tx_core_hex_string_wird_objekt(self):
+        """Start9 liefert getrawtransaction trotz verbose=true als Hex."""
+        from embit.script import address_to_scriptpubkey
+        from embit.transaction import Transaction, TransactionInput, TransactionOutput
+
+        adresse = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        tx = Transaction(
+            version=2,
+            vin=[TransactionInput(b"\x00" * 32, 0xFFFFFFFF)],
+            vout=[TransactionOutput(50_000, address_to_scriptpubkey(adresse))],
+        )
+        client = MagicMock()
+        client.call.return_value = tx.serialize().hex()
+        out = fetch_tx_core(client, tx.txid().hex())
+        self.assertIsInstance(out, dict)
+        self.assertEqual(out["vout"][0]["scriptPubKey"]["address"], adresse)
+        self.assertAlmostEqual(out["vout"][0]["value"], 0.0005)
+
     def test_fetch_tx_core_mit_rollen_lokal_fail_dann_lookup(self):
         lokal = MagicMock()
         archival = MagicMock()
@@ -134,6 +153,24 @@ class TestBitcoindRpc(unittest.TestCase):
             if "/1/*" in d:
                 paths.add(1)
         self.assertEqual(paths, {0, 1})
+
+    def test_descriptors_regtest_nutzen_tpub(self):
+        try:
+            from tests.fixtures import BIP84_ZPUB
+        except Exception:
+            self.skipTest("no fixture")
+        from main import set_chain_network
+
+        set_chain_network("regtest")
+        try:
+            objs = descriptors_for_key(
+                BIP84_ZPUB, max_index=2, script_type="segwit",
+            )
+            roh = objs[0]["desc"].split("#")[0]
+            self.assertIn("tpub", roh)
+            self.assertNotIn("xpub", roh)
+        finally:
+            set_chain_network("main")
 
     def test_multipath_deskriptor_wird_fuer_scantxoutset_gesplittet(self):
         try:

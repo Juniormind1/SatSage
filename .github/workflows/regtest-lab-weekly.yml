@@ -49,6 +49,8 @@ jobs:
             core/derivation.py
             core/config.py
             core/chain_sources.py
+            core/utxo_origin.py
+            core/wallet_sync_engine.py
             core/fulcrum_client.py
             core/fulcrum_protocol.py
           )

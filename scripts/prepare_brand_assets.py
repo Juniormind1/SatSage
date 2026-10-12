@@ -6,6 +6,7 @@ Marke (stilisierte Sherlock-Pfeife): Pfeiffe-Icon.jpg
   Fallback: satsage-head.png (Splash-Ausschnitt mit Crop)
   Fallback: sat-logo.png (älteres Sat-Symbol)
 Volles SatSage-Logo (Sherlock + Sat-Wolke): SatSage final.jpg → web/img/logo.jpg
+Specter-Plugin: dieselbe Pfeife auf heller Platte → specter_plugin/…/img/logo.png
 
 Aufruf vor dem Splash-Build. Benötigt Pillow.
 """
@@ -127,6 +128,39 @@ def _crop_head_mark(im):
     return crop.crop(hb) if hb else crop
 
 
+#: Specter-Seitenleiste ist dunkel (`bg-dark-900`). Dieselbe helle Platte wie `.marke-logo`.
+_SPECTER_PLATE = (0xF0, 0xF3, 0xF0, 255)
+SPECTER_LOGO = (
+    ROOT
+    / "specter_plugin"
+    / "src"
+    / "satsage"
+    / "specterext"
+    / "satsage"
+    / "static"
+    / "satsage"
+    / "img"
+    / "logo.png"
+)
+
+
+def _specter_badge(mark_src, size: int = 256):
+    """
+    Pfeifen-Marke auf heller Platte fürs Specter-Plugin.
+
+    Transparentes Schwarz verschwindet auf der dunklen Seitenleiste.
+    Die Platte ist dieselbe wie in der Web-Kopfzeile.
+    """
+    from PIL import Image, ImageDraw
+
+    plate = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(plate)
+    radius = max(1, int(size * 8 / 36))
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=_SPECTER_PLATE)
+    badge = Image.alpha_composite(plate, _fit(mark_src, size, pad_ratio=0.14))
+    return badge
+
+
 def _fit(im, size: int, *, pad_ratio: float = 0.06):
     """Quadrat size×size, Logo zentriert mit etwas Innenabstand, nie hochskalieren über native."""
     from PIL import Image
@@ -202,9 +236,12 @@ def main() -> int:
     )
     _fit(mark_src, 180, pad_ratio=0.05).save(WEB_IMG / "apple-touch-icon.png", "PNG")
     mark.save(PACKAGING / "icon.png", "PNG")
+    SPECTER_LOGO.parent.mkdir(parents=True, exist_ok=True)
+    _specter_badge(mark_src).save(SPECTER_LOGO, "PNG")
     print(
         "  Abgeleitet: logo-mark.png, favicon-32.png, "
-        "apple-touch-icon.png, packaging/icon.png"
+        "apple-touch-icon.png, packaging/icon.png, "
+        f"{SPECTER_LOGO.relative_to(ROOT)}"
     )
 
     final_src = next((p for p in FINAL_LOGO_KANDIDATEN if p.is_file()), None)

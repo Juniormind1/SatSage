@@ -23,6 +23,8 @@ ELECTRUM_SERVERS_GITHUB_COMMITS_URL = (
     "?path=electrum/chains/mainnet/servers.json&sha=master&per_page=1"
 )
 ELECTRUM_SERVERS_DOWNLOAD_TIMEOUT = 30
+#: Lokale ``electrum_servers.json`` gilt so lange; danach wird sie neu gezogen.
+ELECTRUM_SERVERS_MAX_AGE_DAYS = 1.0
 CLIENT_NAME = "SatSage-check"
 PROTOCOL_VERSION = "1.4"
 
@@ -171,5 +173,40 @@ def load_electrum_servers(path: Path = ELECTRUM_SERVERS_FILE) -> dict[str, dict]
     if not isinstance(data, dict):
         raise ValueError(f"Ungueltiges Format in {path}")
     return data
+
+
+def electrum_servers_brauchen_update(
+    path: Path = ELECTRUM_SERVERS_FILE,
+    *,
+    max_age_days: float = ELECTRUM_SERVERS_MAX_AGE_DAYS,
+) -> bool:
+    """True, wenn die lokale Liste fehlt oder mindestens einen Tag alt ist."""
+    if not path.is_file():
+        return True
+    return _local_json_age_days(path) >= float(max_age_days)
+
+
+def lade_oder_aktualisiere_electrum_servers(
+    dest: Path = ELECTRUM_SERVERS_FILE,
+    url: str = ELECTRUM_SERVERS_URL,
+    *,
+    max_age_days: float = ELECTRUM_SERVERS_MAX_AGE_DAYS,
+) -> tuple[dict[str, dict], bool]:
+    """Lädt die Liste; zieht sie neu, wenn sie fehlt oder zu alt ist.
+
+    Rückgabe: ``(servers, refreshed)``. ``refreshed`` ist nur True, wenn
+    der Download geklappt hat. Schlägt er fehl, bleibt eine vorhandene
+    lokale Datei in Gebrauch.
+    """
+    if not electrum_servers_brauchen_update(dest, max_age_days=max_age_days):
+        return load_electrum_servers(dest), False
+    try:
+        return fetch_electrum_servers_json(dest, url), True
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        if dest.is_file():
+            print(f"  Update fehlgeschlagen: {exc}", flush=True)
+            print(f"  Nutze vorhandene {dest.name}.", flush=True)
+            return load_electrum_servers(dest), False
+        raise
 
 
