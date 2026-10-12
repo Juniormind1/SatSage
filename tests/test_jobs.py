@@ -308,7 +308,11 @@ class TestBip158ImJobLog(unittest.TestCase):
     def test_progress_line_landet_im_log(self):
         """Dieselben Scan-Zeilen wie auf stdout sollen im Web-Log stehen."""
         with patch.object(Bip158ProgressLine, "_tty", False, create=True):
-            line = Bip158ProgressLine(verbose=True)
+            # Seit 8153b36: Datum nur mit Anker (Header-nTime oder Tip);
+            # ohne Anker zeigt die Zeile bewusst nur die Höhe.
+            line = Bip158ProgressLine(
+                verbose=True, tip_height=852_100, tip_time=1_720_000_000,
+            )
             line._tty = False
             line.update(850_000, "aa" * 32 + ":0")
             line.update(850_100, "aa" * 32 + ":0")  # unter 2000 Blöcken → nur tick

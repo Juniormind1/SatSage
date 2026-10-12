@@ -319,12 +319,26 @@ class TestFilterParallel(unittest.TestCase):
     def test_vorab_header_achtet_auf_abschalten(self):
         from bip158_scanner import vorab_block_header
 
+        from unittest.mock import patch as _patch
+
         logs: list[str] = []
-        tip = vorab_block_header(
-            {"BIP158_P2P": "0"}, on_log=logs.append,
-        )
+        with _patch("core.p2p.p2p_gesperrt", return_value=False):
+            tip = vorab_block_header(
+                {"BIP158_P2P": "0"}, on_log=logs.append,
+            )
         self.assertEqual(tip, 0)
-        self.assertTrue(any("BIP158_P2P=0" in z for z in logs))
+        self.assertTrue(any("BIP158_P2P=0" in z for z in logs), logs)
+
+    def test_vorab_header_aus_wenn_p2p_abgeklemmt(self):
+        from unittest.mock import patch as _patch
+
+        from bip158_scanner import vorab_block_header
+
+        logs: list[str] = []
+        with _patch("core.p2p.p2p_gesperrt", return_value=True):
+            tip = vorab_block_header({"BIP158_P2P": "1"}, on_log=logs.append)
+        self.assertEqual(tip, 0)
+        self.assertTrue(any("abgeklemmt" in z for z in logs), logs)
 
     def test_ein_peer_bleibt_sequentiell(self):
         class FakePeer:
