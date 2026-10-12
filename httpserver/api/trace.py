@@ -82,11 +82,21 @@ def verlange_electrum_fuer_spur(state) -> None:
 
     from core.chain_sources import ELECTRUM_SPUR_FEHLT, electrum_fuer_spur_verbunden
 
-    if electrum_fuer_spur_verbunden(
-        state.env().values(),
-        getattr(state, "sources_last", None),
-    ):
+    werte = state.env().values()
+    quellen = getattr(state, "sources_last", None)
+    if electrum_fuer_spur_verbunden(werte, quellen):
         return
+    if not quellen:
+        # Frisch gestartet: noch kein Quellen-Check gelaufen (den macht sonst
+        # der Browser). Einmal den eigenen Electrs prüfen — gecacht, ohne
+        # öffentliche Server und ohne Tor-Autostart.
+        from core.chain_sources import eigene_electrs_ist_verbunden
+
+        try:
+            if eigene_electrs_ist_verbunden(werte):
+                return
+        except Exception:
+            pass
     raise ApiError(409, ELECTRUM_SPUR_FEHLT)
 
 
