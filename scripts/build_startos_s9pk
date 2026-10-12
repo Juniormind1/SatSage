@@ -57,6 +57,12 @@ if [ -z "${SKIP_BTC_PRICE_REFRESH:-}" ]; then
     python3 "$ROOT/scripts/refresh_btc_price_bundle.py"
   fi
 fi
+for w in EUR USD; do
+  if [ ! -s "$ROOT/data/btc_price/$w.csv" ]; then
+    echo "Preis-Bundle fehlt: data/btc_price/$w.csv — vorher scripts/refresh_btc_price_bundle.py ausführen." >&2
+    exit 1
+  fi
+done
 
 APP_VER="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 PKG_VER="${APP_VER}:0"

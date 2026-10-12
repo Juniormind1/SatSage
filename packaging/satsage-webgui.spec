@@ -45,6 +45,19 @@ def _exe_name() -> str:
 
 PROJEKT_ROOT = Path(SPECPATH).resolve().parent
 
+# Preis-Bundle muss vorhanden sein (scripts/refresh_btc_price_bundle.py),
+# sonst fehlen Kurse im Binary. Auch bei SKIP_BTC_PRICE_REFRESH=1.
+_fehlende_kurse = [
+    w for w in ("EUR", "USD")
+    if not (PROJEKT_ROOT / "data" / "btc_price" / f"{w}.csv").is_file()
+]
+if _fehlende_kurse:
+    raise SystemExit(
+        "Preis-Bundle fehlt: data/btc_price/"
+        + ", ".join(f"{w}.csv" for w in _fehlende_kurse)
+        + " — vorher scripts/refresh_btc_price_bundle.py ausführen."
+    )
+
 datas = [
     (str(PROJEKT_ROOT / "web"), "web"),
     (str(PROJEKT_ROOT / "data"), "data"),
