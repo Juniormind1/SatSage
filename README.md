@@ -12,7 +12,7 @@
 https://github.com/user-attachments/assets/4078fbfa-0516-4372-8001-ff06609d5f5e
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-0.9.2-f7931a?style=flat-square" alt="Version 0.9.2"></a>
+  <a href="https://github.com/Juniormind1/SatSage/tags"><img src="https://img.shields.io/github/v/tag/Juniormind1/SatSage?sort=semver&style=flat-square&color=f7931a&label=version" alt="Version"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/UI-localhost%20Web--GUI-111111?style=flat-square" alt="Web-GUI">
@@ -24,7 +24,7 @@ https://github.com/user-attachments/assets/4078fbfa-0516-4372-8001-ff06609d5f5e
 
 | | |
 |:--|:--|
-| **Version** | [`VERSION`](VERSION) → aktuell **0.9.2** (einzige Quelle; Fußzeile der Web-GUI) |
+| **Version** | aktueller Git-Tag (siehe Badge); Fußzeile der Web-GUI zeigt `git describe`, ohne Git-Checkout die Datei [`VERSION`](VERSION) |
 | **Oberfläche** | Web (`py server.py`) + Terminal-Steuerung · Specter-Plugin · StartOS-Sideload |
 | **Sprache** | DE/EN in der UI (`UI_LANG` / Einstellungen); Handbuch vorerst DE |
 | **IDs** | `satsage` · Binary `satsage-linux` / `satsage-macos` / `satsage-windows.exe` · Specter `satsage.specterext.satsage` |
