@@ -1997,6 +1997,31 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   width: 5.5rem;
   min-width: 5.5rem;
 }
+.scan-datum-felder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  margin: 0 0 12px;
+}
+#scan-datum-dialog .quelle-scan-feld {
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: normal;
+  gap: 4px;
+}
+#scan-datum-dialog input.quelle-start-datum {
+  width: 10.5rem;
+  min-width: 10.5rem;
+}
+#scan-datum-dialog input.quelle-start-hoehe {
+  width: 7.5rem;
+  min-width: 7.5rem;
+}
+#scan-datum-dialog input.quelle-gap {
+  width: 5.5rem;
+  min-width: 5.5rem;
+}
 .quelle-notiz { flex-basis: 100%; font-size: 11px; color: var(--warn); padding-left: 23px; }
 /* Hoch-Privatsphäre konfiguriert → grün; unkonfiguriert / von besserer Quelle verdrängt → grau */
 .quelle-notiz.notiz-hoch { color: var(--gut); }

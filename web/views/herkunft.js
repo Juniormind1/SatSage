@@ -2963,7 +2963,7 @@ async function scanneAlleWalletsUtxo({
   if (!liste.length) {
     throw new Error(t("wallets.emptyList"));
   }
-  let scanAb = "";
+  let scanVorgabe;
   for (let i = 0; i < liste.length; i += 1) {
     const wallet = liste[i];
     if (sollAbbrechen()) {
@@ -2988,21 +2988,27 @@ async function scanneAlleWalletsUtxo({
       wallet.name,
     );
 
-    let datum = scanAb;
+    const daten = { wallet_id: wallet.id, scan_ab: "" };
     if (brauchtBip158Startdatum(wallet.id)) {
-      const gewählt = await frageScanDatum(wallet);
-      if (gewählt === undefined) {
-        const err = new Error("abgebrochen");
-        err.abgebrochen = true;
-        throw err;
+      if (scanVorgabe === undefined) {
+        const gewählt = await frageScanDatum(wallet);
+        if (gewählt === undefined) {
+          const err = new Error("abgebrochen");
+          err.abgebrochen = true;
+          throw err;
+        }
+        scanVorgabe = gewählt || null;
       }
-      datum = gewählt || "";
-      scanAb = datum;
+      if (scanVorgabe) {
+        daten.scan_ab = scanVorgabe.datum || "";
+        if (scanVorgabe.hoehe != null) daten.start_height = scanVorgabe.hoehe;
+        if (scanVorgabe.gap != null) daten.gap_limit = scanVorgabe.gap;
+      }
     }
 
     const job = await api("/jobs/rescan", {
       methode: "POST",
-      daten: { wallet_id: wallet.id, scan_ab: datum || "" },
+      daten,
     });
     const jid = job.id || job.job_id;
     if (!jid) {

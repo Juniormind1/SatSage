@@ -1618,9 +1618,11 @@ Ohne den erscheint ein Hinweis, und es wird nicht gesucht.</p>
 
 <p>In den Datenquellen stehen bei Compact Filter <strong>Frühestes Scan-Datum</strong>,
 <strong>Scan ab Blockhöhe</strong> und <strong>Gap-Limit</strong>. Datum und Höhe
-füllen sich gegenseitig. Ohne bekanntes Wallet-Alter startet der Scan bei der
-eingetragenen Höhe (<code>BIP158_START_HEIGHT</code>). Hat das Wallet ein
-First-seen, gilt dieser Beginn — auch wenn die Datenquellen-Höhe später liegt.
+füllen sich gegenseitig. Ohne bekanntes Wallet-Alter fragt <strong>Ab wann
+scannen?</strong> dieselben drei Felder; Vorgabe sind Höhe und Lücke aus den
+Datenquellen, die Lücke gilt nur für diesen Scan. Der Compact-Filter-Scan liest
+die Höhe, nicht das Datum. Hat das Wallet ein First-seen, gilt dieser Beginn —
+auch wenn die Datenquellen-Höhe später liegt.
 Die Umrechnung nutzt die lokale Header-Datei,
 sonst einen verbundenen Block-Explorer, sonst eine 10-Minuten-Schätzung ab Genesis.</p>
 

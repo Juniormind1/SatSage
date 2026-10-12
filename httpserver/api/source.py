@@ -776,6 +776,43 @@ def _merke_scan_funde(
     return entdeckt
 
 
+def _ganze_payload_zahl(roh: object) -> int | None:
+    """Leer → None. Unlesbar → ValueError."""
+    if roh is None or str(roh).strip() == "":
+        return None
+    try:
+        return int(str(roh).strip())
+    except (TypeError, ValueError):
+        raise ValueError("unlesbar") from None
+
+
+def lese_rescan_scan_grenzen(payload: dict) -> tuple[str, int | None, int | None]:
+    """scan_ab, Start­höhe, Gap-Limit. ``start_height`` sticht die Datumsschätzung."""
+    scan_ab = str(payload.get("scan_ab") or "").strip()
+    try:
+        hoehe = _ganze_payload_zahl(payload.get("start_height"))
+    except ValueError:
+        raise ValueError("Scan-Block muss eine ganze Zahl ≥ 0 sein.") from None
+    if hoehe is not None and hoehe < 0:
+        raise ValueError("Scan-Block muss eine ganze Zahl ≥ 0 sein.")
+    try:
+        gap = _ganze_payload_zahl(payload.get("gap_limit"))
+    except ValueError:
+        raise ValueError(
+            "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein."
+        ) from None
+    if gap is not None and (gap < 1 or gap > 10_000):
+        raise ValueError("Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.")
+    if hoehe is None and scan_ab:
+        try:
+            from core.utxo_report import estimate_block_height_for_date
+
+            hoehe = estimate_block_height_for_date(scan_ab)
+        except ValueError as exc:
+            raise ValueError(f"Startdatum unlesbar: {exc}") from exc
+    return scan_ab, hoehe, gap
+
+
 def api_rescan(state: AppState, payload: dict) -> dict:
     from server import (
         ApiError,
@@ -791,14 +828,10 @@ def api_rescan(state: AppState, payload: dict) -> dict:
     if entry is None:
         raise ApiError(404, "Wallet nicht gefunden.")
 
-    scan_ab = str(payload.get("scan_ab") or "").strip()
-    start_hoehe = None
-    if scan_ab:
-        try:
-            from core.utxo_report import estimate_block_height_for_date
-            start_hoehe = estimate_block_height_for_date(scan_ab)
-        except ValueError as exc:
-            raise ApiError(400, f"Startdatum unlesbar: {exc}") from exc
+    try:
+        scan_ab, start_hoehe, scan_gap = lese_rescan_scan_grenzen(payload)
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
 
     def lauf(job):
         from core.jobs import Fortschritt, herzschlag
@@ -830,7 +863,9 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 if alter_start is not None:
                     args.bip158_start = alter_start
 
-            werte = state.env().values()
+            werte = dict(state.env().values())
+            if scan_gap is not None:
+                werte["BIP158_GAP_LIMIT"] = str(scan_gap)
             try:
                 quelle, backend = main._setup_blockchain_client(args, werte)
             except SystemExit:
@@ -855,12 +890,16 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 if scan_ab and bip_start is not None:
                     stand.phase(
                         f"BIP-158 nicht vor {scan_ab} "
-                        f"(ca. Block {bip_start:,})".replace(",", ".")
+                        f"(Block {bip_start:,})".replace(",", ".")
                     )
                 elif bip_start is not None and start_hoehe is None:
                     stand.phase(
                         f"BIP-158 ab Wallet-Beginn "
                         f"(Block {bip_start:,})…".replace(",", ".")
+                    )
+                elif bip_start is not None:
+                    stand.phase(
+                        f"BIP-158 ab Block {bip_start:,}".replace(",", ".")
                     )
 
             if fetchers is None:

@@ -748,10 +748,20 @@ class TestOberflaeche(unittest.TestCase):
 
     def test_bip158_fragt_startdatum_ohne_alter(self):
         self.assertIn('id="scan-datum-dialog"', self.html)
+        self.assertIn('id="scan-datum-feld"', self.html)
+        self.assertIn('id="scan-hoehe-feld"', self.html)
+        self.assertIn('id="scan-gap-feld"', self.html)
         self.assertIn("brauchtBip158Startdatum", self.wallets_js)
         self.assertIn("frageScanDatum", self.wallets_js)
         self.assertIn("p2pScanStartHoehe", self.wallets_js)
+        self.assertIn("p2pScanGapLimit", self.wallets_js)
+        self.assertIn("scanDialogDatumNachHoehe", self.wallets_js)
         self.assertIn("dialog.scanDate.hintSource", self.wallets_js)
+        self.assertIn("start_height: ziel.start_height", self.wallets_js)
+        self.assertIn("gap_limit: ziel.gap_limit", self.wallets_js)
+        self.assertIn("scan-datum-felder", self.css)
+        self.assertIn("daten.start_height = scanVorgabe.hoehe", self.herkunft_js)
+        self.assertIn("daten.gap_limit = scanVorgabe.gap", self.herkunft_js)
         # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
         # konfiguriertem, aber unerreichbarem eigenem Electrum.
         self.assertIn("q.reachable === true", self.js)

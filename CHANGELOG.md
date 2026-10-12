@@ -9,7 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **P2P · Ab wann scannen?:** Der Dialog setzt als Vorgabe die Blockhöhe aus den Datenquellen („Scan ab Blockhöhe“) und das zugehörige Datum. Unverändertes Bestätigen startet genau dort, ohne die 10-Minuten-Schätzung ab Genesis.
+- **P2P · Ab wann scannen?:** Der Dialog hat wie in den Datenquellen Datum und Blockhöhe nebeneinander; die Felder füllen sich gegenseitig (Datums-Umrechnung erst beim Verlassen des Feldes). Gap-Limit steht daneben, vorbelegt mit dem Wert aus den Datenquellen, und gilt für diesen Scan. Unverändertes Bestätigen startet bei der Datenquellen-Höhe, ohne die 10-Minuten-Schätzung ab Genesis.
 - **P2P · Scan-Fortschritt:** Die Datumsangabe neben der Blockhöhe kommt aus den lokalen Headern (echte Blockzeit). Fehlt der Header, interpoliert SatSage vom letzten bekannten Header zum aktuellen Tip und zur aktuellen Zeit. Ohne Anker steht nur die Höhe.
 - **P2P · First-seen vor Datenquellen-Höhe:** Hat ein Wallet ein First-seen, startet der Compact-Filter-Scan dort — auch wenn „Scan ab Blockhöhe“ in den Datenquellen später liegt. Ein fertiger Tip-Nachzug bleibt davor.
 - **Datenquellen · P2P-Scan-Start:** Neben der Blockhöhe steht ein Datum („Frühestes Scan-Datum“). Eingabe eines Datums füllt die Höhe, Eingabe einer Höhe das Datum. Die Datums-Umrechnung startet erst, wenn das Feld den Fokus verliert, nicht bei jedem Tastendruck. Der Compact-Filter-Scan liest nur die Höhe. Die Umrechnung nimmt lokale Header; fehlt die Höhe dort und ein Block-Explorer ist verbunden, den Explorer; sonst die 10-Minuten-Schätzung.

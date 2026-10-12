@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=0.9.9-p2pdatum">
+  <link rel="stylesheet" href="/style.css?v=0.9.9-scandialog">
 </head>
 <body>
 
@@ -203,15 +203,37 @@
     <h1 id="scan-datum-titel" data-i18n="dialog.scanDate.title">Ab wann scannen?</h1>
     <p data-i18n="dialog.scanDate.body">
       Für dieses Wallet ist kein Alter bekannt, und der Cache ist leer.
-      BIP-158 durchsucht die Kette erst ab dem gewählten Tag — früher
-      entstandene Outputs bleiben unsichtbar.
+      BIP-158 durchsucht die Kette erst ab der gewählten Blockhöhe —
+      früher entstandene Outputs bleiben unsichtbar. Die Lücke gilt für
+      diesen Scan; Vorgabe ist das Gap-Limit aus den Datenquellen.
     </p>
-    <label class="feld">
-      <span class="feld-titel" data-i18n="dialog.scanDate.label">Nicht vor</span>
-      <input type="date" id="scan-datum-feld"
-             data-i18n-title="dialog.scanDate.fieldTitle"
-             title="Blöcke vor diesem Tag werden nicht durchsucht. Vorgabe ist die Scan-Höhe aus den Datenquellen. Früher = vollständiger und langsamer.">
-    </label>
+    <div class="scan-datum-felder">
+      <label class="quelle-scan-feld">
+        <span class="quelle-scan-label" data-i18n="sources.bip158DateLabel">Frühestes Scan-Datum:</span>
+        <input type="date" id="scan-datum-feld" class="quelle-start-datum"
+               min="2009-01-03"
+               data-i18n-title="sources.bip158DateTitle"
+               title="Füllt die Blockhöhe. Der Scan liest nur die Höhe. Umrechnung über lokale Header, sonst den verbundenen Block-Explorer.">
+      </label>
+      <label class="quelle-scan-feld">
+        <span class="quelle-scan-label" data-i18n="sources.bip158StartLabel">Scan ab Blockhöhe:</span>
+        <input type="number" id="scan-hoehe-feld" class="quelle-start-hoehe"
+               min="0" step="1" inputmode="numeric"
+               data-i18n-placeholder="sources.bip158StartPlaceholder"
+               placeholder="Höhe"
+               data-i18n-title="sources.bip158StartTitle"
+               title="Ab welcher Blockhöhe Compact Filter laufen. Vorgabe SegWit (481824). Diese Höhe gilt für den Scan, nicht das Datum.">
+      </label>
+      <label class="quelle-scan-feld">
+        <span class="quelle-scan-label" data-i18n="sources.bip158GapLabel">Gap-Limit:</span>
+        <input type="number" id="scan-gap-feld" class="quelle-start-hoehe quelle-gap"
+               min="1" max="10000" step="1" inputmode="numeric"
+               data-i18n-placeholder="sources.bip158GapPlaceholder"
+               placeholder="Lücke"
+               data-i18n-title="dialog.scanDate.gapTitle"
+               title="Unbenutzte Indizes je Kette hinter dem letzten Treffer. Vorgabe ist das Gap-Limit aus den Datenquellen. Gilt für diesen Scan.">
+      </label>
+    </div>
     <p class="klein" id="scan-datum-hinweis"></p>
     <div class="einrichtung-knoepfe">
       <button type="button" id="scan-datum-ok" class="knopf knopf-primaer" data-i18n="common.scan">
@@ -2007,8 +2029,8 @@
 <script src="/views/sanktionen.js?v=0.9.9"></script>
 <script src="/views/einrichtung.js?v=0.9.9"></script>
 <script src="/views/adress_labels.js?v=0.9.9"></script>
-<script src="/views/wallets.js?v=0.9.9-scandatum"></script>
-<script src="/views/herkunft.js?v=0.9.9-plotring"></script>
+<script src="/views/wallets.js?v=0.9.9-scandialog"></script>
+<script src="/views/herkunft.js?v=0.9.9-scandialog"></script>
 <script src="/views/steuerjahr.js?v=0.9.9-plotring"></script>
 <script src="/views/herkunftsnetz.js?v=0.9.9-lottip"></script>
 <script src="/views/tools.js?v=0.9.9-cache"></script>

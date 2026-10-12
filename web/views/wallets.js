@@ -3688,8 +3688,80 @@ function p2pScanStartHoehe() {
   return n;
 }
 
+function p2pScanGapLimit() {
+  const liste = Zustand.config?.sources || [];
+  const bip = liste.find((q) => q && q.key === "bip158");
+  const n = Number(bip && bip.gap_limit);
+  if (!Number.isInteger(n) || n < 1) return 100;
+  return n > 10000 ? 10000 : n;
+}
+
+function scanDialogEnterBlur(feld) {
+  return (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    e.stopPropagation();
+    feld.blur();
+  };
+}
+
+async function scanDialogDatumNachHoehe(datumFeld, hoeheFeld) {
+  if (!datumFeld || !hoeheFeld || typeof p2pScanZeitUmrechnen !== "function") {
+    return;
+  }
+  const roh = String(datumFeld.value || "").trim();
+  if (!roh) return;
+  if (datumFeld.dataset.savedValue === roh) return;
+  Zustand._p2pDatumLauf = (Zustand._p2pDatumLauf || 0) + 1;
+  const lauf = Zustand._p2pDatumLauf;
+  datumFeld.disabled = true;
+  try {
+    const ergebnis = await p2pScanZeitUmrechnen({ datum: roh });
+    if (lauf !== Zustand._p2pDatumLauf) return;
+    const n = Number(ergebnis && ergebnis.height);
+    if (!Number.isInteger(n) || n < 0) {
+      meldung(t("sources.bip158DateInvalid"), "krit");
+      return;
+    }
+    hoeheFeld.value = String(n);
+    hoeheFeld.dataset.savedValue = String(n);
+    if (typeof merkeP2pScanDatum === "function") merkeP2pScanDatum(n, roh);
+    datumFeld.dataset.savedValue = roh;
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  } finally {
+    if (datumFeld.isConnected) datumFeld.disabled = false;
+  }
+}
+
+async function scanDialogHoeheNachDatum(hoeheFeld, datumFeld) {
+  if (!hoeheFeld || !datumFeld || typeof p2pScanZeitUmrechnen !== "function") {
+    return;
+  }
+  const roh = String(hoeheFeld.value || "").trim();
+  if (!roh) return;
+  const n = Number(roh);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    meldung(t("sources.bip158StartInvalid"), "krit");
+    return;
+  }
+  if (hoeheFeld.dataset.savedValue === String(n) && datumFeld.value) return;
+  hoeheFeld.dataset.savedValue = String(n);
+  try {
+    const ergebnis = await p2pScanZeitUmrechnen({ hoehe: n });
+    if (ergebnis && ergebnis.date) {
+      if (typeof merkeP2pScanDatum === "function") {
+        merkeP2pScanDatum(n, ergebnis.date);
+      }
+      datumFeld.value = ergebnis.date;
+      datumFeld.dataset.savedValue = ergebnis.date;
+    }
+  } catch (_) { /* Höhe gilt trotzdem. */ }
+}
+
 async function vorschlagScanDatum() {
   const hoehe = p2pScanStartHoehe();
+  const gap = p2pScanGapLimit();
   let datum = "";
   if (typeof p2pScanDatumCache === "function") {
     const cached = p2pScanDatumCache()[String(hoehe)];
@@ -3706,12 +3778,14 @@ async function vorschlagScanDatum() {
       }
     } catch (_) { /* Hinweis trägt die Höhe. */ }
   }
-  return { datum, hoehe };
+  return { datum, hoehe, gap };
 }
 
 async function frageScanDatum(wallet) {
   const dlg = $("#scan-datum-dialog");
-  const feld = $("#scan-datum-feld");
+  const datum = $("#scan-datum-feld");
+  const hoehe = $("#scan-hoehe-feld");
+  const gap = $("#scan-gap-feld");
   const hinweis = $("#scan-datum-hinweis");
   const ok = $("#scan-datum-ok");
   const abbruch = $("#scan-datum-abbruch");
@@ -3720,31 +3794,90 @@ async function frageScanDatum(wallet) {
     ? formatZahl(vorschlag.hoehe)
     : String(vorschlag.hoehe);
   return new Promise((resolve) => {
-    feld.value = vorschlag.datum;
+    hoehe.value = String(vorschlag.hoehe);
+    hoehe.dataset.savedValue = String(vorschlag.hoehe);
+    datum.value = vorschlag.datum || "";
+    datum.dataset.savedValue = vorschlag.datum || "";
+    if (!vorschlag.datum && typeof fuelleBip158DatumFeld === "function") {
+      fuelleBip158DatumFeld(datum, vorschlag.hoehe);
+    }
+    gap.value = String(vorschlag.gap);
+    gap.dataset.savedValue = String(vorschlag.gap);
     hinweis.textContent = t("dialog.scanDate.hintSource", { n: hoeheText });
     dlg.hidden = false;
-    feld.focus();
+    datum.focus();
+
+    let geschlossen = false;
+    let umrechnung = Promise.resolve();
+    const onDatumBlur = () => {
+      umrechnung = umrechnung.then(() => scanDialogDatumNachHoehe(datum, hoehe));
+    };
+    const onHoeheChange = () => {
+      umrechnung = umrechnung.then(() => scanDialogHoeheNachDatum(hoehe, datum));
+    };
+    const onGapChange = () => {
+      const roh = String(gap.value || "").trim();
+      if (!roh) {
+        gap.value = gap.dataset.savedValue || "100";
+        return;
+      }
+      const n = Number(roh);
+      if (!Number.isInteger(n) || n < 1 || n > 10000) {
+        meldung(t("sources.bip158GapInvalid"), "krit");
+        gap.value = gap.dataset.savedValue || "100";
+        return;
+      }
+      gap.dataset.savedValue = String(n);
+    };
+    const onDatumEnter = scanDialogEnterBlur(datum);
+    const onHoeheEnter = scanDialogEnterBlur(hoehe);
+    const onGapEnter = scanDialogEnterBlur(gap);
 
     const fertig = (wert) => {
+      if (geschlossen) return;
+      geschlossen = true;
       ok.removeEventListener("click", onOk);
       abbruch.removeEventListener("click", onAbbruch);
       dlg.removeEventListener("keydown", onTaste);
+      datum.removeEventListener("blur", onDatumBlur);
+      datum.removeEventListener("keydown", onDatumEnter);
+      hoehe.removeEventListener("change", onHoeheChange);
+      hoehe.removeEventListener("keydown", onHoeheEnter);
+      gap.removeEventListener("change", onGapChange);
+      gap.removeEventListener("keydown", onGapEnter);
       dlg.hidden = true;
       resolve(wert);
     };
     const onOk = () => {
-      const wert = String(feld.value || "").trim();
-      if (!wert || wert === vorschlag.datum) {
-        fertig(null);
-        return;
-      }
-      fertig(wert);
+      umrechnung.then(() => {
+        const hoeheN = Number(String(hoehe.value || "").trim());
+        if (!Number.isInteger(hoeheN) || hoeheN < 0) {
+          meldung(t("sources.bip158StartInvalid"), "krit");
+          return;
+        }
+        const gapN = Number(String(gap.value || "").trim());
+        if (!Number.isInteger(gapN) || gapN < 1 || gapN > 10000) {
+          meldung(t("sources.bip158GapInvalid"), "krit");
+          return;
+        }
+        fertig({
+          datum: String(datum.value || "").trim(),
+          hoehe: hoeheN,
+          gap: gapN,
+        });
+      });
     };
     const onAbbruch = () => fertig(undefined);
     const onTaste = (ev) => {
       if (ev.key === "Escape") onAbbruch();
-      if (ev.key === "Enter") onOk();
+      if (ev.key === "Enter" && ev.target === ok) onOk();
     };
+    datum.addEventListener("blur", onDatumBlur);
+    datum.addEventListener("keydown", onDatumEnter);
+    hoehe.addEventListener("change", onHoeheChange);
+    hoehe.addEventListener("keydown", onHoeheEnter);
+    gap.addEventListener("change", onGapChange);
+    gap.addEventListener("keydown", onGapEnter);
     ok.addEventListener("click", onOk);
     abbruch.addEventListener("click", onAbbruch);
     dlg.addEventListener("keydown", onTaste);
@@ -3922,9 +4055,13 @@ async function starteScanFuer(ziel) {
   }
   if (ziel.art === "utxo" && brauchtBip158Startdatum(ziel.id)) {
     const wallet = (Zustand.config?.wallets || []).find((w) => w.id === ziel.id);
-    const datum = await frageScanDatum(wallet);
-    if (datum === undefined) return;
-    ziel.scan_ab = datum;
+    const wahl = await frageScanDatum(wallet);
+    if (wahl === undefined) return;
+    if (wahl) {
+      ziel.scan_ab = wahl.datum || "";
+      ziel.start_height = wahl.hoehe;
+      ziel.gap_limit = wahl.gap;
+    }
   }
 
   if (schonGeplant(ziel)) {
@@ -3948,6 +4085,11 @@ async function starteScanFuer(ziel) {
       undefined,
       ziel.name,
     );
+  } else if (ziel.start_height != null) {
+    const hoeheText = typeof formatZahl === "function"
+      ? formatZahl(ziel.start_height)
+      : String(ziel.start_height);
+    logZeile(`BIP-158 ab Block ${hoeheText}.`, undefined, ziel.name);
   }
 
   try {
@@ -3955,7 +4097,12 @@ async function starteScanFuer(ziel) {
       ? await api("/verlauf", { methode: "POST", daten: { wallet_id: ziel.id } })
       : await api("/jobs/rescan", {
           methode: "POST",
-          daten: { wallet_id: ziel.id, scan_ab: ziel.scan_ab || "" },
+          daten: {
+            wallet_id: ziel.id,
+            scan_ab: ziel.scan_ab || "",
+            start_height: ziel.start_height,
+            gap_limit: ziel.gap_limit,
+          },
         });
 
     if (job.queue_status === "queued" || job.status === "queued") {
