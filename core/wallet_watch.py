@@ -689,6 +689,8 @@ def _eigener_watch_client(state):
             host,
             timeout=FULCRUM_CONNECT_TIMEOUT,
             require_listunspent=False,
+            port=port,
+            use_ssl=use_ssl,
         )
         return client
     client, fehler = connect_fulcrum(

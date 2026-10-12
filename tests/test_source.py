@@ -99,6 +99,64 @@ class TestEigeneElectrsIpParallel(unittest.TestCase):
         self.assertIsNone(fehler)
         self.assertLess(time.monotonic() - start, 1.5)
 
+    def test_eigener_port_ok_keine_parallelversuche(self):
+        from core import chain_sources
+        client = mock.Mock()
+        aufrufe = []
+
+        def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                    require_listunspent=False):
+            aufrufe.append((port, use_ssl))
+            return (client, None) if (port, use_ssl) == (50031, False) else (None, "refused")
+
+        with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect):
+            got, port, ssl, fehler = chain_sources.verbinde_eigenen_electrs_ip(
+                "127.0.0.1", timeout=1, port=50031, use_ssl=False,
+            )
+        self.assertIs(got, client)
+        self.assertEqual((port, ssl, fehler), (50031, False, None))
+        self.assertEqual(aufrufe, [(50031, False)])
+
+    def test_eigener_port_fehlschlag_dann_parallel(self):
+        from core import chain_sources
+        client = mock.Mock()
+        aufrufe = []
+
+        def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                    require_listunspent=False):
+            aufrufe.append((port, use_ssl))
+            return (client, None) if (port, use_ssl) == (50001, False) else (None, "refused")
+
+        with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect):
+            got, port, ssl, fehler = chain_sources.verbinde_eigenen_electrs_ip(
+                "127.0.0.1", timeout=1, port=50031, use_ssl=True,
+            )
+        self.assertIs(got, client)
+        self.assertEqual((port, ssl), (50001, False))
+        self.assertEqual(aufrufe[0], (50031, True))
+        self.assertIn((50001, False), aufrufe[1:])
+        self.assertNotIn((50031, True), aufrufe[1:])
+
+    def test_standardport_direkt_parallel(self):
+        from core import chain_sources
+        for std in (50001, 50002):
+            aufrufe = []
+
+            def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                        require_listunspent=False):
+                aufrufe.append((port, use_ssl))
+                return None, "refused"
+
+            with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect):
+                got, _p, _s, fehler = chain_sources.verbinde_eigenen_electrs_ip(
+                    "127.0.0.1", timeout=1, port=std, use_ssl=True,
+                )
+            self.assertIsNone(got)
+            self.assertEqual(
+                sorted(aufrufe), sorted(chain_sources.EIGENE_ELECTRS_IP_VERSUCHE),
+            )
+            self.assertIn("refused", fehler)
+
     def test_hostname_bleibt_beim_einen_port(self):
         werte = {
             "FULCRUM_HOST": "electrs.local",

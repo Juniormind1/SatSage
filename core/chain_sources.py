@@ -378,7 +378,54 @@ def host_ist_klare_ip(host: str) -> bool:
     return True
 
 
+#: Standard-Ports, bei denen sofort parallel probiert wird.
+EIGENE_ELECTRS_STANDARD_PORTS: frozenset[int] = frozenset({50001, 50002})
+
+
 def verbinde_eigenen_electrs_ip(
+    host: str,
+    *,
+    timeout: float,
+    require_listunspent: bool = True,
+    port: int | None = None,
+    use_ssl: bool | None = None,
+) -> tuple[object | None, int, bool, str | None]:
+    """Eigener Electrs per IP.
+
+    Ist ``port`` gesetzt und weder 50001 noch 50002, wird zuerst NUR dieser
+    Port mit dem eingestellten TLS-Flag probiert. Erst wenn das scheitert,
+    folgen die vier Parallelversuche. Bei 50001/50002 (oder ohne Port)
+    sofort die vier Parallelversuche.
+    """
+    eigener_fehler: str | None = None
+    if port and int(port) not in EIGENE_ELECTRS_STANDARD_PORTS:
+        from core.fulcrum_client import connect_fulcrum
+
+        ssl_flag = bool(use_ssl)
+        try:
+            client, fehler = connect_fulcrum(
+                host,
+                int(port),
+                use_ssl=ssl_flag,
+                timeout=timeout,
+                tor_proxy=None,
+                require_listunspent=require_listunspent,
+            )
+        except Exception as exc:
+            client, fehler = None, str(exc)
+        if client is not None:
+            return client, int(port), ssl_flag, None
+        weg = "TLS" if ssl_flag else "ohne TLS"
+        eigener_fehler = f"{int(port)} {weg}: {fehler or 'nicht erreichbar'}"
+    client, p, s, fehler = _verbinde_eigenen_electrs_parallel(
+        host, timeout=timeout, require_listunspent=require_listunspent,
+    )
+    if client is None and eigener_fehler:
+        fehler = f"{eigener_fehler}; {fehler}" if fehler else eigener_fehler
+    return client, p, s, fehler
+
+
+def _verbinde_eigenen_electrs_parallel(
     host: str,
     *,
     timeout: float,
@@ -602,13 +649,21 @@ def _try_fulcrum_endpoint(
     # Eigene IP: alle vier Kombinationen gleichzeitig. Onion und Hostname
     # bleiben beim eingestellten Port (darunter die TLS-Gegenprobe).
     if tor_proxy is None and host_ist_klare_ip(host):
-        _quelle_zeile(
-            f"Prüfe {label}: {host} auf 50001 und 50002, mit und ohne TLS…"
-        )
+        if port and int(port) not in EIGENE_ELECTRS_STANDARD_PORTS:
+            _quelle_zeile(
+                f"Prüfe {label}: {host}:{port} "
+                f"({'TLS' if use_ssl else 'ohne TLS'}), sonst 50001 und 50002…"
+            )
+        else:
+            _quelle_zeile(
+                f"Prüfe {label}: {host} auf 50001 und 50002, mit und ohne TLS…"
+            )
         client, treffer_port, treffer_ssl, error = verbinde_eigenen_electrs_ip(
             host,
             timeout=FULCRUM_CONNECT_TIMEOUT,
             require_listunspent=True,
+            port=port,
+            use_ssl=use_ssl,
         )
         if client:
             _quelle_zeile(
@@ -1257,6 +1312,7 @@ def _eigene_electrs_probe(env, *, lan, tor, timeout: int) -> bool:
         if host_ist_klare_ip(lan[0]):
             client, _port, _ssl, _fehler = verbinde_eigenen_electrs_ip(
                 lan[0], timeout=timeout, require_listunspent=False,
+                port=int(lan[1]), use_ssl=bool(lan[2]),
             )
         else:
             client, _fehler = connect_fulcrum(

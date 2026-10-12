@@ -1769,15 +1769,26 @@ def check_reachable(
             ssl_gewuenscht = use_ssl
             port_gewuenscht = port
             if tor_proxy is None and chain_sources.host_ist_klare_ip(host):
-                log(
-                    f"Verbinde mit {host}: 50001 und 50002, "
-                    "mit und ohne TLS"
-                )
+                if port and int(port) not in (
+                    chain_sources.EIGENE_ELECTRS_STANDARD_PORTS
+                ):
+                    log(
+                        f"Verbinde mit {host}:{port} "
+                        f"({'TLS' if use_ssl else 'ohne TLS'}), "
+                        "sonst 50001 und 50002"
+                    )
+                else:
+                    log(
+                        f"Verbinde mit {host}: 50001 und 50002, "
+                        "mit und ohne TLS"
+                    )
                 client, port, use_ssl, fehler = (
                     chain_sources.verbinde_eigenen_electrs_ip(
                         host,
                         timeout=timeout,
                         require_listunspent=True,
+                        port=port,
+                        use_ssl=use_ssl,
                     )
                 )
                 if client:
