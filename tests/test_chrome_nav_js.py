@@ -15,6 +15,21 @@ CHROME = (WEB / "chrome.js").read_text(encoding="utf-8")
 def _node(zustand: dict, aufruf: str) -> object:
     skript = (
         "function uiSprache() { return 'de'; }\n"
+        "function t(key, vars) {\n"
+        "  const katalog = {\n"
+        "    'wallet.historyScanShort': 'Historie…',\n"
+        "    'wallet.navUtxoMany': '{n} UTXOs…',\n"
+        "    'wallet.navUtxoOne': '1 UTXO…',\n"
+        "    'wallet.utxoScanShort': 'Scan…',\n"
+        "  };\n"
+        "  let s = katalog[key] || key;\n"
+        "  if (vars) {\n"
+        "    for (const [k, v] of Object.entries(vars)) {\n"
+        "      s = s.split('{' + k + '}').join(String(v ?? ''));\n"
+        "    }\n"
+        "  }\n"
+        "  return s;\n"
+        "}\n"
         f"const Zustand = {json.dumps(zustand)};\n"
         + NAV
         + f"\nprocess.stdout.write(JSON.stringify({aufruf}));"
@@ -97,6 +112,59 @@ class TestEinstiegsWallet(unittest.TestCase):
         self.assertEqual([w["id"] for w in teile["oben"]], ["scan"])
         self.assertEqual(teile["dachboden"], [])
 
+    def test_alle_scan_pille_je_wallet(self):
+        """Sammelscan: Pille nach Stand je Wallet, nicht eine Zahl für alle."""
+        wallets = [
+            {"id": "a", "name": "Alpha", "has_cache": True, "utxo_count": 0},
+            {"id": "b", "name": "Beta", "has_cache": True, "utxo_count": 4},
+        ]
+        zustand = {
+            "config": {"wallets": wallets},
+            "rescanJob": "job-1",
+            "scanWalletId": "alle",
+            "scanArt": "utxo",
+            "scanUtxoZahl": 7,
+            "scanUtxoJeWallet": {"a": 3, "b": 4},
+        }
+        texte = _node(
+            zustand,
+            "Zustand.config.wallets.map((w) => navScanMarkerText(w))",
+        )
+        self.assertEqual(texte, ["3 UTXOs…", "4 UTXOs…"])
+        teile = _node(zustand, "teileWalletsFuerNav(Zustand.config.wallets)")
+        self.assertEqual([w["id"] for w in teile["oben"]], ["a", "b"])
+        self.assertEqual(teile["dachboden"], [])
+
+    def test_alle_scan_ohne_live_zahl_nimmt_cache(self):
+        wallet = {"id": "a", "name": "Alpha", "has_cache": True, "utxo_count": 2}
+        text = _node(
+            {
+                "config": {"wallets": [wallet]},
+                "rescanJob": "job-1",
+                "scanWalletId": "alle",
+                "scanArt": "utxo",
+                "scanUtxoZahl": 9,
+                "scanUtxoJeWallet": {},
+            },
+            "navScanMarkerText(Zustand.config.wallets[0])",
+        )
+        self.assertEqual(text, "2 UTXOs…")
+
+    def test_alle_scan_leer_ist_scan_pille(self):
+        wallet = {"id": "leer", "name": "Leer", "has_cache": True, "utxo_count": 0}
+        text = _node(
+            {
+                "config": {"wallets": [wallet]},
+                "rescanJob": "job-1",
+                "scanWalletId": "alle",
+                "scanArt": "utxo",
+                "scanUtxoZahl": 5,
+                "scanUtxoJeWallet": {"leer": 0},
+            },
+            "navScanMarkerText(Zustand.config.wallets[0])",
+        )
+        self.assertEqual(text, "Scan…")
+
 
 class TestEinbindung(unittest.TestCase):
 
@@ -109,6 +177,8 @@ class TestEinbindung(unittest.TestCase):
         self.assertIn("function nimmWalletNavStaende(", NAV)
         self.assertIn("nimmWalletNavStaende(daten)", NAV)
         self.assertIn("daten.wallet_nav", NAV)
+        self.assertIn("nimmScanUtxoJeWallet", NAV)
+        self.assertIn("function navScanMarkerText(", NAV)
 
     def test_start_fragt_den_einstieg(self):
         start = CHROME.index("async function start()")

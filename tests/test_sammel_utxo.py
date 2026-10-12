@@ -36,6 +36,22 @@ class TestScanFunde(unittest.TestCase):
         )
         self.assertEqual(len(entdeckt), 1)
 
+    def test_utxo_zahl_je_wallet_aus_adresse(self):
+        from httpserver.api.source import _utxo_zahl_je_wallet
+
+        stand = [
+            {"address": "bc1qa", "txid": "aa" * 32, "vout": 0},
+            {"address": "bc1qa", "txid": "bb" * 32, "vout": 1},
+            {"address": "bc1qb", "txid": "cc" * 32, "vout": 0},
+            {"address": "", "txid": "dd" * 32, "vout": 0},
+        ]
+        self.assertEqual(
+            _utxo_zahl_je_wallet(
+                stand, {"bc1qa": "wallet-a", "bc1qb": "wallet-b"},
+            ),
+            {"wallet-a": 2, "wallet-b": 1},
+        )
+
 
 class TestGruppen(unittest.TestCase):
     def test_uebernahme_teilt_je_xpub(self):

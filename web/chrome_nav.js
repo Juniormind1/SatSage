@@ -111,6 +111,42 @@ function walletsFuerNav(liste) {
   });
 }
 
+/** UTXO-Lauf „Alle Wallets“ — eine Job-ID, Pille trotzdem je Wallet. */
+function alleUtxoScanLaeuft() {
+  return Boolean(
+    Zustand.rescanJob
+    && String(Zustand.scanWalletId) === "alle"
+    && Zustand.scanArt !== "verlauf",
+  );
+}
+
+function utxoScanLaeuftFuer(wallet) {
+  if (!Zustand.rescanJob || !wallet || !wallet.id) return false;
+  if (Zustand.scanArt === "verlauf") return false;
+  if (Zustand.scanWalletId === wallet.id) return true;
+  return alleUtxoScanLaeuft();
+}
+
+/** Live-Stand dieses Wallets während des UTXO-Scans. */
+function navUtxoScanZahl(wallet) {
+  if (alleUtxoScanLaeuft()) {
+    const je = Zustand.scanUtxoJeWallet || {};
+    if (je[wallet.id] != null) return Number(je[wallet.id]) || 0;
+    return Number(wallet.utxo_count) || 0;
+  }
+  if (Zustand.scanUtxoZahl != null) return Number(Zustand.scanUtxoZahl) || 0;
+  return 0;
+}
+
+function navScanMarkerText(wallet) {
+  if (Zustand.scanArt === "verlauf") return t("wallet.historyScanShort");
+  const n = navUtxoScanZahl(wallet);
+  if (n > 0) {
+    return n === 1 ? t("wallet.navUtxoOne") : t("wallet.navUtxoMany", { n });
+  }
+  return t("wallet.utxoScanShort");
+}
+
 /**
  * Bekannt leer: Cache gelesen, keine offenen UTXOs. Solche Wallets braucht
  * nur die Herkunft (ausgegebene Sätze). Nie gescannt bleibt in der Hauptliste,
@@ -120,13 +156,13 @@ function walletsFuerNav(liste) {
 function walletLiegtAufDemDachboden(wallet) {
   if (!wallet || !wallet.id) return false;
   if (Number(wallet.utxo_count) > 0) return false;
-  if (
-    typeof Zustand !== "undefined"
-    && Zustand.rescanJob
-    && Zustand.scanWalletId === wallet.id
-    && Number(Zustand.scanUtxoZahl) > 0
-  ) {
-    return false;
+  if (typeof Zustand !== "undefined" && Zustand.rescanJob) {
+    if (Zustand.scanWalletId === wallet.id && Number(Zustand.scanUtxoZahl) > 0) {
+      return false;
+    }
+    if (alleUtxoScanLaeuft() && navUtxoScanZahl(wallet) > 0) {
+      return false;
+    }
   }
   return Boolean(wallet.has_cache);
 }
@@ -158,17 +194,13 @@ function navWalletKnopf(wallet) {
   name.className = "nav-name";
   name.textContent = wallet.name;
   knopf.append(name);
-  if (Zustand.rescanJob && Zustand.scanWalletId === wallet.id) {
+  if (
+    utxoScanLaeuftFuer(wallet)
+    || (Zustand.rescanJob && Zustand.scanArt === "verlauf" && Zustand.scanWalletId === wallet.id)
+  ) {
     const marker = document.createElement("span");
     marker.className = "nav-marker";
-    if (Zustand.scanArt === "verlauf") {
-      marker.textContent = t("wallet.historyScanShort");
-    } else if (Zustand.scanUtxoZahl != null && Zustand.scanUtxoZahl > 0) {
-      const n = Zustand.scanUtxoZahl;
-      marker.textContent = n === 1 ? "1 UTXO…" : `${n} UTXOs…`;
-    } else {
-      marker.textContent = t("wallet.utxoScanShort");
-    }
+    marker.textContent = navScanMarkerText(wallet);
     knopf.append(marker);
   } else if (
     (scanPipeline().queued || []).some((s) => s.wallet_id === wallet.id)
@@ -353,6 +385,20 @@ function nimmWalletNavStaende(daten) {
   return anders;
 }
 
+/** Live-Zahlen je Wallet aus dem Sammelscan — sonst bleibt „gerade eben“. */
+function nimmScanUtxoJeWallet(daten) {
+  if (!alleUtxoScanLaeuft()) return false;
+  const jobs = (daten && daten.jobs) || [];
+  const job = jobs.find((j) => j && j.id === Zustand.rescanJob);
+  const stand = job && job.result && job.result.utxo_je_wallet;
+  if (!stand || typeof stand !== "object" || Array.isArray(stand)) return false;
+  const alt = JSON.stringify(Zustand.scanUtxoJeWallet || {});
+  const neu = JSON.stringify(stand);
+  if (alt === neu) return false;
+  Zustand.scanUtxoJeWallet = { ...stand };
+  return true;
+}
+
 /** Wallet-Watch-Zeilen aus dem Jobs-Poll ins Web-Log (Reconnect, Subscribe, …). */
 function nimmWalletWatchLog(daten) {
   const zeilen = daten && daten.wallet_watch && daten.wallet_watch.log;
@@ -402,7 +448,9 @@ async function ladeJobsNav() {
     nimmBlockEvent(daten);
     nimmBootLogAusJobs(daten);
     nimmWalletWatchLog(daten);
-    if (nimmWalletNavStaende(daten)) zeichneNav();
+    const navNeu = nimmWalletNavStaende(daten);
+    const scanNeu = nimmScanUtxoJeWallet(daten);
+    if (navNeu || scanNeu) zeichneNav();
   } catch (fehler) {
     /* offline / alter Server ohne /api/jobs */
     Zustand.jobsNavFehler = (fehler && fehler.message) || t("common.netError");
@@ -422,6 +470,7 @@ async function ladeJobsNav() {
         art,
       },
     );
+    if (nimmScanUtxoJeWallet(Zustand.jobsNav)) zeichneNav();
   }
   // Tip-Sync-Job aus Nav übernehmen (Watcher/Start), falls noch kein Poller.
   // Stille Watch-Fallbacks mitverfolgen (Log), aber Nav-Marker bleiben aus.

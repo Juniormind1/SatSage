@@ -29,6 +29,8 @@ const Zustand = {
   scanLogStand: { index: 0, knoten: [], texte: [] },
   /** Bisherige UTXO-Zahl aus Job-Zwischenstand (während UTXO-Scan). */
   scanUtxoZahl: null,
+  /** UTXO-Zahl je Wallet-ID beim Sammelscan „Alle Wallets“. */
+  scanUtxoJeWallet: {},
   /** Zeitpunkt des letzten Wallet-/Nav-Refresh während Scan (ms). */
   scanRefreshUm: 0,
   scanRefreshLaeuft: false,

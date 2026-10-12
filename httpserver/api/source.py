@@ -776,6 +776,24 @@ def _merke_scan_funde(
     return entdeckt
 
 
+def _utxo_zahl_je_wallet(
+    stand_utxos,
+    adressen: dict[str, str] | None = None,
+) -> dict[str, int]:
+    """Offene UTXOs je Wallet-ID — für die Nav-Pille beim Sammelscan."""
+    zaehl: dict[str, int] = {}
+    for utxo in stand_utxos or []:
+        if not isinstance(utxo, dict):
+            continue
+        wid = str(utxo.get("wallet_id") or "").strip()
+        if not wid:
+            wid = (adressen or {}).get(str(utxo.get("address") or ""), "")
+        if not wid:
+            continue
+        zaehl[wid] = zaehl.get(wid, 0) + 1
+    return zaehl
+
+
 def _ganze_payload_zahl(roh: object) -> int | None:
     """Leer → None. Unlesbar → ValueError."""
     if roh is None or str(roh).strip() == "":
@@ -1098,6 +1116,9 @@ def api_rescan_alle(state: AppState) -> dict:
                 job.result = {
                     "utxo_count": n,
                     "partial": True,
+                    "utxo_je_wallet": _utxo_zahl_je_wallet(
+                        stand_utxos, adressen_funde,
+                    ),
                     "entdeckt": _merke_scan_funde(
                         stand_utxos,
                         gesehen=gesehen_funde,

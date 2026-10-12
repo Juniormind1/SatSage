@@ -4138,6 +4138,7 @@ function bindeWalletScanJob(job, ziel) {
   Zustand.scanWalletName = ziel.name || walletNameZu(ziel.id);
   Zustand.scanArt = ziel.art;
   Zustand.scanUtxoZahl = null;
+  Zustand.scanUtxoJeWallet = {};
   Zustand.scanFundKeys = new Set();
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
@@ -4431,9 +4432,16 @@ async function pruefeWalletScan() {
       if (Zustand.scanArt === "utxo") {
         spieleScanFunde(job);
         const zahl = job.result?.utxo_count;
+        const je = job.result?.utxo_je_wallet;
+        let jeAnders = false;
+        if (je && typeof je === "object" && !Array.isArray(je)) {
+          jeAnders = JSON.stringify(je) !== JSON.stringify(Zustand.scanUtxoJeWallet || {});
+          Zustand.scanUtxoJeWallet = je;
+        }
         if (typeof zahl === "number") {
           await erfrischeScanZwischenstand(scanId, zahl);
         }
+        if (jeAnders) zeichneNav();
         if (Array.isArray(job.result?.neu) && typeof zeichneScanPunkte === "function") {
           zeichneScanPunkte(job.result.neu);
         }
@@ -4495,6 +4503,7 @@ function beendeRescan(_meldung, _istFehler = false) {
   Zustand.scanWalletName = "";
   Zustand.scanSchritt = "";
   Zustand.scanUtxoZahl = null;
+  Zustand.scanUtxoJeWallet = {};
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
   if (scanId) {
