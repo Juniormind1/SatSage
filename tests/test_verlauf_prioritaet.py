@@ -171,6 +171,10 @@ class TestVerlaufPrioritaet(unittest.TestCase):
             )
         bip.assert_not_called()
 
+    @unittest.skipIf(
+        __import__("core.p2p", fromlist=["p2p_gesperrt"]).p2p_gesperrt(),
+        "P2P abgeklemmt, siehe doc/issues/p2p-herkunft.md",
+    )
     def test_setup_verlauf_explizit_bip158(self):
         backend = {"client": MagicMock()}
         with patch.object(

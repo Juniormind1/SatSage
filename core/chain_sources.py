@@ -271,7 +271,7 @@ def _resolve_own_lan_endpoint(
     """
     host_raw = (
         getattr(args, "fulcrum_host", None)
-        or args.rpchost
+        or getattr(args, "rpchost", None)
         or env.get("FULCRUM_HOST")
     )
     if not host_raw:
