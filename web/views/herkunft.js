@@ -3275,7 +3275,9 @@ function lotGrauNachGrauFortsetzen(danach) {
       const keys = lotGrauKeysAus(daten);
       const weiter = danach || ladeSteuerjahrMitKandidaten;
       if (!keys.length) {
-        if (typeof weiter === "function") return weiter({ art: "gut" });
+        // Frischer Stand ohne weiteren Lauf dazwischen: an die Fortsetzung
+        // geben, damit sie /tax nicht gleich noch einmal holt.
+        if (typeof weiter === "function") return weiter({ art: "gut", daten });
         return;
       }
       return herkunftAllerUtxos({
@@ -3364,10 +3366,11 @@ function gelbNachGrauFortsetzen(info) {
         try { await ladeSteuerjahrMitKandidaten(); } catch (_) { /* Schlüssel unten */ }
       }
       let daten = Zustand.steuer;
-      if (
-        !daten
-        || (!Array.isArray(daten.eintraege) && !Array.isArray(daten.gelb_keys))
-      ) {
+      const hatGelb = (d) => d
+        && (Array.isArray(d.eintraege) || Array.isArray(d.gelb_keys));
+      if (!hatGelb(daten) && hatGelb(info.daten)) {
+        daten = info.daten;
+      } else if (!hatGelb(daten)) {
         Zustand.steuer = null;
         daten = await steuerStandFuerKlaeren();
       }
