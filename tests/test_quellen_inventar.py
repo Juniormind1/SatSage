@@ -13,6 +13,7 @@ from verify_quellen_inventar import (  # noqa: E402
     electrs_nach_klaeren_ok,
     geplante_quellen,
     isolierte_env,
+    leere_ram_caches,
     p2p_nach_klaeren_ok,
     utxo_ist_voll_geklaert,
 )
@@ -89,10 +90,17 @@ class TestP2pKlaeren(unittest.TestCase):
         ok, grund = p2p_nach_klaeren_ok(rote=0)
         self.assertFalse(ok)
         self.assertIn("rote", grund)
-        ok, grund = p2p_nach_klaeren_ok(rote=3)
-        self.assertTrue(ok)
-        self.assertEqual(grund, "")
+        self.assertEqual(p2p_nach_klaeren_ok(rote=3), (True, ""))
 
+    def test_leere_ram_caches(self):
+        from core import bip158_wallet, xpub_cache
+
+        xpub_cache._immutable_tx_memory["x" * 64] = {"txid": "x"}
+        bip158_wallet._BLOCK_BYTES[b"k"] = b"v"
+        geleert = leere_ram_caches()
+        self.assertEqual(xpub_cache._immutable_tx_memory, {})
+        self.assertEqual(bip158_wallet._BLOCK_BYTES, {})
+        self.assertIn("core.xpub_cache._immutable_tx_memory", geleert)
     def test_electrs_raeumt_ringe_und_grau(self):
         ok, _grund = electrs_nach_klaeren_ok(
             rote=1, grau=[], lot=[], offen=[],
@@ -137,6 +145,34 @@ class TestP2pKlaeren(unittest.TestCase):
             "sats_ohne_datum": 0,
             "herkunft_offen": False,
         }))
+
+
+class InventarTipTest(unittest.TestCase):
+    def _schreibe(self, tip):
+        import json
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        p = Path(d) / "inv.json"
+        p.write_text(json.dumps({"tip_height": tip, "utxos": []}), encoding="utf-8")
+        return p
+
+    def test_veraltet_bricht_ab(self):
+        from herkunft_inventar import pruefe_inventar_tip
+
+        with self.assertRaisesRegex(RuntimeError, "Inventar veraltet"):
+            pruefe_inventar_tip(291, self._schreibe(259))
+
+    def test_ohne_tip_bricht_ab(self):
+        from herkunft_inventar import pruefe_inventar_tip
+
+        with self.assertRaisesRegex(RuntimeError, "Inventar veraltet"):
+            pruefe_inventar_tip(291, self._schreibe(None))
+
+    def test_aktuell_ok(self):
+        from herkunft_inventar import pruefe_inventar_tip
+
+        pruefe_inventar_tip(291, self._schreibe(291))
 
 
 if __name__ == "__main__":

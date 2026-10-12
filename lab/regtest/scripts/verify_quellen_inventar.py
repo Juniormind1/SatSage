@@ -13,8 +13,9 @@ dann UTXO-Bestand und Herkunft jedes Inventar-UTXOs. Kein Fallback
 auf eine andere Quelle. P2P läuft für den UTXO-Bestand mit, auch
 während ``p2p_gesperrt()`` wahr ist: die Sockets stehen nur in
 ``p2p_nur_utxo_entdeckung``. Der P2P-Lauf ist kein Vollvergleich:
-Bestand über Compact Filter, dann die Knöpfe Grau und Gelb. Danach
-bleiben rote Ringe (unvollständige Herkunft). Electrs auf demselben
+Bestand über Compact Filter (muss dem Inventar entsprechen), dann die
+Knöpfe Grau und Gelb: rote Ringe müssen bleiben, Herkunft braucht
+Electrs (``doc/issues/p2p-herkunft.md``). Electrs auf demselben
 Cache, noch einmal Grau und Gelb: die Ringe sind weg, jedes UTXO ist
 entweder vollständig verfolgt oder ohne Baum schon außerhalb der
 Haltefrist.
@@ -49,6 +50,7 @@ from infra_check import brauche  # noqa: E402
 from herkunft_inventar import (  # noqa: E402
     _signatur,
     lade_inventar,
+    pruefe_inventar_tip,
     vergleiche_bestand,
     vergleiche_herkunft,
 )
@@ -208,6 +210,35 @@ def _leere_cache(pfad: Path) -> None:
     if pfad.exists():
         shutil.rmtree(pfad)
     pfad.mkdir(parents=True)
+
+
+# Prozess-RAM, das Tx, Blöcke oder Höhen einer Quelle hält. Ohne Leeren
+# klärt die nächste Quelle mit Txs der vorigen (P2P mit Electrs-Txs).
+RAM_CACHES = (
+    ("core.xpub_cache", "_immutable_tx_memory"),
+    ("core.bip158_wallet", "_BLOCK_BYTES"),
+    ("core.fulcrum_history", "_HEADER_TIME_CACHE"),
+    ("core.fulcrum_history", "_TX_HEIGHT_CACHE"),
+    ("core.fulcrum_history", "_VERBOSE_TX_CACHE"),
+    ("core.fulcrum_history", "_HISTORY_CACHE"),
+    ("core.utxo_report", "_ESTIMATED_HEIGHT_CACHE"),
+)
+
+
+def leere_ram_caches() -> list[str]:
+    """RAM-Caches der Tx-Herkunft leeren. Rückgabe: geleerte Namen."""
+    import importlib
+
+    from core.bip158_wallet import clear_tx_height_hints
+
+    geleert = []
+    for modul, name in RAM_CACHES:
+        cache = getattr(importlib.import_module(modul), name, None)
+        if isinstance(cache, dict):
+            cache.clear()
+            geleert.append(f"{modul}.{name}")
+    clear_tx_height_hints()
+    return geleert
 
 
 def leere_labor_cache() -> None:
@@ -452,6 +483,7 @@ def _laufe_quelle(
     print(f"\n=== {name} — Cache leer, nur diese Quelle ===", flush=True)
     wurzel = WORK / quelle
     _leere_cache(wurzel)
+    leere_ram_caches()
     cache_dir = wurzel / "utxo_cache"
     cache_dir.mkdir(parents=True)
     (wurzel / "immutable_cache").mkdir(parents=True)
@@ -539,9 +571,14 @@ def utxo_ist_voll_geklaert(zeile: dict, steuer: dict | None) -> bool:
 
 
 def p2p_nach_klaeren_ok(*, rote: int) -> tuple[bool, str]:
-    """Nach dem P2P-Klären muss mindestens ein roter Ring stehen."""
+    """Nach reinem P2P-Klären müssen rote Ringe stehen.
+
+    P2P klärt Herkunft nicht vollständig (``doc/issues/p2p-herkunft.md``).
+    Mit isolierten Caches bleiben deshalb Ringe, die erst Electrs auflöst.
+    Kein Ring hieße: das Klären hat Txs aus einer anderen Quelle bekommen.
+    """
     if rote < 1:
-        return False, "nach P2P-Klären fehlt der rote Ring"
+        return False, "nach P2P-Klären fehlt der rote Ring (Cache nicht isoliert?)"
     return True, ""
 
 
@@ -896,6 +933,7 @@ def _laufe_p2p(
     print(f"\n=== {name} — Bestand nur über P2P ===", flush=True)
     wurzel = WORK / P2P_QUELLE
     _leere_cache(wurzel)
+    leere_ram_caches()
     cache_dir = wurzel / "utxo_cache"
     imm = wurzel / "immutable_cache"
     cache_dir.mkdir(parents=True)
@@ -920,7 +958,7 @@ def _laufe_p2p(
     electrs = None
     try:
         # Herkunftssperre bleibt. Der Bestand und das anschließende
-        # P2P-Klären (erwartet rote Ringe) öffnen nur hier Sockets.
+        # P2P-Klären (rote Ringe erwartet) öffnen nur hier Sockets.
         with p2p_nur_utxo_entdeckung():
             p2p_client, _tip = bau_client(env, cache_dir, imm)
             get_tx = bau_get_tx(p2p_client, imm)
@@ -944,6 +982,7 @@ def _laufe_p2p(
             ok_p2p, grund = p2p_nach_klaeren_ok(rote=nach_p2p["rote"])
             if not ok_p2p:
                 raise RuntimeError(grund)
+            print(f"  P2P-Klären: {nach_p2p['rote']} rote Ringe (erwartet, Electrs folgt)", flush=True)
             _schliesse_p2p(p2p_client)
             p2p_client = None
 
@@ -1011,6 +1050,9 @@ def main() -> int:
     leere_labor_cache()
     try:
         soll = lade_inventar()
+        from generate_scenarios import Rpc, choose_native
+
+        pruefe_inventar_tip(int(Rpc(choose_native(False)).call("getblockcount")))
     except (FileNotFoundError, RuntimeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

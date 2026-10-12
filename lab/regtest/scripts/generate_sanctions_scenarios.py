@@ -383,7 +383,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    run(Rpc(native))
+    rpc = Rpc(native)
+    run(rpc)
+    # Sinks der Ketten sind neue Lab-UTXOs: Inventar auf den neuen Tip.
+    from herkunft_inventar import schreibe_inventar
+
+    schreibe_inventar(rpc)
     return 0
 
 
