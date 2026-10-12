@@ -10,13 +10,20 @@ from pathlib import Path
 WURZEL = Path(__file__).resolve().parent.parent
 STUB = (WURZEL / "tests" / "herkunftsnetz_dom_stub.js").read_text(encoding="utf-8")
 STEUER = (WURZEL / "web" / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+DE = (WURZEL / "web" / "locales" / "de.json").read_text(encoding="utf-8")
 
-PREAMBLE = r"""
+PREAMBLE = "const DE_TEXTE = " + DE + ";\n" + r"""
 function formatSats(sats) { return `${sats} sat`; }
 function formatSatsGemeinsam(sats) { return `${sats} sat HIST`; }
 function formatSatsBasis(sats) { return `${sats} sat`; }
 function formatZeitstrahlBetrag(sats) { return `${sats} sat`; }
-function t(key) { return key; }
+function t(key, vars) {
+  let text = Object.prototype.hasOwnProperty.call(DE_TEXTE, key) ? DE_TEXTE[key] : key;
+  for (const [name, wert] of Object.entries(vars || {})) {
+    text = text.split("{" + name + "}").join(String(wert));
+  }
+  return text;
+}
 const $ = (sel) => document.querySelector(sel);
 const umschalt = [];
 function herkunftsnetzUmschalten(key) { umschalt.push(key); }
