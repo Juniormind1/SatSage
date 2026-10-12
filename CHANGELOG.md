@@ -9,6 +9,19 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [1.0.0] — 2026-10-12
+
+Erstes stabiles Release.
+
+- **Release 1.0.0:** Versionsnummer auf 1.0.0. StartOS-Paket `1.0.0:0`; `0.9.9.5:0` bleibt im Versionsgraphen, damit Geräte von dort wandern.
+- **Version · Fußzeile:** Die Web-GUI zeigt die Version aus `git describe --tags --always --dirty` (ohne führendes `v`). Ohne Git-Checkout (Binaries, StartOS, Specter) gilt die Datei `VERSION`. Die README zeigt einen Versions-Badge nach dem letzten Git-Tag statt einer festen Nummer.
+- **Datenquellen · eigener Electrs auf anderem Port:** Ist für eine IP ein Port eingestellt, der weder 50001 noch 50002 ist (etwa 50031), prüft SatSage zuerst genau diesen Port mit der eingestellten TLS-Wahl und erst danach die vier Standard-Kombinationen. Bisher galt so ein Electrs als „Port geschlossen“, und Herkunft und Sanktionscheck waren gesperrt.
+- **Herkunft/Sanktionen · direkt nach dem Start:** Ist der eigene Electrs erreichbar, starten Herkunft und Sanktionscheck auch, bevor der erste Quellen-Check gelaufen ist. Bisher kam direkt nach dem Start „P2P kann nur UTXOs finden…“.
+- **Jobs · Fehlermeldung:** Scheitert ein Lauf mit einer erwarteten Meldung (etwa „Keine Sanktionslisten vorhanden — bitte zuerst aktualisieren.“), zeigt die Oberfläche diesen Text (DE/EN) statt nur „Fehlgeschlagen.“.
+- **Gelb klären:** Ein überflüssiger zweiter `/tax`-Abruf nach der Lot-Grau-Prüfung entfällt.
+- **Binary · Caches bleiben erhalten:** Im PyInstaller-Binary liegen Sanktionslisten, Label-Bestand und Konsolidierungs-PSBTs jetzt neben der Executable (wie `utxo_cache`), nicht im temporären Entpack-Ordner. Bisher waren geladene Listen nach jedem Neustart weg. Im Quellbetrieb bleibt alles am bisherigen Ort.
+- **Build · Preis-Bundle:** Die Build-Skripte brechen ab, wenn `data/btc_price/EUR.csv` oder `USD.csv` fehlen; `scripts/refresh_btc_price_bundle.py` füllt sie.
+
 - **Wallet-Nav · Alle Wallets: UTXOs:** Unter jedem Walletnamen die laufende Zahl dieses Wallets (`n UTXOs…`), nicht „gerade eben“ vom Cache-Schreiben. Die Zahl folgt dem Zwischenstand je Wallet.
 - **P2P · Block-Peer:** Kommt der Treffer-Block nicht (`notfound` oder totter Socket), nimmt SatSage den nächsten schon verbundenen Peer. Ein geprunter Peer (`NODE_NETWORK_LIMITED`) bleibt für Compact Filter und liefert nur die letzten 288 Blöcke. Sind alle verbundenen Peers dafür unbrauchbar, sucht SatSage Ersatz unter den Kandidaten, die nach einem Scan-Abbruch oft in der Zählung stehen. Über Tor höchstens zwei Extra-Verbindungen, im Clearnet vier — nicht die ganze Liste auf einmal. Fünfmal derselbe Socket entfällt.
 - **P2P · Ab wann scannen?:** Der Dialog hat wie in den Datenquellen Datum und Blockhöhe nebeneinander; die Felder füllen sich gegenseitig (Datums-Umrechnung erst beim Verlassen des Feldes). Gap-Limit steht daneben, vorbelegt mit dem Wert aus den Datenquellen, und gilt für diesen Scan. Unverändertes Bestätigen startet bei der Datenquellen-Höhe, ohne die 10-Minuten-Schätzung ab Genesis.

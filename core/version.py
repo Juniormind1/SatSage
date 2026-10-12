@@ -57,5 +57,5 @@ def datei_version() -> str:
 
 @lru_cache(maxsize=1)
 def version() -> str:
-    """Aktuelle SatSage-Version, z. B. ``\"0.9.9.5-57-g2592306\"``."""
+    """Aktuelle SatSage-Version, z. B. ``\"1.0.0\"`` oder ``\"1.0.0-3-gabc1234\"``."""
     return git_version() or datei_version()
