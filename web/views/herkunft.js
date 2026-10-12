@@ -1892,7 +1892,7 @@ function lotDonutTitel(mischung) {
     );
     return `${text} %`;
   };
-  return `Grün ${zahl(mischung.gruen)} · Gelb ${zahl(mischung.orange)} · Grau ${zahl(mischung.grau)}`;
+  return t("origin.lotMixTooltip", { gruen: zahl(mischung.gruen), gelb: zahl(mischung.orange), grau: zahl(mischung.grau) });
 }
 
 /** Mischung für die zugeklappte Zeile. Der Zweig selbst bleibt ungezeichnet. */

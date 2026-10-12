@@ -1666,5 +1666,15 @@
   "tax.metaInputs": "{anzahl} Inputs",
   "tax.metaAcquired": "Anschaffung {datum}",
   "tax.selfTransferHint": "Wirkt wie Eigenübertrag — nur ankreuzen, wenn es doch ein Verkauf war.",
-  "tax.selfTransferLikely": "vermutlich Eigenübertrag"
+  "tax.selfTransferLikely": "vermutlich Eigenübertrag",
+  "origin.lotMixTooltip": "Grün {gruen} · Gelb {gelb} · Grau {grau}",
+  "sanctions.metaAsOf": "Stand {datum}",
+  "sanctions.metaHops": "{n} Hop(s)",
+  "sanctions.metaListAddresses": "{n} Listenadressen",
+  "sanctions.metaConnections": "{n} Verbindungen",
+  "sanctions.metaAborted": "abgebrochen",
+  "format.durDays": "{n} T",
+  "format.durYears": "{j} J",
+  "format.durMonths": "{m} M",
+  "format.durYearsMonths": "{j} J {m} M"
 }

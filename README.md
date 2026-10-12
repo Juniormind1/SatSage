@@ -7,6 +7,8 @@
   <em>Woher die Sats wann kamen — On-Chain-Alter für Steuer und Überblick</em>
 </p>
 
+<p align="center"><a href="README.en.md">🇬🇧 English version</a></p>
+
 https://github.com/user-attachments/assets/4078fbfa-0516-4372-8001-ff06609d5f5e
 
 <p align="center">

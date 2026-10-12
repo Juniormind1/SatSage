@@ -1212,7 +1212,7 @@ function zeichneUtxos(daten, wallet, seite = null) {
     const pendingN = Number(daten.verlauf.pending_count || daten.pending_spends || 0);
     teile.push(
       daten.verlauf.total_count
-        ? `${daten.verlauf.total_count} ausgegeben`
+        ? t("wallet.metaSpent", { n: daten.verlauf.total_count })
           + (pendingN > 0 ? ` · ${t("wallet.spentPendingCount", { n: pendingN })}` : "")
         : t("wallet.metaHistoryNoSpends"),
     );

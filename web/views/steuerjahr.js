@@ -503,7 +503,7 @@ function steuerScorecardModelle(daten) {
         : "Ohne Herkunftsanalyse",
       wert: steuerScorecardWert(k.ungeprueft_sats),
       zusatz: k.ungeprueft_count > 0
-        ? `${k.ungeprueft_count} UTXOs — Frist evtl. länger`
+        ? t("tax.tileNoOriginNote", { anzahl: k.ungeprueft_count })
         : (t("tax.tileLotGrayNote") !== "tax.tileLotGrayNote"
           ? t("tax.tileLotGrayNote")
           : "undatierte Herkunftsenden"),

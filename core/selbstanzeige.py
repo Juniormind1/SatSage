@@ -945,7 +945,9 @@ def als_html(
     immutable_cache_dir: Path | str | None = None,
     theme: str | None = None,
     wallet_ersatz: str | None = None,
+    lang: str | None = None,
 ) -> bytes:
+    """HTML-Bericht; ``lang="en"`` liefert die englische Fassung."""
     from core import herkunft_bericht as hb
 
     person = report["person"]
@@ -1152,4 +1154,8 @@ TxIDs und Adressen sind vollständig angegeben. Herkunft: on-chain Hop-Kette
 
 </body></html>
 """
+    if str(lang or "").strip().lower().startswith("en"):
+        from core.selbstanzeige_en import uebersetze_html
+
+        html = uebersetze_html(html)
     return html.encode("utf-8")

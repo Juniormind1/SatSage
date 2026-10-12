@@ -1666,5 +1666,15 @@
   "tax.metaInputs": "{anzahl} inputs",
   "tax.metaAcquired": "acquired {datum}",
   "tax.selfTransferHint": "Looks like a self-transfer — only tick it if it really was a sale.",
-  "tax.selfTransferLikely": "probably a self-transfer"
+  "tax.selfTransferLikely": "probably a self-transfer",
+  "origin.lotMixTooltip": "Green {gruen} · Yellow {gelb} · Grey {grau}",
+  "sanctions.metaAsOf": "As of {datum}",
+  "sanctions.metaHops": "{n} hop(s)",
+  "sanctions.metaListAddresses": "{n} list addresses",
+  "sanctions.metaConnections": "{n} connections",
+  "sanctions.metaAborted": "aborted",
+  "format.durDays": "{n} d",
+  "format.durYears": "{j} y",
+  "format.durMonths": "{m} m",
+  "format.durYearsMonths": "{j} y {m} m"
 }

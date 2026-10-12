@@ -706,11 +706,15 @@ function formatKurzdatum(wert) {
 
 function formatHaltedauer(tage) {
   if (tage === null || tage === undefined) return "—";
-  if (tage < 31) return `${tage} T`;
+  if (tage < 31) return t("format.durDays", { n: tage });
   const jahre = Math.floor(tage / 365);
   const monate = Math.floor((tage % 365) / 30);
-  if (jahre > 0) return monate > 0 ? `${jahre} J ${monate} M` : `${jahre} J`;
-  return `${monate} M`;
+  if (jahre > 0) {
+    return monate > 0
+      ? t("format.durYearsMonths", { j: jahre, m: monate })
+      : t("format.durYears", { j: jahre });
+  }
+  return t("format.durMonths", { m: monate });
 }
 
 function kuerze(text, vorne = 10, hinten = 6) {

@@ -74,6 +74,16 @@ class HandlerDownloadMixin:
         if self.command != "HEAD":
             self.wfile.write(inhalt)
 
+    def _bericht_lang(self) -> str:
+        """Berichtssprache: X-Satsage-Lang, sonst UI_LANG; Vorgabe Deutsch."""
+        from core import i18n
+
+        client = i18n.client_lang(self.headers.get("X-Satsage-Lang"))
+        if client:
+            return client
+        roh = str(self.state.env().values().get("UI_LANG") or "").strip().lower()
+        return "en" if roh.startswith("en") else "de"
+
     def _download_selbstanzeige(self, pfad: str, query: dict) -> None:
         _ensure_server_names()
         """Bericht Sat-Geschichte als HTML oder CSV (Query: jahr, frist, txids)."""
@@ -173,6 +183,7 @@ class HandlerDownloadMixin:
                 immutable_cache_dir=self.state.immutable_cache_dir,
                 theme=theme,
                 wallet_ersatz=wallet_ersatz,
+                lang=self._bericht_lang(),
             )
             typ = "text/html; charset=utf-8"
             name = f"satsage-trace-{jahr}.html"
