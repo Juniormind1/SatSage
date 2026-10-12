@@ -34,6 +34,29 @@ class TestVerlaufPrioritaet(unittest.TestCase):
         )
         self._log.start()
         self.addCleanup(self._log.stop)
+        # Prozessweiten Stand der öffentlichen Electrum-Suche isolieren:
+        # andere Tests setzen Stopp-/Prozessende-Events oder die Sitzungs-Art.
+        from core import outbound_policy as op
+
+        vorher = (
+            op._SESSION_OEFFENTLICHE_ELECTRUM,
+            op._SESSION_OEFFENTLICHE_ELECTRUM_ART,
+            op._OEFFENTLICHE_ELECTRUM_STOP.is_set(),
+            op._OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.is_set(),
+        )
+        op._SESSION_OEFFENTLICHE_ELECTRUM = False
+        op._SESSION_OEFFENTLICHE_ELECTRUM_ART = None
+        op._OEFFENTLICHE_ELECTRUM_STOP.clear()
+        op._OEFFENTLICHE_ELECTRUM_PROZESS_ENDE.clear()
+
+        def _zurueck():
+            (op._SESSION_OEFFENTLICHE_ELECTRUM,
+             op._SESSION_OEFFENTLICHE_ELECTRUM_ART, stop, ende) = vorher
+            for ev, an in ((op._OEFFENTLICHE_ELECTRUM_STOP, stop),
+                           (op._OEFFENTLICHE_ELECTRUM_PROZESS_ENDE, ende)):
+                ev.set() if an else ev.clear()
+
+        self.addCleanup(_zurueck)
 
     def test_lan_electrs_gewinnt_ohne_bip158_oder_public(self):
         client = object()
