@@ -750,7 +750,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('id="scan-datum-dialog"', self.html)
         self.assertIn("brauchtBip158Startdatum", self.wallets_js)
         self.assertIn("frageScanDatum", self.wallets_js)
-        self.assertIn("2017-08-24", self.wallets_js)
+        self.assertIn("p2pScanStartHoehe", self.wallets_js)
+        self.assertIn("dialog.scanDate.hintSource", self.wallets_js)
         # Nicht nur autoQuelle===bip158 — sonst fehlt der Dialog bei
         # konfiguriertem, aber unerreichbarem eigenem Electrum.
         self.assertIn("q.reachable === true", self.js)

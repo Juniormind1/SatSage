@@ -464,6 +464,57 @@ def _p2p_header_chain(immutable_cache_dir: Path | None):
     _sync_main_cache_scalars()
     return chain
 
+def p2p_header_ntime(
+    height: int,
+    cache_root: Path | None = None,
+) -> int | None:
+    """
+    nTime eines Blocks aus ``p2p_headers.bin``.
+
+    Kein JSON-Cache und kein Schreiben — für häufige Anzeigen
+    (Scan-Fortschritt). Anker-Höhe hat keinen vollen Header.
+    """
+    try:
+        hoehe = int(height)
+    except (TypeError, ValueError):
+        return None
+    if hoehe <= 0:
+        return None
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        anker = int(getattr(chain, "_anchor_height", 0))
+        if hoehe > chain.tip_height() or hoehe <= anker:
+            return None
+        header = chain.header_at(hoehe)
+        if header is None or len(header) < 72:
+            return None
+        block_time = int.from_bytes(header[68:72], "little")
+    except (IndexError, OSError, ValueError, TypeError):
+        return None
+    if block_time <= 0:
+        return None
+    return block_time
+
+
+def p2p_header_tip_stand(
+    cache_root: Path | None = None,
+) -> tuple[int, int] | None:
+    """(Höhe, nTime) des lokalen Header-Tips, oder None."""
+    chain = _p2p_header_chain(cache_root)
+    if chain is None:
+        return None
+    try:
+        tip = int(chain.tip_height())
+    except (TypeError, ValueError):
+        return None
+    ntime = p2p_header_ntime(tip, cache_root)
+    if ntime is None:
+        return None
+    return tip, ntime
+
+
 def block_time_for_height(
     height: int,
     cache_root: Path | None = None,
@@ -485,22 +536,8 @@ def block_time_for_height(
     if cached is not None:
         return cached
 
-    chain = _p2p_header_chain(root)
-    if chain is None:
-        return None
-    try:
-        if hoehe > chain.tip_height() or hoehe < getattr(chain, "_anchor_height", 0):
-            return None
-        header = chain.header_at(hoehe) if hoehe != chain._anchor_height else None
-        if header is None and hoehe == chain._anchor_height:
-            # Anker-Höhe: nur Hash bekannt, kein voller Header in der Datei.
-            return None
-        if header is None or len(header) < 72:
-            return None
-        block_time = int.from_bytes(header[68:72], "little")
-    except (IndexError, OSError, ValueError, TypeError):
-        return None
-    if block_time <= 0:
+    block_time = p2p_header_ntime(hoehe, root)
+    if block_time is None:
         return None
     try:
         save_cached_block_time(hoehe, block_time, root, "p2p_headers")

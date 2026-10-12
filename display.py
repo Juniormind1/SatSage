@@ -240,32 +240,93 @@ def normalize_rpc_progress(raw: float) -> float:
     return max(0.0, min(100.0, round(pct, 1)))
 
 
+def schaetze_zeit_aus_ankern(
+    hoehe: int,
+    *,
+    bekannt_hoehe: int | None = None,
+    bekannt_zeit: int | None = None,
+    tip_hoehe: int | None = None,
+    tip_zeit: int | None = None,
+    intervall: int = 600,
+) -> int | None:
+    """
+    Unix-Zeit für eine Höhe aus zwei Ankern.
+
+    Letzter bekannter Header und Tip/Jetzt: lineare Interpolation, wenn
+    der Tip höher und später liegt und die implizite Blockdauer zwischen
+    2 und 40 Minuten liegt (sonst ist der Tip praktisch am Header und
+    die Wanduhr keine Blockzeit). Sonst 10 Minuten vom vorhandenen Anker.
+    """
+    h = int(hoehe)
+    h_a = int(bekannt_hoehe) if bekannt_hoehe is not None else None
+    t_a = int(bekannt_zeit) if bekannt_zeit is not None else None
+    h_b = int(tip_hoehe) if tip_hoehe is not None else None
+    t_b = int(tip_zeit) if tip_zeit is not None else None
+    schritt = int(intervall)
+    if h_a is not None and t_a is not None:
+        if h_b is not None and t_b is not None and h_b > h_a and t_b > t_a:
+            rate = (t_b - t_a) / (h_b - h_a)
+            if 120.0 <= rate <= 2400.0:
+                return int(t_a + (h - h_a) * rate)
+        return t_a + (h - h_a) * schritt
+    if h_b is not None and t_b is not None:
+        return t_b - (h_b - h) * schritt
+    return None
+
+
 def format_block_height_with_date(
     height: int,
     *,
     tip_height: int | None = None,
     tip_time: int | None = None,
+    jetzt: int | None = None,
 ) -> str:
     """
-    Blockhöhe mit geschätztem Datum.
+    Blockhöhe mit Datum.
 
-    Mit Tip-Höhe/-Zeit: Rückwärts in 10-Minuten-Schritten (treffsicher im
-    Scan-Bereich). Sonst Genesis + 10 Min — grob, aber ohne RPC.
+    Zuerst nTime aus ``p2p_headers.bin``. Fehlt der Header: Interpolation
+    vom letzten bekannten Header zum Tip und zur aktuellen Zeit. Ohne
+    Anker nur die Höhe.
     """
     hoehe = int(height)
     block_label = f"{hoehe:,}"
     if hoehe <= 0:
         return f"Block {block_label}"
     try:
-        from main import BITCOIN_BLOCK_INTERVAL_SECONDS, BITCOIN_GENESIS_TIMESTAMP
+        from core.xpub_cache import (
+            BITCOIN_BLOCK_INTERVAL_SECONDS,
+            p2p_header_ntime,
+            p2p_header_tip_stand,
+        )
     except ImportError:
         return f"Block {block_label}"
-    intervall = BITCOIN_BLOCK_INTERVAL_SECONDS
-    if tip_height is not None and tip_time is not None and int(tip_height) >= hoehe:
-        stempel = int(tip_time) - (int(tip_height) - hoehe) * intervall
-    else:
-        stempel = BITCOIN_GENESIS_TIMESTAMP + hoehe * intervall
-    datum = datetime.fromtimestamp(stempel, tz=timezone.utc).strftime("%d.%m.%Y")
+    stempel = None
+    try:
+        stempel = p2p_header_ntime(hoehe)
+    except Exception:
+        stempel = None
+    if stempel is None:
+        bekannt_h = bekannt_t = None
+        try:
+            stand = p2p_header_tip_stand()
+        except Exception:
+            stand = None
+        if stand:
+            bekannt_h, bekannt_t = stand
+        t_tip = tip_time
+        if t_tip is None and (tip_height is not None or bekannt_h is not None):
+            t_tip = int(jetzt) if jetzt is not None else int(time.time())
+        stempel = schaetze_zeit_aus_ankern(
+            hoehe,
+            bekannt_hoehe=bekannt_h,
+            bekannt_zeit=bekannt_t,
+            tip_hoehe=tip_height,
+            tip_zeit=t_tip,
+            intervall=BITCOIN_BLOCK_INTERVAL_SECONDS,
+        )
+    if stempel is None:
+        return f"Block {block_label}"
+    datum = datetime.fromtimestamp(int(stempel), tz=timezone.utc).strftime("%d.%m.%Y")
     return f"Block {block_label} (≈ {datum})"
 
 
@@ -389,11 +450,14 @@ class Bip158ProgressLine:
         *,
         checked: int | None = None,
         total: int | None = None,
+        tip_height: int | None = None,
     ) -> None:
         if block_height is None:
             return
         if utxo_id:
             self._last_utxo_id = utxo_id
+        if tip_height is not None:
+            self._tip_height = int(tip_height)
         label = self._last_utxo_id or "…"
         if label != "…":
             label = format_utxo_ref(label, verbose=self._verbose)

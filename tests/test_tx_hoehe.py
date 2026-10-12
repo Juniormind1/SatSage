@@ -17,7 +17,13 @@ from core.p2p import (
     header_hash,
     hash_to_hex,
 )
-from core.xpub_cache import hoehe_fuer_blockhash, hoehe_zur_blockzeit
+from core.xpub_cache import (
+    BLOCK_HEADER_CACHE_SUBDIR,
+    hoehe_fuer_blockhash,
+    hoehe_zur_blockzeit,
+    p2p_header_ntime,
+    p2p_header_tip_stand,
+)
 
 
 def _adresse(n: int) -> str:
@@ -81,6 +87,20 @@ class TestHoeheAusHeaderdatei(unittest.TestCase):
 
     def test_unbekannter_hash_bleibt_offen(self):
         self.assertIsNone(hoehe_fuer_blockhash("ab" * 32, self.root))
+
+    def test_p2p_header_ntime_ist_der_header(self):
+        self.assertEqual(p2p_header_ntime(700_001, self.root), 1_638_000_000)
+        self.assertEqual(p2p_header_ntime(700_002, self.root), 1_638_000_600)
+        self.assertIsNone(p2p_header_ntime(700_000, self.root))
+        self.assertIsNone(p2p_header_ntime(0, self.root))
+
+    def test_p2p_header_ntime_schreibt_kein_json(self):
+        p2p_header_ntime(700_001, self.root)
+        cache_dir = self.root / BLOCK_HEADER_CACHE_SUBDIR
+        self.assertFalse(cache_dir.is_dir() and any(cache_dir.glob("*.json")))
+
+    def test_p2p_header_tip_stand(self):
+        self.assertEqual(p2p_header_tip_stand(self.root), (700_002, 1_638_000_600))
 
 
 class _Patch:

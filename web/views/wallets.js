@@ -3680,28 +3680,48 @@ function brauchtBip158Startdatum(walletId) {
   return true;
 }
 
-function vorschlagScanDatum(wallet) {
-  const typ = (wallet && (wallet.script_type_effective || wallet.script_type)) || "";
-  if (typ === "taproot" || typ === "tr") return "2021-11-14";
-  if (typ === "legacy") return "2009-01-03";
-  return "2017-08-24";
+function p2pScanStartHoehe() {
+  const liste = Zustand.config?.sources || [];
+  const bip = liste.find((q) => q && q.key === "bip158");
+  const n = Number(bip && bip.start_height);
+  if (!Number.isInteger(n) || n < 0) return 481824;
+  return n;
 }
 
-function frageScanDatum(wallet) {
+async function vorschlagScanDatum() {
+  const hoehe = p2pScanStartHoehe();
+  let datum = "";
+  if (typeof p2pScanDatumCache === "function") {
+    const cached = p2pScanDatumCache()[String(hoehe)];
+    if (cached) datum = cached;
+  }
+  if (!datum && typeof p2pScanZeitUmrechnen === "function") {
+    try {
+      const ergebnis = await p2pScanZeitUmrechnen({ hoehe });
+      if (ergebnis && ergebnis.date) {
+        datum = ergebnis.date;
+        if (typeof merkeP2pScanDatum === "function") {
+          merkeP2pScanDatum(hoehe, datum);
+        }
+      }
+    } catch (_) { /* Hinweis trägt die Höhe. */ }
+  }
+  return { datum, hoehe };
+}
+
+async function frageScanDatum(wallet) {
+  const dlg = $("#scan-datum-dialog");
+  const feld = $("#scan-datum-feld");
+  const hinweis = $("#scan-datum-hinweis");
+  const ok = $("#scan-datum-ok");
+  const abbruch = $("#scan-datum-abbruch");
+  const vorschlag = await vorschlagScanDatum(wallet);
+  const hoeheText = typeof formatZahl === "function"
+    ? formatZahl(vorschlag.hoehe)
+    : String(vorschlag.hoehe);
   return new Promise((resolve) => {
-    const dlg = $("#scan-datum-dialog");
-    const feld = $("#scan-datum-feld");
-    const hinweis = $("#scan-datum-hinweis");
-    const ok = $("#scan-datum-ok");
-    const abbruch = $("#scan-datum-abbruch");
-    feld.value = vorschlagScanDatum(wallet);
-    const typ = (wallet && (wallet.script_type_effective || wallet.script_type)) || "";
-    hinweis.textContent =
-      typ === "legacy"
-        ? t("dialog.scanDate.hintGenesis")
-        : typ === "taproot" || typ === "tr"
-          ? t("dialog.scanDate.hintTaproot")
-          : t("dialog.scanDate.hintSegwit");
+    feld.value = vorschlag.datum;
+    hinweis.textContent = t("dialog.scanDate.hintSource", { n: hoeheText });
     dlg.hidden = false;
     feld.focus();
 
@@ -3712,7 +3732,14 @@ function frageScanDatum(wallet) {
       dlg.hidden = true;
       resolve(wert);
     };
-    const onOk = () => fertig(feld.value || null);
+    const onOk = () => {
+      const wert = String(feld.value || "").trim();
+      if (!wert || wert === vorschlag.datum) {
+        fertig(null);
+        return;
+      }
+      fertig(wert);
+    };
     const onAbbruch = () => fertig(undefined);
     const onTaste = (ev) => {
       if (ev.key === "Escape") onAbbruch();

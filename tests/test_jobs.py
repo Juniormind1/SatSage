@@ -14,6 +14,7 @@ from display import (
     Bip158ProgressLine,
     format_block_height_with_date,
     melde_zwischenstand,
+    schaetze_zeit_aus_ankern,
 )
 
 
@@ -318,19 +319,93 @@ class TestBip158ImJobLog(unittest.TestCase):
         self.assertTrue(any("≈" in z for z in log), log)
         self.assertEqual(self.job.message.count("Scanne UTXO"), 1)
 
-    def test_blockhoehe_traegt_geschaetztes_datum(self):
-        text = format_block_height_with_date(850_000)
-        self.assertIn("850,000", text)
-        self.assertRegex(text, r"≈ \d{2}\.\d{2}\.\d{4}")
+    def test_blockhoehe_ohne_anker_ohne_datum(self):
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand", return_value=None,
+        ):
+            text = format_block_height_with_date(850_000)
+        self.assertEqual(text, "Block 850,000")
 
     def test_blockdatum_vom_tip_ist_treffsicherer(self):
-        """Rückwärts vom Tip: 850 000 ≈ Juni 2024, nicht die Genesis-Schätzung."""
+        """Rückwärts vom Tip: 850 000 ≈ Juni 2024."""
         from datetime import datetime, timezone
         tip_ts = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
-        text = format_block_height_with_date(
-            850_000, tip_height=963_080, tip_time=tip_ts,
-        )
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand", return_value=None,
+        ):
+            text = format_block_height_with_date(
+                850_000, tip_height=963_080, tip_time=tip_ts,
+            )
         self.assertIn("≈ 23.06.2024", text)
+
+    def test_blockdatum_zehn_minuten_vom_letzten_header(self):
+        from datetime import datetime, timezone
+        bekannt_ts = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand",
+            return_value=(963_080, bekannt_ts),
+        ):
+            text = format_block_height_with_date(850_000)
+        self.assertIn("≈ 23.06.2024", text)
+
+    def test_blockdatum_mini_tip_luecke_bleibt_zehn_minuten(self):
+        """Ein Block Vorsprung plus Wanduhr ist keine Blockdauer."""
+        from datetime import datetime, timezone
+        bekannt_ts = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(
+            schaetze_zeit_aus_ankern(
+                850_000,
+                bekannt_hoehe=963_080,
+                bekannt_zeit=bekannt_ts,
+                tip_hoehe=963_081,
+                tip_zeit=bekannt_ts + 60,
+            ),
+            bekannt_ts + (850_000 - 963_080) * 600,
+        )
+
+    def test_blockdatum_interpoliert_header_zu_tip(self):
+        from datetime import datetime, timezone
+        bekannt_ts = int(datetime(2024, 6, 23, tzinfo=timezone.utc).timestamp())
+        tip_ts = int(datetime(2026, 10, 12, tzinfo=timezone.utc).timestamp())
+        stempel = schaetze_zeit_aus_ankern(
+            910_000,
+            bekannt_hoehe=850_000,
+            bekannt_zeit=bekannt_ts,
+            tip_hoehe=970_000,
+            tip_zeit=tip_ts,
+        )
+        datum = datetime.fromtimestamp(stempel, tz=timezone.utc).strftime("%d.%m.%Y")
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand",
+            return_value=(850_000, bekannt_ts),
+        ):
+            text = format_block_height_with_date(
+                910_000, tip_height=970_000, tip_time=tip_ts,
+            )
+        self.assertIn(f"≈ {datum}", text)
+
+    def test_blockdatum_tip_ohne_zeit_nimmt_jetzt(self):
+        from datetime import datetime, timezone
+        jetzt = int(datetime(2026, 8, 18, tzinfo=timezone.utc).timestamp())
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=None), patch(
+            "core.xpub_cache.p2p_header_tip_stand", return_value=None,
+        ):
+            text = format_block_height_with_date(
+                850_000, tip_height=963_080, jetzt=jetzt,
+            )
+        self.assertIn("≈ 23.06.2024", text)
+
+    def test_blockdatum_nimmt_header_ntime(self):
+        """Echte Header-Zeit schlägt Tip-Schätzung."""
+        from datetime import datetime, timezone
+        ts = int(datetime(2025, 8, 15, 12, 0, tzinfo=timezone.utc).timestamp())
+        tip_ts = int(datetime(2026, 10, 12, tzinfo=timezone.utc).timestamp())
+        with patch("core.xpub_cache.p2p_header_ntime", return_value=ts):
+            text = format_block_height_with_date(
+                908_145, tip_height=970_000, tip_time=tip_ts,
+            )
+        self.assertIn("908,145", text)
+        self.assertIn("≈ 15.08.2025", text)
 
 
 class TestDatenquelleImJobLog(unittest.TestCase):

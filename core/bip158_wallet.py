@@ -782,6 +782,7 @@ def fetch_addresses_utxos_bip158(
         progress_line.update(
             event.height, event.utxo_id,
             checked=event.blocks_checked, total=event.total_blocks,
+            tip_height=event.tip_height,
         )
 
     client.scanner._progress_callback = on_progress
@@ -1017,6 +1018,7 @@ def fetch_wallet_utxos_bip158(
             progress_line.update(
                 event.height, event.utxo_id,
                 checked=event.blocks_checked, total=event.total_blocks,
+                tip_height=event.tip_height,
             )
 
         client.scanner._progress_callback = on_progress
@@ -1092,6 +1094,7 @@ def _fetch_wallet_utxos_union(
         progress_line.update(
             event.height, event.utxo_id,
             checked=event.blocks_checked, total=event.total_blocks,
+            tip_height=event.tip_height,
         )
 
     client.scanner._progress_callback = on_progress
