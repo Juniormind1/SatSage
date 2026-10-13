@@ -22,7 +22,9 @@ from typing import Any
 from core.fulcrum_client import address_to_scripthash
 from core.outbound_policy import ensure_resolves_to_allowed_host, normalize_host
 
-_STANDARD_PORT = 8181
+# libbitcoin-server bindet die Abfrage je nach Fassung auf 8181 oder 8180.
+# Ohne LIBBITCOIN_NATIVE_PORT gelten beide; die Antwort mit Adress-Flag gewinnt.
+_KANDIDATEN_PORTS = (8181, 8180)
 _MAX_ANTWORT = 8_000_000
 _LEER = object()
 
@@ -102,18 +104,24 @@ def _werte_lesen(werte: dict[str, str] | None) -> dict[str, str]:
     return geladen if isinstance(geladen, dict) else {}
 
 
-def _port_aus(werte: dict[str, str]) -> int:
+def _ports_aus(werte: dict[str, str]) -> tuple[int, ...]:
+    """Gesetzter Port bleibt allein. Sonst 8181, danach 8180."""
     roh = str(werte.get("LIBBITCOIN_NATIVE_PORT") or os.environ.get("LIBBITCOIN_NATIVE_PORT") or "")
     roh = roh.strip()
     if not roh:
-        return _STANDARD_PORT
+        return _KANDIDATEN_PORTS
     try:
         port = int(roh)
     except ValueError:
-        return _STANDARD_PORT
+        return _KANDIDATEN_PORTS
     if 1 <= port <= 65535:
-        return port
-    return _STANDARD_PORT
+        return (port,)
+    return _KANDIDATEN_PORTS
+
+
+def _libbitcoin_antwortet(daten: Any) -> bool:
+    """Die native Konfiguration trägt das Feld ``address``."""
+    return isinstance(daten, dict) and "address" in daten
 
 
 def _eigene_hosts(werte: dict[str, str]) -> set[str]:
@@ -396,6 +404,7 @@ class NativeSitzung:
         self.anfragen = 0
         self.antwort_bytes = 0
         self.pfade: list[str] = []
+        self.ports: tuple[int, ...] = ()
         self._lock = threading.Lock()
         self._karte_fertig = False
         self._bekannt: dict[tuple[str, int], dict] = {}
@@ -784,7 +793,12 @@ def abfrage_hinweis(client, werte: dict[str, str] | None = None, *, log=None) ->
         geladen = _werte_fuer(client, werte)
         host = normalize_host(getattr(client, "host", "") or "")
         if host in _eigene_hosts(geladen):
-            log(f"Prüfe libbitcoin-Abfrage {host}:{_port_aus(geladen)}…")
+            ports = _ports_aus(geladen)
+            if len(ports) == 1:
+                log(f"Prüfe libbitcoin-Abfrage {host}:{ports[0]}…")
+            else:
+                namen = " und ".join(str(port) for port in ports)
+                log(f"Prüfe libbitcoin-Abfrage {host} auf {namen}…")
     sitzung = sitzung_fuer(client, werte)
     if sitzung.grund in ("software", "fremd"):
         return None
@@ -797,6 +811,10 @@ def abfrage_hinweis(client, werte: dict[str, str] | None = None, *, log=None) ->
     elif sitzung.grund == "index":
         text = f"libbitcoin-Abfrage {ziel}: kein Adressindex — Electrum bleibt."
     else:
+        ports = getattr(sitzung, "ports", ())
+        if len(ports) > 1:
+            namen = " und ".join(str(port) for port in ports)
+            ziel = f"{sitzung.host} auf {namen}"
         text = f"libbitcoin-Abfrage {ziel}: nicht erreichbar — Electrum bleibt."
     if log is not None:
         log(text)
@@ -820,27 +838,47 @@ def sitzung_fuer(client, werte: dict[str, str] | None = None) -> NativeSitzung:
     ):
         proxy = None
     geladen = _werte_fuer(client, werte)
-    sitzung = NativeSitzung(host, _port_aus(geladen), timeout_f, proxy)
+    ports = _ports_aus(geladen)
     software = str(getattr(client, "server_software", "") or "")
     if software != "libbitcoin" or host not in _eigene_hosts(geladen):
+        sitzung = NativeSitzung(host, ports[0], timeout_f, proxy)
+        sitzung.ports = ports
         sitzung.aktiv = False
         sitzung.grund = "software" if software != "libbitcoin" else "fremd"
         client._libbitcoin_native = sitzung
         return sitzung
-    try:
-        daten = sitzung._holen("configuration", datenformat="json")
-    except NativeFehler:
-        sitzung.aktiv = False
-        sitzung.grund = "probe"
-        client._libbitcoin_native = sitzung
-        return sitzung
-    if not _address_index_an(daten):
-        sitzung.aktiv = False
-        sitzung.grund = "index"
-        client._libbitcoin_native = sitzung
-        return sitzung
-    sitzung.aktiv = True
+    sitzung = _waehle_port(host, ports, timeout_f, proxy)
     client._libbitcoin_native = sitzung
+    return sitzung
+
+
+def _waehle_port(
+    host: str,
+    ports: tuple[int, ...],
+    timeout: float,
+    tor_proxy: tuple[str, int] | None,
+) -> NativeSitzung:
+    """Erster Port, dessen ``/v1/configuration`` von libbitcoin stammt."""
+    letzte: NativeSitzung | None = None
+    mehrere = len(ports) > 1
+    for port in ports:
+        sitzung = NativeSitzung(host, port, timeout, tor_proxy)
+        sitzung.ports = ports
+        try:
+            daten = sitzung._holen("configuration", datenformat="json")
+        except NativeFehler:
+            letzte = sitzung
+            continue
+        if mehrere and not _libbitcoin_antwortet(daten):
+            letzte = sitzung
+            continue
+        sitzung.aktiv = _address_index_an(daten)
+        sitzung.grund = "" if sitzung.aktiv else "index"
+        return sitzung
+    sitzung = letzte or NativeSitzung(host, ports[0], timeout, tor_proxy)
+    sitzung.ports = ports
+    sitzung.aktiv = False
+    sitzung.grund = "probe"
     return sitzung
 
 

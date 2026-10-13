@@ -88,7 +88,7 @@ BIP-158 steht in dieser Kette nicht. Compact Filter liefern keinen Verlauf, sola
 
 Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. In der Oberfläche merkt „Verbinden“ die gewählte Familie (Clearnet oder Onion) für die Sitzung — Scan, Verlauf und Empfang bleiben bei dieser Familie. Sobald ein eigener Electrum-Server (electrs/Fulcrum/libbitcoin) erreichbar ist, werden öffentliche Verbindungen abgeklemmt und die Sitzungs-Freigabe ungültig — ein erneuter öffentlicher Connect fragt wieder. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
 
-Ist der eigene Indexer libbitcoin und antwortet `GET /v1/configuration` mit `address: true` (Klartext, Port 8181 oder `LIBBITCOIN_NATIVE_PORT`), lesen Bestand und Herkunft über diese Abfrage. Sonst bleibt Electrum. Ein öffentlicher Server, der sich libbitcoin nennt, bekommt sie nicht.
+Ist der eigene Indexer libbitcoin und antwortet `GET /v1/configuration` mit `address: true` (Klartext), lesen Bestand und Herkunft über diese Abfrage. Ohne `LIBBITCOIN_NATIVE_PORT` prüft SatSage 8181 und danach 8180 und nimmt den Port, dessen Antwort das Feld `address` trägt. Sonst bleibt Electrum. Ein öffentlicher Server, der sich libbitcoin nennt, bekommt sie nicht.
 
 Ist der verbundene Electrum-Server kein libbitcoin und `MEMPOOL_URL` eine Esplora-Instanz im eigenen Netz, lesen Bestand und kleine Herkunft dort. Die Adresslücke bleibt Electrum. Öffentliche Explorer und Onion-Adressen bleiben außen.
 

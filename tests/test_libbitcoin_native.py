@@ -193,6 +193,54 @@ class NativeWegTests(unittest.TestCase):
         self.assertIsNone(abfrage_hinweis(fremd, log=zeilen.append))
         self.assertEqual(len(zeilen), 2)
 
+    def test_nimmt_den_port_auf_dem_libbitcoin_antwortet(self) -> None:
+        fremd = _server(lambda pfad: (200, {"ok": True}, "application/json"))
+        self.dienst = _server(lambda pfad: (200, {"address": True}, "application/json"))
+        try:
+            zu = 1
+            offen = self.dienst.server_address[1]
+            daneben = fremd.server_address[1]
+            zeilen: list[str] = []
+            kunde = self._kunde()
+            kunde.timeout = 0.3
+            kunde._libbitcoin_werte = {"FULCRUM_HOST": "127.0.0.1"}
+            with mock.patch(
+                "core.libbitcoin_native._KANDIDATEN_PORTS",
+                (zu, daneben, offen),
+            ), mock.patch.dict("os.environ", {"LIBBITCOIN_NATIVE_PORT": ""}):
+                text = abfrage_hinweis(kunde, log=zeilen.append)
+            self.assertEqual(
+                zeilen[0],
+                f"Prüfe libbitcoin-Abfrage 127.0.0.1 auf {zu} und {daneben} und {offen}…",
+            )
+            self.assertIn(f"127.0.0.1:{offen}", text or "")
+            self.assertIn("Adressindex an", text or "")
+            self.assertEqual(kunde._libbitcoin_native.port, offen)
+            self.assertEqual(fremd.pfade, ["/v1/configuration"])
+        finally:
+            fremd.shutdown()
+            fremd.server_close()
+
+    def test_libbitcoin_ohne_index_bleibt_auf_dem_port(self) -> None:
+        self.dienst = _server(lambda pfad: (200, {"address": False}, "application/json"))
+        anderer = _server(lambda pfad: (200, {"address": True}, "application/json"))
+        try:
+            erster = self.dienst.server_address[1]
+            zweiter = anderer.server_address[1]
+            kunde = self._kunde()
+            kunde._libbitcoin_werte = {"FULCRUM_HOST": "127.0.0.1"}
+            with mock.patch(
+                "core.libbitcoin_native._KANDIDATEN_PORTS",
+                (erster, zweiter),
+            ), mock.patch.dict("os.environ", {"LIBBITCOIN_NATIVE_PORT": ""}):
+                text = abfrage_hinweis(kunde)
+            self.assertIn("kein Adressindex", text or "")
+            self.assertEqual(kunde._libbitcoin_native.port, erster)
+            self.assertEqual(anderer.pfade, [])
+        finally:
+            anderer.shutdown()
+            anderer.server_close()
+
     def test_weiterleitung_wird_nicht_verfolgt(self) -> None:
         def router(pfad):
             if pfad == "/v1/configuration":

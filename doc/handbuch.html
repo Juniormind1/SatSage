@@ -1650,9 +1650,11 @@ eine Implementierung davon; electrs und ElectrumX funktionieren genauso. Die
 <code>.env</code>-Schlüssel heißen weiterhin <code>FULCRUM_*</code>, damit
 bestehende Konfigurationen unverändert weiterlaufen — nur die Bezeichnungen in
 der Oberfläche sind richtiggestellt. Meldet sich der eigene Server als
-libbitcoin und liefert seine Abfrage auf Port 8181 einen Adressindex
-(<code>LIBBITCOIN_NATIVE_PORT</code>), nutzt SatSage diesen Weg für Bestand
-und Herkunft. Sonst bleibt es beim Electrum-Protokoll.</p>
+libbitcoin und liefert seine Abfrage einen Adressindex, nutzt SatSage
+diesen Weg für Bestand und Herkunft. Ohne
+<code>LIBBITCOIN_NATIVE_PORT</code> gelten die Ports 8181 und 8180; der
+Port, dessen Antwort das Feld <code>address</code> trägt, gewinnt. Sonst
+bleibt es beim Electrum-Protokoll.</p>
 
 <h3>Verbindung testen</h3>
 
