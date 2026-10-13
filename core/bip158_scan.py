@@ -152,14 +152,17 @@ def _block_peer_nachruecken(
     if on_log:
         on_log("Kein Peer mit dem Block — suche Ersatz…")
     try:
+        # limit=0: schon verbundene Geprunte zählen nicht. Nur ein Peer
+        # mit voller Historie kann einen Block ab SegWit liefern.
         frisch = verbinde_compact_filter_peers(
-            limit=1,
+            limit=0,
             tor_proxy=tor_proxy,
             ruhig=True,
             versuche=12,
             dns_fallback=True,
             exclude=exclude,
             on_log=on_log,
+            brauche_ungeprunt=True,
         )
     except Exception:
         return None
@@ -1298,7 +1301,12 @@ class BIP158Scanner:
         return self._ensure_peers(limit=1, still=still)[0]
 
     def _ensure_peers(self, limit: int | None = None, *, still: bool = False):
-        from core.p2p import FILTER_PEERS_MAX, verbinde_compact_filter_peers
+        from core.p2p import (
+            FILTER_PEERS_MAX,
+            begrenze_peer_pool,
+            peer_ist_ungeprunt,
+            verbinde_compact_filter_peers,
+        )
 
         # Über Tor weniger Parallelität — sonst reißen Peers und stecken
         # die Queue mit toten Sockets zu.
@@ -1308,21 +1316,38 @@ class BIP158Scanner:
         ziel = vorgabe if limit is None else max(1, min(limit, vorgabe if self._tor_proxy else limit))
         if self._peer is not None and self._peer not in self._pool:
             self._pool.insert(0, self._peer)
-        if len(self._pool) >= ziel:
-            return self._pool[:ziel]
+
+        def _hat_historie() -> bool:
+            return any(peer_ist_ungeprunt(peer) for peer in self._pool)
+
+        if len(self._pool) >= ziel and _hat_historie():
+            # Nicht auf die ersten *ziel* kürzen: der ungeprunte Peer kann
+            # hinter den schon verbundenen Geprunten hängen.
+            if self._tor_proxy and len(self._pool) > ziel:
+                self._pool = begrenze_peer_pool(self._pool, ziel)
+            return self._pool
         exclude = {(p.host, p.port) for p in self._pool}
+        fehlend = max(0, ziel - len(self._pool))
+        brauche = not _hat_historie()
         if not self._pool:
             self._log("Suche Compact-Filter-Peers…")
+        elif brauche and fehlend == 0:
+            self._log(
+                "Nur geprunte Peers — suche einen Peer mit voller Historie…"
+            )
         frisch = verbinde_compact_filter_peers(
             timeout=self._timeout,
             tor_proxy=self._tor_proxy,
             peers=self._peers or None,
-            limit=ziel - len(self._pool),
+            limit=fehlend,
             exclude=exclude,
             on_log=self._log,
             ruhig=True,
+            brauche_ungeprunt=brauche,
         )
         self._pool.extend(frisch)
+        if self._tor_proxy and len(self._pool) > ziel:
+            self._pool = begrenze_peer_pool(self._pool, ziel)
         if not self._pool and self._tor_proxy is None:
             from core.p2p import stelle_p2p_tor_bereit
 
@@ -1337,11 +1362,13 @@ class BIP158Scanner:
                     timeout=self._timeout,
                     tor_proxy=proxy,
                     peers=self._peers or None,
-                    limit=ziel,
+                    limit=2,
                     on_log=self._log,
                     ruhig=True,
+                    brauche_ungeprunt=True,
                 )
                 self._pool.extend(frisch)
+                self._pool = begrenze_peer_pool(self._pool, 2)
         if not self._pool:
             clear_live_filter_peers(self)
             raise RuntimeError(

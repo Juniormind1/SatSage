@@ -1104,6 +1104,176 @@ class TestP2pCodec(unittest.TestCase):
             logs,
         )
 
+    def test_ungeprunt_wird_gesucht_obwohl_kontingent_voll_ist(self):
+        """Geprunte Peers füllen das Kontingent nicht das Ende der Suche."""
+        from unittest.mock import MagicMock, patch
+
+        import core.p2p as p2p_mod
+        from core.p2p import (
+            NODE_NETWORK,
+            NODE_NETWORK_LIMITED,
+            verbinde_compact_filter_peers,
+        )
+
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        p2p_mod._FILTER_PEER_CACHE.clear()
+        p2p_mod._FILTER_PEER_LOADED = True
+        gerufen: list[str] = []
+
+        def fake_peer(host, port, **kwargs):
+            gerufen.append(host)
+            peer = MagicMock()
+            peer.host = host
+            peer.port = port
+            peer.services = (
+                NODE_NETWORK if host == "192.0.2.9" else NODE_NETWORK_LIMITED
+            )
+            peer.historie_aus = False
+            peer.tot = False
+            return peer
+
+        peers = [(f"192.0.2.{i}", 8333) for i in range(1, 10)]
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
+            "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
+        ), patch("core.p2p.merke_filter_peer"), patch(
+            "core.p2p.demote_filter_peer",
+        ):
+            ohne = verbinde_compact_filter_peers(
+                peers=peers,
+                limit=2,
+                versuche=9,
+                dns_fallback=False,
+                ruhig=True,
+            )
+            gerufen_ohne = list(gerufen)
+            gerufen.clear()
+            logs: list[str] = []
+            mit = verbinde_compact_filter_peers(
+                peers=peers,
+                limit=2,
+                versuche=9,
+                dns_fallback=False,
+                ruhig=True,
+                brauche_ungeprunt=True,
+                on_log=logs.append,
+            )
+        self.assertNotIn("192.0.2.9", gerufen_ohne)
+        self.assertEqual(len(ohne), 2)
+        self.assertIn("192.0.2.9", gerufen)
+        self.assertTrue(any(peer.host == "192.0.2.9" for peer in mit))
+        self.assertTrue(any("voller Historie" in zeile for zeile in logs), logs)
+
+    def test_limit_null_behaelt_nur_den_ungeprunten(self):
+        from unittest.mock import MagicMock, patch
+
+        import core.p2p as p2p_mod
+        from core.p2p import (
+            NODE_NETWORK,
+            NODE_NETWORK_LIMITED,
+            verbinde_compact_filter_peers,
+        )
+
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        p2p_mod._FILTER_PEER_CACHE.clear()
+        p2p_mod._FILTER_PEER_LOADED = True
+
+        def fake_peer(host, port, **kwargs):
+            peer = MagicMock()
+            peer.host = host
+            peer.port = port
+            peer.services = (
+                NODE_NETWORK if host == "192.0.2.4" else NODE_NETWORK_LIMITED
+            )
+            peer.historie_aus = False
+            peer.tot = False
+            return peer
+
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
+            "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
+        ), patch("core.p2p.merke_filter_peer"), patch(
+            "core.p2p.demote_filter_peer",
+        ):
+            live = verbinde_compact_filter_peers(
+                peers=[(f"192.0.2.{i}", 8333) for i in range(1, 5)],
+                limit=0,
+                versuche=4,
+                dns_fallback=False,
+                ruhig=True,
+                brauche_ungeprunt=True,
+            )
+        self.assertEqual([peer.host for peer in live], ["192.0.2.4"])
+
+    def test_dns_laeuft_wenn_merk_liste_nur_geprunt_ist(self):
+        from unittest.mock import MagicMock, patch
+
+        import core.p2p as p2p_mod
+        from core.p2p import (
+            NODE_NETWORK,
+            NODE_NETWORK_LIMITED,
+            verbinde_compact_filter_peers,
+        )
+
+        p2p_mod._GELOGGTE_FILTER_PEERS.clear()
+        p2p_mod._FILTER_PEER_CACHE.clear()
+        p2p_mod._FILTER_PEER_LOADED = True
+
+        def fake_peer(host, port, **kwargs):
+            peer = MagicMock()
+            peer.host = host
+            peer.port = port
+            peer.services = (
+                NODE_NETWORK if host == "198.51.100.8" else NODE_NETWORK_LIMITED
+            )
+            peer.historie_aus = False
+            peer.tot = False
+            return peer
+
+        with patch("core.p2p.verbinde_peer", side_effect=fake_peer), patch(
+            "core.p2p.clearnet_p2p_port_blockiert", return_value=False,
+        ), patch(
+            "core.p2p.dns_seed_hosts", return_value=[("198.51.100.8", 8333)],
+        ) as dns, patch("core.p2p.merke_filter_peer"), patch(
+            "core.p2p.demote_filter_peer",
+        ):
+            live = verbinde_compact_filter_peers(
+                peers=[("192.0.2.1", 8333), ("192.0.2.2", 8333)],
+                limit=2,
+                versuche=2,
+                dns_fallback=True,
+                ruhig=True,
+                brauche_ungeprunt=True,
+            )
+        dns.assert_called()
+        self.assertTrue(any(peer.host == "198.51.100.8" for peer in live))
+
+    def test_nachruecken_verlangt_ungeprunten_peer(self):
+        from unittest.mock import patch
+
+        from core.bip158_scan import _block_peer_nachruecken
+
+        class Voll:
+            host, port = "192.0.2.9", 8333
+
+        gesehen: dict = {}
+
+        def fake(**kwargs):
+            gesehen.update(kwargs)
+            return [Voll()]
+
+        with patch(
+            "core.p2p.verbinde_compact_filter_peers", side_effect=fake,
+        ), patch("core.p2p.p2p_socket_erlaubt", return_value=True):
+            peer = _block_peer_nachruecken(
+                tor_proxy=None,
+                exclude=set(),
+                on_log=None,
+                rest=[0],
+                max_neu=4,
+            )
+        self.assertIsInstance(peer, Voll)
+        self.assertTrue(gesehen["brauche_ungeprunt"])
+        self.assertEqual(gesehen["limit"], 0)
+
     def test_verbinde_log_sagt_ueber_tor(self):
         from unittest.mock import MagicMock, patch
 
