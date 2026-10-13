@@ -16,6 +16,13 @@ from core.fulcrum_client import (
 
 def address_has_received_fulcrum(client: FulcrumClient, address: str) -> bool:
     """True, wenn die Adresse je eine On-Chain-Transaktion hatte."""
+    from core.libbitcoin_native import luecke_benutzt
+
+    # 404 zählt erst, wenn ein echter listunspent-Treffer die Hash-Reihenfolge
+    # bestätigt hat. Vorher bleibt die Historie die Quelle.
+    nativ = luecke_benutzt(client, address)
+    if nativ is not None:
+        return nativ
     sh = address_to_scripthash(address)
     history = client.request(_GET_HISTORY_METHOD, [sh])
     return bool(history)
@@ -482,7 +489,25 @@ def _utxos_from_listunspent_entries(
 
 
 def fetch_address_utxos_fulcrum(client: FulcrumClient, address: str) -> list[dict]:
-    """Unspent UTXOs einer Adresse (listunspent, Fallback: Tx-Historie)."""
+    """Unspent UTXOs einer Adresse (listunspent, Fallback: Tx-Historie).
+
+    Am eigenen libbitcoin-Indexer ersetzen bestätigte und unbestätigte
+    Outpoints plus Header den listunspent-Abruf, sobald die Skript-Hash-
+    Reihenfolge an einem nicht-leeren Bestand geprüft ist. Eine native
+    Störung fällt auf genau diesen Electrum-Abruf zurück und gilt nicht
+    als leere Adresse.
+    """
+    from core.esplora_lokal import hole_utxos
+    from core.libbitcoin_native import hole_native_utxos, merke_hash_aus_listunspent
+
+    # libbitcoin bleibt unter sich. Esplora nur für jeden anderen Server,
+    # und nur solange die Antwort Blockzeiten trägt.
+    nativ = hole_native_utxos(client, address)
+    if nativ is not None:
+        return nativ
+    lokal = hole_utxos(client, address)
+    if lokal is not None:
+        return lokal
     sh = address_to_scripthash(address)
     try:
         entries = client.request(_LISTUNSPENT_METHOD, [sh]) or []
@@ -491,6 +516,7 @@ def fetch_address_utxos_fulcrum(client: FulcrumClient, address: str) -> list[dic
             from core.fulcrum_history import _fetch_address_utxos_from_history
             return _fetch_address_utxos_from_history(client, address, sh)
         raise
+    merke_hash_aus_listunspent(client, address, entries if isinstance(entries, list) else [])
     return _utxos_from_listunspent_entries(client, entries)
 
 
@@ -862,9 +888,26 @@ def _fetch_wallet_utxos_tor_batch(
     Fallback: Server ohne listunspent → sequenziell History (selten).
     """
     from display import is_list_abort_requested
+    from core.esplora_lokal import utxo_fuer_tor_batch
 
     total = len(addr_list)
     utxos: list[dict] = []
+    # Der Explorer im LAN ist ein Abruf je Adresse und trägt die Blockzeit
+    # schon mit. Das ist weniger als ein Sammelabruf über die Onion.
+    if utxo_fuer_tor_batch(client):
+        for done, address in enumerate(addr_list, start=1):
+            if is_list_abort_requested():
+                return utxos
+            neu = []
+            for utxo in fetch_address_utxos_fulcrum(client, address):
+                utxo["address"] = address
+                utxos.append(utxo)
+                neu.append(utxo)
+            if neu:
+                melde_stand(neu)
+            melde(done, total)
+        return utxos
+
     listunspent_ok = True
 
     for start in range(0, total, TOR_RPC_BATCH_SIZE):

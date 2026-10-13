@@ -2599,6 +2599,14 @@ def _build_blockchain_fetchers(
             pass
 
         def raw_get_tx(txid: str) -> dict:
+            from core.esplora_lokal import hole_tx
+
+            # Kleine Tx vom eigenen Explorer, nur wenn der Server kein
+            # libbitcoin ist. Breite Antworten und fehlende Prevouts
+            # fallen auf Electrum zurück.
+            lokal = hole_tx(fulcrum, txid)
+            if lokal is not None:
+                return lokal
             try:
                 return fetch_tx_fulcrum(fulcrum, txid)
             except Exception as electrs_exc:
@@ -2622,6 +2630,9 @@ def _build_blockchain_fetchers(
         get_tx = wrap_get_tx_with_immutable_cache(
             raw_get_tx, cache_root, source, pool=scan_pool
         )
+        from core.esplora_lokal import haenge_vorgaengerzeit_an
+
+        haenge_vorgaengerzeit_an(get_tx, fulcrum)
         fetch_addresses_utxos = lambda addrs, **kw: _fetch_utxos_for_addresses(
             addrs, fetch_address_utxos, **kw
         )

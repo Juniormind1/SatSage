@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · eigener Explorer:** Ist ein Block-Explorer mit Esplora-API im eigenen Netz eingetragen und der verbundene Electrum-Server kein libbitcoin, liest SatSage Bestand und kleine Herkunft dort. Die Adresslücke bleibt beim Electrum-Server. Öffentliche Explorer und libbitcoin bleiben außen.
+
+- **Datenquellen · libbitcoin:** Ist der eigene Electrum-Server libbitcoin und sein Adressindex erreichbar (Vorgabe Port 8181, `LIBBITCOIN_NATIVE_PORT`), liest SatSage Bestand und Herkunft dort. Electrum bleibt der Ersatz, solange der Index fehlt oder eine Antwort nicht zur bekannten Liste passt. Öffentliche Server bleiben beim Electrum-Protokoll. Der Vergleich `scripts/libbitcoin_native_profil.py` startet nur, wer ihn selbst aufruft.
+
 - **P2P · UTXOs sofort im Cache:** Findet der gemeinsame Compact-Filter-Lauf ein UTXO, schreibt SatSage den Bestand dieses Wallets in dem Moment in den Cache, in dem der Block gelesen ist. Wallet-Ansicht und Dotplot zeigen die Treffer noch während Turbo und Historie laufen. Ein Wallet ohne Treffer bekommt dabei keine leere Cache-Datei. Der Schluss-Schreibvorgang am Ende des Laufs bleibt.
 
 - **Wallet · FIFO-Spend · live während Herkunft:** „max … grün ausgebbar“ und der Lot-Donut am Walletnamen folgen demselben Lots-Strom wie die grüne Scorecard (`lots=0`, dann `GET /api/tax/lots`). Die Zahl steigt mit jedem fertigen Herkunftsbaum, statt erst nach einem neuen Öffnen der Wallet. Läuft das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.

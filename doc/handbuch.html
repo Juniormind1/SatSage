@@ -751,7 +751,7 @@ Lücken, Importe oder ein Change-Ausgang zuerst kommen vor.</p>
 <p>Erhoben wird das <strong>einmalig</strong>, beim Scan eines XPUB, für den
 noch kein Wert vorliegt — die älteste Transaktion eines Wallets kann sich nicht
 mehr ändern. Es kostet eine Abfrage je Adresse und braucht einen
-<strong>Electrum-Server</strong>; läuft der Scan über Esplora oder BIP-158,
+<strong>Electrum-Server</strong>; läuft der Scan über BIP-158,
 bleibt die Angabe leer und wird beim nächsten Electrum-Scan nachgeholt. Lässt
 sich die Blockzeit nicht auflösen, steht dort die Blockhöhe.</p>
 
@@ -1596,10 +1596,10 @@ Menü und Einmal-Läufe über <code>main.py</code> sind kein Bedienweg.</p>
         <td>automatisch (letzte Stufe)</td>
         <td><span class="gelb">mäßig</span></td>
         <td>Server aus <code>electrum_servers.json</code></td></tr>
-    <tr><td><strong>Esplora</strong></td>
-        <td><code>--esplora [URL]</code> oder manuelle Wahl</td>
-        <td><span class="rot">gering</span></td>
-        <td>HTTP-API (Vorgabe mempool.space), Rate-Limit-Schutz</td></tr>
+    <tr><td><strong>Eigener Block-Explorer</strong></td>
+        <td>keine eigene Quelle. <code>MEMPOOL_URL</code> im eigenen Netz, und der Electrum-Server ist kein libbitcoin</td>
+        <td><span class="gruen">hoch</span></td>
+        <td>Bestand und kleine Herkunft über die Esplora-API. Die Adresslücke bleibt beim Electrum-Server. Öffentliche Explorer werden nicht gefragt.</td></tr>
   </tbody>
 </table>
 </div>
@@ -1635,10 +1635,13 @@ ungenutzten Lookahead-Keys seit SegWit. Compact Filter liegen unter
 beim nächsten Wallet oder Rescan wiederverwendet. Blöcke nur bei Filter-Treffer;
 Filter-Download und Block-Download laufen entkoppelt.</p>
 
-<p><code>BITCOIN_BIP158=1</code> und <code>ESPLORA_URL</code> in
-<code>.env</code> erzwingen <strong>keine</strong> Quelle — nur
-<code>--bip158</code>, <code>--rpc-only</code>, <code>--esplora</code> oder die
-manuelle Wahl unter Einstellungen.</p>
+<p><code>BITCOIN_BIP158=1</code> in <code>.env</code> erzwingt
+<strong>keine</strong> Quelle — nur <code>--bip158</code>,
+<code>--rpc-only</code> oder die manuelle Wahl unter Einstellungen.
+Ein öffentlicher Esplora-Server ist keine Datenquelle. Die eigene
+mempool-Instanz unter <code>MEMPOOL_URL</code> liefert Bestand und
+kleine Herkunft, solange der verbundene Electrum-Server kein libbitcoin
+ist.</p>
 
 <h3>Warum „Electrum-Server" und nicht „Fulcrum"</h3>
 
@@ -1646,7 +1649,10 @@ manuelle Wahl unter Einstellungen.</p>
 eine Implementierung davon; electrs und ElectrumX funktionieren genauso. Die
 <code>.env</code>-Schlüssel heißen weiterhin <code>FULCRUM_*</code>, damit
 bestehende Konfigurationen unverändert weiterlaufen — nur die Bezeichnungen in
-der Oberfläche sind richtiggestellt.</p>
+der Oberfläche sind richtiggestellt. Meldet sich der eigene Server als
+libbitcoin und liefert seine Abfrage auf Port 8181 einen Adressindex
+(<code>LIBBITCOIN_NATIVE_PORT</code>), nutzt SatSage diesen Weg für Bestand
+und Herkunft. Sonst bleibt es beim Electrum-Protokoll.</p>
 
 <h3>Verbindung testen</h3>
 
@@ -1713,10 +1719,8 @@ RPCPASSWORD=...
 # BIP158_START_HEIGHT=850000
 # BIP158_GAP_LIMIT=100                 # 1…10000, Vorgabe 100. Höher = weitere Indizes, mehr Blöcke.
 
-# Esplora (nur bei manueller Wahl oder --esplora)
-# ESPLORA_URL=https://mempool.space/api
-
-# Eigene mempool.space-Instanz für die ↗-Verweise
+# Eigene mempool.space-Instanz: ↗-Verweise, und — wenn der Electrum-Server
+# kein libbitcoin ist — Bestand und kleine Herkunft. Öffentliche Explorer nie.
 # MEMPOOL_URL=http://umbrel.local:3006
 
 # Verbose: volle TxIDs/Adressen (Vorgabe: aus)
@@ -1904,8 +1908,9 @@ Schreibvorgänge pausiert (Warnung einmalig).</p>
       beste Privatsphäre.</li>
   <li><strong>Öffentliche Electrum-Server</strong> — Rotation mildert das Risiko
       einzelner Server, bleibt aber <span class="gelb">mäßig</span>.</li>
-  <li><strong>Esplora</strong> — Adressen und TxIDs gehen an den API-Anbieter,
-      <span class="rot">geringste</span> Privatsphäre.</li>
+  <li><strong>Eigener Block-Explorer</strong> — nur die Instanz im eigenen Netz
+      (<code>MEMPOOL_URL</code>). Ein öffentlicher Explorer ist keine
+      Datenquelle.</li>
   <li><strong>Sanktions-Scans</strong> nutzen für die Listen-Adressen den
       eigenen privaten Server oder Clearnet — nie die eigenen Wallet-XPUBs.</li>
   <li>Die Web-Oberfläche schreibt <strong>keine Zugriffsprotokolle</strong> und

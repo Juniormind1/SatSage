@@ -38,6 +38,8 @@ py server.py
 | `bip158_scanner.py` | BIP-158 über Bitcoin-P2P (Compact Filter, TurboSync); Matcher `_CoreBasicFilterMatcher` |
 | `core/p2p.py` | Bitcoin-P2P: Handshake, Header, `cfilter`, Block-Download |
 | `fulcrum.py` | Fulcrum/Electrum-Protokoll, Onion-Rotation |
+| `core/libbitcoin_native.py` | Eigener libbitcoin-Indexer: Bestand und Herkunft über `/v1`, nur mit Adressindex |
+| `core/esplora_lokal.py` | Eigenes Esplora: Bestand und kleine Herkunft, nur wenn der Electrum-Server kein libbitcoin ist |
 | `core/jobs.py` | Hintergrund-Vorgänge (Scan, Verlauf, Herkunft) mit Log und Abbruch |
 | `core/tax.py` | Haltefrist, Stichtag, Steuerjahr-Auswertung |
 | `core/llm_anbindung.py` / `llm_client.py` / `llm_context.py` | Assistent: Einstufung, Chat-Loop (Loopback/LAN; Remote nur Opt-in), Cache-Reader. Kein Job-Start. Key nie im Status. |
@@ -85,6 +87,10 @@ Mit Electrs bleibt Electrs primär für `get_tx`; Core nur wenn Electrs die Tx n
 BIP-158 steht in dieser Kette nicht. Compact Filter liefern keinen Verlauf, solange die Herkunfts-Lücke gilt.
 
 Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. In der Oberfläche merkt „Verbinden“ die gewählte Familie (Clearnet oder Onion) für die Sitzung — Scan, Verlauf und Empfang bleiben bei dieser Familie. Sobald ein eigener Electrum-Server (electrs/Fulcrum/libbitcoin) erreichbar ist, werden öffentliche Verbindungen abgeklemmt und die Sitzungs-Freigabe ungültig — ein erneuter öffentlicher Connect fragt wieder. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
+
+Ist der eigene Indexer libbitcoin und antwortet `GET /v1/configuration` mit `address: true` (Klartext, Port 8181 oder `LIBBITCOIN_NATIVE_PORT`), lesen Bestand und Herkunft über diese Abfrage. Sonst bleibt Electrum. Ein öffentlicher Server, der sich libbitcoin nennt, bekommt sie nicht.
+
+Ist der verbundene Electrum-Server kein libbitcoin und `MEMPOOL_URL` eine Esplora-Instanz im eigenen Netz, lesen Bestand und kleine Herkunft dort. Die Adresslücke bleibt Electrum. Öffentliche Explorer und Onion-Adressen bleiben außen.
 
 Explizit nur per **CLI** (`--bip158`, `--rpc-only`) oder **Einstellungen → Datenquelle wählen**. `BIP158_P2P=1` in `.env` allein erzwingt **keine** Datenquelle — die Auto-Priorität bleibt aktiv.
 

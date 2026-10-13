@@ -125,6 +125,8 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_verlauf_cache.py` | 8 | `*_verlauf.json` |
 | `test_verlauf_prioritaet.py` | 8 | Verlaufskette ≠ UTXO-Kette |
 | `test_fulcrum_verlauf.py` | 11 | History-Fetch |
+| `test_libbitcoin_native.py` | 12 | libbitcoin `/v1` nur am eigenen Indexer, Stub |
+| `test_esplora_lokal.py` | 8 | eigenes Esplora nur neben Electrs, Stub |
 | `test_fulcrum_verlauf_hrp.py` | 1 | scriptPubKey vs. HRP |
 | `test_fulcrum_retry.py` | 7 | Reconnect bei Timeout |
 | `test_fulcrum_tor_batch.py` | 8 | Batch nur eigener Electrs über Tor |

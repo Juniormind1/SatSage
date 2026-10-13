@@ -52,7 +52,7 @@ def make_cached_fulcrum_get_tx(
     from core.fulcrum_history import fetch_tx_fulcrum
 
     root = cache_root or IMMUTABLE_CACHE_DIR
-    return wrap_get_tx_with_immutable_cache(
+    geh = wrap_get_tx_with_immutable_cache(
         lambda txid: fetch_tx_fulcrum(
             client,
             txid,
@@ -61,6 +61,11 @@ def make_cached_fulcrum_get_tx(
         root,
         "fulcrum",
     )
+    # Nur der eigene libbitcoin-Indexer. Der Clearnet-Pool hat einen anderen Host.
+    from core.libbitcoin_native import haenge_prevout_duenn_an
+
+    haenge_prevout_duenn_an(geh, client)
+    return geh
 
 
 _sanctions_clearnet_pool = None

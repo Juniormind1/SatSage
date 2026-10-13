@@ -96,6 +96,16 @@ def resolve_vin_prevout(
     if isinstance(prevout, dict) and prevout:
         return prevout
 
+    duenn = getattr(get_tx, "prevout_duenn", None)
+    if callable(duenn):
+        try:
+            leicht = duenn(str(vin["txid"]), int(vin["vout"]))
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            leicht = None
+        if isinstance(leicht, dict) and leicht:
+            return leicht
+
     if progress:
         vout = int(vin["vout"])
         progress(
@@ -329,12 +339,30 @@ def _mit_vorgaengerzeit(
     Ergänzt die Blockzeit des Vorgängers, wenn sie noch fehlt.
 
     Esplora liefert den Vorgänger-Output inline in ``vin[].prevout`` — aber
-    ohne dessen Blockzeit, und genau die ist das Anschaffungsdatum. Ein
-    get_tx pro Eingang holt sie nach; das ist derselbe Preis, den der
-    deferred-Pfad ohnehin zahlt, und get_tx ist gecacht.
+    ohne dessen Blockzeit, und genau die ist das Anschaffungsdatum. Liegt
+    ``vorgaengerzeit`` am Abruf, reicht ``/tx/:id/status``. Sonst holt ein
+    get_tx pro Eingang die Zeit nach.
     """
     if edge.prev_time_ts is not None:
         return edge
+    duenn = getattr(get_tx, "prevout_duenn", None)
+    if callable(duenn):
+        try:
+            leicht = duenn(edge.prevout.txid, edge.prevout.vout)
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            leicht = None
+        if isinstance(leicht, dict) and leicht.get("_prev_tx_time_ts") is not None:
+            return replace(edge, prev_time_ts=int(leicht["_prev_tx_time_ts"]))
+    zeit_fn = getattr(get_tx, "vorgaengerzeit", None)
+    if callable(zeit_fn):
+        try:
+            zeit = zeit_fn(edge.prevout.txid)
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            zeit = None
+        if zeit is not None:
+            return replace(edge, prev_time_ts=int(zeit))
     if progress:
         progress(f"↻ Herkunft: Blockzeit zu {edge.prevout.txid[:16]}…")
     try:
@@ -475,8 +503,10 @@ def iter_trace_funding_inputs(
     # bleibt Schritt für Schritt und liefert dieselbe Reihenfolge. Der
     # Vorlader blockiert nicht: sonst hängt der ganze Baum am langsamsten
     # Vorgänger einer großen Sammel-Tx, ohne dass eine Zeile entsteht.
+    # Liegt die Vorgängerzeit am Explorer, würde das Vorladen die volle
+    # Vorgänger-Tx trotzdem ziehen.
     vorladen = getattr(get_tx, "prefetch", None)
-    if vorladen is not None:
+    if vorladen is not None and not callable(getattr(get_tx, "vorgaengerzeit", None)):
         try:
             vorladen([vin["txid"] for vin in deferred if vin.get("txid")])
         except Exception as exc:
