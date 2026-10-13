@@ -103,7 +103,7 @@ def read_compact_size(data: bytes, offset: int = 0) -> tuple[int, int]:
 
 
 class P2pGesperrt(ConnectionError):
-    """P2P ist für Herkunft, Verlauf und Header-Vorab zu."""
+    """P2P ist für Herkunft und Verlauf zu."""
 
 
 class PeerHatBlockNicht(ConnectionError):
@@ -116,9 +116,17 @@ _utxo_entdeckung_tiefe = 0
 _utxo_entdeckung_lock = threading.Lock()
 
 
+_header_tiefe = 0
+_header_lock = threading.Lock()
+
+
 def p2p_socket_erlaubt() -> bool:
-    """True während ``p2p_nur_utxo_entdeckung``, sonst nur wenn P2P offen ist."""
-    return (not p2p_gesperrt()) or _utxo_entdeckung_laeuft()
+    """True während UTXO-Suche oder Header-Sync, sonst nur wenn P2P offen ist."""
+    return (
+        (not p2p_gesperrt())
+        or _utxo_entdeckung_laeuft()
+        or _header_laeuft()
+    )
 
 
 def p2p_gesperrt() -> bool:
@@ -129,11 +137,11 @@ def p2p_gesperrt() -> bool:
     Block. Eine historische Vorgänger-Tx braucht eine Txid-zu-Block-
     Abbildung, die P2P nicht hat. Key-Path-Taproot lässt sich aus dem
     Witness nicht rekonstruieren. Deshalb bleiben Herkunft, Verlauf,
-    Header-Vorab und der Walk-Abgleich zu.
+    ``get_tx`` und der Walk-Abgleich zu.
 
-    Sockets für den UTXO-Bestand öffnet nur ``p2p_nur_utxo_entdeckung``,
-    und der Aufrufer nur, wenn eigener Electrum-Server und scantxoutset
-    nicht verbunden sind (``core.chain_sources.p2p_utxo_entdeckung_frei``).
+    Sockets für den UTXO-Bestand öffnet nur ``p2p_nur_utxo_entdeckung``.
+    Header-Sync öffnet sie nur in ``p2p_nur_header``, und nur wenn P2P die
+    einzige Bestandsquelle ist (``p2p_utxo_entdeckung_frei``).
     """
     return True
 
@@ -154,6 +162,24 @@ def p2p_nur_utxo_entdeckung():
 def _utxo_entdeckung_laeuft() -> bool:
     with _utxo_entdeckung_lock:
         return _utxo_entdeckung_tiefe > 0
+
+
+@contextmanager
+def p2p_nur_header():
+    """Erlaubt P2P-Sockets nur für Header-Erstlauf oder Tip-Nachzug."""
+    global _header_tiefe
+    with _header_lock:
+        _header_tiefe += 1
+    try:
+        yield
+    finally:
+        with _header_lock:
+            _header_tiefe -= 1
+
+
+def _header_laeuft() -> bool:
+    with _header_lock:
+        return _header_tiefe > 0
 
 
 def p2p_netz_name() -> str:
@@ -573,7 +599,7 @@ def _oeffne_socket(
     timeout: float,
     tor_proxy: tuple[str, int] | None,
 ) -> socket.socket:
-    if p2p_gesperrt() and not _utxo_entdeckung_laeuft():
+    if not p2p_socket_erlaubt():
         raise P2pGesperrt(
             "P2P ist abgeklemmt: Compact Filter reichen für die Herkunft nicht."
         )

@@ -329,16 +329,45 @@ class TestFilterParallel(unittest.TestCase):
         self.assertEqual(tip, 0)
         self.assertTrue(any("BIP158_P2P=0" in z for z in logs), logs)
 
-    def test_vorab_header_aus_wenn_p2p_abgeklemmt(self):
+    def test_vorab_header_aus_wenn_andere_quelle_verbunden(self):
         from unittest.mock import patch as _patch
 
         from bip158_scanner import vorab_block_header
 
         logs: list[str] = []
-        with _patch("core.p2p.p2p_gesperrt", return_value=True):
+        with _patch("core.p2p.p2p_gesperrt", return_value=True), _patch(
+            "core.chain_sources.p2p_utxo_entdeckung_frei", return_value=False,
+        ):
             tip = vorab_block_header({"BIP158_P2P": "1"}, on_log=logs.append)
         self.assertEqual(tip, 0)
         self.assertTrue(any("abgeklemmt" in z for z in logs), logs)
+
+    def test_vorab_header_startet_wenn_p2p_einzige_quelle(self):
+        from unittest.mock import MagicMock, patch as _patch
+
+        from bip158_scanner import vorab_block_header
+
+        logs: list[str] = []
+        client = MagicMock()
+        peer = MagicMock()
+        client.scanner._ensure_peer.return_value = peer
+        kette = MagicMock()
+        kette.tip_height.return_value = 900_000
+        with _patch("core.p2p.p2p_gesperrt", return_value=True), _patch(
+            "core.chain_sources.p2p_utxo_entdeckung_frei", return_value=True,
+        ), _patch(
+            "core.bip158_wallet.create_bip158_client_from_env",
+            return_value=client,
+        ), _patch(
+            "core.p2p.header_datei_tip", return_value=850_000,
+        ), _patch(
+            "core.p2p.hole_header", return_value=kette,
+        ) as hole:
+            tip = vorab_block_header({"BIP158_P2P": "1"}, on_log=logs.append)
+        self.assertEqual(tip, 900_000)
+        hole.assert_called_once()
+        self.assertTrue(any("nachgezogen" in z for z in logs), logs)
+        client.scanner._ensure_peer.assert_called_once_with(still=True)
 
     def test_ein_peer_bleibt_sequentiell(self):
         class FakePeer:

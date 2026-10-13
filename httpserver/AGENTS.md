@@ -18,4 +18,4 @@ Gilt für `httpserver/` **und** für [`../server.py`](../server.py). Zusätzlich
 
 ## Header-Vorab
 
-`server.py` startet `starte_header_vorab`: Header ab SegWit in `p2p_headers.bin`, Job `headers` für das Log. Solange `p2p_gesperrt()` wahr ist, läuft der Vorab nicht und öffnet keinen Socket. Die UTXO-Suche darf P2P trotzdem nutzen, wenn eigener Electrum-Server und scantxoutset nicht verbunden sind. Fachregeln dazu stehen in [`../core/AGENTS.md`](../core/AGENTS.md) und [`../doc/issues/p2p-herkunft.md`](../doc/issues/p2p-herkunft.md).
+`server.py` startet `starte_header_vorab`: Header ab SegWit in `p2p_headers.bin`, Job `headers` für das Log. Ist der Cache schon über SegWit, nur Tip-Nachzug. Das läuft, sobald P2P die einzige Bestandsquelle ist (`p2p_utxo_entdeckung_frei`), auch während `p2p_gesperrt()` wahr ist. Sockets dafür nur in `p2p_nur_header`. Herkunft, Verlauf und `get_tx` bleiben zu. Fachregeln: [`../core/AGENTS.md`](../core/AGENTS.md) und [`../doc/issues/p2p-herkunft.md`](../doc/issues/p2p-herkunft.md).

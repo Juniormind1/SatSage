@@ -2131,22 +2131,48 @@ def vorab_block_header(
     den Erstsync. Ein eigener Electrum-Server braucht das nicht.
 
     Ist der Cache schon weit, nur Tip-Nachzug (keine „ab SegWit“-Meldung).
+    Läuft auch bei gesperrter Herkunft, sobald P2P die einzige Bestandsquelle ist.
     """
+
+    def _log(text: str) -> None:
+        if on_log:
+            on_log(text)
+
+    if env.get("BIP158_P2P", "1").strip().lower() in ("0", "false", "nein", "off"):
+        _log("P2P-Header-Vorab aus (BIP158_P2P=0).")
+        return 0
+
+    from core.p2p import p2p_nur_header, p2p_socket_erlaubt
+
+    if p2p_socket_erlaubt():
+        return _vorab_block_header_lauf(
+            env, cache_dir=cache_dir, immutable_dir=immutable_dir, on_log=_log,
+        )
+    from core.chain_sources import p2p_utxo_entdeckung_frei
+
+    if not p2p_utxo_entdeckung_frei(env):
+        _log("P2P-Header-Vorab aus (P2P abgeklemmt).")
+        return 0
+    with p2p_nur_header():
+        return _vorab_block_header_lauf(
+            env, cache_dir=cache_dir, immutable_dir=immutable_dir, on_log=_log,
+        )
+
+
+def _vorab_block_header_lauf(
+    env: dict[str, str],
+    *,
+    cache_dir: Path | None,
+    immutable_dir: Path | None,
+    on_log,
+) -> int:
+    """Header ab SegWit oder nur den Tip, je nachdem was schon im Cache liegt."""
     from core.bip158_wallet import create_bip158_client_from_env
     from core.p2p import SEGWIT_HEIGHT, header_datei_tip, hole_header
 
     def _log(text: str) -> None:
         if on_log:
             on_log(text)
-
-    from core.p2p import p2p_gesperrt
-
-    if p2p_gesperrt():
-        _log("P2P-Header-Vorab aus (P2P abgeklemmt).")
-        return 0
-    if env.get("BIP158_P2P", "1").strip().lower() in ("0", "false", "nein", "off"):
-        _log("P2P-Header-Vorab aus (BIP158_P2P=0).")
-        return 0
 
     client = create_bip158_client_from_env(
         env,

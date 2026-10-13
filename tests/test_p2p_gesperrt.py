@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch
 
 from core.chain_sources import p2p_utxo_entdeckung_frei
 from core.fulcrum_client import FulcrumClient
-from core.p2p import P2pGesperrt, p2p_gesperrt, p2p_nur_utxo_entdeckung, verbinde_peer
+from core.p2p import (
+    P2pGesperrt,
+    p2p_gesperrt,
+    p2p_nur_header,
+    p2p_nur_utxo_entdeckung,
+    verbinde_peer,
+)
 from core.source import describe_sources
 
 
@@ -35,6 +41,17 @@ class TestP2pGesperrt(unittest.TestCase):
             worker.start()
             worker.join()
         self.assertEqual(gesehen, [True])
+
+    def test_header_sync_darf_socket(self):
+        with patch("socket.create_connection", side_effect=OSError("zu")) as conn:
+            with p2p_nur_header():
+                with self.assertRaises(OSError):
+                    verbinde_peer("127.0.0.1", 18444, timeout=1)
+            conn.assert_called_once()
+        with patch("socket.create_connection") as conn:
+            with self.assertRaises(P2pGesperrt):
+                verbinde_peer("127.0.0.1", 18444, timeout=1)
+            conn.assert_not_called()
 
     def test_datenquellen_zeigen_p2p_fuer_den_bestand(self):
         quelle = next(q for q in describe_sources({}) if q.key == "bip158")
