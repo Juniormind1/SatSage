@@ -22,6 +22,7 @@ import labels
 import main
 from core.bitcoind_rpc import rpc_credentials_from_env
 from core.config import EnvFile, WalletEntry, read_wallets
+from core.env_bootstrap import NODE_MANAGED, plattform_env_werte
 from core.jobs import JobRegistry, ScanQueue
 from core import source as source_mod
 
@@ -39,7 +40,7 @@ def _close_fulcrum_quiet(client) -> None:
 
 # Plattformen, die Node- und Indexer-Adressen per Prozess-Env vorgeben und
 # deren Datenquellen-Felder deshalb in der UI gesperrt sind.
-_NODE_MANAGED = frozenset(("start9", "umbrel"))
+_NODE_MANAGED = NODE_MANAGED
 # Alle Modi, in denen SatSage nicht allein über die eigene .env konfiguriert wird.
 _MANAGED_MODI = frozenset(("specter", "start9", "umbrel"))
 # Anzeigename je Modus für Hinweise und Fehlermeldungen.
@@ -194,29 +195,7 @@ class AppState:
             # Daemon env from the platform (StartOS bridges, Umbrel compose)
             # is process env, not .env — promote it into runtime_values without
             # overriding a value the user set in their own .env.
-            for key in (
-                "BITCOIND_HOST",
-                "ELECTRS_HOST",
-                "NODE_IP",
-                "RPCHOST",
-                "BITCOIN_RPC_HOST",
-                "RPCPORT",
-                "RPCUSER",
-                "RPCPASSWORD",
-                "RPC_SSL",
-                "RPC_COOKIE_FILE",
-                "FULCRUM_HOST",
-                "FULCRUM_PORT",
-                "FULCRUM_SSL",
-                "SATSAGE_ELECTRUM_INDEXER",
-                "MEMPOOL_URL",
-                "LLM_BASE_URL",
-                "LLM_ANBIETER",
-                "LLM_MODELL",
-            ):
-                proc = (os.environ.get(key) or "").strip()
-                if proc and key not in env.values():
-                    env.runtime_values[key] = proc
+            env.runtime_values.update(plattform_env_werte(env.values()))
             values = env.values()
             # Prefer explicit FULCRUM_* from the platform (StartOS daemon or the
             # Umbrel electrs dependency). Only fall back to ELECTRS_HOST when
