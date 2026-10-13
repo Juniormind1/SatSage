@@ -762,13 +762,49 @@ class NativeSitzung:
         return tx
 
 
-def sitzung_fuer(client, werte: dict[str, str] | None = None) -> NativeSitzung:
-    """Legt die Sitzung einmal am Client ab. Wiederholte Aufrufe prüfen nicht neu."""
+def _werte_fuer(client, werte: dict[str, str] | None) -> dict[str, str]:
     if werte is None:
         # Tests setzen das, damit nicht die .env des Rechners die Probe auslöst.
         gesetzt = getattr(client, "_libbitcoin_werte", None)
         if isinstance(gesetzt, dict):
             werte = gesetzt
+    return _werte_lesen(werte)
+
+
+def abfrage_hinweis(client, werte: dict[str, str] | None = None, *, log=None) -> str | None:
+    """Eine Zeile fürs Job-Log, wenn dieser Client der eigene libbitcoin ist.
+
+    Prüft die Abfrage einmal und legt die Sitzung am Client ab. Electrs,
+    Fulcrum und ein fremder Server, der sich libbitcoin nennt, bleiben stumm.
+    """
+    if str(getattr(client, "server_software", "") or "") != "libbitcoin":
+        return None
+    frisch = not isinstance(getattr(client, "_libbitcoin_native", None), NativeSitzung)
+    if frisch and log is not None:
+        geladen = _werte_fuer(client, werte)
+        host = normalize_host(getattr(client, "host", "") or "")
+        if host in _eigene_hosts(geladen):
+            log(f"Prüfe libbitcoin-Abfrage {host}:{_port_aus(geladen)}…")
+    sitzung = sitzung_fuer(client, werte)
+    if sitzung.grund in ("software", "fremd"):
+        return None
+    ziel = f"{sitzung.host}:{sitzung.port}"
+    if sitzung.aktiv:
+        text = (
+            f"libbitcoin-Abfrage {ziel}: Adressindex an — "
+            "Bestand und Herkunft darüber."
+        )
+    elif sitzung.grund == "index":
+        text = f"libbitcoin-Abfrage {ziel}: kein Adressindex — Electrum bleibt."
+    else:
+        text = f"libbitcoin-Abfrage {ziel}: nicht erreichbar — Electrum bleibt."
+    if log is not None:
+        log(text)
+    return text
+
+
+def sitzung_fuer(client, werte: dict[str, str] | None = None) -> NativeSitzung:
+    """Legt die Sitzung einmal am Client ab. Wiederholte Aufrufe prüfen nicht neu."""
     vorhanden = getattr(client, "_libbitcoin_native", None)
     if isinstance(vorhanden, NativeSitzung):
         return vorhanden
@@ -783,7 +819,7 @@ def sitzung_fuer(client, werte: dict[str, str] | None = None) -> NativeSitzung:
         isinstance(proxy, tuple) and len(proxy) == 2
     ):
         proxy = None
-    geladen = _werte_lesen(werte)
+    geladen = _werte_fuer(client, werte)
     sitzung = NativeSitzung(host, _port_aus(geladen), timeout_f, proxy)
     software = str(getattr(client, "server_software", "") or "")
     if software != "libbitcoin" or host not in _eigene_hosts(geladen):

@@ -20,7 +20,7 @@ from core.fulcrum_wallet import (
     fetch_address_utxos_fulcrum,
     first_seen_height_fulcrum,
 )
-from core.libbitcoin_native import skript_aus_nativ
+from core.libbitcoin_native import abfrage_hinweis, skript_aus_nativ
 from core.trace import FundingEdge, PrevoutRef, _mit_vorgaengerzeit, resolve_vin_prevout
 
 TX = "11" * 32
@@ -151,6 +151,47 @@ class NativeWegTests(unittest.TestCase):
         address_has_received_fulcrum(fremd, self.adresse)
         self.assertEqual(self.dienst.pfade, [])
         self.assertFalse(fremd._libbitcoin_native.aktiv)
+
+    def test_abfrage_hinweis_im_log(self) -> None:
+        self.dienst = _server(lambda pfad: (200, {"address": True}, "application/json"))
+        zeilen: list[str] = []
+        kunde = self._kunde()
+        text = abfrage_hinweis(kunde, log=zeilen.append)
+        port = self.dienst.server_address[1]
+        self.assertEqual(
+            zeilen,
+            [
+                f"Prüfe libbitcoin-Abfrage 127.0.0.1:{port}…",
+                f"libbitcoin-Abfrage 127.0.0.1:{port}: Adressindex an — "
+                "Bestand und Herkunft darüber.",
+            ],
+        )
+        self.assertEqual(text, zeilen[-1])
+        self.assertEqual(self.dienst.pfade, ["/v1/configuration"])
+        self.dienst.pfade.clear()
+        self.assertEqual(abfrage_hinweis(kunde), text)
+        self.assertEqual(self.dienst.pfade, [])
+
+        ohne = self._kunde(software="electrs")
+        self.assertIsNone(abfrage_hinweis(ohne, log=zeilen.append))
+        self.assertEqual(len(zeilen), 2)
+
+        leer = self._kunde()
+        leer._libbitcoin_werte = {"FULCRUM_HOST": "127.0.0.1", "LIBBITCOIN_NATIVE_PORT": "1"}
+        leer.timeout = 0.2
+        self.assertIn(
+            "nicht erreichbar",
+            abfrage_hinweis(leer) or "",
+        )
+
+        ohne_index = self._kunde()
+        self.dienst.router = lambda pfad: (200, {"address": False}, "application/json")
+        self.assertIn("kein Adressindex", abfrage_hinweis(ohne_index) or "")
+
+        fremd = self._kunde(host="192.0.2.50")
+        fremd._libbitcoin_werte["FULCRUM_HOST"] = "127.0.0.1"
+        self.assertIsNone(abfrage_hinweis(fremd, log=zeilen.append))
+        self.assertEqual(len(zeilen), 2)
 
     def test_weiterleitung_wird_nicht_verfolgt(self) -> None:
         def router(pfad):

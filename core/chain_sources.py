@@ -1160,6 +1160,7 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
                 "Datenquelle: eigener Electrum-Server (LAN) "
                 + _client_ziel(client, host, port)
             )
+            _log_libbitcoin_abfrage(client, env)
             return client
         if _resolve_own_tor_endpoint(args, env):
             _log_quelle("LAN-Electrum nicht erreichbar — wechsle auf Onion.")
@@ -1180,8 +1181,16 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
                 "Datenquelle: eigener Electrum-Server (Tor) "
                 + _client_ziel(client, host, port)
             )
+            _log_libbitcoin_abfrage(client, env)
             return client
     return None
+
+
+def _log_libbitcoin_abfrage(client, env: dict[str, str]) -> None:
+    """Sichtbar machen, ob die libbitcoin-Abfrage den Bestand übernimmt."""
+    from core.libbitcoin_native import abfrage_hinweis
+
+    abfrage_hinweis(client, env, log=_log_quelle)
 
 
 def _p2p_schalter_aus(env: dict[str, str]) -> bool:

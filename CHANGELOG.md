@@ -11,7 +11,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 - **Datenquellen · eigener Explorer:** Ist ein Block-Explorer mit Esplora-API im eigenen Netz eingetragen und der verbundene Electrum-Server kein libbitcoin, liest SatSage Bestand und kleine Herkunft dort. Die Adresslücke bleibt beim Electrum-Server. Öffentliche Explorer und libbitcoin bleiben außen.
 
-- **Datenquellen · libbitcoin:** Ist der eigene Electrum-Server libbitcoin und sein Adressindex erreichbar (Vorgabe Port 8181, `LIBBITCOIN_NATIVE_PORT`), liest SatSage Bestand und Herkunft dort. Electrum bleibt der Ersatz, solange der Index fehlt oder eine Antwort nicht zur bekannten Liste passt. Öffentliche Server bleiben beim Electrum-Protokoll. Der Vergleich `scripts/libbitcoin_native_profil.py` startet nur, wer ihn selbst aufruft.
+- **Datenquellen · libbitcoin:** Ist der eigene Electrum-Server libbitcoin und sein Adressindex erreichbar (Vorgabe Port 8181, `LIBBITCOIN_NATIVE_PORT`), liest SatSage Bestand und Herkunft dort. Electrum bleibt der Ersatz, solange der Index fehlt oder eine Antwort nicht zur bekannten Liste passt. Öffentliche Server bleiben beim Electrum-Protokoll. Im Verbindungs-Log steht, ob die Abfrage den Adressindex hat oder Electrum bleibt. Der Vergleich `scripts/libbitcoin_native_profil.py` startet nur, wer ihn selbst aufruft.
 
 - **P2P · UTXOs sofort im Cache:** Findet der gemeinsame Compact-Filter-Lauf ein UTXO, schreibt SatSage den Bestand dieses Wallets in dem Moment in den Cache, in dem der Block gelesen ist. Wallet-Ansicht und Dotplot zeigen die Treffer noch während Turbo und Historie laufen. Ein Wallet ohne Treffer bekommt dabei keine leere Cache-Datei. Der Schluss-Schreibvorgang am Ende des Laufs bleibt.
 
