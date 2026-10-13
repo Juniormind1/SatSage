@@ -831,7 +831,8 @@ function starteWalletWarteRegen(kasten, gen) {
     : WALLET_WARTE_LATEIN;
   const stil = getComputedStyle(kasten);
   const grund = (stil.getPropertyValue("--warte-grund") || "#14181c").trim();
-  const kopf = (stil.getPropertyValue("--warte-kopf") || "#d8ffe6").trim();
+  // Zeichen wie der Text der grünen Pillen. Das Status-Label bleibt --warte-kopf.
+  const kopf = (stil.getPropertyValue("--gut") || "#2C7460").trim();
   const zell = 18;
   let spalten = [];
   let breite = 0;
