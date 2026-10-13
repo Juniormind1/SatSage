@@ -758,6 +758,155 @@ function aktualisiereWalletLotDonut() {
   setzeWalletLotDonut(null);
 }
 
+/**
+ * Fallende Zeichen in der großen Karte, solange der Bestand mit UTXOs
+ * aus dem Cache kommt. Leerer Cache und „keine UTXOs“ bleiben bei ihrer
+ * Hinweis-Karte — die ist schnell da und sagt schon das Richtige.
+ * Kurze Antworten blenden den Regen nicht auf.
+ */
+const WALLET_WARTE_VERZUG_MS = 220;
+const WALLET_WARTE_LATEIN = "0123456789ABCDEF";
+const WALLET_WARTE_KANA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ";
+let walletWarteGen = 0;
+let walletWarteTimer = 0;
+let walletWarteRahmen = 0;
+let walletWarteBeobachter = null;
+
+function walletHatSchonUtxos(wallet) {
+  return Number(wallet && wallet.utxo_count) > 0;
+}
+
+function walletWarteSchrift() {
+  const kandidaten = [
+    "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN",
+    "Yu Gothic",
+    "Yu Gothic UI",
+    "MS Gothic",
+    "Noto Sans CJK JP",
+    "Noto Sans JP",
+  ];
+  if (document.fonts && document.fonts.check) {
+    for (const name of kandidaten) {
+      try {
+        if (document.fonts.check(`16px "${name}"`)) {
+          return { font: `"${name}", sans-serif`, kana: true };
+        }
+      } catch (_) { /* unbekannter Schriftname */ }
+    }
+  }
+  return {
+    font: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    kana: false,
+  };
+}
+
+function walletWarteAus() {
+  walletWarteGen += 1;
+  if (walletWarteTimer) {
+    clearTimeout(walletWarteTimer);
+    walletWarteTimer = 0;
+  }
+  if (walletWarteRahmen) {
+    cancelAnimationFrame(walletWarteRahmen);
+    walletWarteRahmen = 0;
+  }
+  if (walletWarteBeobachter) {
+    walletWarteBeobachter.disconnect();
+    walletWarteBeobachter = null;
+  }
+  const kasten = $("#wallet-warte");
+  if (kasten) kasten.hidden = true;
+}
+
+function starteWalletWarteRegen(kasten, gen) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const leinwand = $("#wallet-warte-leinwand");
+  if (!leinwand || !leinwand.getContext) return;
+  const ctx = leinwand.getContext("2d", { alpha: false });
+  if (!ctx) return;
+  const schrift = walletWarteSchrift();
+  const zeichen = schrift.kana
+    ? WALLET_WARTE_KANA + WALLET_WARTE_LATEIN
+    : WALLET_WARTE_LATEIN;
+  const stil = getComputedStyle(kasten);
+  const grund = (stil.getPropertyValue("--warte-grund") || "#14181c").trim();
+  const kopf = (stil.getPropertyValue("--warte-kopf") || "#d8ffe6").trim();
+  const zell = 18;
+  let spalten = [];
+  let breite = 0;
+  let hoehe = 0;
+
+  const messe = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, kasten.clientWidth);
+    const h = Math.max(1, kasten.clientHeight);
+    leinwand.width = Math.floor(w * dpr);
+    leinwand.height = Math.floor(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    breite = w;
+    hoehe = h;
+    const n = Math.max(1, Math.ceil(w / zell));
+    spalten = Array.from({ length: n }, () => ({
+      y: Math.random() * (h / zell),
+      v: 0.08 + Math.random() * 0.14,
+    }));
+    ctx.fillStyle = grund;
+    ctx.fillRect(0, 0, w, h);
+  };
+  messe();
+  if (typeof ResizeObserver === "function") {
+    walletWarteBeobachter = new ResizeObserver(() => {
+      if (gen !== walletWarteGen) return;
+      messe();
+    });
+    walletWarteBeobachter.observe(kasten);
+  }
+
+  const tick = () => {
+    if (gen !== walletWarteGen) return;
+    if (kasten.hidden || Zustand.ansicht !== "wallet") {
+      walletWarteRahmen = 0;
+      return;
+    }
+    ctx.fillStyle = "rgba(20, 24, 28, 0.16)";
+    ctx.fillRect(0, 0, breite, hoehe);
+    ctx.font = `15px ${schrift.font}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = kopf;
+    for (let i = 0; i < spalten.length; i++) {
+      const s = spalten[i];
+      const glyph = zeichen[Math.floor(Math.random() * zeichen.length)];
+      ctx.globalAlpha = 0.45 + Math.random() * 0.55;
+      ctx.fillText(glyph, i * zell + zell / 2, s.y * zell);
+      s.y += s.v;
+      if (s.y * zell > hoehe && Math.random() > 0.96) {
+        s.y = -Math.random() * 8;
+        s.v = 0.08 + Math.random() * 0.14;
+      }
+    }
+    ctx.globalAlpha = 1;
+    walletWarteRahmen = requestAnimationFrame(tick);
+  };
+  walletWarteRahmen = requestAnimationFrame(tick);
+}
+
+function walletWarteAn() {
+  const kasten = $("#wallet-warte");
+  if (!kasten) return;
+  walletWarteAus();
+  const gen = walletWarteGen;
+  walletWarteTimer = setTimeout(() => {
+    walletWarteTimer = 0;
+    if (gen !== walletWarteGen) return;
+    if (Zustand.ansicht !== "wallet") return;
+    setzeText($("#wallet-warte-text"), t("common.loadingFromCache"));
+    kasten.hidden = false;
+    starteWalletWarteRegen(kasten, gen);
+  }, WALLET_WARTE_VERZUG_MS);
+}
+
 async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletId = walletId;
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
@@ -779,6 +928,10 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
   $("#wallet-leer").hidden = true;
+  // Regen nur, wenn die Nav schon UTXOs kennt. Sonst bleibt die Fläche
+  // kurz leer, bis „noch kein Cache“ oder „keine unspent UTXOs“ steht.
+  if (walletHatSchonUtxos(wallet)) walletWarteAn();
+  else walletWarteAus();
 
   // Seitenweise (ISSUES P2): Adressgruppen kommen seitenweise vom Server,
   // gefiltert über alle Seiten; die Seitengröße ersetzt „Top 10/25/Alle“.
@@ -1126,6 +1279,7 @@ function walletPager(seite) {
 }
 
 function zeigeLeer(titel, text) {
+  walletWarteAus();
   const kasten = $("#wallet-leer");
   kasten.replaceChildren();
   const stark = document.createElement("strong");
@@ -1139,6 +1293,7 @@ function zeigeLeer(titel, text) {
 }
 
 function zeichneUtxos(daten, wallet, seite = null) {
+  walletWarteAus();
   // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
   Zustand._walletUtxoDaten = daten || null;
   Zustand._walletUtxoSeite = seite;

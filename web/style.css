@@ -1612,6 +1612,45 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 }
 .leerzustand strong { display: block; color: var(--text); margin-bottom: 6px; }
 
+/* Wartemelodie, nur solange ein Bestand mit UTXOs aus dem Cache kommt.
+   Dunkles Feld in beiden Themes: die fallenden Zeichen brauchen den Grund. */
+.wallet-warte {
+  --warte-grund: #14181c;
+  --warte-kopf: #d8ffe6;
+  position: relative;
+  min-height: min(68vh, 560px);
+  border: 1px solid var(--linie);
+  border-radius: 4px;
+  background: var(--warte-grund);
+  overflow: hidden;
+}
+.wallet-warte-leinwand {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.wallet-warte-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--warte-kopf);
+  background: rgba(20, 24, 28, 0.78);
+  border: 1px solid rgba(216, 255, 230, 0.35);
+  padding: 6px 12px;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wallet-warte-leinwand { display: none; }
+}
+
 /* ---------- Tabelle ---------- */
 
 .tabelle-huelle { overflow-x: auto; }
