@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **P2P · UTXOs sofort im Cache:** Findet der gemeinsame Compact-Filter-Lauf ein UTXO, schreibt SatSage den Bestand dieses Wallets in dem Moment in den Cache, in dem der Block gelesen ist. Wallet-Ansicht und Dotplot zeigen die Treffer noch während Turbo und Historie laufen. Ein Wallet ohne Treffer bekommt dabei keine leere Cache-Datei. Der Schluss-Schreibvorgang am Ende des Laufs bleibt.
+
 - **Wallet · FIFO-Spend · live während Herkunft:** „max … grün ausgebbar“ und der Lot-Donut am Walletnamen folgen demselben Lots-Strom wie die grüne Scorecard (`lots=0`, dann `GET /api/tax/lots`). Die Zahl steigt mit jedem fertigen Herkunftsbaum, statt erst nach einem neuen Öffnen der Wallet. Läuft das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.
 
 ## [1.0.0] — 2026-10-12

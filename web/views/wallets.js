@@ -4407,6 +4407,14 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
     await ladeConfig();
     if (scanTrifftOffeneWallet(scanId)) {
       await zeigeWallet(Zustand.walletId);
+    } else if (
+      Zustand.ansicht === "steuerjahr"
+      && typeof ladeSteuerjahr === "function"
+    ) {
+      // Dotplot liest den UTXO-Cache. Der Sammelscan schreibt ihn je Block;
+      // ohne diesen Zug bliebe der Plot leer, bis man die Ansicht neu öffnet.
+      zeichneNav();
+      await ladeSteuerjahr({ fensterBehalten: true });
     } else {
       zeichneNav();
     }
@@ -4654,6 +4662,12 @@ async function pruefeWalletScan() {
       await ladeConfig();
       if (scanTrifftOffeneWallet(scanId)) {
         await zeigeWallet(Zustand.walletId);
+      } else if (
+        Zustand.ansicht === "steuerjahr"
+        && typeof ladeSteuerjahr === "function"
+      ) {
+        zeichneNav();
+        await ladeSteuerjahr({ fensterBehalten: true });
       } else {
         zeichneNav();
       }

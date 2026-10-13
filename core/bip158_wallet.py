@@ -1052,6 +1052,38 @@ def fetch_wallet_utxos_bip158(
     return utxos
 
 
+def _union_cache_sofort(
+    xpub: str,
+    stand: list[dict],
+    cache_dir: Path | None,
+    *,
+    max_addresses: int,
+    geschrieben: set[str],
+    vorhanden: set[str],
+) -> None:
+    """Bekannter Bestand dieses Wallets, sobald ein Block ihn ändert.
+
+    Eine leere Liste legt keine neue Datei an. Sonst läge ein Wallet ohne
+    Treffer schon als „Cache gelesen, 0 UTXOs“ auf dem Dachboden, bevor
+    die Historie überhaupt lief. Ein schon geschriebener oder vorhandener
+    Cache wird fortgeschrieben, auch wenn der Block alles ausgegeben hat.
+    """
+    if cache_dir is None:
+        return
+    if not stand and xpub not in geschrieben and xpub not in vorhanden:
+        return
+    from core.xpub_cache import schreibe_utxo_zwischenstand
+
+    schreibe_utxo_zwischenstand(
+        xpub,
+        list(stand or []),
+        cache_dir,
+        "bip158",
+        max_addresses=max_addresses,
+    )
+    geschrieben.add(xpub)
+
+
 def _fetch_wallet_utxos_union(
     client: Bip158Client,
     plaene: list[tuple[str, dict[str, Any]]],
@@ -1064,6 +1096,14 @@ def _fetch_wallet_utxos_union(
     from display import Bip158ProgressLine, melde_zwischenstand
 
     gap = normalisiere_bip158_gap(client.gap_limit)
+    geschrieben: set[str] = set()
+    vorhanden: set[str] = set()
+    if client.cache_dir is not None:
+        from core.xpub_cache import _xpub_cache_path
+
+        for xpub, _plan in plaene:
+            if _xpub_cache_path(xpub, client.cache_dir).is_file():
+                vorhanden.add(xpub)
     wallets = []
     for xpub, plan in plaene:
         konfiguriert = (
@@ -1079,6 +1119,7 @@ def _fetch_wallet_utxos_union(
         print(f"\n{anfang}", flush=True)
         melde_zwischenstand(anfang)
         merke_scan_gap(xpub, gap)
+        max_addr = max(int(konfiguriert), 2)
         wallets.append({
             "xpub": xpub,
             "start_height": plan["start"],
@@ -1087,6 +1128,18 @@ def _fetch_wallet_utxos_union(
             "max_index": max(xpub_max // 2, 1),
             "seed_outputs": plan["seed_out"] or None,
             "seed_verlauf": plan["seed_verlauf"] or None,
+            # Gleicher Augenblick wie die Nav-Pille: der Block ist gelesen,
+            # der Bestand dieses Wallets steht in der Cache-Datei.
+            "on_utxos_update": (
+                lambda stand, _x=xpub, _m=max_addr: _union_cache_sofort(
+                    _x,
+                    stand,
+                    client.cache_dir,
+                    max_addresses=_m,
+                    geschrieben=geschrieben,
+                    vorhanden=vorhanden,
+                )
+            ),
         })
     progress_line = Bip158ProgressLine(verbose=client.verbose)
 

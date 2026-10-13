@@ -111,6 +111,97 @@ class TestListunspentMeldetUtxos(unittest.TestCase):
         self.assertEqual(len(gesehen[-1]), 2)
 
 
+class TestUnionCacheSofort(unittest.TestCase):
+    def test_fund_schreibt_sofort_leere_liste_legt_keine_datei_an(self):
+        from core.bip158_wallet import _fetch_wallet_utxos_union
+        from core.xpub_cache import load_xpub_cache_entry
+
+        fund = {
+            "txid": txid("sofort"),
+            "vout": 0,
+            "value": 5,
+            "address": "bc1qtest",
+            "status": {"confirmed": True, "block_height": 800_000},
+        }
+        plan = {
+            "start": 100,
+            "start_grund": "segwit-default",
+            "used": set(),
+            "seed_out": {},
+            "seed_verlauf": {},
+            "unvollstaendig": True,
+        }
+
+        class Scanner:
+            def scan_union(self, wallets, **_kw):
+                wallets[0]["on_utxos_update"]([fund])
+                wallets[1]["on_utxos_update"]([])
+                return {}
+
+        class Client:
+            gap_limit = 20
+            verbose = False
+            scanner = Scanner()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Client.cache_dir = Path(tmp)
+            _fetch_wallet_utxos_union(
+                Client(),
+                [("xpub-treffer", plan), ("xpub-leer", dict(plan))],
+                max_addresses=20,
+                max_addresses_by_xpub=None,
+                on_utxos_update=None,
+            )
+            treffer = load_xpub_cache_entry("xpub-treffer", Path(tmp))
+            self.assertIsNotNone(treffer)
+            self.assertEqual(treffer["utxos"][0]["txid"], txid("sofort"))
+            self.assertIs(treffer["raw"].get("bip158_fullscan_ok"), False)
+            self.assertIsNone(load_xpub_cache_entry("xpub-leer", Path(tmp)))
+
+    def test_ausgabe_schreibt_leeren_bestand_fort(self):
+        from core.bip158_wallet import _fetch_wallet_utxos_union
+        from core.xpub_cache import load_xpub_cache_entry
+
+        plan = {
+            "start": 100,
+            "start_grund": "segwit-default",
+            "used": set(),
+            "seed_out": {},
+            "seed_verlauf": {},
+            "unvollstaendig": True,
+        }
+
+        class Scanner:
+            def scan_union(self, wallets, **_kw):
+                wallets[0]["on_utxos_update"]([{
+                    "txid": txid("weg"),
+                    "vout": 1,
+                    "value": 9,
+                    "address": "bc1qweg",
+                    "status": {"confirmed": True, "block_height": 800_001},
+                }])
+                wallets[0]["on_utxos_update"]([])
+                return {}
+
+        class Client:
+            gap_limit = 20
+            verbose = False
+            scanner = Scanner()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Client.cache_dir = Path(tmp)
+            _fetch_wallet_utxos_union(
+                Client(),
+                [("xpub-ausgabe", plan)],
+                max_addresses=20,
+                max_addresses_by_xpub=None,
+                on_utxos_update=None,
+            )
+            eintrag = load_xpub_cache_entry("xpub-ausgabe", Path(tmp))
+            self.assertIsNotNone(eintrag)
+            self.assertEqual(eintrag["utxos"], [])
+
+
 class TestScanXpubZwischenstand(unittest.TestCase):
     def test_gap_schreibt_cache_vor_listunspent(self):
         with tempfile.TemporaryDirectory() as tmp:
