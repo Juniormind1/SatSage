@@ -1066,6 +1066,10 @@ def _indexer_konfig_jetzt(
 
     Der Papierkorb löscht FULCRUM_HOST, während ein Job noch die alte
     Adresse wiederholt. Ohne diese Lesung läuft die Frist zu Ende.
+
+    Auf einer Node-Plattform (StartOS, Umbrel) steht die Adresse nicht in
+    der Datei, sondern im Prozess-Env. Sie muss nach der Lesung wieder
+    hinzukommen, sonst gilt die vorgegebene Quelle als gelöscht.
     """
     try:
         from core import env_scramble as scramble_mod
@@ -1083,6 +1087,10 @@ def _indexer_konfig_jetzt(
             except scramble_mod.ScrambleLocked:
                 return _indexer_ist_konfiguriert(args, env), env
         frisch = _load_dotenv()
+        from core.env_bootstrap import ist_node_managed, plattform_env_werte
+
+        if ist_node_managed(frisch):
+            frisch.update(plattform_env_werte(frisch))
     except Exception:
         return _indexer_ist_konfiguriert(args, env), env
     return _indexer_ist_konfiguriert(args, frisch), frisch

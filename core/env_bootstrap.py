@@ -13,6 +13,66 @@ from core.paths import app_dir
 
 ENV_FILE = app_dir() / ".env"
 
+# Plattformen, die Node- und Indexer-Adressen per Prozess-Env vorgeben und
+# deren Datenquellen-Felder deshalb in der UI gesperrt sind.
+NODE_MANAGED = frozenset(("start9", "umbrel"))
+
+# Schlüssel, die diese Plattformen liefern (StartOS-Bridge, Umbrel-Compose).
+# Sie stehen nicht in der ``.env``: wer nur die Datei liest, sieht sie nicht.
+PLATTFORM_ENV_KEYS = (
+    "BITCOIND_HOST",
+    "ELECTRS_HOST",
+    "NODE_IP",
+    "RPCHOST",
+    "BITCOIN_RPC_HOST",
+    "RPCPORT",
+    "RPCUSER",
+    "RPCPASSWORD",
+    "RPC_SSL",
+    "RPC_COOKIE_FILE",
+    "FULCRUM_HOST",
+    "FULCRUM_PORT",
+    "FULCRUM_SSL",
+    "SATSAGE_ELECTRUM_INDEXER",
+    "MEMPOOL_URL",
+    "LLM_BASE_URL",
+    "LLM_ANBIETER",
+    "LLM_MODELL",
+)
+
+
+def ist_node_managed(values: dict[str, str] | None = None) -> bool:
+    """Ob eine Node-Plattform die Adressen vorgibt (StartOS, Umbrel)."""
+    import os
+
+    gelesen = values or {}
+    managed = str(
+        os.environ.get("SATSAGE_MANAGED_BY")
+        or gelesen.get("SATSAGE_MANAGED_BY", "")
+    ).strip().lower()
+    if managed in NODE_MANAGED:
+        return True
+    flag = os.environ.get("SATSAGE_START9")
+    if flag is None:
+        flag = gelesen.get("SATSAGE_START9", "")
+    return str(flag).strip().lower() in ("1", "true", "yes", "ja", "on")
+
+
+def plattform_env_werte(vorhanden: dict[str, str]) -> dict[str, str]:
+    """Plattform-Werte aus dem Prozess-Env, die *vorhanden* noch nicht trägt.
+
+    Eine eigene Eintragung in der ``.env`` behält Vorrang — deshalb zählt
+    schon das Vorhandensein des Schlüssels, nicht erst ein Wert.
+    """
+    import os
+
+    neu: dict[str, str] = {}
+    for key in PLATTFORM_ENV_KEYS:
+        proc = (os.environ.get(key) or "").strip()
+        if proc and key not in vorhanden:
+            neu[key] = proc
+    return neu
+
 
 def _load_dotenv(env_path: Path | None = None) -> dict[str, str]:
     """Lädt KEY=VALUE-Paare aus einer .env-Datei (ohne externe Abhängigkeit).
