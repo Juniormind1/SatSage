@@ -132,6 +132,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         trace_mod,
         wallets_mod,
     )
+    from core.jobs import LAUF_LOG
 
     wallet_ctx = state.wallet_ctx
     if wallet_ctx is None:
@@ -208,6 +209,9 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         )
 
     graue_anteile = bool(roh.get("graue_anteile"))
+    log_lauf = str(roh.get("lauf") or "").strip()
+    if log_lauf not in LAUF_LOG:
+        log_lauf = ""
 
     if not offen:
         return {
@@ -690,6 +694,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             "vollstaendig": vollstaendig,
             "modus": modus,
             "stop_before_ts": stop_before_ts,
+            **({"lauf": log_lauf} if log_lauf else {}),
         },
     )
     return job.as_dict()

@@ -799,6 +799,28 @@ class TestJobAbbruchUeberall(unittest.TestCase):
                 gesehen["log_mitte"],
             )
 
+    def test_lauf_steht_in_start_und_ende(self):
+        job = Job(
+            id="abc",
+            kind="trace-alle",
+            label="Herkunft für 2 UTXOs",
+            meta={"lauf": "klären (grau)"},
+            status="done",
+            started_at=1_000.0,
+            finished_at=1_012.4,
+        )
+        start = jobs_mod.job_start_zeile(job)
+        ende = jobs_mod.job_ende_zeile(job)
+        self.assertIn('lauf="klären (grau)"', start)
+        self.assertIn('lauf="klären (grau)"', ende)
+        self.assertTrue(start.startswith("JOB-START "))
+        self.assertIn("elapsed_s=12.4", ende)
+        fremd = Job(id="x", kind="rescan", label="X", meta={"lauf": "frei"})
+        self.assertNotIn("lauf=", jobs_mod.job_start_zeile(fremd))
+        self.assertEqual(jobs_mod.lauf_fuer_scan("rescan", "alle"), "UTXOs")
+        self.assertEqual(jobs_mod.lauf_fuer_scan("rescan", "w1"), "Bestand")
+        self.assertEqual(jobs_mod.lauf_fuer_scan("verlauf", "w1"), "Historie")
+
     def test_format_job_dauer(self):
         self.assertEqual(jobs_mod.format_job_dauer(0), "0s")
         self.assertEqual(jobs_mod.format_job_dauer(9.4), "9s")

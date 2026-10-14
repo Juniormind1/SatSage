@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Log · Lauf-Anfang und Lauf-Ende:** UTXOs, Bestand, Herkunft, Historie, klären (grau) und klären (gelb) schreiben `lauf="…"` in `JOB-START` und `JOB-ENDE`. Die Dauer steht in `elapsed_s` der Ende-Zeile. Dieselbe Job-Art allein trennt die drei Herkunftsläufe nicht.
+
 - **Datenquellen · eigener Explorer:** Ist ein Block-Explorer mit Esplora-API im eigenen Netz eingetragen und der verbundene Electrum-Server kein libbitcoin, liest SatSage Bestand und kleine Herkunft dort. Die Adresslücke bleibt beim Electrum-Server. Öffentliche Explorer und libbitcoin bleiben außen.
 
 - **Datenquellen · libbitcoin:** Ist der eigene Electrum-Server libbitcoin und sein Adressindex erreichbar, liest SatSage Bestand und Herkunft dort. Ohne `LIBBITCOIN_NATIVE_PORT` prüft SatSage die Ports 8181 und 8180 und nimmt den, dessen Antwort das Feld `address` trägt. Electrum bleibt der Ersatz, solange der Index fehlt oder eine Antwort nicht zur bekannten Liste passt. Öffentliche Server bleiben beim Electrum-Protokoll. Im Verbindungs-Log steht, ob die Abfrage den Adressindex hat oder Electrum bleibt. Der Vergleich `scripts/libbitcoin_native_profil.py` startet nur, wer ihn selbst aufruft.

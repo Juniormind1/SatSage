@@ -852,6 +852,9 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('zeigeAnsicht("steuerjahr")', self.herkunft_js)
         self.assertIn("grauKeysFuerWallet", self.herkunft_js)
         self.assertIn("starteGrauKlaerung(keys, uebernommen)", self.herkunft_js)
+        self.assertIn('"Herkunft"', self.herkunft_js)
+        self.assertIn('"klären (grau)"', self.herkunft_js)
+        self.assertIn('"klären (gelb)"', self.herkunft_js)
         self.assertIn("klaerenNachUngescannten", self.herkunft_js)
         self.assertIn("[wid]", self.herkunft_js)
 
