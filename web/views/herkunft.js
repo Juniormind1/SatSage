@@ -3026,6 +3026,7 @@ async function scanneAlleWalletsUtxo({
       sollAbbrechen,
       onTick: (j) => {
         if (logStand) nimmJobLogAb(j, logStand, wallet.name);
+        if (typeof spieleScanFunde === "function") spieleScanFunde(j);
         if (Array.isArray(j.result?.neu) && typeof zeichneScanPunkte === "function") {
           zeichneScanPunkte(j.result.neu);
         }

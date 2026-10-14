@@ -4493,7 +4493,7 @@ function bindeWalletScanJob(job, ziel) {
   Zustand.scanArt = ziel.art;
   Zustand.scanUtxoZahl = null;
   Zustand.scanUtxoJeWallet = {};
-  Zustand.scanFundKeys = new Set();
+  merkeScanFundJob(job.id);
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
   Zustand.scanLogIndex = 0;
@@ -4525,27 +4525,59 @@ function bindeWalletScanJob(job, ziel) {
 const SCAN_REFRESH_MS = 2500;
 
 /**
- * Jeder in diesem Scan neu gefundene UTXO des offenen Wallets
- * spielt dieselbe Ka-Ching-Animation wie ein Mempool-Empfang.
+ * Neuer Scan: schon gefeierte UTXOs vergessen.
+ * Derselbe Job (Nav hängt sich erneut an) behält die Menge.
+ */
+function merkeScanFundJob(jobId) {
+  const id = String(jobId || "");
+  if (!id || Zustand.scanFundJobId === id) return;
+  Zustand.scanFundJobId = id;
+  Zustand.scanFundKeys = new Set();
+}
+
+/**
+ * Jeder in diesem Scan neu gefundene UTXO spielt seinen eigenen Ka-Ching,
+ * auch wenn er nicht zum gerade offenen Wallet gehört.
+ * Mempool-Ka-Ching bleibt davon unberührt und gilt weiter nur fürs offene Wallet.
+ * Mehrere Funde in einem Poll (Electrs liefert den Stand auf einmal) laufen
+ * nacheinander, sonst ersetzt das zweite Konfetti das erste.
  */
 function spieleScanFunde(job) {
   const liste = job && job.result && job.result.entdeckt;
-  if (!Array.isArray(liste) || !Zustand.walletId) return;
+  if (!Array.isArray(liste)) return;
+  merkeScanFundJob(job && (job.id || job.job_id));
   if (!Zustand.scanFundKeys) Zustand.scanFundKeys = new Set();
+  if (!Zustand.scanKaChing) Zustand.scanKaChing = [];
   for (const fund of liste) {
     if (!fund || !fund.key) continue;
     const key = String(fund.key);
     if (Zustand.scanFundKeys.has(key)) continue;
     Zustand.scanFundKeys.add(key);
-    if (String(fund.wallet_id || "") !== String(Zustand.walletId)) continue;
     const sats = Number(fund.value_sats);
-    if (typeof EmpfangPuls !== "undefined" && EmpfangPuls.flashIncoming) {
-      EmpfangPuls.flashIncoming(
-        Zustand.walletId,
-        Number.isFinite(sats) ? sats : undefined,
-      );
-    }
+    Zustand.scanKaChing.push(Number.isFinite(sats) ? sats : undefined);
   }
+  pumpeScanKaChing();
+}
+
+function pumpeScanKaChing() {
+  if (Zustand.scanKaChingLaeuft) return;
+  const warteschlange = Zustand.scanKaChing || [];
+  if (!warteschlange.length) return;
+  if (typeof EmpfangPuls === "undefined" || !EmpfangPuls.flashIncoming) {
+    Zustand.scanKaChing = [];
+    return;
+  }
+  const sats = warteschlange.shift();
+  Zustand.scanKaChingLaeuft = true;
+  const scanLaeuft = typeof empfangScanLaeuftFuer === "function"
+    && empfangScanLaeuftFuer(Zustand.walletId || "");
+  EmpfangPuls.flashIncoming(Zustand.walletId || "", sats, {
+    halteDanach: warteschlange.length > 0 || scanLaeuft,
+    onDone: () => {
+      Zustand.scanKaChingLaeuft = false;
+      pumpeScanKaChing();
+    },
+  });
 }
 
 async function erfrischeScanZwischenstand(scanId, utxoZahl) {
@@ -4810,6 +4842,9 @@ async function pruefeWalletScan() {
       }
       return;
     }
+
+    // Letzter Stand: Electrs meldet die Funde oft erst ganz am Ende.
+    if (Zustand.scanArt === "utxo") spieleScanFunde(job);
 
     if (job.status === "done") {
       beendeRescan("");

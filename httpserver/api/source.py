@@ -1015,6 +1015,7 @@ def api_rescan(state: AppState, payload: dict) -> dict:
                 "utxo_count": len(gefunden),
                 "partial": False,
                 "empfang_scharf": n_empfang,
+                "entdeckt": entdeckt_funde,
             }
         finally:
             schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
@@ -1175,6 +1176,7 @@ def api_rescan_alle(state: AppState) -> dict:
                 "partial": False,
                 "source": quelle_lauf,
                 "empfang_scharf": n_empfang,
+                "entdeckt": entdeckt_funde,
             }
         finally:
             schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
