@@ -115,6 +115,82 @@ def _kopf() -> dict:
     }
 
 
+class TestNichtImplementiert(unittest.TestCase):
+    def _dienst(self, antwort: bytes | None):
+        import socket as socket_mod
+
+        dienst = socket_mod.socket()
+        dienst.bind(("127.0.0.1", 0))
+        dienst.listen(4)
+        dienst.settimeout(2)
+        gesehen: list[int] = []
+
+        def bediene() -> None:
+            while True:
+                try:
+                    verbindung, _adresse = dienst.accept()
+                except OSError:
+                    return
+                gesehen.append(1)
+                try:
+                    verbindung.settimeout(1)
+                    verbindung.recv(4096)
+                    if antwort:
+                        verbindung.sendall(antwort)
+                except OSError:
+                    pass
+                try:
+                    verbindung.close()
+                except OSError:
+                    pass
+
+        threading.Thread(target=bediene, daemon=True).start()
+        return dienst, gesehen
+
+    def test_not_implemented_ohne_status_nicht_nochmal(self) -> None:
+        from core.libbitcoin_native import NativeFehler, NativeSitzung
+
+        dienst, gesehen = self._dienst(b"error::not_implemented")
+        try:
+            sitzung = NativeSitzung("127.0.0.1", dienst.getsockname()[1], 2, None)
+            sitzung.aktiv = True
+            pfad = "address/" + ("ab" * 32) + "/confirmed"
+            with self.assertRaises(NativeFehler):
+                sitzung._holen(pfad, datenformat="json")
+            with self.assertRaises(NativeFehler):
+                sitzung._holen(pfad, datenformat="json")
+            self.assertEqual(gesehen, [1])
+            self.assertTrue(sitzung.aktiv)
+        finally:
+            dienst.close()
+
+    def test_leerer_abbruch_bleibt_netzfehler(self) -> None:
+        from core.libbitcoin_native import NativeFehler, NativeSitzung
+
+        dienst, gesehen = self._dienst(None)
+        try:
+            sitzung = NativeSitzung("127.0.0.1", dienst.getsockname()[1], 2, None)
+            sitzung.aktiv = True
+            pfad = "address/" + ("cd" * 32) + "/confirmed"
+            with self.assertRaises(NativeFehler):
+                sitzung._holen(pfad, datenformat="json")
+            with self.assertRaises(NativeFehler):
+                sitzung._holen(pfad, datenformat="json")
+            self.assertEqual(gesehen, [1, 1])
+        finally:
+            dienst.close()
+
+    def test_electrum_port_bekommt_kein_http(self) -> None:
+        from core.libbitcoin_native import NativeFehler, NativeSitzung
+
+        sitzung = NativeSitzung("127.0.0.1", 50001, 1, None)
+        sitzung.aktiv = True
+        with self.assertRaises(NativeFehler):
+            sitzung._holen("configuration", datenformat="json")
+        self.assertFalse(sitzung.aktiv)
+        self.assertEqual(sitzung.grund, "electrum-port")
+
+
 class NativeWegTests(unittest.TestCase):
     def setUp(self) -> None:
         self.adresse, self.spk = _adresse(b"\x01" * 32)

@@ -1240,8 +1240,17 @@ function quellenFormular(quelle, behaelter, gemerkt) {
       zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
       meldung(t("sources.appliedTesting"), "warn");
       try {
+        // Vierfach-Probe nur hier, und nur wenn die Angaben neu sind.
+        const vierfach = quelle.key === "own_fulcrum" && eigeneElectrumFelderNeu(eingaben);
         // jubel:true — Staub nach jedem erfolgreichen Indexer-Übernehmen.
-        const stand = await testeEigenenNode($("#quelle-pruefen"), { jubel: true });
+        const stand = await testeEigenenNode($("#quelle-pruefen"), { jubel: true, vierfach });
+        if (vierfach) {
+          for (const [key, eingabe] of eingaben) {
+            if (key.startsWith("FULCRUM_")) {
+              eingabe.dataset.serverValue = liesEingabeWert(eingabe);
+            }
+          }
+        }
         meldung(
           t("sources.appliedResult", { stand: stand.label }),
           stand.gut
@@ -1497,6 +1506,16 @@ async function speichereMempool() {
   }
 }
 
+function eigeneElectrumFelderNeu(eingaben) {
+  for (const [key, eingabe] of eingaben) {
+    if (!key.startsWith("FULCRUM_")) continue;
+    const jetzt = liesEingabeWert(eingabe);
+    const vorher = eingabe.dataset.serverValue ?? "";
+    if (String(jetzt) !== String(vorher)) return true;
+  }
+  return false;
+}
+
 /* --- node-test --- */
 async function testeEigenenNode(knopf, opts = {}) {
   const vorher = knopf ? knopf.textContent : "";
@@ -1514,7 +1533,7 @@ async function testeEigenenNode(knopf, opts = {}) {
     zeichneQuellen(Zustand.config?.sources || []);
   }
   try {
-    const ergebnis = await apiSourceCheck();
+    const ergebnis = await apiSourceCheck({ vierfach: Boolean(opts.vierfach) });
     if ((Zustand.quellenEpoch || 0) !== epoch) {
       return peerStatusAusQuellen(Zustand.config?.sources || []);
     }

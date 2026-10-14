@@ -157,6 +157,7 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
             job.progress(text, log=True)
 
         netz = []
+        fetchers_gehalten: list = []
 
         def hole_netz():
             if netz:
@@ -171,6 +172,7 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
                 quelle, backend, args, wallet_ctx,
                 immutable_cache_dir=cache_root,
             )
+            fetchers_gehalten.append(fetchers)
             netz.append(fetchers["get_tx"])
             return netz[0]
 
@@ -180,22 +182,31 @@ def api_tools_tx_beteiligung(state: Any, payload: dict | None = None) -> dict:
                 return cached
             return hole_netz()(t)
 
-        ergebnis = analysiere_tx(
-            txid,
-            get_tx=get_tx,
-            wallet=wallet_ctx,
-            cache_root=cache_root,
-            on_progress=fortschritt,
-            raise_if_cancelled=job.raise_if_cancelled,
-        )
-        ergebnis["aus_cache"] = not netz
-        ergebnis = mit_nav(ergebnis)
-        n = int(ergebnis["eigene_inputs"]) + int(ergebnis["eigene_outputs"])
-        job.progress(
-            f"{n} eigene Zu-/Abgänge." if n else "Kein eigenes Wallet in dieser Tx.",
-            log=True,
-        )
-        return ergebnis
+        try:
+            ergebnis = analysiere_tx(
+                txid,
+                get_tx=get_tx,
+                wallet=wallet_ctx,
+                cache_root=cache_root,
+                on_progress=fortschritt,
+                raise_if_cancelled=job.raise_if_cancelled,
+            )
+            ergebnis["aus_cache"] = not netz
+            ergebnis = mit_nav(ergebnis)
+            n = int(ergebnis["eigene_inputs"]) + int(ergebnis["eigene_outputs"])
+            job.progress(
+                f"{n} eigene Zu-/Abgänge." if n else "Kein eigenes Wallet in dieser Tx.",
+                log=True,
+            )
+            return ergebnis
+        finally:
+            for fetchers in fetchers_gehalten:
+                schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+                if schliessen is not None:
+                    try:
+                        schliessen()
+                    except Exception:
+                        pass
 
     job = state.jobs.start(
         "tx_beteiligung",

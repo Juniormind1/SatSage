@@ -229,7 +229,7 @@ class TestTlsAutoProbe(unittest.TestCase):
             return None, "connection refused"
 
         with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect):
-            out = check_reachable(quelle, werte, timeout=1)
+            out = check_reachable(quelle, werte, timeout=1, vierfach=True)
         self.assertTrue(out.reachable)
         self.assertGreaterEqual(calls["n"], 1)
         self.assertEqual(out.peer_hosts, ["192.0.2.10:50001"])
@@ -237,6 +237,32 @@ class TestTlsAutoProbe(unittest.TestCase):
         self.assertEqual(out.ssl_persist.get("FULCRUM_SSL"), "false")
         self.assertNotIn("FULCRUM_PORT", out.ssl_persist)
         self.assertIn("festgeschrieben", out.note)
+
+    def test_ohne_vierfach_bleibt_beim_gespeicherten_tls(self):
+        """Prüfen und der stille Takt wählen nicht mehr Port oder TLS."""
+        from fulcrum import FulcrumClient
+
+        werte = {
+            "FULCRUM_HOST": "192.0.2.10",
+            "FULCRUM_PORT": "50001",
+            "FULCRUM_SSL": "true",
+        }
+        quelle = next(q for q in describe_sources(werte) if q.key == "own_fulcrum")
+        client = mock.Mock(spec=FulcrumClient)
+        client.close = mock.Mock()
+
+        def connect(host, port, use_ssl=True, timeout=5, tor_proxy=None,
+                    require_listunspent=False):
+            if use_ssl:
+                return None, "WRONG_VERSION_NUMBER"
+            return client, None
+
+        with mock.patch("core.fulcrum_client.connect_fulcrum", side_effect=connect) as conn:
+            out = check_reachable(quelle, werte, timeout=1)
+        self.assertFalse(out.reachable)
+        self.assertEqual(conn.call_count, 1)
+        self.assertEqual(conn.call_args.kwargs["use_ssl"], True)
+        self.assertFalse(out.ssl_persist)
 
 
 class TestElectrumSoftwareLabel(unittest.TestCase):
@@ -411,8 +437,8 @@ class TestCheckReachable(unittest.TestCase):
             geprueft = check_reachable(quelle, werte, timeout=1)
         text = "\n".join(geprueft.log)
         self.assertIn("Prüfe Eigener Electrum-Server", text)
-        self.assertIn("Verbinde mit 192.0.2.1: 50001 und 50002", text)
-        self.assertIn("mit und ohne TLS", text)
+        self.assertIn("Verbinde mit 192.0.2.1:50001 (ohne TLS)", text)
+        self.assertNotIn("50001 und 50002", text)
         self.assertIn("Verbindung fehlgeschlagen:", text)
         self.assertNotIn("Verbunden.", text)
         self.assertTrue(
@@ -894,7 +920,7 @@ class TestCheckReachable(unittest.TestCase):
         )
         logs: list[str] = []
 
-        def fake_check(info, values, *, timeout=5, on_log=None):
+        def fake_check(info, values, *, timeout=5, on_log=None, vierfach=False):
             if info.key == "own_fulcrum":
                 return replace(
                     info, reachable=True, peer_count=1,

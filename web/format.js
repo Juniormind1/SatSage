@@ -1583,10 +1583,55 @@ function logIstWichtig(text) {
  *
  * Rückgabe: das DOM-Element der Zeile (für spätere In-place-Updates).
  */
+const _logDatei = [];
+let _logDateiTimer = 0;
+
+function merkeLogDatei(text, wallet) {
+  const roh = String(text ?? "").trim();
+  if (!roh) return;
+  _logDatei.push({
+    t: (typeof logZeitstempel === "function") ? logZeitstempel() : "",
+    text: roh,
+    wallet: String(wallet || "").trim(),
+  });
+  if (_logDatei.length >= 20) {
+    spueleLogDatei();
+    return;
+  }
+  if (!_logDateiTimer) {
+    _logDateiTimer = setTimeout(spueleLogDatei, 400);
+  }
+}
+
+function spueleLogDatei() {
+  if (_logDateiTimer) {
+    clearTimeout(_logDateiTimer);
+    _logDateiTimer = 0;
+  }
+  if (!_logDatei.length) return;
+  const zeilen = _logDatei.splice(0, _logDatei.length);
+  const kopf = {
+    ...(typeof tokenKopf === "function" ? tokenKopf() : {}),
+    "Content-Type": "application/json",
+  };
+  fetch("/api/logbereich", {
+    method: "POST",
+    headers: kopf,
+    credentials: "same-origin",
+    body: JSON.stringify({ zeilen }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", spueleLogDatei);
+}
+
 function logZeile(text, wichtig, wallet) {
   const ziel = $("#log-text");
   if (!ziel) return null;
   const roh = String(text ?? "");
+  merkeLogDatei(roh, wallet);
   // Wichtigkeit am Original (DE-Muster); Anzeige ggf. übersetzt.
   const zeile = document.createElement("div");
   zeile.className = (wichtig ?? logIstWichtig(roh)) ? "log-zeile log-wichtig" : "log-zeile";
@@ -1619,6 +1664,7 @@ function logZeile(text, wichtig, wallet) {
 function aktualisiereLogZeile(knoten, text, wichtig) {
   if (!knoten) return;
   const roh = String(text ?? "");
+  merkeLogDatei(roh, "");
   const meldung = knoten.querySelector(".log-meldung");
   if (meldung) meldung.textContent = übersetzeLogText(roh);
   const istWichtig = wichtig ?? logIstWichtig(roh);
@@ -3539,9 +3585,11 @@ async function leseSourceCheckStream(antwort) {
 
 async function apiSourceCheck(optionen = {}) {
   const still = Boolean(optionen.still);
-  const url = still
-    ? "/api/source/status?check=1&still=1"
-    : "/api/source/status?check=1";
+  const vierfach = Boolean(optionen.vierfach) && !still;
+  const teile = ["check=1"];
+  if (still) teile.push("still=1");
+  if (vierfach) teile.push("vierfach=1");
+  const url = `/api/source/status?${teile.join("&")}`;
   const kopf = { ...tokenKopf() };
   if (!still) kopf.Accept = "application/x-ndjson";
   const antwort = await fetch(url, { headers: kopf, credentials: "same-origin" });

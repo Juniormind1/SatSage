@@ -1010,6 +1010,7 @@ def check_sources(
     timeout: int = 5,
     on_log=None,
     still: bool = False,
+    vierfach: bool = False,
 ) -> list[SourceInfo]:
     """
     Prüft die eigenen Nodes.
@@ -1035,7 +1036,9 @@ def check_sources(
     lan_ok: SourceInfo | None = None
 
     for quelle in lan:
-        geprueft = check_reachable(quelle, values, timeout=timeout, on_log=log)
+        geprueft = check_reachable(
+            quelle, values, timeout=timeout, on_log=log, vierfach=vierfach,
+        )
         gefunden[quelle.key] = geprueft
         if geprueft.reachable and lan_ok is None:
             lan_ok = geprueft
@@ -1054,7 +1057,7 @@ def check_sources(
             )
             continue
         gefunden[quelle.key] = check_reachable(
-            quelle, values, timeout=timeout, on_log=log,
+            quelle, values, timeout=timeout, on_log=log, vierfach=vierfach,
         )
 
     for quelle in rest:
@@ -1614,6 +1617,7 @@ def check_reachable(
     *,
     timeout: int = 5,
     on_log=None,
+    vierfach: bool = False,
 ) -> SourceInfo:
     """
     Prüft eine einzelne Quelle. Verändert *info* nicht, sondern liefert eine
@@ -1761,14 +1765,20 @@ def check_reachable(
     ssl_gewuenscht = True
     port_gewuenscht = 0
     tor_proxy = None
+    behalten = False
 
     try:
-        from core.fulcrum_client import connect_fulcrum
+        from core.fulcrum_client import connect_fulcrum, lebende_zum_ziel
 
         for host, port, use_ssl, tor_proxy in kandidaten:
             ssl_gewuenscht = use_ssl
             port_gewuenscht = port
-            if tor_proxy is None and chain_sources.host_ist_klare_ip(host):
+            behalten = False
+            if (
+                vierfach
+                and tor_proxy is None
+                and chain_sources.host_ist_klare_ip(host)
+            ):
                 if port and int(port) not in (
                     chain_sources.EIGENE_ELECTRS_STANDARD_PORTS
                 ):
@@ -1795,6 +1805,27 @@ def check_reachable(
                     break
                 log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
                 continue
+            if tor_proxy is None and chain_sources.host_ist_klare_ip(host):
+                log(
+                    f"Verbinde mit "
+                    f"{_verbindung_ziel(host, port, use_ssl)}"
+                )
+                gehalten = lebende_zum_ziel(
+                    host, int(port), use_ssl=bool(use_ssl),
+                )
+                if gehalten is not None:
+                    client = gehalten
+                    behalten = True
+                    fehler = None
+                    break
+                client, fehler = connect_fulcrum(
+                    host, port, use_ssl=use_ssl, timeout=timeout,
+                    tor_proxy=None, require_listunspent=True,
+                )
+                if client:
+                    break
+                log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
+                continue
             log(
                 f"Verbinde mit "
                 f"{_verbindung_ziel(host, port, use_ssl, tor_proxy)}"
@@ -1804,7 +1835,7 @@ def check_reachable(
                 tor_proxy=tor_proxy, require_listunspent=True,
             )
             # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung.
-            if not client and fehler and chain_sources.tls_should_try_opposite(
+            if vierfach and not client and fehler and chain_sources.tls_should_try_opposite(
                 fehler, use_ssl=use_ssl, port=port,
             ):
                 alt = not use_ssl
@@ -1865,7 +1896,8 @@ def check_reachable(
                     tor_proxy=tor_proxy, require_listunspent=True,
                 )
                 if (
-                    not client
+                    vierfach
+                    and not client
                     and fehler
                     and chain_sources.tls_should_try_opposite(
                         fehler, use_ssl=use_ssl, port=port,
@@ -1934,10 +1966,11 @@ def check_reachable(
             + (f" ({soft})" if soft else "")
             + f". Privatsphäre: {ergebnis.privacy}"
         )
-        try:
-            client.close()
-        except Exception:
-            pass
+        if not behalten:
+            try:
+                client.close()
+            except Exception:
+                pass
         return ergebnis
 
     ergebnis.reachable = False

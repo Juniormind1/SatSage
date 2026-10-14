@@ -523,6 +523,12 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     quellen = source_mod.describe_sources(werte)
     still = query.get("still", ["0"])[0] in ("1", "true", "ja")
     check_an = query.get("check", ["0"])[0] in ("1", "true", "ja")
+    # Vierfach nur vom Übernehmen-Knopf nach neuen Angaben. Der stille
+    # Takt und „Prüfen“ verbinden die gespeicherte Kombination.
+    vierfach = (
+        not still
+        and query.get("vierfach", ["0"])[0] in ("1", "true", "ja")
+    )
     # Während UTXO-Scan/Herkunft: stiller Peer-Takt soll own_fulcrum nicht
     # neu connecten (Tor-SOCKS-Spam + Last auf dem Electrs-Socket).
     electrum_busy = electrum_serial_busy()
@@ -530,6 +536,7 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     if check_an and not skip_live_check:
         quellen = source_mod.check_sources(
             quellen, werte, on_log=None if still else on_log, still=still,
+            vierfach=vierfach,
         )
         quellen = _persist_tls_auto(
             state, quellen, on_log=None if still else on_log,

@@ -239,6 +239,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
         gesamt = len(offen)
+        fetchers = None
         try:
             # Vor dem Verbinden: der Plot setzt „?“ auf jeden UTXO dieses Laufs.
             job.result = {
@@ -666,6 +667,12 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 "partial": False,
             }
         finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
             halt.set()
             stand.close()
 
@@ -753,6 +760,7 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
         threading.Thread(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
+        fetchers = None
         try:
             stand.phase(f"Starte Verlaufsscan für {namen}…")
             # Adressen bis scan_end_index (Change jenseits max_addresses)
@@ -863,6 +871,12 @@ def api_verlauf(state: AppState, payload: dict) -> dict:
                 "utxo_from_cache": frisch is not None,
             }
         finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
             halt.set()
             stand.close()
 
@@ -1228,6 +1242,7 @@ def api_trace(state: AppState, payload: dict) -> dict:
         threading.Thread(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
+        fetchers = None
         try:
             # log=True: Nav und Fokus-UI sehen mehr als nur die letzte message.
             stand.phase("Verbinde mit der Datenquelle…")
@@ -1381,6 +1396,12 @@ def api_trace(state: AppState, payload: dict) -> dict:
                 )
             raise
         finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
             halt.set()
             stand.close()
 

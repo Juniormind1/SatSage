@@ -74,10 +74,31 @@ class NativeFehler(Exception):
         *,
         index_aus: bool = False,
         unbrauchbar: bool = False,
+        roh: bytes = b"",
     ) -> None:
         super().__init__(text)
         self.index_aus = index_aus
         self.unbrauchbar = unbrauchbar
+        self.roh = roh
+
+
+def _nicht_implementiert(daten: bytes | None) -> bool:
+    if not daten:
+        return False
+    klein = daten.lower()
+    return b"not implemented" in klein or b"not_implemented" in klein
+
+
+def _routenart(pfad: str) -> str:
+    """Gleiche Art für jede Adresse: ein abgelehnter Pfad gilt für den Scan."""
+    teile = [teil for teil in pfad.split("/") if teil]
+    if not teile:
+        return pfad
+    if teile[0] == "address" and len(teile) >= 3:
+        return f"address/{teile[2]}"
+    if teile[0] == "tx" and len(teile) >= 3:
+        return f"tx/{teile[2]}"
+    return teile[0]
 
 
 def _host_aus_env(raw: str) -> str:
@@ -349,7 +370,7 @@ def _lies_http(sock: socket.socket) -> tuple[int, bytes]:
     while b"\r\n\r\n" not in puffer:
         chunk = sock.recv(65536)
         if not chunk:
-            raise NativeFehler("Verbindung zu")
+            raise NativeFehler("Verbindung zu", roh=puffer)
         puffer += chunk
         if len(puffer) > _MAX_ANTWORT:
             raise NativeFehler("Antwort zu groß")
@@ -405,6 +426,7 @@ class NativeSitzung:
         self.antwort_bytes = 0
         self.pfade: list[str] = []
         self.ports: tuple[int, ...] = ()
+        self._tot: set[str] = set()
         self._lock = threading.Lock()
         self._karte_fertig = False
         self._bekannt: dict[tuple[str, int], dict] = {}
@@ -446,6 +468,10 @@ class NativeSitzung:
         return roh
 
     def _anfrage(self, pfad: str, *, datenformat: str) -> tuple[int, bytes]:
+        if int(self.port) in (50001, 50002):
+            self.aktiv = False
+            self.grund = "electrum-port"
+            raise NativeFehler("Electrum-Port")
         if datenformat not in ("json", "data"):
             raise NativeFehler("Format")
         if not _PFAD.fullmatch(pfad):
@@ -479,19 +505,29 @@ class NativeSitzung:
         return status, body
 
     def _holen(self, pfad: str, *, datenformat: str) -> Any:
+        art = _routenart(pfad)
+        unbestaetigt = pfad.endswith("/unconfirmed")
+        if art in self._tot:
+            if unbestaetigt:
+                return _LEER
+            raise NativeFehler("nicht implementiert")
         try:
             status, body = self._anfrage(pfad, datenformat=datenformat)
-        except NativeFehler:
+        except NativeFehler as exc:
+            if _nicht_implementiert(exc.roh):
+                self._tot.add(art)
+                if unbestaetigt:
+                    return _LEER
             raise
         except OSError as exc:
             raise NativeFehler("Netz") from exc
         if status == 404:
             return _LEER
-        unbestaetigt = pfad.endswith("/unconfirmed")
-        if status == 501 and unbestaetigt:
-            return _LEER
-        if status == 501:
-            raise NativeFehler("Index", index_aus=True)
+        if status == 501 or _nicht_implementiert(body):
+            self._tot.add(art)
+            if unbestaetigt:
+                return _LEER
+            raise NativeFehler("nicht implementiert")
         if status != 200:
             raise NativeFehler(f"HTTP {status}")
         if datenformat == "data":

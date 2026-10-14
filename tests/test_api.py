@@ -1493,7 +1493,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             },
         ]
 
-        def fake_check(info, values, *, timeout=5, on_log=None):
+        def fake_check(info, values, *, timeout=5, on_log=None, vierfach=False):
             if info.key == "own_fulcrum" and info.configured:
                 return replace(
                     info, reachable=True, peer_count=1,
@@ -1532,7 +1532,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         """Die Oberfläche soll Zeilen sehen, bevor die Prüfung fertig ist."""
         from dataclasses import replace
 
-        def fake_check(info, values, *, timeout=5, on_log=None):
+        def fake_check(info, values, *, timeout=5, on_log=None, vierfach=False):
             zeilen = []
             if info.configured and info.key == "own_fulcrum":
                 zeilen.append("Prüfe Eigener Electrum-Server…")

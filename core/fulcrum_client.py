@@ -36,6 +36,40 @@ _LISTUNSPENT_METHOD = "blockchain.scripthash.listunspent"
 _GET_HISTORY_METHOD = "blockchain.scripthash.get_history"
 _PROBE_SCRIPT_HASH = "0" * 64
 
+_lebende_lock = threading.Lock()
+_lebende: dict[int, "FulcrumClient"] = {}
+
+
+def _merk_lebend(client: "FulcrumClient") -> None:
+    with _lebende_lock:
+        _lebende[id(client)] = client
+
+
+def _vergiss_lebend(client: "FulcrumClient") -> None:
+    with _lebende_lock:
+        _lebende.pop(id(client), None)
+
+
+def lebende_zum_ziel(host: str, port: int, *, use_ssl: bool) -> "FulcrumClient | None":
+    """Schon geöffnete Verbindung zu genau diesem Host, Port und TLS.
+
+    Status und Erreichbarkeit dürfen die nicht noch einmal anwählen
+    und auch nicht schließen.
+    """
+    ziel_port = int(port)
+    ziel_ssl = bool(use_ssl)
+    with _lebende_lock:
+        kandidaten = list(_lebende.values())
+    for client in kandidaten:
+        if (
+            client.host == host
+            and int(client.port) == ziel_port
+            and bool(client.use_ssl) is ziel_ssl
+            and client._sock is not None
+        ):
+            return client
+    return None
+
 
 def _is_unknown_method_error(exc: BaseException, method: str) -> bool:
     msg = str(exc).lower()
@@ -141,6 +175,9 @@ class FulcrumClient:
                 return None
 
     def connect(self) -> None:
+        # Alten Socket zuerst zu. Sonst hält der Server die Session bis
+        # zum Inaktiv-Timeout, während hier schon die nächste steht.
+        self.close()
         if outbound_policy.oeffentliche_electrum_suche_prozess_ende():
             raise ConnectionError("abgebrochen")
         outbound_policy.ensure_resolves_to_allowed_host(
@@ -148,40 +185,57 @@ class FulcrumClient:
             service="fulcrum",
             values=self._outbound_values(),
         )
-        if self.tor_proxy:
-            proxy_host, proxy_port = self.tor_proxy
-            raw = _socks5_connect(
-                proxy_host, proxy_port, self.host, self.port, self.timeout
-            )
-        else:
-            raw = socket.create_connection((self.host, self.port), timeout=self.timeout)
-            merke_kette_socket(raw)
-        # Timeout vor dem TLS-Handshake — sonst hängt wrap_socket auf
-        # Klartext-Port 50001 über Tor bis zum Default (oft Minuten).
+        raw = None
         try:
-            raw.settimeout(float(self.timeout))
-        except OSError:
-            pass
-        if self.use_ssl:
-            ctx = outbound_policy.tls_context(host=self.host)
-            self._sock = ctx.wrap_socket(raw, server_hostname=self.host)
-            if self._sock is not raw:
+            if self.tor_proxy:
+                proxy_host, proxy_port = self.tor_proxy
+                raw = _socks5_connect(
+                    proxy_host, proxy_port, self.host, self.port, self.timeout
+                )
+            else:
+                raw = socket.create_connection(
+                    (self.host, self.port), timeout=self.timeout
+                )
+                merke_kette_socket(raw)
+            # Timeout vor dem TLS-Handshake — sonst hängt wrap_socket auf
+            # Klartext-Port 50001 über Tor bis zum Default (oft Minuten).
+            try:
+                raw.settimeout(float(self.timeout))
+            except OSError:
+                pass
+            if self.use_ssl:
+                ctx = outbound_policy.tls_context(host=self.host)
+                wrapped = ctx.wrap_socket(raw, server_hostname=self.host)
+                if wrapped is not raw:
+                    vergiss_kette_socket(raw)
+                    merke_kette_socket(wrapped)
+                self._sock = wrapped
+            else:
+                self._sock = raw
+            raw = None
+            self._handshaked = False
+            self.server_version = None
+            self.server_software = ""
+            self.server_software_raw = ""
+            # Connect-Timeout gilt sonst nicht zuverlässig für spätere recv —
+            # ohne das hängt get_history über Tor minutenlang ohne Abbruch.
+            try:
+                self._sock.settimeout(float(self.timeout))
+            except OSError:
+                pass
+            _merk_lebend(self)
+        except Exception:
+            if raw is not None:
                 vergiss_kette_socket(raw)
-                merke_kette_socket(self._sock)
-        else:
-            self._sock = raw
-        self._handshaked = False
-        self.server_version = None
-        self.server_software = ""
-        self.server_software_raw = ""
-        # Connect-Timeout gilt sonst nicht zuverlässig für spätere recv —
-        # ohne das hängt get_history über Tor minutenlang ohne Abbruch.
-        try:
-            self._sock.settimeout(float(self.timeout))
-        except OSError:
-            pass
+                try:
+                    raw.close()
+                except OSError:
+                    pass
+            self.close()
+            raise
 
     def close(self) -> None:
+        _vergiss_lebend(self)
         if self._sock:
             sock = self._sock
             self._sock = None

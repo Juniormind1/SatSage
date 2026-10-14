@@ -27,6 +27,7 @@ function logReleaseAlsErsteZeile() {
   const ver = (Zustand.config?.version || "").trim();
   if (!ver) return;
   const text = `SatSage v${ver}`;
+  if (typeof merkeLogDatei === "function") merkeLogDatei(text, "");
   let zeile = ziel.querySelector(".log-zeile.log-release");
   if (zeile) {
     const meldung = zeile.querySelector(".log-meldung");

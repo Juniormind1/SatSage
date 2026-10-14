@@ -1010,6 +1010,9 @@ from httpserver.api.jobs import (  # noqa: E402
 from httpserver.api.p2p_walk import api_p2p_walk_abgleich  # noqa: E402
 
 
+from httpserver.logbereich import api_logbereich  # noqa: E402
+
+
 from httpserver.api.source import (  # noqa: E402
     api_clear_source,
     api_header_vorab,
@@ -1635,6 +1638,8 @@ class Handler(
             return 200, api_exchange_reports_loesche(state, query)
         if teile == ["source", "status"] and methode == "GET":
             return 200, api_source_status(state, query)
+        if teile == ["logbereich"] and methode == "POST":
+            return 200, api_logbereich(state, self._body(max_bytes=256 * 1024))
         if teile == ["source", "oeffentlich"] and methode == "POST":
             return 200, api_oeffentliche_electrum(state, self._body())
         if teile == ["source", "local-core"] and methode == "POST":
