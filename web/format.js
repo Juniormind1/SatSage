@@ -3542,6 +3542,9 @@ async function leseSourceCheckStream(antwort) {
 
   const nimm = (obj) => {
     if (obj.log) logZeile(obj.log);
+    if (obj.electrs_form && typeof wendeElectrsFormularStand === "function") {
+      wendeElectrsFormularStand(obj.electrs_form);
+    }
     if (obj.sources) sources = obj.sources;
     if (obj.peers != null) peers = obj.peers;
     if (obj.peer_status) peer_status = obj.peer_status;

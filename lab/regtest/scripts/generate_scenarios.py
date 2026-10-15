@@ -40,6 +40,17 @@ AGE_INDEX_COUNT = 40
 #: Indizes AGE_INDEX_COUNT .. AGE+SPEND-1 = Spend-Pool (CJ/Hop/…).
 SPEND_INDEX_COUNT = 40
 
+#: Eigenes Core-Wallet, nicht in SatSage WALLET_* und nicht im Herkunfts-Inventar.
+#: Empfang 0 ist belegt, 1…100 leer, 101 belegt. Gap 100 findet 101 nicht.
+GAP_WALLET = "lab-gap"
+GAP_NEAR_INDEX = 0
+GAP_FAR_INDEX = 101
+GAP_MISS = 100
+GAP_HIT = 101
+GAP_NEAR_SATS = 10_000
+GAP_FAR_SATS = 10_101
+GAP_REPORT = HERE / ".data" / "scenario-report-gap.json"
+
 class Rpc:
     def __init__(self, native: bool):
         user = os.environ.get("RPCUSER", "bitcoin")
@@ -282,6 +293,148 @@ def receive_addresses(rpc: Rpc, wallet: str, count: int = LAB_RECEIVE_COUNT) -> 
         return [str(a) for a in addrs]
     # Fallback (ältere Wallets ohne wpkh-Deskriptor): Keypool wie bisher.
     return [new_address(rpc, wallet) for _ in range(count)]
+
+
+def _sats_betrag(amount: object) -> int:
+    return int(round(float(amount) * 1e8))
+
+
+def _unspents_an_adresse(rpc: Rpc, address: str) -> list[dict[str, Any]]:
+    """Unspents einer Adresse, ohne dass das Wallet den Index beobachten muss."""
+    try:
+        rpc.call("scantxoutset", "abort")
+    except RuntimeError:
+        pass
+    info = rpc.json("getdescriptorinfo", f"addr({address})")
+    desc = str(info.get("descriptor") or "")
+    if not desc:
+        raise RuntimeError(f"Kein Deskriptor für {address}")
+    daten = rpc.json("scantxoutset", "start", json.dumps([desc]))
+    if not isinstance(daten, dict) or daten.get("success") is False:
+        raise RuntimeError(f"scantxoutset ohne Erfolg: {daten!r}")
+    rows: list[dict[str, Any]] = []
+    for row in daten.get("unspents") or []:
+        if not isinstance(row, dict) or "txid" not in row:
+            continue
+        rows.append({
+            "txid": str(row["txid"]).lower(),
+            "vout": int(row["vout"]),
+            "amount_sats": _sats_betrag(row.get("amount") or 0),
+        })
+    return rows
+
+
+def _sendmany_sats(rpc: Rpc, payouts: dict[str, int]) -> str:
+    """Beträge als Dezimaltext, nicht als Binärfloat."""
+    teile = [
+        f"{json.dumps(addr)}:{sats / 1e8:.8f}"
+        for addr, sats in payouts.items()
+    ]
+    return rpc.call(
+        "sendmany", "", "{" + ",".join(teile) + "}", wallet="lab-faucet",
+    )
+
+
+def _outs_der_tx(
+    rpc: Rpc, txid: str, wanted: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    decoded = rpc.json("getrawtransaction", txid, "true")
+    gefunden: dict[str, dict[str, Any]] = {}
+    for vout in decoded.get("vout") or []:
+        spk = vout.get("scriptPubKey") or {}
+        addr = str(spk.get("address") or "")
+        if not addr:
+            liste = spk.get("addresses") or []
+            if liste:
+                addr = str(liste[0])
+        if addr not in wanted:
+            continue
+        gefunden[addr] = {
+            "txid": txid.lower(),
+            "vout": int(vout["n"]),
+            "amount_sats": _sats_betrag(vout.get("value") or 0),
+        }
+    fehlend = [addr for addr in wanted if addr not in gefunden]
+    if fehlend:
+        raise RuntimeError(
+            f"Gap-Tx {txid} enthält nicht alle Ziele ({len(fehlend)} fehlen)"
+        )
+    return gefunden
+
+
+def fund_gap_wallet(rpc: Rpc) -> dict[str, Any]:
+    """
+    Legt ``lab-gap`` an: Empfangsindex 0 und 101, dazwischen nichts.
+
+    Das Wallet steht nicht in ``WALLET_*``. Core sieht Index 101 über
+    scantxoutset, der Electrs-Gap-Walk mit Limit 100 nicht.
+    """
+    load_or_create(rpc, "lab-faucet")
+    load_or_create(rpc, GAP_WALLET)
+    addrs = receive_addresses(rpc, GAP_WALLET, GAP_FAR_INDEX + 1)
+    near = addrs[GAP_NEAR_INDEX]
+    far = addrs[GAP_FAR_INDEX]
+    xpub, script = public_receive_key(rpc, GAP_WALLET)
+    try:
+        near_rows = _unspents_an_adresse(rpc, near)
+        far_rows = _unspents_an_adresse(rpc, far)
+    except RuntimeError as exc:
+        print(f"Gap-Bestand unklar ({exc}) — zahle neu.", file=sys.stderr)
+        near_rows, far_rows = [], []
+    neu: dict[str, dict[str, Any]] = {}
+    if not near_rows or not far_rows:
+        payouts: dict[str, int] = {}
+        if not near_rows:
+            payouts[near] = GAP_NEAR_SATS
+        if not far_rows:
+            payouts[far] = GAP_FAR_SATS
+        rescan_wallets(rpc, "lab-faucet")
+        faucet = new_address(rpc, "lab-faucet")
+        txid = _sendmany_sats(rpc, payouts)
+        mine(rpc, 1, faucet)
+        neu = _outs_der_tx(rpc, txid, payouts)
+        ziele = []
+        if near in payouts:
+            ziele.append(f"#{GAP_NEAR_INDEX}")
+        if far in payouts:
+            ziele.append(f"#{GAP_FAR_INDEX}")
+        print(
+            f"Gap-Wallet {GAP_WALLET}: Empfang {' und '.join(ziele)} "
+            f"finanziert ({txid})",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Gap-Wallet {GAP_WALLET}: Index {GAP_NEAR_INDEX} und "
+            f"{GAP_FAR_INDEX} schon belegt",
+            file=sys.stderr,
+        )
+    near_out = neu.get(near) or near_rows[0]
+    far_out = neu.get(far) or far_rows[0]
+    bericht = {
+        "wallet": GAP_WALLET,
+        "script": script,
+        "xpub": xpub,
+        "chain": 0,
+        "near_index": GAP_NEAR_INDEX,
+        "far_index": GAP_FAR_INDEX,
+        "empty_between": GAP_FAR_INDEX - GAP_NEAR_INDEX - 1,
+        "gap_miss": GAP_MISS,
+        "gap_hit": GAP_HIT,
+        "near_address": near,
+        "far_address": far,
+        "near": near_out,
+        "far": far_out,
+        "in_satsage_env": False,
+        "funded": bool(neu),
+        "note": (
+            "Nicht in WALLET_*. Gap 100 findet nur Index 0. "
+            "Gap 101 findet Index 101. Core scantxoutset findet beide."
+        ),
+    }
+    GAP_REPORT.parent.mkdir(parents=True, exist_ok=True)
+    GAP_REPORT.write_text(json.dumps(bericht, indent=2) + "\n", encoding="utf-8")
+    return bericht
 
 def load_or_create(rpc: Rpc, wallet: str) -> None:
     try:
@@ -791,6 +944,19 @@ def run(rpc: Rpc) -> None:
     set_time(rpc, 0)
     _MOCK_CURSOR = 0
 
+    gap = fund_gap_wallet(rpc)
+    if gap.get("funded"):
+        phases.append({
+            "label": "gap-101",
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "height": int(rpc.call("getblockcount")),
+            "note": (
+                f"{GAP_WALLET}: Empfang #{GAP_NEAR_INDEX} und #{GAP_FAR_INDEX}, "
+                f"{gap['empty_between']} leere Indizes dazwischen. "
+                "Nicht in WALLET_*."
+            ),
+        })
+
     write_env(rpc)
     report = {
         "tip_height": int(rpc.call("getblockcount")),
@@ -836,6 +1002,49 @@ def run(rpc: Rpc) -> None:
         "scenario_count": len(records),
         "txclass_cases": len(txclass["cases"]),
         "phases": [p["label"] for p in phases],
+        "gap_wallet": GAP_WALLET,
+        "gap_far_index": GAP_FAR_INDEX,
+        "gap_report": str(GAP_REPORT),
+    }))
+
+
+def add_gap_case(rpc: Rpc) -> None:
+    """Nur das Gap-Wallet an eine schon erzeugte Chain hängen."""
+    tip = int(rpc.call("getblockcount"))
+    if tip < 101:
+        raise RuntimeError(
+            "Chain ist zu kurz für das Gap-Wallet — zuerst generate_scenarios.py"
+        )
+    set_time(rpc, 0)
+    global _MOCK_CURSOR
+    _MOCK_CURSOR = 0
+    gap = fund_gap_wallet(rpc)
+    report_path = HERE / ".data" / "scenario-report.json"
+    if gap.get("funded") and report_path.is_file():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        phases = list(report.get("phases") or [])
+        phases.append({
+            "label": "gap-101",
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "height": int(rpc.call("getblockcount")),
+            "note": (
+                f"{GAP_WALLET}: Empfang #{GAP_NEAR_INDEX} und #{GAP_FAR_INDEX}, "
+                f"{gap['empty_between']} leere Indizes dazwischen. "
+                "Nicht in WALLET_*."
+            ),
+        })
+        report["phases"] = phases
+        report["tip_height"] = int(rpc.call("getblockcount"))
+        report_path.write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8",
+        )
+    print(json.dumps({
+        "gap_wallet": GAP_WALLET,
+        "gap_far_index": GAP_FAR_INDEX,
+        "gap_miss": GAP_MISS,
+        "gap_hit": GAP_HIT,
+        "gap_report": str(GAP_REPORT),
+        "tip_height": int(rpc.call("getblockcount")),
     }))
 
 def add_volume_cohort(rpc: Rpc) -> None:
@@ -920,15 +1129,26 @@ def main() -> int:
         action="store_true",
         help="nur die Volumen-Kohorte an eine bestehende Chain hängen",
     )
+    parser.add_argument(
+        "--gap-only",
+        action="store_true",
+        help="nur lab-gap (Index 0 und 101) an eine bestehende Chain hängen",
+    )
     args = parser.parse_args()
     native = choose_native(args.native)
     print(f"Backend: {'native bitcoin-cli' if native else 'Docker Compose'}")
     print(f"Lokale Env-Datei: {ENV_PATH}")
     if args.dry_run:
         return 0
+    if args.volume_only and args.gap_only:
+        print("Nur eines von --volume-only und --gap-only.", file=sys.stderr)
+        return 2
     rpc = Rpc(native)
     if args.volume_only:
         add_volume_cohort(rpc)
+        return 0
+    if args.gap_only:
+        add_gap_case(rpc)
         return 0
     run(rpc)
     return 0

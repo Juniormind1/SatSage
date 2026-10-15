@@ -533,6 +533,11 @@ function aktualisiereGruppenMixIcons(address) {
 }
 
 function quelleFeldLabel(feld, quelleKey) {
+  if (quelleKey === "own_fulcrum") {
+    const kurz = `sources.field.${feld.key}.labelElectrs`;
+    const electrs = t(kurz);
+    if (electrs !== kurz) return electrs;
+  }
   const key = `sources.field.${feld.key}.label`;
   const uebersetzt = t(key);
   return uebersetzt !== key ? uebersetzt : feld.label;

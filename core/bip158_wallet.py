@@ -270,7 +270,7 @@ def naechste_historie_scripts(
     return set(ziel) - set(schon or ())
 
 
-#: P2P-Lücke. Electrs bleibt bei ``UTXO_SCAN_GAP_LIMIT`` (100).
+#: P2P-Lücke. Electrs liest ``UTXO_SCAN_GAP_LIMIT`` aus der .env (Vorgabe 100).
 BIP158_GAP_MIN = 1
 BIP158_GAP_DEFAULT = 100
 BIP158_GAP_MAX = 10_000

@@ -61,7 +61,36 @@ if TYPE_CHECKING:
 BIP44_GAP_LIMIT = 20
 
 
-UTXO_SCAN_GAP_LIMIT = 100  # Wasabi/CoinJoin: Lücken >20 zwischen genutzten Indizes
+UTXO_SCAN_GAP_MIN = 1
+UTXO_SCAN_GAP_DEFAULT = 100
+UTXO_SCAN_GAP_MAX = 10_000
+#: Default und Schätzung alter Caches ohne ``scan_end_je_chain``.
+#: Wasabi/CoinJoin: Lücken >20 zwischen genutzten Indizes.
+UTXO_SCAN_GAP_LIMIT = UTXO_SCAN_GAP_DEFAULT
+
+
+def normalisiere_utxo_scan_gap(
+    roh: object, *, default: int = UTXO_SCAN_GAP_DEFAULT,
+) -> int:
+    """Ganze Zahl im Bereich 1…10.000. Leer oder unlesbar → *default*."""
+    if roh is None or str(roh).strip() == "":
+        return default
+    try:
+        n = int(str(roh).strip())
+    except (TypeError, ValueError):
+        return default
+    if n < UTXO_SCAN_GAP_MIN:
+        return UTXO_SCAN_GAP_MIN
+    if n > UTXO_SCAN_GAP_MAX:
+        return UTXO_SCAN_GAP_MAX
+    return n
+
+
+def utxo_scan_gap_aus_env(env: dict[str, str] | None = None) -> int:
+    """``UTXO_SCAN_GAP_LIMIT`` aus der Umgebung, sonst 100."""
+    if env is None:
+        env = _load_dotenv()
+    return normalisiere_utxo_scan_gap((env or {}).get("UTXO_SCAN_GAP_LIMIT"))
 
 
 def _merge_cached_utxos(
@@ -1113,6 +1142,7 @@ def _scan_xpub_utxos(
             fulcrum=fulcrum,
             max_index_per_chain=scan_cap,
             start_index=start_index,
+            gap_limit=utxo_scan_gap_aus_env(),
             on_progress=on_progress,
             on_utxos_update=_melde_utxos,
             enden_je_chain=enden_je_chain,
@@ -1828,10 +1858,13 @@ def sync_xpub_zum_tip(
 
     if not nur_bekannte and fulcrum is not None:
         scan_cap = _scan_index_cap_per_chain(xpub, wallet, xpub_max)
+        gap = utxo_scan_gap_aus_env()
         # Scan-Ende je Chain: Empfang und Change wachsen unterschiedlich weit
         # (z. B. Empfang bis #121, Change bis #17). Ein gemeinsames Ende
         # hätte das Rückwärtsfenster der Change-Chain über ihren letzten
         # benutzten Index hinausgeschoben — neues Wechselgeld blieb unsichtbar.
+        # Schätzung alter Caches immer mit dem historischen Default 100 —
+        # ein höheres Limit darf den Start nicht nach vorn schieben.
         enden = _scan_enden_je_chain(
             xpub, entry, scan_end, addrs_cache, UTXO_SCAN_GAP_LIMIT,
         )
@@ -1847,7 +1880,7 @@ def sync_xpub_zum_tip(
                 fulcrum=fulcrum,
                 max_index_per_chain=scan_cap,
                 start_index=scan_end,
-                gap_limit=UTXO_SCAN_GAP_LIMIT,
+                gap_limit=gap,
                 on_progress=on_progress,
                 start_je_chain=enden,
                 enden_je_chain=walk_enden,
@@ -1873,7 +1906,7 @@ def sync_xpub_zum_tip(
         # unterhalb des Scan-Endes DIESER Chain — [Ende − Gap-Limit, Ende).
         if fetch_address_utxos or fetch_addresses_utxos:
             fenster = _rueckwaerts_fenster_je_chain(
-                xpub, enden, UTXO_SCAN_GAP_LIMIT,
+                xpub, enden, gap,
             )
             neu_window = set(fenster) - addrs_cache - set(extra_addrs)
             if neu_window:
@@ -1891,7 +1924,7 @@ def sync_xpub_zum_tip(
                     kette, index = treffer
                     enden_neu[kette] = max(
                         enden_neu[kette],
-                        min(index + UTXO_SCAN_GAP_LIMIT + 1, scan_cap),
+                        min(index + gap + 1, scan_cap),
                     )
         new_end = max(new_end, *enden_neu.values())
     elif not nur_bekannte:

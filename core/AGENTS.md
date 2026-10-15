@@ -98,7 +98,7 @@ Einzelmodi:
 
 - **Bitcoin-P2P Compact Filter** — Peers mit `NODE_COMPACT_FILTERS` (`peerblockfilters=1`)
   - Filter lokal matchen, Block nur bei Treffer
-  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Lücke`. Die Lücke ist `BIP158_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld in den Datenquellen). Electrs bleibt bei `UTXO_SCAN_GAP_LIMIT` (100). Ohne Treffer nur die ersten *Lücke* Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein P2P-Cache gilt erst fertig, wenn `bip158_scan_gap` mindestens die eingestellte Lücke ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
+  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Lücke`. Die Lücke ist `BIP158_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld in den Datenquellen). Electrs liest `UTXO_SCAN_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld am eigenen Electrum-Server). Ohne Treffer nur die ersten *Lücke* Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein P2P-Cache gilt erst fertig, wenn `bip158_scan_gap` mindestens die eingestellte Lücke ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
   - Peer-Reihenfolge: Host im LAN (`FULCRUM_HOST`, P2P-Port 8333), dann gemerkte Filter-Peers, dann `BIP158_PEERS`, dann DNS-Seeds mit `x40.` (NODE_COMPACT_FILTERS). Im Regtest nur der bitcoind auf Port 18444, ohne Merk-Liste und ohne DNS. Ohne Compact Filter am eigenen Node kein Sprung zu öffentlichen Electrum-Servern. LAN-IPs nicht über Tor. Vor dem DNS-Rundlauf: drei parallele TCP-Prüfungen auf 8333; lauter Timeouts = Firewall, Clearnet entfällt. Scheitert Clearnet, folgt Tor: laufender Browser (9150) oder Autostart des `tor`-Binary (`stelle_tor_socks_bereit`, wie beim eigenen Onion-Node).
   - Scan: bis zu 8 Peers parallel für `getcfilters` (Clearnet; über Tor 2); Trefferblöcke auf 2 Workern — bei `notfound`/totem Socket der nächste schon verbundene Peer, Nachrücken nur wenn keiner den Block hat (Tor höchstens 2 Extra, Clearnet 4); `NODE_NETWORK_LIMITED` nur letzte 288 Blöcke (Filter bleibt). Ein Scan ab SegWit sucht weiter, bis ein Peer mit `NODE_NETWORK` verbunden ist, auch wenn das Kontingent schon voller geprunter Peers ist. Über Tor ersetzt der einen geprunten Platz, auf Clearnet bleibt er zusätzlich. Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
   - `server.py` startet `starte_header_vorab`, sobald P2P die einzige Bestandsquelle ist: Header ab SegWit in `p2p_headers.bin`, sonst nur Tip-Nachzug. Job `headers` für das Log
@@ -155,6 +155,7 @@ FULCRUM_HOST=...
 FULCRUM_TOR=....onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
+# UTXO_SCAN_GAP_LIMIT=100      # 1…10000, Vorgabe 100; Electrs/Fulcrum-Gap-Scan
 # Ist FULCRUM_HOST eine IP, probiert der Übernehmen-Knopf in den
 # Datenquellen 50001 und 50002 jeweils mit und ohne TLS, aber nur wenn
 # der Benutzer dort neue Angaben gespeichert hat. Danach verbindet

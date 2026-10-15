@@ -430,8 +430,53 @@ function liesEingabeWert(eingabe) {
 }
 
 function setzeEingabeWert(eingabe, wert) {
-  if (eingabe.type === "checkbox") eingabe.checked = wert === "true";
-  else eingabe.value = wert;
+  if (eingabe.type === "checkbox") {
+    eingabe.checked = wert === "true" || wert === "1";
+  } else {
+    eingabe.value = wert;
+  }
+}
+
+/**
+ * Electrs-Verbindung steht, die übrige Quellenprüfung läuft noch.
+ * Das offene Formular übernimmt TLS sofort. Port nur, wenn der Nutzer
+ * ihn nicht gerade selbst ändert. Sonst schreibt Übernehmen den alten Port
+ * über den Treffer.
+ */
+function wendeElectrsFormularStand(felder) {
+  const werte = {};
+  for (const [key, wert] of Object.entries(felder || {})) {
+    if (wert == null) continue;
+    werte[key] = String(wert);
+  }
+  if (!Object.keys(werte).length) return;
+  const sources = Zustand.config && Zustand.config.sources;
+  if (Array.isArray(sources)) {
+    Zustand.config.sources = sources.map((q) => {
+      if (!q || q.key !== "own_fulcrum" || !Array.isArray(q.felder)) return q;
+      return {
+        ...q,
+        felder: q.felder.map((f) => (
+          Object.prototype.hasOwnProperty.call(werte, f.key)
+            ? { ...f, value: werte[f.key] }
+            : f
+        )),
+      };
+    });
+  }
+  const form = document.querySelector(
+    '#quellen-liste [data-quelle-key="own_fulcrum"] .quelle-formular',
+  );
+  if (!form || form.hidden) return;
+  for (const eingabe of form.querySelectorAll("[data-key]")) {
+    const key = eingabe.dataset.key;
+    if (!Object.prototype.hasOwnProperty.call(werte, key)) continue;
+    const aktuell = liesEingabeWert(eingabe);
+    const server = eingabe.dataset.serverValue ?? "";
+    if (key !== "FULCRUM_SSL" && aktuell !== server) continue;
+    setzeEingabeWert(eingabe, werte[key]);
+    eingabe.dataset.serverValue = liesEingabeWert(eingabe);
+  }
 }
 
 /**
@@ -1126,71 +1171,76 @@ async function loescheElectrumListe(quelle) {
   }
 }
 
-/** Baut das Bearbeitungsformular einer Datenquelle. */
-function quellenFormular(quelle, behaelter, gemerkt) {
-  const form = document.createElement("div");
-  const bridgeManaged = start9BridgeManaged(quelle);
-  const eingaben = new Map();
+function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinweisAlsTitel) {
+  const zeile = document.createElement("label");
+  zeile.className = extraKlasse ? `feld-zeile ${extraKlasse}` : "feld-zeile";
 
-  for (const feld of quelle.felder) {
-    const zeile = document.createElement("label");
-    zeile.className = "feld-zeile";
+  const titel = document.createElement("span");
+  titel.className = "feld-titel";
+  titel.textContent = quelleFeldLabel(feld, quelle.key);
 
-    const titel = document.createElement("span");
-    titel.className = "feld-titel";
-    titel.textContent = quelleFeldLabel(feld, quelle.key);
-    zeile.append(titel);
+  let eingabe;
+  if (feld.typ === "checkbox") {
+    eingabe = document.createElement("input");
+    eingabe.type = "checkbox";
+    eingabe.checked = feld.value === "true" || feld.value === "1";
+    eingabe.className = "feld-checkbox";
+  } else if (feld.typ === "schalter") {
+    eingabe = document.createElement("select");
+    for (const [wert, text] of [["true", t("common.yes")], ["false", t("common.no")]]) {
+      const option = document.createElement("option");
+      option.value = wert;
+      option.textContent = text;
+      eingabe.append(option);
+    }
+    eingabe.value = feld.value === "true" ? "true" : "false";
+  } else if (feld.typ === "liste") {
+    eingabe = document.createElement("textarea");
+    eingabe.rows = 4;
+    eingabe.className = "mono";
+    eingabe.value = feld.value;
+  } else {
+    eingabe = document.createElement("input");
+    const zahl = feld.typ === "zahl" || feld.key === "UTXO_SCAN_GAP_LIMIT";
+    eingabe.type = feld.typ === "geheim" ? "password" : (zahl ? "number" : "text");
+    eingabe.className = "mono";
+    eingabe.value = feld.value;
+    eingabe.autocomplete = "off";
+    if (feld.typ === "geheim") {
+      eingabe.placeholder = feld.gesetzt ? t("common.passwordKept") : "";
+    }
+    if (zahl) {
+      eingabe.min = "1";
+      eingabe.max = "10000";
+      eingabe.step = "1";
+      eingabe.inputMode = "numeric";
+    }
+  }
+  eingabe.dataset.key = feld.key;
+  eingabe.dataset.serverValue = liesEingabeWert(eingabe);
+  const roh = gemerkt && gemerkt.werte;
+  if (roh && Object.prototype.hasOwnProperty.call(roh, feld.key)) {
+    setzeEingabeWert(eingabe, roh[feld.key]);
+  }
+  if (bridgeManaged) eingabe.disabled = true;
+  if (feld.typ === "checkbox") zeile.append(eingabe, titel);
+  else zeile.append(titel, eingabe);
 
-    let eingabe;
-    if (feld.typ === "checkbox") {
-      eingabe = document.createElement("input");
-      eingabe.type = "checkbox";
-      eingabe.checked = feld.value === "true";
-      eingabe.className = "feld-checkbox";
-    } else if (feld.typ === "schalter") {
-      eingabe = document.createElement("select");
-      for (const [wert, text] of [["true", t("common.yes")], ["false", t("common.no")]]) {
-        const option = document.createElement("option");
-        option.value = wert;
-        option.textContent = text;
-        eingabe.append(option);
-      }
-      eingabe.value = feld.value === "true" ? "true" : "false";
-    } else if (feld.typ === "liste") {
-      eingabe = document.createElement("textarea");
-      eingabe.rows = 4;
-      eingabe.className = "mono";
-      eingabe.value = feld.value;
+  const hinweisText = quelleFeldHinweis(feld, quelle.key);
+  if (hinweisText && feld.key !== "UTXO_SCAN_GAP_LIMIT") {
+    if (feld.typ === "checkbox" || hinweisAlsTitel) {
+      zeile.title = hinweisText;
     } else {
-      eingabe = document.createElement("input");
-      eingabe.type = feld.typ === "geheim" ? "password" : "text";
-      eingabe.className = "mono";
-      eingabe.value = feld.value;
-      eingabe.autocomplete = "off";
-      if (feld.typ === "geheim") {
-        eingabe.placeholder = feld.gesetzt ? t("common.passwordKept") : "";
-      }
-    }
-    eingabe.dataset.key = feld.key;
-    eingabe.dataset.serverValue = liesEingabeWert(eingabe);
-    const roh = gemerkt && gemerkt.werte;
-    if (roh && Object.prototype.hasOwnProperty.call(roh, feld.key)) {
-      setzeEingabeWert(eingabe, roh[feld.key]);
-    }
-    if (bridgeManaged) eingabe.disabled = true;
-    eingaben.set(feld.key, eingabe);
-    zeile.append(eingabe);
-
-    const hinweisText = quelleFeldHinweis(feld, quelle.key);
-    if (hinweisText) {
       const hinweis = document.createElement("span");
       hinweis.className = "feld-hinweis";
       hinweis.textContent = hinweisText;
       zeile.append(hinweis);
     }
-    form.append(zeile);
   }
+  return { zeile, eingabe };
+}
 
+function haengeQuellenFussAn(form, eingaben, quelle, behaelter, bridgeManaged) {
   const fuss = document.createElement("div");
   fuss.className = "formular-fuss";
 
@@ -1215,6 +1265,10 @@ function quellenFormular(quelle, behaelter, gemerkt) {
     meldungsfeld.textContent = "";
     const werte = {};
     for (const [key, eingabe] of eingaben) {
+      const zeile = eingabe.closest(".feld-zeile");
+      if (eingabe.dataset.nurSichtbar === "1" && zeile && zeile.hidden) {
+        continue;
+      }
       werte[key] = eingabe.type === "checkbox"
         ? (eingabe.checked ? "true" : "false")
         : eingabe.value;
@@ -1270,6 +1324,111 @@ function quellenFormular(quelle, behaelter, gemerkt) {
 
   fuss.append(meldungsfeld, abbrechen, speichern);
   form.append(fuss);
+}
+
+function istOnionAdresse(roh) {
+  let text = String(roh || "").trim();
+  const tiefer = text.toLowerCase();
+  for (const prefix of ["https://", "http://"]) {
+    if (tiefer.startsWith(prefix)) {
+      text = text.slice(prefix.length);
+      break;
+    }
+  }
+  const slash = text.indexOf("/");
+  if (slash >= 0) text = text.slice(0, slash);
+  const at = text.lastIndexOf("@");
+  if (at >= 0) text = text.slice(at + 1);
+  const colon = text.lastIndexOf(":");
+  if (colon >= 0 && !text.toLowerCase().endsWith(".onion")) {
+    const port = text.slice(colon + 1);
+    if (/^\d+$/.test(port)) text = text.slice(0, colon);
+  }
+  return text.toLowerCase().endsWith(".onion");
+}
+
+function electrsQuellenFormular(quelle, behaelter, gemerkt) {
+  const form = document.createElement("div");
+  form.className = "electrs-formular";
+  const bridgeManaged = start9BridgeManaged(quelle);
+  const eingaben = new Map();
+  const nachKey = new Map();
+  for (const feld of quelle.felder) nachKey.set(feld.key, feld);
+
+  const nimm = (key, extraKlasse) => {
+    const feld = nachKey.get(key);
+    if (!feld) return null;
+    const { zeile, eingabe } = baueQuellenFeld(
+      feld, quelle, gemerkt, bridgeManaged, extraKlasse, true,
+    );
+    eingaben.set(feld.key, eingabe);
+    nachKey.delete(key);
+    return zeile;
+  };
+
+  const reiheHost = document.createElement("div");
+  reiheHost.className = "electrs-reihe";
+  const hostZeile = nimm("FULCRUM_HOST");
+  if (hostZeile) reiheHost.append(hostZeile);
+  const proxyZeile = nimm("FULCRUM_TOR_PROXY");
+  const proxyEingabe = eingaben.get("FULCRUM_TOR_PROXY");
+  if (proxyEingabe) proxyEingabe.dataset.nurSichtbar = "1";
+  if (proxyZeile) reiheHost.append(proxyZeile);
+  const hostEingabe = eingaben.get("FULCRUM_HOST");
+  const zeigeProxy = () => {
+    if (!proxyZeile) return;
+    proxyZeile.hidden = !(hostEingabe && istOnionAdresse(hostEingabe.value));
+  };
+  if (hostEingabe) hostEingabe.addEventListener("input", zeigeProxy);
+  zeigeProxy();
+  if (reiheHost.childElementCount) form.append(reiheHost);
+
+  const reihePort = document.createElement("div");
+  reihePort.className = "electrs-reihe-port";
+  const port = nimm("FULCRUM_PORT");
+  if (port) reihePort.append(port);
+  const tls = nimm("FULCRUM_SSL", "feld-zeile-check");
+  if (tls) reihePort.append(tls);
+  if (reihePort.childElementCount) form.append(reihePort);
+
+  const reiheGap = document.createElement("div");
+  reiheGap.className = "electrs-reihe-gap";
+  const gap = nimm("UTXO_SCAN_GAP_LIMIT");
+  if (gap) {
+    reiheGap.append(gap);
+    const hinweis = document.createElement("p");
+    hinweis.className = "electrs-gap-hinweis";
+    hinweis.textContent = t("sources.electrsGapHint");
+    reiheGap.append(hinweis);
+  }
+  if (reiheGap.childElementCount) form.append(reiheGap);
+
+  for (const feld of nachKey.values()) {
+    const { zeile, eingabe } = baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged);
+    eingaben.set(feld.key, eingabe);
+    form.append(zeile);
+  }
+
+  haengeQuellenFussAn(form, eingaben, quelle, behaelter, bridgeManaged);
+  return form;
+}
+
+/** Baut das Bearbeitungsformular einer Datenquelle. */
+function quellenFormular(quelle, behaelter, gemerkt) {
+  if (quelle.key === "own_fulcrum") {
+    return electrsQuellenFormular(quelle, behaelter, gemerkt);
+  }
+  const form = document.createElement("div");
+  const bridgeManaged = start9BridgeManaged(quelle);
+  const eingaben = new Map();
+
+  for (const feld of quelle.felder) {
+    const { zeile, eingabe } = baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged);
+    eingaben.set(feld.key, eingabe);
+    form.append(zeile);
+  }
+
+  haengeQuellenFussAn(form, eingaben, quelle, behaelter, bridgeManaged);
   return form;
 }
 

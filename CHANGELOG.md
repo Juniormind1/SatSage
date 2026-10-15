@@ -9,6 +9,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenquellen · Electrs-TLS:** Steht das Electrs-Formular noch offen, setzt sich das TLS-Häkchen, sobald die Verbindung mit der passenden Einstellung steht. Ein dabei neu gefundener Port folgt mit, solange das Portfeld unangetastet ist.
+- **Datenquellen · Electrs-Adresse:** Ein Feld für IP, Name oder `.onion`. Eine Onion wird als `FULCRUM_TOR` gespeichert und die IP-Zeile geleert, eine IP umgekehrt. Der Proxy erscheint erst, wenn die Eingabe eine Onion ist. Stehen in der `.env` beide, zeigt das Feld die IP; Übernehmen behält nur diese eine Adresse.
+- **Datenquellen · Electrs-Lücke:** Am eigenen Electrum-Server steht das Gap-Limit (Vorgabe 100, höchstens 10.000, `.env` `UTXO_SCAN_GAP_LIMIT`). Der nächste UTXO-Scan und Aktualisieren suchen so viele leere Indizes in Folge. Höher findet weiter entfernte Adressen; der bestehende Cache und fertige Herkunftsbäume bleiben. Herkunft und Historie nur für neu gefundene UTXOs. Das Formular zeigt IP, Onion und Proxy nebeneinander, darunter Port mit TLS-Häkchen, darunter die Lücke.
+- **Regtest-Labor · Gap über 100:** `lab-gap` hat Coins auf Empfang #0 und #101, dazwischen nichts. Das Wallet steht nicht in der Lab-Env. `verify_electrs_gap.py` erwartet, dass Limit 100 den hinteren Coin übersieht und Limit 101 ihn findet. Nicht Teil des Merge-Labors.
+
 - **Log · Lauf-Anfang und Lauf-Ende:** UTXOs, Bestand, Herkunft, Historie, klären (grau) und klären (gelb) schreiben `lauf="…"` in `JOB-START` und `JOB-ENDE`. Die Dauer steht in `elapsed_s` der Ende-Zeile. Dieselbe Job-Art allein trennt die drei Herkunftsläufe nicht.
 
 - **Datenquellen · eigener Explorer:** Ist ein Block-Explorer mit Esplora-API im eigenen Netz eingetragen und der verbundene Electrum-Server kein libbitcoin, liest SatSage Bestand und kleine Herkunft dort. Die Adresslücke bleibt beim Electrum-Server. Öffentliche Explorer und libbitcoin bleiben außen.
@@ -16,7 +21,6 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **Datenquellen · libbitcoin:** Ist der eigene Electrum-Server libbitcoin und sein Adressindex erreichbar, liest SatSage Bestand und Herkunft dort. Ohne `LIBBITCOIN_NATIVE_PORT` prüft SatSage die Ports 8181 und 8180 und nimmt den, dessen Antwort das Feld `address` trägt. Electrum bleibt der Ersatz, solange der Index fehlt oder eine Antwort nicht zur bekannten Liste passt. Öffentliche Server bleiben beim Electrum-Protokoll. Im Verbindungs-Log steht, ob die Abfrage den Adressindex hat oder Electrum bleibt. Der Vergleich `scripts/libbitcoin_native_profil.py` startet nur, wer ihn selbst aufruft.
 
 - **P2P · UTXOs sofort im Cache:** Findet der gemeinsame Compact-Filter-Lauf ein UTXO, schreibt SatSage den Bestand dieses Wallets in dem Moment in den Cache, in dem der Block gelesen ist. Wallet-Ansicht und Dotplot zeigen die Treffer noch während Turbo und Historie laufen. Ein Wallet ohne Treffer bekommt dabei keine leere Cache-Datei. Der Schluss-Schreibvorgang am Ende des Laufs bleibt.
-
 - **Wallet · FIFO-Spend · live während Herkunft:** „max … grün ausgebbar“ und der Lot-Donut am Walletnamen folgen demselben Lots-Strom wie die grüne Scorecard (`lots=0`, dann `GET /api/tax/lots`). Die Zahl steigt mit jedem fertigen Herkunftsbaum, statt erst nach einem neuen Öffnen der Wallet. Läuft das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.
 
 ## [1.0.0] — 2026-10-12

@@ -1656,6 +1656,21 @@ diesen Weg für Bestand und Herkunft. Ohne
 Port, dessen Antwort das Feld <code>address</code> trägt, gewinnt. Sonst
 bleibt es beim Electrum-Protokoll.</p>
 
+<p>In den Datenquellen hat der eigene Electrum-Server ein Adressfeld.
+IP oder Name landen in <code>FULCRUM_HOST</code>, eine <code>.onion</code>
+in <code>FULCRUM_TOR</code>. Die andere Zeile wird dabei geleert.
+Der Proxy erscheint erst, wenn die Eingabe eine Onion ist.
+Kommt die Verbindung mit einer anderen TLS-Einstellung zustande und das
+Electrs-Formular ist noch offen, setzt sich das TLS-Häkchen in diesem Moment.</p>
+
+<p>Beim eigenen Electrum-Server steht in den Datenquellen das
+<strong>Gap-Limit</strong> (Vorgabe 100, höchstens 10.000,
+<code>UTXO_SCAN_GAP_LIMIT</code>). Der nächste UTXO-Scan und
+<strong>Aktualisieren</strong> suchen so viele leere Indizes in Folge.
+Ein höheres Limit findet weiter entfernte Adressen; der bestehende Cache
+und fertige Herkunftsbäume bleiben. Herkunft und Historie nur für neu
+gefundene UTXOs.</p>
+
 <h3>Verbindung testen</h3>
 
 <pre><code>py check_fulcrum_tor.py
@@ -1701,6 +1716,7 @@ FULCRUM_HOST=192.168.1.100
 FULCRUM_TOR=deinnode.onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
+# UTXO_SCAN_GAP_LIMIT=100              # 1…10000, Vorgabe 100. Electrs-Gap.
 # Eine IP wird auf 50001 und 50002, mit und ohne TLS, gleichzeitig geprüft.
 FULCRUM_TOR_PROXY=127.0.0.1:9150
 

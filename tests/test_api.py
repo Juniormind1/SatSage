@@ -971,6 +971,8 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         schluessel = [f["key"] for f in quellen["own_fulcrum"]["felder"]]
         self.assertIn("FULCRUM_HOST", schluessel)
         self.assertIn("FULCRUM_PORT", schluessel)
+        self.assertIn("UTXO_SCAN_GAP_LIMIT", schluessel)
+        self.assertEqual(quellen["own_fulcrum"]["gap_limit"], 100)
 
     def test_clearnet_ist_nicht_bearbeitbar(self):
         """Die Liste kommt aus electrum_servers.json, nicht aus der .env."""
@@ -1102,6 +1104,42 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertNotIn("FULCRUM_TOR", werte)
         self.assertEqual(werte.get("FULCRUM_PORT"), "50001")
 
+    def test_onion_im_adressfeld_landet_unter_fulcrum_tor(self):
+        status, koerper = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "FULCRUM_HOST": "https://abc.onion/foo",
+                "FULCRUM_PORT": "50001",
+                "FULCRUM_SSL": "false",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(koerper["saved"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_TOR"), "abc.onion")
+        self.assertNotIn("FULCRUM_HOST", werte)
+        quelle = self.quellen()["own_fulcrum"]
+        host = next(f for f in quelle["felder"] if f["key"] == "FULCRUM_HOST")
+        self.assertEqual(host["value"], "abc.onion")
+        self.assertNotIn("FULCRUM_TOR", [f["key"] for f in quelle["felder"]])
+
+    def test_ip_im_adressfeld_loescht_bestehende_onion(self):
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad) + "\nFULCRUM_TOR=abc.onion\n",
+        )
+        status, koerper = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "FULCRUM_HOST": "192.0.2.50",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(koerper["saved"])
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_HOST"), "192.0.2.50")
+        self.assertNotIn("FULCRUM_TOR", werte)
+
     def test_port_speichern_loescht_stale_tor_port(self):
         """UI-Port muss Tor-Endpoint steuern — altes FULCRUM_TOR_PORT weg."""
         write_env_scrambled(
@@ -1176,6 +1214,31 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         self.assertEqual(status, 400)
         self.assertEqual(
             main._load_dotenv(self.env_pfad)["BIP158_GAP_LIMIT"], "250",
+        )
+
+    def test_electrs_luecke_wird_gespeichert_und_begrenzt(self):
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "UTXO_SCAN_GAP_LIMIT": "250",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["UTXO_SCAN_GAP_LIMIT"], "250",
+        )
+        _, koerper = self.anfrage("/api/config")
+        own = next(q for q in koerper["sources"] if q["key"] == "own_fulcrum")
+        self.assertEqual(own["gap_limit"], 250)
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "UTXO_SCAN_GAP_LIMIT": "10001",
+            }},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["UTXO_SCAN_GAP_LIMIT"], "250",
         )
 
     def test_fremdes_feld_wird_abgelehnt(self):
@@ -1564,6 +1627,89 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         logs = [o["log"] for o in objekte if "log" in o]
         self.assertIn("Prüfe Eigener Electrum-Server…", logs)
         self.assertTrue(any("sources" in o for o in objekte))
+
+    def test_electrs_tls_erreicht_das_formular_vor_den_anderen_quellen(self):
+        """Das offene Häkchen darf nicht auf Core, P2P oder öffentliche Server warten."""
+        from dataclasses import replace
+
+        write_env_scrambled(
+            self.env_pfad,
+            read_env_plaintext(self.env_pfad)
+            + "FULCRUM_SSL=false\nFULCRUM_PORT=50001\n",
+        )
+        self.state.reload()
+        spaeter = []
+
+        def fake_check(info, values, *, timeout=5, on_log=None, vierfach=False):
+            if info.key == "own_fulcrum" and info.configured:
+                if on_log:
+                    on_log("Verbunden")
+                return replace(
+                    info,
+                    reachable=True,
+                    peer_count=1,
+                    peer_hosts=["192.0.2.1:50002"],
+                    ssl_effective=True,
+                    ssl_persist={
+                        "FULCRUM_SSL": "true",
+                        "FULCRUM_PORT": "50002",
+                    },
+                    log=["Verbunden"],
+                )
+            if on_log and not spaeter:
+                stand = self.state.env().values()
+                spaeter.append(stand.get("FULCRUM_SSL"))
+                spaeter.append(stand.get("FULCRUM_PORT"))
+                on_log("Nächste Quelle")
+            return replace(info, log=[])
+
+        url = f"http://127.0.0.1:{self.port}/api/source/status?check=1"
+        req = urllib.request.Request(url)
+        req.add_header("Host", f"127.0.0.1:{self.port}")
+        req.add_header("X-Satsage-Token", self.state.token)
+        req.add_header("Accept", "application/x-ndjson")
+        with mock.patch("server.source_mod.check_reachable", side_effect=fake_check), \
+             mock.patch("core.p2p.zaehle_compact_filter_peers", return_value=[]), \
+             mock.patch("core.p2p.stelle_p2p_tor_bereit", return_value=None), \
+             mock.patch(
+                 "core.source._pruefe_oeffentliche_electrum",
+                 side_effect=lambda gefunden, *a, **k: gefunden,
+             ):
+            with urllib.request.urlopen(req, timeout=10) as antwort:
+                roh = antwort.read().decode("utf-8")
+        objekte = [json.loads(z) for z in roh.splitlines() if z.strip()]
+        schritte = []
+        for obj in objekte:
+            if "electrs_form" in obj:
+                schritte.append(("form", obj["electrs_form"]))
+            elif "log" in obj:
+                schritte.append(("log", obj["log"]))
+        form_idx = next(i for i, (art, _) in enumerate(schritte) if art == "form")
+        danach_idx = next(
+            i for i, (art, wert) in enumerate(schritte)
+            if art == "log" and wert == "Nächste Quelle"
+        )
+        self.assertLess(form_idx, danach_idx)
+        self.assertEqual(schritte[form_idx][1], {
+            "FULCRUM_SSL": "true",
+            "FULCRUM_PORT": "50002",
+        })
+        self.assertEqual(spaeter, ["true", "50002"])
+        gespeichert = [
+            wert for art, wert in schritte
+            if art == "log" and str(wert).startswith("TLS-Einstellung gespeichert")
+        ]
+        self.assertEqual(len(gespeichert), 1)
+        fertig = next(obj for obj in objekte if "sources" in obj)
+        fulcrum = next(q for q in fertig["sources"] if q["key"] == "own_fulcrum")
+        ssl = next(f for f in fulcrum["felder"] if f["key"] == "FULCRUM_SSL")
+        port = next(f for f in fulcrum["felder"] if f["key"] == "FULCRUM_PORT")
+        self.assertEqual(ssl["value"], "true")
+        self.assertEqual(port["value"], "50002")
+        self.assertFalse(fulcrum.get("ssl_persist"))
+        werte = main._load_dotenv(self.env_pfad)
+        self.assertEqual(werte.get("FULCRUM_SSL"), "true")
+        self.assertEqual(werte.get("FULCRUM_PORT"), "50002")
 
     def test_electrum_laden_onion_schreibt_nur_onions(self):
         daten = {

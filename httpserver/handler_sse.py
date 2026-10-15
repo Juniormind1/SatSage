@@ -236,10 +236,20 @@ class HandlerSseMixin:
                     return
                 raise
 
+        def on_ereignis(obj: dict) -> None:
+            try:
+                self._ndjson_zeile(obj)
+            except Exception as exc:
+                if _client_weg(exc):
+                    return
+                raise
+
         if _server_faehrt_runter(self.state):
             return
         try:
-            payload = api_source_status(self.state, query, on_log=on_log)
+            payload = api_source_status(
+                self.state, query, on_log=on_log, on_ereignis=on_ereignis,
+            )
             self._ndjson_zeile(payload)
         except Exception as exc:
             if _shutdown_rauschen(exc) or _server_faehrt_runter(self.state):

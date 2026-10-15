@@ -468,6 +468,20 @@ class TestCheckReachable(unittest.TestCase):
         )
         ssl = next(f for f in quelle.felder if f.key == "FULCRUM_SSL")
         self.assertEqual(ssl.value, "false")
+        host = next(f for f in quelle.felder if f.key == "FULCRUM_HOST")
+        self.assertEqual(host.value, "abc.onion")
+        self.assertNotIn("FULCRUM_TOR", [f.key for f in quelle.felder])
+
+    def test_electrs_formular_bevorzugt_die_ip_wenn_beide_stehen(self):
+        quelle = next(
+            q for q in describe_sources({
+                "FULCRUM_HOST": "192.0.2.1",
+                "FULCRUM_TOR": "abc.onion",
+            })
+            if q.key == "own_fulcrum"
+        )
+        host = next(f for f in quelle.felder if f.key == "FULCRUM_HOST")
+        self.assertEqual(host.value, "192.0.2.1")
 
     def test_tor_50001_ohne_ssl_env_verbindet_ohne_tls(self):
         """Anzeige und Scan-Pfad müssen denselben TLS-Default nutzen."""
@@ -730,6 +744,25 @@ class TestCheckReachable(unittest.TestCase):
         deckel = next(
             q for q in describe_sources({"BIP158_GAP_LIMIT": "99999"})
             if q.key == "bip158"
+        )
+        self.assertEqual(deckel.gap_limit, 10000)
+
+    def test_electrs_luecke_aus_env(self):
+        leer = next(q for q in describe_sources({}) if q.key == "own_fulcrum")
+        self.assertEqual(leer.gap_limit, 100)
+        schluessel = [f.key for f in leer.felder]
+        self.assertIn("UTXO_SCAN_GAP_LIMIT", schluessel)
+        self.assertNotIn("FULCRUM_TOR", schluessel)
+        ssl = next(f for f in leer.felder if f.key == "FULCRUM_SSL")
+        self.assertEqual(ssl.typ, "checkbox")
+        weit = next(
+            q for q in describe_sources({"UTXO_SCAN_GAP_LIMIT": "250"})
+            if q.key == "own_fulcrum"
+        )
+        self.assertEqual(weit.gap_limit, 250)
+        deckel = next(
+            q for q in describe_sources({"UTXO_SCAN_GAP_LIMIT": "99999"})
+            if q.key == "own_fulcrum"
         )
         self.assertEqual(deckel.gap_limit, 10000)
 

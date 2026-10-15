@@ -197,7 +197,10 @@ def api_save_source(state: AppState, payload: dict) -> dict:
 
         if schluessel.endswith(("PORT", "HEIGHT")) and text and not text.isdigit():
             raise ApiError(400, f"„{schluessel}“ muss eine Zahl sein.")
-        if schluessel == "BIP158_GAP_LIMIT":
+        if schluessel in ("BIP158_GAP_LIMIT", "UTXO_SCAN_GAP_LIMIT"):
+            if not text:
+                updates[schluessel] = None
+                continue
             if not text.isdigit():
                 raise ApiError(
                     400, "Die Lücke muss eine ganze Zahl von 1 bis 10.000 sein.",
@@ -218,6 +221,15 @@ def api_save_source(state: AppState, payload: dict) -> dict:
                 raise ApiError(400, str(exc)) from exc
 
         updates[schluessel] = text or None
+
+    # Ein Adressfeld: .onion nach FULCRUM_TOR, sonst FULCRUM_HOST.
+    # Die jeweils andere Zeile fällt weg, damit nicht zwei Endpunkte bleiben.
+    if quelle == "own_fulcrum" and "FULCRUM_HOST" in updates:
+        lan, onion = source_mod.electrs_adresse_in_env(
+            updates.get("FULCRUM_HOST") or "",
+        )
+        updates["FULCRUM_HOST"] = lan
+        updates["FULCRUM_TOR"] = onion
 
     if not updates:
         return {"saved": False, "grund": "Nichts zu ändern."}
@@ -507,7 +519,9 @@ def _kappe_oeffentliche_wenn_indexer_steht(
     return gekappt, state.env().values()
 
 
-def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
+def api_source_status(
+    state: AppState, query: dict, *, on_log=None, on_ereignis=None,
+) -> dict:
     from server import (
         _header_tip,
         _live_p2p_peers,
@@ -534,9 +548,30 @@ def api_source_status(state: AppState, query: dict, *, on_log=None) -> dict:
     electrum_busy = electrum_serial_busy()
     skip_live_check = bool(check_an and still and electrum_busy)
     if check_an and not skip_live_check:
+        def _electrs_tls_sofort(quelle):
+            # Schreiben und dem offenen Formular melden, sobald Electrs steht.
+            # Core, P2P und öffentliche Server dürfen das Häkchen nicht aufhalten.
+            persist = {
+                key: wert
+                for key, wert in (getattr(quelle, "ssl_persist", None) or {}).items()
+                if key in ("FULCRUM_SSL", "FULCRUM_PORT") and wert is not None
+            }
+            if not persist:
+                return quelle
+            neu_liste = _persist_tls_auto(
+                state, [quelle], on_log=None if still else on_log,
+            )
+            neu = neu_liste[0] if neu_liste else quelle
+            if getattr(neu, "ssl_persist", None):
+                return neu
+            if on_ereignis is not None and not still:
+                on_ereignis({"electrs_form": persist})
+            return neu
+
         quellen = source_mod.check_sources(
             quellen, werte, on_log=None if still else on_log, still=still,
             vierfach=vierfach,
+            on_geprueft=_electrs_tls_sofort,
         )
         quellen = _persist_tls_auto(
             state, quellen, on_log=None if still else on_log,

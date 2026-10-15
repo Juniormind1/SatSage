@@ -261,6 +261,7 @@ from core.sanctions_pool import (
 from core.wallet_sync_engine import (
     BIP44_GAP_LIMIT,
     UTXO_SCAN_GAP_LIMIT,
+    utxo_scan_gap_aus_env,
     _adressen_bis_index,
     _collect_used_chain_indices_gap,
     _ensure_address_cached,

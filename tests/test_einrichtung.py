@@ -352,6 +352,8 @@ if (fehler.length) {
         self.assertIn("Starte Verbindungstest…", de)
         self.assertIn("apiSourceCheck", self.format_js)
         self.assertIn("leseSourceCheckStream", self.format_js)
+        self.assertIn("wendeElectrsFormularStand", self.format_js)
+        self.assertIn("electrs_form", self.format_js)
         self.assertIn("application/x-ndjson", self.format_js)
 
     def test_log_zeile_wallet_nur_bei_walletspezifischer_aktion(self):
@@ -778,6 +780,32 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"sources.bip158DateLabel": "Frühestes Scan-Datum:"', de)
         self.assertIn('"sources.bip158StartLabel": "Scan ab Blockhöhe:"', de)
         self.assertIn('"sources.bip158GapLabel": "Gap-Limit:"', de)
+
+    def test_electrs_formular_hat_luecke_und_layout(self):
+        self.assertIn("function electrsQuellenFormular", self.datenquellen_js)
+        self.assertIn("function wendeElectrsFormularStand", self.datenquellen_js)
+        self.assertIn("function istOnionAdresse", self.datenquellen_js)
+        self.assertIn("proxyZeile.hidden", self.datenquellen_js)
+        self.assertNotIn(
+            '["FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_TOR_PROXY"]',
+            self.datenquellen_js,
+        )
+        self.assertIn("electrs-reihe", self.datenquellen_js)
+        self.assertIn("electrs-reihe-port", self.datenquellen_js)
+        self.assertIn("electrs-reihe-gap", self.datenquellen_js)
+        self.assertIn("feld-zeile-check", self.datenquellen_js)
+        self.assertIn("UTXO_SCAN_GAP_LIMIT", self.datenquellen_js)
+        self.assertIn('t("sources.electrsGapHint")', self.datenquellen_js)
+        self.assertIn(".electrs-reihe", self.css)
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn(
+            '"sources.electrsGapHint": "Bei Erhöhung sucht der nächste UTXO-Scan',
+            de,
+        )
+        self.assertIn('"sources.field.FULCRUM_HOST.label": "Adresse"', de)
+        self.assertIn('"sources.field.FULCRUM_SSL.label": "TLS"', de)
+        self.assertIn("das offene Häkchen folgt sofort", de)
+        self.assertIn('"sources.field.UTXO_SCAN_GAP_LIMIT.label": "Gap-Limit"', de)
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)

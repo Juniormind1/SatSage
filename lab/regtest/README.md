@@ -114,6 +114,19 @@ python3 lab/regtest/scripts/verify_tx_classify.py
 
 **GUI-Abnahme Herkunft:** UTXO aus einem CJ-Szenario tracen — Soft-Label der CoinJoin-Art; nur **eigene** Ins weiter; Faucet-Peers nicht als Herkunft „von extern“ auflisten. Auch mit allen vier Lab-Wallets bleiben Faucet-Ins fremd.
 
+### Electrs-Gap über 100
+
+`lab-gap` ist ein fünftes Core-Wallet, **nicht** in `WALLET_*` und nicht im Herkunfts-Inventar. Empfang #0 und #101 sind belegt, #1…#100 leer. Gap 100 findet nur #0. Gap 101 findet #101. Core `scantxoutset` findet beide — deshalb darf der XPUB nicht in die Lab-Env, sonst wird der Quellen-Vergleich rot.
+
+Der volle Szenario-Lauf legt das Wallet mit an. Auf einer bestehenden Chain reicht:
+
+```bash
+python3 lab/regtest/scripts/generate_scenarios.py --gap-only
+python3 lab/regtest/scripts/verify_electrs_gap.py
+```
+
+Bericht: `.data/scenario-report-gap.json` (lokal, XPUB nur dort). Der Prüfer ist nicht Teil von Q6 und startet kein Docker.
+
 ### Pseudo-Sanktionslisten & Hop-Traces
 
 Nach den Basis-Szenarien legt `scripts/generate_sanctions_scenarios.py` (von `run_scenarios.ps1` mit aufgerufen) an:

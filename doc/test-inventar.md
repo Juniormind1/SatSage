@@ -208,7 +208,7 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 Labor (`lab/regtest/scripts/`):
 
 - `verify_rpc_allowlist.py` — Allowlist + Hinweise `rpcwhitelist?` / `disablewallet?` am echten Node
-- `generate_scenarios.py` / `generate_sanctions_scenarios.py`
+- `generate_scenarios.py` / `generate_sanctions_scenarios.py` — `lab-gap` (Empfang #0 und #101) hängt am Szenario-Lauf, nicht in `WALLET_*`. Prüfer `verify_electrs_gap.py` (optional, nicht Q6): Limit 100 übersieht #101, Limit 101 findet den Outpoint.
 - `verify_tx_classify.py` / `verify_sanctions_hops.py` / `verify_quellen_inventar.py` — letztere: Cache leer, nur eine Quelle, Bestand und Herkunft aller Inventar-UTXOs. Der P2P-Zusatzschritt (Bestand, Grau/Gelb, rote Ringe, dann Electrs) läuft mit; nach P2P müssen rote Ringe stehen, Electrs muss sie alle auflösen. Vor jeder Quelle leert das Skript auch die RAM-Caches (Tx, Blöcke, Höhen). Sockets für den Bestand nur in `p2p_nur_utxo_entdeckung`. Die Herkunftssperre bleibt.
 - `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6). `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen (P2P-Fallback, siehe unten).
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)

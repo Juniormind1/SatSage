@@ -2095,12 +2095,71 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   border-bottom: 1px solid var(--linie-zart);
   display: flex; flex-direction: column; gap: 10px;
 }
+.electrs-formular {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.electrs-reihe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+}
+.electrs-reihe .feld-zeile {
+  flex: 1 1 16rem;
+  max-width: 32rem;
+}
+.electrs-reihe-port {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 20px;
+}
+.electrs-reihe-gap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 20px;
+}
+.electrs-reihe-port .feld-zeile,
+.electrs-reihe-gap .feld-zeile {
+  max-width: none;
+}
+.electrs-reihe-port .feld-zeile:not(.feld-zeile-check),
+.electrs-reihe-gap .feld-zeile {
+  flex: 0 1 10rem;
+}
+.electrs-reihe-gap {
+  align-items: flex-start;
+}
+.electrs-gap-hinweis {
+  flex: 1 1 18rem;
+  margin: 0;
+  font-size: 11px;
+  color: var(--gedaempft);
+  line-height: 1.45;
+  padding-top: 1.55em;
+}
 .feld-zeile { display: flex; flex-direction: column; gap: 3px; max-width: 52ch; }
+.feld-zeile-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  max-width: none;
+}
 .feld-zeile .feld-checkbox {
   width: 1.1rem;
   height: 1.1rem;
   margin: 2px 0 0;
   accent-color: var(--akzent);
+}
+.feld-zeile-check .feld-checkbox {
+  margin: 0;
+  flex: 0 0 auto;
+}
+@media (max-width: 44rem) {
+  .electrs-reihe .feld-zeile { flex-basis: 100%; max-width: none; }
 }
 .feld-zeile input:not(.feld-checkbox),
 .feld-zeile select,
