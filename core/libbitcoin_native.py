@@ -958,12 +958,18 @@ def haenge_prevout_duenn_an(get_tx, client, werte: dict[str, str] | None = None)
     get_tx.prevout_duenn = prevout_duenn
 
 
+# ``threading.Lock`` und ``RLock`` sind Factory-Funktionen, keine Klassen:
+# ``isinstance(x, threading.Lock)`` wirft immer TypeError, gleich was x ist.
+# Die echten Typen stehen deshalb einmal hier.
+_LOCK_TYPEN = (type(threading.Lock()), type(threading.RLock()))
+
+
 def _sperre(client):
     sperre = getattr(client, "_lock", None)
-    if isinstance(sperre, threading.Lock):
+    if isinstance(sperre, _LOCK_TYPEN):
         return sperre
     sperre = getattr(client, "_libbitcoin_native_lock", None)
-    if not isinstance(sperre, threading.Lock):
+    if not isinstance(sperre, _LOCK_TYPEN):
         sperre = threading.Lock()
         try:
             client._libbitcoin_native_lock = sperre
