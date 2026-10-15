@@ -520,6 +520,8 @@ if (fehler.length) {
         self.assertIn("navKompaktErzwungen", nav_js)
         self.assertIn("navInEinbettung", nav_js)
         self.assertIn("bindeNavLeiste", nav_js)
+        self.assertIn("navZeigerDrin", nav_js)
+        self.assertIn('toggle.addEventListener("pointerleave"', nav_js)
         self.assertIn("satsage-nav-pin", nav_js)
         self.assertIn(".nav-kompakt", css)
         self.assertIn(".nav-gepinnt", css)
@@ -529,6 +531,21 @@ if (fehler.length) {
         self.assertIn('"nav.toggleTitle"', de)
         self.assertIn('"nav.pinTitle"', en)
         self.assertIn('"nav.toggleTitle"', en)
+
+    def test_empfang_qr_in_nav_nur_ohne_log_und_llm(self):
+        """Log aus und kein LLM: QR in der Leiste. Sonst rechts unten."""
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        css = (WEB / "style.css").read_text(encoding="utf-8")
+        nav_js = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
+        self.assertLess(html.index('class="nav-scroll"'), html.index('id="wallet-nav"'))
+        self.assertLess(html.index('id="nav-jobs"'), html.index("</nav>"))
+        self.assertIn("function legeEmpfangNachOrt()", nav_js)
+        self.assertIn('!buehne.classList.contains("log-an")', nav_js)
+        self.assertIn('!buehne.classList.contains("chat-an")', nav_js)
+        self.assertIn("legeEmpfangNachOrt()", self.format_js)
+        self.assertIn("legeEmpfangNachOrt()", self.js)
+        self.assertIn(".buehne.empfang-in-nav:not(.log-an):not(.chat-an)", css)
+        self.assertIn(".buehne.empfang-in-nav #empfang-pane", css)
 
     def test_assistent_slash_phase2(self):
         """Phase 2: Slash liest Cache, startet keine Jobs, kein Completion."""

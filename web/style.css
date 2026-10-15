@@ -383,6 +383,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .nav-leiste-kopf {
   display: none;
+  flex-shrink: 0;
   justify-content: flex-end;
   align-items: center;
   padding: 0 8px 4px 8px;
@@ -471,6 +472,13 @@ button, input, select { font: inherit; color: inherit; }
 }
 .buehne:not(.log-an):not(.chat-an) .dock-spalten {
   grid-template-columns: minmax(0, 1fr);
+}
+/* Log aus und kein LLM: Dock weg, der Empfang sitzt in der Navigationsleiste. */
+.buehne.empfang-in-nav:not(.log-an):not(.chat-an) {
+  grid-template-rows: minmax(0, 1fr);
+}
+.buehne.empfang-in-nav:not(.log-an):not(.chat-an) > #dock {
+  display: none;
 }
 .buehne:not(.log-an) #log-pane,
 .buehne:not(.log-an) #dock-spalter { display: none; }
@@ -962,7 +970,27 @@ button, input, select { font: inherit; color: inherit; }
   border-right: 1px solid var(--linie);
   padding: 14px 0;
   display: flex; flex-direction: column; gap: 6px;
-  min-height: 0; overflow-y: auto;
+  min-height: 0; overflow: hidden;
+}
+.nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* Empfang unten in der Leiste: Einträge scrollen darüber, der QR bleibt sichtbar. */
+.buehne.empfang-in-nav .seitenleiste {
+  padding-bottom: 0;
+}
+.buehne.empfang-in-nav #empfang-pane {
+  flex: 0 1 auto;
+  width: 100%;
+  height: min(48%, 17rem);
+  max-height: 48%;
+  min-height: 0;
+  border-left: 0;
+  border-top: 1px solid var(--linie);
+  background: var(--flaeche-2);
 }
 #app.nav-kompakt:not(.nav-gepinnt) .seitenleiste {
   position: absolute;

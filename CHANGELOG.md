@@ -9,6 +9,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Empfang · ohne Log und ohne Assistent:** Ist der Log-Bereich aus und kein LLM verbunden, sitzt der Empfangs-QR unten in der Navigationsleiste und blendet mit ihr ein und aus. Sobald das Log wieder an ist, steht er rechts unten. Ist ein LLM verbunden, bleibt er auch bei ausgeblendetem Log rechts unten.
+
+- **Navigation · nicht angeheftet:** Die Leiste blendet aus, sobald der Mauszeiger sie verlässt. Nach dem Lösen blieb sie bisher offen, bis irgendwo anders geklickt wurde.
+
 - **Git · Autor auf dev-juniormind:** Hooks und `scripts/push` lassen auf diesem Branch neben Juniormind1 auch `busch21 <busch21@tutamail.com>` als Git-Autor zu. Config und Committer bleiben Juniormind1. Auf `main` bleibt der Autor Juniormind1.
 
 - **Datenquellen · Electrs-TLS:** Steht das Electrs-Formular noch offen, setzt sich das TLS-Häkchen, sobald die Verbindung mit der passenden Einstellung steht. Ein dabei neu gefundener Port folgt mit, solange das Portfeld unangetastet ist.

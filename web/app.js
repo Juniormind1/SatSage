@@ -2722,6 +2722,7 @@ function setzeChatSichtbar() {
   const an = s.pille === "gut" || s.pille === "warn";
   const buehne = document.querySelector(".buehne");
   if (buehne) buehne.classList.toggle("chat-an", an);
+  if (typeof legeEmpfangNachOrt === "function") legeEmpfangNachOrt();
 }
 
 function zeichneChatAnbindung() {

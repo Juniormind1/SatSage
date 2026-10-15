@@ -1709,6 +1709,7 @@ function setzeLogSichtbar(an) {
     knopf.classList.toggle("aktiv", sichtbar);
     knopf.setAttribute("aria-pressed", sichtbar ? "true" : "false");
   }
+  if (typeof legeEmpfangNachOrt === "function") legeEmpfangNachOrt();
 }
 
 const LOG_HOEHE_MERKER = "xpq-log-hoehe";
