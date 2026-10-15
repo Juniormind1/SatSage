@@ -337,10 +337,14 @@ class AppState:
             name = namen.get(schluessel_eins) or ""
             if on_log:
                 on_log("Lese Cache…", wallet=name)
+            # Stand für die Nav-Pille: was Schritt 1 und 2 schon geparst haben.
+            utxo_gemerkt: dict = {}
+            verlauf_gemerkt: dict = {}
             try:
                 seed_wallet_addresses_from_utxo_cache(
                     ctx, [schluessel_eins], self.cache_dir,
                     scan_end_ableiten=False,
+                    merken=utxo_gemerkt,
                 )
             except Exception:
                 LOGGER.exception("UTXO-Cache-Seed fehlgeschlagen")
@@ -349,6 +353,7 @@ class AppState:
             try:
                 seed_wallet_addresses_from_verlauf_cache(
                     ctx, [schluessel_eins], self.cache_dir,
+                    merken=verlauf_gemerkt,
                 )
             except Exception:
                 LOGGER.exception("Verlaufs-Cache-Seed fehlgeschlagen")
@@ -371,10 +376,16 @@ class AppState:
                         None,
                     )
                     if eintrag is not None:
+                        # Nur fehlende Stücke nachlesen. Beide da: kein zweites JSON.
+                        kwargs = {}
+                        if schluessel_eins in utxo_gemerkt:
+                            kwargs["cache_eintrag"] = utxo_gemerkt[schluessel_eins]
+                        if schluessel_eins in verlauf_gemerkt:
+                            kwargs["verlauf"] = verlauf_gemerkt[schluessel_eins]
                         extra = {
-                            "wallet": wallets_mod.summarize(
-                                [eintrag], self.cache_dir,
-                            )[0].as_dict(),
+                            "wallet": wallets_mod.zusammenfassung_aus_gelesenem(
+                                eintrag, self.cache_dir, **kwargs,
+                            ).as_dict(),
                         }
                 except Exception:
                     LOGGER.exception("Wallet-Stand fürs Start-Log fehlgeschlagen")

@@ -1374,23 +1374,36 @@ def save_xpub_first_seen(
     path.write_text(_dump_cache_json(wert), encoding="utf-8")
     return path
 
-def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
+def xpub_first_seen(
+    xpub: str,
+    cache_dir: Path,
+    *,
+    roh: dict | None = None,
+) -> dict | None:
     """
     Wann dieses Wallet zum ersten Mal benutzt wurde.
 
     Zuerst die eigene Alters-Datei (überlebt Cache-Löschen), sonst die
     Felder in der UTXO-Cache-Datei — die werden dann ins eigene File
     übernommen. Liefert ``{"height": …, "time_ts": …}`` oder None.
+
+    *roh*: schon gelesener UTXO-Cache. Die große Datei bleibt dann zu.
     """
     alter_pfad = _xpub_alter_path(xpub, cache_dir)
     if alter_pfad.is_file():
         try:
-            roh = json.loads(alter_pfad.read_text(encoding="utf-8"))
+            datei = json.loads(alter_pfad.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            roh = None
-        gefunden = _alter_aus_payload(roh if isinstance(roh, dict) else None)
+            datei = None
+        gefunden = _alter_aus_payload(datei if isinstance(datei, dict) else None)
         if gefunden:
             return gefunden
+
+    if roh is not None:
+        gefunden = _alter_aus_payload(roh)
+        if gefunden:
+            save_xpub_first_seen(xpub, cache_dir, gefunden)
+        return gefunden
 
     eintrag = load_xpub_cache_entry(xpub, cache_dir)
     gefunden = _alter_aus_payload((eintrag or {}).get("raw") or {})

@@ -794,6 +794,12 @@ def api_wallet_utxos(state: AppState, kennung: str, query: dict) -> dict:
     if entry is None:
         raise ApiError(404, "Wallet nicht gefunden.")
 
+    # Nur die Verlaufsdatei. Der Erst-Paint hat die UTXO-Datei schon gelesen.
+    if (query.get("teil") or [""])[0] == "verlaufstand":
+        from httpserver.api.listen_fenster import verlauf_stand
+
+        return verlauf_stand(state, entry, kennung)
+
     try:
         limit = int(query.get("limit", ["0"])[0]) or None
     except (ValueError, TypeError):

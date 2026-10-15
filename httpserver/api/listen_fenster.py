@@ -6,10 +6,15 @@ Fenster-Modus: sortiert und gefiltert wird auf den Rohdaten aus dem Cache,
 angereichert (Herkunfts-Meta, Börsen, Sanktionsmarke) nur das Fenster.
 Ohne ``seite`` bleibt die bisherige Antwort (alles auf einmal).
 
-Parameter: ``teil`` = ``bestand`` (Default) | ``verlauf`` (Bereits ausgegeben),
+Parameter: ``teil`` = ``bestand`` (Default) | ``verlauf`` (Bereits ausgegeben)
+| ``verlaufstand`` (nur Summen der Verlaufsdatei, ohne die UTXO-Datei;
+siehe ``verlauf_stand``),
 ``modus`` = ``gruppen`` | ``volume-desc`` | ``age-desc`` | ``age-asc``,
 ``offset``, ``limit``, ``sort`` (``betrag``/``datum``), ``q`` (+ ``q_nach``/
-``q_vor`` aus der Browser-Zeitzone), ``lang`` (für Soft-Labels im Filter).
+``q_vor`` aus der Browser-Zeitzone), ``lang`` (für Soft-Labels im Filter),
+``verlauf`` (Default an). ``verlauf=0`` auf dem Bestand lässt die
+Verlaufsdatei aus und setzt ``verlauf_ausstehend``. ``teil=verlauf`` liest
+die Datei trotzdem.
 """
 from __future__ import annotations
 
@@ -101,6 +106,30 @@ def _verlauf_roh(state: Any, entries) -> tuple[list[dict], bool]:
     return roh, hat_verlauf
 
 
+def verlauf_stand(state: Any, entry, kennung: str) -> dict:
+    """
+    Summen der Verlaufsdatei eines Wallets, ohne die UTXO-Datei zu lesen.
+
+    ``pending_count`` bleibt 0 — derselbe Stand wie der Erst-Paint mit
+    ``mempool=0``. Die einzelnen Zeilen lädt ``teil=verlauf``.
+    """
+    roh, hat_verlauf = _verlauf_roh(state, [entry])
+    return {
+        "wallet": entry.display_name,
+        "wallet_id": kennung,
+        "hat_verlauf": hat_verlauf,
+        "verlauf_ausstehend": False,
+        "verlauf": {
+            "total_count": len(roh),
+            "total_sats": sum(lf.wert(e) for e in roh),
+            "pending_count": 0,
+            "shown_count": 0,
+            "utxos": [],
+            "addresses": [],
+        },
+    }
+
+
 def _formen(fenster: lf.Fenster, schnitt: dict, sort: str) -> tuple[list, list]:
     from server import utxos_mod
 
@@ -126,6 +155,7 @@ def fenster_antwort(
     from server import (
         _eigene_adressen,
         _mit_mempool_pending,
+        _query_flag,
         _sortierung,
         _verlaufs_anhang,
         sanctions_mod,
@@ -148,15 +178,34 @@ def fenster_antwort(
     # „Bereits ausgegeben“ ist der Verlaufs-Cache. Ein Electrs-Mempool-Check
     # ändert diese Liste nicht und kostet sonst den Verbindungsversuch, bevor
     # die erste Seite überhaupt geschnitten wird.
+    # verlauf=0: Bestand aus der UTXO-Datei zeichnen, Verlaufsdatei nicht
+    # anfassen. Die Summen holt der Client danach über verlauf_stand.
+    # teil=verlauf liest die Datei auch dann.
+    verlauf_jetzt = teil == "verlauf" or _query_flag(query, "verlauf", default=True)
     if mempool and teil != "verlauf":
         # limit=0: nur Summen, kein Eintrag wird angereichert; Pending/
         # bestätigte Spends kommen angereichert zurück (``vorab``).
-        anhang = _verlaufs_anhang(state, entries, limit=0, sort=sort)
-        gesammelt, anhang = _mit_mempool_pending(
-            state, gesammelt, anhang, limit=None, sort=sort, xpub=xpub,
-        )
-        roh_verlauf, _ = _verlauf_roh(state, entries)
-    else:
+        if verlauf_jetzt:
+            anhang = _verlaufs_anhang(state, entries, limit=0, sort=sort)
+            gesammelt, anhang = _mit_mempool_pending(
+                state, gesammelt, anhang, limit=None, sort=sort, xpub=xpub,
+            )
+            roh_verlauf, _ = _verlauf_roh(state, entries)
+        else:
+            # Pending-Marken an den UTXO-Zeilen behalten. Die Verlaufs-Summen
+            # aus dem Mempool-Abgleich wären nur die unbestätigten Spends
+            # und sähen aus wie eine fertige Historie.
+            gesammelt, _ = _mit_mempool_pending(
+                state, gesammelt,
+                {"verlauf": {"total_count": 0, "total_sats": 0}, "hat_verlauf": False},
+                limit=None, sort=sort, xpub=xpub,
+            )
+            roh_verlauf = []
+            anhang = {
+                "verlauf": {"total_count": 0, "total_sats": 0},
+                "hat_verlauf": False,
+            }
+    elif verlauf_jetzt:
         roh_verlauf, hat_verlauf = _verlauf_roh(state, entries)
         anhang = {
             "verlauf": {
@@ -164,6 +213,12 @@ def fenster_antwort(
                 "total_sats": sum(lf.wert(e) for e in roh_verlauf),
             },
             "hat_verlauf": hat_verlauf,
+        }
+    else:
+        roh_verlauf = []
+        anhang = {
+            "verlauf": {"total_count": 0, "total_sats": 0},
+            "hat_verlauf": False,
         }
     verlauf_alt = anhang.get("verlauf") or {}
     vorab = [u for u in (verlauf_alt.get("utxos") or []) if isinstance(u, dict)]
@@ -191,6 +246,7 @@ def fenster_antwort(
         # Adressen mit Bestand (ungefiltert) — Kopfzeile der Wallet-Ansicht.
         "adressen_count": len({u.get("address", "") for u in gesammelt}),
         "hat_verlauf": bool(anhang.get("hat_verlauf")),
+        "verlauf_ausstehend": not verlauf_jetzt,
         "sort": sort,
         "teil": teil,
     }

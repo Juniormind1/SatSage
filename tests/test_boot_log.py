@@ -114,10 +114,10 @@ class TestBootLog(ApiTestBasis):
         tor = threading.Event()
         original = wc.seed_wallet_addresses_from_verlauf_cache
 
-        def haengt(wallet, xpubs, cache_dir):
+        def haengt(wallet, xpubs, cache_dir, **kwargs):
             if zweites.analyse_schluessel in xpubs:
                 tor.wait(timeout=20)
-            return original(wallet, xpubs, cache_dir)
+            return original(wallet, xpubs, cache_dir, **kwargs)
 
         self.addCleanup(tor.set)
         with mock.patch.object(wc, "seed_wallet_addresses_from_verlauf_cache", haengt):

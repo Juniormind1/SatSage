@@ -337,6 +337,58 @@ class TestFensterApi(ApiTestBasis):
         self.assertEqual(len(v["utxos"]), 2)
         self.assertTrue(all(u["spent"] for u in v["utxos"]))
 
+    def _verlauf_fuenf(self):
+        verlauf = [dict(roh(f"{i:02x}", 1000 + i, BIP84_RECEIVE_0, vout=i), spent=True,
+                        spent_txid=txid("ff"), spent_time_ts=1_700_000_000 + i)
+                   for i in range(5)]
+        main.save_xpub_verlauf_cache(BIP84_ZPUB, verlauf, self.cache)
+        return self.wallet_id(BIP84_ZPUB)
+
+    def test_bestand_ohne_verlauf_zeigt_utxos_und_laedt_die_datei_nicht(self):
+        """Erst-Paint liest die UTXO-Datei. Die Summen kommen über teil=verlaufstand."""
+        kennung = self._verlauf_fuenf()
+        url_kurz = (
+            f"/api/wallets/{kennung}/utxos?mempool=0&seite=1"
+            "&modus=gruppen&limit=1&verlauf=0"
+        )
+        with mock.patch.object(main, "load_xpub_verlauf_cache") as spion:
+            _, kurz = self.anfrage(url_kurz)
+        spion.assert_not_called()
+        self.assertTrue(kurz["verlauf_ausstehend"])
+        self.assertFalse(kurz["hat_verlauf"])
+        self.assertEqual(kurz["total_count"], 8)
+        self.assertGreater(len(kurz["addresses"]), 0)
+        self.assertEqual(kurz["verlauf"]["total_count"], 0)
+
+        _, voll = self.anfrage(
+            f"/api/wallets/{kennung}/utxos?mempool=0&seite=1&modus=gruppen&limit=1")
+        self.assertFalse(voll["verlauf_ausstehend"])
+        self.assertTrue(voll["hat_verlauf"])
+        self.assertEqual(voll["verlauf"]["total_count"], 5)
+
+        with mock.patch.object(utxos_mod, "load_cached_utxos") as bestand:
+            _, stand = self.anfrage(
+                f"/api/wallets/{kennung}/utxos?teil=verlaufstand&mempool=0")
+        bestand.assert_not_called()
+        self.assertTrue(stand["hat_verlauf"])
+        self.assertFalse(stand["verlauf_ausstehend"])
+        self.assertEqual(stand["verlauf"]["total_count"], voll["verlauf"]["total_count"])
+        self.assertEqual(stand["verlauf"]["total_sats"], voll["verlauf"]["total_sats"])
+        self.assertEqual(stand["verlauf"]["pending_count"], 0)
+        self.assertEqual(stand["verlauf"]["utxos"], [])
+
+    def test_verlauf_seite_liest_die_datei_auch_mit_verlauf_0(self):
+        kennung = self._verlauf_fuenf()
+        with mock.patch.object(
+            main, "load_xpub_verlauf_cache", wraps=main.load_xpub_verlauf_cache,
+        ) as spion:
+            _, körper = self.anfrage(
+                f"/api/wallets/{kennung}/utxos?seite=1&teil=verlauf"
+                "&modus=age-desc&limit=2&mempool=0&verlauf=0")
+        self.assertGreater(spion.call_count, 0)
+        self.assertFalse(körper["verlauf_ausstehend"])
+        self.assertEqual(körper["verlauf"]["fenster"]["total"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()
