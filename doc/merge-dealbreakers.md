@@ -52,7 +52,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | S1 | **Niemals Geheimnisse pushen oder persönliche Daten doxxen.** Im Git-Diff/Commit/Push/PR/Issue: `.env` (+ Backups/Scramble), `.satsage-password`, Cookies, RPC-/API-Keys, Passwort-Hashes, Session-Token, Seed/xprv/WIF, volle XPUBs/Deskriptoren, persönliche Wallet-Namen, reale Nutzer-Mainnet-Adressen/TxIDs, Klarnamen/Kontaktdaten zum Doxxing. Gilt auch für Agent-Chat-Output und Logs. | Hart |
-| S2 | **Maintainer-/Agent-Clones:** nur `Juniormind1 <juniormind@proton.me>`. **Fremde Contributor-Commits/PRs:** eigene Autor-IDs erlaubt. CI prüft nicht „jeder Commit = Juniormind1“. | Hart lokal (Hooks) für Maintainer/Agent |
+| S2 | **Maintainer-/Agent-Clones:** Config und Committer nur `Juniormind1 <juniormind@proton.me>`. Git-Autor ebenso, auf `dev-juniormind` zusätzlich `busch21 <busch21@tutamail.com>`. **Fremde Contributor-Commits/PRs:** eigene Autor-IDs erlaubt. CI prüft nicht „jeder Commit = Juniormind1“. | Hart lokal (Hooks) für Maintainer/Agent |
 | S3 | **`githooks/`** oder CI-Workflows sabotieren/entfernen ohne Maintainer-Freigabe | Hart+Review |
 | S4 | Merge nach **`main`** ohne Prüfung (Prozess/Ruleset) | Hart (Ruleset/Prozess) |
 

@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Git · Autor auf dev-juniormind:** Hooks und `scripts/push` lassen auf diesem Branch neben Juniormind1 auch `busch21 <busch21@tutamail.com>` als Git-Autor zu. Config und Committer bleiben Juniormind1. Auf `main` bleibt der Autor Juniormind1.
+
 - **Datenquellen · Electrs-TLS:** Steht das Electrs-Formular noch offen, setzt sich das TLS-Häkchen, sobald die Verbindung mit der passenden Einstellung steht. Ein dabei neu gefundener Port folgt mit, solange das Portfeld unangetastet ist.
 - **Datenquellen · Electrs-Adresse:** Ein Feld für IP, Name oder `.onion`. Eine Onion wird als `FULCRUM_TOR` gespeichert und die IP-Zeile geleert, eine IP umgekehrt. Der Proxy erscheint erst, wenn die Eingabe eine Onion ist. Stehen in der `.env` beide, zeigt das Feld die IP; Übernehmen behält nur diese eine Adresse.
 - **Datenquellen · Electrs-Lücke:** Am eigenen Electrum-Server steht das Gap-Limit (Vorgabe 100, höchstens 10.000, `.env` `UTXO_SCAN_GAP_LIMIT`). Der nächste UTXO-Scan und Aktualisieren suchen so viele leere Indizes in Folge. Höher findet weiter entfernte Adressen; der bestehende Cache und fertige Herkunftsbäume bleiben. Herkunft und Historie nur für neu gefundene UTXOs. Das Formular zeigt IP, Onion und Proxy nebeneinander, darunter Port mit TLS-Häkchen, darunter die Lücke.

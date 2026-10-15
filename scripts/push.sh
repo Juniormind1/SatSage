@@ -2,8 +2,9 @@
 # SatSage: push aktuellen Branch zu origin (ohne AI).
 #
 # Maintainer-only (Juniormind1-Rechner / Assistenten-Worktrees):
-#   Config UND Tip-Autor müssen Juniormind1 <juniormind@proton.me> sein.
-#   Von diesen Maschinen kein Push unter anderer Identität.
+#   Config muss Juniormind1 <juniormind@proton.me> sein.
+#   Tip-Autor ebenso, auf dev-juniormind zusätzlich busch21.
+#   Von diesen Maschinen kein Push unter anderer Committer-Identität.
 #   Fremde Contributor (tbusch u. a.) pushen mit eigener ID — ohne dieses
 #   Skript / ohne Maintainer-hooksPath; das ist gewollt (OSS).
 #
@@ -42,9 +43,19 @@ fi
 
 TIP_NAME="$(git -c log.showSignature=false log -1 --format='%an')"
 TIP_EMAIL="$(git -c log.showSignature=false log -1 --format='%ae')"
-if [[ "$TIP_NAME" != "$REQUIRED_NAME" || "$TIP_EMAIL" != "$REQUIRED_EMAIL" ]]; then
+tip_ok=0
+if [[ "$TIP_NAME" == "$REQUIRED_NAME" && "$TIP_EMAIL" == "$REQUIRED_EMAIL" ]]; then
+  tip_ok=1
+fi
+if [[ "$BRANCH" == "dev-juniormind" \
+  && "$TIP_NAME" == "busch21" \
+  && "$TIP_EMAIL" == "busch21@tutamail.com" ]]; then
+  tip_ok=1
+fi
+if [[ "$tip_ok" -ne 1 ]]; then
   echo "ERROR: Tip-Autor ist $TIP_NAME <$TIP_EMAIL> — Maintainer-Push verweigert." >&2
   echo "  Erwartet: $REQUIRED_NAME <$REQUIRED_EMAIL>" >&2
+  echo "  Auf dev-juniormind zusätzlich: busch21 <busch21@tutamail.com>" >&2
   echo "  z. B. git commit --amend --reset-author --no-edit   (nur wenn Tip noch lokal)" >&2
   exit 1
 fi

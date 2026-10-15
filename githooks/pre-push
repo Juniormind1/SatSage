@@ -1,6 +1,7 @@
 #!/bin/sh
 # SatSage Maintainer-Hook (core.hooksPath=githooks):
-# 1) Tip-Autor muss Juniormind1 sein (wie bisher)
+# 1) Tip-Autor muss Juniormind1 sein.
+#    Auf refs/heads/dev-juniormind zusätzlich busch21.
 # 2) Unit-Suite nur bei Push nach main (dev-juniormind = WIP, ohne Suite)
 #
 # Getestet wird der *gepushte* Stand (git worktree des local_sha), nicht der
@@ -14,6 +15,8 @@ set -e
 
 REQUIRED_NAME="Juniormind1"
 REQUIRED_EMAIL="juniormind@proton.me"
+DEV_AUTHOR_NAME="busch21"
+DEV_AUTHOR_EMAIL="busch21@tutamail.com"
 
 remote="$1"
 url="$2"
@@ -34,9 +37,20 @@ do
   name="$(git -c log.showSignature=false log -1 --format='%an' "$local_sha")"
   email="$(git -c log.showSignature=false log -1 --format='%ae' "$local_sha")"
 
-  if [ "$email" != "$REQUIRED_EMAIL" ] || [ "$name" != "$REQUIRED_NAME" ]; then
+  tip_ok=0
+  if [ "$name" = "$REQUIRED_NAME" ] && [ "$email" = "$REQUIRED_EMAIL" ]; then
+    tip_ok=1
+  fi
+  if [ "$remote_ref" = "refs/heads/dev-juniormind" ] \
+    && [ "$name" = "$DEV_AUTHOR_NAME" ] \
+    && [ "$email" = "$DEV_AUTHOR_EMAIL" ]; then
+    tip_ok=1
+  fi
+  if [ "$tip_ok" -ne 1 ]; then
     echo "ERROR: refusing push: tip author must be $REQUIRED_NAME <$REQUIRED_EMAIL>." >&2
+    echo "On refs/heads/dev-juniormind, $DEV_AUTHOR_NAME <$DEV_AUTHOR_EMAIL> is also allowed." >&2
     echo "Current tip: $name <$email> ($local_sha)" >&2
+    echo "Ref: $remote_ref" >&2
     echo "Rewrite before push, e.g.:" >&2
     echo "  git commit --amend --reset-author --no-edit" >&2
     exit 1
