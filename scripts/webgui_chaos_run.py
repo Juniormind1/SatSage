@@ -110,10 +110,14 @@ def _playwright_run(
 
     harness_src = HARNESS.read_text(encoding="utf-8")
     with sync_playwright() as p:
-        # macOS/Linux: gebündeltes Chromium, kein channel.
-        # Windows: channel="chrome" (Fernsteuer-Zustimmung). Diesen Default
-        # nicht auf das andere System umschreiben. doc/gui-test-protokoll.md
-        browser = p.chromium.launch(headless=True)
+        from webgui_test_ready import playwright_kanal
+
+        # macOS und Windows: installiertes Chrome. Linux: gebündeltes Chromium.
+        launch_kwargs: dict = {"headless": True}
+        kanal = playwright_kanal(None)
+        if kanal:
+            launch_kwargs["channel"] = kanal
+        browser = p.chromium.launch(**launch_kwargs)
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(800)

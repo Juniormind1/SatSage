@@ -31,11 +31,14 @@
 Strategie nach Betriebssystem, eine pro Umgebung. Details und die verbotenen Alternativen: `doc/gui-test-protokoll.md` (Abschnitt „Playwright · eine Strategie pro Betriebssystem“).
 
 ```bash
-# macOS und Linux — mitgeliefertes Chromium, ohne --channel
+# macOS — installiertes Chrome, Kanal setzt das Skript selbst
+.venv/bin/python3.14 scripts/webgui_userflow.py --spawn
+.venv/bin/python3.14 scripts/webgui_userflow.py --attach
+.venv/bin/python3.14 scripts/webgui_userflow.py --url 'http://127.0.0.1:8730/?t=…'
+
+# Linux — gebündeltes Chromium, ohne --channel
 .venv/bin/python -m playwright install chromium
 .venv/bin/python scripts/webgui_userflow.py --spawn
-.venv/bin/python scripts/webgui_userflow.py --attach
-.venv/bin/python scripts/webgui_userflow.py --url 'http://127.0.0.1:8730/?t=…'
 
 # Windows — installiertes Chrome (Fernsteuer-Zustimmung)
 py -3 scripts/webgui_userflow.py --spawn --channel chrome

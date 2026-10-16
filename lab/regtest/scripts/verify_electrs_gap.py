@@ -12,7 +12,7 @@ zur Laufzeit aus Core (ohne private Schlüssel) und scannt zweimal über
 - Gap 101: beide, inklusive des gemerkten Outpoints
 
 Core scantxoutset findet #101 unabhängig vom Limit. Deshalb bleibt das
-Wallet aus dem Herkunfts-Inventar. Kein Teil von Q6. Startet kein Docker.
+Wallet aus dem Herkunfts-Inventar. Teil von Q6. Startet kein Docker.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ REPORT = HERE / ".data" / "scenario-report-gap.json"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(SCRIPTS))
 
-from infra_check import brauche  # noqa: E402
+from infra_check import brauche, pinne_lab_env  # noqa: E402
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -141,7 +141,11 @@ def main() -> int:
 
     werte = _load_env(ENV_PATH)
     os.environ["NETWORK"] = werte.get("NETWORK") or "regtest"
+    # Persönliche .env darf den Lauf nicht auf Mainnet zurücksetzen.
+    pinne_lab_env(ENV_PATH)
     import main as satsage_main
+
+    pinne_lab_env(ENV_PATH)
     from core.derivation import derive_address_at_index, register_script_types
     from core.fulcrum_client import connect_fulcrum
     from generate_scenarios import (  # noqa: E402

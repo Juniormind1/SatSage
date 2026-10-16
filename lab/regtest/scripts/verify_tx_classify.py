@@ -22,7 +22,7 @@ ENV_PATH = HERE / ".data" / ".regtest.env"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(SCRIPTS))
 
-from infra_check import brauche  # noqa: E402
+from infra_check import brauche, pinne_lab_env  # noqa: E402
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -110,15 +110,18 @@ def main() -> int:
         print(f"Kette nicht nachziehbar: {exc}", file=sys.stderr)
         return 1
 
-    os.environ.setdefault("NETWORK", "regtest")
     werte = _load_env(ENV_PATH)
     # Vor dem Wallet-Kontext: sonst leitet Mainnet ab und die Lab-Adressen
-    # gelten nicht als eigen. Die Tx bleibt dann unknown.
+    # gelten nicht als eigen. Die Tx bleibt dann unknown. Ein späterer
+    # Abruf lädt ENV_FILE erneut — ohne Pin springt das Netz zurück.
     for k, v in werte.items():
         os.environ[k] = v
+    os.environ["NETWORK"] = werte.get("NETWORK") or "regtest"
+    pinne_lab_env(ENV_PATH)
 
     import main as satsage_main
-    satsage_main.set_chain_network(werte.get("NETWORK") or "regtest")
+    pinne_lab_env(ENV_PATH)
+    satsage_main.set_chain_network(os.environ["NETWORK"])
     from core.config import EnvFile, read_wallets
     from core.tx_classify import classify_tx
 

@@ -29,11 +29,11 @@ python -m unittest discover -s tests -t .
 
 Windows: `py -m unittest discover -s tests -t .`
 
-GitHub startet dieselbe Suite bei jedem Push und jedem Pull Request nach `dev-juniormind` und nach `main`. Grün heißt: der Lauf kam ohne Node und ohne persönliche `.env` durch. Der Browser-Klicklauf (`scripts/webgui_userflow.py`) bleibt lokal. Er braucht eine Oberfläche und ist nicht Teil dieser Suite.
+GitHub startet dieselbe Suite bei jedem Push und jedem Pull Request nach `dev-juniormind` und nach `main`. Grün heißt: der Lauf kam ohne Node und ohne persönliche `.env` durch. Der Browser-Klicklauf gehört nicht in diese Suite. Er läuft im Regtest-Labor (unten).
 
 ## Regtest vor `main`
 
-Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. Dasselbe gilt für einen Release-Wechsel: Tag `v*`, Container-Image, Linux-Binary und StartOS-Paket laufen erst, wenn `Regtest-Labor` auf diesem Commit grün ist. GitHub startet dafür Bitcoin Core und Electrs in Docker, dann `verify_rpc_allowlist.py` (Allowlist, rpcwhitelist, disablewallet), Lab-Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py` und `verify_quellen_inventar.py` (jede eigene Datenquelle allein: Cache leer, Bestand und Herkunft aller UTXOs; P2P erst ohne Sperre, mit rotem Ring nach dem ersten Klären und ohne Ring nach Electrs). Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main`, bei einem Push nach `main` und bei einem Tag `v*`, nicht bei jedem Push nach `dev-juniormind`. Montags schaut `Regtest-Labor Woche` auf `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag (Lab, Allowlist, Klassifikation, Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
+Ein Merge nach `main` setzt zusätzlich das Regtest-Labor voraus. Dasselbe gilt für einen Release-Wechsel: Tag `v*`, Container-Image, Linux-Binary und StartOS-Paket laufen erst, wenn `Regtest-Labor` auf diesem Commit grün ist. GitHub startet dafür Bitcoin Core und Electrs in Docker, dann `verify_rpc_allowlist.py` (Allowlist, rpcwhitelist, disablewallet), Lab-Szenarien, `verify_electrs_gap.py` (Index 101 nur mit Gap über 100), `verify_tx_classify.py`, `verify_sanctions_hops.py` und `verify_quellen_inventar.py` (jede eigene Datenquelle allein: Cache leer, Bestand und Herkunft aller UTXOs; P2P erst ohne Sperre, mit rotem Ring nach dem ersten Klären und ohne Ring nach Electrs), danach `verify_gui_dachboden.py` (eigene Lab-Sitzung, Chromium). Parallel dazu Userflow und Chaos im gebündelten Chromium (`scripts/webgui_userflow.py --spawn`, `scripts/webgui_chaos_run.py --spawn --rounds 200 --seed 42`). Auf dem Mac dieselben zwei Läufe im installierten Chrome. Der Lauf dauert deutlich länger als die Unittests. Er startet bei einem Pull Request nach `main`, bei einem Push nach `main` und bei einem Tag `v*`, nicht bei jedem Push nach `dev-juniormind`. Montags schaut `Regtest-Labor Woche` auf `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag (Lab, Allowlist, Gap, Klassifikation, Sanktions-Hops, Wallet-Kontext, Userflow, Chaos, deren Abhängigkeiten).
 
 Lokal derselbe Kern, ohne den Mempool-Explorer:
 
@@ -43,9 +43,11 @@ SATSAGE_LAB_SKIP_MEMPOOL=1 ./scripts/start.sh
 python3 scripts/verify_rpc_allowlist.py
 python3 scripts/generate_scenarios.py
 python3 scripts/generate_sanctions_scenarios.py
+python3 scripts/verify_electrs_gap.py
 python3 scripts/verify_tx_classify.py
 python3 scripts/verify_sanctions_hops.py
 python3 scripts/verify_quellen_inventar.py
+python3 scripts/verify_gui_dachboden.py
 ```
 
 Windows bleibt bei `scripts/win/start_lab.ps1` (siehe [`lab/regtest/README.md`](lab/regtest/README.md)).

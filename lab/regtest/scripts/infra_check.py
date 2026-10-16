@@ -106,6 +106,24 @@ def hinweis_kein_docker() -> str:
     )
 
 
+def pinne_lab_env(pfad: Path) -> None:
+    """Persönliche ``.env`` darf einen Labor-Abruf nicht auf Mainnet setzen.
+
+    ``_load_dotenv()`` ohne Pfad liest ``ENV_FILE`` und ruft daraus
+    ``set_chain_network``. Der Bootstrap-Name und, sobald geladen,
+    ``main.ENV_FILE`` müssen beide auf die Lab-Datei zeigen. Vor und
+    nach ``import main`` aufrufen: der Import bindet den Namen einmal.
+    """
+    pfad = Path(pfad)
+    os.environ["ENV_FILE"] = str(pfad)
+    from core import env_bootstrap
+
+    env_bootstrap.ENV_FILE = pfad
+    main_mod = sys.modules.get("main")
+    if main_mod is not None:
+        main_mod.ENV_FILE = pfad
+
+
 def lab_optional() -> bool:
     """Auf WIP darf fehlende Infra ein sauberer Abbruch sein, kein Rot."""
     flag = (os.environ.get("SATSAGE_HARD_TESTS") or "").strip().lower()

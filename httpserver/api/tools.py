@@ -321,6 +321,33 @@ def api_tools_schatzsuche(state: Any, payload: dict | None = None) -> dict:
         pass
 
     koerper = payload or {}
+    try:
+        from core.schatzsuche import (
+            SCHATZ_AB_VORGABE,
+            SCHATZ_BIS_VORGABE,
+            schatz_index_grenzen,
+        )
+
+        ab_roh = koerper.get("scan_ab")
+        bis_roh = koerper.get("scan_bis")
+        scan_ab = (
+            SCHATZ_AB_VORGABE
+            if ab_roh is None or str(ab_roh).strip() == ""
+            else int(str(ab_roh).strip())
+        )
+        scan_bis = (
+            SCHATZ_BIS_VORGABE
+            if bis_roh is None or str(bis_roh).strip() == ""
+            else int(str(bis_roh).strip())
+        )
+        scan_ab, scan_bis = schatz_index_grenzen(scan_ab, scan_bis)
+    except (TypeError, ValueError) as exc:
+        text = str(exc)
+        if text.startswith("Scan"):
+            raise ApiError(400, text) from None
+        raise ApiError(
+            400, "Scan ab und Scan bis müssen ganze Zahlen ≥ 0 sein.",
+        ) from None
     ziel = str(koerper.get("wallet_id") or "").strip()
     wallets = list(state.analyse_entries)
     if ziel and ziel != "*":
@@ -341,6 +368,8 @@ def api_tools_schatzsuche(state: Any, payload: dict | None = None) -> dict:
             wallets=wallets,
             wallet_ctx=state.wallet_ctx,
             cache_dir=state.cache_dir,
+            scan_ab=scan_ab,
+            scan_bis=scan_bis,
             on_log=lambda text: job.progress(text, log=True),
             on_progress=fortschritt,
             raise_if_cancelled=job.raise_if_cancelled,
@@ -348,8 +377,8 @@ def api_tools_schatzsuche(state: Any, payload: dict | None = None) -> dict:
         n = len(funde)
         wort = "UTXO" if n == 1 else "UTXOs"
         job.progress(
-            f"{n} {wort} außerhalb des Suchfensters." if n else
-            "Kein UTXO außerhalb des Suchfensters.",
+            f"{n} {wort} im Scan von Index #{scan_ab} bis #{scan_bis}." if n else
+            f"Kein UTXO im Scan von Index #{scan_ab} bis #{scan_bis}.",
             log=True,
         )
         return {

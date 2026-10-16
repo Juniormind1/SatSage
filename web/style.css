@@ -2144,30 +2144,11 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   align-items: flex-end;
   gap: 10px 20px;
 }
-.electrs-reihe-gap {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 10px 20px;
-}
-.electrs-reihe-port .feld-zeile,
-.electrs-reihe-gap .feld-zeile {
+.electrs-reihe-port .feld-zeile {
   max-width: none;
 }
-.electrs-reihe-port .feld-zeile:not(.feld-zeile-check),
-.electrs-reihe-gap .feld-zeile {
+.electrs-reihe-port .feld-zeile:not(.feld-zeile-check) {
   flex: 0 1 10rem;
-}
-.electrs-reihe-gap {
-  align-items: flex-start;
-}
-.electrs-gap-hinweis {
-  flex: 1 1 18rem;
-  margin: 0;
-  font-size: 11px;
-  color: var(--gedaempft);
-  line-height: 1.45;
-  padding-top: 1.55em;
 }
 .feld-zeile { display: flex; flex-direction: column; gap: 3px; max-width: 52ch; }
 .feld-zeile-check {
@@ -2248,6 +2229,19 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   min-width: 0;
   box-sizing: border-box;
   font-size: 12px;
+}
+.tools-schatz-zeile {
+  grid-template-columns: minmax(10rem, 22rem) auto auto var(--tools-knopf);
+}
+.tools-schatz-zeile > .tools-eingabe { width: 100%; }
+.tools-indexfeld {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blass);
 }
 .tools-zeile > .knopf { width: 100%; }
 .tools-zeile > .knopf + .knopf { width: auto; }

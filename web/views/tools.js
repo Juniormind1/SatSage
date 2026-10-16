@@ -92,6 +92,17 @@ let schatzTimer = null;
 let schatzLogStand = { index: 0, knoten: [], texte: [] };
 let schatzFunde = [];
 let schatzListeAnzeigen = false;
+let schatzAb = 0;
+let schatzBis = 500;
+
+function schatzIndex(id, vorgabe) {
+  const el = $(id);
+  const roh = el ? String(el.value).trim() : "";
+  if (roh === "") return vorgabe;
+  const n = Number(roh);
+  if (!Number.isInteger(n) || n < 0) return null;
+  return n;
+}
 
 function scantxoutsetVerbunden() {
   const qs = Zustand.config?.sources || [];
@@ -133,6 +144,10 @@ function aktualisiereSchatzKnopf() {
   knopf.title = laeuft ? t("tools.treasureRunning") : t("tools.treasureTitle");
   const wahl = $("#tools-schatz-wallet");
   if (wahl) wahl.disabled = laeuft;
+  const ab = $("#tools-schatz-ab");
+  const bis = $("#tools-schatz-bis");
+  if (ab) ab.disabled = laeuft;
+  if (bis) bis.disabled = laeuft;
 }
 
 function schatzStatus(text) {
@@ -166,14 +181,19 @@ function zeichneSchatzListe(funde) {
     const kette = Number(fund.chain) === 0
       ? t("tools.chainReceive")
       : t("tools.chainChange");
-    li.textContent = t("tools.treasureItem", {
+    const innerhalb = Number(fund.index) < Number(fund.fenster_bis);
+    const werte = {
       amount: formatSats(fund.sats),
       wallet: fund.wallet || "",
       chain: kette,
       index: fund.index,
       until: Math.max(0, Number(fund.fenster_bis) - 1),
+      from: fund.scan_ab ?? 0,
       address: kuerze(fund.address || ""),
-    });
+    };
+    li.textContent = innerhalb
+      ? t("tools.treasureItemFrom", werte)
+      : t("tools.treasureItem", werte);
     liste.append(li);
   }
   liste.hidden = false;
@@ -208,9 +228,15 @@ async function pruefeSchatzJob() {
     if (schatzListeAnzeigen && Zustand.ansicht === "tools" && job.status === "done") {
       schatzFunde = funde;
       zeichneSchatzListe(funde);
-      schatzStatus(funde.length ? "" : t("tools.treasureEmpty"));
+      schatzStatus(funde.length ? "" : t("tools.treasureEmpty", {
+        from: schatzAb,
+        to: schatzBis,
+      }));
     } else if (Zustand.ansicht === "tools" && job.status !== "done") {
-      schatzStatus(job.error || job.message || t("tools.treasureEmpty"));
+      schatzStatus(job.error || job.message || t("tools.treasureEmpty", {
+        from: schatzAb,
+        to: schatzBis,
+      }));
     } else {
       schatzStatus("");
     }
@@ -233,6 +259,20 @@ function bindeSchatzJob(id) {
 async function starteSchatzsuche() {
   const knopf = $("#tools-schatz");
   if (!knopf || knopf.disabled) return;
+  const ab = schatzIndex("#tools-schatz-ab", 0);
+  const bis = schatzIndex("#tools-schatz-bis", 500);
+  if (ab == null || bis == null) {
+    schatzStatus(t("tools.treasureIndexInvalid"));
+    knopf.disabled = false;
+    return;
+  }
+  if (bis < ab) {
+    schatzStatus(t("tools.treasureIndexOrder"));
+    knopf.disabled = false;
+    return;
+  }
+  schatzAb = ab;
+  schatzBis = bis;
   schatzListeAnzeigen = true;
   schatzFunde = [];
   zeichneSchatzListe([]);
@@ -243,7 +283,7 @@ async function starteSchatzsuche() {
     const walletId = (wahl && wahl.value) || "*";
     const job = await api("/tools/schatzsuche", {
       methode: "POST",
-      daten: { wallet_id: walletId },
+      daten: { wallet_id: walletId, scan_ab: ab, scan_bis: bis },
     });
     bindeSchatzJob(job.id);
   } catch (fehler) {
@@ -670,6 +710,15 @@ function bindeSchatzKnopf() {
   if (!knopf || knopf.dataset.gebunden) return;
   knopf.dataset.gebunden = "1";
   knopf.addEventListener("click", starteSchatzsuche);
+  for (const id of ["#tools-schatz-ab", "#tools-schatz-bis"]) {
+    const feld = $(id);
+    if (!feld) continue;
+    feld.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      starteSchatzsuche();
+    });
+  }
   fuelleSchatzWallets();
   aktualisiereSchatzKnopf();
 }

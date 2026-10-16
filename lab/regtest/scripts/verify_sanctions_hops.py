@@ -22,7 +22,7 @@ ENV_PATH = HERE / ".data" / ".regtest.env"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(SCRIPTS))
 
-from infra_check import brauche, hinweis_electrs  # noqa: E402
+from infra_check import brauche, hinweis_electrs, pinne_lab_env  # noqa: E402
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -50,19 +50,21 @@ def main() -> int:
         return 1
 
     os.environ.setdefault("SANKTION_MAX_HOPS_CAP", "100")
-    os.environ.setdefault("NETWORK", "regtest")
+    werte = _load_env(ENV_PATH)
+    for k, v in werte.items():
+        os.environ[k] = v
+    # Der Roh-Parser kodiert Adressen im gesetzten Netz. Ohne das hier
+    # bleibt es Mainnet (bc1…), die Laborliste trägt bcrt1…, und jeder
+    # Treffer geht daneben. Ein Abruf lädt ENV_FILE erneut.
+    os.environ["NETWORK"] = werte.get("NETWORK") or "regtest"
+    pinne_lab_env(ENV_PATH)
 
     import main as satsage_main
     from analyze import check_wallet_utxos_sanctions
     from sanctioned import load_sanctioned_xbt_addresses
 
-    werte = _load_env(ENV_PATH)
-    for k, v in werte.items():
-        os.environ.setdefault(k, v)
-    # Der Roh-Parser kodiert Adressen im gesetzten Netz. Ohne das hier
-    # bleibt es Mainnet (bc1…), die Laborliste trägt bcrt1…, und jeder
-    # Treffer geht daneben.
-    satsage_main.set_chain_network(os.environ.get("NETWORK") or "regtest")
+    pinne_lab_env(ENV_PATH)
+    satsage_main.set_chain_network(os.environ["NETWORK"])
 
     listed, _meta = load_sanctioned_xbt_addresses(cache_dir=SANCTIONS_DIR)
     if not listed:

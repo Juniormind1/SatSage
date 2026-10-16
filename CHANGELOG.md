@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Tools · gründlicher Wallet-Scan:** Zwei Felder legen das Indexfenster fest. Scan ab steht auf 0, Scan bis auf 500 (Ende einschließlich, Empfang und Wechselgeld). Der Lauf beginnt damit bei Index #0, statt das vordere Fenster auszulassen.
+
 - **Empfang · ohne Log und ohne Assistent:** Ist der Log-Bereich aus und kein LLM verbunden, sitzt der Empfangs-QR unten in der Navigationsleiste und blendet mit ihr ein und aus. Sobald das Log wieder an ist, steht er rechts unten. Ist ein LLM verbunden, bleibt er auch bei ausgeblendetem Log rechts unten.
 
 - **Navigation · nicht angeheftet:** Die Leiste blendet aus, sobald der Mauszeiger sie verlässt. Nach dem Lösen blieb sie bisher offen, bis irgendwo anders geklickt wurde.
@@ -17,8 +19,10 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 - **Datenquellen · Electrs-TLS:** Steht das Electrs-Formular noch offen, setzt sich das TLS-Häkchen, sobald die Verbindung mit der passenden Einstellung steht. Ein dabei neu gefundener Port folgt mit, solange das Portfeld unangetastet ist.
 - **Datenquellen · Electrs-Adresse:** Ein Feld für IP, Name oder `.onion`. Eine Onion wird als `FULCRUM_TOR` gespeichert und die IP-Zeile geleert, eine IP umgekehrt. Der Proxy erscheint erst, wenn die Eingabe eine Onion ist. Stehen in der `.env` beide, zeigt das Feld die IP; Übernehmen behält nur diese eine Adresse.
-- **Datenquellen · Electrs-Lücke:** Am eigenen Electrum-Server steht das Gap-Limit (Vorgabe 100, höchstens 10.000, `.env` `UTXO_SCAN_GAP_LIMIT`). Der nächste UTXO-Scan und Aktualisieren suchen so viele leere Indizes in Folge. Höher findet weiter entfernte Adressen; der bestehende Cache und fertige Herkunftsbäume bleiben. Herkunft und Historie nur für neu gefundene UTXOs. Das Formular zeigt IP, Onion und Proxy nebeneinander, darunter Port mit TLS-Häkchen, darunter die Lücke.
-- **Regtest-Labor · Gap über 100:** `lab-gap` hat Coins auf Empfang #0 und #101, dazwischen nichts. Das Wallet steht nicht in der Lab-Env. `verify_electrs_gap.py` erwartet, dass Limit 100 den hinteren Coin übersieht und Limit 101 ihn findet. Nicht Teil des Merge-Labors.
+- **Datenquellen · Electrs-Lücke:** Das Gap-Limit steht nicht mehr im Formular. `UTXO_SCAN_GAP_LIMIT` bleibt in der `.env` (Vorgabe 100, höchstens 10.000). Der nächste UTXO-Scan und Aktualisieren suchen so viele leere Indizes in Folge. Im Dialog „Ab wann scannen?“ gilt die Lücke nur für diesen Scan.
+- **Regtest-Labor · Gap über 100:** `lab-gap` hat Coins auf Empfang #0 und #101, dazwischen nichts. Das Wallet steht nicht in der Lab-Env. `verify_electrs_gap.py` erwartet, dass Limit 100 den hinteren Coin übersieht und Limit 101 ihn findet. Teil des Merge-Labors.
+- **Merge-Labor · GUI:** Userflow und Chaos gehören zum Workflow `Regtest-Labor`. Auf macOS startet Playwright das installierte Chrome, in der Linux-CI das gebündelte Chromium. Chaos läuft mit 200 Runden und Seed 42. Der Userflow klickt die Navigationsleiste über das DOM, weil die Leiste höher ist als das Fenster.
+- **Tests · ohne persönliche .env:** Die Unittests lesen eine leere Datei statt der eigenen `.env` und verwerfen den Scramble-Schlüssel. Die Labor-Prüfer für Gap, Klassifikation, Sanktions-Hops und Quellen-Inventar bleiben auf der Lab-Env, auch wenn ein Abruf die Datei neu lädt.
 
 - **Log · Lauf-Anfang und Lauf-Ende:** UTXOs, Bestand, Herkunft, Historie, klären (grau) und klären (gelb) schreiben `lauf="…"` in `JOB-START` und `JOB-ENDE`. Die Dauer steht in `elapsed_s` der Ende-Zeile. Dieselbe Job-Art allein trennt die drei Herkunftsläufe nicht.
 
@@ -68,7 +72,7 @@ Erstes stabiles Release.
 - **Datenquellen · eigener Indexer:** Der Papierkorb beendet die Wiederholungen. Ein laufender Job liest die Adresse neu und versucht den gelöschten Electrum-Server nicht weiter.
 - **Kopfzeile · öffentliche Electrum:** Die rote Pille nennt die Zahl der verbundenen Server („Electrum öffentlich 3“). Fällt einer weg, sinkt die Zahl beim nächsten Takt. Neue Server werden erst gesucht, wenn weniger als zwei verbunden bleiben.
 - **Datenquellen · öffentliche Electrum:** Onion und Clearnet haben nur noch den Knopf **Verbinden**. Fehlt die Liste oder ist sie älter als einen Tag, holt derselbe Knopf sie. Einen eigenen Knopf „Liste laden“ gibt es nicht.
-- **Labor · Playwright Dachboden:** `lab/regtest/scripts/verify_gui_dachboden.py` legt ein leeres Wallet an, prüft den Dachboden, schickt Sats und sweept. Die Walletliste gruppiert dabei ohne Reload um. Der Jobs-Takt liest dafür nur `utxo_count` aus dem Cache-Dateikopf. Nav-Klicks gehen über das DOM, weil der Dachboden unter dem sichtbaren Bereich der Seitenleiste liegt.
+- **Labor · Playwright Dachboden:** `lab/regtest/scripts/verify_gui_dachboden.py` legt ein leeres Wallet an, prüft den Dachboden, schickt Sats und sweept. Die Walletliste gruppiert dabei ohne Reload um. Der Jobs-Takt liest dafür nur `utxo_count` aus dem Cache-Dateikopf. Nav-Klicks gehen über das DOM, weil der Dachboden unter dem sichtbaren Bereich der Seitenleiste liegt. Der Prüfer startet die Sitzung selbst gegen die Lab-Env, wie Userflow und Chaos, und hängt nicht mehr an der Präsentations-GUI.
 - **Navigation · Dachboden:** Wallets mit gelesenem Cache und ohne offene UTXOs stehen ganz unten in der Gruppe „Dachboden“ (Englisch: Attic). Die Gruppe ist der einzige aufklappbare Eintrag und startet zugeklappt. Nie gescannte Wallets bleiben in der Hauptliste.
 - **Datenquellen · öffentliche Electrum:** „Verbinden“ bei Clearnet verbindet nur Clearnet-Server. „Verbinden“ bei Onion verbindet nur Onion-Server. Es läuft nicht beides parallel, und nach einem Treffer fällt SatSage nicht auf die andere Art um.
 - **Electrs/Fulcrum · Verbindung weg:** Ist der Socket schon zu (`Fulcrum-Client nicht verbunden`), gilt das als normaler Verbindungsverlust: Reconnect oder nächster öffentlicher Server, bei Job-Abbruch Ende ohne Traceback. Ein Gap-Scan knallt darüber nicht mehr.

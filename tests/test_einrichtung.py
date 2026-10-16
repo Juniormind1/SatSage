@@ -451,7 +451,8 @@ if (fehler.length) {
         self.assertIn("sources.disableP2pTitle", self.datenquellen_js)
         self.assertIn("sources.bip158DateLabel", self.datenquellen_js)
         self.assertIn("sources.bip158StartLabel", self.datenquellen_js)
-        self.assertIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertNotIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertNotIn("speichereBip158Gap", self.datenquellen_js)
         self.assertIn("/p2p/scan-zeit?", self.datenquellen_js)
         self.assertIn("feld.typ === \"checkbox\"", self.datenquellen_js)
         self.assertIn("verbindeP2p", self.datenquellen_js)
@@ -702,13 +703,19 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("Steuerjahr", de["header.filterTitleActive"])
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
-        """Zugeklappt unter den UTXOs — ohne Verlauf kein zusätzlicher Hinweis."""
+        """Zugeklappt unter den UTXOs — ohne Verlauf bleibt der Abschnitt leer."""
         self.assertIn('id="wallet-ausgegeben"', self.html)
         self.assertIn("function zeichneAusgegeben", self.herkunft_js)
+        self.assertIn("function setzeWalletAusgegeben", self.wallets_js)
         self.assertRegex(
             self.wallets_js,
-            r"if \(hatVerlauf\) \{\s*ausgegeben\.append\(zeichneAusgegeben",
+            r"if \(!daten \|\| !daten\.hat_verlauf\) return;",
         )
+        self.assertIn(
+            "ausgegeben.append(zeichneAusgegeben(daten",
+            self.wallets_js,
+        )
+        self.assertIn("setzeWalletAusgegeben(daten, seite);", self.wallets_js)
 
     def test_multisig_feld_erklaert_warum_kein_hinzufuegen(self):
         self.assertIn('id="deskriptor-hinweis"', self.html)
@@ -796,9 +803,8 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"dialog.p2pPrivacy.title"', de)
         self.assertIn('"sources.bip158DateLabel": "Frühestes Scan-Datum:"', de)
         self.assertIn('"sources.bip158StartLabel": "Scan ab Blockhöhe:"', de)
-        self.assertIn('"sources.bip158GapLabel": "Gap-Limit:"', de)
 
-    def test_electrs_formular_hat_luecke_und_layout(self):
+    def test_electrs_formular_ohne_gap_limit(self):
         self.assertIn("function electrsQuellenFormular", self.datenquellen_js)
         self.assertIn("function wendeElectrsFormularStand", self.datenquellen_js)
         self.assertIn("function istOnionAdresse", self.datenquellen_js)
@@ -809,20 +815,18 @@ class TestOberflaeche(unittest.TestCase):
         )
         self.assertIn("electrs-reihe", self.datenquellen_js)
         self.assertIn("electrs-reihe-port", self.datenquellen_js)
-        self.assertIn("electrs-reihe-gap", self.datenquellen_js)
+        self.assertNotIn("electrs-reihe-gap", self.datenquellen_js)
+        self.assertIn('nachKey.delete("UTXO_SCAN_GAP_LIMIT")', self.datenquellen_js)
+        self.assertNotIn("nimm(\"UTXO_SCAN_GAP_LIMIT\")", self.datenquellen_js)
         self.assertIn("feld-zeile-check", self.datenquellen_js)
-        self.assertIn("UTXO_SCAN_GAP_LIMIT", self.datenquellen_js)
-        self.assertIn('t("sources.electrsGapHint")', self.datenquellen_js)
         self.assertIn(".electrs-reihe", self.css)
+        self.assertNotIn(".electrs-reihe-gap", self.css)
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
-        self.assertIn(
-            '"sources.electrsGapHint": "Bei Erhöhung sucht der nächste UTXO-Scan',
-            de,
-        )
+        self.assertNotIn("sources.electrsGapHint", de)
         self.assertIn('"sources.field.FULCRUM_HOST.label": "Adresse"', de)
         self.assertIn('"sources.field.FULCRUM_SSL.label": "TLS"', de)
         self.assertIn("das offene Häkchen folgt sofort", de)
-        self.assertIn('"sources.field.UTXO_SCAN_GAP_LIMIT.label": "Gap-Limit"', de)
+        self.assertNotIn("UTXO_SCAN_GAP_LIMIT", de)
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)

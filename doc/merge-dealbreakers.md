@@ -65,7 +65,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | Q1 | **`tests/`-Suite rot** auf CI (Ubuntu `unittest discover`) | Hart |
-| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py` | Hart |
+| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, `verify_gui_dachboden.py` (Lab-Sitzung, kein Präsentations-Server). Dazu Userflow und Chaos (`scripts/webgui_userflow.py --spawn`, `scripts/webgui_chaos_run.py --spawn --rounds 200 --seed 42`): auf macOS im installierten Chrome, in der Linux-CI im gebündelten Chromium | Hart |
 | Q2 | Suite „grün“ nur durch **unbegründete skips** / Aushebeln von Checks | Hart+Review |
 | Q3 | **Scope-Monster**: UI + Core-Scan + Packaging + Plugin in einem PR ohne Trennung | Weich |
 | Q4 | Neue Nutzertexte **nur Englisch / hart in `app.js`** statt Locales | Weich |

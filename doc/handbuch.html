@@ -968,8 +968,9 @@ keine Anfrage an einen Node.</p>
 
 <p>Darunter <strong>Jäger der verlorene Schätze</strong>. Der Knopf ist nur
 aktiv, wenn eine Bitcoin-Core-Quelle mit <code>scantxoutset</code> verbunden
-ist. Der Lauf dauert: der Node sucht UTXOs jenseits des normalen
-Adressfensters. Gefundene Beträge landen im Wallet-Cache. Im Log steht,
+ist. Der Lauf dauert: der Node sucht UTXOs im Indexfenster
+<strong>Scan ab</strong> / <strong>Scan bis</strong> (Vorgabe #0 bis #500,
+Empfang und Wechselgeld, Ende einschließlich). Gefundene Beträge landen im Wallet-Cache. Im Log steht,
 warum der normale Scan sie übersehen hat. Die Liste unter dem Knopf gilt
 nur, solange dieser Bereich offen bleibt.</p>
 
@@ -1617,11 +1618,11 @@ scantxoutset nicht verbunden sind. Herkunft, Verlauf und der
 Sanktionscheck bleiben bei einem schon verbundenen Electrum-Server.
 Ohne den erscheint ein Hinweis, und es wird nicht gesucht.</p>
 
-<p>In den Datenquellen stehen bei Compact Filter <strong>Frühestes Scan-Datum</strong>,
-<strong>Scan ab Blockhöhe</strong> und <strong>Gap-Limit</strong>. Datum und Höhe
+<p>In den Datenquellen stehen bei Compact Filter <strong>Frühestes Scan-Datum</strong>
+und <strong>Scan ab Blockhöhe</strong>. Datum und Höhe
 füllen sich gegenseitig. Ohne bekanntes Wallet-Alter fragt <strong>Ab wann
-scannen?</strong> dieselben drei Felder; Vorgabe sind Höhe und Lücke aus den
-Datenquellen, die Lücke gilt nur für diesen Scan. Der Compact-Filter-Scan liest
+scannen?</strong> dieselben zwei Felder plus das <strong>Gap-Limit</strong>
+für diesen Scan (Vorgabe 100, höchstens 10.000). Der Compact-Filter-Scan liest
 die Höhe, nicht das Datum. Hat das Wallet ein First-seen, gilt dieser Beginn —
 auch wenn die Datenquellen-Höhe später liegt.
 Die Umrechnung nutzt die lokale Header-Datei,
@@ -1663,13 +1664,13 @@ Der Proxy erscheint erst, wenn die Eingabe eine Onion ist.
 Kommt die Verbindung mit einer anderen TLS-Einstellung zustande und das
 Electrs-Formular ist noch offen, setzt sich das TLS-Häkchen in diesem Moment.</p>
 
-<p>Beim eigenen Electrum-Server steht in den Datenquellen das
-<strong>Gap-Limit</strong> (Vorgabe 100, höchstens 10.000,
-<code>UTXO_SCAN_GAP_LIMIT</code>). Der nächste UTXO-Scan und
-<strong>Aktualisieren</strong> suchen so viele leere Indizes in Folge.
-Ein höheres Limit findet weiter entfernte Adressen; der bestehende Cache
-und fertige Herkunftsbäume bleiben. Herkunft und Historie nur für neu
-gefundene UTXOs.</p>
+<p>Die Adresslücke des eigenen Electrum-Servers steht in der
+<code>.env</code> als <code>UTXO_SCAN_GAP_LIMIT</code>
+(Vorgabe 100, höchstens 10.000), nicht in den Datenquellen.
+Der nächste UTXO-Scan und <strong>Aktualisieren</strong> suchen so viele
+leere Indizes in Folge. Ein höheres Limit findet weiter entfernte Adressen;
+der bestehende Cache und fertige Herkunftsbäume bleiben. Herkunft und
+Historie nur für neu gefundene UTXOs.</p>
 
 <h3>Verbindung testen</h3>
 

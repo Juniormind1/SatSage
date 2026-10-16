@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=0.9.9-qrnav">
+  <link rel="stylesheet" href="/style.css?v=0.9.9-schatz-index">
 </head>
 <body>
 
@@ -205,7 +205,7 @@
       Für dieses Wallet ist kein Alter bekannt, und der Cache ist leer.
       BIP-158 durchsucht die Kette erst ab der gewählten Blockhöhe —
       früher entstandene Outputs bleiben unsichtbar. Die Lücke gilt für
-      diesen Scan; Vorgabe ist das Gap-Limit aus den Datenquellen.
+      diesen Scan.
     </p>
     <div class="scan-datum-felder">
       <label class="quelle-scan-feld">
@@ -231,7 +231,7 @@
                data-i18n-placeholder="sources.bip158GapPlaceholder"
                placeholder="Lücke"
                data-i18n-title="dialog.scanDate.gapTitle"
-               title="Unbenutzte Indizes je Kette hinter dem letzten Treffer. Vorgabe ist das Gap-Limit aus den Datenquellen. Gilt für diesen Scan.">
+               title="Unbenutzte Indizes je Kette hinter dem letzten Treffer. Vorgabe 100, höchstens 10.000. Gilt für diesen Scan.">
       </label>
     </div>
     <p class="klein" id="scan-datum-hinweis"></p>
@@ -784,17 +784,34 @@
             <span class="karte-titel" data-i18n="tools.treasureHeading">Außergewöhnlich gründlicher Wallet-Scan nach bisher unentdeckten UTXOs</span>
           </div>
           <p class="meta tools-erklaerung" data-i18n="tools.treasureLead">
-            Sucht mit scantxoutset UTXOs jenseits des normalen Adressfensters
-            und sortiert sie in den Wallet-Cache. Braucht eine verbundene
+            Sucht mit scantxoutset im angegebenen Indexfenster
+            (Empfang und Wechselgeld) und sortiert Treffer in den Wallet-Cache.
+            Vorgabe Index #0 bis #500. Braucht eine verbundene
             Bitcoin-Core-Quelle.
           </p>
-          <div class="tools-zeile">
+          <div class="tools-zeile tools-schatz-zeile">
             <select id="tools-schatz-wallet" class="tools-eingabe"
                     data-i18n-aria-label="tools.treasureWalletAria"
                     aria-label="Wallet für die Schatzsuche"></select>
+            <label class="tools-indexfeld">
+              <span data-i18n="tools.treasureFrom">Scan ab</span>
+              <input type="number" id="tools-schatz-ab" min="0" step="1" value="0"
+                     data-i18n-aria-label="tools.treasureFromAria"
+                     data-i18n-title="tools.treasureFromTitle"
+                     aria-label="Scan ab, Adressindex"
+                     title="Erster Adressindex, Empfang und Wechselgeld. Vorgabe 0.">
+            </label>
+            <label class="tools-indexfeld">
+              <span data-i18n="tools.treasureTo">Scan bis</span>
+              <input type="number" id="tools-schatz-bis" min="0" step="1" value="500"
+                     data-i18n-aria-label="tools.treasureToAria"
+                     data-i18n-title="tools.treasureToTitle"
+                     aria-label="Scan bis, Adressindex"
+                     title="Letzter Adressindex, einschließlich. Vorgabe 500.">
+            </label>
             <button type="button" id="tools-schatz" class="knopf"
                     data-i18n="tools.go" data-i18n-title="tools.treasureTitle"
-                    title="Sucht mit scantxoutset UTXOs jenseits des normalen Adressfensters und sortiert sie in den Wallet-Cache.">
+                    title="Sucht mit scantxoutset im angegebenen Indexfenster und sortiert Treffer in den Wallet-Cache.">
               Los
             </button>
             <p id="tools-schatz-status" class="meta" hidden></p>
@@ -2041,7 +2058,7 @@
 <script src="/views/herkunft.js?v=0.9.9-scandialog"></script>
 <script src="/views/steuerjahr.js?v=0.9.9-plotring"></script>
 <script src="/views/herkunftsnetz.js?v=0.9.9-lottip"></script>
-<script src="/views/tools.js?v=0.9.9-cache"></script>
+<script src="/views/tools.js?v=0.9.9-schatz-index"></script>
 <script src="/chrome_nav.js?v=0.9.9-qrnav"></script>
 <script src="/chrome.js?v=0.9.9-logbereich"></script>
 <script src="/boot.js?v=0.9.9"></script>

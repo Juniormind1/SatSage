@@ -267,9 +267,12 @@ def lauf_passwort_zyklen(*, headless: bool = True, channel: str | None = None) -
     schritte: list[dict] = []
     ok = True
     holds: list[tuple] = []
+    from webgui_test_ready import playwright_kanal
+
     launch: dict = {"headless": headless}
-    if channel:
-        launch["channel"] = channel
+    kanal = playwright_kanal(channel)
+    if kanal:
+        launch["channel"] = kanal
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(**launch)

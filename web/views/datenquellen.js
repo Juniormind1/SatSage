@@ -678,27 +678,6 @@ function zeichneQuellen(quellen) {
       });
       hoehe.addEventListener("change", () => speichereBip158StartHoehe(hoehe, datum));
 
-      const luecke = document.createElement("input");
-      luecke.type = "number";
-      luecke.className = "quelle-start-hoehe quelle-gap";
-      luecke.min = "1";
-      luecke.max = "10000";
-      luecke.step = "1";
-      luecke.inputMode = "numeric";
-      luecke.placeholder = t("sources.bip158GapPlaceholder");
-      luecke.title = t("sources.bip158GapTitle");
-      luecke.disabled = bridgeManaged;
-      const gapWert = quelle.gap_limit != null ? String(quelle.gap_limit) : "100";
-      luecke.value = gapWert;
-      luecke.dataset.savedValue = gapWert;
-      luecke.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          luecke.blur();
-        }
-      });
-      luecke.addEventListener("change", () => speichereBip158Gap(luecke));
-
       datum.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -712,7 +691,6 @@ function zeichneQuellen(quellen) {
       rechts.append(
         quelleScanFeld(t("sources.bip158DateLabel"), datum),
         quelleScanFeld(t("sources.bip158StartLabel"), hoehe),
-        quelleScanFeld(t("sources.bip158GapLabel"), luecke),
       );
 
       const verbinden = document.createElement("button");
@@ -1018,46 +996,6 @@ async function speichereBip158StartHoehe(eingabe, datumFeld, optionen) {
   }
 }
 
-/** P2P-Zeile: Lücke je Kette speichern. Leer lässt den gespeicherten Wert. */
-async function speichereBip158Gap(eingabe) {
-  if (!eingabe || eingabe.disabled) return;
-  const roh = String(eingabe.value || "").trim();
-  if (!roh) {
-    eingabe.value = eingabe.dataset.savedValue || "100";
-    return;
-  }
-  const n = Number(roh);
-  if (!Number.isInteger(n) || n < 1 || n > 10000) {
-    meldung(t("sources.bip158GapInvalid"), "krit");
-    eingabe.value = eingabe.dataset.savedValue || "100";
-    return;
-  }
-  const vorher = eingabe.dataset.savedValue;
-  if (vorher != null && vorher === String(n)) return;
-  eingabe.disabled = true;
-  merkeQuellenAenderung();
-  try {
-    const ergebnis = await api("/config/source", {
-      methode: "PUT",
-      daten: {
-        source: "bip158",
-        values: { BIP158_GAP_LIMIT: String(n) },
-      },
-    });
-    merkeQuellenAenderung();
-    await ladeConfig();
-    if (Array.isArray(ergebnis.sources) && Zustand.config) {
-      Zustand.config.sources = ergebnis.sources;
-    }
-    eingabe.dataset.savedValue = String(n);
-    zeichneQuellen(Zustand.config?.sources || ergebnis.sources || []);
-    meldung(t("sources.bip158GapSaved", { n }), "gut");
-  } catch (fehler) {
-    meldung(fehler.message, "krit");
-    eingabe.disabled = false;
-  }
-}
-
 function beobachteP2pWalk(jobId) {
   const timer = setInterval(async () => {
     try {
@@ -1201,7 +1139,7 @@ function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinw
     eingabe.value = feld.value;
   } else {
     eingabe = document.createElement("input");
-    const zahl = feld.typ === "zahl" || feld.key === "UTXO_SCAN_GAP_LIMIT";
+    const zahl = feld.typ === "zahl";
     eingabe.type = feld.typ === "geheim" ? "password" : (zahl ? "number" : "text");
     eingabe.className = "mono";
     eingabe.value = feld.value;
@@ -1227,7 +1165,7 @@ function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinw
   else zeile.append(titel, eingabe);
 
   const hinweisText = quelleFeldHinweis(feld, quelle.key);
-  if (hinweisText && feld.key !== "UTXO_SCAN_GAP_LIMIT") {
+  if (hinweisText) {
     if (feld.typ === "checkbox" || hinweisAlsTitel) {
       zeile.title = hinweisText;
     } else {
@@ -1391,17 +1329,7 @@ function electrsQuellenFormular(quelle, behaelter, gemerkt) {
   if (tls) reihePort.append(tls);
   if (reihePort.childElementCount) form.append(reihePort);
 
-  const reiheGap = document.createElement("div");
-  reiheGap.className = "electrs-reihe-gap";
-  const gap = nimm("UTXO_SCAN_GAP_LIMIT");
-  if (gap) {
-    reiheGap.append(gap);
-    const hinweis = document.createElement("p");
-    hinweis.className = "electrs-gap-hinweis";
-    hinweis.textContent = t("sources.electrsGapHint");
-    reiheGap.append(hinweis);
-  }
-  if (reiheGap.childElementCount) form.append(reiheGap);
+  nachKey.delete("UTXO_SCAN_GAP_LIMIT");
 
   for (const feld of nachKey.values()) {
     const { zeile, eingabe } = baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged);

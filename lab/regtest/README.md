@@ -1,6 +1,6 @@
 # SatSage-Regtest-Labor
 
-Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
+Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, dazu Userflow und Chaos). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
 
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
@@ -21,9 +21,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\start_lab.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 ```
 
-`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf macOS und Linux, nicht hier.
+`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf Linux, nicht hier. macOS nutzt wie Windows das installierte Chrome.
 
-Szenario Dachboden (GUI muss schon laufen, bitcoind und Electrs auch): `scripts/verify_gui_dachboden.py`. Es legt `Dachprobe` an, erwartet sie unter Dachboden, schickt 100 000 sats vom Faucet, mined einen Block und erwartet den Sprung in die normale Liste ohne Reload. Danach Sweep zurück an `lab-faucet` und wieder Dachboden. macOS/Linux starten das gebündelte Chromium ohne `channel`, Windows mit `channel=chrome`.
+Szenario Dachboden (bitcoind und Electrs müssen laufen): `scripts/verify_gui_dachboden.py`. Es startet selbst eine Lab-Sitzung wie Userflow und Chaos, legt `Dachprobe` an, erwartet sie unter Dachboden, schickt 100 000 sats vom Faucet, mined einen Block und erwartet den Sprung in die normale Liste ohne Reload. Danach Sweep zurück an `lab-faucet` und wieder Dachboden. `--url` nutzt eine schon laufende Sitzung. macOS und Windows starten das installierte Chrome (`channel=chrome`), Linux das gebündelte Chromium ohne `channel`.
 
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 
@@ -125,7 +125,7 @@ python3 lab/regtest/scripts/generate_scenarios.py --gap-only
 python3 lab/regtest/scripts/verify_electrs_gap.py
 ```
 
-Bericht: `.data/scenario-report-gap.json` (lokal, XPUB nur dort). Der Prüfer ist nicht Teil von Q6 und startet kein Docker.
+Bericht: `.data/scenario-report-gap.json` (lokal, XPUB nur dort). Der Prüfer ist Teil von Q6 und startet kein Docker.
 
 ### Pseudo-Sanktionslisten & Hop-Traces
 

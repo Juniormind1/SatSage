@@ -184,8 +184,19 @@ def _warte_nicht_lade(page, root_sel: str, sekunden: float = 25.0) -> bool:
 
 
 def _nav_klick(page, ansicht: str) -> None:
-    btn = page.locator(f'button.nav-eintrag[data-ansicht="{ansicht}"]')
-    btn.first.click(timeout=8000)
+    # Die Nav ist höher als das Fenster. Playwright sieht den Knopf als
+    # sichtbar, scrollt ihn aber nicht ins Viewport (overflow hidden).
+    # Ein DOM-Klick trifft den Listener trotzdem.
+    page.evaluate(
+        """(ansicht) => {
+          const el = document.querySelector(
+            'button.nav-eintrag[data-ansicht="' + ansicht + '"]'
+          );
+          if (!el) throw new Error('Nav-Knopf fehlt: ' + ansicht);
+          el.click();
+        }""",
+        ansicht,
+    )
     page.wait_for_timeout(300)
 
 
@@ -224,13 +235,12 @@ def run_userflow(
 
     with sync_playwright() as p:
         launch_kwargs: dict = {"headless": headless}
-        if channel:
-            # Nur Windows: installiertes Chrome (channel="chrome").
-            # Fernsteuer-Zustimmung — das mitgelieferte Playwright-Chromium
-            # ist dort nicht der Weg. macOS und Linux lassen channel leer
-            # und starten das gebündelte Chromium. Siehe
-            # doc/gui-test-protokoll.md.
-            launch_kwargs["channel"] = channel
+        # macOS: installiertes Chrome. Windows ebenso. Linux: Chromium.
+        from webgui_test_ready import playwright_kanal
+
+        kanal = playwright_kanal(channel)
+        if kanal:
+            launch_kwargs["channel"] = kanal
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()

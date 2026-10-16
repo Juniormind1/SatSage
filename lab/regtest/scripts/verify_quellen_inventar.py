@@ -194,11 +194,10 @@ def _aktiviere_env(pfad: Path, werte: dict[str, str]) -> None:
         "\n".join(f"{k}={v}" for k, v in werte.items()) + "\n",
         encoding="utf-8",
     )
-    import core.env_bootstrap as boot
+    from infra_check import pinne_lab_env
     import main
 
-    boot.ENV_FILE = pfad
-    main.ENV_FILE = pfad
+    pinne_lab_env(pfad)
     for key in list(os.environ):
         if key in _STREICHEN or key.startswith("FULCRUM_TOR_") or key.startswith("UTXO_RPC"):
             os.environ.pop(key, None)
