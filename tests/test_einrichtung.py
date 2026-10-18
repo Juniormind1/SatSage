@@ -7,6 +7,7 @@ im Python-Teil entstehen. Benennt jemand dort einen Schlüssel um, meldet der
 Hinweis stillschweigend „nicht eingetragen", obwohl alles konfiguriert ist.
 Genau diese Kopplung prüfen die folgenden Tests.
 """
+import json
 import re
 import shutil
 import subprocess
@@ -804,7 +805,7 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"sources.bip158DateLabel": "Frühestes Scan-Datum:"', de)
         self.assertIn('"sources.bip158StartLabel": "Scan ab Blockhöhe:"', de)
 
-    def test_electrs_formular_ohne_gap_limit(self):
+    def test_electrs_formular_mit_gap_limit(self):
         self.assertIn("function electrsQuellenFormular", self.datenquellen_js)
         self.assertIn("function wendeElectrsFormularStand", self.datenquellen_js)
         self.assertIn("function istOnionAdresse", self.datenquellen_js)
@@ -815,18 +816,39 @@ class TestOberflaeche(unittest.TestCase):
         )
         self.assertIn("electrs-reihe", self.datenquellen_js)
         self.assertIn("electrs-reihe-port", self.datenquellen_js)
-        self.assertNotIn("electrs-reihe-gap", self.datenquellen_js)
-        self.assertIn('nachKey.delete("UTXO_SCAN_GAP_LIMIT")', self.datenquellen_js)
-        self.assertNotIn("nimm(\"UTXO_SCAN_GAP_LIMIT\")", self.datenquellen_js)
+        # Gap-Limit steht wieder im Electrs-Formular, mit sichtbarem Hinweis.
+        self.assertIn("electrs-reihe-gap", self.datenquellen_js)
+        self.assertIn('nimm("UTXO_SCAN_GAP_LIMIT")', self.datenquellen_js)
+        self.assertNotIn('nachKey.delete("UTXO_SCAN_GAP_LIMIT")', self.datenquellen_js)
+        self.assertIn('t("sources.electrsGapHint")', self.datenquellen_js)
+        self.assertIn('t("sources.electrsGapInvalid")', self.datenquellen_js)
+        self.assertIn("function electrsGapGueltig", self.datenquellen_js)
         self.assertIn("feld-zeile-check", self.datenquellen_js)
         self.assertIn(".electrs-reihe", self.css)
-        self.assertNotIn(".electrs-reihe-gap", self.css)
+        self.assertIn(".electrs-reihe-gap", self.css)
+        self.assertIn(".electrs-gap-hinweis", self.css)
+        # P2P-Zeile bleibt ohne eigenes Gap-Feld (nur im Dialog „Ab wann scannen?“).
+        self.assertNotIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertNotIn("speichereBip158Gap", self.datenquellen_js)
+        for code in ("de", "en"):
+            katalog = json.loads(
+                (WEB / "locales" / f"{code}.json").read_text(encoding="utf-8"),
+            )
+            for key in (
+                "sources.electrsGapHint",
+                "sources.electrsGapInvalid",
+                "sources.field.UTXO_SCAN_GAP_LIMIT.label",
+                "sources.field.UTXO_SCAN_GAP_LIMIT.hint",
+            ):
+                self.assertTrue(katalog.get(key), f"{code}: {key}")
         de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
-        self.assertNotIn("sources.electrsGapHint", de)
         self.assertIn('"sources.field.FULCRUM_HOST.label": "Adresse"', de)
         self.assertIn('"sources.field.FULCRUM_SSL.label": "TLS"', de)
         self.assertIn("das offene Häkchen folgt sofort", de)
-        self.assertNotIn("UTXO_SCAN_GAP_LIMIT", de)
+        self.assertIn('"sources.field.UTXO_SCAN_GAP_LIMIT.label": "Gap-Limit"', de)
+        self.assertIn("langsamer", json.loads(de)["sources.electrsGapHint"])
+        en = json.loads((WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+        self.assertIn("slower", en["sources.electrsGapHint"])
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)

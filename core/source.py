@@ -759,7 +759,7 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
                  "in .env geschrieben, und das offene Häkchen folgt sofort"),
             Feld("UTXO_SCAN_GAP_LIMIT", "Gap-Limit", "zahl", str(electrs_gap),
                  "Unbenutzte Indizes in Folge, dann bricht der Scan die Kette ab. "
-                 "Vorgabe 100, höchstens 10.000."),
+                 "Vorgabe 100, höchstens 10.000. Höher = langsamer."),
         ],
     ))
 

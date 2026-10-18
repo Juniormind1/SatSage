@@ -1241,6 +1241,50 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             main._load_dotenv(self.env_pfad)["UTXO_SCAN_GAP_LIMIT"], "250",
         )
 
+    def test_electrs_luecke_gui_wert_gilt_fuer_naechsten_scan(self):
+        """Gespeichert über die GUI, gelesen beim Scan aus der .env."""
+        from unittest import mock
+
+        from core.wallet_sync_engine import utxo_scan_gap_aus_env
+
+        # Wie im Betrieb: Server und Scan lesen dieselbe .env (server --env
+        # setzt main.ENV_FILE); hier zeigt main.ENV_FILE auf die Test-Datei.
+        patcher = mock.patch.object(main, "ENV_FILE", self.env_pfad)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "UTXO_SCAN_GAP_LIMIT": "300",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(utxo_scan_gap_aus_env(), 300)
+        for kaputt in ("0", "abc", "-5", "1e3", "12.5"):
+            status, _ = self.anfrage(
+                "/api/config/source", methode="PUT",
+                daten={"source": "own_fulcrum", "values": {
+                    "UTXO_SCAN_GAP_LIMIT": kaputt,
+                }},
+            )
+            self.assertEqual(status, 400, kaputt)
+            self.assertEqual(utxo_scan_gap_aus_env(), 300, kaputt)
+        # Leer: Zeile fällt aus der .env, Vorgabe 100 gilt wieder.
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "UTXO_SCAN_GAP_LIMIT": "",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn(
+            "UTXO_SCAN_GAP_LIMIT", main._load_dotenv(self.env_pfad),
+        )
+        self.assertEqual(utxo_scan_gap_aus_env(), 100)
+        _, koerper = self.anfrage("/api/config")
+        own = next(q for q in koerper["sources"] if q["key"] == "own_fulcrum")
+        self.assertEqual(own["gap_limit"], 100)
+
     def test_fremdes_feld_wird_abgelehnt(self):
         """
         Die Positivliste ist der eigentliche Schutz: Ohne sie wäre der

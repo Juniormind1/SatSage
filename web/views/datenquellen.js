@@ -1178,6 +1178,19 @@ function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinw
   return { zeile, eingabe };
 }
 
+/** Grenzen wie ``UTXO_SCAN_GAP_MIN``/``_MAX`` in core/wallet_sync_engine.py. */
+const ELECTRS_GAP_MIN = 1;
+const ELECTRS_GAP_MAX = 10000;
+
+/** Leer = Vorgabe 100 (Zeile fällt aus der .env), sonst ganze Zahl 1…10.000. */
+function electrsGapGueltig(roh) {
+  const text = String(roh ?? "").trim();
+  if (!text) return true;
+  if (!/^\d+$/.test(text)) return false;
+  const n = Number(text);
+  return n >= ELECTRS_GAP_MIN && n <= ELECTRS_GAP_MAX;
+}
+
 function haengeQuellenFussAn(form, eingaben, quelle, behaelter, bridgeManaged) {
   const fuss = document.createElement("div");
   fuss.className = "formular-fuss";
@@ -1199,8 +1212,18 @@ function haengeQuellenFussAn(form, eingaben, quelle, behaelter, bridgeManaged) {
   speichern.textContent = t("common.apply");
   speichern.disabled = bridgeManaged;
   speichern.addEventListener("click", async () => {
-    speichern.disabled = true;
     meldungsfeld.textContent = "";
+    const gapEingabe = eingaben.get("UTXO_SCAN_GAP_LIMIT");
+    // badInput: Buchstaben im Zahlenfeld liefern sonst value "" (= Vorgabe).
+    const gapKaputt = gapEingabe
+      && ((gapEingabe.validity && gapEingabe.validity.badInput)
+        || !electrsGapGueltig(gapEingabe.value));
+    if (gapKaputt) {
+      meldungsfeld.textContent = t("sources.electrsGapInvalid");
+      gapEingabe.focus();
+      return;
+    }
+    speichern.disabled = true;
     const werte = {};
     for (const [key, eingabe] of eingaben) {
       const zeile = eingabe.closest(".feld-zeile");
@@ -1329,7 +1352,19 @@ function electrsQuellenFormular(quelle, behaelter, gemerkt) {
   if (tls) reihePort.append(tls);
   if (reihePort.childElementCount) form.append(reihePort);
 
-  nachKey.delete("UTXO_SCAN_GAP_LIMIT");
+  // Gap-Limit der UTXO-Suche (.env UTXO_SCAN_GAP_LIMIT). Hinweis sichtbar,
+  // nicht nur als Tooltip: höher findet mehr, scannt aber langsamer.
+  const reiheGap = document.createElement("div");
+  reiheGap.className = "electrs-reihe-gap";
+  const gap = nimm("UTXO_SCAN_GAP_LIMIT");
+  if (gap) {
+    reiheGap.append(gap);
+    const hinweis = document.createElement("p");
+    hinweis.className = "electrs-gap-hinweis";
+    hinweis.textContent = t("sources.electrsGapHint");
+    reiheGap.append(hinweis);
+  }
+  if (reiheGap.childElementCount) form.append(reiheGap);
 
   for (const feld of nachKey.values()) {
     const { zeile, eingabe } = baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged);

@@ -155,7 +155,7 @@ FULCRUM_HOST=...
 FULCRUM_TOR=....onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
-# UTXO_SCAN_GAP_LIMIT=100      # 1…10000, Vorgabe 100; Electrs/Fulcrum-Gap-Scan
+# UTXO_SCAN_GAP_LIMIT=100      # 1…10000, Vorgabe 100; Electrs/Fulcrum-Gap-Scan (GUI: Datenquellen → Electrum-Server)
 # Ist FULCRUM_HOST eine IP, probiert der Übernehmen-Knopf in den
 # Datenquellen 50001 und 50002 jeweils mit und ohne TLS, aber nur wenn
 # der Benutzer dort neue Angaben gespeichert hat. Danach verbindet
