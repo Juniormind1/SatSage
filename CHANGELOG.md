@@ -36,6 +36,15 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **P2P · UTXOs sofort im Cache:** Findet der gemeinsame Compact-Filter-Lauf ein UTXO, schreibt SatSage den Bestand dieses Wallets in dem Moment in den Cache, in dem der Block gelesen ist. Wallet-Ansicht und Dotplot zeigen die Treffer noch während Turbo und Historie laufen. Ein Wallet ohne Treffer bekommt dabei keine leere Cache-Datei. Der Schluss-Schreibvorgang am Ende des Laufs bleibt.
 - **Wallet · FIFO-Spend · live während Herkunft:** „max … grün ausgebbar“ und der Lot-Donut am Walletnamen folgen demselben Lots-Strom wie die grüne Scorecard (`lots=0`, dann `GET /api/tax/lots`). Die Zahl steigt mit jedem fertigen Herkunftsbaum, statt erst nach einem neuen Öffnen der Wallet. Läuft das Steuerjahr schon für dasselbe Jahr, teilen sich beide den Strom.
 
+- **Wallets · erstes Laden:** Die Wallet-Ansicht zeigt Bestand und UTXOs zuerst ohne Verlauf und lädt den Verlauf danach nach. Die erste Anzeige kommt damit schneller.
+- **Wallets · Warten auf UTXOs:** Brauchen die UTXOs noch einen Moment bis zur Anzeige, läuft ein grüner Matrix-Regen statt einer leeren Fläche.
+- **Scan · Ka-Ching:** Die Animation läuft für jedes neu gefundene UTXO, nicht nur für das erste.
+- **Datenquellen · Electrs-Flooding:** Die vier Port-/TLS-Versuche auf 50001 und 50002 laufen nur noch beim Übernehmen neuer Angaben in den Datenquellen. Danach verbinden alle Läufe mit dem gespeicherten Port und TLS. Ein libbitcoin-Server wird nicht mehr mit parallelen Anfragen überflutet.
+- **libbitcoin · Sperre:** Die Lock-Prüfung im nativen Weg verglich gegen `threading.Lock` als Klasse und scheiterte deshalb bei jedem Aufruf. Sie prüft jetzt gegen die echten Lock-Typen, der native Weg funktioniert wieder.
+- **Managed-Modus (Umbrel, StartOS):** Der Scan verliert die von der Plattform vorgegebene Node- und Indexer-Adresse nicht mehr. Bisher las die Warteschleife die `.env` frisch und hielt die Quelle für gelöscht.
+- **P2P · Peers:** Ein Scan ab SegWit sucht weiter, bis mindestens ein ungeprunter Peer (`NODE_NETWORK`) verbunden ist, auch wenn das Kontingent schon voller geprunter Peers ist. Peers ohne Nutzen für den Scan erscheinen gar nicht erst in der Anzeige. Header-Vorab läuft wieder, wenn P2P die einzige Bestandsquelle ist.
+- **Regtest-Labor · Quellen-Inventar:** Das Inventar wird nach den Sanktionsketten neu geschrieben (bisher meldeten alle vier Quellen 9 UTXOs als „extra“). Ein veraltetes Inventar bricht mit „Inventar veraltet“ ab. Vor jeder Quelle werden auch die RAM-Caches geleert. P2P liefert den Bestand, rote Ringe beim Klären sind dort Pflicht, Electrs räumt sie auf demselben Cache ab.
+
 ## [1.0.0] — 2026-10-12
 
 Erstes stabiles Release.
