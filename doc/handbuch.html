@@ -1084,7 +1084,9 @@ Adressen grau, nicht aufgelöste Eingänge <span class="gelb">gelb</span>.</p>
     <li>Sobald ein eigener Eingang gefunden ist, werden die <em>danach</em>
         folgenden Eingänge nur gezählt, nicht aufgelöst. Die ausgewiesene Summe
         externer Zuflüsse ist deshalb eine <strong>Untergrenze, keine
-        Gesamtsumme</strong>.</li>
+        Gesamtsumme</strong>. Das Anschaffungsdatum dagegen nicht: Jeder
+        ungeklärte Eingang zählt vorsichtig als angeschafft zur Blockzeit der
+        Sammel-Tx — das Datum kann zu jung sein, nie zu alt.</li>
   </ul>
 </div>
 
@@ -1280,8 +1282,16 @@ Börsen-Batches oder CoinJoin/Mix — ohne automatische Erkennung.</p>
     <tr><td><strong>Herkunft verfolgt</strong></td>
         <td>Analyse liegt vor, alle externen Zuflüsse datiert</td>
         <td>jüngster externer Zufluss — steuerlich das richtige</td></tr>
+    <tr><td><strong>… (Bündel, vorsichtig)</strong></td>
+        <td>Analyse vorhanden, Eingänge einer Tx ungeklärt (Sammel-Tx über
+            20 Eingängen, fehlender Vorgänger) — Datum ist die Blockzeit
+            dieser Tx</td>
+        <td>Datum kann <strong>zu jung</strong> sein — Haltefrist zu kurz
+            ausgewiesen; „Herkunft vervollständigen“ kann es nach links
+            schieben</td></tr>
     <tr><td><strong>… (Untergrenze)</strong></td>
-        <td>Analyse vorhanden, nicht alle externen Vorgänger auflösbar</td>
+        <td>Analyse vorhanden, eine Tx der Herkunft noch unbestätigt (ohne
+            Blockzeit)</td>
         <td>Datum kann <strong>zu alt</strong> sein — Haltefrist zu lang
             ausgewiesen</td></tr>
     <tr><td><strong>… (nur Wallet-Eingang)</strong></td>
@@ -1295,24 +1305,25 @@ Börsen-Batches oder CoinJoin/Mix — ohne automatische Erkennung.</p>
 </table>
 </div>
 
-<p>Die beiden mittleren Fälle zeigen in <strong>entgegengesetzte
+<p>Die mittleren Fälle zeigen in <strong>entgegengesetzte
 Richtungen</strong> und werden deshalb getrennt ausgewiesen — in der Zeile, in
 den Kennzahlen und im CSV-Export. „Untergrenze" ist der riskante Fall: Die
-Frist erscheint länger erfüllt, als sie es womöglich ist. „Nur Wallet-Eingang"
-ist der defensive.</p>
+Frist erscheint länger erfüllt, als sie es womöglich ist. Er tritt nur noch
+auf, solange eine Tx der Herkunft unbestätigt ist. „Bündel, vorsichtig“ und
+„Nur Wallet-Eingang" sind die defensiven. Im offensiven Modus bleibt es bei
+einem Bündel bei der jüngsten Lesart, und die Lose eines Bündels dürfen nicht
+früher grün werden als die Blockzeit der Tx.</p>
 
 <h4>Sonderfälle</h4>
 <ul>
   <li><strong>Coinbase (Mining):</strong> Der Block-Zeitpunkt der Coinbase-Tx
       ist der externe Zufluss.</li>
   <li><strong>Große Sammel-Tx (mehr als 20 Eingänge):</strong> Der Trace bricht
-      nach dem ersten internen Eingang ab. Das gefundene Datum wird als
-      <strong>Untergrenze</strong> markiert.</li>
-  <li><strong>Datenquelle ohne Blockzeiten der Vorgänger:</strong> Esplora
-      liefert den Vorgänger-Output inline mit, aber ohne dessen Blockzeit. Bei
-      Transaktionen bis 20 Eingängen wird sie nachgeladen; bei größeren gilt
-      der jüngste Wallet-Eingang. Ein eigener Fulcrum liefert die Blockzeit
-      ohnehin mit.</li>
+      nach dem ersten internen Eingang ab. Die übrigen Eingänge zählen als
+      angeschafft zur Blockzeit der Sammel-Tx; das Datum wird als
+      <strong>Bündel, vorsichtig</strong> markiert (kann zu jung sein, nie zu
+      alt). Dasselbe gilt für Eingänge, deren Vorgänger-Tx nicht geladen
+      werden konnte.</li>
   <li><strong>Kein Trace vorhanden:</strong> Rückfall auf das Output-Datum —
       bewusst defensiv (zu jung, nie zu alt).</li>
 </ul>
@@ -2047,7 +2058,11 @@ jüngsten <em>Wallet</em>-Eingang und den jüngsten <em>externen</em> Zufluss.</
     <tr><td><code>external_sats</code>, <code>external_address</code></td>
         <td>Betrag und Adresse dieses Zuflusses</td></tr>
     <tr><td><code>external_untergrenze</code></td>
-        <td>true, wenn externe Vorgänger unaufgelöst blieben — Datum kann zu alt sein</td></tr>
+        <td>true, wenn ein Zufluss ohne Blockzeit blieb (Tx unbestätigt) — Datum kann zu alt sein</td></tr>
+    <tr><td><code>external_buendel</code></td>
+        <td>true, wenn der Baum Lücken hat (gebündelte oder unauflösbare Eingänge); offensiv gilt dann die jüngste Lesart</td></tr>
+    <tr><td><code>external_buendel_obergrenze</code></td>
+        <td>true, wenn das Datum die Blockzeit einer Tx mit solchen Lücken ist — kann zu jung sein, nie zu alt</td></tr>
   </tbody>
 </table>
 </div>
