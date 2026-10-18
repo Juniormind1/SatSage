@@ -15,6 +15,7 @@ import labels
 from core import trace as trace_mod
 from core import utxos as utxos_mod
 from tests.test_labels import baue_filter, baue_index
+from core.xpub_cache import HERKUNFT_SCHEMA
 
 BOERSE = "1BoerseAAA"
 
@@ -74,6 +75,7 @@ class TestUtxoListe(LabelBestand):
         ziel.mkdir(parents=True, exist_ok=True)
         txid = "a" * 64
         (ziel / f"{txid}_0.json").write_text(json.dumps({
+            "schema": HERKUNFT_SCHEMA,
             "txid": txid, "vout": 0,
             "youngest_time": "01.03.2022 10:00",
             "external_address": externe_adresse,

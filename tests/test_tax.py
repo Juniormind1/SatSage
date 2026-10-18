@@ -26,6 +26,7 @@ from core.tax import (
     verfuegbare_jahre,
 )
 from tests.fixtures import BIP84_RECEIVE_0, BIP84_ZPUB, txid
+from core.xpub_cache import HERKUNFT_SCHEMA
 
 
 def zeitstempel(datum: str) -> int:
@@ -380,6 +381,7 @@ class TestAnschaffungsdatum(unittest.TestCase):
         zeit = datetime.strptime(datum, "%d.%m.%Y %H:%M")
         (self.ingress / f"{txid(marker)}_{vout}.json").write_text(
             json.dumps({
+                "schema": HERKUNFT_SCHEMA,
                 "txid": txid(marker), "vout": vout,
                 "youngest_time": zeit.strftime("%Y-%m-%d %H:%M"),
                 "youngest_time_ts": int(zeit.timestamp()),
@@ -496,7 +498,7 @@ class TestAnschaffungsdatum(unittest.TestCase):
 
     def test_kaputter_zeitstempel_faellt_auf_das_output_datum_zurueck(self):
         (self.ingress / f"{txid('a1')}_0.json").write_text(
-            json.dumps({"txid": txid("a1"), "vout": 0,
+            json.dumps({"schema": HERKUNFT_SCHEMA, "txid": txid("a1"), "vout": 0,
                         "youngest_time_ts": "unsinn"}),
             encoding="utf-8",
         )
@@ -543,7 +545,7 @@ class TestExternerZuflussDatum(unittest.TestCase):
         self.ingress.mkdir(parents=True)
 
     def hinterlegen(self, marker, vout, **felder):
-        payload = {"txid": txid(marker), "vout": vout}
+        payload = {"schema": HERKUNFT_SCHEMA, "txid": txid(marker), "vout": vout}
         payload.update(felder)
         (self.ingress / f"{txid(marker)}_{vout}.json").write_text(
             json.dumps(payload), encoding="utf-8"
@@ -1459,6 +1461,7 @@ class TestLotSummen(unittest.TestCase):
         ordner = self.cache / main.UTXO_INGRESS_CACHE_SUBDIR
         ordner.mkdir(parents=True, exist_ok=True)
         payload = {
+            "schema": HERKUNFT_SCHEMA,
             "txid": txid(marker),
             "vout": 0,
             "external_time_ts": zeitstempel("01.01.2020 12:00"),

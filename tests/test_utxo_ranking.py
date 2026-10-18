@@ -12,6 +12,7 @@ from pathlib import Path
 import main
 from core.utxos import load_cached_utxos, rank_wallet_utxos, utxo_as_dict
 from tests.fixtures import BIP84_CHANGE_0, BIP84_RECEIVE_0, BIP84_ZPUB, txid
+from core.xpub_cache import HERKUNFT_SCHEMA
 
 
 def utxo(betrag_sats: int, adresse: str = BIP84_RECEIVE_0, *, marker="a1",
@@ -163,6 +164,7 @@ class TestHerkunftsAnreicherung(unittest.TestCase):
         # ein Eintrag ohne diese Felder gilt zu Recht als ungültig.
         (ziel / f"{txid('b2')}_1.json").write_text(
             json.dumps({
+                "schema": HERKUNFT_SCHEMA,
                 "txid": txid("b2"),
                 "vout": 1,
                 "youngest_time": "2025-02-02 11:20",
@@ -199,6 +201,7 @@ class TestHerkunftsAnreicherung(unittest.TestCase):
         (self.cache / main.UTXO_INGRESS_CACHE_SUBDIR).mkdir(parents=True, exist_ok=True)
         (self.cache / main.UTXO_INGRESS_CACHE_SUBDIR / f"{ziel['txid']}_1.json").write_text(
             json.dumps({
+                "schema": HERKUNFT_SCHEMA,
                 "txid": ziel["txid"],
                 "vout": 1,
                 "external_time_ts": 1_718_294_400,

@@ -1060,7 +1060,15 @@ zeigt, bleibt <strong>Scan neu</strong> ebenfalls aus.</p>
   Passt er nicht mehr, wird der Baum trotzdem gezeigt, aber gekennzeichnet:
   Die Marke wird gelb, und über dem Baum steht, wie viele Adressen seither
   dazugekommen sind. Verworfen wird nichts — <strong>Herkunft aller UTXOs</strong>
-  nimmt diese Bäume mit und löst damit alle Warnungen auf einmal auf.</p>
+  nimmt diese Bäume mit und löst damit alle Warnungen auf einmal auf. Ein
+  gekennzeichneter Baum wird dabei <strong>neu verfolgt</strong>, nicht
+  fortgesetzt; ebenso einer, dessen externes Ende heute eine eigene Adresse
+  ist. Erzwungene Läufe (grauer Knopf im Steuerjahr) bauen jeden Baum neu,
+  <strong>Scan neu</strong> setzt nur einen unfertigen Baum fort.</p>
+  <p>Mit einer neuen Version kann sich die Fassung der Herkunfts-Caches ändern
+  (<code>utxo_trace/</code>, <code>utxo_ingress/</code>). Ältere Einträge
+  gelten dann als nicht verfolgt: Die UTXOs stehen wieder grau, bis
+  <strong>Herkunft aller UTXOs</strong> sie neu erhoben hat.</p>
 </div>
 
 <p>Jeder Zweig läuft eigenständig: mehrere lassen sich nebeneinander verfolgen,

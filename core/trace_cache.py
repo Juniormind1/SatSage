@@ -54,6 +54,12 @@ VERSION = 1
 #: Schreiben ersetzt.
 VERSION_KNOTEN = 2
 
+#: Fassung des Inhalts (nicht des Dateiformats), gemeinsam mit
+#: ``utxo_ingress`` — siehe ``xpub_cache.HERKUNFT_SCHEMA``. Bäume einer
+#: anderen Fassung gelten als nicht vorhanden: ``laden``/``kopf`` liefern
+#: None, der nächste Herkunftslauf baut neu und überschreibt die Datei.
+SCHEMA = xpub_cache.HERKUNFT_SCHEMA
+
 
 def _anzeige_ohne_position(kinder: list, eltern_id: str, tiefe: int) -> list:
     """Kinderliste ohne ``id``/``depth``, wo beide aus der Position folgen."""
@@ -360,6 +366,7 @@ def _schreibe_meta(
     """Sidecar mit Listenkopf — kopf() liest nur diese Datei."""
     nutzlast = {
         "version": VERSION,
+        "schema": SCHEMA,
         "txid": xpub_cache._normalize_txid(txid),
         "vout": int(vout),
         "erstellt_ts": int(erstellt_ts),
@@ -393,6 +400,7 @@ def _schreibe_nutzlast(
         return None
     nutzlast = {
         "version": VERSION,
+        "schema": SCHEMA,
         "txid": xpub_cache._normalize_txid(txid),
         "vout": int(vout),
         "erstellt_ts": int(erstellt_ts),
@@ -485,6 +493,8 @@ def vervollstaendigen(
         VERSION, VERSION_KNOTEN,
     ):
         return None
+    if daten.get("schema") != SCHEMA:
+        return None
     if daten.get("txid") != xpub_cache._normalize_txid(txid):
         return None
     if int(daten.get("vout", -1)) != int(vout):
@@ -526,6 +536,8 @@ def laden(
     if not isinstance(daten, dict) or daten.get("version") not in (
         VERSION, VERSION_KNOTEN,
     ):
+        return None
+    if daten.get("schema") != SCHEMA:
         return None
     if daten.get("txid") != xpub_cache._normalize_txid(txid):
         return None
@@ -816,6 +828,7 @@ def kopf(
         if (
             isinstance(daten, dict)
             and daten.get("version") == VERSION
+            and daten.get("schema") == SCHEMA
             and daten.get("txid") == xpub_cache._normalize_txid(txid)
             and int(daten.get("vout", -1)) == int(vout)
             and "vollstaendig" in daten
@@ -894,3 +907,76 @@ def kopf(
         "boerse_namen": boerse_namen,
         "tx_class": tx_class,
     }
+
+
+def externes_blatt_eigen(origin: dict | None, adressen) -> str | None:
+    """
+    Erstes externe Blatt im Rohbaum, dessen Adresse heute als eigen gilt.
+
+    Ein externer Zufluss von einer eigenen Adresse ist ein Widerspruch: Der
+    Baum entstand mit einer anderen Adressmenge (neues XPUB, höheres
+    Gap-Limit) oder mit falsch kodierten Adressen. Er darf nicht
+    fortgesetzt werden — die Verfolgung bräche dort zu früh ab, und die
+    Anschaffung fiele zu jung aus.
+    """
+    eigen = {str(a) for a in (adressen or ()) if a}
+    if not eigen or not isinstance(origin, dict):
+        return None
+    stapel = [origin]
+    while stapel:
+        knoten = stapel.pop()
+        if not isinstance(knoten, dict):
+            continue
+        for quelle in knoten.get("sources") or []:
+            if not isinstance(quelle, dict):
+                continue
+            if quelle.get("type") == "external" and not quelle.get("exchange_stop"):
+                adresse = str(quelle.get("address") or "")
+                if adresse in eigen:
+                    return adresse
+            elif quelle.get("type") == "internal":
+                stapel.append(quelle.get("trace"))
+    return None
+
+
+def fortsetzbarer_origin(
+    txid: str,
+    vout: int,
+    immutable_cache_dir: Path | str | None,
+    adressen=None,
+    *,
+    erzwingen: bool = False,
+    nur_unvollstaendig: bool = False,
+) -> dict | None:
+    """
+    Gespeicherter Rohbaum, auf dem ein Herkunftslauf aufsetzen darf — sonst None.
+
+    None heißt: von vorn verfolgen. Das gilt bei *erzwingen* immer, bei
+    alter Fassung (``laden`` liefert dann nichts), bei ``veraltet`` (die
+    Adressmenge hat sich seit dem Baum geändert) und wenn ein externes Blatt
+    heute eine eigene Adresse ist. *nur_unvollstaendig*: ein fertiger Baum
+    wird nicht fortgesetzt, sondern neu gebaut („Scan neu“) — ihn
+    fortzusetzen hieße, ihn unverändert zu übernehmen.
+    """
+    if erzwingen:
+        return None
+    from core import utxo_origin
+
+    geladen = laden(txid, vout, immutable_cache_dir, adressen)
+    if not geladen or not isinstance(geladen.get("baum"), dict):
+        return None
+    if geladen.get("veraltet"):
+        return None
+    origin = geladen["baum"].get("origin_tree")
+    if not isinstance(origin, dict):
+        return None
+    if not utxo_origin.hat_brauchbaren_teilfortschritt(origin):
+        return None
+    if adressen and externes_blatt_eigen(origin, adressen):
+        return None
+    if nur_unvollstaendig and not (
+        utxo_origin._origin_hat_luecken(origin)
+        or utxo_origin._hat_tax_horizon(origin)
+    ):
+        return None
+    return origin

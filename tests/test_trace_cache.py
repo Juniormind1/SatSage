@@ -308,7 +308,8 @@ class TestKnotenTabelle(TraceCacheBasis):
         ziel = trace_cache.pfad(txid("a1"), 0, self.dir)
         ziel.parent.mkdir(parents=True, exist_ok=True)
         ziel.write_text(json.dumps({
-            "version": 1, "txid": txid("a1"), "vout": 0, "erstellt_ts": 5,
+            "version": 1, "schema": trace_cache.SCHEMA,
+            "txid": txid("a1"), "vout": 0, "erstellt_ts": 5,
             "adressen_fingerprint": "", "adressen_anzahl": 0,
             "baum": self._raute(),
         }))

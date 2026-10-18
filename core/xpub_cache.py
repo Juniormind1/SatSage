@@ -61,6 +61,18 @@ class CacheDiskFullError(OSError):
 TX_IMMUTABLE_CACHE_SUBDIR = "tx"
 BLOCK_HEADER_CACHE_SUBDIR = "block_header"
 UTXO_INGRESS_CACHE_SUBDIR = "utxo_ingress"
+#: Fassung der Herkunfts-Caches ``utxo_ingress/`` und ``utxo_trace/``.
+#: Steigt, wenn alte Einträge nicht mehr stimmen können; Dateien mit einer
+#: anderen (oder ohne) Fassung gelten als nicht vorhanden und werden beim
+#: nächsten Herkunftslauf neu erhoben.
+#: 2 — Release 1.0.1: Bäume aus der Zeit vor dem HRP-Fix (Regtest-Blätter
+#:     mit Mainnet-Präfix ``bc1``) hielten eigene Eingänge für extern.
+HERKUNFT_SCHEMA = 2
+
+
+def herkunft_schema_passt(daten: dict | None) -> bool:
+    """Ob ein Herkunfts-Cache-Eintrag in der aktuellen Fassung vorliegt."""
+    return isinstance(daten, dict) and daten.get("schema") == HERKUNFT_SCHEMA
 BITCOIN_GENESIS_TIMESTAMP = 1231006505  # 2009-01-03 18:15:05 UTC
 BITCOIN_BLOCK_INTERVAL_SECONDS = 600  # Ziel: 10 Minuten pro Block
 SALDEN_CHECK_LOOKAHEAD = 5
@@ -704,6 +716,9 @@ def load_utxo_ingress_cache(
         return None
     if int(data.get("vout", -1)) != int(vout):
         return None
+    if not herkunft_schema_passt(data):
+        # Alte Fassung: wie nicht verfolgt — der nächste Lauf erhebt neu.
+        return None
     return data
 
 def save_utxo_ingress_cache(
@@ -717,6 +732,7 @@ def save_utxo_ingress_cache(
     path = _utxo_ingress_cache_path(txid, vout, root)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema": HERKUNFT_SCHEMA,
         "txid": _normalize_txid(txid),
         "vout": int(vout),
         "youngest_time": ingress.get("youngest_time"),
@@ -784,6 +800,8 @@ def iter_utxo_ingress_cache_entries(cache_root: Path | None = None) -> list[dict
         except (TypeError, ValueError):
             continue
         if vout < 0:
+            continue
+        if not herkunft_schema_passt(data):
             continue
         entries.append(data)
     return entries

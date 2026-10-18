@@ -670,17 +670,15 @@ def _ungeklaert(zeilen: list[dict], steuer: dict[str, dict]) -> list[str]:
     return offen
 
 
-def _resume_origin(txid: str, vout: int, imm: Path, eigene: set):
+def _resume_origin(
+    txid: str, vout: int, imm: Path, eigene: set, *, erzwingen: bool = False,
+):
+    """Wie ``/trace/alle``: erzwingen baut neu, veraltete Bäume auch."""
     from core import trace_cache
-    from core.utxo_origin import hat_brauchbaren_teilfortschritt
 
-    geladen = trace_cache.laden(txid, vout, imm, eigene)
-    if not geladen or not isinstance(geladen.get("baum"), dict):
-        return None
-    origin = geladen["baum"].get("origin_tree")
-    if isinstance(origin, dict) and hat_brauchbaren_teilfortschritt(origin):
-        return origin
-    return None
+    return trace_cache.fortsetzbarer_origin(
+        txid, vout, imm, eigene, erzwingen=erzwingen,
+    )
 
 
 def _klaere_keys(
@@ -741,7 +739,9 @@ def _klaere_keys(
                 cache_dir=cache_dir,
                 immutable_cache_dir=imm,
                 cache_source=cache_source,
-                resume_origin=_resume_origin(txid, vout, imm, eigene),
+                resume_origin=_resume_origin(
+                    txid, vout, imm, eigene, erzwingen=erzwingen,
+                ),
             )
             if graue_anteile:
                 externe_blockzeiten_speichern(txid, vout, get_tx, imm)

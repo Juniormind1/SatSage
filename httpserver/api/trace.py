@@ -125,7 +125,6 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         _trace_offen_steuer,
         _trace_offen_tief,
         _utxos_fuer_trace,
-        analyze,
         main,
         threading,
         trace_cache,
@@ -209,6 +208,8 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
         )
 
     graue_anteile = bool(roh.get("graue_anteile"))
+    # Erzwingen baut neu: kein gespeicherter Baum, auch kein vollständiger.
+    erzwingen = bool(roh.get("erzwingen"))
     log_lauf = str(roh.get("lauf") or "").strip()
     if log_lauf not in LAUF_LOG:
         log_lauf = ""
@@ -396,18 +397,12 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                     _live(teil)
 
             def _resume_origin(txid: str, vout: int):
-                geladen = trace_cache.laden(
+                # Veraltete Bäume (andere Adressmenge), alte Fassung und
+                # Blätter, die heute eigen sind, werden neu gebaut.
+                return trace_cache.fortsetzbarer_origin(
                     txid, vout, state.immutable_cache_dir, eigene,
+                    erzwingen=erzwingen,
                 )
-                if not geladen or not isinstance(geladen.get("baum"), dict):
-                    return None
-                origin = geladen["baum"].get("origin_tree")
-                if (
-                    isinstance(origin, dict)
-                    and analyze.hat_brauchbaren_teilfortschritt(origin)
-                ):
-                    return origin
-                return None
 
             def _persist(txid: str, vout: int, tree: dict | None):
                 fetch_addr = fetchers.get("fetch_address_utxos")
@@ -473,6 +468,7 @@ def api_trace_alle(state: AppState, payload: dict) -> dict:
                 )
                 if (
                     graue_anteile
+                    and not erzwingen
                     and isinstance(kopf, dict)
                     and kopf.get("vollstaendig")
                     and not kopf.get("veraltet")
@@ -1190,19 +1186,16 @@ def api_trace(state: AppState, payload: dict) -> dict:
     datei_log = bool(force or followup is not None)
     if force or followup is not None:
         try:
-            geladen = trace_cache.laden(
+            # „Scan neu“ setzt nur einen unfertigen, aktuellen Teilbaum fort.
+            # Ein fertiger Baum würde sonst unverändert übernommen; veraltete
+            # (andere Adressmenge) und alte Fassungen werden neu gebaut.
+            resume_origin = trace_cache.fortsetzbarer_origin(
                 txid, vout, state.immutable_cache_dir, eigene,
+                nur_unvollstaendig=bool(force),
             )
-            if geladen and isinstance(geladen.get("baum"), dict):
-                origin = geladen["baum"].get("origin_tree")
-                if (
-                    isinstance(origin, dict)
-                    and analyze.hat_brauchbaren_teilfortschritt(origin)
-                ):
-                    resume_origin = origin
-                elif force:
-                    # Nichts Brauchbares — alten Stand weg, echter Neustart.
-                    trace_cache.loeschen(txid, vout, state.immutable_cache_dir)
+            if resume_origin is None and force:
+                # Nichts Fortsetzbares — alten Stand weg, echter Neustart.
+                trace_cache.loeschen(txid, vout, state.immutable_cache_dir)
         except Exception:
             if force:
                 try:
