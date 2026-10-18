@@ -1148,7 +1148,7 @@ function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinw
       eingabe.placeholder = feld.gesetzt ? t("common.passwordKept") : "";
     }
     if (zahl) {
-      eingabe.min = "1";
+      eingabe.min = feld.key === "UTXO_SCAN_GAP_LIMIT" ? String(ELECTRS_GAP_MIN) : "1";
       eingabe.max = "10000";
       eingabe.step = "1";
       eingabe.inputMode = "numeric";
@@ -1179,10 +1179,10 @@ function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinw
 }
 
 /** Grenzen wie ``UTXO_SCAN_GAP_MIN``/``_MAX`` in core/wallet_sync_engine.py. */
-const ELECTRS_GAP_MIN = 1;
+const ELECTRS_GAP_MIN = 100;
 const ELECTRS_GAP_MAX = 10000;
 
-/** Leer = Vorgabe 100 (Zeile fällt aus der .env), sonst ganze Zahl 1…10.000. */
+/** Leer = Vorgabe 100 (Zeile fällt aus der .env), sonst ganze Zahl 100…10.000. */
 function electrsGapGueltig(roh) {
   const text = String(roh ?? "").trim();
   if (!text) return true;

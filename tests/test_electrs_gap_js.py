@@ -40,12 +40,13 @@ class TestElectrsGapGueltig(unittest.TestCase):
 
     def test_grenzen(self):
         self.assertEqual(
-            self.pruefe(["1", "20", "100", "250", "10000", " 300 "]),
-            [True] * 6,
+            self.pruefe(["100", "101", "250", "10000", " 300 "]),
+            [True] * 5,
         )
         self.assertEqual(
-            self.pruefe(["0", "10001", "-5", "1e3", "12.5", "abc", "99999"]),
-            [False] * 7,
+            self.pruefe(["0", "1", "20", "99", "10001", "-5", "1e3", "12.5",
+                         "abc", "99999"]),
+            [False] * 10,
         )
 
     def test_leer_heisst_vorgabe(self):
@@ -66,6 +67,21 @@ class TestGrenzenWieBackend(unittest.TestCase):
         anfrage = JS.index('api("/config/source"', klick)
         self.assertLess(pruefung, anfrage)
         self.assertIn("validity.badInput", JS)
+
+    def test_zahlenfeld_min_100(self):
+        """Das Eingabefeld selbst nennt 100 als Minimum, die Lücke für P2P nicht."""
+        self.assertIn(
+            'eingabe.min = feld.key === "UTXO_SCAN_GAP_LIMIT" '
+            '? String(ELECTRS_GAP_MIN) : "1";',
+            JS,
+        )
+
+    def test_meldung_nennt_100(self):
+        for sprache, text in (("de", "100 bis 10.000"), ("en", "100 to 10,000")):
+            daten = json.loads(
+                (WEB / "locales" / f"{sprache}.json").read_text(encoding="utf-8"),
+            )
+            self.assertIn(text, daten["sources.electrsGapInvalid"], sprache)
 
 
 if __name__ == "__main__":

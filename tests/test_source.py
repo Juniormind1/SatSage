@@ -765,6 +765,11 @@ class TestCheckReachable(unittest.TestCase):
             if q.key == "own_fulcrum"
         )
         self.assertEqual(deckel.gap_limit, 10000)
+        boden = next(
+            q for q in describe_sources({"UTXO_SCAN_GAP_LIMIT": "20"})
+            if q.key == "own_fulcrum"
+        )
+        self.assertEqual(boden.gap_limit, 100)
 
     def test_p2p_pruefung_nutzt_lan_und_dns_fallback(self):
         from unittest import mock

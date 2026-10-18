@@ -161,8 +161,28 @@ class TestElectrsGapEnv(unittest.TestCase):
     def test_normalisieren(self):
         self.assertEqual(wse.utxo_scan_gap_aus_env({}), 100)
         self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "250"}), 250)
-        self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "0"}), 1)
+        self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "0"}), 100)
         self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "99999"}), 10000)
+
+    def test_unter_100_gilt_als_100(self):
+        """Auch ein Eintrag von Hand wie ``UTXO_SCAN_GAP_LIMIT=20``."""
+        import contextlib
+        import io
+
+        wse._gap_angehoben_gemeldet.discard(20)
+        aus = io.StringIO()
+        with contextlib.redirect_stdout(aus):
+            for roh in ("20", " 20 ", "20"):
+                self.assertEqual(
+                    wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": roh}), 100,
+                )
+        self.assertEqual(aus.getvalue().count("UTXO_SCAN_GAP_LIMIT=20"), 1)
+        self.assertIn("nutzt 100", aus.getvalue())
+        for roh, soll in (("1", 100), ("99", 100), ("100", 100), ("101", 101)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": roh}), soll, roh,
+                )
 
     def test_hoeheres_limit_schiebt_alte_schaetzung_nicht_vor(self):
         """Alter Cache ohne Ende je Chain: Start bleibt letzter+100, Walk nutzt 500."""

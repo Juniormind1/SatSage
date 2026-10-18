@@ -1666,9 +1666,11 @@ Electrs-Formular ist noch offen, setzt sich das TLS-Häkchen in diesem Moment.</
 
 <p>Die Adresslücke des eigenen Electrum-Servers stellst du in den
 Datenquellen unter <strong>Electrum-Server → Gap-Limit</strong> ein
-(Vorgabe 100, 1 bis 10.000). Übernehmen schreibt sie als
+(Vorgabe 100, mindestens 100, höchstens 10.000). Übernehmen schreibt sie als
 <code>UTXO_SCAN_GAP_LIMIT</code> in die <code>.env</code>; ein Eintrag von
 Hand dort wirkt genauso, ein leeres Feld setzt die Vorgabe zurück.
+Ein Wert unter 100, auch von Hand in der <code>.env</code>, gilt als 100;
+das Log nennt das einmal.
 Ein höherer Wert macht den Scan langsamer.
 Der nächste UTXO-Scan und <strong>Aktualisieren</strong> suchen so viele
 leere Indizes in Folge. Ein höheres Limit findet weiter entfernte Adressen;
@@ -1720,7 +1722,7 @@ FULCRUM_HOST=192.168.1.100
 FULCRUM_TOR=deinnode.onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
-# UTXO_SCAN_GAP_LIMIT=100              # 1…10000, Vorgabe 100. Electrs-Gap.
+# UTXO_SCAN_GAP_LIMIT=100              # 100…10000, Vorgabe 100. Electrs-Gap.
 # Eine IP wird auf 50001 und 50002, mit und ohne TLS, gleichzeitig geprüft.
 FULCRUM_TOR_PROXY=127.0.0.1:9150
 

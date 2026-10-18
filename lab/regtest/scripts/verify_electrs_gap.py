@@ -16,6 +16,7 @@ Kopie der Lab-Env bekommt das Gap-Limit über ``PUT /api/config/source``
 (Datenquellen → Electrum-Server, ``UTXO_SCAN_GAP_LIMIT``). Der Walk liest es
 wie der echte UTXO-Scan über ``utxo_scan_gap_aus_env()``:
 
+- GUI 20: HTTP 400; ``UTXO_SCAN_GAP_LIMIT=20`` von Hand gilt als 100
 - GUI 100: #101 nein
 - GUI 200: #101 ja, inklusive Outpoint
 
@@ -178,6 +179,23 @@ def _gui_pfad(
         ).start()
         print(f"GUI-Pfad: SatSage-API auf 127.0.0.1:{port}", flush=True)
         try:
+            # Untergrenze 100: die API weist 20 ab, ein Eintrag von Hand
+            # in der .env gilt als 100.
+            status, _ = _api(
+                port, state.token, "/api/config/source", methode="PUT",
+                daten={"source": "own_fulcrum",
+                       "values": {"UTXO_SCAN_GAP_LIMIT": "20"}},
+            )
+            if status != 400:
+                print(f"FAIL GUI-Pfad: Gap 20 → HTTP {status}, erwartet 400.",
+                      file=sys.stderr)
+                return 1
+            with env_kopie.open("a", encoding="utf-8") as f:
+                f.write("UTXO_SCAN_GAP_LIMIT=20\n")
+            if utxo_scan_gap_aus_env() != 100:
+                print("FAIL GUI-Pfad: .env 20 gilt nicht als 100.", file=sys.stderr)
+                return 1
+            print("  OK  GUI 20: abgewiesen, .env 20 gilt als 100", flush=True)
             for gap, soll in ((GUI_GAP_MISS, False), (GUI_GAP_HIT, True)):
                 status, koerper = _api(
                     port, state.token, "/api/config/source", methode="PUT",

@@ -197,7 +197,23 @@ def api_save_source(state: AppState, payload: dict) -> dict:
 
         if schluessel.endswith(("PORT", "HEIGHT")) and text and not text.isdigit():
             raise ApiError(400, f"„{schluessel}“ muss eine Zahl sein.")
-        if schluessel in ("BIP158_GAP_LIMIT", "UTXO_SCAN_GAP_LIMIT"):
+        if schluessel == "UTXO_SCAN_GAP_LIMIT":
+            # Electrs-Lücke: mindestens 100 (core/wallet_sync_engine.py).
+            from core.wallet_sync_engine import (
+                UTXO_SCAN_GAP_MAX, UTXO_SCAN_GAP_MIN,
+            )
+
+            if not text:
+                updates[schluessel] = None
+                continue
+            if not text.isdigit() or not (
+                UTXO_SCAN_GAP_MIN <= int(text) <= UTXO_SCAN_GAP_MAX
+            ):
+                raise ApiError(
+                    400,
+                    "Das Gap-Limit muss eine ganze Zahl von 100 bis 10.000 sein.",
+                )
+        if schluessel == "BIP158_GAP_LIMIT":
             if not text:
                 updates[schluessel] = None
                 continue

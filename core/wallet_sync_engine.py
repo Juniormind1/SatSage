@@ -61,7 +61,8 @@ if TYPE_CHECKING:
 BIP44_GAP_LIMIT = 20
 
 
-UTXO_SCAN_GAP_MIN = 1
+#: Untergrenze: kleinere Werte (auch von Hand in der .env) gelten als 100.
+UTXO_SCAN_GAP_MIN = 100
 UTXO_SCAN_GAP_DEFAULT = 100
 UTXO_SCAN_GAP_MAX = 10_000
 #: Default und Schätzung alter Caches ohne ``scan_end_je_chain``.
@@ -69,10 +70,32 @@ UTXO_SCAN_GAP_MAX = 10_000
 UTXO_SCAN_GAP_LIMIT = UTXO_SCAN_GAP_DEFAULT
 
 
+_gap_angehoben_gemeldet: set[int] = set()
+
+
+def _melde_gap_angehoben(n: int) -> None:
+    """Einmal je Wert: die .env nennt eine Lücke unter 100."""
+    if n in _gap_angehoben_gemeldet:
+        return
+    _gap_angehoben_gemeldet.add(n)
+    print(
+        f"  Hinweis: UTXO_SCAN_GAP_LIMIT={n} in der .env liegt unter "
+        f"{UTXO_SCAN_GAP_MIN}; der Scan nutzt {UTXO_SCAN_GAP_MIN}.",
+        flush=True,
+    )
+
+
 def normalisiere_utxo_scan_gap(
     roh: object, *, default: int = UTXO_SCAN_GAP_DEFAULT,
 ) -> int:
-    """Ganze Zahl im Bereich 1…10.000. Leer oder unlesbar → *default*."""
+    """
+    Ganze Zahl im Bereich 100…10.000. Leer oder unlesbar → *default*.
+
+    Werte unter 100 hebt SatSage auf 100 an, auch wenn sie von Hand in der
+    .env stehen (z. B. ``UTXO_SCAN_GAP_LIMIT=20``). Eine kleinere Lücke
+    übersieht Coins hinter Lücken; das Formular und die API lassen sie
+    gar nicht erst zu. Der Hinweis im Log erscheint je Wert einmal.
+    """
     if roh is None or str(roh).strip() == "":
         return default
     try:
@@ -80,6 +103,7 @@ def normalisiere_utxo_scan_gap(
     except (TypeError, ValueError):
         return default
     if n < UTXO_SCAN_GAP_MIN:
+        _melde_gap_angehoben(n)
         return UTXO_SCAN_GAP_MIN
     if n > UTXO_SCAN_GAP_MAX:
         return UTXO_SCAN_GAP_MAX

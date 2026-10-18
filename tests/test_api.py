@@ -1241,6 +1241,37 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
             main._load_dotenv(self.env_pfad)["UTXO_SCAN_GAP_LIMIT"], "250",
         )
 
+    def test_electrs_luecke_mindestens_100(self):
+        for zu_klein in ("1", "20", "99"):
+            status, koerper = self.anfrage(
+                "/api/config/source", methode="PUT",
+                daten={"source": "own_fulcrum", "values": {
+                    "UTXO_SCAN_GAP_LIMIT": zu_klein,
+                }},
+            )
+            self.assertEqual(status, 400, zu_klein)
+            self.assertIn("100", str(koerper), zu_klein)
+            self.assertNotEqual(
+                main._load_dotenv(self.env_pfad).get("UTXO_SCAN_GAP_LIMIT"),
+                zu_klein,
+            )
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "own_fulcrum", "values": {
+                "UTXO_SCAN_GAP_LIMIT": "100",
+            }},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            main._load_dotenv(self.env_pfad)["UTXO_SCAN_GAP_LIMIT"], "100",
+        )
+        # Die P2P-Lücke bleibt bei 1…10.000.
+        status, _ = self.anfrage(
+            "/api/config/source", methode="PUT",
+            daten={"source": "bip158", "values": {"BIP158_GAP_LIMIT": "20"}},
+        )
+        self.assertEqual(status, 200)
+
     def test_electrs_luecke_gui_wert_gilt_fuer_naechsten_scan(self):
         """Gespeichert über die GUI, gelesen beim Scan aus der .env."""
         from unittest import mock
@@ -1260,7 +1291,7 @@ class TestDatenquellenBearbeiten(ApiTestBasis):
         )
         self.assertEqual(status, 200)
         self.assertEqual(utxo_scan_gap_aus_env(), 300)
-        for kaputt in ("0", "abc", "-5", "1e3", "12.5"):
+        for kaputt in ("0", "20", "99", "abc", "-5", "1e3", "12.5"):
             status, _ = self.anfrage(
                 "/api/config/source", methode="PUT",
                 daten={"source": "own_fulcrum", "values": {
