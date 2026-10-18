@@ -236,3 +236,102 @@ class TestExporte(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _voll(marker: str, empfangen: str, **kw) -> dict:
+    """Wie ``eingang``, aber mit gültiger 64er-TxID (Ingress-Cache)."""
+    e = eingang(marker, empfangen, **kw)
+    e["txid"] = marker * 64
+    return e
+
+
+class TestBestandNachEntstehung(unittest.TestCase):
+    """
+    Bestand am Stichtag zählt nach dem Entstehen des Outputs.
+
+    Ein Output aus 2025 mit Herkunft aus 2023 lag am 31.12.2024 noch nicht
+    im Wallet. Dort lagen seine Vorgänger — beide zu zählen, zählte dieselben
+    Sats doppelt (Befund 2, Release 1.0.1).
+    """
+
+    def setUp(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        import main
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cache = Path(self._tmp.name)
+        self.ingress = self.cache / main.UTXO_INGRESS_CACHE_SUBDIR
+        self.ingress.mkdir(parents=True)
+        self._json = json
+
+    def herkunft(self, eintrag: dict, datum: str) -> None:
+        from core import xpub_cache
+
+        ts = int(datetime.strptime(datum, "%d.%m.%Y").timestamp())
+        xpub_cache.save_utxo_ingress_cache(
+            eintrag["txid"], eintrag["vout"],
+            {"youngest_time_ts": ts, "external_time_ts": ts},
+            self.cache,
+        )
+
+    def _kette(self):
+        # Vorgänger 2023 empfangen, 2025 in den neuen Output umgeschichtet.
+        alt = _voll("a", "01.03.2023", sats=100_000, ausgegeben="10.02.2025")
+        neu = _voll("b", "10.02.2025", sats=99_000)
+        self.herkunft(neu, "01.03.2023")
+        return alt, neu
+
+    def test_spaeter_entstandener_output_fehlt_im_vorjahr(self):
+        alt, neu = self._kette()
+        auswertung = tax.auswerten(
+            [alt, neu], 2024, jetzt=STICHTAG_2024,
+            immutable_cache_dir=self.cache,
+        )
+        k = auswertung["kennzahlen"]
+        self.assertEqual(k["gesamt_count"], 1)
+        self.assertEqual(k["gesamt_sats"], 100_000)
+        self.assertEqual(
+            [e["txid"] for e in auswertung["eintraege"]], [alt["txid"]],
+        )
+
+    def test_im_entstehungsjahr_zaehlt_er_mit_alter_herkunft(self):
+        alt, neu = self._kette()
+        auswertung = tax.auswerten(
+            [alt, neu], 2025, jetzt=datetime(2025, 12, 31, 23, 59, 59),
+            immutable_cache_dir=self.cache,
+        )
+        eintraege = auswertung["eintraege"]
+        self.assertEqual([e["txid"] for e in eintraege], [neu["txid"]])
+        # Anschaffung bleibt die Herkunft, nicht das Entstehungsdatum.
+        self.assertEqual(eintraege[0]["datum"], "01.03.2023")
+        self.assertTrue(eintraege[0]["erfuellt"])
+
+    def test_unbestaetigt_nur_im_laufenden_jahr(self):
+        offen = _voll("c", "01.01.2024", sats=5_000)
+        offen["status"] = {"confirmed": False}
+        self.herkunft(offen, "01.03.2023")
+        vorjahr = tax.auswerten(
+            [offen], 2024, jetzt=datetime(2026, 6, 1),
+            immutable_cache_dir=self.cache,
+        )
+        self.assertEqual(vorjahr["kennzahlen"]["gesamt_count"], 0)
+        laufend = tax.auswerten(
+            [offen], 2026, jetzt=datetime(2026, 6, 1),
+            immutable_cache_dir=self.cache,
+        )
+        self.assertEqual(laufend["kennzahlen"]["gesamt_count"], 1)
+
+    def test_abgang_im_jahr_bleibt_veraeusserung(self):
+        alt = _voll("d", "01.03.2023", sats=100_000, ausgegeben="15.05.2025")
+        neu = _voll("e", "20.08.2025", sats=40_000)
+        self.herkunft(neu, "01.06.2024")
+        auswertung = tax.auswerten(
+            [alt, neu], 2024, jetzt=STICHTAG_2024,
+            immutable_cache_dir=self.cache,
+        )
+        self.assertEqual(auswertung["kennzahlen"]["gesamt_count"], 1)
+        self.assertEqual(auswertung["kennzahlen"]["abgang_count"], 0)

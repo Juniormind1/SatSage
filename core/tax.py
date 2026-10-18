@@ -571,6 +571,23 @@ def _output_zeitpunkt(utxo: dict) -> datetime | None:
     return datetime.fromtimestamp(int(block_time))
 
 
+def _output_nach_bezug(utxo: dict, ende: datetime, laufend: bool) -> bool:
+    """
+    Ob der Output erst nach dem Bezugszeitpunkt *ende* entstand.
+
+    Bestätigte Outputs: Blockzeit der Funding-Tx. Unbestätigte entstehen
+    „jetzt“ — sie gehören nur ins laufende Jahr. Ohne jede Angabe bleibt
+    es beim Anschaffungsdatum (alte Einträge ohne Status).
+    """
+    entstanden = _output_zeitpunkt(utxo)
+    if entstanden is not None:
+        return entstanden > ende
+    status = utxo.get("status") or {}
+    if status.get("confirmed") is False:
+        return not laufend
+    return False
+
+
 def _anschaffung(
     utxo: dict,
     ingress: dict | None,
@@ -929,6 +946,12 @@ def auswerten(
             ohne_datum += 1
             continue
         if zeitpunkt > ende:
+            continue
+        # Bestand am Stichtag: maßgeblich ist, wann der Output **entstand**,
+        # nicht die Anschaffung. Ein Output aus 2025 mit Herkunft aus 2023
+        # lag am 31.12.2024 noch nicht im Wallet — dort standen seine
+        # Vorgänger. Ihn trotzdem zu zählen, zählte dieselben Sats doppelt.
+        if _output_nach_bezug(utxo, ende, laufend):
             continue
 
         adresse = utxo.get("address", "")

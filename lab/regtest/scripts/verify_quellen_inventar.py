@@ -18,7 +18,9 @@ Knöpfe Grau und Gelb: rote Ringe müssen bleiben, Herkunft braucht
 Electrs (``doc/issues/p2p-herkunft.md``). Electrs auf demselben
 Cache, noch einmal Grau und Gelb: die Ringe sind weg, jedes UTXO ist
 entweder vollständig verfolgt oder ohne Baum schon außerhalb der
-Haltefrist.
+Haltefrist. Danach der Bestand am 31.12. jedes abgeschlossenen Jahres
+gegen die Kette (``stichtag_chain.py``): gezählt wird nach Entstehung
+des Outputs, nicht nach Anschaffung.
 
 Soll: ``.data/herkunft-inventar.json`` (von ``generate_scenarios.py``).
 Der Labor-Node ist nicht geprunt. „Pruned Node“ meint den Slot
@@ -1001,6 +1003,7 @@ def _laufe_p2p(
         )
         if not ok_electrs:
             raise RuntimeError(grund)
+        stichtage = _pruefe_stichtage(env_electrs, ctx, imm)
     finally:
         if p2p_client is not None:
             _schliesse_p2p(p2p_client)
@@ -1024,7 +1027,38 @@ def _laufe_p2p(
         "rote_nach_p2p": nach_p2p["rote"],
         "rote_nach_electrs": nach_electrs["rote"],
         "gelb_nach_electrs": len(nach_electrs["gelb"]),
+        "stichtage": stichtage,
     }
+
+
+def _pruefe_stichtage(env: dict[str, str], ctx, imm: Path) -> list[dict]:
+    """
+    Bestand am 31.12. jedes abgeschlossenen Jahres gegen die Kette.
+
+    Läuft nach dem Electrs-Klären: Jedes UTXO hat dann eine Herkunft, und
+    ein Output aus dem Folgejahr mit alter Anschaffung fiele auf, wenn die
+    Auswertung nach Anschaffung statt nach Entstehung filterte.
+    """
+    from generate_scenarios import Rpc, choose_native
+    from stichtag_chain import chain_wahrheit, pruefe_stichtage, rpc_json
+
+    t0 = time.monotonic()
+    wahrheit = chain_wahrheit(
+        rpc_json(Rpc(choose_native(False))), set(ctx.address_to_wallet),
+    )
+    fehler, zeilen = pruefe_stichtage(wahrheit, imm=imm, ctx=ctx, env=env)
+    for z in zeilen:
+        print(
+            f"  Stichtag 31.12.{z['jahr']}: {z['ist_count']} Outputs / "
+            f"{z['ist_sats']} sats (Kette {z['soll_count']} / {z['soll_sats']})",
+            flush=True,
+        )
+    print(f"  Stichtage gegen Kette: {time.monotonic() - t0:.1f}s", flush=True)
+    if not zeilen:
+        raise RuntimeError("Stichtag: Kette ohne abgeschlossenes Jahr")
+    if fehler:
+        raise RuntimeError("; ".join(fehler))
+    return zeilen
 
 
 def main() -> int:
