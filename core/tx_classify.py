@@ -7,7 +7,9 @@ keine forensische Sicherheit.
 """
 from __future__ import annotations
 
-from collections import Counter
+import os
+import threading
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -748,6 +750,64 @@ def classify_tx(
     return _classification("unknown", own)
 
 
+# Stufe-1-Index je Verlaufsdatei: spent_txid → eigene Outpoints. Die Herkunft
+# fragt ihn für jede geladene Tx. Ohne Cache las sie dafür jedes Mal die ganze
+# ``_verlauf.json`` (mehrere MB) neu ein. Ändert sich die Datei (mtime, Größe
+# oder Inode), wird sie neu gelesen. Begrenzt auf die zuletzt benutzten Dateien.
+_VERLAUF_INDEX_MAX = 64
+_verlauf_index: OrderedDict[str, tuple[tuple[int, int, int], dict[str, frozenset[str]]]] = OrderedDict()
+_verlauf_index_lock = threading.Lock()
+
+
+def _baue_verlauf_index(verlauf) -> dict[str, frozenset[str]]:
+    roh: dict[str, set[str]] = {}
+    for e in verlauf or []:
+        if not isinstance(e, dict):
+            continue
+        spent = str(e.get("spent_txid") or "").strip().lower()
+        if not spent:
+            continue
+        tid = str(e.get("txid") or "").strip().lower()
+        if not tid:
+            continue
+        try:
+            vout = int(e.get("vout"))
+        except (TypeError, ValueError):
+            continue
+        roh.setdefault(spent, set()).add(utxo_ref(tid, vout).lower())
+    return {k: frozenset(v) for k, v in roh.items()}
+
+
+def _verlauf_index_fuer(chain, xpub: str, cache_dir) -> dict[str, frozenset[str]]:
+    """Index der Verlaufsdatei von *xpub*, aus dem Speicher, solange die Datei gleich ist."""
+    try:
+        pfad = chain._xpub_verlauf_cache_path(xpub, cache_dir)
+        st = os.stat(pfad)
+    except (AttributeError, OSError, TypeError, ValueError):
+        # Keine Datei (oder ein Ersatz-Loader in Tests): ohne Cache lesen.
+        return _baue_verlauf_index(chain.load_xpub_verlauf_cache(xpub, cache_dir))
+    schluessel = os.fspath(pfad)
+    marke = (st.st_mtime_ns, st.st_size, st.st_ino)
+    with _verlauf_index_lock:
+        eintrag = _verlauf_index.get(schluessel)
+        if eintrag is not None and eintrag[0] == marke:
+            _verlauf_index.move_to_end(schluessel)
+            return eintrag[1]
+    index = _baue_verlauf_index(chain.load_xpub_verlauf_cache(xpub, cache_dir))
+    with _verlauf_index_lock:
+        _verlauf_index[schluessel] = (marke, index)
+        _verlauf_index.move_to_end(schluessel)
+        while len(_verlauf_index) > _VERLAUF_INDEX_MAX:
+            _verlauf_index.popitem(last=False)
+    return index
+
+
+def leere_verlauf_index() -> None:
+    """Vergisst alle gemerkten Verlaufs-Indizes (Tests, Cache gelöscht)."""
+    with _verlauf_index_lock:
+        _verlauf_index.clear()
+
+
 def own_prevouts_for_txid(
     creator_txid: str,
     *,
@@ -758,6 +818,7 @@ def own_prevouts_for_txid(
     Stufe‑1-Index: eigene Outpoints mit ``spent_txid == creator_txid``.
 
     Liest den Verlaufs-Cache je XPUB. Fehlt Cache/Wallet → leeres Set.
+    Der Index je Datei bleibt im Speicher, bis sich die Datei ändert.
     """
     if wallet is None or cache_dir is None:
         return set()
@@ -768,19 +829,8 @@ def own_prevouts_for_txid(
     treffer: set[str] = set()
     for xpub in getattr(wallet, "xpubs", None) or []:
         try:
-            verlauf = chain.load_xpub_verlauf_cache(xpub, cache_dir) or []
+            index = _verlauf_index_fuer(chain, xpub, cache_dir)
         except Exception:
             continue
-        for e in verlauf:
-            spent = str(e.get("spent_txid") or "").strip().lower()
-            if spent != ziel:
-                continue
-            tid = str(e.get("txid") or "").strip().lower()
-            if not tid:
-                continue
-            try:
-                vout = int(e.get("vout"))
-            except (TypeError, ValueError):
-                continue
-            treffer.add(utxo_ref(tid, vout).lower())
+        treffer.update(index.get(ziel, ()))
     return treffer
