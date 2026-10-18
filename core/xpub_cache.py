@@ -70,7 +70,16 @@ UTXO_INGRESS_CACHE_SUBDIR = "utxo_ingress"
 #: 3 — Release 1.0.1: externe Blätter tragen die Blockzeit des Wallet-
 #:     Eingangs (Funding-Tx) statt der des fremden Prevouts; die
 #:     Anschaffung wird damit neu berechnet.
-HERKUNFT_SCHEMA = 3
+#: 4 — Release 1.0.1 (nur ``utxo_ingress``): Lücken im Baum (gebündelte
+#:     Eingänge, fehlende Vorgänger) zählen als Zufluss zur Blockzeit ihrer
+#:     Tx; neue Felder ``external_buendel``/``external_buendel_obergrenze``.
+#:     Die Bäume bleiben bei 3 (``TRACE_SCHEMA``): der nächste Lauf „Herkunft
+#:     aller UTXOs“ schreibt den Zufluss aus dem gespeicherten Rohbaum neu,
+#:     ohne die Chain erneut abzugehen.
+HERKUNFT_SCHEMA = 4
+
+#: Fassung der gespeicherten Herkunftsbäume (``trace_cache``).
+TRACE_SCHEMA = 3
 
 
 def herkunft_schema_passt(daten: dict | None) -> bool:
@@ -755,6 +764,12 @@ def save_utxo_ingress_cache(
         # True, wenn externe Eingänge unaufgelöst blieben (Sammel-Tx über
         # dem Auflösungs-Limit) und das Datum deshalb zu alt sein kann.
         "external_untergrenze": bool(ingress.get("external_untergrenze")),
+        # Lücke im Baum (Bündel/fehlender Vorgänger); Obergrenze: Datum
+        # stammt aus der Lücke, kann zu jung sein, nie zu alt.
+        "external_buendel": bool(ingress.get("external_buendel")),
+        "external_buendel_obergrenze": bool(
+            ingress.get("external_buendel_obergrenze")
+        ),
         "address": ingress.get("address"),
     }
     if ingress.get("tax_horizon_time_ts") is not None:

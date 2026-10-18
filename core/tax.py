@@ -444,9 +444,13 @@ def _grundlage_label(
     *,
     anschaffung: str = STANDARD_ANSCHAFFUNG,
     offensiv_fallback: bool = False,
+    buendel: bool = False,
 ) -> str:
     """
     Worauf das Anschaffungsdatum beruht — in Worten.
+
+    *buendel*: Das Datum ist die Blockzeit einer Tx mit gebündelten oder
+    unauflösbaren Eingängen (Obergrenze, nie zu alt).
 
     Als Funktion und nicht nur als Eigenschaft am Eingang: Die Veräußerungen
     im Export brauchen dieselbe Beschriftung, und zwei Fassungen desselben
@@ -461,6 +465,8 @@ def _grundlage_label(
             basis = "Herkunft verfolgt"
         if untergrenze:
             return f"{basis} (Untergrenze)"
+        if buendel:
+            return f"{basis} (Bündel, vorsichtig)"
         return basis
     if grundlage == GRUNDLAGE_WALLET_EINGANG:
         return "Herkunft verfolgt (nur Wallet-Eingang)"
@@ -617,6 +623,11 @@ def _anschaffung(
     noch offen ist oder kein Oldest-Feld im Ingress lag.
     """
     modus = parse_anschaffung(anschaffung)
+    # Lücke im Baum (Bündel, fehlender Vorgänger): Hinter ihr kann ein
+    # jüngerer fremder Eingang stecken — offensiv bleibt es bei der jüngsten
+    # Lesart, wie bei offenem Baum.
+    if ingress and ingress.get("external_buendel"):
+        herkunft_vollstaendig = False
     if modus == ANSCHAFFUNG_AELTESTE and not herkunft_vollstaendig:
         modus = ANSCHAFFUNG_JUENGSTE
         offen_offensiv = True
@@ -717,6 +728,9 @@ class Eingang:
     #: True, wenn externe Vorgänger unaufgelöst blieben und das
     #: Anschaffungsdatum deshalb zu alt sein kann.
     untergrenze: bool = False
+    #: True, wenn das Datum die Blockzeit einer Tx mit gebündelten oder
+    #: unauflösbaren Eingängen ist: Obergrenze, kann zu jung sein, nie zu alt.
+    buendel_obergrenze: bool = False
     #: Herkunft liegt vor, endet aber nicht an extern/Coinbase.
     #: „vervollständigen“ ist noch nötig. False, wenn kein Baum vorliegt.
     herkunft_offen: bool = False
@@ -745,6 +759,7 @@ class Eingang:
             self.untergrenze,
             anschaffung=self.anschaffung,
             offensiv_fallback=self.offensiv_fallback,
+            buendel=self.buendel_obergrenze,
         )
 
     def as_dict(self) -> dict:
@@ -765,6 +780,7 @@ class Eingang:
             "grundlage": self.grundlage,
             "geprueft": self.geprueft,
             "untergrenze": self.untergrenze,
+            "buendel_obergrenze": self.buendel_obergrenze,
             "herkunft_offen": self.herkunft_offen,
             "grundlage_label": self.grundlage_label,
             "neuvermoegen": self.neuvermoegen,
@@ -942,6 +958,12 @@ def auswerten(
             utxo, ingress, anschaffung=modus,
             herkunft_vollstaendig=herkunft_voll,
         )
+        buendel = bool(
+            ingress
+            and grundlage == GRUNDLAGE_HERKUNFT
+            and not untergrenze
+            and ingress.get("external_buendel_obergrenze")
+        )
         if zeitpunkt is None:
             ohne_datum += 1
             continue
@@ -1012,6 +1034,7 @@ def auswerten(
                     "neuvermoegen": neu_ab,
                     "grundlage": grundlage,
                     "untergrenze": untergrenze,
+                    "buendel_obergrenze": buendel,
                     "anschaffung": modus,
                     "offensiv_fallback": offensiv_fb,
                 })
@@ -1032,6 +1055,7 @@ def auswerten(
             haltedauer_tage=max(0, (ende - zeitpunkt).days),
             grundlage=grundlage,
             untergrenze=untergrenze,
+            buendel_obergrenze=buendel,
             herkunft_offen=bool(
                 kopf and not kopf.get("vollstaendig") and not kopf.get("veraltet")
             ),
@@ -1053,6 +1077,7 @@ def auswerten(
 
     ohne_analyse = [e for e in eintraege if not e.geprueft]
     untergrenzen = [e for e in eintraege if e.untergrenze]
+    buendel_eintraege = [e for e in eintraege if e.buendel_obergrenze]
     wallet_eingaenge = [
         e for e in eintraege if e.grundlage == GRUNDLAGE_WALLET_EINGANG
     ]
@@ -1073,6 +1098,8 @@ def auswerten(
         hinweise.insert(0, _h("tax.hintWalletEntry"))
     if untergrenzen:
         hinweise.insert(0, _h("tax.hintLowerBound"))
+    if buendel_eintraege:
+        hinweise.insert(0, _h("tax.hintBundle"))
     if modus == ANSCHAFFUNG_AELTESTE:
         hinweise.insert(0, _h("tax.hintOffensive"))
     if offensiv_fallbacks:
@@ -1116,6 +1143,8 @@ def auswerten(
             "geprueft_count": len(eintraege) - len(ohne_analyse),
             "untergrenze_count": len(untergrenzen),
             "untergrenze_sats": sum(e.value_sats for e in untergrenzen),
+            "buendel_count": len(buendel_eintraege),
+            "buendel_sats": sum(e.value_sats for e in buendel_eintraege),
             "wallet_eingang_count": len(wallet_eingaenge),
             "wallet_eingang_sats": sum(e.value_sats for e in wallet_eingaenge),
             # Veräußerungen des Jahres — nur mit Verlaufsdaten überhaupt
@@ -1394,6 +1423,12 @@ def _lot_segmente_eintragen(
             bezug=bezug, jahre=jahre, stichtag=stichtag_lot, fifo=fifo,
         ) if objekt else None
         los_ts = (seg or {}).get("lot_von_ts" if aelteste else "lot_bis_ts")
+        # Bündel-Obergrenze: Die Lose kennen nur die aufgelösten Eingänge.
+        # Ein älteres Los-Datum hieße, ein ungeklärter (vielleicht fremder)
+        # Eingang zählte als früh angeschafft — es bleibt beim Datum der Tx.
+        bremse = bool(eintrag.get("buendel_obergrenze"))
+        if bremse and los_ts and int(los_ts) < int(eintrag.get("time_ts") or 0):
+            los_ts = None
         if los_ts and bezug is not None:
             umsortieren = _datum_aus_losen(
                 eintrag, objekt, event, int(los_ts),
@@ -1405,6 +1440,13 @@ def _lot_segmente_eintragen(
             eintrag["sats_grau"] = seg["sats_grau"]
             eintrag["sats_ohne_datum"] = seg.get("sats_ohne_datum")
             ganz = _ganz_gruen(seg) and not eintrag.get("neuvermoegen")
+            if bremse and not eintrag.get("erfuellt"):
+                # Frist am Tx-Datum nicht erfüllt: Kein Los darf grün sein.
+                eintrag["sats_orange"] = int(seg["sats_orange"] or 0) + int(
+                    seg["sats_gruen"] or 0
+                )
+                eintrag["sats_gruen"] = 0
+                ganz = False
             eintrag["erfuellt"] = ganz
         if objekt is not None:
             objekt.sats_gruen = eintrag.get("sats_gruen")
@@ -1866,6 +1908,13 @@ def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
             kennzahlen["untergrenze_sats"],
             "", "", "", "Haltefrist kann zu LANG ausgewiesen sein",
         ])
+    if kennzahlen.get("buendel_count"):
+        schreiber.writerow([
+            "davon Anschaffungsdatum aus Bündel (Obergrenze)", "", "", "",
+            _btc(kennzahlen["buendel_sats"]),
+            kennzahlen["buendel_sats"],
+            "", "", "", "Haltefrist kann zu kurz ausgewiesen sein",
+        ])
 
     # Veräußerungen als eigener Block. Nach § 23 EStG ist die Veräußerung der
     # steuerlich maßgebliche Vorgang — sie gehört in die Datei, die zum
@@ -1892,6 +1941,7 @@ def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
                     abgang["untergrenze"],
                     anschaffung=abgang.get("anschaffung", STANDARD_ANSCHAFFUNG),
                     offensiv_fallback=bool(abgang.get("offensiv_fallback")),
+                    buendel=bool(abgang.get("buendel_obergrenze")),
                 ),
                 abgang["txid"], abgang["vout"], abgang["abgang_txid"],
             ])
@@ -1985,7 +2035,7 @@ def als_bericht(
             f"<td class='r'>{a['haltedauer_tage']}</td>"
             f"<td>{'ja' if a['frist_erfuellt'] else '<b>nein</b>'}</td>"
             f"<td class='klein'>"
-            f"{_html_escape(_grundlage_label(a['grundlage'], a['untergrenze'], anschaffung=a.get('anschaffung', STANDARD_ANSCHAFFUNG), offensiv_fallback=bool(a.get('offensiv_fallback'))))}"
+            f"{_html_escape(_grundlage_label(a['grundlage'], a['untergrenze'], anschaffung=a.get('anschaffung', STANDARD_ANSCHAFFUNG), offensiv_fallback=bool(a.get('offensiv_fallback')), buendel=bool(a.get('buendel_obergrenze'))))}"
             "</td>"
             "</tr>"
             for a in abgaenge

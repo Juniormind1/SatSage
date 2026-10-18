@@ -147,7 +147,10 @@ def utxo_as_dict(
             # wieder rot färben.
             if (
                 ingress
-                and ingress.get("external_untergrenze")
+                and (
+                    ingress.get("external_untergrenze")
+                    or ingress.get("external_buendel")
+                )
                 and gespeichert.get("luecken_buendel")
             ):
                 voll = False

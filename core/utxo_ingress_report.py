@@ -340,6 +340,47 @@ def _youngest_wallet_ingress(
     return max(events, key=lambda e: e["time_ts"])
 
 
+#: Quellen, hinter denen der Trace nicht weiterkam: gebündelte Eingänge einer
+#: Sammel-Tx, fehlende Vorgänger (error), unfertige Hops.
+LUECKEN_TYPEN = ("external_unresolved", "error", "unknown", "pending", "cycle")
+
+
+def _luecken_event(src: dict, node: dict) -> dict:
+    """
+    Zufluss an einer Lücke der Tx *node*: Jeder Eingang kam spätestens zur
+    Blockzeit dieser Tx ins Wallet — ein fremder genau dann, ein eigener
+    früher. Die Zeit ist damit eine Obergrenze, nie zu alt. Unbestätigte Tx:
+    ohne Zeit (echte Untergrenze).
+
+    ``eingang_time_ts`` trägt die Zeit an UI-Blättern (Stempel aus dem
+    gespeicherten Baum, ohne Eltern-Knoten).
+    """
+    return {
+        "time_ts": src.get("eingang_time_ts") or node.get("time_ts"),
+        "amount_sats": 0,
+        "address": "",
+        "from_utxo": src.get("from_utxo", "") or "",
+        "unresolved": src.get("type") == "external_unresolved",
+        "obergrenze": True,
+    }
+
+
+def _ist_luecke_als_unterbaum(trace) -> bool:
+    """Interner Eingang, dessen Erzeuger-Tx nicht verfolgt werden konnte."""
+    if not isinstance(trace, dict):
+        return True
+    typ = trace.get("type")
+    # cycle = Maximaltiefe erreicht (ein Zyklus ist im DAG nicht möglich).
+    if typ in ("error", "pending", "cycle"):
+        return True
+    if trace.get("sources") or trace.get("tax_horizon"):
+        return False
+    if trace.get("coinjoin_noise_skipped") and trace.get("tx_class"):
+        # Absichtliches CoinJoin-Ende ohne Fremd-Eingänge, keine Lücke.
+        return False
+    return typ in ("utxo", "unknown")
+
+
 def _collect_external_ingress_events(node: dict | None) -> list[dict]:
     """
     Alle externen Zuflüsse im Baum — die Stellen, an denen Sats erstmals von
@@ -348,6 +389,9 @@ def _collect_external_ingress_events(node: dict | None) -> list[dict]:
     Steuerlich ist das der Anschaffungszeitpunkt: Interne Überträge (auch
     über mehrere eigene XPUBs/Seeds hinweg) verändern die Haltedauer nicht;
     erst ein externer Zufluss beginnt sie.
+
+    Lücken (``LUECKEN_TYPEN``, interner Eingang ohne verfolgbaren Erzeuger)
+    zählen als Zufluss zur Blockzeit ihrer Tx mit ``obergrenze``.
     """
     if not node or node.get("type") not in ("utxo", "unknown"):
         return []
@@ -356,21 +400,19 @@ def _collect_external_ingress_events(node: dict | None) -> list[dict]:
     for src in node.get("sources", []):
         typ = src["type"]
         if typ == "internal":
-            events.extend(_collect_external_ingress_events(src.get("trace")))
+            unterbaum = src.get("trace")
+            if _ist_luecke_als_unterbaum(unterbaum):
+                events.append(_luecken_event(src, node))
+            else:
+                events.extend(_collect_external_ingress_events(unterbaum))
+        elif typ in LUECKEN_TYPEN:
+            events.append(_luecken_event(src, node))
         elif typ == "external":
             events.append({
                 "time_ts": src.get("time_ts"),
                 "amount_sats": src.get("amount_sats", 0),
                 "address": src.get("address", ""),
                 "from_utxo": src.get("from_utxo", ""),
-            })
-        elif typ == "external_unresolved":
-            events.append({
-                "time_ts": None,
-                "amount_sats": 0,
-                "address": "",
-                "from_utxo": "",
-                "unresolved": True,
             })
         elif typ == "coinbase":
             # Geschürfte Sats: der Coinbase selbst ist der externe Zufluss.
@@ -389,8 +431,15 @@ def _external_ingress_extrema(trace: dict | None) -> dict | None:
     """
     Jüngster und ältester datierter externer Zufluss im Baum.
 
-    *untergrenze*: True, wenn daneben Zuflüsse ohne Datum stehen (einer
-    davon kann jünger sein als der jüngste Bekannte).
+    Lücken-Zuflüsse (Bündel, fehlender Vorgänger) zählen für den jüngsten
+    mit der Blockzeit ihrer Tx — einer Obergrenze. Für den ältesten zählen
+    sie nicht: Dahinter kann älteres stecken.
+
+    *untergrenze*: True, wenn ein Zufluss gar keine Zeit hat (Tx noch
+    unbestätigt); dann kann ein jüngerer fehlen.
+    *buendel*: True, wenn der Baum Lücken hat (offensiv bleibt jüngste).
+    *buendel_obergrenze*: True, wenn der jüngste Zeitpunkt nur von einer
+    Lücke stammt — das Datum kann dann zu jung sein, nie zu alt.
     """
     events = _collect_external_ingress_events(trace)
     if not events:
@@ -398,23 +447,35 @@ def _external_ingress_extrema(trace: dict | None) -> dict | None:
     bekannte = [e for e in events if e.get("time_ts")]
     if not bekannte:
         return None
-    juengster = max(bekannte, key=lambda e: e["time_ts"])
-    aeltester = min(bekannte, key=lambda e: e["time_ts"])
+    exakt = [e for e in bekannte if not e.get("obergrenze")]
+    luecken = [e for e in bekannte if e.get("obergrenze")]
+    juengster = max(bekannte, key=lambda e: (e["time_ts"], not e.get("obergrenze")))
+    aeltester = min(exakt or bekannte, key=lambda e: e["time_ts"])
     untergrenze = len(events) > len(bekannte)
+    buendel = any(e.get("obergrenze") for e in events)
+    obergrenze = bool(juengster.get("obergrenze")) and not any(
+        e["time_ts"] >= juengster["time_ts"] for e in exakt
+    )
     return {
         "youngest": {
             "time_ts": juengster["time_ts"],
             "amount_sats": juengster["amount_sats"],
             "address": juengster["address"],
             "untergrenze": untergrenze,
+            "buendel": buendel,
+            "buendel_obergrenze": obergrenze,
         },
         "oldest": {
             "time_ts": aeltester["time_ts"],
             "amount_sats": aeltester["amount_sats"],
             "address": aeltester["address"],
             "untergrenze": untergrenze,
+            "buendel": buendel,
+            "buendel_obergrenze": obergrenze,
         },
         "untergrenze": untergrenze,
+        "buendel": buendel,
+        "buendel_obergrenze": obergrenze,
     }
 
 
@@ -466,7 +527,9 @@ def gesicherte_anschaffung(trace: dict | None) -> dict | None:
     if not isinstance(trace, dict):
         return None
     extrema = _external_ingress_extrema(trace)
-    if not extrema or extrema.get("untergrenze"):
+    # Obergrenze aus einer Lücke: Nach dem Auflösen kann das Datum noch
+    # nach links wandern — nichts steht fest.
+    if not extrema or extrema.get("untergrenze") or extrema.get("buendel"):
         return None
     juengster = extrema.get("youngest") or {}
     aeltester = extrema.get("oldest") or {}
@@ -588,6 +651,13 @@ def persist_utxo_ingress(
         ),
         "external_untergrenze": (
             external["untergrenze"] if external else False
+        ),
+        # Lücken im Baum (Bündel, fehlender Vorgänger): offensiv bleibt es
+        # bei der jüngsten Lesart. Obergrenze: das Datum stammt aus einer
+        # Lücke und kann zu jung sein, nie zu alt.
+        "external_buendel": bool(external and external.get("buendel")),
+        "external_buendel_obergrenze": bool(
+            external and external.get("buendel_obergrenze")
         ),
         "address": address,
     }

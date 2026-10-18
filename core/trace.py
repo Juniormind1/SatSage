@@ -1091,8 +1091,22 @@ def baum_zeiten_nachziehen(
     return n
 
 
-def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
-    """Baut einen Knoten aus einem Quellen-Eintrag des Analysebaums."""
+#: Blätter, hinter denen der Trace nicht weiterkam. Sie tragen
+#: ``eingang_time_ts`` = Blockzeit der Tx, in die sie eingehen — der
+#: späteste mögliche Empfang (siehe ``utxo_ingress_report._luecken_event``).
+LUECKEN_BLATT_TYPEN = frozenset(
+    {"external_unresolved", "error", "unknown", "pending", "cycle"}
+)
+
+
+def _kind_knoten(
+    quelle: dict, wallet, pfad: str, tiefe: int, eltern_ts=None,
+) -> dict:
+    """
+    Baut einen Knoten aus einem Quellen-Eintrag des Analysebaums.
+
+    *eltern_ts*: Blockzeit der Tx, deren Eingang *quelle* ist.
+    """
     typ = quelle.get("type", "unknown")
     adresse = quelle.get("address", "")
 
@@ -1192,6 +1206,9 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
                     "block_height": None,
                     "block_time": unterbaum.get("time_ts"),
                     "tax_horizon": bool(unterbaum.get("tax_horizon")),
+                    "eingang_time_ts": (
+                        eltern_ts if marker in LUECKEN_BLATT_TYPEN else None
+                    ),
                     "children": [],
                     "expandable": False,
                     "note": (
@@ -1265,6 +1282,8 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
             or "Herkunft unvollständig — kein externes oder Coinbase-Ende."
         )
 
+    if typ in LUECKEN_BLATT_TYPEN and eltern_ts:
+        knoten["eingang_time_ts"] = eltern_ts
     return knoten
 
 
@@ -1272,7 +1291,10 @@ def _quellen_zu_knoten(baum: dict, wallet, pfad: str, tiefe: int) -> list[dict]:
     kinder = []
     for nummer, quelle in enumerate(baum.get("sources", [])):
         kinder.append(
-            _kind_knoten(quelle, wallet, f"{pfad}.{nummer}", tiefe)
+            _kind_knoten(
+                quelle, wallet, f"{pfad}.{nummer}", tiefe,
+                eltern_ts=baum.get("time_ts"),
+            )
         )
     return kinder
 
@@ -1366,6 +1388,7 @@ def _ui_knoten_als_quelle(knoten: dict) -> dict:
     return {
         "type": knoten.get("type"),
         "time_ts": knoten.get("block_time") or knoten.get("time_ts"),
+        "eingang_time_ts": knoten.get("eingang_time_ts"),
         "amount_sats": knoten.get("amount_sats", 0),
         "address": knoten.get("address") or "",
         "from_utxo": knoten.get("from_utxo") or "",
@@ -1398,7 +1421,8 @@ def _stempel_aus_ui_baum(
         if not isinstance(knoten, dict):
             continue
         stapel.extend(knoten.get("children") or [])
-        if knoten.get("type") in ("external", "external_unresolved", "coinbase"):
+        typ = knoten.get("type")
+        if typ in ("external", "coinbase") or typ in LUECKEN_BLATT_TYPEN:
             quellen.append(_ui_knoten_als_quelle(knoten))
     if not quellen and not baum.get("tax_horizon"):
         return

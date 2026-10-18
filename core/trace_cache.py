@@ -54,11 +54,12 @@ VERSION = 1
 #: Schreiben ersetzt.
 VERSION_KNOTEN = 2
 
-#: Fassung des Inhalts (nicht des Dateiformats), gemeinsam mit
-#: ``utxo_ingress`` — siehe ``xpub_cache.HERKUNFT_SCHEMA``. Bäume einer
-#: anderen Fassung gelten als nicht vorhanden: ``laden``/``kopf`` liefern
-#: None, der nächste Herkunftslauf baut neu und überschreibt die Datei.
-SCHEMA = xpub_cache.HERKUNFT_SCHEMA
+#: Fassung des Inhalts (nicht des Dateiformats) — siehe
+#: ``xpub_cache.TRACE_SCHEMA`` (``utxo_ingress`` hat seit 4 eine eigene,
+#: ``xpub_cache.HERKUNFT_SCHEMA``). Bäume einer anderen Fassung gelten als
+#: nicht vorhanden: ``laden``/``kopf`` liefern None, der nächste
+#: Herkunftslauf baut neu und überschreibt die Datei.
+SCHEMA = xpub_cache.TRACE_SCHEMA
 
 
 def _anzeige_ohne_position(kinder: list, eltern_id: str, tiefe: int) -> list:

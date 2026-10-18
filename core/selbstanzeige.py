@@ -157,8 +157,13 @@ def _anschaffung_los(
     immutable_cache_dir: Path | None,
     *,
     anschaffung: str = tax_mod.STANDARD_ANSCHAFFUNG,
-) -> tuple[datetime | None, str, bool, str]:
-    """(zeit, grundlage, untergrenze, externe_adresse_oder_leer)."""
+) -> tuple[datetime | None, str, bool, str, bool]:
+    """
+    (zeit, grundlage, untergrenze, externe_adresse_oder_leer, buendel).
+
+    *buendel*: Datum ist die Blockzeit einer Tx mit gebündelten oder
+    unauflösbaren Eingängen (Obergrenze, nie zu alt).
+    """
     ingress = None
     if immutable_cache_dir:
         ingress = xpub_cache.load_utxo_ingress_cache(
@@ -187,7 +192,13 @@ def _anschaffung_los(
             )
         else:
             ext_addr = str(ingress.get("external_address") or "")
-    return zeit, grundlage, untergrenze, ext_addr
+    buendel = bool(
+        ingress
+        and grundlage == tax_mod.GRUNDLAGE_HERKUNFT
+        and not untergrenze
+        and ingress.get("external_buendel_obergrenze")
+    )
+    return zeit, grundlage, untergrenze, ext_addr, buendel
 
 
 def _baue_lose(
@@ -204,7 +215,7 @@ def _baue_lose(
     """
     lose: dict[str, list[dict]] = {}
     for utxo in utxos:
-        zeit, grundlage, untergrenze, ext_addr = _anschaffung_los(
+        zeit, grundlage, untergrenze, ext_addr, buendel = _anschaffung_los(
             utxo, immutable_cache_dir, anschaffung=anschaffung,
         )
         if zeit is None:
@@ -224,6 +235,7 @@ def _baue_lose(
             "rest": sats,
             "grundlage": grundlage,
             "untergrenze": untergrenze,
+            "buendel": buendel,
         })
     for name in lose:
         lose[name].sort(key=lambda L: (L["anschaffung"], L["txid"], L["vout"]))
@@ -346,7 +358,7 @@ def _hypothese_utxo_kandidaten(
     stichtag = hypothese_stichtag(jahr)
     liste = []
     for utxo in _offene_utxos(utxos):
-        zeit, grundlage, untergrenze, ext_addr = _anschaffung_los(
+        zeit, grundlage, untergrenze, ext_addr, buendel = _anschaffung_los(
             utxo, immutable_cache_dir
         )
         txid = _norm_txid(utxo.get("txid", ""))
@@ -365,7 +377,7 @@ def _hypothese_utxo_kandidaten(
             "value_sats": sats,
             "anschaffung_datum": anschaffung,
             "external_address": ext_addr,
-            "grundlage": tax_mod._grundlage_label(grundlage, untergrenze)
+            "grundlage": tax_mod._grundlage_label(grundlage, untergrenze, buendel=buendel)
             if zeit is not None else "unbekannt",
             "stichtag": stichtag.strftime("%d.%m.%Y"),
             "stichtag_ts": int(stichtag.timestamp()),
@@ -529,6 +541,7 @@ def _fifo_verbrauch(
             "lot_vout": los["vout"],
             "grundlage": tax_mod._grundlage_label(
                 los["grundlage"], los["untergrenze"],
+                buendel=bool(los.get("buendel")),
             ),
             "haltedauer_tage": max(
                 0, (veraeusserung - los["anschaffung"]).days
@@ -622,7 +635,7 @@ def _vorgang_aus_hypothese_utxo(
     anschaffung: str = tax_mod.STANDARD_ANSCHAFFUNG,
 ) -> dict:
     """Ein offener UTXO als fiktive Veräußerung zum Stichtag (eigene Anschaffung)."""
-    zeit, grundlage, untergrenze, ext_addr = _anschaffung_los(
+    zeit, grundlage, untergrenze, ext_addr, buendel = _anschaffung_los(
         utxo, immutable_cache_dir, anschaffung=anschaffung,
     )
     sats = int(utxo.get("value", 0))
@@ -645,7 +658,7 @@ def _vorgang_aus_hypothese_utxo(
             "external_address": ext_addr,
             "lot_txid": txid,
             "lot_vout": vout,
-            "grundlage": tax_mod._grundlage_label(grundlage, untergrenze),
+            "grundlage": tax_mod._grundlage_label(grundlage, untergrenze, buendel=buendel),
             "haltedauer_tage": max(0, (stichtag - zeit).days),
             "frist_erfuellt": erfuellt,
             "frist_ende": frist_ende.strftime("%d.%m.%Y") if frist_ende else "",
