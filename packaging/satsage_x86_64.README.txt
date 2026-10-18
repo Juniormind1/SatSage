@@ -2,7 +2,7 @@ SatSage StartOS sideload package (x86_64)
 
 File: satsage_x86_64.s9pk
 SHA-256: 183c5a3ddae1491d7f88f931f7572411ec267d67d9e9fd4f47c12f8d1a6ac6fb
-Version: 1.0.0 (app) / package 1.0.0:0
+Version: 1.0.1 (app) / package 1.0.1:0
 
 Sideload: StartOS web UI → Sideload → select this .s9pk.
 Requires running Bitcoin Core and Electrs (or Fulcrum) on the same device.

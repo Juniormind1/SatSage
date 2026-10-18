@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [1.0.1] — 2026-10-18
+
+- **Release 1.0.1:** Versionsnummer auf 1.0.1. StartOS-Paket `1.0.1:0`; `1.0.0:0` bleibt im Versionsgraphen, damit Geräte von dort wandern. Specter-Plugin 1.0.1.
 - **Filter · Fiat:** `>100 EUR`, `>100 €` und `>100EUR` (ebenso USD und $) rechnen mit dem neuesten bereits gespeicherten BTC-Kurs in Sats um. Fehlt der Kurs, bleibt die Liste vollständig und das Feld weist darauf hin. Es wird dafür kein Kurs neu geholt.
 - **Tools · globale Cache-Suche:** Die Trefferzeilen zeigen neben sats/BTC den Fiat-Wert zum aktuellen Kurs der Kopfzeile (DE €, EN $). Fehlt der Kurs, bleibt nur der Sat-Betrag.
 
