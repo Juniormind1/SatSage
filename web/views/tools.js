@@ -80,8 +80,9 @@ function bindeTools() {
 
 bindeTools();
 window.addEventListener("satsage:lang", () => {
-  if (!toolsLetztes) return;
-  zeichneToolsStatus(toolsLetztes.status, toolsLetztes.wallet);
+  if (toolsLetztes) {
+    zeichneToolsStatus(toolsLetztes.status, toolsLetztes.wallet);
+  }
   zeichneSchatzListe(schatzFunde);
   zeichneCacheListe(cacheTreffer);
   fuelleSchatzWallets();
@@ -321,6 +322,13 @@ function cacheStatus(text) {
   el.hidden = !text;
 }
 
+/** Sat-Betrag plus Spot-Fiat der Kopfzeile; ohne Kurs nur sats/BTC. */
+function toolsCacheBetrag(sats) {
+  const basis = formatSatsBasis(Number(sats) || 0);
+  const fiat = typeof formatEurAusSats === "function" ? formatEurAusSats(sats) : "";
+  return fiat ? `${basis} (≈ ${fiat})` : basis;
+}
+
 function zeichneCacheListe(treffer) {
   const liste = $("#tools-cache-liste");
   if (!liste) return;
@@ -338,7 +346,7 @@ function zeichneCacheListe(treffer) {
       ? t("tools.cacheSpent")
       : t("tools.cacheOpen");
     knopf.textContent = t("tools.cacheItem", {
-      amount: formatSats(trefferEintrag.value_sats),
+      amount: toolsCacheBetrag(trefferEintrag.value_sats),
       wallet: trefferEintrag.wallet || "",
       wo,
       address: kuerze(trefferEintrag.address || trefferEintrag.key || ""),

@@ -2789,6 +2789,9 @@ function aktualisiereFiatAnzeigen() {
       ladeSteuerjahr().catch(() => {});
     }
   }
+  if (Zustand.ansicht === "tools" && typeof zeichneCacheListe === "function") {
+    zeichneCacheListe(typeof cacheTreffer !== "undefined" ? cacheTreffer : []);
+  }
 }
 
 /**

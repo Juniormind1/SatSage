@@ -10,6 +10,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 ## [Unveröffentlicht]
 
 - **Filter · Fiat:** `>100 EUR`, `>100 €` und `>100EUR` (ebenso USD und $) rechnen mit dem neuesten bereits gespeicherten BTC-Kurs in Sats um. Fehlt der Kurs, bleibt die Liste vollständig und das Feld weist darauf hin. Es wird dafür kein Kurs neu geholt.
+- **Tools · globale Cache-Suche:** Die Trefferzeilen zeigen neben sats/BTC den Fiat-Wert zum aktuellen Kurs der Kopfzeile (DE €, EN $). Fehlt der Kurs, bleibt nur der Sat-Betrag.
 
 - **Tools · gründlicher Wallet-Scan:** Zwei Felder legen das Indexfenster fest. Scan ab steht auf 0, Scan bis auf 500 (Ende einschließlich, Empfang und Wechselgeld). Der Lauf beginnt damit bei Index #0, statt das vordere Fenster auszulassen.
 
