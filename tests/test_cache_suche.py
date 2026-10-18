@@ -37,6 +37,27 @@ class TestCacheSuche(unittest.TestCase):
         self.assertEqual(ergebnis["treffer"], [])
         self.assertEqual(gerufen, [])
 
+    def test_fehlender_kurs_sucht_nicht(self):
+        gerufen = []
+
+        def lade(_schluessel):
+            gerufen.append(1)
+            return [{"txid": "aa", "vout": 0, "value": 1, "address": "bc1q"}]
+
+        ergebnis = suche_cache(
+            eintraege=[_Wallet("A")],
+            roh=">100 EUR kraken",
+            lang="de",
+            lade_bestand=lade,
+            lade_verlauf=lade,
+            anreichere_bestand=lambda e: e,
+            anreichere_verlauf=lambda e: e,
+            kurse={"EUR": None, "USD": None},
+        )
+        self.assertEqual(gerufen, [])
+        self.assertEqual(ergebnis["kurs_fehlt"], "EUR")
+        self.assertEqual(ergebnis["treffer"], [])
+
     def test_stichwort_ueber_bestand_und_verlauf(self):
         bestand = {
             "A": [{

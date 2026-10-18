@@ -110,6 +110,14 @@ async function api(pfad, { methode = "GET", daten, timeoutMs, signal } = {}) {
   } catch (_) {
     /* leerer Körper ist in Ordnung */
   }
+  if (
+    antwort.ok
+    && koerper
+    && koerper.filter_kurs_fehlt
+    && typeof uebernimmFilterKursFehlt === "function"
+  ) {
+    uebernimmFilterKursFehlt(koerper.filter_kurs_fehlt);
+  }
   if (!antwort.ok) {
     if (
       antwort.status === 409

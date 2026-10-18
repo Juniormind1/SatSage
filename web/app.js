@@ -1923,6 +1923,7 @@ function setzeKopfFilterAktiv(aktiv) {
   } else if (feld.value.trim()) {
     wendeKopfFilterAn();
   }
+  zeichneKopfFilterHinweis();
 }
 
 /** Welche Ansichten den Kopf-Filter nutzen (weitere folgen schrittweise). */
@@ -1933,7 +1934,7 @@ function kopfFilterAnsichtAktiv(ansicht) {
 function kopfFilterLeer() {
   return {
     leer: true, terms: [], minSats: null, maxSats: null,
-    afterTs: null, beforeTs: null,
+    afterTs: null, beforeTs: null, kursFehlt: null, wartet: false,
   };
 }
 
@@ -1941,7 +1942,11 @@ function kopfFilterLeer() {
 function kopfFilterGelesen() {
   const feld = $("#kopf-filter");
   if (!feld || feld.disabled) return kopfFilterLeer();
-  return parseKopfFilter(feld.value);
+  const f = parseKopfFilter(feld.value);
+  if (f.kursFehlt || f.wartet) {
+    return { ...kopfFilterLeer(), kursFehlt: f.kursFehlt, wartet: f.wartet };
+  }
+  return f;
 }
 
 function aktualisiereKopfFilterFuerAnsicht() {
@@ -1985,29 +1990,129 @@ function parseKopfFilterDatum(dd, mm, yy) {
   return d;
 }
 
+function kopfFilterWaehrung(roh) {
+  const text = String(roh || "").trim().toLowerCase();
+  if (text === "eur" || text === "€") return "EUR";
+  if (text === "usd" || text === "$") return "USD";
+  return "";
+}
+
+/** Gespeicherter Kurs (Fiat pro 1 BTC). undefined = noch nicht geladen, null = keiner. */
+function kopfFilterKurs(code) {
+  const stand = Zustand.kursBekannt;
+  if (!stand || !Object.prototype.hasOwnProperty.call(stand, code)) return undefined;
+  const betrag = Number(stand[code] && stand[code].amount);
+  return betrag > 0 ? betrag : null;
+}
+
+function zeichneKopfFilterHinweis() {
+  const feld = $("#kopf-filter");
+  if (!feld) return;
+  if (feld.disabled) {
+    feld.classList.remove("kopf-filter-kurs-fehlt");
+    feld.removeAttribute("aria-invalid");
+    return;
+  }
+  const f = parseKopfFilter(feld.value);
+  if (f.kursFehlt) {
+    feld.classList.add("kopf-filter-kurs-fehlt");
+    feld.title = t("header.filterNoRate", { currency: f.kursFehlt });
+    feld.setAttribute("aria-invalid", "true");
+    return;
+  }
+  feld.classList.remove("kopf-filter-kurs-fehlt");
+  feld.removeAttribute("aria-invalid");
+  feld.title = t("header.filterTitleActive");
+  feld.setAttribute("data-i18n-title", "header.filterTitleActive");
+}
+
 /**
- * Parse: Freitext + `>1234`/`<1234` (sats) + `>1.1.25`/`<05.12.2023` (Datum).
+ * Server sagt, der Kurs fehlt. Die gezeichnete Seite folgt dem, ohne neu zu laden.
+ */
+function uebernimmFilterKursFehlt(code) {
+  const namen = String(code || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!namen.length) return;
+  const basis = { ...(Zustand.kursBekannt || {}) };
+  let geaendert = false;
+  for (const w of namen) {
+    if (basis[w]) {
+      basis[w] = null;
+      geaendert = true;
+    } else if (!Object.prototype.hasOwnProperty.call(basis, w)) {
+      basis[w] = null;
+      geaendert = true;
+    }
+  }
+  Zustand.kursBekannt = basis;
+  zeichneKopfFilterHinweis();
+  if (geaendert && typeof wendeKopfFilterAn === "function") wendeKopfFilterAn();
+}
+
+let _kursBekanntLauf = null;
+
+function merkeKursBekannt(code, eintrag) {
+  const basis = { EUR: null, USD: null, ...(Zustand.kursBekannt || {}) };
+  const alt = basis[code];
+  const neuZeit = Number(eintrag && eintrag.time) || 0;
+  const altZeit = Number(alt && alt.time) || 0;
+  if (eintrag && Number(eintrag.amount) > 0) {
+    if (!alt || neuZeit >= altZeit) basis[code] = eintrag;
+  } else if (!alt) {
+    basis[code] = null;
+  }
+  Zustand.kursBekannt = basis;
+}
+
+/** Beide Währungen aus dem lokalen Cache. Kein Spot-Abruf. */
+async function ladeKurseBekannt() {
+  if (Zustand.kursBekannt) return Zustand.kursBekannt;
+  if (_kursBekanntLauf) return _kursBekanntLauf;
+  _kursBekanntLauf = (async () => {
+    try {
+      const stand = await api("/price/bekannt");
+      for (const w of ["EUR", "USD"]) {
+        const eintrag = stand && stand.kurse ? stand.kurse[w] : null;
+        merkeKursBekannt(w, eintrag);
+      }
+    } catch (_fehler) {
+      merkeKursBekannt("EUR", null);
+      merkeKursBekannt("USD", null);
+    } finally {
+      _kursBekanntLauf = null;
+    }
+    const feld = $("#kopf-filter");
+    if (feld && feld.value.trim()) kopfFilterGeaendert();
+    return Zustand.kursBekannt;
+  })();
+  return _kursBekanntLauf;
+}
+
+/**
+ * Parse: Freitext + `>1234`/`<1234` (sats) + `>1.1.25`/`<05.12.2023` (Datum)
+ * + `>100 EUR` / `>100 €` / `>100EUR` (Fiat, umgerechnet in Sats).
  * Datum: nach dem Tag = ab Folgetag 00:00; vor dem Tag = vor 00:00 dieses Tags.
- * Mehrere Tokens = UND.
+ * Mehrere Tokens = UND. Fehlt der Kurs, ist der ganze Filter aus.
  */
 function parseKopfFilter(roh) {
   const text = String(roh || "").trim();
-  if (!text) {
-    return {
-      leer: true, terms: [], minSats: null, maxSats: null,
-      afterTs: null, beforeTs: null,
-    };
-  }
+  const leer = {
+    leer: true, terms: [], minSats: null, maxSats: null,
+    afterTs: null, beforeTs: null, kursFehlt: null, wartet: false,
+  };
+  if (!text) return leer;
   const terms = [];
   let minSats = null;
   let maxSats = null;
   let afterTs = null;
   let beforeTs = null;
+  const fehlt = [];
+  let wartet = false;
   // Datum vor reinem Betrag prüfen (Punkte!).
   const reDatum = /^([<>])(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/;
-  const reSats = /^([<>])(\d+(?:[.,]\d+)?)$/;
-  for (const tok of text.split(/\s+/)) {
-    if (!tok) continue;
+  const reSats = /^([<>])(\d+(?:[.,]\d+)?)(eur|usd|€|\$)?$/i;
+  const toks = text.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < toks.length; i += 1) {
+    const tok = toks[i];
     const dm = tok.match(reDatum);
     if (dm) {
       const start = parseKopfFilterDatum(dm[2], dm[3], dm[4]);
@@ -2028,7 +2133,24 @@ function parseKopfFilter(roh) {
     }
     const sm = tok.match(reSats);
     if (sm) {
-      const n = Number(String(sm[2]).replace(",", "."));
+      let n = Number(String(sm[2]).replace(",", "."));
+      let code = kopfFilterWaehrung(sm[3] || "");
+      if (!code && toks[i + 1] && kopfFilterWaehrung(toks[i + 1])) {
+        i += 1;
+        code = kopfFilterWaehrung(toks[i]);
+      }
+      if (code) {
+        const kurs = kopfFilterKurs(code);
+        if (kurs === undefined) {
+          wartet = true;
+          continue;
+        }
+        if (kurs == null) {
+          fehlt.push(code);
+          continue;
+        }
+        if (Number.isFinite(n)) n = n / kurs * 100_000_000;
+      }
       if (Number.isFinite(n)) {
         if (sm[1] === ">") {
           minSats = minSats == null ? n : Math.max(minSats, n);
@@ -2040,7 +2162,13 @@ function parseKopfFilter(roh) {
     }
     terms.push(tok.toLowerCase());
   }
-  return { leer: false, terms, minSats, maxSats, afterTs, beforeTs };
+  if (fehlt.length) {
+    return { ...leer, kursFehlt: [...new Set(fehlt)].join(", ") };
+  }
+  return {
+    leer: false, terms, minSats, maxSats, afterTs, beforeTs,
+    kursFehlt: null, wartet,
+  };
 }
 
 /**
@@ -2460,6 +2588,10 @@ function wendeKopfFilterAn() {
  * dem der geladenen Seite (``quelle.q``) ändert.
  */
 function kopfFilterGeaendert() {
+  const feld = $("#kopf-filter");
+  const roh = feld && !feld.disabled ? feld.value : "";
+  if (parseKopfFilter(roh).wartet) ladeKurseBekannt();
+  zeichneKopfFilterHinweis();
   wendeKopfFilterAn();
   const q = kopfFilterParameter().toString();
   if (Zustand.ansicht === "wallet" && typeof ladeWalletSeitenNeu === "function") {
@@ -2588,6 +2720,7 @@ async function ladeKursSerie() {
 }
 
 async function ladeSpotkurs({ laut = false } = {}) {
+  ladeKurseBekannt();
   if (laut) logZeile("Hole Bitcoin-Kurs…");
   const w = fiatWaehrung();
   try {
@@ -2623,7 +2756,17 @@ async function ladeSpotkurs({ laut = false } = {}) {
   }
   zeichneKursPille();
   if (Zustand.kurs && Number(Zustand.kurs.amount) > 0) {
+    const w = String(Zustand.kurs.currency || fiatWaehrung()).toUpperCase();
+    const vorher = Zustand.kursBekannt && Zustand.kursBekannt[w];
+    if (w === "EUR" || w === "USD") merkeKursBekannt(w, Zustand.kurs);
+    const nachher = Zustand.kursBekannt && Zustand.kursBekannt[w];
+    const anders = !vorher
+      || !nachher
+      || Number(vorher.amount) !== Number(nachher.amount)
+      || Number(vorher.time) !== Number(nachher.time);
     aktualisiereFiatAnzeigen();
+    const feld = $("#kopf-filter");
+    if (anders && feld && feld.value.trim()) kopfFilterGeaendert();
   }
 }
 

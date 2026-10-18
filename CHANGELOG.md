@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Filter · Fiat:** `>100 EUR`, `>100 €` und `>100EUR` (ebenso USD und $) rechnen mit dem neuesten bereits gespeicherten BTC-Kurs in Sats um. Fehlt der Kurs, bleibt die Liste vollständig und das Feld weist darauf hin. Es wird dafür kein Kurs neu geholt.
+
 - **Tools · gründlicher Wallet-Scan:** Zwei Felder legen das Indexfenster fest. Scan ab steht auf 0, Scan bis auf 500 (Ende einschließlich, Empfang und Wechselgeld). Der Lauf beginnt damit bei Index #0, statt das vordere Fenster auszulassen.
 
 - **Empfang · ohne Log und ohne Assistent:** Ist der Log-Bereich aus und kein LLM verbunden, sitzt der Empfangs-QR unten in der Navigationsleiste und blendet mit ihr ein und aus. Sobald das Log wieder an ist, steht er rechts unten. Ist ein LLM verbunden, bleibt er auch bei ausgeblendetem Log rechts unten.

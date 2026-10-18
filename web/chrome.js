@@ -292,6 +292,7 @@ async function start() {
     }
     window.addEventListener("satsage:lang", () => {
       if (window.SatSageI18n) window.SatSageI18n.applyDom(document);
+      if (typeof zeichneKopfFilterHinweis === "function") zeichneKopfFilterHinweis();
       // data-i18n-html setzt .env-pfad zurück auf „.env“ — echten Pfad wiederherstellen.
       if (Zustand.config?.env_path) setzeEnvPfad(Zustand.config.env_path);
       zeichneNav();

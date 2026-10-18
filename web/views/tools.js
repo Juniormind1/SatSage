@@ -389,6 +389,11 @@ async function pruefeCacheJob() {
       return;
     }
     const treffer = (job.result && job.result.treffer) || [];
+    if (job.result && job.result.kurs_fehlt) {
+      cacheStatus(t("header.filterNoRate", { currency: job.result.kurs_fehlt }));
+      cachePollStop();
+      return;
+    }
     if (cacheListeAnzeigen && Zustand.ansicht === "tools" && job.status === "done") {
       cacheTreffer = treffer;
       zeichneCacheListe(treffer);
@@ -422,6 +427,18 @@ async function starteCacheSuche() {
   if (!roh) {
     feld.focus();
     return;
+  }
+  if (typeof ladeKurseBekannt === "function" && /(?:eur|usd|€|\$)/i.test(roh)) {
+    await ladeKurseBekannt();
+  }
+  if (typeof parseKopfFilter === "function") {
+    const vorher = parseKopfFilter(roh);
+    if (vorher.kursFehlt || vorher.wartet) {
+      cacheStatus(t("header.filterNoRate", {
+        currency: vorher.kursFehlt || "EUR, USD",
+      }));
+      return;
+    }
   }
   cacheListeAnzeigen = true;
   cacheTreffer = [];

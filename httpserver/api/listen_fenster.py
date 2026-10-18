@@ -170,7 +170,7 @@ def fenster_antwort(
         modus = "gruppen"
     offset = lf.query_int(query, "offset", 0)
     limit = lf.query_int(query, "limit", lf.SEITEN_GROESSEN[0])
-    filt = lf.filter_aus_query(query)
+    filt = lf.filter_aus_query(query, immutable_cache_dir=state.immutable_cache_dir)
     lang = lf.query_text(query, "lang", "de")
     own = _eigene_adressen(state)
     imm = state.immutable_cache_dir
@@ -308,7 +308,7 @@ def fenster_antwort(
             "fenster": _fenster_meta(schnitt, offset, limit, modus),
         })
     ergebnis["verlauf"] = verlauf_meta
-    return ergebnis
+    return lf.mit_kurs_hinweis(ergebnis, filt)
 
 
 def _label_cache(state: Any, teil: str, lang: str, filt: dict) -> dict | None:

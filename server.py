@@ -1103,6 +1103,7 @@ from httpserver.api.price_llm_lab import (  # noqa: E402
     api_llm_context,
     api_llm_status,
     api_price,
+    api_price_bekannt,
     api_price_history,
     api_price_history_sync,
     api_price_import,
@@ -1648,6 +1649,8 @@ class Handler(
             return 200, api_llm_status(state, query)
         if teile == ["price"] and methode == "GET":
             return 200, api_price(state, query)
+        if teile == ["price", "bekannt"] and methode == "GET":
+            return 200, api_price_bekannt(state, query)
         if teile == ["price", "history"] and methode == "GET":
             return 200, api_price_history(state, query)
         if teile == ["price", "history", "sync"] and methode == "POST":

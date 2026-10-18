@@ -46,6 +46,36 @@ class TestFilterParse(unittest.TestCase):
     def test_leer(self):
         self.assertTrue(lf.parse_filter("  ")["leer"])
 
+    def test_fiat_schreibweisen_und_engere_grenze(self):
+        kurse = {"EUR": 100_000.0, "USD": 50_000.0}
+        # 100 EUR = 100_000 sats; 50 USD = 100_000 sats; >2000 sats ist lockerer.
+        f = lf.parse_filter(">100 EUR >100€ >100EUR >2000", kurse=kurse)
+        self.assertEqual(f["terms"], [])
+        self.assertEqual(f["min_sats"], 100_000.0)
+        self.assertIsNone(f["kurs_fehlt"])
+        f = lf.parse_filter("<50 usd <50$ <50USD", kurse=kurse)
+        self.assertEqual(f["max_sats"], 100_000.0)
+        f = lf.parse_filter(">5000,5 EUR", kurse=kurse)
+        self.assertEqual(f["min_sats"], 5_000.5 / 100_000.0 * 100_000_000)
+
+    def test_fiat_und_datum_bleiben_getrennt(self):
+        f = lf.parse_filter(">1.1.25 EUR", kurse={"EUR": 100_000.0})
+        self.assertEqual(f["terms"], ["eur"])
+        self.assertIsNotNone(f["after_ts"])
+        self.assertIsNone(f["min_sats"])
+        self.assertIsNone(f["kurs_fehlt"])
+        self.assertEqual(lf.parse_filter("100 EUR")["terms"], ["100", "eur"])
+
+    def test_fehlender_kurs_setzt_filter_aus(self):
+        f = lf.parse_filter("kraken >100 EUR <1.1.25", kurse={"EUR": None, "USD": 1.0})
+        self.assertTrue(f["leer"])
+        self.assertEqual(f["kurs_fehlt"], "EUR")
+        self.assertEqual(f["terms"], [])
+        self.assertIsNone(f["before_ts"])
+        beide = lf.parse_filter(">1 EUR <1 USD")
+        self.assertEqual(beide["kurs_fehlt"], "EUR, USD")
+        self.assertTrue(beide["leer"])
+
 
 class TestLabelText(unittest.TestCase):
     """Port von kopfFilterLabelText/softTxClassLabel."""

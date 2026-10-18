@@ -269,9 +269,12 @@ def api_tools_cache_suche(state: Any, payload: dict | None = None) -> dict:
             anreichere_verlauf=lambda e: anreichere(e, verlauf=True),
             nach_ts=nach_ts,
             vor_ts=vor_ts,
+            immutable_cache_dir=imm,
             on_progress=fortschritt,
             raise_if_cancelled=job.raise_if_cancelled,
         )
+        if ergebnis.get("kurs_fehlt"):
+            return ergebnis
         n = int(ergebnis["total"])
         job.progress(
             f"{n} Treffer." if n else "Keine Treffer im Cache.",

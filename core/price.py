@@ -947,6 +947,39 @@ def _letzter_tageskurs_csv(
     return None
 
 
+def letzter_bekannter_kurs(
+    currency: str,
+    *,
+    immutable_cache_dir: Path | str | None,
+    jetzt: int | None = None,
+) -> BtcPreis | None:
+    """
+    Neuester bereits gespeicherter BTC-Kurs. Holt nichts aus dem Netz.
+
+    Verglichen werden die Spot-Datei (auch nach Ablauf der TTL) und der
+    neueste lokale Tageskurs an oder vor heute. Größeres ``time`` gewinnt,
+    bei Gleichstand der Spot. Ein Betrag ``<= 0`` zählt nicht.
+    """
+    w = normalisiere_historie_waehrung(currency)
+    jetzt_ts = int(time.time() if jetzt is None else jetzt)
+    heute = datetime.fromtimestamp(jetzt_ts, tz=timezone.utc).date()
+    spot: BtcPreis | None = None
+    if immutable_cache_dir is not None:
+        spot = _lese_cache(
+            Path(immutable_cache_dir) / "btc_price" / f"spot_{w}.json"
+        )
+        if spot is not None and not (spot.amount > 0):
+            spot = None
+    tag = _neuester_tageskurs_csv(immutable_cache_dir, w, bis=heute)
+    if tag is not None and not (tag.amount > 0):
+        tag = None
+    if spot is not None and tag is not None:
+        if spot.time >= tag.time:
+            return spot
+        return tag
+    return spot or tag
+
+
 def tageskurs(
     tag: date | datetime | int | str,
     currency: str = "EUR",

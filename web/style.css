@@ -308,6 +308,10 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--blass);
   opacity: 0.9;
 }
+.kopf-filter.kopf-filter-kurs-fehlt {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
 .kopf-filter:disabled,
 .kopf-filter[aria-disabled="true"] {
   opacity: 0.45;

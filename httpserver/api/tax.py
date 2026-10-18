@@ -190,15 +190,16 @@ def api_tax(
 
         auswertung = _steuer_auswertung_gecacht(state, query, sprache)
         lim_ab = lf.query_int(query, "limit_abgaenge", -1)
-        return steuer_fenster.fenster(
+        f = lf.filter_aus_query(query, immutable_cache_dir=state.immutable_cache_dir)
+        return lf.mit_kurs_hinweis(steuer_fenster.fenster(
             auswertung,
             teil=lf.query_text(query, "teil", "alle"),
             offset=lf.query_int(query, "offset", 0),
             limit=lf.query_int(query, "limit", 10),
             limit_abgaenge=None if lim_ab < 0 else lim_ab,
-            f=lf.filter_aus_query(query),
+            f=f,
             lang=lf.query_text(query, "lang", "") or sprache,
-        )
+        ), f)
     auswertung = _steuer_auswertung(state, query, lang=sprache)
     auswertung.pop("_objekte", None)
     return auswertung
@@ -396,15 +397,16 @@ def api_selbstanzeige_kandidaten(state: AppState, query: dict) -> dict:
 
     kandidaten = _sa_kandidaten_gecacht(state, query, rechnen)
     lim_u = lf.query_int(query, "limit_utxos", -1)
-    return steuer_fenster.sa_fenster(
+    f = lf.filter_aus_query(query, immutable_cache_dir=state.immutable_cache_dir)
+    return lf.mit_kurs_hinweis(steuer_fenster.sa_fenster(
         kandidaten,
         teil=lf.query_text(query, "teil", "alle"),
         offset=lf.query_int(query, "offset", 0),
         limit=lf.query_int(query, "limit", 10),
         limit_utxos=None if lim_u < 0 else lim_u,
-        f=lf.filter_aus_query(query),
+        f=f,
         nur_werte=lf.query_text(query, "werte") == "1",
-    )
+    ), f)
 
 
 #: Letzte Kandidatenlisten für Seitenwechsel — gleiche Gültigkeit wie oben.
