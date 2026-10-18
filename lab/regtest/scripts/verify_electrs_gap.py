@@ -11,6 +11,14 @@ zur Laufzeit aus Core (ohne private Schlüssel) und scannt zweimal über
 - Gap 100: Empfang #0 ja, #101 nein
 - Gap 101: beide, inklusive des gemerkten Outpoints
 
+Danach der GUI-Pfad: Ein SatSage-Server auf einem freien Port mit einer
+Kopie der Lab-Env bekommt das Gap-Limit über ``PUT /api/config/source``
+(Datenquellen → Electrum-Server, ``UTXO_SCAN_GAP_LIMIT``). Der Walk liest es
+wie der echte UTXO-Scan über ``utxo_scan_gap_aus_env()``:
+
+- GUI 100: #101 nein
+- GUI 200: #101 ja, inklusive Outpoint
+
 Core scantxoutset findet #101 unabhängig vom Limit. Deshalb bleibt das
 Wallet aus dem Herkunfts-Inventar. Teil von Q6. Startet kein Docker.
 """
@@ -101,6 +109,133 @@ def _scan(xpub: str, client, gap: int, max_index: int) -> tuple[set[str], list[d
         on_utxos_update=nimm,
     )
     return set(adressen), list(stand)
+
+
+GUI_GAP_MISS = 100
+GUI_GAP_HIT = 200
+
+
+def _api(port: int, token: str, pfad: str, *, methode: str = "GET", daten=None):
+    import urllib.error
+    import urllib.request
+
+    koerper = json.dumps(daten).encode() if daten is not None else None
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{pfad}", data=koerper, method=methode,
+    )
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Host", f"127.0.0.1:{port}")
+    req.add_header("X-Satsage-Token", token)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as antwort:
+            return antwort.status, json.loads(antwort.read() or b"{}")
+    except urllib.error.HTTPError as fehler:
+        roh = fehler.read()
+        try:
+            return fehler.code, json.loads(roh or b"{}")
+        except json.JSONDecodeError:
+            return fehler.code, {"raw": roh.decode("utf-8", "replace")}
+
+
+def _gui_pfad(
+    xpub: str, client, *, near_addr: str, far_addr: str,
+    far_op: tuple[str, int], far_index: int,
+) -> int:
+    """Gap-Limit über die Datenquellen-API setzen, dann wie der Scan lesen."""
+    import tempfile
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    import server as satsage_server
+    from core.wallet_sync_engine import (
+        discover_wallet_scan_addresses, utxo_scan_gap_aus_env,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="satsage-gap-gui-") as tmp:
+        wurzel = Path(tmp)
+        env_kopie = wurzel / ".env"
+        zeilen = [
+            z for z in ENV_PATH.read_text(encoding="utf-8").splitlines()
+            if not z.strip().startswith("UTXO_SCAN_GAP_LIMIT")
+        ]
+        env_kopie.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
+        for name in ("utxo_cache", "immutable_cache", "sanctioned_cache"):
+            (wurzel / name).mkdir()
+        pinne_lab_env(env_kopie)
+        if utxo_scan_gap_aus_env() != 100:
+            print("FAIL GUI-Pfad: Vorgabe ohne Eintrag ist nicht 100.", file=sys.stderr)
+            return 1
+        state = satsage_server.AppState(
+            env_kopie, wurzel / "utxo_cache", wurzel / "immutable_cache",
+            sanctions_dir=wurzel / "sanctioned_cache",
+        )
+        satsage_server.Handler.state = state
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), satsage_server.Handler)
+        port = httpd.server_address[1]
+        threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.05},
+            daemon=True,
+        ).start()
+        print(f"GUI-Pfad: SatSage-API auf 127.0.0.1:{port}", flush=True)
+        try:
+            for gap, soll in ((GUI_GAP_MISS, False), (GUI_GAP_HIT, True)):
+                status, koerper = _api(
+                    port, state.token, "/api/config/source", methode="PUT",
+                    daten={"source": "own_fulcrum",
+                           "values": {"UTXO_SCAN_GAP_LIMIT": str(gap)}},
+                )
+                if status != 200:
+                    print(
+                        f"FAIL GUI-Pfad: Speichern {gap} → HTTP {status} {koerper}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                _, cfg = _api(port, state.token, "/api/config")
+                own = next(
+                    (q for q in cfg.get("sources") or [] if q.get("key") == "own_fulcrum"),
+                    {},
+                )
+                if own.get("gap_limit") != gap or utxo_scan_gap_aus_env() != gap:
+                    print(
+                        f"FAIL GUI-Pfad: gespeichert {gap}, API zeigt "
+                        f"{own.get('gap_limit')}, Scan liest {utxo_scan_gap_aus_env()}.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                stand: list[dict] = []
+
+                def nimm(teil: list[dict]) -> None:
+                    stand.clear()
+                    stand.extend(teil)
+
+                # Wie _scan_xpub_utxos: gap_limit aus der .env zur Scan-Zeit.
+                adressen, _ende = discover_wallet_scan_addresses(
+                    xpub, fulcrum=client, max_index_per_chain=far_index + 1,
+                    gap_limit=utxo_scan_gap_aus_env(), start_index=0,
+                    on_utxos_update=nimm,
+                )
+                adressen = set(adressen)
+                if near_addr not in adressen:
+                    print(f"FAIL GUI {gap}: Index #0 fehlt.", file=sys.stderr)
+                    return 1
+                gefunden = far_addr in adressen and _hat(stand, far_op)
+                if gefunden != soll:
+                    print(
+                        f"FAIL GUI {gap}: Index #{far_index} "
+                        f"{'nicht ' if soll else ''}gefunden.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print(
+                    f"  OK  GUI {gap}: Index #{far_index} "
+                    f"{'da' if soll else 'nicht da'}",
+                    flush=True,
+                )
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            pinne_lab_env(ENV_PATH)
+    return 0
 
 
 def main() -> int:
@@ -238,6 +373,13 @@ def main() -> int:
             f"{_kurz(far_op[0])}:{far_op[1]}",
             flush=True,
         )
+
+        ergebnis = _gui_pfad(
+            xpub, client, near_addr=near_addr, far_addr=far_addr,
+            far_op=far_op, far_index=far_index,
+        )
+        if ergebnis:
+            return ergebnis
     finally:
         try:
             client.close()
@@ -246,7 +388,7 @@ def main() -> int:
 
     print(
         f"OK electrs-gap wallet={wallet} miss={gap_miss} hit={gap_hit} "
-        f"index={far_index}",
+        f"gui={GUI_GAP_MISS}/{GUI_GAP_HIT} index={far_index}",
         flush=True,
     )
     return 0

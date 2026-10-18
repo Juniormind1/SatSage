@@ -116,7 +116,7 @@ python3 lab/regtest/scripts/verify_tx_classify.py
 
 ### Electrs-Gap über 100
 
-`lab-gap` ist ein fünftes Core-Wallet, **nicht** in `WALLET_*` und nicht im Herkunfts-Inventar. Empfang #0 und #101 sind belegt, #1…#100 leer. Gap 100 findet nur #0. Gap 101 findet #101. Core `scantxoutset` findet beide — deshalb darf der XPUB nicht in die Lab-Env, sonst wird der Quellen-Vergleich rot.
+`lab-gap` ist ein fünftes Core-Wallet, **nicht** in `WALLET_*` und nicht im Herkunfts-Inventar. Empfang #0 und #101 sind belegt, #1…#100 leer. Gap 100 findet nur #0. Gap 101 findet #101. Danach setzt der Prüfer das Limit wie die GUI über `PUT /api/config/source` (eigener SatSage-Server auf freiem Port, Kopie der Lab-Env): 100 übersieht #101, 200 findet ihn. Core `scantxoutset` findet beide — deshalb darf der XPUB nicht in die Lab-Env, sonst wird der Quellen-Vergleich rot.
 
 Der volle Szenario-Lauf legt das Wallet mit an. Auf einer bestehenden Chain reicht:
 
