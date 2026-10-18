@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,6 +74,43 @@ def _spawn(modus: str):
     return tmp, eingebettet
 
 
+_HINWEISE = (
+    "#einrichtung-onchain-ok",
+    "#einrichtung-spaeter",
+    "#einrichtung-weiter",
+    "#privatsphaere-ok",
+    "#oeffentliche-electrum-nein",
+)
+
+
+def _hinweise_weg(page, sekunden: float = 10.0) -> None:
+    """Hinweise schließen, auch wenn sie erst nach dem Laden kommen.
+
+    Der „On-Chain-Beleg“ erscheint nicht sofort. Läuft beim Start schon ein
+    Header-Job, kommt er oft erst nach Sekunden und liegt dann über der
+    Navigation. Deshalb bis zu *sekunden* warten, bis er da war und kein
+    Hinweis mehr offen ist.
+    """
+    ende = time.monotonic() + sekunden
+    onchain_weg = False
+    while time.monotonic() < ende:
+        geklickt = False
+        for sel in _HINWEISE:
+            loc = page.locator(sel)
+            try:
+                if loc.count() and loc.first.is_visible():
+                    loc.first.click(timeout=1500)
+                    geklickt = True
+                    if sel == "#einrichtung-onchain-ok":
+                        onchain_weg = True
+                    page.wait_for_timeout(200)
+            except Exception:
+                pass
+        if onchain_weg and not geklickt:
+            return
+        page.wait_for_timeout(250)
+
+
 def _oeffne(page, url: str, modus: str) -> None:
     page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     page.wait_for_timeout(500)
@@ -83,20 +121,7 @@ def _oeffne(page, url: str, modus: str) -> None:
         page.locator("#password").fill(UMBREL_BOOT)
         page.locator("#login-form button[type=submit]").click()
         page.locator("#app").wait_for(state="visible", timeout=15_000)
-    for sel in (
-        "#einrichtung-onchain-ok",
-        "#einrichtung-spaeter",
-        "#einrichtung-weiter",
-        "#privatsphaere-ok",
-        "#oeffentliche-electrum-nein",
-    ):
-        loc = page.locator(sel)
-        try:
-            if loc.count() and loc.first.is_visible(timeout=300):
-                loc.first.click(timeout=1500)
-                page.wait_for_timeout(200)
-        except Exception:
-            pass
+    _hinweise_weg(page)
     if not page.locator("#app").is_visible():
         raise RuntimeError("#app nicht sichtbar")
     # Die Nav ist höher als das Fenster. Ein DOM-Klick trifft den Listener
