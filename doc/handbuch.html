@@ -1164,6 +1164,11 @@ ist nicht ohne Weiteres das Entstehungsdatum des Outputs.</p>
   <strong>keinem</strong> der konfigurierten XPUBs gehört. Interne Überträge —
   auch zwischen verschiedenen eigenen Wallets oder Seeds — beginnen keine neue
   Frist.</p>
+  <p><strong>Datum eines Zuflusses</strong> ist die Blockzeit der Transaktion,
+  mit der die Sats auf deiner Adresse ankamen — der Empfang durch das Wallet.
+  Wie lange sie vorher beim Absender lagen (Blockzeit seines Outputs), zählt
+  nicht. Bis Version 1.0.0 nahm SatSage dieses frühere Datum; die Haltefrist
+  begann dadurch zu früh.</p>
 </blockquote>
 
 <h4>Ein durchgehendes Beispiel</h4>
@@ -1212,6 +1217,9 @@ Zuflüsse: 01.03.2021 (0,8 BTC) und 15.06.2022 (0,7 BTC). Der
       der jüngste. Das ist die defensive Lesart: Die Frist gilt erst als
       erfüllt, wenn <em>alle</em> Sats im UTXO länger als ein Jahr gehalten
       wurden.</li>
+  <li><strong>Nicht</strong> der Tag, an dem Bitpanda die Sats selbst erhielt,
+      sondern der Tag von <code>T2</code>, an dem sie auf
+      <code>A-receive-3</code> ankamen.</li>
 </ol>
 
 <p>In den Einstellungen unter <strong>Anschaffung aus Herkunft</strong> (bzw.
@@ -1250,6 +1258,7 @@ sats ausgebbar. Während einer Herkunftsanalyse (Klären) steigt die Zahl
 mit jedem fertigen Baum, wie die grüne Scorecard im Steuerjahr.</p>
 <p>Auch das Anschaffungsdatum kommt aus diesen Losen: Bei „jüngste“ zählt das
 jüngste, bei „älteste“ das älteste Los, das per FIFO in diesem UTXO steckt.
+Jedes Los trägt das Datum seines Wallet-Eingangs (siehe Grundregel).
 Datum, Farbe und „erfüllt“ passen so zusammen; Frist-Ende und Haltedauer folgen.
 Im Zeitstrahl steht ein Punkt zuerst am Datum aus dem Herkunftsbaum und rückt
 nach dem Lot-Lauf an sein Los-Datum. Wo SatSage anteilig verteilt (fremde

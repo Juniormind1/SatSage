@@ -807,11 +807,25 @@ def _knoten_blockhoehe(knoten: dict) -> int | None:
     return n if n > 0 else None
 
 
+def _zeit_ref(knoten: dict) -> str:
+    """
+    „txid:vout“, dessen Blockzeit die Zeit des Knotens ist.
+
+    Externe Blätter: die Tx, mit der die Sats im Wallet ankamen
+    (``funding_txid``), nicht der fremde Prevout. Ohne ``funding_txid``
+    (älteres Format) wird nichts geraten.
+    """
+    if knoten.get("type") == "external":
+        fund = str(knoten.get("funding_txid") or "").strip()
+        return f"{fund}:0" if fund else ""
+    return str(knoten.get("from_utxo") or "")
+
+
 def _zeit_aus_tx_cache(
     from_utxo: str,
     immutable: Path | None,
 ) -> tuple[int | None, str]:
-    """Blockzeit der Prevout-Tx aus dem Tx-Cache (inkl. Header-Nachzug)."""
+    """Blockzeit der Tx zu „txid:vout“ aus dem Tx-Cache (inkl. Header-Nachzug)."""
     if not immutable or not from_utxo or ":" not in str(from_utxo):
         return None, ""
     try:
@@ -853,7 +867,7 @@ def _knoten_zeit_fuellen(
             cache = None
     _setze_externe_zeit(knoten)
     if not (knoten.get("time_label") and knoten.get("block_time")):
-        ts, label = _zeit_aus_tx_cache(knoten.get("from_utxo") or "", cache)
+        ts, label = _zeit_aus_tx_cache(_zeit_ref(knoten), cache)
         if label and not knoten.get("time_label"):
             knoten["time_label"] = label
         if ts:
@@ -940,7 +954,7 @@ def hat_extern_ohne_zeit(baum: dict | None) -> bool:
         if (
             knoten.get("type") == "external"
             and _knoten_ohne_datum(knoten)
-            and ":" in str(knoten.get("from_utxo") or "")
+            and ":" in _zeit_ref(knoten)
         ):
             return True
         for kind in knoten.get("children") or []:
@@ -987,7 +1001,7 @@ def externe_blockzeiten_nachziehen(baum: dict | None, get_tx) -> int:
         nonlocal geaendert
         if knoten.get("type") != "external" or not _knoten_ohne_datum(knoten):
             return
-        ref = str(knoten.get("from_utxo") or "")
+        ref = _zeit_ref(knoten)
         if ":" not in ref:
             return
         try:
@@ -1217,10 +1231,13 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
         from_utxo = str(quelle.get("from_utxo") or "")
         prev_txid = from_utxo.rsplit(":", 1)[0] if ":" in from_utxo else ""
         knoten["label"] = labels.beschrifte(adresse, txid=prev_txid)
-        # Blockzeit des Prevouts: wann diese Sats die fremde Adresse erreichten
-        # (bzw. der Funding-Output bestätigt wurde). analyze legt time_ts ab;
-        # ohne das blieb die UI-Zeile ohne Datum, obwohl die jüngsten sats
-        # genau aus diesen Zeiten berechnet werden.
+        # Zeit = Empfang durch das Wallet: Blockzeit der Tx, mit der diese
+        # Sats auf der eigenen Adresse ankamen (funding_txid). Daraus
+        # werden „jüngste sats“ und die Anschaffung berechnet.
+        if quelle.get("funding_txid"):
+            knoten["funding_txid"] = quelle.get("funding_txid")
+        if quelle.get("prevout_time_ts"):
+            knoten["prevout_time_ts"] = quelle.get("prevout_time_ts")
         _setze_externe_zeit(knoten, quelle)
     elif typ == "external_unresolved":
         anzahl = int(quelle.get("input_count", 0) or 0)

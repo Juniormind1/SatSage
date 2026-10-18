@@ -442,8 +442,9 @@ class TestMehrereEingaenge(unittest.TestCase):
 
 class TestExternerZeitstempel(unittest.TestCase):
     """
-    Externe Kanten tragen die Blockzeit ihrer Vorgänger-Tx — daraus ergibt
-    sich das steuerliche Anschaffungsdatum (jüngster externer Zufluss).
+    Externe Kanten tragen die Blockzeit der Tx, mit der die Sats im Wallet
+    ankamen — daraus ergibt sich das steuerliche Anschaffungsdatum. Die
+    Blockzeit des fremden Prevouts steht nur zur Anzeige daneben.
     """
 
     def test_externer_zufluss_traegt_die_blockzeit_seiner_tx(self):
@@ -452,7 +453,10 @@ class TestExternerZeitstempel(unittest.TestCase):
         )
         extern = node["sources"][0]
         self.assertEqual(extern["type"], "external")
-        self.assertEqual(extern["time_ts"], 1_690_000_000)
+        # Empfang durch das Wallet (TXID_WALLET_IN), nicht der Prevout.
+        self.assertEqual(extern["time_ts"], 1_700_000_000)
+        self.assertEqual(extern["funding_txid"], TXID_WALLET_IN)
+        self.assertEqual(extern["prevout_time_ts"], 1_690_000_000)
 
     def test_kleine_tx_loest_alle_eingaenge_auf(self):
         """
@@ -486,7 +490,9 @@ class TestExternerZeitstempel(unittest.TestCase):
         self.assertIn(fremder, geladen, "kleine Tx muss alle Eingänge auflösen")
 
         extern = next(q for q in node["sources"] if q["type"] == "external")
-        self.assertEqual(extern["time_ts"], 1_695_000_000)
+        # Anschaffung = Blockzeit von ziel (Standard 1_700_000_000).
+        self.assertEqual(extern["time_ts"], 1_700_000_000)
+        self.assertEqual(extern["prevout_time_ts"], 1_695_000_000)
 
     def test_grosse_tx_bricht_weiterhin_ab(self):
         """
@@ -548,11 +554,13 @@ class TestJuengsterExternerZufluss(unittest.TestCase):
 
     def test_interne_uebertraege_behalten_den_externen_ursprung(self):
         """
-        Börse → Wallet A → Wallet B: Anschaffungsdatum bleibt der Börsen-
-        Zufluss, obwohl der letzte Wallet-Eingang jünger ist.
+        Börse → Wallet A → Wallet B: Anschaffungsdatum bleibt der Eingang in
+        Wallet A (vorher, 1_690_000_000), obwohl der letzte Wallet-Eingang
+        jünger ist. Wie lange die Sats vorher bei der Börse lagen
+        (1_680_000_000), zählt nicht.
         """
         ergebnis = analyze._youngest_external_ingress(self._interne_kette())
-        self.assertEqual(ergebnis["time_ts"], 1_680_000_000)
+        self.assertEqual(ergebnis["time_ts"], 1_690_000_000)
         self.assertFalse(ergebnis["untergrenze"])
 
     def test_unaufloesbare_externe_markieren_untergrenze(self):
@@ -603,9 +611,9 @@ if __name__ == "__main__":
 class TestInlinePrevoutBlockzeit(unittest.TestCase):
     """
     Esplora liefert den Vorgänger-Output inline in ``vin[].prevout`` — aber
-    ohne dessen Blockzeit. Genau die ist das Anschaffungsdatum. Bei kleinen
-    Transaktionen wird sie für externe Eingänge nachgeladen; sonst liefe das
-    Feature auf dieser Datenquelle stillschweigend ins Leere.
+    ohne dessen Blockzeit. Bei kleinen Transaktionen wird sie für externe
+    Eingänge nachgeladen und als ``prevout_time_ts`` angezeigt. Das
+    Anschaffungsdatum ist davon unabhängig: Blockzeit der Wallet-Tx.
     """
 
     ZEIT_EXTERN = 1_584_262_800   # 15.03.2020
@@ -640,14 +648,17 @@ class TestInlinePrevoutBlockzeit(unittest.TestCase):
         quellen = self.trace(2)["sources"]
         self.assertEqual([q["type"] for q in quellen], ["external", "external"])
         self.assertEqual(
-            [q["time_ts"] for q in quellen],
+            [q["prevout_time_ts"] for q in quellen],
             [self.ZEIT_EXTERN, self.ZEIT_EXTERN + 1],
+        )
+        self.assertEqual(
+            [q["time_ts"] for q in quellen], [self.ZEIT_WALLET] * 2,
         )
 
     def test_anschaffungsdatum_ist_der_juengste_externe_zufluss(self):
         external = analyze._youngest_external_ingress(self.trace(3))
         self.assertIsNotNone(external)
-        self.assertEqual(external["time_ts"], self.ZEIT_EXTERN + 2)
+        self.assertEqual(external["time_ts"], self.ZEIT_WALLET)
         self.assertFalse(external["untergrenze"])
 
     def test_grosse_sammel_tx_laedt_nicht_nach(self):
@@ -657,19 +668,21 @@ class TestInlinePrevoutBlockzeit(unittest.TestCase):
         """
         eingaenge = trace_engine.FULL_RESOLUTION_INPUT_LIMIT + 1
         quellen = self.trace(eingaenge)["sources"]
-        self.assertTrue(all(q["time_ts"] is None for q in quellen))
+        self.assertTrue(all(q["prevout_time_ts"] is None for q in quellen))
+        self.assertTrue(all(q["time_ts"] == self.ZEIT_WALLET for q in quellen))
         # Keine einzige Vorgänger-Tx wurde angefasst. (Die Wallet-Tx selbst
         # holen trace_utxo_origin und iter_trace_funding_inputs je einmal;
         # in der Anwendung ist get_tx gecacht.)
         self.assertEqual(set(self.geladen), {TXID_WALLET_IN})
 
-    def test_ohne_datierten_zufluss_kein_anschaffungsdatum(self):
+    def test_sammel_tx_hat_trotzdem_ein_anschaffungsdatum(self):
         """
-        Lieber gar keine Angabe als eine erfundene: Die Steuerschicht fällt
-        dann auf den Wallet-Eingang zurück und weist das aus.
+        Ohne Prevout-Zeiten bleibt das Anschaffungsdatum bekannt: Es ist die
+        Blockzeit der Wallet-Tx, die ohnehin geladen ist.
         """
         eingaenge = trace_engine.FULL_RESOLUTION_INPUT_LIMIT + 1
-        self.assertIsNone(analyze._youngest_external_ingress(self.trace(eingaenge)))
+        external = analyze._youngest_external_ingress(self.trace(eingaenge))
+        self.assertEqual(external["time_ts"], self.ZEIT_WALLET)
 
     def test_interne_eingaenge_kosten_keinen_zusatzabruf(self):
         """

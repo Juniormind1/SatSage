@@ -2956,6 +2956,8 @@ class TestHerkunftVollstaendig(ApiTestBasis):
             "children": [{
                 "type": "external",
                 "from_utxo": f"{txid('e9')}:0",
+                # Zeit kommt vom Wallet-Eingang, nicht vom fremden Prevout.
+                "funding_txid": txid("d4"),
                 "time_label": "",
                 "children": [],
             }],

@@ -153,6 +153,30 @@ def _pending_stub(
 
 
 
+def _empfang_zeit(node: dict | None) -> tuple[int | None, str]:
+    """
+    Zeit eines externen Zuflusses: Blockzeit der Tx, mit der die Sats auf
+    der eigenen Adresse ankamen (*node* = diese Tx), als (Unix, Anzeige UTC).
+
+    Steuerlich ist das die Anschaffung durch das Wallet. Wie lange die Sats
+    vorher bei einem Fremden lagen (Blockzeit des Prevouts), spielt dafür
+    keine Rolle. Unbestätigte Tx: (None, "").
+    """
+    ts = (node or {}).get("time_ts")
+    try:
+        ts = int(ts) if ts else None
+    except (TypeError, ValueError):
+        ts = None
+    if not ts or ts <= 0:
+        return None, ""
+    try:
+        from datetime import UTC, datetime
+
+        return ts, datetime.fromtimestamp(ts, UTC).strftime("%d.%m.%Y %H:%M:%S")
+    except (OSError, OverflowError, ValueError):
+        return ts, ""
+
+
 def trace_utxo_origin(
     get_tx,
     creator_txid: str,
@@ -349,6 +373,7 @@ def trace_utxo_origin(
             "from_utxo": utxo_key,
             "time_ts": node.get("time_ts"),
             "time": node.get("time") or "",
+            "funding_txid": node.get("txid"),
             "exchange_stop": True,
         }]
         memo[utxo_key] = node
@@ -520,17 +545,7 @@ def trace_utxo_origin(
             except Exception:
                 prev_boerse = None
             if prev_boerse is not None:
-                ext_ts = edge.prev_time_ts
-                ext_time = ""
-                if ext_ts:
-                    try:
-                        from datetime import UTC, datetime
-
-                        ext_time = datetime.fromtimestamp(
-                            int(ext_ts), UTC
-                        ).strftime("%d.%m.%Y %H:%M:%S")
-                    except (OSError, OverflowError, TypeError, ValueError):
-                        ext_time = ""
+                ext_ts, ext_time = _empfang_zeit(node)
                 node["sources"].append({
                     "type": "external",
                     "address": (
@@ -541,6 +556,8 @@ def trace_utxo_origin(
                     "from_utxo": prev_ref,
                     "time_ts": ext_ts,
                     "time": ext_time,
+                    "prevout_time_ts": edge.prev_time_ts,
+                    "funding_txid": creator_txid,
                     "exchange_stop": True,
                 })
                 _melde_teilstand()
@@ -631,18 +648,9 @@ def trace_utxo_origin(
             else:
                 if spur is not None:
                     spur.extern += 1
-                ext_ts = edge.prev_time_ts
-                ext_time = ""
-                if ext_ts:
-                    try:
-                        # Anzeige wie bei internen Hops (ohne extra get_tx).
-                        from datetime import UTC, datetime
-
-                        ext_time = datetime.fromtimestamp(
-                            int(ext_ts), UTC
-                        ).strftime("%d.%m.%Y %H:%M:%S")
-                    except (OSError, OverflowError, TypeError, ValueError):
-                        ext_time = ""
+                # Anschaffung = Empfang durch das Wallet: Blockzeit dieser
+                # Tx (``node``), nicht seit wann die Sats beim Fremden lagen.
+                ext_ts, ext_time = _empfang_zeit(node)
                 if progress:
                     from display import abbrev_display
 
@@ -659,6 +667,9 @@ def trace_utxo_origin(
                     "from_utxo": prev_ref,
                     "time_ts": ext_ts,
                     "time": ext_time,
+                    # Nur zur Anzeige: Blockzeit des fremden Prevouts.
+                    "prevout_time_ts": edge.prev_time_ts,
+                    "funding_txid": creator_txid,
                 })
                 _melde_teilstand()
         except Exception as exc:
@@ -1150,6 +1161,7 @@ def vertiefe_herkunft_luecken(
                 elif kind and kind.get("type") not in ("error", "unknown"):
                     # Als external-Blatt, wenn Prevout jetzt da und fremd
                     addrs = kind.get("addresses") or []
+                    emp_ts, emp_time = _empfang_zeit(node)
                     neu_quellen.append({
                         "type": "external",
                         "address": addrs[0] if addrs else "unbekannt",
@@ -1159,8 +1171,11 @@ def vertiefe_herkunft_luecken(
                             or 0
                         ),
                         "from_utxo": f"{txid}:{vout}",
-                        "time_ts": kind.get("time_ts"),
-                        "time": kind.get("time") or "",
+                        # Empfang durch das Wallet = Blockzeit dieses Hops.
+                        "time_ts": emp_ts,
+                        "time": emp_time,
+                        "prevout_time_ts": kind.get("time_ts"),
+                        "funding_txid": node.get("txid"),
                     })
                 else:
                     neu_quellen.append(src)

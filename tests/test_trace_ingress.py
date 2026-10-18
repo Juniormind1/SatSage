@@ -28,8 +28,10 @@ from tests.fixtures import (
 
 EIGENE = {BIP84_RECEIVE_0, BIP84_CHANGE_0}
 
-#: Blockzeit des externen Zuflusses in simple_chain (TXID_EXTERN).
-EXTERN_TS = 1_690_000_000
+#: Anschaffung in simple_chain: Blockzeit der Tx, mit der die Sats im
+#: Wallet ankamen (TXID_WALLET_IN) — nicht die des fremden Prevouts
+#: (TXID_EXTERN, 1_690_000_000).
+EXTERN_TS = 1_700_000_000
 
 
 class TestIngressWirdGeschrieben(unittest.TestCase):
@@ -163,8 +165,8 @@ class TestSteuerjahrSiehtDieHerkunft(unittest.TestCase):
             "vout": 0,
             "address": BIP84_RECEIVE_0,
             "value": 60_000_000,
-            # Der Output selbst entstand deutlich später als der externe
-            # Zufluss — genau der Unterschied, um den es geht.
+            # Hier kamen die Sats von außen an: Anschaffung = Output-Datum,
+            # aber mit Grundlage „Herkunft verfolgt“.
             "status": {"block_time": 1_700_000_000, "confirmed": True},
         }
 
@@ -188,7 +190,8 @@ class TestSteuerjahrSiehtDieHerkunft(unittest.TestCase):
             eintrag["grundlage"], tax.GRUNDLAGE_HERKUNFT,
             "Nach dem Tracen muss die Grundlage 'Herkunft verfolgt' sein.",
         )
-        self.assertEqual(eintrag["datum"], "22.07.2023")
+        # Empfang durch das Wallet (TXID_WALLET_IN), nicht 22.07.2023.
+        self.assertEqual(eintrag["datum"], "14.11.2023")
 
 
 if __name__ == "__main__":

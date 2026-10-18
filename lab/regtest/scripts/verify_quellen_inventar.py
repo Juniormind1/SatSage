@@ -1033,7 +1033,8 @@ def _laufe_p2p(
 
 def _pruefe_stichtage(env: dict[str, str], ctx, imm: Path) -> list[dict]:
     """
-    Bestand am 31.12. jedes abgeschlossenen Jahres gegen die Kette.
+    Bestand am 31.12. jedes abgeschlossenen Jahres gegen die Kette, dazu
+    die Anschaffung (Empfang durch das Wallet) je UTXO mit Herkunft.
 
     Läuft nach dem Electrs-Klären: Jedes UTXO hat dann eine Herkunft, und
     ein Output aus dem Folgejahr mit alter Anschaffung fiele auf, wenn die
@@ -1050,7 +1051,9 @@ def _pruefe_stichtage(env: dict[str, str], ctx, imm: Path) -> list[dict]:
     for z in zeilen:
         print(
             f"  Stichtag 31.12.{z['jahr']}: {z['ist_count']} Outputs / "
-            f"{z['ist_sats']} sats (Kette {z['soll_count']} / {z['soll_sats']})",
+            f"{z['ist_sats']} sats (Kette {z['soll_count']} / {z['soll_sats']}), "
+            f"Anschaffung {z.get('anschaffung_geprueft', 0) - z.get('anschaffung_falsch', 0)}"
+            f"/{z.get('anschaffung_geprueft', 0)} im Empfangsfenster",
             flush=True,
         )
     print(f"  Stichtage gegen Kette: {time.monotonic() - t0:.1f}s", flush=True)

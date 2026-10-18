@@ -138,6 +138,10 @@ def abgeschlossene_jahre(wahrheit: dict[str, dict], jetzt: datetime | None = Non
     return sorted(j for j in jahre if j < jetzt.year)
 
 
+def _tag(ts: int) -> str:
+    return datetime.fromtimestamp(int(ts)).strftime("%d.%m.%Y")
+
+
 def pruefe_stichtage(
     wahrheit: dict[str, dict],
     *,
@@ -150,8 +154,17 @@ def pruefe_stichtage(
     Wertet jedes abgeschlossene Jahr aus dem Ketten-Verlauf aus.
 
     Liefert *(fehler, zeilen)*; *zeilen* je Jahr Soll/Ist für den Bericht.
+
+    Dazu die Anschaffung: Steht ein UTXO auf „Herkunft verfolgt“, muss sein
+    Datum zwischen ältestem und jüngstem Empfang von außen liegen. Ein
+    Datum davor (etwa die Blockzeit des fremden Prevouts) ist falsch.
     """
-    from core.tax import auswerten, lese_steuer_einstellungen, parse_stichtag
+    from core.tax import (
+        GRUNDLAGE_HERKUNFT,
+        auswerten,
+        lese_steuer_einstellungen,
+        parse_stichtag,
+    )
 
     einstellung = lese_steuer_einstellungen(env or {})
     verlauf = als_verlauf(wahrheit)
@@ -178,6 +191,33 @@ def pruefe_stichtage(
             "ist_count": int(k["gesamt_count"]),
             "ist_sats": int(k["gesamt_sats"]),
         }
+        falsch: list[str] = []
+        geprueft = 0
+        for e in ist["eintraege"]:
+            key = f'{e["txid"]}:{e["vout"]}'
+            soll_e = soll.get(key)
+            if (
+                soll_e is None
+                or e.get("grundlage") != GRUNDLAGE_HERKUNFT
+                or e.get("untergrenze")
+                or e.get("herkunft_offen")
+                or soll_e.get("juengste") is None
+            ):
+                continue
+            geprueft += 1
+            ts = int(e["time_ts"])
+            if not soll_e["aelteste"] <= ts <= soll_e["juengste"]:
+                falsch.append(
+                    f"{key} {e['datum']} (Kette {_tag(soll_e['aelteste'])}"
+                    f"…{_tag(soll_e['juengste'])})"
+                )
+        zeile["anschaffung_geprueft"] = geprueft
+        zeile["anschaffung_falsch"] = len(falsch)
+        if falsch:
+            fehler.append(
+                f"Anschaffung 31.12.{jahr}: {len(falsch)} von {geprueft} "
+                f"außerhalb des Empfangs von außen, z. B. {falsch[:3]}"
+            )
         zeilen.append(zeile)
         if zeile["ist_count"] != len(soll) or zeile["ist_sats"] != soll_sats:
             zuviel = sorted(ist_keys - set(soll))

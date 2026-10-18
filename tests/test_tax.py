@@ -1604,9 +1604,10 @@ class TestLotSummen(unittest.TestCase):
     def test_undatiertes_ende_wird_aus_tx_cache_gruen(self):
         from core import xpub_cache
 
+        # Datiert wird über die Tx des Wallet-Eingangs (funding_txid).
         self._speichern("e5", [
             self._extern("c1", 500, "01.01.2020 12:00:00"),
-            self._extern("c2", 500, ""),
+            {**self._extern("b2", 500, ""), "funding_txid": txid("c2")},
         ])
         xpub_cache.save_cached_tx(txid("c2"), {
             "txid": txid("c2"),

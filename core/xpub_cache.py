@@ -67,7 +67,10 @@ UTXO_INGRESS_CACHE_SUBDIR = "utxo_ingress"
 #: nächsten Herkunftslauf neu erhoben.
 #: 2 — Release 1.0.1: Bäume aus der Zeit vor dem HRP-Fix (Regtest-Blätter
 #:     mit Mainnet-Präfix ``bc1``) hielten eigene Eingänge für extern.
-HERKUNFT_SCHEMA = 2
+#: 3 — Release 1.0.1: externe Blätter tragen die Blockzeit des Wallet-
+#:     Eingangs (Funding-Tx) statt der des fremden Prevouts; die
+#:     Anschaffung wird damit neu berechnet.
+HERKUNFT_SCHEMA = 3
 
 
 def herkunft_schema_passt(daten: dict | None) -> bool:

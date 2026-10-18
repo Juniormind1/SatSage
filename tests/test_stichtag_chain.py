@@ -123,6 +123,37 @@ class TestPruefeStichtage(unittest.TestCase):
              (2025, 1, 150_000_000)],
         )
 
+    def test_anschaffung_vor_dem_empfang_faellt_auf(self):
+        """Prevout-Datum (vor dem Empfang von außen) ist ein Fehler."""
+        from core import xpub_cache
+
+        w = chain_wahrheit(_rpc, EIGEN)
+        zu_frueh = T1 - 30 * 86_400   # fremder Prevout lag schon länger
+        with tempfile.TemporaryDirectory() as tmp:
+            imm = Path(tmp)
+            xpub_cache.save_utxo_ingress_cache(
+                A, 0,
+                {"youngest_time_ts": zu_frueh, "external_time_ts": zu_frueh},
+                imm,
+            )
+            fehler, zeilen = pruefe_stichtage(w, imm=imm, jahre=[2024])
+        self.assertEqual(zeilen[0]["anschaffung_geprueft"], 1)
+        self.assertEqual(zeilen[0]["anschaffung_falsch"], 1)
+        self.assertTrue(any("Anschaffung 31.12.2024" in f for f in fehler))
+
+    def test_anschaffung_am_empfang_ist_richtig(self):
+        w = chain_wahrheit(_rpc, EIGEN)
+        from core import xpub_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            imm = Path(tmp)
+            xpub_cache.save_utxo_ingress_cache(
+                A, 0, {"youngest_time_ts": T1, "external_time_ts": T1}, imm,
+            )
+            fehler, zeilen = pruefe_stichtage(w, imm=imm, jahre=[2024])
+        self.assertEqual(fehler, [])
+        self.assertEqual(zeilen[0]["anschaffung_geprueft"], 1)
+        self.assertEqual(zeilen[0]["anschaffung_falsch"], 0)
 
 if __name__ == "__main__":
     unittest.main()
