@@ -239,6 +239,10 @@ def _mine(rpc, blocks: int = 1) -> None:
     rpc.call("generatetoaddress", str(blocks), ziel, wallet="lab-faucet")
 
 
+def _hat_bestand(rpc) -> bool:
+    return bool(rpc.json("listunspent", "0", "9999999", wallet=WALLET))
+
+
 def _sweep(rpc) -> None:
     try:
         rpc.call("rescanblockchain", "0", wallet=WALLET)
@@ -282,16 +286,6 @@ def _warte_ort(page, ort: str, sekunden: float) -> None:
         arg=NAME,
         timeout=int(sekunden * 1000),
     )
-
-
-def _warte_einen(page, orte: tuple[str, ...], sekunden: float) -> str:
-    erlaubt = json.dumps(list(orte))
-    page.wait_for_function(
-        f"(name) => {erlaubt}.includes(({_ORT_JS})(name))",
-        arg=NAME,
-        timeout=int(sekunden * 1000),
-    )
-    return page.evaluate(_ORT_JS, NAME)
 
 
 def _zuerst_leeren(page, rpc) -> None:
@@ -467,8 +461,13 @@ def main() -> int:
                 _lege_an(page, xpub)
                 # Ein frischer Import scannt den Core-Bestand. Sats vom vorigen
                 # Lauf liegen dann in der normalen Liste, nicht im Dachboden.
-                if _warte_einen(page, ("dachboden", "liste"), 180) == "liste":
+                # Bis der Scan im Cache steht, zeigt die Nav das Wallet kurz in
+                # der Liste. Ob ein Rest liegt, sagt deshalb Core, nicht die Nav.
+                if _hat_bestand(rpc):
+                    _warte_ort(page, "liste", 180)
                     _zuerst_leeren(page, rpc)
+                else:
+                    _warte_ort(page, "dachboden", 180)
             else:
                 _warte_ort(page, "dachboden", 30)
             print("  im Dachboden")
