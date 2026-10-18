@@ -193,19 +193,37 @@ def pruefe_stichtage(
         }
         falsch: list[str] = []
         geprueft = 0
+        buendel = 0
+        untergrenze = 0
         for e in ist["eintraege"]:
             key = f'{e["txid"]}:{e["vout"]}'
             soll_e = soll.get(key)
             if (
                 soll_e is None
                 or e.get("grundlage") != GRUNDLAGE_HERKUNFT
-                or e.get("untergrenze")
-                or e.get("herkunft_offen")
                 or soll_e.get("juengste") is None
             ):
                 continue
-            geprueft += 1
+            if e.get("untergrenze"):
+                # Nur noch bei unbestätigter Tx in der Herkunft — die Kette
+                # kennt dafür keine Wahrheit. Gezählt, nicht geprüft.
+                untergrenze += 1
+                continue
             ts = int(e["time_ts"])
+            if e.get("buendel_obergrenze"):
+                # Bündel: Datum ist die Blockzeit der Sammel-Tx — nie älter
+                # als der echte jüngste Empfang von außen.
+                buendel += 1
+                geprueft += 1
+                if ts < soll_e["juengste"]:
+                    falsch.append(
+                        f"{key} {e['datum']} Bündel älter als Empfang "
+                        f"{_tag(soll_e['juengste'])}"
+                    )
+                continue
+            if e.get("herkunft_offen"):
+                continue
+            geprueft += 1
             if not soll_e["aelteste"] <= ts <= soll_e["juengste"]:
                 falsch.append(
                     f"{key} {e['datum']} (Kette {_tag(soll_e['aelteste'])}"
@@ -213,6 +231,8 @@ def pruefe_stichtage(
                 )
         zeile["anschaffung_geprueft"] = geprueft
         zeile["anschaffung_falsch"] = len(falsch)
+        zeile["anschaffung_buendel"] = buendel
+        zeile["anschaffung_untergrenze"] = untergrenze
         if falsch:
             fehler.append(
                 f"Anschaffung 31.12.{jahr}: {len(falsch)} von {geprueft} "

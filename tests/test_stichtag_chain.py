@@ -155,5 +155,45 @@ class TestPruefeStichtage(unittest.TestCase):
         self.assertEqual(zeilen[0]["anschaffung_geprueft"], 1)
         self.assertEqual(zeilen[0]["anschaffung_falsch"], 0)
 
+
+    def _bundle_lauf(self, ts, **flags):
+        from core import xpub_cache
+
+        w = chain_wahrheit(_rpc, EIGEN)
+        with tempfile.TemporaryDirectory() as tmp:
+            imm = Path(tmp)
+            xpub_cache.save_utxo_ingress_cache(
+                A, 0,
+                {"youngest_time_ts": ts, "external_time_ts": ts, **flags},
+                imm,
+            )
+            return pruefe_stichtage(w, imm=imm, jahre=[2024])
+
+    def test_buendel_juenger_als_empfang_ist_richtig(self):
+        """Bündel-Obergrenze: später als der Empfang ist erlaubt."""
+        spaeter = T1 + 90 * 86_400
+        fehler, zeilen = self._bundle_lauf(
+            spaeter, external_buendel=True, external_buendel_obergrenze=True,
+        )
+        self.assertEqual(fehler, [])
+        self.assertEqual(zeilen[0]["anschaffung_buendel"], 1)
+        self.assertEqual(zeilen[0]["anschaffung_geprueft"], 1)
+
+    def test_buendel_aelter_als_empfang_faellt_auf(self):
+        fehler, zeilen = self._bundle_lauf(
+            T1 - 86_400, external_buendel=True,
+            external_buendel_obergrenze=True,
+        )
+        self.assertEqual(zeilen[0]["anschaffung_falsch"], 1)
+        self.assertTrue(any("Bündel" in f for f in fehler))
+
+    def test_untergrenze_wird_gezaehlt_nicht_geprueft(self):
+        fehler, zeilen = self._bundle_lauf(
+            T1 - 86_400, external_untergrenze=True,
+        )
+        self.assertEqual(fehler, [])
+        self.assertEqual(zeilen[0]["anschaffung_untergrenze"], 1)
+        self.assertEqual(zeilen[0]["anschaffung_geprueft"], 0)
+
 if __name__ == "__main__":
     unittest.main()
