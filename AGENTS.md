@@ -68,6 +68,17 @@ Mehrdeutig heißt: ein Wort lässt mehrere Umsetzungen zu, eine Grenze oder ein 
 - Keine Heuristik, die eine Lesart still zur Regel macht (Fallback, „näher an heute“, „was üblich wäre“, Sonderfall selbst ausgedacht).
 - Erst umsetzen, wenn die Antwort die Wahl festlegt.
 
+## HART · Naheliegende Hypothese zuerst
+
+**Beim Diagnostizieren ordnet der Assistent Hypothesen nach Wahrscheinlichkeit und prüft die naheliegendste zuerst.**
+
+Naheliegend heißt: sie erklärt die beobachteten Fakten aus dem vorhandenen Code oder dem üblichen Ablauf, ohne Zusatzannahmen.
+
+- Zuerst die wahrscheinlichste vollständig durchdenken und an Code oder Fakten prüfen.
+- Eine unwahrscheinlichere erst anfassen, wenn die naheliegendere an einem konkreten Fakt scheitert.
+- Im Chat die Rangfolge kurz nennen. Randideen nicht ausbreiten, solange die führende Hypothese trägt.
+- Trifft sie zu, dabei bleiben.
+
 ## HART · Core-RPC nur aus der Allowlist
 
 Dealbreaker **T14**. Jeder bitcoind-Aufruf geht durch `BitcoinRpcClient.call` in `core/bitcoind_rpc.py`; erlaubt sind nur `RPC_KERN` (lesend), `RPC_WALLET_IMPORT` (`listdescriptors` nur ohne private Schlüssel) und `RPC_LAB_REGTEST` (nur `NETWORK=regtest`). Keine wallet-schreibenden/signierenden RPCs, kein Roh-JSON-RPC, kein `bitcoin-cli` im Produktivcode. `RpcAllowlistError` nie in einen Fallback verschlucken (`except RpcAllowlistError: raise` vor `except Exception`). Neue Methode = Maintainer-Freigabe + Doku (`.env.example`, Handbuch „Bitcoin Core absichern“, README) + Tests `tests/test_rpc_allowlist*.py`. Jeder Pull Request nach `main` prüft Allowlist und die Hinweise „rpcwhitelist?“ / „disablewallet?“ zusätzlich am Regtest-Node (`lab/regtest/scripts/verify_rpc_allowlist.py`, Dealbreaker Q6).

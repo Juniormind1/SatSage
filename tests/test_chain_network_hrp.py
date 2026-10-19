@@ -143,7 +143,8 @@ class TestTraceMehrereEbenen(_NetzTest):
                 self.assertGreaterEqual(summary["max_depth"], 3, summary)
                 self.assertEqual(summary["external_count"], 1, summary)
                 self.assertGreater(summary["internal_sats"], 0, summary)
-                # Blatt: externer Zufluss in t_in, Zeit = Entstehung des externen Outputs.
+                # Blatt: externer Zufluss in t_in, Zeit = Empfang durch das
+                # Wallet (Blockzeit von t_in), nicht der externe Output.
                 knoten = ergebnis["children"]
                 tiefe = 0
                 while knoten and knoten[0].get("type") != "external":
@@ -153,7 +154,8 @@ class TestTraceMehrereEbenen(_NetzTest):
                 self.assertEqual(tiefe, 2, ergebnis["children"])
                 blatt = knoten[0]
                 self.assertEqual(blatt["from_utxo"], f"{extern.txid().hex()}:0")
-                self.assertEqual(blatt["time_ts"], zeiten[extern.txid().hex()][1])
+                self.assertEqual(blatt["time_ts"], zeiten[t_in.txid().hex()][1])
+                self.assertEqual(blatt["funding_txid"], t_in.txid().hex())
 
 
 class TestXpubCacheNetzZurLaufzeit(_NetzTest):

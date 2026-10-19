@@ -623,6 +623,15 @@ def fetch_tx_fulcrum(
             if not _verbose_tx_unsupported(exc):
                 raise
     schritt(f"rpc-anfrage {txid} roh host={host} software={software}")
+    if roh:
+        from core.libbitcoin_native import versuche_tx
+
+        # Rohbytes und Blockzeit vom eigenen libbitcoin. Fehlt der Weg,
+        # bleibt es beim Electrum-Abruf darunter.
+        nativ = versuche_tx(client, txid)
+        if nativ is not None:
+            schritt(f"nativ-tx {txid} vin={len(nativ.get('vin') or [])}")
+            return nativ
     raw = client.request("blockchain.transaction.get", [txid, False])
     schritt(
         f"rpc-antwort {txid} art={type(raw).__name__} "

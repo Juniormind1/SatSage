@@ -61,6 +61,30 @@ class CacheDiskFullError(OSError):
 TX_IMMUTABLE_CACHE_SUBDIR = "tx"
 BLOCK_HEADER_CACHE_SUBDIR = "block_header"
 UTXO_INGRESS_CACHE_SUBDIR = "utxo_ingress"
+#: Fassung der Herkunfts-Caches ``utxo_ingress/`` und ``utxo_trace/``.
+#: Steigt, wenn alte Einträge nicht mehr stimmen können; Dateien mit einer
+#: anderen (oder ohne) Fassung gelten als nicht vorhanden und werden beim
+#: nächsten Herkunftslauf neu erhoben.
+#: 2 — Release 1.0.1: Bäume aus der Zeit vor dem HRP-Fix (Regtest-Blätter
+#:     mit Mainnet-Präfix ``bc1``) hielten eigene Eingänge für extern.
+#: 3 — Release 1.0.1: externe Blätter tragen die Blockzeit des Wallet-
+#:     Eingangs (Funding-Tx) statt der des fremden Prevouts; die
+#:     Anschaffung wird damit neu berechnet.
+#: 4 — Release 1.0.1 (nur ``utxo_ingress``): Lücken im Baum (gebündelte
+#:     Eingänge, fehlende Vorgänger) zählen als Zufluss zur Blockzeit ihrer
+#:     Tx; neue Felder ``external_buendel``/``external_buendel_obergrenze``.
+#:     Die Bäume bleiben bei 3 (``TRACE_SCHEMA``): der nächste Lauf „Herkunft
+#:     aller UTXOs“ schreibt den Zufluss aus dem gespeicherten Rohbaum neu,
+#:     ohne die Chain erneut abzugehen.
+HERKUNFT_SCHEMA = 4
+
+#: Fassung der gespeicherten Herkunftsbäume (``trace_cache``).
+TRACE_SCHEMA = 3
+
+
+def herkunft_schema_passt(daten: dict | None) -> bool:
+    """Ob ein Herkunfts-Cache-Eintrag in der aktuellen Fassung vorliegt."""
+    return isinstance(daten, dict) and daten.get("schema") == HERKUNFT_SCHEMA
 BITCOIN_GENESIS_TIMESTAMP = 1231006505  # 2009-01-03 18:15:05 UTC
 BITCOIN_BLOCK_INTERVAL_SECONDS = 600  # Ziel: 10 Minuten pro Block
 SALDEN_CHECK_LOOKAHEAD = 5
@@ -704,6 +728,9 @@ def load_utxo_ingress_cache(
         return None
     if int(data.get("vout", -1)) != int(vout):
         return None
+    if not herkunft_schema_passt(data):
+        # Alte Fassung: wie nicht verfolgt — der nächste Lauf erhebt neu.
+        return None
     return data
 
 def save_utxo_ingress_cache(
@@ -717,6 +744,7 @@ def save_utxo_ingress_cache(
     path = _utxo_ingress_cache_path(txid, vout, root)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema": HERKUNFT_SCHEMA,
         "txid": _normalize_txid(txid),
         "vout": int(vout),
         "youngest_time": ingress.get("youngest_time"),
@@ -736,6 +764,12 @@ def save_utxo_ingress_cache(
         # True, wenn externe Eingänge unaufgelöst blieben (Sammel-Tx über
         # dem Auflösungs-Limit) und das Datum deshalb zu alt sein kann.
         "external_untergrenze": bool(ingress.get("external_untergrenze")),
+        # Lücke im Baum (Bündel/fehlender Vorgänger); Obergrenze: Datum
+        # stammt aus der Lücke, kann zu jung sein, nie zu alt.
+        "external_buendel": bool(ingress.get("external_buendel")),
+        "external_buendel_obergrenze": bool(
+            ingress.get("external_buendel_obergrenze")
+        ),
         "address": ingress.get("address"),
     }
     if ingress.get("tax_horizon_time_ts") is not None:
@@ -784,6 +818,8 @@ def iter_utxo_ingress_cache_entries(cache_root: Path | None = None) -> list[dict
         except (TypeError, ValueError):
             continue
         if vout < 0:
+            continue
+        if not herkunft_schema_passt(data):
             continue
         entries.append(data)
     return entries
@@ -1374,23 +1410,36 @@ def save_xpub_first_seen(
     path.write_text(_dump_cache_json(wert), encoding="utf-8")
     return path
 
-def xpub_first_seen(xpub: str, cache_dir: Path) -> dict | None:
+def xpub_first_seen(
+    xpub: str,
+    cache_dir: Path,
+    *,
+    roh: dict | None = None,
+) -> dict | None:
     """
     Wann dieses Wallet zum ersten Mal benutzt wurde.
 
     Zuerst die eigene Alters-Datei (überlebt Cache-Löschen), sonst die
     Felder in der UTXO-Cache-Datei — die werden dann ins eigene File
     übernommen. Liefert ``{"height": …, "time_ts": …}`` oder None.
+
+    *roh*: schon gelesener UTXO-Cache. Die große Datei bleibt dann zu.
     """
     alter_pfad = _xpub_alter_path(xpub, cache_dir)
     if alter_pfad.is_file():
         try:
-            roh = json.loads(alter_pfad.read_text(encoding="utf-8"))
+            datei = json.loads(alter_pfad.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            roh = None
-        gefunden = _alter_aus_payload(roh if isinstance(roh, dict) else None)
+            datei = None
+        gefunden = _alter_aus_payload(datei if isinstance(datei, dict) else None)
         if gefunden:
             return gefunden
+
+    if roh is not None:
+        gefunden = _alter_aus_payload(roh)
+        if gefunden:
+            save_xpub_first_seen(xpub, cache_dir, gefunden)
+        return gefunden
 
     eintrag = load_xpub_cache_entry(xpub, cache_dir)
     gefunden = _alter_aus_payload((eintrag or {}).get("raw") or {})

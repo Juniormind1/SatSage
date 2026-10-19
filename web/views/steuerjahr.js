@@ -800,6 +800,7 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
         steuer: false,
         gelbVertiefen: true,
         graueAnteile: true,
+        logLauf: "klären (gelb)",
       });
     });
     grundlage.append(klaeren);

@@ -32,27 +32,37 @@ NOCH_JUENGER = 1_760_000_000
 
 
 def _kette_zwei_externe():
-    """Erster Hop extern und alt, zweiter interner Weg endet jünger."""
+    """
+    Erster Hop endet alt, zweiter interner Weg endet jünger.
+
+    Anschaffung = Empfang durch das Wallet: Der alte Zweig kam mit
+    ``intern_alt`` (ALT) an, der junge mit ``intern`` (JUNG).
+    """
     extern_alt = txid("a1")
     extern_jung = txid("b2")
     intern = txid("c3")
     wurzel = txid("d4")
+    intern_alt = txid("e5")
     kette = {
         extern_alt: core_tx(
             extern_alt, [core_vin(txid("00"), 0)],
-            [core_vout(0, EXTERN_A, 0.4)], blocktime=ALT,
+            [core_vout(0, EXTERN_A, 0.4)], blocktime=ALT - 10,
+        ),
+        intern_alt: core_tx(
+            intern_alt, [core_vin(extern_alt, 0)],
+            [core_vout(0, BIP84_RECEIVE_0, 0.35)], blocktime=ALT,
         ),
         extern_jung: core_tx(
             extern_jung, [core_vin(txid("01"), 0)],
-            [core_vout(0, EXTERN_B, 0.4)], blocktime=JUNG,
+            [core_vout(0, EXTERN_B, 0.4)], blocktime=JUNG - 10,
         ),
         intern: core_tx(
             intern, [core_vin(extern_jung, 0)],
-            [core_vout(0, BIP84_RECEIVE_0, 0.3)], blocktime=JUNG + 10,
+            [core_vout(0, BIP84_RECEIVE_0, 0.3)], blocktime=JUNG,
         ),
         wurzel: core_tx(
             wurzel,
-            [core_vin(extern_alt, 0), core_vin(intern, 0)],
+            [core_vin(intern_alt, 0), core_vin(intern, 0)],
             [core_vout(0, BIP84_RECEIVE_0, 0.6)],
             blocktime=JUNG + 20,
         ),

@@ -35,6 +35,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def playwright_kanal(channel: str | None = None) -> str | None:
+    """Browserkanal für Playwright.
+
+    macOS ist der vorgesehene Rechner für Userflow, Playwright und das
+    installierte Chrome. Windows nutzt ebenfalls Chrome. Linux bleibt beim
+    gebündelten Chromium. Siehe ``doc/gui-test-protokoll.md``.
+    """
+    if channel:
+        return channel
+    if sys.platform in ("darwin", "win32"):
+        return "chrome"
+    return None
+
+
 def _json_out(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 

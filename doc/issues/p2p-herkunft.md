@@ -29,8 +29,9 @@ Die Zeile „Bitcoin-P2P · Compact Filter“ ist wieder in den Datenquellen. Di
 ## Was zu bleibt
 
 - Herkunft, Verlauf und `get_tx` über P2P.
-- Header-Vorab (`starte_header_vorab` / `vorab_block_header`).
 - `POST /api/p2p/walk-abgleich` antwortet 403 und schreibt den Electrs-Cache nicht an.
+
+Header-Vorab läuft wieder, aber nur wenn P2P die einzige Bestandsquelle ist: fehlender Cache ab SegWit, sonst Tip-Nachzug. Sockets dafür nur in `p2p_nur_header`.
 - `p2p_gesperrt()` bleibt wahr. Es wird nicht pauschal falsch.
 
 Labor-Prüfer, die P2P als Herkunft fahren, starten weiter nicht: `verify_p2p_traces.py`, im Scan-Abbruch `Q-START-P2P` und `Q-START-KILL`. Sie laufen erst, wenn `p2p_gesperrt()` falsch wird (`doc/test-inventar.md`). Der Bestands-Schritt in `verify_quellen_inventar.py` ist davon getrennt: Compact Filter und das erwartete rote Klären (Ringe Pflicht, Electrs räumt sie) öffnen Sockets nur in `p2p_nur_utxo_entdeckung`, danach klärt Electrs denselben Cache.

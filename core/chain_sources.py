@@ -433,11 +433,11 @@ def _verbinde_eigenen_electrs_parallel(
 ) -> tuple[object | None, int, bool, str | None]:
     """Vier Kombinationen gleichzeitig. Der erste Treffer gewinnt.
 
-    50001 und 50002, jeweils mit und ohne TLS. Nur für die IP des eigenen
-    Nodes. Sobald eine Verbindung steht, kehrt der Aufruf zurück. Die
-    übrigen Versuche laufen aus und schließen ihren Client, ohne dass
-    ihre Timeouts abgewartet werden. Scheitern alle vier, kommt der
-    Fehler erst, wenn der langsamste fertig ist.
+    Nur der Übernehmen-Knopf in den Datenquellen, und nur wenn dort neue
+    Angaben stehen. 50001 und 50002, jeweils mit und ohne TLS. Sobald eine
+    Verbindung steht, kehrt der Aufruf zurück. Die übrigen Versuche laufen
+    aus und schließen ihren Client. Scan, Watch und der stille Takt rufen
+    das nicht auf.
     """
     from core.fulcrum_client import connect_fulcrum
 
@@ -646,37 +646,9 @@ def _try_fulcrum_endpoint(
     use_ssl: bool,
     tor_proxy: tuple[str, int] | None,
 ):
-    # Eigene IP: alle vier Kombinationen gleichzeitig. Onion und Hostname
-    # bleiben beim eingestellten Port (darunter die TLS-Gegenprobe).
-    if tor_proxy is None and host_ist_klare_ip(host):
-        if port and int(port) not in EIGENE_ELECTRS_STANDARD_PORTS:
-            _quelle_zeile(
-                f"Prüfe {label}: {host}:{port} "
-                f"({'TLS' if use_ssl else 'ohne TLS'}), sonst 50001 und 50002…"
-            )
-        else:
-            _quelle_zeile(
-                f"Prüfe {label}: {host} auf 50001 und 50002, mit und ohne TLS…"
-            )
-        client, treffer_port, treffer_ssl, error = verbinde_eigenen_electrs_ip(
-            host,
-            timeout=FULCRUM_CONNECT_TIMEOUT,
-            require_listunspent=True,
-            port=port,
-            use_ssl=use_ssl,
-        )
-        if client:
-            _quelle_zeile(
-                f"  → {label} erreichbar "
-                f"({treffer_port}, {'TLS' if treffer_ssl else 'ohne TLS'})"
-            )
-            return client
-        if error and "listunspent" in error:
-            _quelle_zeile(f"  → ungeeignet: {error}")
-        else:
-            _print_connection_error("  → ", error, use_ssl)
-        return None
-
+    # Genau die Kombination, die der Datenquellen-Knopf festgeschrieben hat.
+    # Die Vierfach-Probe (50001/50002, mit und ohne TLS) läuft nur dort,
+    # wenn der Benutzer neue Angaben übernommen hat.
     route = _format_fulcrum_route(use_ssl, tor_proxy)
     _quelle_zeile(f"Prüfe {label}: {host}:{port} ({route})...")
     if tor_proxy:
@@ -698,31 +670,6 @@ def _try_fulcrum_endpoint(
             tor_proxy=None,
             require_listunspent=True,
         )
-    # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung (LAN + Onion).
-    if not client and error and tls_should_try_opposite(
-        error, use_ssl=use_ssl, port=port,
-    ):
-        alt = not use_ssl
-        _quelle_zeile(
-            f"  → {'TLS' if use_ssl else 'ohne TLS'} fehlgeschlagen "
-            f"({error}) — versuche {'ohne TLS' if use_ssl else 'mit TLS'}…"
-        )
-        if tor_proxy:
-            _index, client, error = _probe_public_onion_endpoint(
-                0, host, port, alt, tor_proxy,
-            )
-        else:
-            from core.fulcrum_client import connect_fulcrum
-
-            client, error = connect_fulcrum(
-                host,
-                port,
-                use_ssl=alt,
-                timeout=FULCRUM_CONNECT_TIMEOUT,
-                tor_proxy=None,
-                require_listunspent=True,
-            )
-        use_ssl = alt
     if client:
         _quelle_zeile(
             f"  → {label} erreichbar"
@@ -843,6 +790,14 @@ def _open_scan_pool(client, workers: int = SCAN_POOL_WORKERS):
     if workers < 2:
         return None
 
+    bestehend = getattr(client, "_scan_pool", None)
+    if (
+        bestehend is not None
+        and len(bestehend) >= 2
+        and getattr(client, "_sock", None) is not None
+    ):
+        return bestehend
+
     clients = [client]
     for _ in range(workers - 1):
         weiterer, _fehler = connect_fulcrum(
@@ -857,7 +812,9 @@ def _open_scan_pool(client, workers: int = SCAN_POOL_WORKERS):
 
     if len(clients) < 2:
         return None
-    return SanctionsClearnetPool(clients)
+    pool = SanctionsClearnetPool(clients)
+    client._scan_pool = pool
+    return pool
 
 
 def _setup_public_onion_rotation(
@@ -1066,6 +1023,10 @@ def _indexer_konfig_jetzt(
 
     Der Papierkorb löscht FULCRUM_HOST, während ein Job noch die alte
     Adresse wiederholt. Ohne diese Lesung läuft die Frist zu Ende.
+
+    Auf einer Node-Plattform (StartOS, Umbrel) steht die Adresse nicht in
+    der Datei, sondern im Prozess-Env. Sie muss nach der Lesung wieder
+    hinzukommen, sonst gilt die vorgegebene Quelle als gelöscht.
     """
     try:
         from core import env_scramble as scramble_mod
@@ -1083,6 +1044,10 @@ def _indexer_konfig_jetzt(
             except scramble_mod.ScrambleLocked:
                 return _indexer_ist_konfiguriert(args, env), env
         frisch = _load_dotenv()
+        from core.env_bootstrap import ist_node_managed, plattform_env_werte
+
+        if ist_node_managed(frisch):
+            frisch.update(plattform_env_werte(frisch))
     except Exception:
         return _indexer_ist_konfiguriert(args, env), env
     return _indexer_ist_konfiguriert(args, frisch), frisch
@@ -1160,6 +1125,7 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
                 "Datenquelle: eigener Electrum-Server (LAN) "
                 + _client_ziel(client, host, port)
             )
+            _log_libbitcoin_abfrage(client, env)
             return client
         if _resolve_own_tor_endpoint(args, env):
             _log_quelle("LAN-Electrum nicht erreichbar — wechsle auf Onion.")
@@ -1180,8 +1146,16 @@ def _try_own_fulcrum_client(args, env: dict[str, str]):
                 "Datenquelle: eigener Electrum-Server (Tor) "
                 + _client_ziel(client, host, port)
             )
+            _log_libbitcoin_abfrage(client, env)
             return client
     return None
+
+
+def _log_libbitcoin_abfrage(client, env: dict[str, str]) -> None:
+    """Sichtbar machen, ob die libbitcoin-Abfrage den Bestand übernimmt."""
+    from core.libbitcoin_native import abfrage_hinweis
+
+    abfrage_hinweis(client, env, log=_log_quelle)
 
 
 def _p2p_schalter_aus(env: dict[str, str]) -> bool:
@@ -1306,19 +1280,15 @@ def eigene_electrs_ist_verbunden(
 
 
 def _eigene_electrs_probe(env, *, lan, tor, timeout: int) -> bool:
-    from core.fulcrum_client import connect_fulcrum
+    from core.fulcrum_client import connect_fulcrum, lebende_zum_ziel
 
     if lan:
-        if host_ist_klare_ip(lan[0]):
-            client, _port, _ssl, _fehler = verbinde_eigenen_electrs_ip(
-                lan[0], timeout=timeout, require_listunspent=False,
-                port=int(lan[1]), use_ssl=bool(lan[2]),
-            )
-        else:
-            client, _fehler = connect_fulcrum(
-                lan[0], int(lan[1]), use_ssl=bool(lan[2]),
-                timeout=timeout, tor_proxy=None,
-            )
+        if lebende_zum_ziel(lan[0], int(lan[1]), use_ssl=bool(lan[2])):
+            return True
+        client, _fehler = connect_fulcrum(
+            lan[0], int(lan[1]), use_ssl=bool(lan[2]),
+            timeout=timeout, tor_proxy=None,
+        )
         if client is None:
             return False
         _schliesse_fulcrum(client)
@@ -2599,6 +2569,14 @@ def _build_blockchain_fetchers(
             pass
 
         def raw_get_tx(txid: str) -> dict:
+            from core.esplora_lokal import hole_tx
+
+            # Kleine Tx vom eigenen Explorer, nur wenn der Server kein
+            # libbitcoin ist. Breite Antworten und fehlende Prevouts
+            # fallen auf Electrum zurück.
+            lokal = hole_tx(fulcrum, txid)
+            if lokal is not None:
+                return lokal
             try:
                 return fetch_tx_fulcrum(fulcrum, txid)
             except Exception as electrs_exc:
@@ -2622,6 +2600,9 @@ def _build_blockchain_fetchers(
         get_tx = wrap_get_tx_with_immutable_cache(
             raw_get_tx, cache_root, source, pool=scan_pool
         )
+        from core.esplora_lokal import haenge_vorgaengerzeit_an
+
+        haenge_vorgaengerzeit_an(get_tx, fulcrum)
         fetch_addresses_utxos = lambda addrs, **kw: _fetch_utxos_for_addresses(
             addrs, fetch_address_utxos, **kw
         )
@@ -2653,7 +2634,29 @@ def _build_blockchain_fetchers(
             "fetch_utxos": fetch_address_utxos,
             "fulcrum": fulcrum,
             "immutable_cache_dir": cache_root,
+            "close": _schliesse_scan_fetchers(fulcrum, scan_pool),
         }
+
+
+def _schliesse_scan_fetchers(fulcrum, scan_pool):
+    """Schließt den Scan-Pool inklusive der Hauptverbindung, einmal je Job."""
+
+    def _zu() -> None:
+        if scan_pool is not None:
+            try:
+                scan_pool.close()
+            except Exception:
+                pass
+            if getattr(fulcrum, "_scan_pool", None) is scan_pool:
+                fulcrum._scan_pool = None
+            return
+        if fulcrum is not None and hasattr(fulcrum, "close"):
+            try:
+                fulcrum.close()
+            except Exception:
+                pass
+
+    return _zu
 
 
 def _fulcrum_transport_ist_lan(fulcrum) -> bool:

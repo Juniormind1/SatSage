@@ -1,7 +1,8 @@
 @echo off
 setlocal EnableExtensions
 REM SatSage: push current branch to origin (without AI).
-REM Maintainer-only: config AND tip author must be Juniormind1 <juniormind@proton.me>
+REM Maintainer-only: config must be Juniormind1 <juniormind@proton.me>
+REM Tip author likewise. On dev-juniormind, busch21 is also allowed.
 REM Other contributors: use normal git push with their own identity.
 REM
 REM Usage:
@@ -46,13 +47,14 @@ set "TIP_NAME="
 set "TIP_EMAIL="
 for /f "delims=" %%A in ('git log -1 --format^=%%an') do set "TIP_NAME=%%A"
 for /f "delims=" %%A in ('git log -1 --format^=%%ae') do set "TIP_EMAIL=%%A"
-if /i not "%TIP_NAME%"=="%REQUIRED_NAME%" goto bad_tip
-if /i not "%TIP_EMAIL%"=="%REQUIRED_EMAIL%" goto bad_tip
-goto tip_ok
+if /i "%TIP_NAME%"=="%REQUIRED_NAME%" if /i "%TIP_EMAIL%"=="%REQUIRED_EMAIL%" goto tip_ok
+if /i "%BRANCH%"=="dev-juniormind" if /i "%TIP_NAME%"=="busch21" if /i "%TIP_EMAIL%"=="busch21@tutamail.com" goto tip_ok
+goto bad_tip
 
 :bad_tip
 echo ERROR: Tip-Autor ist %TIP_NAME% ^<%TIP_EMAIL%^> - Maintainer-Push verweigert.
 echo   Erwartet: %REQUIRED_NAME% ^<%REQUIRED_EMAIL%^>
+echo   Auf dev-juniormind zusaetzlich: busch21 ^<busch21@tutamail.com^>
 echo   z. B. git commit --amend --reset-author --no-edit  ^(nur wenn Tip noch lokal^)
 exit /b 1
 

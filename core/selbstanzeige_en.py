@@ -89,8 +89,8 @@ _TABELLE: list[tuple[str, str]] = [
      "Every line can be verified on-chain (TxID:vout)."),
     ("Herkunftsnachweis (on-chain Hop-Kette der Lose)",
      "Proof of origin (on-chain hop chain of the lots)"),
-    ("Trace unvollständig — Untergrenze möglich",
-     "trace incomplete — lower bound possible"),
+    ("Trace unvollständig — Datum vorsichtig (Obergrenze)",
+     "trace incomplete — cautious date (upper bound)"),
     ("Trace vollständig", "trace complete"),
     (" Hops im Nachweis", " hops in proof"),
     (" externe Blätter", " external leaves"),
@@ -105,6 +105,7 @@ _TABELLE: list[tuple[str, str]] = [
      "origin traced (wallet inflow only)"),
     ("Herkunft verfolgt", "origin traced"),
     ("(Untergrenze)", "(lower bound)"),
+    ("(Bündel, vorsichtig)", "(bundle, cautious)"),
     ("nur Output-Datum", "output date only"),
     # Kopf, Vorgang, Tabellen (selbstanzeige.py)
     ("Hypothese: offene UTXOs zum Stichtag",

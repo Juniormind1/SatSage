@@ -77,6 +77,21 @@ def _warte_config(base: str, token: str, sekunden: float = 25.0) -> dict:
     raise RuntimeError(f"Server antwortet nicht auf /api/config: {letzte}")
 
 
+def _server_anhalten(emb) -> None:
+    """HTTP-Server und laufenden Header-Job beenden."""
+    state = getattr(emb, "state", None)
+    hid = getattr(state, "header_job_id", None) if state is not None else None
+    if hid:
+        try:
+            state.jobs.cancel(hid)
+        except Exception:
+            pass
+    try:
+        emb.stop()
+    except Exception:
+        pass
+
+
 def _spawn():
     sys.path.insert(0, str(ROOT))
     import server
@@ -184,8 +199,19 @@ def _warte_nicht_lade(page, root_sel: str, sekunden: float = 25.0) -> bool:
 
 
 def _nav_klick(page, ansicht: str) -> None:
-    btn = page.locator(f'button.nav-eintrag[data-ansicht="{ansicht}"]')
-    btn.first.click(timeout=8000)
+    # Die Nav ist höher als das Fenster. Playwright sieht den Knopf als
+    # sichtbar, scrollt ihn aber nicht ins Viewport (overflow hidden).
+    # Ein DOM-Klick trifft den Listener trotzdem.
+    page.evaluate(
+        """(ansicht) => {
+          const el = document.querySelector(
+            'button.nav-eintrag[data-ansicht="' + ansicht + '"]'
+          );
+          if (!el) throw new Error('Nav-Knopf fehlt: ' + ansicht);
+          el.click();
+        }""",
+        ansicht,
+    )
     page.wait_for_timeout(300)
 
 
@@ -224,13 +250,12 @@ def run_userflow(
 
     with sync_playwright() as p:
         launch_kwargs: dict = {"headless": headless}
-        if channel:
-            # Nur Windows: installiertes Chrome (channel="chrome").
-            # Fernsteuer-Zustimmung — das mitgelieferte Playwright-Chromium
-            # ist dort nicht der Weg. macOS und Linux lassen channel leer
-            # und starten das gebündelte Chromium. Siehe
-            # doc/gui-test-protokoll.md.
-            launch_kwargs["channel"] = channel
+        # macOS: installiertes Chrome. Windows ebenso. Linux: Chromium.
+        from webgui_test_ready import playwright_kanal
+
+        kanal = playwright_kanal(channel)
+        if kanal:
+            launch_kwargs["channel"] = kanal
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()
@@ -445,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     tmp_hold = None
+    emb = None
     url = args.url
     if args.spawn or (not url and not args.attach):
         if not url:
@@ -471,7 +497,11 @@ def main(argv: list[str] | None = None) -> int:
         channel=args.channel or None,
     )
     # Nur der Wegwerf-Spawn. --url und --attach zeigen auf eine echte Sitzung.
+    # Der Userflow-Server bleibt sonst im Prozess und lädt Header, während
+    # die Passwort-Server scramblen.
     if tmp_hold is not None:
+        if emb is not None:
+            _server_anhalten(emb)
         from webgui_passwort_flow import lauf_passwort_zyklen
 
         print("Passwort setzen / ändern / löschen…", flush=True)

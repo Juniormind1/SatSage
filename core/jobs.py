@@ -282,6 +282,43 @@ def _reset_electrum_gate_fuer_tests() -> None:
         ELECTRUM_GATE._cv.notify_all()
 
 
+#: Feste Namen in JOB-START/JOB-ENDE. Andere Werte werden verworfen,
+#: damit das Log nicht beliebigen Text als Lauf ausgibt.
+LAUF_LOG = frozenset({
+    "UTXOs",
+    "Bestand",
+    "Herkunft",
+    "Historie",
+    "klären (grau)",
+    "klären (gelb)",
+})
+
+
+def lauf_fuer_scan(kind: str, wallet_id: str) -> str:
+    """Scan-Pipeline: ein Wallet-Bestand, alle UTXOs, oder Historie."""
+    if kind == "verlauf":
+        return "Historie"
+    if kind == "rescan" and str(wallet_id or "").strip() == "alle":
+        return "UTXOs"
+    if kind == "rescan":
+        return "Bestand"
+    return ""
+
+
+def lauf_aus_job(job: "Job") -> str:
+    meta = job.meta if isinstance(getattr(job, "meta", None), dict) else {}
+    lauf = str(meta.get("lauf") or "").strip()
+    return lauf if lauf in LAUF_LOG else ""
+
+
+def _lauf_feld(job: "Job") -> str:
+    """Leer oder ``lauf="…" "`` inklusive Leerzeichen danach."""
+    lauf = lauf_aus_job(job)
+    if not lauf:
+        return ""
+    return f'lauf="{lauf}" '
+
+
 def format_job_uhr(ts: float | None = None) -> str:
     """Lokale Wanduhr, ISO-ähnlich ohne TZ — greppbar und lesbar."""
     return time.strftime(
@@ -309,7 +346,7 @@ def job_start_zeile(job: "Job") -> str:
     Felder kind/id/at stabil für Suche; Label am Ende (Wallet-Name, Anzahl).
     """
     return (
-        f"JOB-START kind={job.kind} id={job.id} "
+        f"JOB-START kind={job.kind} id={job.id} {_lauf_feld(job)}"
         f"at={format_job_uhr(job.started_at)} · {job.label}"
     )
 
@@ -324,7 +361,7 @@ def job_ende_zeile(job: "Job") -> str:
     elapsed = max(0.0, float(ende) - float(job.started_at))
     return (
         f"JOB-ENDE kind={job.kind} id={job.id} status={job.status} "
-        f"elapsed_s={elapsed:.1f} dauer={format_job_dauer(elapsed)} "
+        f"elapsed_s={elapsed:.1f} dauer={format_job_dauer(elapsed)} {_lauf_feld(job)}"
         f"at={format_job_uhr(ende)} · {job.label}"
     )
 
@@ -847,6 +884,7 @@ class ScanQueue:
             "wallet_name": wallet_name,
             "art": "utxo" if kind == "rescan" else "verlauf",
             "scan_ab": scan_ab or "",
+            "lauf": lauf_fuer_scan(kind, wallet_id),
         }
         job = self._jobs.start(
             kind,

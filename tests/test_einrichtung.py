@@ -7,6 +7,7 @@ im Python-Teil entstehen. Benennt jemand dort einen Schlüssel um, meldet der
 Hinweis stillschweigend „nicht eingetragen", obwohl alles konfiguriert ist.
 Genau diese Kopplung prüfen die folgenden Tests.
 """
+import json
 import re
 import shutil
 import subprocess
@@ -352,6 +353,8 @@ if (fehler.length) {
         self.assertIn("Starte Verbindungstest…", de)
         self.assertIn("apiSourceCheck", self.format_js)
         self.assertIn("leseSourceCheckStream", self.format_js)
+        self.assertIn("wendeElectrsFormularStand", self.format_js)
+        self.assertIn("electrs_form", self.format_js)
         self.assertIn("application/x-ndjson", self.format_js)
 
     def test_log_zeile_wallet_nur_bei_walletspezifischer_aktion(self):
@@ -449,7 +452,8 @@ if (fehler.length) {
         self.assertIn("sources.disableP2pTitle", self.datenquellen_js)
         self.assertIn("sources.bip158DateLabel", self.datenquellen_js)
         self.assertIn("sources.bip158StartLabel", self.datenquellen_js)
-        self.assertIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertNotIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertNotIn("speichereBip158Gap", self.datenquellen_js)
         self.assertIn("/p2p/scan-zeit?", self.datenquellen_js)
         self.assertIn("feld.typ === \"checkbox\"", self.datenquellen_js)
         self.assertIn("verbindeP2p", self.datenquellen_js)
@@ -518,6 +522,8 @@ if (fehler.length) {
         self.assertIn("navKompaktErzwungen", nav_js)
         self.assertIn("navInEinbettung", nav_js)
         self.assertIn("bindeNavLeiste", nav_js)
+        self.assertIn("navZeigerDrin", nav_js)
+        self.assertIn('toggle.addEventListener("pointerleave"', nav_js)
         self.assertIn("satsage-nav-pin", nav_js)
         self.assertIn(".nav-kompakt", css)
         self.assertIn(".nav-gepinnt", css)
@@ -527,6 +533,21 @@ if (fehler.length) {
         self.assertIn('"nav.toggleTitle"', de)
         self.assertIn('"nav.pinTitle"', en)
         self.assertIn('"nav.toggleTitle"', en)
+
+    def test_empfang_qr_in_nav_nur_ohne_log_und_llm(self):
+        """Log aus und kein LLM: QR in der Leiste. Sonst rechts unten."""
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        css = (WEB / "style.css").read_text(encoding="utf-8")
+        nav_js = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
+        self.assertLess(html.index('class="nav-scroll"'), html.index('id="wallet-nav"'))
+        self.assertLess(html.index('id="nav-jobs"'), html.index("</nav>"))
+        self.assertIn("function legeEmpfangNachOrt()", nav_js)
+        self.assertIn('!buehne.classList.contains("log-an")', nav_js)
+        self.assertIn('!buehne.classList.contains("chat-an")', nav_js)
+        self.assertIn("legeEmpfangNachOrt()", self.format_js)
+        self.assertIn("legeEmpfangNachOrt()", self.js)
+        self.assertIn(".buehne.empfang-in-nav:not(.log-an):not(.chat-an)", css)
+        self.assertIn(".buehne.empfang-in-nav #empfang-pane", css)
 
     def test_assistent_slash_phase2(self):
         """Phase 2: Slash liest Cache, startet keine Jobs, kein Completion."""
@@ -683,13 +704,19 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn("Steuerjahr", de["header.filterTitleActive"])
 
     def test_wallet_ansicht_zeigt_ausgegeben_nur_mit_verlauf(self):
-        """Zugeklappt unter den UTXOs — ohne Verlauf kein zusätzlicher Hinweis."""
+        """Zugeklappt unter den UTXOs — ohne Verlauf bleibt der Abschnitt leer."""
         self.assertIn('id="wallet-ausgegeben"', self.html)
         self.assertIn("function zeichneAusgegeben", self.herkunft_js)
+        self.assertIn("function setzeWalletAusgegeben", self.wallets_js)
         self.assertRegex(
             self.wallets_js,
-            r"if \(hatVerlauf\) \{\s*ausgegeben\.append\(zeichneAusgegeben",
+            r"if \(!daten \|\| !daten\.hat_verlauf\) return;",
         )
+        self.assertIn(
+            "ausgegeben.append(zeichneAusgegeben(daten",
+            self.wallets_js,
+        )
+        self.assertIn("setzeWalletAusgegeben(daten, seite);", self.wallets_js)
 
     def test_multisig_feld_erklaert_warum_kein_hinzufuegen(self):
         self.assertIn('id="deskriptor-hinweis"', self.html)
@@ -777,7 +804,51 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('"dialog.p2pPrivacy.title"', de)
         self.assertIn('"sources.bip158DateLabel": "Frühestes Scan-Datum:"', de)
         self.assertIn('"sources.bip158StartLabel": "Scan ab Blockhöhe:"', de)
-        self.assertIn('"sources.bip158GapLabel": "Gap-Limit:"', de)
+
+    def test_electrs_formular_mit_gap_limit(self):
+        self.assertIn("function electrsQuellenFormular", self.datenquellen_js)
+        self.assertIn("function wendeElectrsFormularStand", self.datenquellen_js)
+        self.assertIn("function istOnionAdresse", self.datenquellen_js)
+        self.assertIn("proxyZeile.hidden", self.datenquellen_js)
+        self.assertNotIn(
+            '["FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_TOR_PROXY"]',
+            self.datenquellen_js,
+        )
+        self.assertIn("electrs-reihe", self.datenquellen_js)
+        self.assertIn("electrs-reihe-port", self.datenquellen_js)
+        # Gap-Limit steht wieder im Electrs-Formular, mit sichtbarem Hinweis.
+        self.assertIn("electrs-reihe-gap", self.datenquellen_js)
+        self.assertIn('nimm("UTXO_SCAN_GAP_LIMIT")', self.datenquellen_js)
+        self.assertNotIn('nachKey.delete("UTXO_SCAN_GAP_LIMIT")', self.datenquellen_js)
+        self.assertIn('t("sources.electrsGapHint")', self.datenquellen_js)
+        self.assertIn('t("sources.electrsGapInvalid")', self.datenquellen_js)
+        self.assertIn("function electrsGapGueltig", self.datenquellen_js)
+        self.assertIn("feld-zeile-check", self.datenquellen_js)
+        self.assertIn(".electrs-reihe", self.css)
+        self.assertIn(".electrs-reihe-gap", self.css)
+        self.assertIn(".electrs-gap-hinweis", self.css)
+        # P2P-Zeile bleibt ohne eigenes Gap-Feld (nur im Dialog „Ab wann scannen?“).
+        self.assertNotIn("sources.bip158GapLabel", self.datenquellen_js)
+        self.assertNotIn("speichereBip158Gap", self.datenquellen_js)
+        for code in ("de", "en"):
+            katalog = json.loads(
+                (WEB / "locales" / f"{code}.json").read_text(encoding="utf-8"),
+            )
+            for key in (
+                "sources.electrsGapHint",
+                "sources.electrsGapInvalid",
+                "sources.field.UTXO_SCAN_GAP_LIMIT.label",
+                "sources.field.UTXO_SCAN_GAP_LIMIT.hint",
+            ):
+                self.assertTrue(katalog.get(key), f"{code}: {key}")
+        de = (WEB / "locales" / "de.json").read_text(encoding="utf-8")
+        self.assertIn('"sources.field.FULCRUM_HOST.label": "Adresse"', de)
+        self.assertIn('"sources.field.FULCRUM_SSL.label": "TLS"', de)
+        self.assertIn("das offene Häkchen folgt sofort", de)
+        self.assertIn('"sources.field.UTXO_SCAN_GAP_LIMIT.label": "Gap-Limit"', de)
+        self.assertIn("langsamer", json.loads(de)["sources.electrsGapHint"])
+        en = json.loads((WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+        self.assertIn("slower", en["sources.electrsGapHint"])
 
     def test_danger_zone_steht_ganz_unten(self):
         self.assertIn("Danger Zone!!!!", self.html)
@@ -852,6 +923,9 @@ class TestOberflaeche(unittest.TestCase):
         self.assertIn('zeigeAnsicht("steuerjahr")', self.herkunft_js)
         self.assertIn("grauKeysFuerWallet", self.herkunft_js)
         self.assertIn("starteGrauKlaerung(keys, uebernommen)", self.herkunft_js)
+        self.assertIn('"Herkunft"', self.herkunft_js)
+        self.assertIn('"klären (grau)"', self.herkunft_js)
+        self.assertIn('"klären (gelb)"', self.herkunft_js)
         self.assertIn("klaerenNachUngescannten", self.herkunft_js)
         self.assertIn("[wid]", self.herkunft_js)
 

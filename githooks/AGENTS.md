@@ -14,8 +14,9 @@ Gilt beim Arbeiten an `githooks/` **und** bei jedem Commit/Push aus diesem Clone
 
 **Von Maintainer-Rechnern und Assistenten-Worktrees** (Juniormind1-Maschinen, Grok/Cursor-Worktrees, `scripts/commit.*` / `scripts/push.*`) gilt hart:
 
-- **Nur** `user.name=Juniormind1` / `user.email=juniormind@proton.me`
-- **Kein** Push/Commit unter anderer Identität — auch nicht versehentlich (OS-Default, alte Config, Assistent)
+- **Nur** `user.name=Juniormind1` / `user.email=juniormind@proton.me` — das ist Config und Committer
+- **Git-Autor:** dieselbe Identität. Auf `dev-juniormind` zusätzlich `busch21 <busch21@tutamail.com>`. Auf `main` und jedem anderen Branch bleibt der Autor Juniormind1
+- **Kein** Push/Commit unter anderer Committer-Identität — auch nicht versehentlich (OS-Default, alte Config, Assistent)
 - Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Abweichung ab; `--fix-identity` setzt name/email/hooks). Commit-Default: getrackte + untracked **Text** auto; untracked **Binär** nach Nachfrage (`-A` alles, `-u` nur getrackt)
 - **Windows `.bat`:** echte `cmd.exe`-Dateien — **CRLF**-Zeilenenden (LF-only zerlegt CMD in Müll-Befehle), `REM`/`::` statt `#`, kein Bash-Syntax. Nach dem Schreiben Bytes prüfen (`\r\n`, kein UTF-16/NUL). `.sh` bleibt LF/Bash.
 

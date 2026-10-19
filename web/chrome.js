@@ -27,6 +27,7 @@ function logReleaseAlsErsteZeile() {
   const ver = (Zustand.config?.version || "").trim();
   if (!ver) return;
   const text = `SatSage v${ver}`;
+  if (typeof merkeLogDatei === "function") merkeLogDatei(text, "");
   let zeile = ziel.querySelector(".log-zeile.log-release");
   if (zeile) {
     const meldung = zeile.querySelector(".log-meldung");
@@ -291,6 +292,7 @@ async function start() {
     }
     window.addEventListener("satsage:lang", () => {
       if (window.SatSageI18n) window.SatSageI18n.applyDom(document);
+      if (typeof zeichneKopfFilterHinweis === "function") zeichneKopfFilterHinweis();
       // data-i18n-html setzt .env-pfad zurück auf „.env“ — echten Pfad wiederherstellen.
       if (Zustand.config?.env_path) setzeEnvPfad(Zustand.config.env_path);
       zeichneNav();

@@ -267,5 +267,54 @@ class TestUmbrelProxyVertrauen(UmbrelModeTestCase):
                 self.assertFalse(server._start9_proxy_authenticated(state, headers))
 
 
+class TestUmbrelScanDatenquelle(UmbrelModeTestCase):
+    """Der Scan darf die vorgegebene Quelle nicht für gelöscht halten.
+
+    Regression (1.0.0): die Warteschleife des Scans las die ``.env`` frisch,
+    um einen Papierkorb-Löschvorgang zu bemerken. Unter Umbrel steht die
+    Adresse aber im Prozess-Env, nicht in der Datei — die Lesung verwarf sie,
+    der Scan endete ohne eine einzige Prüfung mit "Keine Datenquelle".
+    """
+
+    def _args(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            xpubs=[], rescan=True, bip158=False, rpc_only=False, bip158_start=None,
+        )
+
+    def test_frische_lesung_behaelt_die_bridge_adresse(self):
+        import main
+        from core import chain_sources as cs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("NETWORK=main\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, UMBREL_ENV, clear=False), \
+                    mock.patch.object(main, "ENV_FILE", env_path):
+                konfiguriert, frisch = cs._indexer_konfig_jetzt(
+                    self._args(), dict(UMBREL_ENV),
+                )
+        self.assertTrue(konfiguriert, "Umbrel-Quelle gilt als gelöscht")
+        self.assertEqual(frisch.get("FULCRUM_HOST"), UMBREL_ENV["FULCRUM_HOST"])
+
+    def test_ohne_plattform_bleibt_der_papierkorb_wirksam(self):
+        """Ohne Managed-Modus zählt weiter nur die Datei."""
+        import main
+        from core import chain_sources as cs
+
+        ohne = {"SATSAGE_MANAGED_BY": "", "SATSAGE_START9": ""}
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("NETWORK=main\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, ohne, clear=False), \
+                    mock.patch.object(main, "ENV_FILE", env_path):
+                konfiguriert, frisch = cs._indexer_konfig_jetzt(
+                    self._args(), {"FULCRUM_HOST": "10.21.21.10"},
+                )
+        self.assertFalse(konfiguriert)
+        self.assertIsNone(frisch.get("FULCRUM_HOST"))
+
+
 if __name__ == "__main__":
     unittest.main()

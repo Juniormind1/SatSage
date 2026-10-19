@@ -2,8 +2,8 @@ name: Regtest-Labor Woche
 
 # Montags auf dev-juniormind, aber nur wenn seit dem letzten erfolgreichen
 # Labor-Lauf etwas am Prüfpfad lag. Ein stiller Dev-Zweig startet nichts.
-# Pfade = das, was die Labor-Prüfungen anfassen (Allowlist, Klassifikation,
-# Sanktions-Hops, Wallet-Kontext, deren Abhängigkeiten).
+# Pfade = das, was die Labor-Prüfungen anfassen (Allowlist, Gap, Klassifikation,
+# Sanktions-Hops, Wallet-Kontext, Userflow, Chaos, deren Abhängigkeiten).
 on:
   schedule:
     - cron: "17 6 * * 1"
@@ -53,6 +53,12 @@ jobs:
             core/wallet_sync_engine.py
             core/fulcrum_client.py
             core/fulcrum_protocol.py
+            scripts/webgui_userflow.py
+            scripts/webgui_chaos_run.py
+            scripts/webgui_chaos_harness.js
+            scripts/webgui_test_ready.py
+            scripts/webgui_passwort_flow.py
+            web
           )
           # Jüngster erfolgreicher Lauf auf diesem Branch, egal ob Merge-Labor
           # oder Wochenlauf. Ein roter Lauf zählt nicht als Basis.

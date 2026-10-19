@@ -103,7 +103,7 @@ def read_compact_size(data: bytes, offset: int = 0) -> tuple[int, int]:
 
 
 class P2pGesperrt(ConnectionError):
-    """P2P ist für Herkunft, Verlauf und Header-Vorab zu."""
+    """P2P ist für Herkunft und Verlauf zu."""
 
 
 class PeerHatBlockNicht(ConnectionError):
@@ -116,9 +116,17 @@ _utxo_entdeckung_tiefe = 0
 _utxo_entdeckung_lock = threading.Lock()
 
 
+_header_tiefe = 0
+_header_lock = threading.Lock()
+
+
 def p2p_socket_erlaubt() -> bool:
-    """True während ``p2p_nur_utxo_entdeckung``, sonst nur wenn P2P offen ist."""
-    return (not p2p_gesperrt()) or _utxo_entdeckung_laeuft()
+    """True während UTXO-Suche oder Header-Sync, sonst nur wenn P2P offen ist."""
+    return (
+        (not p2p_gesperrt())
+        or _utxo_entdeckung_laeuft()
+        or _header_laeuft()
+    )
 
 
 def p2p_gesperrt() -> bool:
@@ -129,11 +137,11 @@ def p2p_gesperrt() -> bool:
     Block. Eine historische Vorgänger-Tx braucht eine Txid-zu-Block-
     Abbildung, die P2P nicht hat. Key-Path-Taproot lässt sich aus dem
     Witness nicht rekonstruieren. Deshalb bleiben Herkunft, Verlauf,
-    Header-Vorab und der Walk-Abgleich zu.
+    ``get_tx`` und der Walk-Abgleich zu.
 
-    Sockets für den UTXO-Bestand öffnet nur ``p2p_nur_utxo_entdeckung``,
-    und der Aufrufer nur, wenn eigener Electrum-Server und scantxoutset
-    nicht verbunden sind (``core.chain_sources.p2p_utxo_entdeckung_frei``).
+    Sockets für den UTXO-Bestand öffnet nur ``p2p_nur_utxo_entdeckung``.
+    Header-Sync öffnet sie nur in ``p2p_nur_header``, und nur wenn P2P die
+    einzige Bestandsquelle ist (``p2p_utxo_entdeckung_frei``).
     """
     return True
 
@@ -154,6 +162,24 @@ def p2p_nur_utxo_entdeckung():
 def _utxo_entdeckung_laeuft() -> bool:
     with _utxo_entdeckung_lock:
         return _utxo_entdeckung_tiefe > 0
+
+
+@contextmanager
+def p2p_nur_header():
+    """Erlaubt P2P-Sockets nur für Header-Erstlauf oder Tip-Nachzug."""
+    global _header_tiefe
+    with _header_lock:
+        _header_tiefe += 1
+    try:
+        yield
+    finally:
+        with _header_lock:
+            _header_tiefe -= 1
+
+
+def _header_laeuft() -> bool:
+    with _header_lock:
+        return _header_tiefe > 0
 
 
 def p2p_netz_name() -> str:
@@ -406,6 +432,53 @@ def _peer_tip(peer) -> int:
         return 0
 
 
+def peer_ist_ungeprunt(peer) -> bool:
+    """``NODE_NETWORK``: der Peer kann Blöcke vor den letzten 288 liefern.
+
+    ``NODE_NETWORK_LIMITED`` ohne ``NODE_NETWORK`` ist geprunt. Nach
+    ``notfound`` (``historie_aus``) zählt der Peer nicht mehr als volle Historie.
+    """
+    if peer is None or getattr(peer, "tot", False):
+        return False
+    if getattr(peer, "historie_aus", False):
+        return False
+    return bool(_peer_services(peer) & NODE_NETWORK)
+
+
+def _hat_ungeprunten_peer(live) -> bool:
+    return any(peer_ist_ungeprunt(peer) for peer in live or [])
+
+
+def _noch_peers_suchen(live, limit: int, brauche_ungeprunt: bool) -> bool:
+    """Weiterwählen, solange Plätze frei sind oder die volle Historie fehlt.
+
+    Geprunte Peers füllen das Kontingent, stoppen die Suche aber nicht,
+    wenn ein Scan ab SegWit einen ungeprunten Peer braucht.
+    """
+    if len(live) < limit:
+        return True
+    return bool(brauche_ungeprunt) and not _hat_ungeprunten_peer(live)
+
+
+def begrenze_peer_pool(pool, ziel: int) -> list:
+    """Höchstens *ziel* Sockets. Ein ungeprunter Peer bleibt, geprunte weichen."""
+    behalten = list(pool or [])
+    while len(behalten) > max(0, int(ziel)):
+        opfer = None
+        for index in range(len(behalten) - 1, -1, -1):
+            if not peer_ist_ungeprunt(behalten[index]):
+                opfer = index
+                break
+        if opfer is None:
+            opfer = len(behalten) - 1
+        peer = behalten.pop(opfer)
+        try:
+            peer.close()
+        except Exception:
+            pass
+    return behalten
+
+
 def peer_liefert_block(peer, hoehe: int) -> bool:
     """Ob dieser Peer den vollen Block zu *hoehe* haben kann.
 
@@ -526,7 +599,7 @@ def _oeffne_socket(
     timeout: float,
     tor_proxy: tuple[str, int] | None,
 ) -> socket.socket:
-    if p2p_gesperrt() and not _utxo_entdeckung_laeuft():
+    if not p2p_socket_erlaubt():
         raise P2pGesperrt(
             "P2P ist abgeklemmt: Compact Filter reichen für die Herkunft nicht."
         )
@@ -1642,9 +1715,15 @@ def _verbinde_peer_batch(
     timeout: float,
     tor_proxy: tuple[str, int] | None,
     on_log: Callable[[str], None] | None,
+    brauche_ungeprunt: bool = False,
 ) -> None:
-    """Füllt *live* bis *limit* aus der Warteschlange (parallel je Batch)."""
-    while warteschlange and len(live) < limit:
+    """Füllt *live* bis *limit* aus der Warteschlange (parallel je Batch).
+
+    *brauche_ungeprunt*: ist das Kontingent schon voll mit geprunten Peers,
+    läuft die Warteschlange weiter, bis ein Peer mit ``NODE_NETWORK``
+    verbunden ist. Weitere geprunte Peers werden dann verworfen.
+    """
+    while warteschlange and _noch_peers_suchen(live, limit, brauche_ungeprunt):
         batch = warteschlange[:8]
         del warteschlange[:8]
         def eines(
@@ -1666,7 +1745,16 @@ def _verbinde_peer_batch(
                 if peer is None:
                     demote_filter_peer(host, port)
                     continue
-                if len(live) >= limit:
+                ungeprunt = peer_ist_ungeprunt(peer)
+                if not ungeprunt and len(live) >= limit:
+                    peer.close()  # type: ignore[union-attr]
+                    continue
+                if (
+                    ungeprunt
+                    and brauche_ungeprunt
+                    and _hat_ungeprunten_peer(live)
+                    and len(live) >= limit
+                ):
                     peer.close()  # type: ignore[union-attr]
                     continue
                 live.append(peer)
@@ -1685,6 +1773,7 @@ def verbinde_compact_filter_peers(
     dns_fallback: bool = True,
     versuche: int = 32,
     ruhig: bool = False,
+    brauche_ungeprunt: bool = False,
 ) -> list[BitcoinPeer]:
     """
     Offene Compact-Filter-Verbindungen. Nicht schließen.
@@ -1693,12 +1782,35 @@ def verbinde_compact_filter_peers(
     2. Nur wenn zu wenige: DNS-Seeds nachziehen
 
     *ruhig*: Scan-Betrieb — knappe Logs, Warnung unter ``P2P_SCAN_WARN_PEERS``.
+    *brauche_ungeprunt*: nicht aufhören, nur weil geprunte Peers das
+    Kontingent füllen. Ein Scan ab SegWit braucht mindestens einen Peer
+    mit voller Historie (``NODE_NETWORK``). ``limit=0`` sammelt dann nur
+    diesen einen Peer und verwirft geprunte Handshakes.
     """
-    if limit <= 0:
+    if limit <= 0 and not brauche_ungeprunt:
         return []
     meld = None if ruhig else on_log
     gesperrt = set(exclude or [])
     live: list[BitcoinPeer] = []
+
+    def _batch(warteschlange: list[tuple[str, int]]) -> None:
+        vorher = _hat_ungeprunten_peer(live)
+        _verbinde_peer_batch(
+            warteschlange,
+            live=live,
+            limit=limit,
+            timeout=timeout,
+            tor_proxy=tor_proxy,
+            on_log=meld,
+            brauche_ungeprunt=brauche_ungeprunt,
+        )
+        if brauche_ungeprunt and not vorher and _hat_ungeprunten_peer(live):
+            voll = next(peer for peer in live if peer_ist_ungeprunt(peer))
+            _sag(
+                on_log,
+                "Peer mit voller Historie "
+                f"{getattr(voll, 'host', '?')}:{getattr(voll, 'port', '')}",
+            )
 
     # --- Phase 1: bekannte Peers, kein DNS ---------------------------------
     phase1 = [
@@ -1718,28 +1830,33 @@ def verbinde_compact_filter_peers(
             f"Suche bis zu {limit} Compact-Filter-Peers "
             f"(zuerst {len(phase1)} aus Merk-Liste/LAN)…",
         )
-        _verbinde_peer_batch(
-            list(phase1),
-            live=live,
-            limit=limit,
-            timeout=timeout,
-            tor_proxy=tor_proxy,
-            on_log=meld,
-        )
+        _batch(list(phase1))
     else:
         _sag(meld, f"Suche bis zu {limit} Compact-Filter-Peers…")
 
-    # --- Phase 2: DNS nur wenn noch Plätze --------------------------------
-    if len(live) < limit and dns_fallback:
+    # --- Phase 2: DNS wenn noch Plätze oder die volle Historie fehlt -------
+    if brauche_ungeprunt and live and not _hat_ungeprunten_peer(live):
+        _sag(
+            on_log,
+            "Bisher nur geprunte Peers — suche einen Peer mit voller Historie…",
+        )
+    if _noch_peers_suchen(live, limit, brauche_ungeprunt) and dns_fallback:
         if live:
-            _sag(
-                meld,
-                f"{len(live)} Peer(s) aus Merk-Liste — "
-                f"weitere über DNS (noch {limit - len(live)})…",
-            )
+            rest = limit - len(live)
+            if rest > 0:
+                _sag(
+                    meld,
+                    f"{len(live)} Peer(s) aus Merk-Liste — "
+                    f"weitere über DNS (noch {rest})…",
+                )
         else:
             _sag(meld, "Merk-Liste leer/ohne Treffer — DNS-Seeds…")
         gesperrt_live = {(p.host, p.port) for p in live} | gesperrt
+        # Volle Historie fehlt: die Merk-Liste darf das DNS-Budget nicht
+        # aufbrauchen, sonst bleibt es bei den schon verbundenen Geprunten.
+        phase2_budget = max(0, versuche - len(phase1))
+        if brauche_ungeprunt and not _hat_ungeprunten_peer(live):
+            phase2_budget = versuche
         phase2 = [
             p
             for p in _p2p_kandidaten(
@@ -1750,16 +1867,9 @@ def verbinde_compact_filter_peers(
                 dns_sofort=True,
             )
             if p not in gesperrt_live
-        ][: max(0, versuche - len(phase1))]
+        ][:phase2_budget]
         if phase2:
-            _verbinde_peer_batch(
-                list(phase2),
-                live=live,
-                limit=limit,
-                timeout=timeout,
-                tor_proxy=tor_proxy,
-                on_log=meld,
-            )
+            _batch(list(phase2))
 
     if live:
         wort = "Peer" if len(live) == 1 else "Peers"
@@ -1790,6 +1900,12 @@ def verbinde_compact_filter_peers(
             )
     elif not ruhig:
         _sag(on_log, "Verbindung fehlgeschlagen: kein Compact-Filter-Peer")
+    if brauche_ungeprunt and live and not _hat_ungeprunten_peer(live):
+        _sag(
+            on_log,
+            "Kein Peer mit voller Historie — geprunte Peers liefern nur "
+            "die letzten 288 Blöcke.",
+        )
     return live
 
 

@@ -31,6 +31,64 @@ def _coinbase(amount: str = "38999.5"):
     return {"data": {"amount": amount, "base": "BTC", "currency": "EUR"}}
 
 
+class TestLetzterBekannterKurs(unittest.TestCase):
+    """Nur lokale Dateien. Kein Fetch."""
+
+    def test_leer_ohne_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(price, "bundel_historie_dir", return_value=Path(tmp) / "keins"):
+                self.assertIsNone(price.letzter_bekannter_kurs(
+                    "EUR", immutable_cache_dir=tmp,
+                ))
+
+    def test_spot_neuer_als_csv_auch_nach_ttl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            price.schreibe_kurs_csv(
+                price.historie_csv_pfad(cache, "EUR"),
+                {"2020-01-01": 10_000.0},
+                currency="EUR",
+            )
+            spot = price.BtcPreis(
+                amount=50_000.0, currency="EUR", time=1_700_000_000,
+                source="test", kind="spot", day="2023-11-14",
+            )
+            price._schreibe_cache(
+                price._spot_pfad(price.preis_cache_dir(cache), "EUR"),
+                spot,
+                fetched_at=1,
+            )
+            got = price.letzter_bekannter_kurs("EUR", immutable_cache_dir=cache)
+            self.assertIsNotNone(got)
+            self.assertEqual(got.amount, 50_000.0)
+            self.assertEqual(got.kind, "spot")
+
+    def test_gleichstand_nimmt_spot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            tag = date(2024, 6, 1)
+            price.schreibe_kurs_csv(
+                price.historie_csv_pfad(cache, "USD"),
+                {tag.isoformat(): 40_000.0},
+                currency="USD",
+            )
+            spot = price.BtcPreis(
+                amount=41_000.0, currency="USD",
+                time=price.unix_tagesbeginn(tag),
+                source="test", kind="spot", day=tag.isoformat(),
+            )
+            price._schreibe_cache(
+                price._spot_pfad(price.preis_cache_dir(cache), "USD"),
+                spot,
+                fetched_at=1,
+            )
+            got = price.letzter_bekannter_kurs(
+                "USD", immutable_cache_dir=cache, jetzt=1_800_000_000,
+            )
+            self.assertEqual(got.amount, 41_000.0)
+            self.assertEqual(got.kind, "spot")
+
+
 class TestHilfen(unittest.TestCase):
 
     def test_waehrung_normalisieren(self):

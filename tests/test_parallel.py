@@ -306,6 +306,18 @@ class TestOpenScanPool(unittest.TestCase):
         self.assertEqual(connect.call_count, 2)
         self.assertEqual(connect.call_args.args[:2], ("192.0.2.1", 50002))
 
+    def test_zweites_oeffnen_nimmt_denselben_pool(self):
+        erster = self._client()
+        erster._sock = mock.Mock()
+        extra = self._client()
+        with mock.patch(
+            "core.fulcrum_client.connect_fulcrum", return_value=(extra, None)
+        ) as connect:
+            pool = main._open_scan_pool(erster, workers=3)
+            nochmal = main._open_scan_pool(erster, workers=3)
+        self.assertIs(nochmal, pool)
+        self.assertEqual(connect.call_count, 2)
+
     def test_fehlende_extra_verbindung_ist_kein_pool(self):
         with mock.patch(
             "core.fulcrum_client.connect_fulcrum", return_value=(None, "timeout")

@@ -110,6 +110,14 @@ async function api(pfad, { methode = "GET", daten, timeoutMs, signal } = {}) {
   } catch (_) {
     /* leerer Körper ist in Ordnung */
   }
+  if (
+    antwort.ok
+    && koerper
+    && koerper.filter_kurs_fehlt
+    && typeof uebernimmFilterKursFehlt === "function"
+  ) {
+    uebernimmFilterKursFehlt(koerper.filter_kurs_fehlt);
+  }
   if (!antwort.ok) {
     if (
       antwort.status === 409
@@ -533,6 +541,11 @@ function aktualisiereGruppenMixIcons(address) {
 }
 
 function quelleFeldLabel(feld, quelleKey) {
+  if (quelleKey === "own_fulcrum") {
+    const kurz = `sources.field.${feld.key}.labelElectrs`;
+    const electrs = t(kurz);
+    if (electrs !== kurz) return electrs;
+  }
   const key = `sources.field.${feld.key}.label`;
   const uebersetzt = t(key);
   return uebersetzt !== key ? uebersetzt : feld.label;

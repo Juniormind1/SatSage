@@ -69,12 +69,15 @@ function setzeText() {}
 function zeichneUtxos() {}
 function zeigeLeer() {}
 function aktualisiereScanAnzeige() {}
+function walletWarteAn() {}
+function walletWarteAus() {}
 const warte = () => new Promise((r) => setTimeout(r, 20));
 const utxos = () => aufrufe.filter((x) => x.pfad.includes("/utxos"));
 """
 
 _FUNKTIONEN = [
     "async function zeigeWallet(",
+    "function walletHatSchonUtxos(",
     "function walletListenParameter(",
     "function walletMempoolErlaubt(",
     "function holeWalletMempoolNachStart(",

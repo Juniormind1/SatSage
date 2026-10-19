@@ -308,6 +308,10 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--blass);
   opacity: 0.9;
 }
+.kopf-filter.kopf-filter-kurs-fehlt {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
 .kopf-filter:disabled,
 .kopf-filter[aria-disabled="true"] {
   opacity: 0.45;
@@ -383,6 +387,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .nav-leiste-kopf {
   display: none;
+  flex-shrink: 0;
   justify-content: flex-end;
   align-items: center;
   padding: 0 8px 4px 8px;
@@ -471,6 +476,13 @@ button, input, select { font: inherit; color: inherit; }
 }
 .buehne:not(.log-an):not(.chat-an) .dock-spalten {
   grid-template-columns: minmax(0, 1fr);
+}
+/* Log aus und kein LLM: Dock weg, der Empfang sitzt in der Navigationsleiste. */
+.buehne.empfang-in-nav:not(.log-an):not(.chat-an) {
+  grid-template-rows: minmax(0, 1fr);
+}
+.buehne.empfang-in-nav:not(.log-an):not(.chat-an) > #dock {
+  display: none;
 }
 .buehne:not(.log-an) #log-pane,
 .buehne:not(.log-an) #dock-spalter { display: none; }
@@ -962,7 +974,27 @@ button, input, select { font: inherit; color: inherit; }
   border-right: 1px solid var(--linie);
   padding: 14px 0;
   display: flex; flex-direction: column; gap: 6px;
-  min-height: 0; overflow-y: auto;
+  min-height: 0; overflow: hidden;
+}
+.nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* Empfang unten in der Leiste: Einträge scrollen darüber, der QR bleibt sichtbar. */
+.buehne.empfang-in-nav .seitenleiste {
+  padding-bottom: 0;
+}
+.buehne.empfang-in-nav #empfang-pane {
+  flex: 0 1 auto;
+  width: 100%;
+  height: min(48%, 17rem);
+  max-height: 48%;
+  min-height: 0;
+  border-left: 0;
+  border-top: 1px solid var(--linie);
+  background: var(--flaeche-2);
 }
 #app.nav-kompakt:not(.nav-gepinnt) .seitenleiste {
   position: absolute;
@@ -1612,6 +1644,45 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
 }
 .leerzustand strong { display: block; color: var(--text); margin-bottom: 6px; }
 
+/* Wartemelodie, nur solange ein Bestand mit UTXOs aus dem Cache kommt.
+   Dunkles Feld in beiden Themes: die fallenden Zeichen brauchen den Grund. */
+.wallet-warte {
+  --warte-grund: #14181c;
+  --warte-kopf: #d8ffe6;
+  position: relative;
+  min-height: min(68vh, 560px);
+  border: 1px solid var(--linie);
+  border-radius: 4px;
+  background: var(--warte-grund);
+  overflow: hidden;
+}
+.wallet-warte-leinwand {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.wallet-warte-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--warte-kopf);
+  background: rgba(20, 24, 28, 0.78);
+  border: 1px solid rgba(216, 255, 230, 0.35);
+  padding: 6px 12px;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wallet-warte-leinwand { display: none; }
+}
+
 /* ---------- Tabelle ---------- */
 
 .tabelle-huelle { overflow-x: auto; }
@@ -2056,12 +2127,70 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   border-bottom: 1px solid var(--linie-zart);
   display: flex; flex-direction: column; gap: 10px;
 }
+.electrs-formular {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.electrs-reihe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+}
+.electrs-reihe .feld-zeile {
+  flex: 1 1 16rem;
+  max-width: 32rem;
+}
+.electrs-reihe-port {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 20px;
+}
+.electrs-reihe-port .feld-zeile {
+  max-width: none;
+}
+.electrs-reihe-port .feld-zeile:not(.feld-zeile-check) {
+  flex: 0 1 10rem;
+}
+.electrs-reihe-gap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 20px;
+}
+.electrs-reihe-gap .feld-zeile {
+  flex: 0 1 10rem;
+  max-width: none;
+}
+.electrs-gap-hinweis {
+  flex: 1 1 18rem;
+  margin: 0;
+  font-size: 11px;
+  color: var(--gedaempft);
+  line-height: 1.45;
+  padding-top: 1.55em;
+}
 .feld-zeile { display: flex; flex-direction: column; gap: 3px; max-width: 52ch; }
+.feld-zeile-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  max-width: none;
+}
 .feld-zeile .feld-checkbox {
   width: 1.1rem;
   height: 1.1rem;
   margin: 2px 0 0;
   accent-color: var(--akzent);
+}
+.feld-zeile-check .feld-checkbox {
+  margin: 0;
+  flex: 0 0 auto;
+}
+@media (max-width: 44rem) {
+  .electrs-reihe .feld-zeile { flex-basis: 100%; max-width: none; }
 }
 .feld-zeile input:not(.feld-checkbox),
 .feld-zeile select,
@@ -2122,6 +2251,19 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   min-width: 0;
   box-sizing: border-box;
   font-size: 12px;
+}
+.tools-schatz-zeile {
+  grid-template-columns: minmax(10rem, 22rem) auto auto var(--tools-knopf);
+}
+.tools-schatz-zeile > .tools-eingabe { width: 100%; }
+.tools-indexfeld {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blass);
 }
 .tools-zeile > .knopf { width: 100%; }
 .tools-zeile > .knopf + .knopf { width: auto; }

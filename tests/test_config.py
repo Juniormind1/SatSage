@@ -500,5 +500,17 @@ class TestMaskierung(unittest.TestCase):
         self.assertEqual(eintrag.display_name, main._default_wallet_name(BIP84_ZPUB))
 
 
+class TestSuiteOhnePersoenlicheEnv(unittest.TestCase):
+    """Der Default-Pfad der Suite ist leer. Die persönliche Datei bleibt außen."""
+
+    def test_load_dotenv_ohne_pfad_ist_leer(self):
+        from core import env_bootstrap
+
+        self.assertEqual(env_bootstrap.ENV_FILE, main.ENV_FILE)
+        self.assertEqual(env_bootstrap.ENV_FILE.name, "unittest-leer.env")
+        self.assertEqual(env_bootstrap._load_dotenv(), {})
+        self.assertEqual(main._load_dotenv(), {})
+
+
 if __name__ == "__main__":
     unittest.main()

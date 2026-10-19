@@ -751,7 +751,7 @@ Lücken, Importe oder ein Change-Ausgang zuerst kommen vor.</p>
 <p>Erhoben wird das <strong>einmalig</strong>, beim Scan eines XPUB, für den
 noch kein Wert vorliegt — die älteste Transaktion eines Wallets kann sich nicht
 mehr ändern. Es kostet eine Abfrage je Adresse und braucht einen
-<strong>Electrum-Server</strong>; läuft der Scan über Esplora oder BIP-158,
+<strong>Electrum-Server</strong>; läuft der Scan über BIP-158,
 bleibt die Angabe leer und wird beim nächsten Electrum-Scan nachgeholt. Lässt
 sich die Blockzeit nicht auflösen, steht dort die Blockhöhe.</p>
 
@@ -968,8 +968,9 @@ keine Anfrage an einen Node.</p>
 
 <p>Darunter <strong>Jäger der verlorene Schätze</strong>. Der Knopf ist nur
 aktiv, wenn eine Bitcoin-Core-Quelle mit <code>scantxoutset</code> verbunden
-ist. Der Lauf dauert: der Node sucht UTXOs jenseits des normalen
-Adressfensters. Gefundene Beträge landen im Wallet-Cache. Im Log steht,
+ist. Der Lauf dauert: der Node sucht UTXOs im Indexfenster
+<strong>Scan ab</strong> / <strong>Scan bis</strong> (Vorgabe #0 bis #500,
+Empfang und Wechselgeld, Ende einschließlich). Gefundene Beträge landen im Wallet-Cache. Im Log steht,
 warum der normale Scan sie übersehen hat. Die Liste unter dem Knopf gilt
 nur, solange dieser Bereich offen bleibt.</p>
 
@@ -1059,7 +1060,15 @@ zeigt, bleibt <strong>Scan neu</strong> ebenfalls aus.</p>
   Passt er nicht mehr, wird der Baum trotzdem gezeigt, aber gekennzeichnet:
   Die Marke wird gelb, und über dem Baum steht, wie viele Adressen seither
   dazugekommen sind. Verworfen wird nichts — <strong>Herkunft aller UTXOs</strong>
-  nimmt diese Bäume mit und löst damit alle Warnungen auf einmal auf.</p>
+  nimmt diese Bäume mit und löst damit alle Warnungen auf einmal auf. Ein
+  gekennzeichneter Baum wird dabei <strong>neu verfolgt</strong>, nicht
+  fortgesetzt; ebenso einer, dessen externes Ende heute eine eigene Adresse
+  ist. Erzwungene Läufe (grauer Knopf im Steuerjahr) bauen jeden Baum neu,
+  <strong>Scan neu</strong> setzt nur einen unfertigen Baum fort.</p>
+  <p>Mit einer neuen Version kann sich die Fassung der Herkunfts-Caches ändern
+  (<code>utxo_trace/</code>, <code>utxo_ingress/</code>). Ältere Einträge
+  gelten dann als nicht verfolgt: Die UTXOs stehen wieder grau, bis
+  <strong>Herkunft aller UTXOs</strong> sie neu erhoben hat.</p>
 </div>
 
 <p>Jeder Zweig läuft eigenständig: mehrere lassen sich nebeneinander verfolgen,
@@ -1075,7 +1084,9 @@ Adressen grau, nicht aufgelöste Eingänge <span class="gelb">gelb</span>.</p>
     <li>Sobald ein eigener Eingang gefunden ist, werden die <em>danach</em>
         folgenden Eingänge nur gezählt, nicht aufgelöst. Die ausgewiesene Summe
         externer Zuflüsse ist deshalb eine <strong>Untergrenze, keine
-        Gesamtsumme</strong>.</li>
+        Gesamtsumme</strong>. Das Anschaffungsdatum dagegen nicht: Jeder
+        ungeklärte Eingang zählt vorsichtig als angeschafft zur Blockzeit der
+        Sammel-Tx — das Datum kann zu jung sein, nie zu alt.</li>
   </ul>
 </div>
 
@@ -1155,6 +1166,11 @@ ist nicht ohne Weiteres das Entstehungsdatum des Outputs.</p>
   <strong>keinem</strong> der konfigurierten XPUBs gehört. Interne Überträge —
   auch zwischen verschiedenen eigenen Wallets oder Seeds — beginnen keine neue
   Frist.</p>
+  <p><strong>Datum eines Zuflusses</strong> ist die Blockzeit der Transaktion,
+  mit der die Sats auf deiner Adresse ankamen — der Empfang durch das Wallet.
+  Wie lange sie vorher beim Absender lagen (Blockzeit seines Outputs), zählt
+  nicht. Bis Version 1.0.0 nahm SatSage dieses frühere Datum; die Haltefrist
+  begann dadurch zu früh.</p>
 </blockquote>
 
 <h4>Ein durchgehendes Beispiel</h4>
@@ -1203,6 +1219,9 @@ Zuflüsse: 01.03.2021 (0,8 BTC) und 15.06.2022 (0,7 BTC). Der
       der jüngste. Das ist die defensive Lesart: Die Frist gilt erst als
       erfüllt, wenn <em>alle</em> Sats im UTXO länger als ein Jahr gehalten
       wurden.</li>
+  <li><strong>Nicht</strong> der Tag, an dem Bitpanda die Sats selbst erhielt,
+      sondern der Tag von <code>T2</code>, an dem sie auf
+      <code>A-receive-3</code> ankamen.</li>
 </ol>
 
 <p>In den Einstellungen unter <strong>Anschaffung aus Herkunft</strong> (bzw.
@@ -1241,6 +1260,7 @@ sats ausgebbar. Während einer Herkunftsanalyse (Klären) steigt die Zahl
 mit jedem fertigen Baum, wie die grüne Scorecard im Steuerjahr.</p>
 <p>Auch das Anschaffungsdatum kommt aus diesen Losen: Bei „jüngste“ zählt das
 jüngste, bei „älteste“ das älteste Los, das per FIFO in diesem UTXO steckt.
+Jedes Los trägt das Datum seines Wallet-Eingangs (siehe Grundregel).
 Datum, Farbe und „erfüllt“ passen so zusammen; Frist-Ende und Haltedauer folgen.
 Im Zeitstrahl steht ein Punkt zuerst am Datum aus dem Herkunftsbaum und rückt
 nach dem Lot-Lauf an sein Los-Datum. Wo SatSage anteilig verteilt (fremde
@@ -1262,8 +1282,16 @@ Börsen-Batches oder CoinJoin/Mix — ohne automatische Erkennung.</p>
     <tr><td><strong>Herkunft verfolgt</strong></td>
         <td>Analyse liegt vor, alle externen Zuflüsse datiert</td>
         <td>jüngster externer Zufluss — steuerlich das richtige</td></tr>
+    <tr><td><strong>… (Bündel, vorsichtig)</strong></td>
+        <td>Analyse vorhanden, Eingänge einer Tx ungeklärt (Sammel-Tx über
+            20 Eingängen, fehlender Vorgänger) — Datum ist die Blockzeit
+            dieser Tx</td>
+        <td>Datum kann <strong>zu jung</strong> sein — Haltefrist zu kurz
+            ausgewiesen; „Herkunft vervollständigen“ kann es nach links
+            schieben</td></tr>
     <tr><td><strong>… (Untergrenze)</strong></td>
-        <td>Analyse vorhanden, nicht alle externen Vorgänger auflösbar</td>
+        <td>Analyse vorhanden, eine Tx der Herkunft noch unbestätigt (ohne
+            Blockzeit)</td>
         <td>Datum kann <strong>zu alt</strong> sein — Haltefrist zu lang
             ausgewiesen</td></tr>
     <tr><td><strong>… (nur Wallet-Eingang)</strong></td>
@@ -1277,24 +1305,25 @@ Börsen-Batches oder CoinJoin/Mix — ohne automatische Erkennung.</p>
 </table>
 </div>
 
-<p>Die beiden mittleren Fälle zeigen in <strong>entgegengesetzte
+<p>Die mittleren Fälle zeigen in <strong>entgegengesetzte
 Richtungen</strong> und werden deshalb getrennt ausgewiesen — in der Zeile, in
 den Kennzahlen und im CSV-Export. „Untergrenze" ist der riskante Fall: Die
-Frist erscheint länger erfüllt, als sie es womöglich ist. „Nur Wallet-Eingang"
-ist der defensive.</p>
+Frist erscheint länger erfüllt, als sie es womöglich ist. Er tritt nur noch
+auf, solange eine Tx der Herkunft unbestätigt ist. „Bündel, vorsichtig“ und
+„Nur Wallet-Eingang" sind die defensiven. Im offensiven Modus bleibt es bei
+einem Bündel bei der jüngsten Lesart, und die Lose eines Bündels dürfen nicht
+früher grün werden als die Blockzeit der Tx.</p>
 
 <h4>Sonderfälle</h4>
 <ul>
   <li><strong>Coinbase (Mining):</strong> Der Block-Zeitpunkt der Coinbase-Tx
       ist der externe Zufluss.</li>
   <li><strong>Große Sammel-Tx (mehr als 20 Eingänge):</strong> Der Trace bricht
-      nach dem ersten internen Eingang ab. Das gefundene Datum wird als
-      <strong>Untergrenze</strong> markiert.</li>
-  <li><strong>Datenquelle ohne Blockzeiten der Vorgänger:</strong> Esplora
-      liefert den Vorgänger-Output inline mit, aber ohne dessen Blockzeit. Bei
-      Transaktionen bis 20 Eingängen wird sie nachgeladen; bei größeren gilt
-      der jüngste Wallet-Eingang. Ein eigener Fulcrum liefert die Blockzeit
-      ohnehin mit.</li>
+      nach dem ersten internen Eingang ab. Die übrigen Eingänge zählen als
+      angeschafft zur Blockzeit der Sammel-Tx; das Datum wird als
+      <strong>Bündel, vorsichtig</strong> markiert (kann zu jung sein, nie zu
+      alt). Dasselbe gilt für Eingänge, deren Vorgänger-Tx nicht geladen
+      werden konnte.</li>
   <li><strong>Kein Trace vorhanden:</strong> Rückfall auf das Output-Datum —
       bewusst defensiv (zu jung, nie zu alt).</li>
 </ul>
@@ -1596,10 +1625,10 @@ Menü und Einmal-Läufe über <code>main.py</code> sind kein Bedienweg.</p>
         <td>automatisch (letzte Stufe)</td>
         <td><span class="gelb">mäßig</span></td>
         <td>Server aus <code>electrum_servers.json</code></td></tr>
-    <tr><td><strong>Esplora</strong></td>
-        <td><code>--esplora [URL]</code> oder manuelle Wahl</td>
-        <td><span class="rot">gering</span></td>
-        <td>HTTP-API (Vorgabe mempool.space), Rate-Limit-Schutz</td></tr>
+    <tr><td><strong>Eigener Block-Explorer</strong></td>
+        <td>keine eigene Quelle. <code>MEMPOOL_URL</code> im eigenen Netz, und der Electrum-Server ist kein libbitcoin</td>
+        <td><span class="gruen">hoch</span></td>
+        <td>Bestand und kleine Herkunft über die Esplora-API. Die Adresslücke bleibt beim Electrum-Server. Öffentliche Explorer werden nicht gefragt.</td></tr>
   </tbody>
 </table>
 </div>
@@ -1617,11 +1646,11 @@ scantxoutset nicht verbunden sind. Herkunft, Verlauf und der
 Sanktionscheck bleiben bei einem schon verbundenen Electrum-Server.
 Ohne den erscheint ein Hinweis, und es wird nicht gesucht.</p>
 
-<p>In den Datenquellen stehen bei Compact Filter <strong>Frühestes Scan-Datum</strong>,
-<strong>Scan ab Blockhöhe</strong> und <strong>Gap-Limit</strong>. Datum und Höhe
+<p>In den Datenquellen stehen bei Compact Filter <strong>Frühestes Scan-Datum</strong>
+und <strong>Scan ab Blockhöhe</strong>. Datum und Höhe
 füllen sich gegenseitig. Ohne bekanntes Wallet-Alter fragt <strong>Ab wann
-scannen?</strong> dieselben drei Felder; Vorgabe sind Höhe und Lücke aus den
-Datenquellen, die Lücke gilt nur für diesen Scan. Der Compact-Filter-Scan liest
+scannen?</strong> dieselben zwei Felder plus das <strong>Gap-Limit</strong>
+für diesen Scan (Vorgabe 100, höchstens 10.000). Der Compact-Filter-Scan liest
 die Höhe, nicht das Datum. Hat das Wallet ein First-seen, gilt dieser Beginn —
 auch wenn die Datenquellen-Höhe später liegt.
 Die Umrechnung nutzt die lokale Header-Datei,
@@ -1635,10 +1664,13 @@ ungenutzten Lookahead-Keys seit SegWit. Compact Filter liegen unter
 beim nächsten Wallet oder Rescan wiederverwendet. Blöcke nur bei Filter-Treffer;
 Filter-Download und Block-Download laufen entkoppelt.</p>
 
-<p><code>BITCOIN_BIP158=1</code> und <code>ESPLORA_URL</code> in
-<code>.env</code> erzwingen <strong>keine</strong> Quelle — nur
-<code>--bip158</code>, <code>--rpc-only</code>, <code>--esplora</code> oder die
-manuelle Wahl unter Einstellungen.</p>
+<p><code>BITCOIN_BIP158=1</code> in <code>.env</code> erzwingt
+<strong>keine</strong> Quelle — nur <code>--bip158</code>,
+<code>--rpc-only</code> oder die manuelle Wahl unter Einstellungen.
+Ein öffentlicher Esplora-Server ist keine Datenquelle. Die eigene
+mempool-Instanz unter <code>MEMPOOL_URL</code> liefert Bestand und
+kleine Herkunft, solange der verbundene Electrum-Server kein libbitcoin
+ist.</p>
 
 <h3>Warum „Electrum-Server" und nicht „Fulcrum"</h3>
 
@@ -1646,7 +1678,32 @@ manuelle Wahl unter Einstellungen.</p>
 eine Implementierung davon; electrs und ElectrumX funktionieren genauso. Die
 <code>.env</code>-Schlüssel heißen weiterhin <code>FULCRUM_*</code>, damit
 bestehende Konfigurationen unverändert weiterlaufen — nur die Bezeichnungen in
-der Oberfläche sind richtiggestellt.</p>
+der Oberfläche sind richtiggestellt. Meldet sich der eigene Server als
+libbitcoin und liefert seine Abfrage einen Adressindex, nutzt SatSage
+diesen Weg für Bestand und Herkunft. Ohne
+<code>LIBBITCOIN_NATIVE_PORT</code> gelten die Ports 8181 und 8180; der
+Port, dessen Antwort das Feld <code>address</code> trägt, gewinnt. Sonst
+bleibt es beim Electrum-Protokoll.</p>
+
+<p>In den Datenquellen hat der eigene Electrum-Server ein Adressfeld.
+IP oder Name landen in <code>FULCRUM_HOST</code>, eine <code>.onion</code>
+in <code>FULCRUM_TOR</code>. Die andere Zeile wird dabei geleert.
+Der Proxy erscheint erst, wenn die Eingabe eine Onion ist.
+Kommt die Verbindung mit einer anderen TLS-Einstellung zustande und das
+Electrs-Formular ist noch offen, setzt sich das TLS-Häkchen in diesem Moment.</p>
+
+<p>Die Adresslücke des eigenen Electrum-Servers stellst du in den
+Datenquellen unter <strong>Electrum-Server → Gap-Limit</strong> ein
+(Vorgabe 100, mindestens 100, höchstens 10.000). Übernehmen schreibt sie als
+<code>UTXO_SCAN_GAP_LIMIT</code> in die <code>.env</code>; ein Eintrag von
+Hand dort wirkt genauso, ein leeres Feld setzt die Vorgabe zurück.
+Ein Wert unter 100, auch von Hand in der <code>.env</code>, gilt als 100;
+das Log nennt das einmal.
+Ein höherer Wert macht den Scan langsamer.
+Der nächste UTXO-Scan und <strong>Aktualisieren</strong> suchen so viele
+leere Indizes in Folge. Ein höheres Limit findet weiter entfernte Adressen;
+der bestehende Cache und fertige Herkunftsbäume bleiben. Herkunft und
+Historie nur für neu gefundene UTXOs.</p>
 
 <h3>Verbindung testen</h3>
 
@@ -1693,6 +1750,7 @@ FULCRUM_HOST=192.168.1.100
 FULCRUM_TOR=deinnode.onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
+# UTXO_SCAN_GAP_LIMIT=100              # 100…10000, Vorgabe 100. Electrs-Gap.
 # Eine IP wird auf 50001 und 50002, mit und ohne TLS, gleichzeitig geprüft.
 FULCRUM_TOR_PROXY=127.0.0.1:9150
 
@@ -1713,10 +1771,8 @@ RPCPASSWORD=...
 # BIP158_START_HEIGHT=850000
 # BIP158_GAP_LIMIT=100                 # 1…10000, Vorgabe 100. Höher = weitere Indizes, mehr Blöcke.
 
-# Esplora (nur bei manueller Wahl oder --esplora)
-# ESPLORA_URL=https://mempool.space/api
-
-# Eigene mempool.space-Instanz für die ↗-Verweise
+# Eigene mempool.space-Instanz: ↗-Verweise, und — wenn der Electrum-Server
+# kein libbitcoin ist — Bestand und kleine Herkunft. Öffentliche Explorer nie.
 # MEMPOOL_URL=http://umbrel.local:3006
 
 # Verbose: volle TxIDs/Adressen (Vorgabe: aus)
@@ -1904,8 +1960,9 @@ Schreibvorgänge pausiert (Warnung einmalig).</p>
       beste Privatsphäre.</li>
   <li><strong>Öffentliche Electrum-Server</strong> — Rotation mildert das Risiko
       einzelner Server, bleibt aber <span class="gelb">mäßig</span>.</li>
-  <li><strong>Esplora</strong> — Adressen und TxIDs gehen an den API-Anbieter,
-      <span class="rot">geringste</span> Privatsphäre.</li>
+  <li><strong>Eigener Block-Explorer</strong> — nur die Instanz im eigenen Netz
+      (<code>MEMPOOL_URL</code>). Ein öffentlicher Explorer ist keine
+      Datenquelle.</li>
   <li><strong>Sanktions-Scans</strong> nutzen für die Listen-Adressen den
       eigenen privaten Server oder Clearnet — nie die eigenen Wallet-XPUBs.</li>
   <li>Die Web-Oberfläche schreibt <strong>keine Zugriffsprotokolle</strong> und
@@ -2001,7 +2058,11 @@ jüngsten <em>Wallet</em>-Eingang und den jüngsten <em>externen</em> Zufluss.</
     <tr><td><code>external_sats</code>, <code>external_address</code></td>
         <td>Betrag und Adresse dieses Zuflusses</td></tr>
     <tr><td><code>external_untergrenze</code></td>
-        <td>true, wenn externe Vorgänger unaufgelöst blieben — Datum kann zu alt sein</td></tr>
+        <td>true, wenn ein Zufluss ohne Blockzeit blieb (Tx unbestätigt) — Datum kann zu alt sein</td></tr>
+    <tr><td><code>external_buendel</code></td>
+        <td>true, wenn der Baum Lücken hat (gebündelte oder unauflösbare Eingänge); offensiv gilt dann die jüngste Lesart</td></tr>
+    <tr><td><code>external_buendel_obergrenze</code></td>
+        <td>true, wenn das Datum die Blockzeit einer Tx mit solchen Lücken ist — kann zu jung sein, nie zu alt</td></tr>
   </tbody>
 </table>
 </div>

@@ -52,7 +52,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | S1 | **Niemals Geheimnisse pushen oder persönliche Daten doxxen.** Im Git-Diff/Commit/Push/PR/Issue: `.env` (+ Backups/Scramble), `.satsage-password`, Cookies, RPC-/API-Keys, Passwort-Hashes, Session-Token, Seed/xprv/WIF, volle XPUBs/Deskriptoren, persönliche Wallet-Namen, reale Nutzer-Mainnet-Adressen/TxIDs, Klarnamen/Kontaktdaten zum Doxxing. Gilt auch für Agent-Chat-Output und Logs. | Hart |
-| S2 | **Maintainer-/Agent-Clones:** nur `Juniormind1 <juniormind@proton.me>`. **Fremde Contributor-Commits/PRs:** eigene Autor-IDs erlaubt. CI prüft nicht „jeder Commit = Juniormind1“. | Hart lokal (Hooks) für Maintainer/Agent |
+| S2 | **Maintainer-/Agent-Clones:** Config und Committer nur `Juniormind1 <juniormind@proton.me>`. Git-Autor ebenso, auf `dev-juniormind` zusätzlich `busch21 <busch21@tutamail.com>`. **Fremde Contributor-Commits/PRs:** eigene Autor-IDs erlaubt. CI prüft nicht „jeder Commit = Juniormind1“. | Hart lokal (Hooks) für Maintainer/Agent |
 | S3 | **`githooks/`** oder CI-Workflows sabotieren/entfernen ohne Maintainer-Freigabe | Hart+Review |
 | S4 | Merge nach **`main`** ohne Prüfung (Prozess/Ruleset) | Hart (Ruleset/Prozess) |
 
@@ -65,7 +65,7 @@ Verankert in [`AGENTS.md`](../AGENTS.md) (HART, Cross-Cutting) und [`githooks/AG
 | ID | Dealbreaker | Härte |
 |----|-------------|--------|
 | Q1 | **`tests/`-Suite rot** auf CI (Ubuntu `unittest discover`) | Hart |
-| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py` | Hart |
+| Q6 | **Regtest-Labor rot** vor Merge nach `main` oder vor einem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket). Core + Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, `verify_gui_dachboden.py` (Lab-Sitzung, kein Präsentations-Server). Dazu Userflow und Chaos (`scripts/webgui_userflow.py --spawn`, `scripts/webgui_chaos_run.py --spawn --rounds 200 --seed 42`): auf macOS im installierten Chrome, in der Linux-CI im gebündelten Chromium | Hart |
 | Q2 | Suite „grün“ nur durch **unbegründete skips** / Aushebeln von Checks | Hart+Review |
 | Q3 | **Scope-Monster**: UI + Core-Scan + Packaging + Plugin in einem PR ohne Trennung | Weich |
 | Q4 | Neue Nutzertexte **nur Englisch / hart in `app.js`** statt Locales | Weich |

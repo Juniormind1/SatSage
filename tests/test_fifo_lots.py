@@ -16,6 +16,7 @@ from core import fifo_lots as fl
 from core import herkunftsnetz as hn
 from core import psbt_bau
 from tests.fixtures import txid
+from core.xpub_cache import HERKUNFT_SCHEMA
 
 SKALA = hn.Skala(von=datetime(2023, 1, 1), bis=datetime(2025, 1, 1), hoechst=10_000)
 L = fl.Los
@@ -548,6 +549,7 @@ class TestDatumAusLosen(unittest.TestCase):
         ordner = self.cache / main.UTXO_INGRESS_CACHE_SUBDIR
         ordner.mkdir(parents=True, exist_ok=True)
         (ordner / f"{txid(name)}_{vout}.json").write_text(_json.dumps({
+            "schema": HERKUNFT_SCHEMA,
             "txid": txid(name), "vout": vout,
             "external_time_ts": _ts(stempel[0]), "external_oldest_time_ts": _ts(stempel[1]),
         }), encoding="utf-8")

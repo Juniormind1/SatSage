@@ -25,6 +25,8 @@ def suche_cache(
     anreichere_verlauf: Callable[[dict], dict],
     nach_ts=None,
     vor_ts=None,
+    immutable_cache_dir=None,
+    kurse=None,
     on_progress: Callable[[str], None] | None = None,
     raise_if_cancelled: Callable[[], None] | None = None,
 ) -> dict:
@@ -34,7 +36,21 @@ def suche_cache(
     *eintraege*: Wallets mit ``display_name`` und ``wallet_id()``.
     *lade_*: ``(analyse_schluessel) -> list[dict] | None``.
     """
-    filt = lf.parse_filter(roh, nach_ts=nach_ts, vor_ts=vor_ts)
+    text = str(roh or "")
+    if kurse is None and lf.enthaelt_fiat(text):
+        kurse = lf.bekannte_filter_kurse(immutable_cache_dir)
+    elif not lf.enthaelt_fiat(text):
+        kurse = None
+    filt = lf.parse_filter(text, nach_ts=nach_ts, vor_ts=vor_ts, kurse=kurse)
+    if filt.get("kurs_fehlt"):
+        return {
+            "q": text.strip(),
+            "total": 0,
+            "bestand": 0,
+            "verlauf": 0,
+            "treffer": [],
+            "kurs_fehlt": filt["kurs_fehlt"],
+        }
     if filt["leer"]:
         return {"q": "", "total": 0, "bestand": 0, "verlauf": 0, "treffer": []}
 

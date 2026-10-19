@@ -522,8 +522,13 @@ def _seed_wallet_addresses_from_cache(
     *,
     cache_dir: Path | None = None,
     xpubs: list[str] | None = None,
+    merken: dict | None = None,
 ) -> None:
-    """UTXO- und scanned_addresses aus dem Scan-Cache ins Wallet-Mapping."""
+    """UTXO- und scanned_addresses aus dem Scan-Cache ins Wallet-Mapping.
+
+    *merken*: der eben gelesene Cache-Eintrag je Schlüssel. Der Start-Stand
+    baut die Pille daraus und öffnet die Datei dafür nicht noch einmal.
+    """
     if not wallet:
         return
     targets = xpubs or list(cached_by_xpub.keys())
@@ -539,6 +544,8 @@ def _seed_wallet_addresses_from_cache(
         from core.xpub_cache import load_xpub_cache_entry
 
         entry = load_xpub_cache_entry(xpub, cache_dir)
+        if merken is not None:
+            merken[xpub] = entry
         if not entry:
             continue
         for addr in entry["raw"].get("scanned_addresses", []):
@@ -556,8 +563,12 @@ def seed_wallet_addresses_from_utxo_cache(
     cache_dir: Path,
     *,
     scan_end_ableiten: bool = True,
+    merken: dict | None = None,
 ) -> None:
-    """Lädt alle bekannten Wallet-Adressen aus dem UTXO-Flatfile-Cache."""
+    """Lädt alle bekannten Wallet-Adressen aus dem UTXO-Flatfile-Cache.
+
+    *merken* behält den dabei gelesenen Cache-Eintrag je Schlüssel.
+    """
     from core.xpub_cache import load_xpub_utxo_cache
 
     cached_by_xpub: dict[str, list[dict]] = {}
@@ -570,6 +581,7 @@ def seed_wallet_addresses_from_utxo_cache(
         cached_by_xpub,
         cache_dir=cache_dir,
         xpubs=xpubs,
+        merken=merken,
     )
     # Ausgegebene Change-Adressen jenseits max_addresses: nicht in utxos[],
     # oft auch nicht im Verlauf — scan_end_index kennt den Scan-Horizont.
@@ -671,6 +683,8 @@ def seed_wallet_addresses_from_verlauf_cache(
     wallet: WalletContext | None,
     xpubs: list[str],
     cache_dir: Path,
+    *,
+    merken: dict | None = None,
 ) -> int:
     """
     Adressen aus dem Verlaufs-Cache ins Mapping — **ohne** HD-Suche.
@@ -687,6 +701,8 @@ def seed_wallet_addresses_from_verlauf_cache(
     n = 0
     for xpub in xpubs:
         eintraege = load_xpub_verlauf_cache(xpub, cache_dir) or []
+        if merken is not None:
+            merken[xpub] = eintraege
         for e in eintraege:
             addr = (e.get("address") or "").strip()
             if not addr:

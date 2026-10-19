@@ -1,6 +1,6 @@
 # SatSage-Regtest-Labor
 
-Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
+Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, dazu Userflow und Chaos). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
 
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
@@ -21,9 +21,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\win\start_lab.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\win\stop_lab.ps1
 ```
 
-`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf macOS und Linux, nicht hier.
+`start_lab.ps1` öffnet die SatSage-GUI mit **Token-URL** im ersten gefundenen Browser (Edge → Chrome → Firefox → System-Default). Die URL liegt zusätzlich in `.data/gui-url.txt`. Das ist der Browser für einen Menschen, kein Playwright-Kanal. Optional Playwright-Verify (`verify_gui.py`): Paket `playwright`, Start über das installierte Chrome (`channel="chrome"`, Fernsteuer-Zustimmung). `playwright install chromium` ist der Weg auf Linux, nicht hier. macOS nutzt wie Windows das installierte Chrome.
 
-Szenario Dachboden (GUI muss schon laufen, bitcoind und Electrs auch): `scripts/verify_gui_dachboden.py`. Es legt `Dachprobe` an, erwartet sie unter Dachboden, schickt 100 000 sats vom Faucet, mined einen Block und erwartet den Sprung in die normale Liste ohne Reload. Danach Sweep zurück an `lab-faucet` und wieder Dachboden. macOS/Linux starten das gebündelte Chromium ohne `channel`, Windows mit `channel=chrome`.
+Szenario Dachboden (bitcoind und Electrs müssen laufen): `scripts/verify_gui_dachboden.py`. Es startet selbst eine Lab-Sitzung wie Userflow und Chaos, legt `Dachprobe` an, erwartet sie unter Dachboden, schickt 100 000 sats vom Faucet, mined einen Block und erwartet den Sprung in die normale Liste ohne Reload. Danach Sweep zurück an `lab-faucet` und wieder Dachboden. `--url` nutzt eine schon laufende Sitzung. macOS und Windows starten das installierte Chrome (`channel=chrome`), Linux das gebündelte Chromium ohne `channel`.
 
 Einzelschritte falls nötig: `start.ps1` (nur Chain), `run_scenarios.ps1`, `start_gui.ps1` (GUI±Browser), `status.ps1`.
 
@@ -77,13 +77,14 @@ Die Basis-Szenarien streuen **unspent UTXO-Alter zufällig** über **gestern …
 |-------|----------------|
 | bootstrap | 110 Blocks am Fensterstart (Coinbase-Reife) |
 | random-age-funding | 40× unspent @0,049 BTC (nur Alter) + 40× Spend-Pool @0,05 BTC — je Index eigene Zufallszeit |
+| sammel-buendel | Alpha Empfang #96 (Jahre alt) vor 21 fremden Eingängen → Empfang #97. Anschaffung = Blockzeit dieser Tx |
 | random-volume-funding | noch einmal 40× unspent, gleiche Zeitstreuung, Betrag log-gleich 1000 Sat … 0,2 BTC (Index 120…159) |
 | shapes | Hop/CJ/Fan-out nur aus Spend-Pool (Alters-Kohorte bleibt liegen) |
 | tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
 
 In der GUI: viele unterschiedliche `hold_days` (nicht nur 1 T / 377 T).
 
-**Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
+**Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Der GitHub-Workflow löscht diese Verzeichnisse vor `start.sh` und bricht ab, wenn die Blockhöhe danach nicht 0 ist. `generate_scenarios.py` baut die UTXO-Mengen danach neu, Electrs indexiert diese Kette. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
 
 **Kette vor jedem Test nachziehen:** `verify_tx_classify.py` ruft `scripts/kette_aktualisieren.py` auf, bevor es die Fälle prüft. Liegt die Zeit des Tip-Blocks hinter der Host-Uhr, setzt das Skript `setmocktime` auf jetzt, mined einen Block und löst die Mock-Zeit wieder (`setmocktime 0`). Eine stehen gebliebene Labor-Kette scheitert sonst mit `time-too-new`, obwohl ein einzelner Block sie anschlussfähig macht. Der Nachzug ist kein Ersatz für einen Wipe: eine Kette, deren Tip in der Zukunft liegt, oder eine ohne `lab-faucet`, muss neu aufgesetzt werden.
 
@@ -104,6 +105,9 @@ Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolid
 | `PayJoin-like` | `payjoin` |
 | `Beta-aged-fanout` / Fan-out-own | `fan_out_own` (1→viele; n→1 wäre `fan_in_own`) |
 | `Exchange-batch-like` | `exchange_batch` |
+| `Sammel-eigen-zuerst` | `unknown` — 1× Alpha (vorn) + 21× Faucet; ein Ausgang an Alpha #97. Kein CoinJoin |
+
+**Sammel-Bündel:** `Sammel-eigen-zuerst` ist der riskante Fall über dem Auflöse-Limit von 20 Eingängen. Der eigene Eingang steht vorn und ist Jahre alt, die 21 fremden folgen. SatSage bricht nach dem ersten eigenen Eingang ab. Die Anschaffung muss die Blockzeit der Sammel-Tx sein (noch in der Haltefrist, also nicht grün), Markierung „Bündel, vorsichtig“. `verify_quellen_inventar.py` lässt genau dieses UTXO nach dem Electrs-Klären offen (ein roter Ring, unvollständiger Baum) und prüft das Datum gegen `scenario-report.json` → `buendel`. CoinJoin-Formen bleiben davon getrennt. Eine alte Chain ohne diese Phase braucht einen Wipe.
 
 **Fremd-Peers:** `lab-faucet` finanziert alle Lab-Sats und stellt Mix-Peer-Inputs. Die Faucet-XPUB steht **nicht** in SatSage `WALLET_*` — in der App sind das fremde Inputs. Alles Einzelsignatur (kein Multisig). Keine Coordinator-/echte WabiSabi-Implementierung, nur On-Chain-Form. Expectations: `.data/scenario-report-txclass.json`.
 
@@ -113,6 +117,19 @@ python3 lab/regtest/scripts/verify_tx_classify.py
 ```
 
 **GUI-Abnahme Herkunft:** UTXO aus einem CJ-Szenario tracen — Soft-Label der CoinJoin-Art; nur **eigene** Ins weiter; Faucet-Peers nicht als Herkunft „von extern“ auflisten. Auch mit allen vier Lab-Wallets bleiben Faucet-Ins fremd.
+
+### Electrs-Gap über 100
+
+`lab-gap` ist ein fünftes Core-Wallet, **nicht** in `WALLET_*` und nicht im Herkunfts-Inventar. Empfang #0 und #101 sind belegt, #1…#100 leer. Gap 100 findet nur #0. Gap 101 findet #101. Danach setzt der Prüfer das Limit wie die GUI über `PUT /api/config/source` (eigener SatSage-Server auf freiem Port, Kopie der Lab-Env): 20 lehnt die API mit 400 ab, ein Eintrag `UTXO_SCAN_GAP_LIMIT=20` von Hand gilt als 100; 100 übersieht #101, 200 findet ihn. Der direkte Walk mit 101 läuft an der Untergrenze vorbei, nur die `.env`/API-Werte sind auf mindestens 100 begrenzt. Core `scantxoutset` findet beide — deshalb darf der XPUB nicht in die Lab-Env, sonst wird der Quellen-Vergleich rot.
+
+Der volle Szenario-Lauf legt das Wallet mit an. Auf einer bestehenden Chain reicht:
+
+```bash
+python3 lab/regtest/scripts/generate_scenarios.py --gap-only
+python3 lab/regtest/scripts/verify_electrs_gap.py
+```
+
+Bericht: `.data/scenario-report-gap.json` (lokal, XPUB nur dort). Der Prüfer ist Teil von Q6 und startet kein Docker.
 
 ### Pseudo-Sanktionslisten & Hop-Traces
 

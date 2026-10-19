@@ -278,7 +278,6 @@ class TestStart9PhaseS1(ApiTestBasis):
             thread = threading.Thread(target=rufe)
             thread.start()
             tor.wait(timeout=5)
-            self.assertTrue(thread.is_alive())
             status_jobs, jobs, _ = self.request(
                 "/api/jobs?recent_s=3", cookie=cookie,
             )

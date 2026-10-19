@@ -1010,6 +1010,9 @@ from httpserver.api.jobs import (  # noqa: E402
 from httpserver.api.p2p_walk import api_p2p_walk_abgleich  # noqa: E402
 
 
+from httpserver.logbereich import api_logbereich  # noqa: E402
+
+
 from httpserver.api.source import (  # noqa: E402
     api_clear_source,
     api_header_vorab,
@@ -1100,6 +1103,7 @@ from httpserver.api.price_llm_lab import (  # noqa: E402
     api_llm_context,
     api_llm_status,
     api_price,
+    api_price_bekannt,
     api_price_history,
     api_price_history_sync,
     api_price_import,
@@ -1635,6 +1639,8 @@ class Handler(
             return 200, api_exchange_reports_loesche(state, query)
         if teile == ["source", "status"] and methode == "GET":
             return 200, api_source_status(state, query)
+        if teile == ["logbereich"] and methode == "POST":
+            return 200, api_logbereich(state, self._body(max_bytes=256 * 1024))
         if teile == ["source", "oeffentlich"] and methode == "POST":
             return 200, api_oeffentliche_electrum(state, self._body())
         if teile == ["source", "local-core"] and methode == "POST":
@@ -1643,6 +1649,8 @@ class Handler(
             return 200, api_llm_status(state, query)
         if teile == ["price"] and methode == "GET":
             return 200, api_price(state, query)
+        if teile == ["price", "bekannt"] and methode == "GET":
+            return 200, api_price_bekannt(state, query)
         if teile == ["price", "history"] and methode == "GET":
             return 200, api_price_history(state, query)
         if teile == ["price", "history", "sync"] and methode == "POST":
@@ -1906,11 +1914,9 @@ def starte_header_vorab(state: AppState, *, nur_wenn_leer: bool = False) -> None
     from core.jobs import Fortschritt, herzschlag
     from core.p2p import SEGWIT_HEIGHT, header_cache_leer, header_datei_tip
 
-    from core.p2p import p2p_gesperrt
+    from core.chain_sources import p2p_utxo_entdeckung_frei
 
     env = state.env().values()
-    if p2p_gesperrt():
-        return
     if env.get("BIP158_P2P", "1").strip().lower() in ("0", "false", "nein", "off"):
         return
     if state.header_job_id:
@@ -1930,6 +1936,9 @@ def starte_header_vorab(state: AppState, *, nur_wenn_leer: bool = False) -> None
     ):
         return
     if cache_ok and nur_wenn_leer:
+        return
+    # Herkunft bleibt zu. Header nur, wenn P2P den UTXO-Bestand trägt.
+    if not p2p_utxo_entdeckung_frei(env):
         return
 
     label = (

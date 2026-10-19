@@ -167,7 +167,52 @@ def filter_label_text(obj: dict, lang: str) -> str:
 # --- Filter ---------------------------------------------------------------
 
 _RE_DATUM = re.compile(r"^([<>])(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$")
-_RE_SATS = re.compile(r"^([<>])(\d+(?:[.,]\d+)?)$")
+_RE_SATS = re.compile(
+    r"^([<>])(\d+(?:[.,]\d+)?)(?:(eur|usd|€|\$))?$",
+    re.IGNORECASE,
+)
+_RE_WAEHRUNG = re.compile(r"^(eur|usd|€|\$)$", re.IGNORECASE)
+
+
+def _waehrung_code(roh: str) -> str:
+    text = str(roh or "").strip().lower()
+    if text in ("eur", "€"):
+        return "EUR"
+    if text in ("usd", "$"):
+        return "USD"
+    return ""
+
+
+def enthaelt_fiat(roh: str) -> bool:
+    """True, wenn ein ``>``/``<``-Betrag eine Währung trägt oder ihr folgt."""
+    toks = str(roh or "").split()
+    for i, tok in enumerate(toks):
+        if _RE_DATUM.match(tok):
+            continue
+        sm = _RE_SATS.match(tok)
+        if not sm:
+            continue
+        if _waehrung_code(sm.group(3) or ""):
+            return True
+        if i + 1 < len(toks) and _waehrung_code(toks[i + 1]):
+            return True
+    return False
+
+
+def bekannte_filter_kurse(immutable_cache_dir) -> dict:
+    """EUR- und USD-Stand aus dem lokalen Cache, ohne Netz. Fehlend → None."""
+    from core.price import letzter_bekannter_kurs
+
+    kurse = {}
+    for w in ("EUR", "USD"):
+        preis = letzter_bekannter_kurs(w, immutable_cache_dir=immutable_cache_dir)
+        kurse[w] = float(preis.amount) if preis is not None and preis.amount > 0 else None
+    return kurse
+
+
+def _sats_aus_fiat(betrag: float, kurs: float) -> float:
+    from core.price import SATS_PRO_BTC
+    return betrag / float(kurs) * SATS_PRO_BTC
 
 
 def _datum_lokal(dd: str, mm: str, yy: str) -> datetime | None:
@@ -185,20 +230,37 @@ def _datum_lokal(dd: str, mm: str, yy: str) -> datetime | None:
         return None
 
 
-def parse_filter(roh: str, *, nach_ts=None, vor_ts=None) -> dict:
+def _filter_leer(kurs_fehlt: str | None = None) -> dict:
+    return {
+        "leer": True, "terms": [], "min_sats": None, "max_sats": None,
+        "after_ts": None, "before_ts": None, "kurs_fehlt": kurs_fehlt,
+    }
+
+
+def parse_filter(roh: str, *, nach_ts=None, vor_ts=None, kurse=None) -> dict:
     """
     Port von ``parseKopfFilter``: Freitext + ``>1234``/``<1234`` (sats) +
     ``>1.1.25``/``<05.12.2023`` (Datum), mehrere Tokens = UND.
+
+    ``>100 EUR``, ``>100 €`` und ``>100EUR`` (ebenso USD/$) werden mit
+    *kurse* (Fiat pro 1 BTC) in Sats umgerechnet. Fehlt ein gebrauchter
+    Kurs, ist der ganze Filter aus (``leer`` und ``kurs_fehlt``).
 
     Datumsgrenzen hängen an der Zeitzone des Browsers. Er schickt sie als
     ``nach_ts``/``vor_ts`` mit; ohne sie rechnet der Server in seiner Zeit.
     """
     text = str(roh or "").strip()
-    f = {"leer": not text, "terms": [], "min_sats": None, "max_sats": None,
-         "after_ts": None, "before_ts": None}
     if not text:
-        return f
-    for tok in text.split():
+        return _filter_leer()
+    f = {
+        "leer": False, "terms": [], "min_sats": None, "max_sats": None,
+        "after_ts": None, "before_ts": None, "kurs_fehlt": None,
+    }
+    toks = text.split()
+    fehlt: list[str] = []
+    i = 0
+    while i < len(toks):
+        tok = toks[i]
         dm = _RE_DATUM.match(tok)
         if dm:
             start = _datum_lokal(dm.group(2), dm.group(3), dm.group(4))
@@ -209,16 +271,33 @@ def parse_filter(roh: str, *, nach_ts=None, vor_ts=None) -> dict:
                 else:
                     ts = int(start.timestamp())
                     f["before_ts"] = ts if f["before_ts"] is None else min(f["before_ts"], ts)
+            i += 1
             continue
         sm = _RE_SATS.match(tok)
         if sm:
             n = float(sm.group(2).replace(",", "."))
+            waehrung = _waehrung_code(sm.group(3) or "")
+            if not waehrung and i + 1 < len(toks):
+                folgt = _waehrung_code(toks[i + 1])
+                if folgt:
+                    waehrung = folgt
+                    i += 1
+            if waehrung:
+                kurs = None if not kurse else kurse.get(waehrung)
+                if not kurs or float(kurs) <= 0:
+                    fehlt.append(waehrung)
+                else:
+                    n = _sats_aus_fiat(n, float(kurs))
             if sm.group(1) == ">":
                 f["min_sats"] = n if f["min_sats"] is None else max(f["min_sats"], n)
             else:
                 f["max_sats"] = n if f["max_sats"] is None else min(f["max_sats"], n)
+            i += 1
             continue
         f["terms"].append(tok.lower())
+        i += 1
+    if fehlt:
+        return _filter_leer(", ".join(dict.fromkeys(fehlt)))
     for feld, wert in (("after_ts", nach_ts), ("before_ts", vor_ts)):
         if wert not in (None, ""):
             try:
@@ -228,10 +307,19 @@ def parse_filter(roh: str, *, nach_ts=None, vor_ts=None) -> dict:
     return f
 
 
-def filter_aus_query(query: dict) -> dict:
+def filter_aus_query(query: dict, *, immutable_cache_dir=None) -> dict:
     def eins(name):
         return (query.get(name) or [""])[0]
-    return parse_filter(eins("q"), nach_ts=eins("q_nach") or None, vor_ts=eins("q_vor") or None)
+    roh = eins("q")
+    kurse = bekannte_filter_kurse(immutable_cache_dir) if enthaelt_fiat(roh) else None
+    return parse_filter(roh, nach_ts=eins("q_nach") or None, vor_ts=eins("q_vor") or None, kurse=kurse)
+
+
+def mit_kurs_hinweis(antwort: dict, f: dict) -> dict:
+    code = f.get("kurs_fehlt")
+    if code:
+        antwort["filter_kurs_fehlt"] = code
+    return antwort
 
 
 def _nur_datum_betrag(f: dict) -> bool:

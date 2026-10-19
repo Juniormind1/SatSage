@@ -11,8 +11,8 @@ Die schnelle CI-Suite (`tests/`, Dealbreaker **Q1**) umfasst Unittests ohne Node
 | Schicht | Ort | Wann | Inhalt |
 |---------|-----|------|--------|
 | Unittests | `tests/` | jeder Push/PR (`test.yml`), Hook vor Push nach `main` | gemockt, ohne Node/Electrs/persönliche `.env` |
-| Regtest-Labor | `lab/regtest/scripts/` | Merge nach `main`, Release, wöchentlich bei Delta (**Q6**) | Core + Electrs, Allowlist am echten Node, Szenarien, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py` |
-| GUI-Chaos / Userflow | `scripts/webgui_*.py`, `doc/testprotokoll-*.md` | manuell / Assistent nach Angebot | Playwright, kein CI |
+| Regtest-Labor | `lab/regtest/scripts/`, `scripts/webgui_userflow.py`, `scripts/webgui_chaos_run.py` | Merge nach `main`, Release, wöchentlich bei Delta (**Q6**) | Core + Electrs, Allowlist am echten Node, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, `verify_gui_dachboden.py`, Userflow und Chaos (macOS: Chrome, Linux-CI: Chromium) |
+| GUI-Chaos / Userflow | `scripts/webgui_*.py`, `doc/testprotokoll-*.md` | Merge-Labor (**Q6**), lokal nach Angebot | Playwright. macOS: Chrome. Linux-CI: Chromium |
 | Specter | `tests/test_specter_*.py` | in Q1 | ohne laufendes Specter |
 | Start9 / Umbrel | `tests/test_start9_phase_s*.py`, `test_umbrel_mode.py` | in Q1 | Bind, Auth, Outbound, Managed-Modus |
 | Hart-Dealbreaker | `tests/test_dealbreaker_*.py`, Gate `tests/hart.py` | `main` Pflicht, `dev-juniormind` Skip | T1/T6/T9/T13, Auth, CSRF — ohne Node |
@@ -125,6 +125,8 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_verlauf_cache.py` | 8 | `*_verlauf.json` |
 | `test_verlauf_prioritaet.py` | 8 | Verlaufskette ≠ UTXO-Kette |
 | `test_fulcrum_verlauf.py` | 11 | History-Fetch |
+| `test_libbitcoin_native.py` | 12 | libbitcoin `/v1` nur am eigenen Indexer, Stub |
+| `test_esplora_lokal.py` | 8 | eigenes Esplora nur neben Electrs, Stub |
 | `test_fulcrum_verlauf_hrp.py` | 1 | scriptPubKey vs. HRP |
 | `test_fulcrum_retry.py` | 7 | Reconnect bei Timeout |
 | `test_fulcrum_tor_batch.py` | 8 | Batch nur eigener Electrs über Tor |
@@ -153,7 +155,7 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_wallet_mempool_js.py` | 8 | Mempool-Abgleich nach Start |
 | `test_adresse_werkzeug.py` | 12 | „Ist die Adresse meine?“ + Tools-API |
 | `test_cache_suche.py` | 3 | Kopf-Filter über alle Wallets |
-| `test_schatzsuche.py` | 7 | Fenster/Zuordnung ohne Node |
+| `test_schatzsuche.py` | 10 | Fenster/Zuordnung ohne Node |
 
 ### Sanktionen / Labels / Börse / Preis
 
@@ -206,11 +208,12 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 Labor (`lab/regtest/scripts/`):
 
 - `verify_rpc_allowlist.py` — Allowlist + Hinweise `rpcwhitelist?` / `disablewallet?` am echten Node
-- `generate_scenarios.py` / `generate_sanctions_scenarios.py`
-- `verify_tx_classify.py` / `verify_sanctions_hops.py` / `verify_quellen_inventar.py` — letztere: Cache leer, nur eine Quelle, Bestand und Herkunft aller Inventar-UTXOs. Der P2P-Zusatzschritt (Bestand, Grau/Gelb, rote Ringe, dann Electrs) läuft mit; nach P2P müssen rote Ringe stehen, Electrs muss sie alle auflösen. Vor jeder Quelle leert das Skript auch die RAM-Caches (Tx, Blöcke, Höhen). Sockets für den Bestand nur in `p2p_nur_utxo_entdeckung`. Die Herkunftssperre bleibt.
+- `generate_scenarios.py` / `generate_sanctions_scenarios.py` — `lab-gap` (Empfang #0 und #101) hängt am Szenario-Lauf, nicht in `WALLET_*`. Prüfer `verify_electrs_gap.py` ist Q6: Limit 100 übersieht #101, Limit 101 findet den Outpoint. GUI-Pfad: `UTXO_SCAN_GAP_LIMIT` über `PUT /api/config/source`, 20 → HTTP 400, `.env` 20 gilt als 100; 100 übersieht #101, 200 findet ihn.
+- Userflow und Chaos sind Q6. macOS: installiertes Chrome. Linux-CI: gebündeltes Chromium. Aufruf `scripts/webgui_userflow.py --spawn` und `scripts/webgui_chaos_run.py --spawn --rounds 200 --seed 42`.
+- `verify_tx_classify.py` / `verify_sanctions_hops.py` / `verify_quellen_inventar.py` — letztere: Cache leer, nur eine Quelle, Bestand und Herkunft aller Inventar-UTXOs. Der P2P-Zusatzschritt (Bestand, Grau/Gelb, rote Ringe, dann Electrs) läuft mit; nach P2P müssen rote Ringe stehen, Electrs muss sie alle auflösen. Vor jeder Quelle leert das Skript auch die RAM-Caches (Tx, Blöcke, Höhen). Nach dem Electrs-Klären prüft es den Bestand am 31.12. jedes abgeschlossenen Jahres gegen die Kette (`stichtag_chain.py`: Core `getblock` Stufe 3, Verlauf aus der Kette, Zählung nach Entstehung des Outputs). Sockets für den Bestand nur in `p2p_nur_utxo_entdeckung`. Die Herkunftssperre bleibt.
 - `verify_scan_abort_cache.py` + `electrs_delay_proxy.py` — Scan-Abbruch / Start vor Electrs / kaputter Cache; Protokoll `doc/testprotokoll-scan-abbruch-cache.md` (noch nicht Q6). `Q-START-P2P` und `Q-START-KILL` nicht mitlaufen lassen (P2P-Fallback, siehe unten).
 - Windows: `verify_gui.py` (Playwright, `channel=chrome`)
-- `verify_gui_dachboden.py` — Playwright-Szenario: leeres Wallet im Dachboden, Faucet, Sweep, Umgruppieren ohne Reload. GUI muss laufen. macOS/Linux ohne `channel`, Windows mit `channel=chrome`.
+- `verify_gui_dachboden.py` — Playwright-Szenario im Labor-Job: leeres Wallet im Dachboden, Faucet, Sweep, Umgruppieren ohne Reload. Startet selbst eine Lab-Sitzung (`tmp/satsage-gui-session.json`). macOS und Windows mit `channel=chrome`, Linux ohne `channel`.
 - `live_psbt_regtest_timing.py` — Lab darf `sendrawtransaction`, die App nicht
 
 GUI-Protokolle: `doc/gui-test-protokoll.md`, `doc/testprotokoll-webgui-stabilitaet.md`, `doc/testprotokoll-webgui-userflow.md`, `doc/testprotokoll-datenquellen-wechsel-waehrend-scan.md`, `doc/testprotokoll-scan-abbruch-cache.md`. Runner: `scripts/webgui_test_ready.py`, `webgui_chaos_run.py`, `webgui_userflow.py`. Passwort setzen/ändern/löschen in der Oberfläche: `scripts/webgui_passwort_flow.py`, aufgerufen von Userflow und Chaos bei `--spawn` (Desktop, Specter, Umbrel). Labor: `verify_scan_abort_cache.py` ohne die beiden P2P-Fälle.
@@ -283,7 +286,7 @@ Kein Node-Test für: `web/app.js` (nur statische Fallen), `web/state.js`, `web/l
 - `packaging/` (PyInstaller-Spec, StartOS-Manifest, Umbrel-YML): kein Q1-Test außer `test_paths.py`.
 - `githooks/`: kein Test, dass Secret-Pfade und Identitätsregeln noch greifen.
 - Browser-E2E und „Quelle wechseln während Scan“: Protokoll da, **kein CI** (steht so in `ISSUES.md` Tests · Blind spots).
-- Chaos-Harness startet auf Windows ohne `channel="chrome"` (`doc/gui-test-protokoll.md`).
+- Chaos-Harness folgt `playwright_kanal()`: macOS und Windows `channel="chrome"`, Linux ohne Kanal (`doc/gui-test-protokoll.md`).
 
 ### Semantik, die ISSUES bewusst offen lässt
 
@@ -338,7 +341,7 @@ Reihenfolge: Dealbreaker und Datenverlust zuerst, dann HTTP-Löcher der Produktf
 
 15. Ein E2E-Smoke im Userflow-Sinn (Kern-Nav, keine 100 Chaos-Runden) — erst wenn der Maintainer CI-Zeit will; steht in ISSUES.
 16. Eine automatisierte Mini-Variante von `testprotokoll-datenquellen-wechsel-waehrend-scan.md` im Labor.
-17. Chaos-Runner: Windows `channel="chrome"` wie im GUI-Protokoll beschrieben.
+17. Chaos-Runner: macOS und Windows `channel="chrome"` wie im GUI-Protokoll beschrieben.
 18. **Scan-Abbruch/Cache** — Harness liegt (`verify_scan_abort_cache.py`). Produkt muss die Fälle noch grün machen (atomare Writes, kaputtes JSON = Miss, kein Quellenwechsel mitten im Job). Ohne `Q-START-P2P` und `Q-START-KILL`.
 
 ### Bewusst nicht

@@ -8,11 +8,11 @@ Nie Token aus Logs greppen. Session-JSON `tmp/satsage-gui-session.json` bzw. Zei
 
 ## Playwright und Docker
 
-Nur auf **macOS, Linux und Grok-Bots**. Dort: `.venv/bin/python`, mitgeliefertes Chromium, `p.chromium.launch(headless=True)` **ohne** `channel` (Userflow: `scripts/webgui_userflow.py --spawn`). Docker/Regtest-Lab dort hochfahren ist der Prüfweg. **Windows (dieser Rechner):** kein Playwright, kein Docker hochfahren, kein Node/Browser-Setup durch den Assistenten. GUI-Kosmetik testet der Nutzer selbst; der Assistent ändert nach bestem Wissen und lässt Infrastruktur dem Nutzer. Vor dem Merge nach `main` testet der Assistent wieder selbst — auf macOS, Linux oder einem Grok-Bot, nicht indem er auf Windows Playwright oder Docker startet.
+**macOS** ist der vorgesehene Rechner für alle Userflow-Tests, für Playwright und für das installierte Chrome (`channel="chrome"`, `scripts/webgui_userflow.py --spawn`). Der Merge-Schritt ist der Job `gui` im Workflow `Regtest-Labor`: dort Linux mit gebündeltem Chromium ohne `channel`, lokal auf dem Mac dieselben Läufe im installierten Chrome. **Windows:** kein Playwright und kein Docker durch den Assistenten. GUI-Kosmetik testet der Nutzer selbst.
 
 ## Web-GUI-Stabilität (Rumgeklicke)
 
-Protokoll [`../doc/testprotokoll-webgui-stabilitaet.md`](../doc/testprotokoll-webgui-stabilitaet.md); halbautomatisch `scripts/webgui_chaos_run.py` + `scripts/webgui_chaos_harness.js` (optional Playwright).
+Protokoll [`../doc/testprotokoll-webgui-stabilitaet.md`](../doc/testprotokoll-webgui-stabilitaet.md). Q6-Schritt: `scripts/webgui_chaos_run.py --spawn --rounds 200 --seed 42` mit `scripts/webgui_chaos_harness.js`.
 
 ## Datenquellen-Wechsel während Scan
 

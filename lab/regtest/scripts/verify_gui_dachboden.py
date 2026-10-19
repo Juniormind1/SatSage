@@ -11,12 +11,13 @@ Szenario ``dachboden``:
 5. Sweep zurück an lab-faucet, ein Block.
 6. Ohne Seiten-Reload steht es wieder unter Dachboden.
 
-Voraussetzung: bitcoind + Electrs und eine laufende Lab-GUI
-(``lab/regtest/.data/gui-session.json`` oder ``--url``).
-Der Prüfer startet weder Docker noch den Server.
+Voraussetzung: bitcoind und Electrs laufen. Der Prüfer startet selbst eine
+SatSage-Sitzung wie Userflow und Chaos (``tmp/satsage-gui-session.json``),
+mit einer Kopie der Lab-Env. ``--url`` hängt sich an eine schon laufende
+Sitzung. Weder Docker noch die Präsentations-GUI.
 
-macOS/Linux: gebündeltes Chromium, ohne ``channel``.
-Windows: ``channel=chrome``.
+macOS und Windows: installiertes Chrome (``channel=chrome``).
+Linux: gebündeltes Chromium, ohne ``channel``.
 """
 from __future__ import annotations
 
@@ -24,12 +25,15 @@ import argparse
 import json
 import re
 import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1]
 REPO = HERE.parents[1]
-SESSION_LAB = HERE / ".data" / "gui-session.json"
-SESSION_REPO = REPO / "tmp" / "satsage-gui-session.json"
+ENV_LAB = HERE / ".data" / ".regtest.env"
 WALLET = "lab-dachprobe"
 NAME = "Dachprobe"
 SATS = 100_000
@@ -43,33 +47,172 @@ def _ruhig(text: str) -> str:
     return _SCHLUESSEL.sub("[schluessel]", text or "")
 
 
-def _session(url_arg: str | None) -> tuple[str, str]:
-    if url_arg:
-        url = url_arg.strip()
-    elif SESSION_LAB.is_file():
-        url = str(json.loads(SESSION_LAB.read_text(encoding="utf-8"))["url"])
-    elif SESSION_REPO.is_file():
-        url = str(json.loads(SESSION_REPO.read_text(encoding="utf-8"))["url"])
-    else:
-        raise SystemExit(
-            "Keine Lab-GUI-Session. Zuerst die GUI gegen die Lab-Env starten.\n"
-            "  lab/regtest/.data/gui-session.json fehlt.\n"
-            "Windows: lab\\regtest\\scripts\\win\\start_gui.ps1\n"
-            "macOS/Linux: lab/regtest/scripts/start_praesentation.sh"
-        )
+_SPAWN_KEYS = {
+    "NETWORK": "regtest",
+    "BIP158_P2P": "0",
+    "OEFFENTLICHE_ELECTRUM": "0",
+    "TOR_AUTOSTART": "0",
+    "WALLETS_BEIM_START_AKTUALISIEREN": "0",
+    "UI_LANG": "de",
+}
+
+
+def _env_text(roh: str) -> str:
+    gesehen: set[str] = set()
+    zeilen: list[str] = []
+    for line in roh.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in line:
+            zeilen.append(line)
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key in _SPAWN_KEYS:
+            zeilen.append(f"{key}={_SPAWN_KEYS[key]}")
+            gesehen.add(key)
+        else:
+            zeilen.append(line)
+    for key, wert in _SPAWN_KEYS.items():
+        if key not in gesehen:
+            zeilen.append(f"{key}={wert}")
+    return "\n".join(zeilen) + "\n"
+
+
+def _warte_api(url: str) -> None:
+    basis, _, query = url.partition("?")
     token = ""
-    if "t=" in url:
-        token = url.split("t=", 1)[1].split("&", 1)[0]
-    if not token:
-        raise SystemExit("URL ohne Token.")
-    return url, token
+    for teil in query.split("&"):
+        if teil.startswith("t="):
+            token = teil[2:]
+            break
+    ziel = basis.rstrip("/") + "/api/config"
+    req = urllib.request.Request(ziel, headers={"X-Satsage-Token": token})
+    ende = time.monotonic() + 15
+    letzte: Exception | None = None
+    while time.monotonic() < ende:
+        try:
+            with urllib.request.urlopen(req, timeout=3) as ant:
+                if ant.status == 200:
+                    return
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            letzte = exc
+        time.sleep(0.3)
+    raise RuntimeError(f"Server antwortet nicht auf /api/config: {letzte}")
+
+
+def _spawn_lab():
+    """Wegwerf-Server auf einer Kopie der Lab-Env. Session wie Userflow."""
+    if not ENV_LAB.is_file():
+        raise SystemExit(
+            f"Lab-Env fehlt: {ENV_LAB}\n"
+            "Einmalig: cd lab/regtest && ./scripts/start.sh && ./scripts/generate_scenarios.py"
+        )
+    sys.path.insert(0, str(REPO))
+    from infra_check import pinne_lab_env
+
+    gehalten = tempfile.TemporaryDirectory(prefix="satsage-dachboden-")
+    wurzel = Path(gehalten.name)
+    env = wurzel / ".env"
+    env.write_text(_env_text(ENV_LAB.read_text(encoding="utf-8")), encoding="utf-8")
+    for name in ("utxo_cache", "immutable_cache", "sanctioned_cache"):
+        (wurzel / name).mkdir()
+    pinne_lab_env(env)
+    import server
+    import main as satsage_main
+    from core import gui_session as gs
+
+    pinne_lab_env(env)
+    satsage_main.set_chain_network("regtest")
+    state = server.AppState(
+        env,
+        wurzel / "utxo_cache",
+        wurzel / "immutable_cache",
+        sanctions_dir=wurzel / "sanctioned_cache",
+    )
+    eingebettet = server.starte_im_hintergrund(state, port=0, header_vorab=False)
+    from core import wallet_watch
+
+    wallet_watch.starte_wallet_watch(
+        state, on_log=lambda text: print(f"  {text}", flush=True),
+    )
+    session_pfad = REPO / "tmp" / gs.SESSION_NAME
+    alt = session_pfad.read_bytes() if session_pfad.is_file() else None
+    gs.schreibe_session(
+        gs.bau_payload(
+            url=eingebettet.url,
+            token=eingebettet.token,
+            port=eingebettet.port,
+            bind=eingebettet.bind,
+            env_path=str(env),
+        ),
+        pfad=session_pfad,
+        stdout_zeile=False,
+    )
+    _warte_api(eingebettet.url)
+    return gehalten, eingebettet, session_pfad, alt
+
+
+def _beende_sitzung(gehalten, eingebettet, pfad: Path | None, alt: bytes | None) -> None:
+    try:
+        from core import wallet_watch
+
+        wallet_watch.stoppe_wallet_watch()
+    except Exception:
+        pass
+    _session_zurueck(pfad, alt)
+    if eingebettet is not None:
+        eingebettet.stop()
+    if gehalten is not None:
+        gehalten.cleanup()
+
+
+def _session_zurueck(pfad: Path | None, alt: bytes | None) -> None:
+    if pfad is None:
+        return
+    if alt is None:
+        try:
+            pfad.unlink(missing_ok=True)
+        except TypeError:
+            if pfad.exists():
+                pfad.unlink()
+        return
+    pfad.write_bytes(alt)
 
 
 def _browser(p, headed: bool):
+    sys.path.insert(0, str(REPO / "scripts"))
+    from webgui_test_ready import playwright_kanal
+
     kwargs: dict = {"headless": not headed}
-    if sys.platform == "win32":
-        kwargs["channel"] = "chrome"
+    kanal = playwright_kanal(None)
+    if kanal:
+        kwargs["channel"] = kanal
     return p.chromium.launch(**kwargs)
+
+
+def _dialoge_weg(page) -> None:
+    """Erst der On-Chain-Hinweis, danach die Einrichtung. Der Hinweis
+    erscheint erst nach /api/config und liegt über der Sprachwahl."""
+    for overlay, knopf in (
+        ("#onchain-hinweis", "#einrichtung-onchain-ok"),
+        ("#einrichtung", "#einrichtung-spaeter"),
+        ("#privatsphaere-warnung", "#privatsphaere-ok"),
+        ("#oeffentliche-electrum-warnung", "#oeffentliche-electrum-nein"),
+    ):
+        try:
+            page.locator(overlay).wait_for(state="visible", timeout=4000)
+        except Exception:
+            continue
+        page.evaluate(
+            """(knopf) => {
+              const el = document.querySelector(knopf);
+              if (el) el.click();
+            }""",
+            knopf,
+        )
+        try:
+            page.locator(overlay).wait_for(state="hidden", timeout=8000)
+        except Exception:
+            pass
 
 
 def _core():
@@ -94,6 +237,10 @@ def _mine(rpc, blocks: int = 1) -> None:
         print(f"  setmocktime: {_ruhig(str(exc))}", file=sys.stderr)
     ziel = rpc.call("getnewaddress", "", "bech32", wallet="lab-faucet")
     rpc.call("generatetoaddress", str(blocks), ziel, wallet="lab-faucet")
+
+
+def _hat_bestand(rpc) -> bool:
+    return bool(rpc.json("listunspent", "0", "9999999", wallet=WALLET))
 
 
 def _sweep(rpc) -> None:
@@ -139,6 +286,16 @@ def _warte_ort(page, ort: str, sekunden: float) -> None:
         arg=NAME,
         timeout=int(sekunden * 1000),
     )
+
+
+def _zuerst_leeren(page, rpc) -> None:
+    """Rest vom vorigen Lauf: erst sweepen, dann den leeren Dachboden erwarten."""
+    print("  Dachprobe hat noch Bestand — zuerst sweepen")
+    _oeffne_wallet_oben(page)
+    _sweep(rpc)
+    _warte_ort(page, "dachboden", 90)
+    if not _seite_lebt(page):
+        raise RuntimeError("Reload beim Leeren vor dem Szenario.")
 
 
 def _seite_lebt(page) -> bool:
@@ -222,7 +379,11 @@ def _oeffne_wallet_oben(page) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Playwright-Szenario Dachboden")
-    parser.add_argument("--url", default=None)
+    parser.add_argument(
+        "--url",
+        default=None,
+        help="Laufende Sitzung. Ohne Angabe startet der Prüfer eine Lab-Sitzung.",
+    )
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
 
@@ -234,26 +395,45 @@ def main() -> int:
         return code
 
     try:
-        url, _token = _session(args.url)
-    except SystemExit as exc:
-        print(_ruhig(str(exc)), file=sys.stderr)
-        return 2
-
-    try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print(
             "Playwright fehlt.\n"
-            "  macOS/Linux: .venv/bin/python -m playwright install chromium\n"
+            "  macOS: .venv/bin/python3.14 -m pip install playwright"
+            "  (Browser: installiertes Chrome)\n"
+            "  Linux: .venv/bin/python -m playwright install chromium\n"
             "  Windows: py -3 -m pip install playwright  (Browser: installiertes Chrome)",
             file=sys.stderr,
         )
         return 4
 
+    gehalten = None
+    eingebettet = None
+    session_pfad = None
+    session_alt = None
+    try:
+        if args.url:
+            url = args.url.strip()
+            if "t=" not in url:
+                print("URL ohne Token.", file=sys.stderr)
+                return 2
+        else:
+            gehalten, eingebettet, session_pfad, session_alt = _spawn_lab()
+            url = eingebettet.url
+            print(f"Spawn: port={eingebettet.port}", flush=True)
+    except SystemExit as exc:
+        print(_ruhig(str(exc)), file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(f"Sitzung: {_ruhig(str(exc))}", file=sys.stderr)
+        _beende_sitzung(gehalten, eingebettet, session_pfad, session_alt)
+        return 2
+
     try:
         rpc, xpub = _core()
     except Exception as exc:
         print(f"Core-Wallet: {_ruhig(str(exc))}", file=sys.stderr)
+        _beende_sitzung(gehalten, eingebettet, session_pfad, session_alt)
         return 3
 
     try:
@@ -263,24 +443,33 @@ def main() -> int:
             page.on("dialog", lambda dialog: dialog.accept())
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             page.locator("#app").wait_for(state="visible", timeout=30000)
+            _dialoge_weg(page)
             # DE, damit die Gruppe „Dachboden“ heißt. Die Prüfung nutzt die Klasse.
-            de = page.locator("#lang-de")
-            if de.count():
-                de.click()
+            # DOM-Klick: ein noch offener Hinweis fängt den Playwright-Klick ab.
+            page.evaluate(
+                """() => {
+                  const de = document.querySelector('#lang-de');
+                  if (de) de.click();
+                }"""
+            )
+            # Vor dem ersten Sweep setzen, sonst wirkt ein Reload-Check wie ein Fehlalarm.
+            page.evaluate("() => { window.__dachbodenSeite = 1; }")
             schon = page.evaluate(_ORT_JS, NAME)
             if schon == "liste":
-                print("  Dachprobe hat noch Bestand — zuerst sweepen")
-                _oeffne_wallet_oben(page)
-                _sweep(rpc)
-                _warte_ort(page, "dachboden", 90)
-                if not _seite_lebt(page):
-                    raise RuntimeError("Reload beim Leeren vor dem Szenario.")
+                _zuerst_leeren(page, rpc)
             elif schon == "weg":
                 _lege_an(page, xpub)
-                _warte_ort(page, "dachboden", 180)
+                # Ein frischer Import scannt den Core-Bestand. Sats vom vorigen
+                # Lauf liegen dann in der normalen Liste, nicht im Dachboden.
+                # Bis der Scan im Cache steht, zeigt die Nav das Wallet kurz in
+                # der Liste. Ob ein Rest liegt, sagt deshalb Core, nicht die Nav.
+                if _hat_bestand(rpc):
+                    _warte_ort(page, "liste", 180)
+                    _zuerst_leeren(page, rpc)
+                else:
+                    _warte_ort(page, "dachboden", 180)
             else:
                 _warte_ort(page, "dachboden", 30)
-            page.evaluate("() => { window.__dachbodenSeite = 1; }")
             print("  im Dachboden")
 
             _oeffne_wallet(page)
@@ -310,6 +499,8 @@ def main() -> int:
     except Exception as exc:
         print(f"FAIL: {_ruhig(str(exc))}", file=sys.stderr)
         return 10
+    finally:
+        _beende_sitzung(gehalten, eingebettet, session_pfad, session_alt)
 
     print("PASS: Dachboden → Liste → Dachboden")
     return 0

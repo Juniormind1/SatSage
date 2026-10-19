@@ -38,6 +38,8 @@ py server.py
 | `bip158_scanner.py` | BIP-158 über Bitcoin-P2P (Compact Filter, TurboSync); Matcher `_CoreBasicFilterMatcher` |
 | `core/p2p.py` | Bitcoin-P2P: Handshake, Header, `cfilter`, Block-Download |
 | `fulcrum.py` | Fulcrum/Electrum-Protokoll, Onion-Rotation |
+| `core/libbitcoin_native.py` | Eigener libbitcoin-Indexer: Bestand und Herkunft über `/v1`, nur mit Adressindex |
+| `core/esplora_lokal.py` | Eigenes Esplora: Bestand und kleine Herkunft, nur wenn der Electrum-Server kein libbitcoin ist |
 | `core/jobs.py` | Hintergrund-Vorgänge (Scan, Verlauf, Herkunft) mit Log und Abbruch |
 | `core/tax.py` | Haltefrist, Stichtag, Steuerjahr-Auswertung |
 | `core/llm_anbindung.py` / `llm_client.py` / `llm_context.py` | Assistent: Einstufung, Chat-Loop (Loopback/LAN; Remote nur Opt-in), Cache-Reader. Kein Job-Start. Key nie im Status. |
@@ -86,16 +88,20 @@ BIP-158 steht in dieser Kette nicht. Compact Filter liefern keinen Verlauf, sola
 
 Öffentliche Electrum-Server erst nach User-Bestätigung: Web-Dialog, `--oeffentliche-electrum` oder `OEFFENTLICHE_ELECTRUM=1` in `.env`. In der Oberfläche merkt „Verbinden“ die gewählte Familie (Clearnet oder Onion) für die Sitzung — Scan, Verlauf und Empfang bleiben bei dieser Familie. Sobald ein eigener Electrum-Server (electrs/Fulcrum/libbitcoin) erreichbar ist, werden öffentliche Verbindungen abgeklemmt und die Sitzungs-Freigabe ungültig — ein erneuter öffentlicher Connect fragt wieder. Sanktions-Scans bleiben Clearnet (Listen-Adressen, nicht Wallet-XPUBs).
 
+Ist der eigene Indexer libbitcoin und antwortet `GET /v1/configuration` mit `address: true` (Klartext), lesen Bestand und Herkunft über diese Abfrage. Ohne `LIBBITCOIN_NATIVE_PORT` prüft SatSage 8181 und danach 8180 und nimmt den Port, dessen Antwort das Feld `address` trägt. Sonst bleibt Electrum. Ein öffentlicher Server, der sich libbitcoin nennt, bekommt sie nicht.
+
+Ist der verbundene Electrum-Server kein libbitcoin und `MEMPOOL_URL` eine Esplora-Instanz im eigenen Netz, lesen Bestand und kleine Herkunft dort. Die Adresslücke bleibt Electrum. Öffentliche Explorer und Onion-Adressen bleiben außen.
+
 Explizit nur per **CLI** (`--bip158`, `--rpc-only`) oder **Einstellungen → Datenquelle wählen**. `BIP158_P2P=1` in `.env` allein erzwingt **keine** Datenquelle — die Auto-Priorität bleibt aktiv.
 
 Einzelmodi:
 
 - **Bitcoin-P2P Compact Filter** — Peers mit `NODE_COMPACT_FILTERS` (`peerblockfilters=1`)
   - Filter lokal matchen, Block nur bei Treffer
-  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Lücke`. Die Lücke ist `BIP158_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld in den Datenquellen). Electrs bleibt bei `UTXO_SCAN_GAP_LIMIT` (100). Ohne Treffer nur die ersten *Lücke* Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein P2P-Cache gilt erst fertig, wenn `bip158_scan_gap` mindestens die eingestellte Lücke ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
+  - TurboSync: ungenutzte Keys nur im jüngsten Fenster (`TURBO_WINDOW`). Historie des Erstscans: je Chain das Präfix `0 … höchster Treffer + Lücke`. Die Lücke ist `BIP158_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld in den Datenquellen). Electrs liest `UTXO_SCAN_GAP_LIMIT` (Vorgabe 100, 1…10.000, Feld am eigenen Electrum-Server). Ohne Treffer nur die ersten *Lücke* Indizes. Trifft ein Durchgang einen höheren Index, läuft die Historie mit dem neuen Präfix weiter, bis die Lücke darüber leer ist. Ein P2P-Cache gilt erst fertig, wenn `bip158_scan_gap` mindestens die eingestellte Lücke ist. Ein Ausgang, der im selben Block wieder ausgegeben wird, bleibt aus dem Bestand.
   - Peer-Reihenfolge: Host im LAN (`FULCRUM_HOST`, P2P-Port 8333), dann gemerkte Filter-Peers, dann `BIP158_PEERS`, dann DNS-Seeds mit `x40.` (NODE_COMPACT_FILTERS). Im Regtest nur der bitcoind auf Port 18444, ohne Merk-Liste und ohne DNS. Ohne Compact Filter am eigenen Node kein Sprung zu öffentlichen Electrum-Servern. LAN-IPs nicht über Tor. Vor dem DNS-Rundlauf: drei parallele TCP-Prüfungen auf 8333; lauter Timeouts = Firewall, Clearnet entfällt. Scheitert Clearnet, folgt Tor: laufender Browser (9150) oder Autostart des `tor`-Binary (`stelle_tor_socks_bereit`, wie beim eigenen Onion-Node).
-  - Scan: bis zu 8 Peers parallel für `getcfilters` (Clearnet; über Tor 2); Trefferblöcke auf 2 Workern — bei `notfound`/totem Socket der nächste schon verbundene Peer, Nachrücken nur wenn keiner den Block hat (Tor höchstens 2 Extra, Clearnet 4); `NODE_NETWORK_LIMITED` nur letzte 288 Blöcke (Filter bleibt); Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
-  - `server.py` startet `starte_header_vorab`: Header ab SegWit in `p2p_headers.bin`, Job `headers` für das Log
+  - Scan: bis zu 8 Peers parallel für `getcfilters` (Clearnet; über Tor 2); Trefferblöcke auf 2 Workern — bei `notfound`/totem Socket der nächste schon verbundene Peer, Nachrücken nur wenn keiner den Block hat (Tor höchstens 2 Extra, Clearnet 4); `NODE_NETWORK_LIMITED` nur letzte 288 Blöcke (Filter bleibt). Ein Scan ab SegWit sucht weiter, bis ein Peer mit `NODE_NETWORK` verbunden ist, auch wenn das Kontingent schon voller geprunter Peers ist. Über Tor ersetzt der einen geprunten Platz, auf Clearnet bleibt er zusätzlich. Header-Sync auf Peer 0; UTXO-Stand in Höhenreihenfolge
+  - `server.py` startet `starte_header_vorab`, sobald P2P die einzige Bestandsquelle ist: Header ab SegWit in `p2p_headers.bin`, sonst nur Tip-Nachzug. Job `headers` für das Log
   - Mitgeliefertes Archiv `data/p2p_headers_segwit.bin.gz` wird ausgelegt, wenn der lokale Cache fehlt oder hinter dem Archiv-Tip liegt; P2P holt nur den Rest bis zum Tip
   - Matcher: `_CoreBasicFilterMatcher` (nicht `chiabip158`)
   - UTXO-Scan schreibt den Verlaufs-Cache mit (Empfang/Ausgabe aus dem Blockwalk); Merge, kein Überschreiben durch Turbo-Pässe
@@ -149,8 +155,11 @@ FULCRUM_HOST=...
 FULCRUM_TOR=....onion
 FULCRUM_PORT=50002
 FULCRUM_SSL=true
-# Ist FULCRUM_HOST eine IP, probiert der eigene Node 50001 und 50002
-# jeweils mit und ohne TLS gleichzeitig und nimmt den ersten Treffer.
+# UTXO_SCAN_GAP_LIMIT=100      # 100…10000, Vorgabe 100, kleinere Werte gelten als 100; Electrs/Fulcrum-Gap-Scan (GUI: Datenquellen → Electrum-Server)
+# Ist FULCRUM_HOST eine IP, probiert der Übernehmen-Knopf in den
+# Datenquellen 50001 und 50002 jeweils mit und ohne TLS, aber nur wenn
+# der Benutzer dort neue Angaben gespeichert hat. Danach verbindet
+# alles andere nur noch Port und TLS aus dieser Prüfung.
 # Onion, Hostname und öffentliche Server bleiben beim eingestellten Port.
 FULCRUM_TOR_PROXY=127.0.0.1:9150   # nur für .onion-Verbindungen
 
@@ -197,7 +206,7 @@ Hintergrund: [`../doc/adr-modularisierung.md`](../doc/adr-modularisierung.md). S
 
 - **Neue Analyse-Funktion:** Logik in `core/` (z. B. `tx_utxo_analyze`, `utxo_origin`). Web: Route in `httpserver/api/` + View in `web/views/`. `analyze.py` und `server.py` nur Fassade/Dispatch. Kein neuer Menüpunkt in `menu.py`. Im Plugin optional `specter_session.run_*` + Route/Template in `controller.py`
 - **Neues Backend:** Fetcher in Backend-Modul, Anbindung in `core.chain_sources` (`_setup_blockchain_client` / `_build_blockchain_fetchers`, über die `main`-Fassade erreichbar)
-- **BIP-158:** P2P in `core/p2p.py`, Scan in `core/bip158_scan.py`, Wallet-API in `core/bip158_wallet.py`; `bip158_scanner.py` bleibt Fassade. Kein Core-RPC. Turbo-Pässe in `plane_filter_passes`. **Herkunftssperre:** `p2p_gesperrt()` bleibt wahr (`doc/issues/p2p-herkunft.md`). Herkunft, Verlauf, `get_tx`, Header-Vorab und `POST /api/p2p/walk-abgleich` (403) bleiben zu. Sockets nur in `p2p_nur_utxo_entdeckung`, und nur für den UTXO-Bestand, wenn eigener Electrum-Server, Bitcoin Core · RPC und scantxoutset nicht verbunden sind. Die Datenquellen-Zeile ist wieder da und sagt das. `BIP158_P2P=0` schaltet die Bestandssuche aus. Der Walk schreibt den Electrs-Cache nicht an.
+- **BIP-158:** P2P in `core/p2p.py`, Scan in `core/bip158_scan.py`, Wallet-API in `core/bip158_wallet.py`; `bip158_scanner.py` bleibt Fassade. Kein Core-RPC. Turbo-Pässe in `plane_filter_passes`. **Herkunftssperre:** `p2p_gesperrt()` bleibt wahr (`doc/issues/p2p-herkunft.md`). Herkunft, Verlauf, `get_tx` und `POST /api/p2p/walk-abgleich` (403) bleiben zu. Sockets für den UTXO-Bestand nur in `p2p_nur_utxo_entdeckung`, und nur wenn eigener Electrum-Server, Bitcoin Core · RPC und scantxoutset nicht verbunden sind. Ist P2P dann die einzige Bestandsquelle, startet `starte_header_vorab` sofort: fehlender Cache ab SegWit, voller Cache nur Tip-Nachzug. Dafür gilt `p2p_nur_header`. Die Datenquellen-Zeile ist wieder da und sagt das. `BIP158_P2P=0` schaltet die Bestandssuche aus. Der Walk schreibt den Electrs-Cache nicht an.
 - **Steuerjahr:** `core/tax.py`; Einstellungen `STEUER_HALTEFRIST_JAHRE` / `STEUER_STICHTAG`; Web-Ansicht in `web/views/`
 - **Fulcrum/Tor:** Fachcode in `core/fulcrum_*` und `core/electrum_servers.py`; `fulcrum.py` und `check_fulcrum_tor.py` bleiben Fassade bzw. Diagnose-CLI. `.env`-Variablen, `electrum_servers.json`
 - **Adress-Auflösung:** `WalletContext`, `external_addresses.json` in `main.py`

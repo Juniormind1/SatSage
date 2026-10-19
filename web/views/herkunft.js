@@ -2805,7 +2805,9 @@ async function starteHerkunftVollstaendig() {
       }
       return keys;
     },
-    (keys, uebernommen) => starteGrauKlaerung(keys, uebernommen),
+    (keys, uebernommen) => starteGrauKlaerung(
+      keys, uebernommen, undefined, "Herkunft",
+    ),
     [wid],
   );
 }
@@ -3024,6 +3026,7 @@ async function scanneAlleWalletsUtxo({
       sollAbbrechen,
       onTick: (j) => {
         if (logStand) nimmJobLogAb(j, logStand, wallet.name);
+        if (typeof spieleScanFunde === "function") spieleScanFunde(j);
         if (Array.isArray(j.result?.neu) && typeof zeichneScanPunkte === "function") {
           zeichneScanPunkte(j.result.neu);
         }
@@ -3261,7 +3264,8 @@ function zeigeKeinGelbZumKlaeren() {
  * Nach dem normalen Grau-Lauf: Zeitnachzug für Lot-Grau.
  * Abbruch und Fehler beenden hier — *danach* (Gelb) startet nicht.
  */
-function lotGrauNachGrauFortsetzen(danach) {
+function lotGrauNachGrauFortsetzen(danach, logLauf) {
+  const marke = logLauf || "klären (grau)";
   return Promise.resolve()
     .then(async () => {
       if (typeof ladeSteuerjahrMitKandidaten === "function") {
@@ -3297,6 +3301,7 @@ function lotGrauNachGrauFortsetzen(danach) {
         erzwingen: false,
         uebernommen: true,
         keinPauschalScan: true,
+        logLauf: marke,
       });
     })
     .catch((fehler) => {
@@ -3311,17 +3316,18 @@ function lotGrauNachGrauFortsetzen(danach) {
 }
 
 /** Dieselben Argumente wie der graue Scorecard-Knopf. *danach* nur für Gelb. */
-function starteGrauKlaerung(keys, uebernommen, danach) {
+function starteGrauKlaerung(keys, uebernommen, danach, logLauf) {
+  const marke = logLauf || "klären (grau)";
   const weiter = (info) => {
     if (!info || info.art !== "gut") {
       if (typeof danach === "function") return danach(info);
       return;
     }
-    return lotGrauNachGrauFortsetzen(danach);
+    return lotGrauNachGrauFortsetzen(danach, marke);
   };
   const liste = Array.isArray(keys) ? keys : [];
   if (!liste.length) {
-    return lotGrauNachGrauFortsetzen(danach);
+    return lotGrauNachGrauFortsetzen(danach, marke);
   }
   return herkunftAllerUtxos({
     knopf: "#herkunft-grau",
@@ -3336,6 +3342,7 @@ function starteGrauKlaerung(keys, uebernommen, danach) {
     erzwingen: true,
     uebernommen,
     keinPauschalScan: true,
+    logLauf: marke,
   });
 }
 
@@ -3354,6 +3361,7 @@ function starteGelbKlaerung(keys, uebernommen) {
     graueAnteile: true,
     uebernommen,
     keinPauschalScan: true,
+    logLauf: "klären (gelb)",
   });
 }
 
@@ -3492,6 +3500,13 @@ async function herkunftAllerUtxos(ziele = {
 
   const fertig = (meldung, art, jobStand) => {
     clearInterval(timer);
+    // Ohne Server-Job gibt es kein JOB-ENDE. Sonst misst JOB-ENDE die Dauer.
+    if (ziele.logLauf && !jobId) {
+      const grund = art === "gut" ? "nichts zu tun" : (
+        art === "warn" ? "ohne Lauf" : "fehlgeschlagen"
+      );
+      logZeile(`Ende ${ziele.logLauf} · ${grund}`);
+    }
     if (jobStand && jobStand.result && typeof traceMarkenAusJob === "function") {
       traceMarkenAusJob(jobStand.result);
     }
@@ -3528,7 +3543,12 @@ async function herkunftAllerUtxos(ziele = {
   };
 
   // Steuergrenze aufgehoben: jeder Lauf bis extern/Coinbase.
-  logZeile(t("ui.hard.0a8622a114"));
+  // Die gemessene Dauer steht in JOB-START/JOB-ENDE (lauf=…).
+  logZeile(
+    ziele.logLauf
+      ? `Starte ${ziele.logLauf}…`
+      : t("ui.hard.0a8622a114"),
+  );
   try {
     const traceDaten = {
       modus: "voll",
@@ -3536,6 +3556,7 @@ async function herkunftAllerUtxos(ziele = {
       erzwingen: Boolean(ziele.erzwingen),
       graue_anteile: Boolean(ziele.graueAnteile),
     };
+    if (ziele.logLauf) traceDaten.lauf = ziele.logLauf;
     let antwort = await api("/trace/alle", {
       methode: "POST",
       daten: traceDaten,

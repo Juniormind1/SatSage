@@ -10,6 +10,7 @@ from core.schatzsuche import (
     merge_utxos,
     sammle_schaetze,
     schatz_hinweis,
+    schatz_index_grenzen,
     schreibe_schaetze_in_cache,
     suchfenster,
 )
@@ -28,6 +29,16 @@ def _utxo(txid, adresse, sats=50_000, vout=0):
 
 
 class TestSchatzfenster(unittest.TestCase):
+
+    def test_felder_inklusive_vorgabe(self):
+        self.assertEqual(schatz_index_grenzen(0, 500), (0, 500))
+        self.assertEqual(schatz_index_grenzen(200, 200), (200, 200))
+
+    def test_bis_vor_ab_wirft(self):
+        with self.assertRaises(ValueError):
+            schatz_index_grenzen(500, 0)
+        with self.assertRaises(ValueError):
+            schatz_index_grenzen(-1, 500)
 
     def test_beginnt_hinter_dem_normalen_fenster(self):
         start, ende = suchfenster(500)
@@ -53,6 +64,14 @@ class TestSchatzfenster(unittest.TestCase):
         self.assertIn("Empfang #812", text)
         self.assertIn("bis Index #499", text)
         self.assertIn("außerhalb des Suchfensters", text)
+
+    def test_hinweis_nennt_den_fruehen_start(self):
+        text = schatz_hinweis(
+            wallet="Cold", chain=0, index=12, fenster_bis=200, sats=8000,
+            scan_ab=0,
+        )
+        self.assertIn("Empfang #12", text)
+        self.assertIn("bei Index #0", text)
 
 
 class TestSammelnUndCache(unittest.TestCase):

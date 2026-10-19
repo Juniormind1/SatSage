@@ -26,7 +26,7 @@ Jetzt zählt der fehlerfreie Electrs-Walk. Core-Walks und der Abgleich gegen Ele
 **Nächste Prüfung:** frühestens 2027-01-08
 Aufwand: erst nach einer Protokoll-Änderung abschätzbar
 
-Compact Filter suchen den UTXO-Bestand, und nur wenn eigener Electrum-Server und scantxoutset nicht verbunden sind. Die Herkunft eines fremden Vorgängers bleibt zu: `getdata` TX liefert nur Mempool und den letzten Block, Key-Path-Taproot lässt sich aus dem Witness nicht rekonstruieren. Herkunft, Verlauf, Header-Vorab und der Walk-Abgleich bleiben aus. Detail: [`doc/issues/p2p-herkunft.md`](doc/issues/p2p-herkunft.md).
+Compact Filter suchen den UTXO-Bestand, und nur wenn eigener Electrum-Server und scantxoutset nicht verbunden sind. Die Herkunft eines fremden Vorgängers bleibt zu: `getdata` TX liefert nur Mempool und den letzten Block, Key-Path-Taproot lässt sich aus dem Witness nicht rekonstruieren. Herkunft, Verlauf und der Walk-Abgleich bleiben aus. Header-Vorab läuft in diesem Fall: fehlender Cache ab SegWit, sonst Tip-Nachzug. Detail: [`doc/issues/p2p-herkunft.md`](doc/issues/p2p-herkunft.md).
 
 ---
 

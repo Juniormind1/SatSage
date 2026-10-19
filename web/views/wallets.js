@@ -758,6 +758,156 @@ function aktualisiereWalletLotDonut() {
   setzeWalletLotDonut(null);
 }
 
+/**
+ * Fallende Zeichen in der großen Karte, solange der Bestand mit UTXOs
+ * aus dem Cache kommt. Leerer Cache und „keine UTXOs“ bleiben bei ihrer
+ * Hinweis-Karte — die ist schnell da und sagt schon das Richtige.
+ * Kurze Antworten blenden den Regen nicht auf.
+ */
+const WALLET_WARTE_VERZUG_MS = 220;
+const WALLET_WARTE_LATEIN = "0123456789ABCDEF";
+const WALLET_WARTE_KANA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ";
+let walletWarteGen = 0;
+let walletWarteTimer = 0;
+let walletWarteRahmen = 0;
+let walletWarteBeobachter = null;
+
+function walletHatSchonUtxos(wallet) {
+  return Number(wallet && wallet.utxo_count) > 0;
+}
+
+function walletWarteSchrift() {
+  const kandidaten = [
+    "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN",
+    "Yu Gothic",
+    "Yu Gothic UI",
+    "MS Gothic",
+    "Noto Sans CJK JP",
+    "Noto Sans JP",
+  ];
+  if (document.fonts && document.fonts.check) {
+    for (const name of kandidaten) {
+      try {
+        if (document.fonts.check(`16px "${name}"`)) {
+          return { font: `"${name}", sans-serif`, kana: true };
+        }
+      } catch (_) { /* unbekannter Schriftname */ }
+    }
+  }
+  return {
+    font: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    kana: false,
+  };
+}
+
+function walletWarteAus() {
+  walletWarteGen += 1;
+  if (walletWarteTimer) {
+    clearTimeout(walletWarteTimer);
+    walletWarteTimer = 0;
+  }
+  if (walletWarteRahmen) {
+    cancelAnimationFrame(walletWarteRahmen);
+    walletWarteRahmen = 0;
+  }
+  if (walletWarteBeobachter) {
+    walletWarteBeobachter.disconnect();
+    walletWarteBeobachter = null;
+  }
+  const kasten = $("#wallet-warte");
+  if (kasten) kasten.hidden = true;
+}
+
+function starteWalletWarteRegen(kasten, gen) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const leinwand = $("#wallet-warte-leinwand");
+  if (!leinwand || !leinwand.getContext) return;
+  const ctx = leinwand.getContext("2d", { alpha: false });
+  if (!ctx) return;
+  const schrift = walletWarteSchrift();
+  const zeichen = schrift.kana
+    ? WALLET_WARTE_KANA + WALLET_WARTE_LATEIN
+    : WALLET_WARTE_LATEIN;
+  const stil = getComputedStyle(kasten);
+  const grund = (stil.getPropertyValue("--warte-grund") || "#14181c").trim();
+  // Zeichen wie der Text der grünen Pillen. Das Status-Label bleibt --warte-kopf.
+  const kopf = (stil.getPropertyValue("--gut") || "#2C7460").trim();
+  const zell = 18;
+  let spalten = [];
+  let breite = 0;
+  let hoehe = 0;
+
+  const messe = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, kasten.clientWidth);
+    const h = Math.max(1, kasten.clientHeight);
+    leinwand.width = Math.floor(w * dpr);
+    leinwand.height = Math.floor(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    breite = w;
+    hoehe = h;
+    const n = Math.max(1, Math.ceil(w / zell));
+    spalten = Array.from({ length: n }, () => ({
+      y: Math.random() * (h / zell),
+      v: 0.08 + Math.random() * 0.14,
+    }));
+    ctx.fillStyle = grund;
+    ctx.fillRect(0, 0, w, h);
+  };
+  messe();
+  if (typeof ResizeObserver === "function") {
+    walletWarteBeobachter = new ResizeObserver(() => {
+      if (gen !== walletWarteGen) return;
+      messe();
+    });
+    walletWarteBeobachter.observe(kasten);
+  }
+
+  const tick = () => {
+    if (gen !== walletWarteGen) return;
+    if (kasten.hidden || Zustand.ansicht !== "wallet") {
+      walletWarteRahmen = 0;
+      return;
+    }
+    ctx.fillStyle = "rgba(20, 24, 28, 0.16)";
+    ctx.fillRect(0, 0, breite, hoehe);
+    ctx.font = `15px ${schrift.font}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = kopf;
+    for (let i = 0; i < spalten.length; i++) {
+      const s = spalten[i];
+      const glyph = zeichen[Math.floor(Math.random() * zeichen.length)];
+      ctx.globalAlpha = 0.45 + Math.random() * 0.55;
+      ctx.fillText(glyph, i * zell + zell / 2, s.y * zell);
+      s.y += s.v;
+      if (s.y * zell > hoehe && Math.random() > 0.96) {
+        s.y = -Math.random() * 8;
+        s.v = 0.08 + Math.random() * 0.14;
+      }
+    }
+    ctx.globalAlpha = 1;
+    walletWarteRahmen = requestAnimationFrame(tick);
+  };
+  walletWarteRahmen = requestAnimationFrame(tick);
+}
+
+function walletWarteAn() {
+  const kasten = $("#wallet-warte");
+  if (!kasten) return;
+  walletWarteAus();
+  const gen = walletWarteGen;
+  walletWarteTimer = setTimeout(() => {
+    walletWarteTimer = 0;
+    if (gen !== walletWarteGen) return;
+    if (Zustand.ansicht !== "wallet") return;
+    setzeText($("#wallet-warte-text"), t("common.loadingFromCache"));
+    kasten.hidden = false;
+    starteWalletWarteRegen(kasten, gen);
+  }, WALLET_WARTE_VERZUG_MS);
+}
+
 async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   Zustand.walletId = walletId;
   Zustand.walletLadeGen = (Zustand.walletLadeGen || 0) + 1;
@@ -779,6 +929,10 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
   setzeText($("#wallet-meta"), t("common.loadingFromCache"));
   $("#adress-liste").hidden = true;
   $("#wallet-leer").hidden = true;
+  // Regen nur, wenn die Nav schon UTXOs kennt. Sonst bleibt die Fläche
+  // kurz leer, bis „noch kein Cache“ oder „keine unspent UTXOs“ steht.
+  if (walletHatSchonUtxos(wallet)) walletWarteAn();
+  else walletWarteAus();
 
   // Seitenweise (ISSUES P2): Adressgruppen kommen seitenweise vom Server,
   // gefiltert über alle Seiten; die Seitengröße ersetzt „Top 10/25/Alle“.
@@ -792,6 +946,7 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
     );
     if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeichneUtxos(daten, wallet, { ...bestandSeitenAuszug(daten), offset: 0 });
+    if (daten && daten.verlauf_ausstehend === true) holeVerlaufStand(walletId, ladeGen);
   } catch (fehler) {
     if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeigeLeer(t("wallet.loadFailed", { msg: fehler.message }), "");
@@ -879,7 +1034,50 @@ function walletListenParameter(teil, offset, limit, filter = "") {
   // Ausgegeben kommt aus dem Verlaufs-Cache. Der Mempool-Check gehört zum
   // Bestand (Hintergrund nach dem Erst-Paint), nicht zum Aufklappen.
   if (teil === "verlauf") p.set("mempool", "0");
+  // Bestand zuerst aus der UTXO-Datei. Die Verlaufs-Summen holt
+  // holeVerlaufStand, sobald die Verlaufsdatei dieses Wallets gelesen ist.
+  // Blättern und der Mempool-Nachzug behalten einen schon bekannten Verlauf.
+  else p.set("verlauf", "0");
   return p.toString();
+}
+
+/**
+ * Verlaufs-Summen nach dem UTXO-Paint. Liest nur die Verlaufsdatei.
+ * Ein schon gezeichnetes UTXO-Bild bleibt stehen; Meta-Zeile und
+ * „Bereits ausgegeben“ ziehen nach. Noch keine Zeilen: einmal ganz zeichnen,
+ * damit ein Wallet nur mit Historie nicht auf „nie gescannt“ stehen bleibt.
+ */
+function holeVerlaufStand(walletId, ladeGen) {
+  const sprache = typeof uiSprache === "function" ? uiSprache() : "de";
+  api(
+    `/wallets/${walletId}/utxos?seite=1&teil=verlaufstand&mempool=0&lang=${sprache}`,
+  )
+    .then((stand) => {
+      if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
+      if (Zustand.ansicht !== "wallet") return;
+      const aktuell = Zustand._walletUtxoDaten;
+      if (!aktuell || String(aktuell.wallet_id || "") !== String(walletId)) return;
+      aktuell.hat_verlauf = Boolean(stand && stand.hat_verlauf);
+      aktuell.verlauf = (stand && stand.verlauf) || {
+        total_count: 0,
+        total_sats: 0,
+        pending_count: 0,
+        shown_count: 0,
+        utxos: [],
+        addresses: [],
+      };
+      aktuell.verlauf_ausstehend = false;
+      const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId) || null;
+      const liste = $("#adress-liste");
+      const sichtbar = Boolean(liste && !liste.hidden && Number(aktuell.total_count) > 0);
+      if (!sichtbar) {
+        zeichneUtxos(aktuell, wallet, Zustand._walletUtxoSeite);
+        return;
+      }
+      setzeWalletBestandtext(aktuell, wallet, Zustand._walletUtxoSeite);
+      setzeWalletAusgegeben(aktuell, Zustand._walletUtxoSeite);
+    })
+    .catch(() => {});
 }
 
 /**
@@ -1126,6 +1324,7 @@ function walletPager(seite) {
 }
 
 function zeigeLeer(titel, text) {
+  walletWarteAus();
   const kasten = $("#wallet-leer");
   kasten.replaceChildren();
   const stark = document.createElement("strong");
@@ -1138,49 +1337,29 @@ function zeigeLeer(titel, text) {
   if (typeof aktualisiereWalletLotDonut === "function") aktualisiereWalletLotDonut();
 }
 
-function zeichneUtxos(daten, wallet, seite = null) {
-  // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
-  Zustand._walletUtxoDaten = daten || null;
-  Zustand._walletUtxoSeite = seite;
-  const hatVerlauf = Boolean(daten.hat_verlauf);
-  const hatUtxos = Boolean(daten.has_cache && daten.total_count);
+/**
+ * Ein neuer Bestand ohne Verlauf übernimmt den schon gelesenen Verlauf
+ * desselben Wallets. Sonst würde Blättern oder der Mempool-Nachzug die
+ * Zeile „bereits ausgegeben“ wieder leer räumen.
+ */
+function verlaufErgaenzen(daten) {
+  if (!daten || daten.verlauf_ausstehend !== true) return;
+  const alt = Zustand._walletUtxoDaten;
+  if (!alt || alt.verlauf_ausstehend === true) return;
+  if (String(alt.wallet_id || "") !== String(daten.wallet_id || "")) return;
+  daten.hat_verlauf = Boolean(alt.hat_verlauf);
+  daten.verlauf = alt.verlauf;
+  daten.verlauf_ausstehend = false;
+}
 
-  if (!daten.has_cache && !hatVerlauf) {
-    zeigeLeer(
-      t("wallet.emptyNoCache"),
-      t("wallet.emptyNoCacheHint"),
-    );
-    setzeText($("#wallet-meta"), t("wallet.metaNeverScanned"));
-    const metaLeer = $("#wallet-meta");
-    if (metaLeer) {
-      metaLeer.title = "";
-      delete metaLeer.dataset.fresh;
-    }
-    setzeWalletTitel(wallet);
-    aktualisiereKopfFilterFuerAnsicht();
-    return;
-  }
-  if (daten.has_cache && !hatUtxos && !hatVerlauf) {
-    zeigeLeer(
-      t("wallet.emptyNoUtxo"),
-      t("wallet.emptyNoUtxoHint"),
-    );
-    setzeText($("#wallet-meta"), t("wallet.metaZeroCache"));
-    const metaNull = $("#wallet-meta");
-    if (metaNull) {
-      metaNull.title = "";
-      delete metaNull.dataset.fresh;
-    }
-    setzeWalletTitel(wallet, 0);
-    aktualisiereKopfFilterFuerAnsicht();
-    return;
-  }
-
+/** Meta-Zeile der Wallet-Ansicht, inklusive „bereits ausgegeben“, sobald bekannt. */
+function setzeWalletBestandtext(daten, wallet, seite = null) {
+  const hatVerlauf = Boolean(daten && daten.hat_verlauf);
   const teile = [];
   // UTXO-Datei und Verlauf sind getrennte Caches. Historie allein füllt
   // den Verlauf; „kein UTXO-Cache“ darf dann nicht die Verlaufs-Zeit anhängen.
-  const utxoDatei = Boolean(daten.has_cache);
-  const cacheDa = utxoDatei || Boolean(daten.hat_verlauf);
+  const utxoDatei = Boolean(daten && daten.has_cache);
+  const cacheDa = utxoDatei || hatVerlauf;
   if (utxoDatei) {
     const utxoListe = daten.utxos || [];
     setzeWalletTitel(wallet, daten.total_sats);
@@ -1244,6 +1423,81 @@ function zeichneUtxos(daten, wallet, seite = null) {
       delete metaEl.dataset.fresh;
     }
   }
+}
+
+/** Abschnitt „Bereits ausgegeben“. Ohne bekannten Verlauf bleibt er leer. */
+function setzeWalletAusgegeben(daten, seite = null) {
+  const ausgegeben = $("#wallet-ausgegeben");
+  if (!ausgegeben) return;
+  ausgegeben.replaceChildren();
+  if (!daten || !daten.hat_verlauf) return;
+  const verlaufWalletId = daten.wallet_id || Zustand.walletId;
+  ausgegeben.append(zeichneAusgegeben(daten, seite ? {
+    quelle: () => walletSeitenQuelle(verlaufWalletId, "verlauf"),
+  } : null));
+}
+
+function zeichneUtxos(daten, wallet, seite = null) {
+  walletWarteAus();
+  verlaufErgaenzen(daten);
+  // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
+  Zustand._walletUtxoDaten = daten || null;
+  Zustand._walletUtxoSeite = seite;
+  const hatVerlauf = Boolean(daten.hat_verlauf);
+  const hatUtxos = Boolean(daten.has_cache && daten.total_count);
+
+  // Verlaufsdatei noch nicht gelesen und noch keine UTXO-Zeile: nicht
+  // „nie gescannt“ oder „keine UTXOs“ behaupten. Die UTXOs selbst, sobald
+  // die UTXO-Datei sie hergibt, zeichnet der Zweig darunter sofort.
+  if (daten.verlauf_ausstehend === true && !hatUtxos) {
+    const sanktion = $("#sanktions-karte");
+    if (sanktion) sanktion.hidden = true;
+    $("#adress-liste").hidden = true;
+    $("#wallet-leer").hidden = true;
+    if (daten.has_cache) setzeWalletTitel(wallet, daten.total_sats || 0);
+    else setzeWalletTitel(wallet);
+    setzeText($("#wallet-meta"), t("common.loadingFromCache"));
+    const metaWarten = $("#wallet-meta");
+    if (metaWarten) {
+      metaWarten.title = "";
+      delete metaWarten.dataset.fresh;
+    }
+    aktualisiereKopfFilterFuerAnsicht();
+    return;
+  }
+
+  if (!daten.has_cache && !hatVerlauf) {
+    zeigeLeer(
+      t("wallet.emptyNoCache"),
+      t("wallet.emptyNoCacheHint"),
+    );
+    setzeText($("#wallet-meta"), t("wallet.metaNeverScanned"));
+    const metaLeer = $("#wallet-meta");
+    if (metaLeer) {
+      metaLeer.title = "";
+      delete metaLeer.dataset.fresh;
+    }
+    setzeWalletTitel(wallet);
+    aktualisiereKopfFilterFuerAnsicht();
+    return;
+  }
+  if (daten.has_cache && !hatUtxos && !hatVerlauf) {
+    zeigeLeer(
+      t("wallet.emptyNoUtxo"),
+      t("wallet.emptyNoUtxoHint"),
+    );
+    setzeText($("#wallet-meta"), t("wallet.metaZeroCache"));
+    const metaNull = $("#wallet-meta");
+    if (metaNull) {
+      metaNull.title = "";
+      delete metaNull.dataset.fresh;
+    }
+    setzeWalletTitel(wallet, 0);
+    aktualisiereKopfFilterFuerAnsicht();
+    return;
+  }
+
+  setzeWalletBestandtext(daten, wallet, seite);
 
   zeichneSanktionsBefund(daten.sanctions);
 
@@ -1273,14 +1527,7 @@ function zeichneUtxos(daten, wallet, seite = null) {
     ));
   }
 
-  const ausgegeben = $("#wallet-ausgegeben");
-  ausgegeben.replaceChildren();
-  const verlaufWalletId = daten.wallet_id || Zustand.walletId;
-  if (hatVerlauf) {
-    ausgegeben.append(zeichneAusgegeben(daten, seite ? {
-      quelle: () => walletSeitenQuelle(verlaufWalletId, "verlauf"),
-    } : null));
-  }
+  setzeWalletAusgegeben(daten, seite);
 
   $("#wallet-leer").hidden = true;
   $("#adress-liste").hidden = false;
@@ -4337,7 +4584,7 @@ function bindeWalletScanJob(job, ziel) {
   Zustand.scanArt = ziel.art;
   Zustand.scanUtxoZahl = null;
   Zustand.scanUtxoJeWallet = {};
-  Zustand.scanFundKeys = new Set();
+  merkeScanFundJob(job.id);
   Zustand.scanRefreshUm = 0;
   Zustand.scanRefreshLaeuft = false;
   Zustand.scanLogIndex = 0;
@@ -4369,27 +4616,59 @@ function bindeWalletScanJob(job, ziel) {
 const SCAN_REFRESH_MS = 2500;
 
 /**
- * Jeder in diesem Scan neu gefundene UTXO des offenen Wallets
- * spielt dieselbe Ka-Ching-Animation wie ein Mempool-Empfang.
+ * Neuer Scan: schon gefeierte UTXOs vergessen.
+ * Derselbe Job (Nav hängt sich erneut an) behält die Menge.
+ */
+function merkeScanFundJob(jobId) {
+  const id = String(jobId || "");
+  if (!id || Zustand.scanFundJobId === id) return;
+  Zustand.scanFundJobId = id;
+  Zustand.scanFundKeys = new Set();
+}
+
+/**
+ * Jeder in diesem Scan neu gefundene UTXO spielt seinen eigenen Ka-Ching,
+ * auch wenn er nicht zum gerade offenen Wallet gehört.
+ * Mempool-Ka-Ching bleibt davon unberührt und gilt weiter nur fürs offene Wallet.
+ * Mehrere Funde in einem Poll (Electrs liefert den Stand auf einmal) laufen
+ * nacheinander, sonst ersetzt das zweite Konfetti das erste.
  */
 function spieleScanFunde(job) {
   const liste = job && job.result && job.result.entdeckt;
-  if (!Array.isArray(liste) || !Zustand.walletId) return;
+  if (!Array.isArray(liste)) return;
+  merkeScanFundJob(job && (job.id || job.job_id));
   if (!Zustand.scanFundKeys) Zustand.scanFundKeys = new Set();
+  if (!Zustand.scanKaChing) Zustand.scanKaChing = [];
   for (const fund of liste) {
     if (!fund || !fund.key) continue;
     const key = String(fund.key);
     if (Zustand.scanFundKeys.has(key)) continue;
     Zustand.scanFundKeys.add(key);
-    if (String(fund.wallet_id || "") !== String(Zustand.walletId)) continue;
     const sats = Number(fund.value_sats);
-    if (typeof EmpfangPuls !== "undefined" && EmpfangPuls.flashIncoming) {
-      EmpfangPuls.flashIncoming(
-        Zustand.walletId,
-        Number.isFinite(sats) ? sats : undefined,
-      );
-    }
+    Zustand.scanKaChing.push(Number.isFinite(sats) ? sats : undefined);
   }
+  pumpeScanKaChing();
+}
+
+function pumpeScanKaChing() {
+  if (Zustand.scanKaChingLaeuft) return;
+  const warteschlange = Zustand.scanKaChing || [];
+  if (!warteschlange.length) return;
+  if (typeof EmpfangPuls === "undefined" || !EmpfangPuls.flashIncoming) {
+    Zustand.scanKaChing = [];
+    return;
+  }
+  const sats = warteschlange.shift();
+  Zustand.scanKaChingLaeuft = true;
+  const scanLaeuft = typeof empfangScanLaeuftFuer === "function"
+    && empfangScanLaeuftFuer(Zustand.walletId || "");
+  EmpfangPuls.flashIncoming(Zustand.walletId || "", sats, {
+    halteDanach: warteschlange.length > 0 || scanLaeuft,
+    onDone: () => {
+      Zustand.scanKaChingLaeuft = false;
+      pumpeScanKaChing();
+    },
+  });
 }
 
 async function erfrischeScanZwischenstand(scanId, utxoZahl) {
@@ -4407,6 +4686,14 @@ async function erfrischeScanZwischenstand(scanId, utxoZahl) {
     await ladeConfig();
     if (scanTrifftOffeneWallet(scanId)) {
       await zeigeWallet(Zustand.walletId);
+    } else if (
+      Zustand.ansicht === "steuerjahr"
+      && typeof ladeSteuerjahr === "function"
+    ) {
+      // Dotplot liest den UTXO-Cache. Der Sammelscan schreibt ihn je Block;
+      // ohne diesen Zug bliebe der Plot leer, bis man die Ansicht neu öffnet.
+      zeichneNav();
+      await ladeSteuerjahr({ fensterBehalten: true });
     } else {
       zeichneNav();
     }
@@ -4647,6 +4934,9 @@ async function pruefeWalletScan() {
       return;
     }
 
+    // Letzter Stand: Electrs meldet die Funde oft erst ganz am Ende.
+    if (Zustand.scanArt === "utxo") spieleScanFunde(job);
+
     if (job.status === "done") {
       beendeRescan("");
       Zustand.traceListe = null;
@@ -4654,6 +4944,12 @@ async function pruefeWalletScan() {
       await ladeConfig();
       if (scanTrifftOffeneWallet(scanId)) {
         await zeigeWallet(Zustand.walletId);
+      } else if (
+        Zustand.ansicht === "steuerjahr"
+        && typeof ladeSteuerjahr === "function"
+      ) {
+        zeichneNav();
+        await ladeSteuerjahr({ fensterBehalten: true });
       } else {
         zeichneNav();
       }

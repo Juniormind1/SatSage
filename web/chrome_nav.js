@@ -871,6 +871,7 @@ function aktualisiereSpeicherleiste() {
 const NAV_PIN_MERKER = "satsage-nav-pin";
 let navKompaktGebunden = false;
 let navHoverTimer = 0;
+let navZeigerDrin = false;
 let navBeobachter = null;
 
 function navPinGemerkt() {
@@ -941,10 +942,20 @@ function navIstKompakt() {
   return Boolean(app && app.classList.contains("nav-kompakt"));
 }
 
+function nimmFokusAusZugeklappterLeiste() {
+  const aktiv = document.activeElement;
+  if (!aktiv || aktiv === document.body || aktiv.id === "nav-toggle") return;
+  if (!navZeigerUeberLeiste(aktiv) || typeof aktiv.blur !== "function") return;
+  aktiv.blur();
+}
+
 function setzeNavOffen(an) {
   const app = document.getElementById("app");
   if (!app) return;
-  app.classList.toggle("nav-offen", Boolean(an));
+  const offen = Boolean(an);
+  const warOffen = app.classList.contains("nav-offen");
+  app.classList.toggle("nav-offen", offen);
+  if (warOffen && !offen) nimmFokusAusZugeklappterLeiste();
   aktualisiereNavWerkzeuge();
 }
 
@@ -1007,6 +1018,24 @@ function schliesseNavWennUngepinnt() {
   setzeNavOffen(false);
 }
 
+// Log aus und kein verbundenes LLM: Empfang wandert in die Leiste und
+// blendet mit ihr. Sobald das Log an ist oder der Chat da ist, zurück nach rechts unten.
+function legeEmpfangNachOrt() {
+  const pane = document.getElementById("empfang-pane");
+  const leiste = document.getElementById("seitenleiste");
+  const spalten = document.querySelector(".dock-spalten");
+  const buehne = document.querySelector(".buehne");
+  if (!pane || !leiste || !spalten || !buehne) return;
+  const inNav = !buehne.classList.contains("log-an")
+    && !buehne.classList.contains("chat-an");
+  if (inNav) {
+    if (pane.parentElement !== leiste) leiste.appendChild(pane);
+  } else if (pane.parentElement !== spalten) {
+    spalten.appendChild(pane);
+  }
+  buehne.classList.toggle("empfang-in-nav", inNav);
+}
+
 function navZeigerUeberLeiste(ziel) {
   if (!ziel || typeof ziel.closest !== "function") return false;
   return Boolean(
@@ -1048,32 +1077,61 @@ function bindeNavLeiste() {
     });
   }
 
-  const navHatFokus = () => navZeigerUeberLeiste(document.activeElement);
-  const hoverAn = () => {
+  // Klick auf Pin oder Menüknopf lässt den Fokus dort. Das darf die
+  // ungepinnte Leiste nicht offen halten, sobald der Zeiger woanders ist.
+  const oeffneDurchZeiger = () => {
+    navZeigerDrin = true;
+    window.clearTimeout(navHoverTimer);
+    if (!navIstKompakt() || navIstGepinnt()) return;
+    setzeNavOffen(true);
+  };
+  const oeffneDurchFokus = () => {
     if (!navIstKompakt() || navIstGepinnt()) return;
     window.clearTimeout(navHoverTimer);
     setzeNavOffen(true);
   };
-  const hoverAus = () => {
+  const merkeZeigerAufWerkzeug = () => {
+    navZeigerDrin = true;
+    window.clearTimeout(navHoverTimer);
+  };
+  const zeigerWeg = (ereignis) => {
+    if (navZeigerUeberLeiste(ereignis.relatedTarget)) {
+      navZeigerDrin = true;
+      window.clearTimeout(navHoverTimer);
+      return;
+    }
+    navZeigerDrin = false;
+    if (!navIstKompakt() || navIstGepinnt() || !navIstOffen()) return;
+    window.clearTimeout(navHoverTimer);
+    navHoverTimer = window.setTimeout(() => {
+      if (navIstGepinnt() || navZeigerDrin) return;
+      setzeNavOffen(false);
+    }, 280);
+  };
+  const fokusWeg = (ereignis) => {
+    if (navZeigerUeberLeiste(ereignis.relatedTarget) || navZeigerDrin) return;
     if (!navIstKompakt() || navIstGepinnt()) return;
     window.clearTimeout(navHoverTimer);
     navHoverTimer = window.setTimeout(() => {
-      if (navIstGepinnt() || navHatFokus()) return;
+      if (navIstGepinnt() || navZeigerDrin) return;
+      if (navZeigerUeberLeiste(document.activeElement)) return;
       setzeNavOffen(false);
     }, 280);
   };
   if (rand) {
-    rand.addEventListener("pointerenter", hoverAn);
-    rand.addEventListener("pointerleave", hoverAus);
+    rand.addEventListener("pointerenter", oeffneDurchZeiger);
+    rand.addEventListener("pointerleave", zeigerWeg);
   }
   if (leiste) {
-    leiste.addEventListener("pointerenter", hoverAn);
-    leiste.addEventListener("pointerleave", hoverAus);
-    leiste.addEventListener("focusin", hoverAn);
-    leiste.addEventListener("focusout", hoverAus);
+    leiste.addEventListener("pointerenter", oeffneDurchZeiger);
+    leiste.addEventListener("pointerleave", zeigerWeg);
+    leiste.addEventListener("focusin", oeffneDurchFokus);
+    leiste.addEventListener("focusout", fokusWeg);
   }
   if (toggle) {
-    toggle.addEventListener("focus", hoverAn);
+    toggle.addEventListener("pointerenter", merkeZeigerAufWerkzeug);
+    toggle.addEventListener("pointerleave", zeigerWeg);
+    toggle.addEventListener("focus", oeffneDurchFokus);
   }
 
   document.addEventListener("pointerdown", (ereignis) => {

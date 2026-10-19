@@ -46,6 +46,36 @@ class TestFilterParse(unittest.TestCase):
     def test_leer(self):
         self.assertTrue(lf.parse_filter("  ")["leer"])
 
+    def test_fiat_schreibweisen_und_engere_grenze(self):
+        kurse = {"EUR": 100_000.0, "USD": 50_000.0}
+        # 100 EUR = 100_000 sats; 50 USD = 100_000 sats; >2000 sats ist lockerer.
+        f = lf.parse_filter(">100 EUR >100€ >100EUR >2000", kurse=kurse)
+        self.assertEqual(f["terms"], [])
+        self.assertEqual(f["min_sats"], 100_000.0)
+        self.assertIsNone(f["kurs_fehlt"])
+        f = lf.parse_filter("<50 usd <50$ <50USD", kurse=kurse)
+        self.assertEqual(f["max_sats"], 100_000.0)
+        f = lf.parse_filter(">5000,5 EUR", kurse=kurse)
+        self.assertEqual(f["min_sats"], 5_000.5 / 100_000.0 * 100_000_000)
+
+    def test_fiat_und_datum_bleiben_getrennt(self):
+        f = lf.parse_filter(">1.1.25 EUR", kurse={"EUR": 100_000.0})
+        self.assertEqual(f["terms"], ["eur"])
+        self.assertIsNotNone(f["after_ts"])
+        self.assertIsNone(f["min_sats"])
+        self.assertIsNone(f["kurs_fehlt"])
+        self.assertEqual(lf.parse_filter("100 EUR")["terms"], ["100", "eur"])
+
+    def test_fehlender_kurs_setzt_filter_aus(self):
+        f = lf.parse_filter("kraken >100 EUR <1.1.25", kurse={"EUR": None, "USD": 1.0})
+        self.assertTrue(f["leer"])
+        self.assertEqual(f["kurs_fehlt"], "EUR")
+        self.assertEqual(f["terms"], [])
+        self.assertIsNone(f["before_ts"])
+        beide = lf.parse_filter(">1 EUR <1 USD")
+        self.assertEqual(beide["kurs_fehlt"], "EUR, USD")
+        self.assertTrue(beide["leer"])
+
 
 class TestLabelText(unittest.TestCase):
     """Port von kopfFilterLabelText/softTxClassLabel."""
@@ -336,6 +366,58 @@ class TestFensterApi(ApiTestBasis):
         self.assertEqual(v["fenster"]["total"], 5)
         self.assertEqual(len(v["utxos"]), 2)
         self.assertTrue(all(u["spent"] for u in v["utxos"]))
+
+    def _verlauf_fuenf(self):
+        verlauf = [dict(roh(f"{i:02x}", 1000 + i, BIP84_RECEIVE_0, vout=i), spent=True,
+                        spent_txid=txid("ff"), spent_time_ts=1_700_000_000 + i)
+                   for i in range(5)]
+        main.save_xpub_verlauf_cache(BIP84_ZPUB, verlauf, self.cache)
+        return self.wallet_id(BIP84_ZPUB)
+
+    def test_bestand_ohne_verlauf_zeigt_utxos_und_laedt_die_datei_nicht(self):
+        """Erst-Paint liest die UTXO-Datei. Die Summen kommen über teil=verlaufstand."""
+        kennung = self._verlauf_fuenf()
+        url_kurz = (
+            f"/api/wallets/{kennung}/utxos?mempool=0&seite=1"
+            "&modus=gruppen&limit=1&verlauf=0"
+        )
+        with mock.patch.object(main, "load_xpub_verlauf_cache") as spion:
+            _, kurz = self.anfrage(url_kurz)
+        spion.assert_not_called()
+        self.assertTrue(kurz["verlauf_ausstehend"])
+        self.assertFalse(kurz["hat_verlauf"])
+        self.assertEqual(kurz["total_count"], 8)
+        self.assertGreater(len(kurz["addresses"]), 0)
+        self.assertEqual(kurz["verlauf"]["total_count"], 0)
+
+        _, voll = self.anfrage(
+            f"/api/wallets/{kennung}/utxos?mempool=0&seite=1&modus=gruppen&limit=1")
+        self.assertFalse(voll["verlauf_ausstehend"])
+        self.assertTrue(voll["hat_verlauf"])
+        self.assertEqual(voll["verlauf"]["total_count"], 5)
+
+        with mock.patch.object(utxos_mod, "load_cached_utxos") as bestand:
+            _, stand = self.anfrage(
+                f"/api/wallets/{kennung}/utxos?teil=verlaufstand&mempool=0")
+        bestand.assert_not_called()
+        self.assertTrue(stand["hat_verlauf"])
+        self.assertFalse(stand["verlauf_ausstehend"])
+        self.assertEqual(stand["verlauf"]["total_count"], voll["verlauf"]["total_count"])
+        self.assertEqual(stand["verlauf"]["total_sats"], voll["verlauf"]["total_sats"])
+        self.assertEqual(stand["verlauf"]["pending_count"], 0)
+        self.assertEqual(stand["verlauf"]["utxos"], [])
+
+    def test_verlauf_seite_liest_die_datei_auch_mit_verlauf_0(self):
+        kennung = self._verlauf_fuenf()
+        with mock.patch.object(
+            main, "load_xpub_verlauf_cache", wraps=main.load_xpub_verlauf_cache,
+        ) as spion:
+            _, körper = self.anfrage(
+                f"/api/wallets/{kennung}/utxos?seite=1&teil=verlauf"
+                "&modus=age-desc&limit=2&mempool=0&verlauf=0")
+        self.assertGreater(spion.call_count, 0)
+        self.assertFalse(körper["verlauf_ausstehend"])
+        self.assertEqual(körper["verlauf"]["fenster"]["total"], 5)
 
 
 if __name__ == "__main__":

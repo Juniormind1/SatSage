@@ -40,6 +40,30 @@ AGE_INDEX_COUNT = 40
 #: Indizes AGE_INDEX_COUNT .. AGE+SPEND-1 = Spend-Pool (CJ/Hop/…).
 SPEND_INDEX_COUNT = 40
 
+# Sammel-Tx, die das 20er-Auflöse-Limit trifft: ein eigener Eingang zuerst,
+# danach mehr fremde Eingänge als core.trace.FULL_RESOLUTION_INPUT_LIMIT.
+# Indizes 96 und 97 liegen in der Lücke zwischen Shape (~55) und Volumen (120).
+# Eingang 0,002 BTC und Ausgang 0,0061 BTC liegen unter select_near (ab 0,01),
+# der Spend-Pool fasst sie nicht an.
+BUENDEL_NAME = "Sammel-eigen-zuerst"
+BUENDEL_EIGEN_INDEX = 96
+BUENDEL_AUSGANG_INDEX = 97
+BUENDEL_FREMDE = 21
+BUENDEL_EIGEN_SATS = 200_000
+BUENDEL_FREMD_SATS = 20_000
+BUENDEL_FEE_SATS = 10_000
+
+#: Eigenes Core-Wallet, nicht in SatSage WALLET_* und nicht im Herkunfts-Inventar.
+#: Empfang 0 ist belegt, 1…100 leer, 101 belegt. Gap 100 findet 101 nicht.
+GAP_WALLET = "lab-gap"
+GAP_NEAR_INDEX = 0
+GAP_FAR_INDEX = 101
+GAP_MISS = 100
+GAP_HIT = 101
+GAP_NEAR_SATS = 10_000
+GAP_FAR_SATS = 10_101
+GAP_REPORT = HERE / ".data" / "scenario-report-gap.json"
+
 class Rpc:
     def __init__(self, native: bool):
         user = os.environ.get("RPCUSER", "bitcoin")
@@ -113,7 +137,16 @@ def utc_ts(iso_date: str) -> int:
 
 
 def set_time(rpc: Rpc, unix_ts: int) -> None:
-    rpc.call("setmocktime", str(int(unix_ts)))
+    """Mocktime setzen. 0 hebt sie auf.
+
+    Core lehnt einen Block ab, dessen Zeit mehr als zwei Stunden vor der
+    Host-Uhr liegt (time-too-new). Ein Zeitsprung, der darüber hinaus
+    wollte, bleibt auf der Host-Uhr.
+    """
+    ts = int(unix_ts)
+    if ts > 0:
+        ts = min(ts, int(time.time()))
+    rpc.call("setmocktime", str(ts))
 
 
 def mine_at(rpc: Rpc, ts: int, blocks: int, address: str) -> int:
@@ -282,6 +315,277 @@ def receive_addresses(rpc: Rpc, wallet: str, count: int = LAB_RECEIVE_COUNT) -> 
         return [str(a) for a in addrs]
     # Fallback (ältere Wallets ohne wpkh-Deskriptor): Keypool wie bisher.
     return [new_address(rpc, wallet) for _ in range(count)]
+
+
+def _sats_betrag(amount: object) -> int:
+    return int(round(float(amount) * 1e8))
+
+
+def _btc_aus_sats(sats: int) -> float:
+    return round(int(sats) / 1e8, 8)
+
+
+def _blockzeit(rpc: Rpc, txid: str) -> int:
+    tx = rpc.json("getrawtransaction", txid, "true")
+    zeit = tx.get("blocktime")
+    if zeit is None:
+        raise RuntimeError(f"{txid}: keine Blockzeit")
+    return int(zeit)
+
+
+def _vout_an(rpc: Rpc, txid: str, address: str) -> int:
+    tx = rpc.json("getrawtransaction", txid, "true")
+    for out in tx.get("vout") or []:
+        if (out.get("scriptPubKey") or {}).get("address") == address:
+            return int(out["n"])
+    raise RuntimeError(f"{txid}: kein Ausgang an {address}")
+
+
+def fund_eine_adresse(
+    rpc: Rpc,
+    address: str,
+    faucet: str,
+    ts: int,
+    amount: float,
+) -> dict[str, Any]:
+    """Faucet zahlt genau eine Adresse und bestätigt einen Block."""
+    global _MOCK_CURSOR
+    ts = max(int(ts), int(_MOCK_CURSOR) + 60 if _MOCK_CURSOR else int(ts))
+    set_time(rpc, ts)
+    txid = str(rpc.call(
+        "sendmany",
+        "",
+        json.dumps({address: round(float(amount), 8)}, separators=(",", ":")),
+        wallet="lab-faucet",
+    )).strip()
+    _MOCK_CURSOR = mine_at(rpc, ts, 1, faucet)
+    return {
+        "txid": txid,
+        "vout": _vout_an(rpc, txid, address),
+        "block_time": _blockzeit(rpc, txid),
+        "address": address,
+    }
+
+
+def lege_sammel_buendel(
+    rpc: Rpc,
+    addresses: dict[str, list[str]],
+    faucet: str,
+    eigen: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Ein eigener Eingang, danach 21 fremde, ein Ausgang an Alpha.
+
+    Der eigene Eingang ist Jahre alt. Die Sammel-Tx wird am aktuellen
+    Mock-Cursor bestätigt, direkt nach dem Alters-Funding (etwa ein Tag
+    vor dem Laborlauf) und damit noch in der Haltefrist von einem Jahr.
+    """
+    alpha = "lab-alpha"
+    ausgang = addresses["alpha"][BUENDEL_AUSGANG_INDEX]
+    rescan_wallets(rpc, alpha, "lab-faucet")
+    eigene = [
+        u for u in unspent(rpc, alpha)
+        if u.get("address") == eigen["address"]
+    ]
+    if len(eigene) != 1:
+        raise RuntimeError(
+            f"{BUENDEL_NAME}: eigener Eingang {len(eigene)}× statt 1×"
+        )
+    fremd_adressen = [new_address(rpc, "lab-faucet") for _ in range(BUENDEL_FREMDE)]
+    betrag = _btc_aus_sats(BUENDEL_FREMD_SATS)
+    set_time(rpc, int(_MOCK_CURSOR) or int(time.time()))
+    rpc.call(
+        "sendmany",
+        "",
+        json.dumps({a: betrag for a in fremd_adressen}, separators=(",", ":")),
+        wallet="lab-faucet",
+    )
+    mine_next(rpc, 1, faucet)
+    rescan_wallets(rpc, "lab-faucet")
+    fremde = []
+    for adresse in fremd_adressen:
+        treffer = [u for u in unspent(rpc, "lab-faucet") if u.get("address") == adresse]
+        if len(treffer) != 1:
+            raise RuntimeError(
+                f"{BUENDEL_NAME}: fremder Eingang {adresse} {len(treffer)}×"
+            )
+        fremde.append(treffer[0])
+    fremde.sort(key=lambda row: (row["txid"], int(row["vout"])))
+    summe = BUENDEL_EIGEN_SATS + BUENDEL_FREMDE * BUENDEL_FREMD_SATS
+    ausgang_sats = summe - BUENDEL_FEE_SATS
+    if ausgang_sats <= 0:
+        raise RuntimeError(f"{BUENDEL_NAME}: Ausgang nicht positiv")
+    rec = raw_spend(
+        rpc,
+        BUENDEL_NAME,
+        [eigene[0], *fremde],
+        [(ausgang, _btc_aus_sats(ausgang_sats))],
+        [alpha, "lab-faucet"],
+    )
+    tx = rpc.json("getrawtransaction", rec["txid"], "true")
+    erster = tx["vin"][0]
+    if (
+        erster["txid"] != eigene[0]["txid"]
+        or int(erster["vout"]) != int(eigene[0]["vout"])
+    ):
+        raise RuntimeError(f"{BUENDEL_NAME}: eigener Eingang steht nicht vorn")
+    if len(tx["vin"]) != 1 + BUENDEL_FREMDE:
+        raise RuntimeError(
+            f"{BUENDEL_NAME}: {len(tx['vin'])} Eingänge, erwartet {1 + BUENDEL_FREMDE}"
+        )
+    mine_next(rpc, 1, faucet)
+    block_time = _blockzeit(rpc, rec["txid"])
+    if block_time <= int(eigen["block_time"]):
+        raise RuntimeError(f"{BUENDEL_NAME}: Sammel-Tx nicht jünger als der eigene Eingang")
+    vout = _vout_an(rpc, rec["txid"], ausgang)
+    rec.update({
+        "alias": "Sammel-Bündel",
+        "expected_kind": "unknown",
+        "viewer_wallet": alpha,
+        "vout_index": vout,
+        "block_time": block_time,
+        "eigen_time": int(eigen["block_time"]),
+        "foreign_inputs": BUENDEL_FREMDE,
+    })
+    return rec
+
+
+def _unspents_an_adresse(rpc: Rpc, address: str) -> list[dict[str, Any]]:
+    """Unspents einer Adresse, ohne dass das Wallet den Index beobachten muss."""
+    try:
+        rpc.call("scantxoutset", "abort")
+    except RuntimeError:
+        pass
+    info = rpc.json("getdescriptorinfo", f"addr({address})")
+    desc = str(info.get("descriptor") or "")
+    if not desc:
+        raise RuntimeError(f"Kein Deskriptor für {address}")
+    daten = rpc.json("scantxoutset", "start", json.dumps([desc]))
+    if not isinstance(daten, dict) or daten.get("success") is False:
+        raise RuntimeError(f"scantxoutset ohne Erfolg: {daten!r}")
+    rows: list[dict[str, Any]] = []
+    for row in daten.get("unspents") or []:
+        if not isinstance(row, dict) or "txid" not in row:
+            continue
+        rows.append({
+            "txid": str(row["txid"]).lower(),
+            "vout": int(row["vout"]),
+            "amount_sats": _sats_betrag(row.get("amount") or 0),
+        })
+    return rows
+
+
+def _sendmany_sats(rpc: Rpc, payouts: dict[str, int]) -> str:
+    """Beträge als Dezimaltext, nicht als Binärfloat."""
+    teile = [
+        f"{json.dumps(addr)}:{sats / 1e8:.8f}"
+        for addr, sats in payouts.items()
+    ]
+    return rpc.call(
+        "sendmany", "", "{" + ",".join(teile) + "}", wallet="lab-faucet",
+    )
+
+
+def _outs_der_tx(
+    rpc: Rpc, txid: str, wanted: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    decoded = rpc.json("getrawtransaction", txid, "true")
+    gefunden: dict[str, dict[str, Any]] = {}
+    for vout in decoded.get("vout") or []:
+        spk = vout.get("scriptPubKey") or {}
+        addr = str(spk.get("address") or "")
+        if not addr:
+            liste = spk.get("addresses") or []
+            if liste:
+                addr = str(liste[0])
+        if addr not in wanted:
+            continue
+        gefunden[addr] = {
+            "txid": txid.lower(),
+            "vout": int(vout["n"]),
+            "amount_sats": _sats_betrag(vout.get("value") or 0),
+        }
+    fehlend = [addr for addr in wanted if addr not in gefunden]
+    if fehlend:
+        raise RuntimeError(
+            f"Gap-Tx {txid} enthält nicht alle Ziele ({len(fehlend)} fehlen)"
+        )
+    return gefunden
+
+
+def fund_gap_wallet(rpc: Rpc) -> dict[str, Any]:
+    """
+    Legt ``lab-gap`` an: Empfangsindex 0 und 101, dazwischen nichts.
+
+    Das Wallet steht nicht in ``WALLET_*``. Core sieht Index 101 über
+    scantxoutset, der Electrs-Gap-Walk mit Limit 100 nicht.
+    """
+    load_or_create(rpc, "lab-faucet")
+    load_or_create(rpc, GAP_WALLET)
+    addrs = receive_addresses(rpc, GAP_WALLET, GAP_FAR_INDEX + 1)
+    near = addrs[GAP_NEAR_INDEX]
+    far = addrs[GAP_FAR_INDEX]
+    xpub, script = public_receive_key(rpc, GAP_WALLET)
+    try:
+        near_rows = _unspents_an_adresse(rpc, near)
+        far_rows = _unspents_an_adresse(rpc, far)
+    except RuntimeError as exc:
+        print(f"Gap-Bestand unklar ({exc}) — zahle neu.", file=sys.stderr)
+        near_rows, far_rows = [], []
+    neu: dict[str, dict[str, Any]] = {}
+    if not near_rows or not far_rows:
+        payouts: dict[str, int] = {}
+        if not near_rows:
+            payouts[near] = GAP_NEAR_SATS
+        if not far_rows:
+            payouts[far] = GAP_FAR_SATS
+        rescan_wallets(rpc, "lab-faucet")
+        faucet = new_address(rpc, "lab-faucet")
+        txid = _sendmany_sats(rpc, payouts)
+        mine(rpc, 1, faucet)
+        neu = _outs_der_tx(rpc, txid, payouts)
+        ziele = []
+        if near in payouts:
+            ziele.append(f"#{GAP_NEAR_INDEX}")
+        if far in payouts:
+            ziele.append(f"#{GAP_FAR_INDEX}")
+        print(
+            f"Gap-Wallet {GAP_WALLET}: Empfang {' und '.join(ziele)} "
+            f"finanziert ({txid})",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Gap-Wallet {GAP_WALLET}: Index {GAP_NEAR_INDEX} und "
+            f"{GAP_FAR_INDEX} schon belegt",
+            file=sys.stderr,
+        )
+    near_out = neu.get(near) or near_rows[0]
+    far_out = neu.get(far) or far_rows[0]
+    bericht = {
+        "wallet": GAP_WALLET,
+        "script": script,
+        "xpub": xpub,
+        "chain": 0,
+        "near_index": GAP_NEAR_INDEX,
+        "far_index": GAP_FAR_INDEX,
+        "empty_between": GAP_FAR_INDEX - GAP_NEAR_INDEX - 1,
+        "gap_miss": GAP_MISS,
+        "gap_hit": GAP_HIT,
+        "near_address": near,
+        "far_address": far,
+        "near": near_out,
+        "far": far_out,
+        "in_satsage_env": False,
+        "funded": bool(neu),
+        "note": (
+            "Nicht in WALLET_*. Gap 100 findet nur Index 0. "
+            "Gap 101 findet Index 101. Core scantxoutset findet beide."
+        ),
+    }
+    GAP_REPORT.parent.mkdir(parents=True, exist_ok=True)
+    GAP_REPORT.write_text(json.dumps(bericht, indent=2) + "\n", encoding="utf-8")
+    return bericht
 
 def load_or_create(rpc: Rpc, wallet: str) -> None:
     try:
@@ -487,8 +791,21 @@ def run(rpc: Rpc) -> None:
         idx = AGE_INDEX_COUNT + j
         fund_slots.append((rng.randint(lo, hi), idx, SPEND_FUND_AMOUNT))
     fund_slots.sort(key=lambda row: (row[0], row[1]))
+    # Der eigene Eingang liegt nah am Fensteranfang, Jahre vor der Sammel-Tx.
+    eigen_ts = t0 + 120 * 24 * 3600
+    if not (t0 < eigen_ts < t1):
+        raise RuntimeError("Bündel-Zeiten liegen außerhalb des Laborfensters")
+    buendel_eigen: dict[str, Any] | None = None
     age_dates: list[str] = []
     for ts, index, amount in fund_slots:
+        if buendel_eigen is None and ts >= eigen_ts:
+            buendel_eigen = fund_eine_adresse(
+                rpc,
+                addresses["alpha"][BUENDEL_EIGEN_INDEX],
+                faucet,
+                eigen_ts,
+                _btc_aus_sats(BUENDEL_EIGEN_SATS),
+            )
         fund_index_at(rpc, addresses, faucet, index, ts, amount=amount)
         if amount == AGE_FUND_AMOUNT:
             age_dates.append(
@@ -513,6 +830,30 @@ def run(rpc: Rpc) -> None:
     print(
         f"Phase random-age-funding: Höhe {phases[-1]['height']} — "
         f"Alters-Jahre {dict(sorted(year_hist.items()))}",
+        file=sys.stderr,
+    )
+
+    # Sammel-Tx jetzt: der Cursor steht am Ende des Alters-Fundings, etwa
+    # einen Tag vor der Host-Uhr. Spätere Shape-Sprünge ändern diese
+    # Blockzeit nicht mehr. Der Ausgang bleibt liegen (unter select_near).
+    if buendel_eigen is None:
+        raise RuntimeError(f"{BUENDEL_NAME}: eigener Eingang wurde nicht angelegt")
+    buendel_record = lege_sammel_buendel(rpc, addresses, faucet, buendel_eigen)
+    phases.append({
+        "label": "sammel-buendel",
+        "date": datetime.fromtimestamp(
+            int(buendel_record["block_time"]), tz=timezone.utc,
+        ).date().isoformat(),
+        "mock_ts": int(buendel_record["block_time"]),
+        "height": int(rpc.call("getblockcount")),
+        "note": (
+            f"{BUENDEL_NAME}: 1 eigener Eingang vor {BUENDEL_FREMDE} "
+            "fremden. Anschaffung = Blockzeit dieser Tx, noch in der Haltefrist."
+        ),
+    })
+    print(
+        f"Phase sammel-buendel: Höhe {phases[-1]['height']} "
+        f"({phases[-1]['date']})",
         file=sys.stderr,
     )
 
@@ -556,7 +897,7 @@ def run(rpc: Rpc) -> None:
     )
 
     alpha, beta, _change, gamma = WALLETS
-    records: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = [buendel_record]
 
     # Shape-Spends nur aus Spend-Pool (0.05); Alters-Kohorte bleibt liegen.
     def _bump(hours: float = 2.0) -> None:
@@ -791,6 +1132,19 @@ def run(rpc: Rpc) -> None:
     set_time(rpc, 0)
     _MOCK_CURSOR = 0
 
+    gap = fund_gap_wallet(rpc)
+    if gap.get("funded"):
+        phases.append({
+            "label": "gap-101",
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "height": int(rpc.call("getblockcount")),
+            "note": (
+                f"{GAP_WALLET}: Empfang #{GAP_NEAR_INDEX} und #{GAP_FAR_INDEX}, "
+                f"{gap['empty_between']} leere Indizes dazwischen. "
+                "Nicht in WALLET_*."
+            ),
+        })
+
     write_env(rpc)
     report = {
         "tip_height": int(rpc.call("getblockcount")),
@@ -802,6 +1156,16 @@ def run(rpc: Rpc) -> None:
             f"Spend-Pool @{SPEND_FUND_AMOUNT} BTC für Hop/CJ."
         ),
         "records": records,
+        "buendel": {
+            "name": BUENDEL_NAME,
+            "txid": buendel_record["txid"],
+            "vout": int(buendel_record["vout_index"]),
+            "block_time": int(buendel_record["block_time"]),
+            "eigen_time": int(buendel_record["eigen_time"]),
+            "input_count": 1 + BUENDEL_FREMDE,
+            "foreign_inputs": BUENDEL_FREMDE,
+            "viewer_wallet": "lab-alpha",
+        },
     }
     (HERE / ".data" / "scenario-report.json").write_text(json.dumps(report, indent=2) + "\n")
     from herkunft_inventar import schreibe_inventar
@@ -836,6 +1200,49 @@ def run(rpc: Rpc) -> None:
         "scenario_count": len(records),
         "txclass_cases": len(txclass["cases"]),
         "phases": [p["label"] for p in phases],
+        "gap_wallet": GAP_WALLET,
+        "gap_far_index": GAP_FAR_INDEX,
+        "gap_report": str(GAP_REPORT),
+    }))
+
+
+def add_gap_case(rpc: Rpc) -> None:
+    """Nur das Gap-Wallet an eine schon erzeugte Chain hängen."""
+    tip = int(rpc.call("getblockcount"))
+    if tip < 101:
+        raise RuntimeError(
+            "Chain ist zu kurz für das Gap-Wallet — zuerst generate_scenarios.py"
+        )
+    set_time(rpc, 0)
+    global _MOCK_CURSOR
+    _MOCK_CURSOR = 0
+    gap = fund_gap_wallet(rpc)
+    report_path = HERE / ".data" / "scenario-report.json"
+    if gap.get("funded") and report_path.is_file():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        phases = list(report.get("phases") or [])
+        phases.append({
+            "label": "gap-101",
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "height": int(rpc.call("getblockcount")),
+            "note": (
+                f"{GAP_WALLET}: Empfang #{GAP_NEAR_INDEX} und #{GAP_FAR_INDEX}, "
+                f"{gap['empty_between']} leere Indizes dazwischen. "
+                "Nicht in WALLET_*."
+            ),
+        })
+        report["phases"] = phases
+        report["tip_height"] = int(rpc.call("getblockcount"))
+        report_path.write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8",
+        )
+    print(json.dumps({
+        "gap_wallet": GAP_WALLET,
+        "gap_far_index": GAP_FAR_INDEX,
+        "gap_miss": GAP_MISS,
+        "gap_hit": GAP_HIT,
+        "gap_report": str(GAP_REPORT),
+        "tip_height": int(rpc.call("getblockcount")),
     }))
 
 def add_volume_cohort(rpc: Rpc) -> None:
@@ -920,15 +1327,26 @@ def main() -> int:
         action="store_true",
         help="nur die Volumen-Kohorte an eine bestehende Chain hängen",
     )
+    parser.add_argument(
+        "--gap-only",
+        action="store_true",
+        help="nur lab-gap (Index 0 und 101) an eine bestehende Chain hängen",
+    )
     args = parser.parse_args()
     native = choose_native(args.native)
     print(f"Backend: {'native bitcoin-cli' if native else 'Docker Compose'}")
     print(f"Lokale Env-Datei: {ENV_PATH}")
     if args.dry_run:
         return 0
+    if args.volume_only and args.gap_only:
+        print("Nur eines von --volume-only und --gap-only.", file=sys.stderr)
+        return 2
     rpc = Rpc(native)
     if args.volume_only:
         add_volume_cohort(rpc)
+        return 0
+    if args.gap_only:
+        add_gap_case(rpc)
         return 0
     run(rpc)
     return 0

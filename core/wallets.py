@@ -236,7 +236,9 @@ def find_entry(entries: list[WalletEntry], kennung: str) -> WalletEntry | None:
 
 
 def _export_import_stand(
-    entry: WalletEntry, cache_dir: Path,
+    entry: WalletEntry,
+    cache_dir: Path,
+    verlauf: list | None = None,
 ) -> tuple[str | None, int, int]:
     """
     Status nach Sparrow/Wasabi-Export-Import.
@@ -245,6 +247,8 @@ def _export_import_stand(
     * ``complete`` — importiert, alle Verlaufs-Adressen zugeordnet (grün)
     * ``partial`` — importiert, einige ohne Adresse (gelb)
     * ``None`` — kein Wallet-Export-Ursprung
+
+    *verlauf*: schon gelesene Einträge. None liest die Datei.
     """
     from core.config import WALLET_ORIGIN_WALLET_EXPORT
     from core import export_adressen as adr_mod
@@ -252,7 +256,8 @@ def _export_import_stand(
     origin = (getattr(entry, "origin", "") or "").strip()
     if origin != WALLET_ORIGIN_WALLET_EXPORT:
         return None, 0, 0
-    verlauf = xpub_cache.load_xpub_verlauf_cache(entry.analyse_schluessel, cache_dir) or []
+    if verlauf is None:
+        verlauf = xpub_cache.load_xpub_verlauf_cache(entry.analyse_schluessel, cache_dir) or []
     n = len(verlauf)
     ohne = len(adr_mod.verlauf_ohne_adresse(verlauf))
     # Nur Deskriptor ohne CSV-Verlauf: Import gilt als vollständig.
@@ -263,62 +268,90 @@ def _export_import_stand(
     return "complete", 0, n
 
 
+#: Noch nicht aus Schritt 1/2 da — dann liest die Übersicht die Datei selbst.
+_NOCH_NICHT_GELESEN = object()
+
+
+def zusammenfassung_aus_gelesenem(
+    entry: WalletEntry,
+    cache_dir: Path,
+    *,
+    cache_eintrag: dict | None = _NOCH_NICHT_GELESEN,
+    verlauf: list | None = _NOCH_NICHT_GELESEN,
+) -> WalletSummary:
+    """
+    Dieselbe Übersicht wie ``summarize``, aus schon gelesenen Caches.
+
+    Fehlt ein Argument, wird nur diese eine Datei geöffnet. Beide Argumente
+    gesetzt: kein erneutes Lesen von UTXO- oder Verlaufs-JSON.
+    """
+    if cache_eintrag is _NOCH_NICHT_GELESEN:
+        cache_eintrag = xpub_cache.load_xpub_cache_entry(
+            entry.analyse_schluessel, cache_dir,
+        )
+    if verlauf is _NOCH_NICHT_GELESEN:
+        verlauf = xpub_cache.load_xpub_verlauf_cache(
+            entry.analyse_schluessel, cache_dir,
+        ) or []
+    elif verlauf is None:
+        verlauf = []
+    utxos = (cache_eintrag or {}).get("utxos") or []
+    roh = (cache_eintrag or {}).get("raw") or {}
+    alter = xpub_cache.xpub_first_seen(
+        entry.analyse_schluessel, cache_dir, roh=roh,
+    ) or {}
+    cache_mtime = None
+    scan_tip = None
+    if cache_eintrag is not None:
+        pfad = xpub_cache._xpub_cache_path(entry.analyse_schluessel, cache_dir)
+        try:
+            cache_mtime = int(pfad.stat().st_mtime)
+        except OSError:
+            cache_mtime = None
+        tip_roh = roh.get("scan_tip_height")
+        if tip_roh is None:
+            tip_roh = cache_eintrag.get("scan_tip_height")
+        if tip_roh is not None:
+            try:
+                scan_tip = int(tip_roh)
+            except (TypeError, ValueError):
+                scan_tip = None
+    elif verlauf:
+        # Nur Verlauf (z. B. Wasabi-Store ohne offene UTXOs): mtime der
+        # Verlaufsdatei, damit die Oberfläche „hat Daten“ erkennt.
+        vpfad = xpub_cache._xpub_verlauf_cache_path(
+            entry.analyse_schluessel, cache_dir,
+        )
+        try:
+            cache_mtime = int(vpfad.stat().st_mtime)
+        except OSError:
+            cache_mtime = None
+    exp_status, exp_ohne, exp_n = _export_import_stand(
+        entry, cache_dir, verlauf,
+    )
+    return WalletSummary(
+        entry=entry,
+        # UTXO-Datei oder Verlauf zählt als Cache (Import-Pille / Nav).
+        has_cache=cache_eintrag is not None or bool(verlauf),
+        utxo_count=len(utxos),
+        total_sats=sum(int(u.get("value", 0)) for u in utxos),
+        scan_end_index=(cache_eintrag or {}).get("scan_end_index"),
+        first_seen_ts=alter.get("time_ts"),
+        first_seen_height=alter.get("height"),
+        cache_mtime=cache_mtime,
+        scan_tip_height=scan_tip,
+        export_import=exp_status,
+        export_ohne_adresse=exp_ohne,
+        export_verlauf_n=exp_n,
+    )
+
+
 def summarize(entries: list[WalletEntry], cache_dir: Path) -> list[WalletSummary]:
     """Baut die Übersicht ausschließlich aus dem lokalen Cache."""
-    zusammenfassungen: list[WalletSummary] = []
-    for entry in entries:
-        eintrag = xpub_cache.load_xpub_cache_entry(entry.analyse_schluessel, cache_dir)
-        utxos = (eintrag or {}).get("utxos") or []
-        verlauf = xpub_cache.load_xpub_verlauf_cache(
-            entry.analyse_schluessel, cache_dir
-        ) or []
-        alter = xpub_cache.xpub_first_seen(entry.analyse_schluessel, cache_dir) or {}
-        cache_mtime = None
-        scan_tip = None
-        if eintrag is not None:
-            pfad = xpub_cache._xpub_cache_path(entry.analyse_schluessel, cache_dir)
-            try:
-                cache_mtime = int(pfad.stat().st_mtime)
-            except OSError:
-                cache_mtime = None
-            roh = eintrag.get("raw") or {}
-            tip_roh = roh.get("scan_tip_height")
-            if tip_roh is None:
-                tip_roh = eintrag.get("scan_tip_height")
-            if tip_roh is not None:
-                try:
-                    scan_tip = int(tip_roh)
-                except (TypeError, ValueError):
-                    scan_tip = None
-        elif verlauf:
-            # Nur Verlauf (z. B. Wasabi-Store ohne offene UTXOs): mtime der
-            # Verlaufsdatei, damit die Oberfläche „hat Daten“ erkennt.
-            vpfad = xpub_cache._xpub_verlauf_cache_path(
-                entry.analyse_schluessel, cache_dir
-            )
-            try:
-                cache_mtime = int(vpfad.stat().st_mtime)
-            except OSError:
-                cache_mtime = None
-        exp_status, exp_ohne, exp_n = _export_import_stand(entry, cache_dir)
-        zusammenfassungen.append(
-            WalletSummary(
-                entry=entry,
-                # UTXO-Datei oder Verlauf zählt als Cache (Import-Pille / Nav).
-                has_cache=eintrag is not None or bool(verlauf),
-                utxo_count=len(utxos),
-                total_sats=sum(int(u.get("value", 0)) for u in utxos),
-                scan_end_index=(eintrag or {}).get("scan_end_index"),
-                first_seen_ts=alter.get("time_ts"),
-                first_seen_height=alter.get("height"),
-                cache_mtime=cache_mtime,
-                scan_tip_height=scan_tip,
-                export_import=exp_status,
-                export_ohne_adresse=exp_ohne,
-                export_verlauf_n=exp_n,
-            )
-        )
-    return zusammenfassungen
+    return [
+        zusammenfassung_aus_gelesenem(entry, cache_dir)
+        for entry in entries
+    ]
 
 
 _UTXO_COUNT_IM_KOPF = re.compile(br'"utxo_count"\s*:\s*(\d+)')

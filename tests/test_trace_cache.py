@@ -129,7 +129,9 @@ class TestBaumZeitenNachziehen(TraceCacheBasis):
             "children": [{
                 "id": "0.0",
                 "type": "external",
-                "from_utxo": f"{txid('e1')}:0",
+                # Fremder Prevout b9; datiert wird die Wallet-Tx e1.
+                "from_utxo": f"{txid('b9')}:0",
+                "funding_txid": txid("e1"),
                 "amount_sats": 1000,
                 "time_label": "",
                 "children": [],
@@ -189,7 +191,9 @@ class TestExterneBlockzeiten(TraceCacheBasis):
         kind = {
             "id": "0.0",
             "type": "external",
-            "from_utxo": f"{txid('e1')}:0",
+            # Fremder Prevout b9; Zeit kommt von der Wallet-Tx e1.
+            "from_utxo": f"{txid('b9')}:0",
+            "funding_txid": txid("e1"),
             "amount_sats": 1000,
             "time_label": "",
             "children": [],
@@ -223,6 +227,19 @@ class TestExterneBlockzeiten(TraceCacheBasis):
         self.assertEqual(kind["block_time"], ts)
         self.assertTrue(kind["time_label"])
         self.assertFalse(hat_extern_ohne_zeit(geladen["baum"]))
+
+    def test_ohne_funding_txid_kein_datum_vom_prevout(self):
+        """Die Blockzeit des fremden Prevouts ist kein Anschaffungsdatum."""
+        from core.trace import externe_blockzeiten_nachziehen, hat_extern_ohne_zeit
+
+        baum = self._baum(funding_txid=None)
+        self.assertFalse(hat_extern_ohne_zeit(baum))
+
+        def get_tx(_tx_id):
+            raise AssertionError("Prevout darf nicht datiert werden")
+
+        self.assertEqual(externe_blockzeiten_nachziehen(baum, get_tx), 0)
+        self.assertFalse(baum["children"][0].get("block_time"))
 
     def test_mindesthoehe_setzt_kein_datum(self):
         from core.trace import externe_blockzeiten_nachziehen
@@ -308,7 +325,8 @@ class TestKnotenTabelle(TraceCacheBasis):
         ziel = trace_cache.pfad(txid("a1"), 0, self.dir)
         ziel.parent.mkdir(parents=True, exist_ok=True)
         ziel.write_text(json.dumps({
-            "version": 1, "txid": txid("a1"), "vout": 0, "erstellt_ts": 5,
+            "version": 1, "schema": trace_cache.SCHEMA,
+            "txid": txid("a1"), "vout": 0, "erstellt_ts": 5,
             "adressen_fingerprint": "", "adressen_anzahl": 0,
             "baum": self._raute(),
         }))

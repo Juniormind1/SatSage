@@ -32,6 +32,14 @@ from core.xpub_cache import (
     resolve_immutable_cache_dir,
 )
 
+def _ssl_wie_electrum(env: dict[str, str], key: str, port: int) -> bool:
+    """Wie ``_default_fulcrum_ssl``: leer und Port 50001 bleibt Klartext."""
+    raw = env.get(key)
+    if raw is None or not str(raw).strip():
+        return int(port) != 50001
+    return _parse_env_bool(raw, default=(int(port) != 50001))
+
+
 SANCTIONS_CLEARNET_PROBE_TIMEOUT = 4
 SANCTIONS_CLEARNET_PROBE_WORKERS = 12
 SANCTIONS_CLEARNET_MAX_SERVERS = 10
@@ -52,7 +60,7 @@ def make_cached_fulcrum_get_tx(
     from core.fulcrum_history import fetch_tx_fulcrum
 
     root = cache_root or IMMUTABLE_CACHE_DIR
-    return wrap_get_tx_with_immutable_cache(
+    geh = wrap_get_tx_with_immutable_cache(
         lambda txid: fetch_tx_fulcrum(
             client,
             txid,
@@ -61,6 +69,11 @@ def make_cached_fulcrum_get_tx(
         root,
         "fulcrum",
     )
+    # Nur der eigene libbitcoin-Indexer. Der Clearnet-Pool hat einen anderen Host.
+    from core.libbitcoin_native import haenge_prevout_duenn_an
+
+    haenge_prevout_duenn_an(geh, client)
+    return geh
 
 
 _sanctions_clearnet_pool = None
@@ -335,20 +348,22 @@ def resolve_sanctions_preferred_pool(env: dict[str, str]):
     if configured:
         host = _normalize_fulcrum_host(configured)
         if _is_private_fulcrum_host(host):
+            port = _env_port(env, "FULCRUM_SANCTIONS_PORT")
             kandidaten.append((
                 host,
-                _env_port(env, "FULCRUM_SANCTIONS_PORT"),
-                _parse_env_bool(env.get("FULCRUM_SANCTIONS_SSL"), default=True),
+                port,
+                _ssl_wie_electrum(env, "FULCRUM_SANCTIONS_SSL", port),
             ))
 
     own = env.get("FULCRUM_HOST", "").strip()
     if own:
         host = _normalize_fulcrum_host(own)
         if _is_private_fulcrum_host(host):
+            port = _env_port(env, "FULCRUM_PORT")
             kandidaten.append((
                 host,
-                _env_port(env, "FULCRUM_PORT"),
-                _parse_env_bool(env.get("FULCRUM_SSL"), default=True),
+                port,
+                _ssl_wie_electrum(env, "FULCRUM_SSL", port),
             ))
 
     for host, port, use_ssl in kandidaten:

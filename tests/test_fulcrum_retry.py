@@ -8,6 +8,46 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import fulcrum
+import ssl
+
+
+class TestConnectSchliesstVorher(unittest.TestCase):
+    def test_zweiter_connect_schliesst_den_ersten_socket(self):
+        client = fulcrum.FulcrumClient("192.0.2.1", 50001, use_ssl=False, timeout=1)
+        erster = MagicMock()
+        zweiter = MagicMock()
+        with patch("socket.create_connection", side_effect=[erster, zweiter]), \
+                patch("core.fulcrum_transport.merke_kette_socket"), \
+                patch("core.fulcrum_transport.vergiss_kette_socket"), \
+                patch("core.outbound_policy.ensure_resolves_to_allowed_host"), \
+                patch(
+                    "core.outbound_policy.oeffentliche_electrum_suche_prozess_ende",
+                    return_value=False,
+                ):
+            client.connect()
+            client.connect()
+        erster.close.assert_called()
+        self.assertIs(client._sock, zweiter)
+        client.close()
+
+    def test_tls_fehler_schliesst_den_rohen_socket(self):
+        client = fulcrum.FulcrumClient("192.0.2.1", 50001, use_ssl=True, timeout=1)
+        roh = MagicMock()
+        kontext = MagicMock()
+        kontext.wrap_socket.side_effect = ssl.SSLError("wrong version")
+        with patch("socket.create_connection", return_value=roh), \
+                patch("core.fulcrum_transport.merke_kette_socket"), \
+                patch("core.fulcrum_transport.vergiss_kette_socket"), \
+                patch("core.outbound_policy.ensure_resolves_to_allowed_host"), \
+                patch(
+                    "core.outbound_policy.oeffentliche_electrum_suche_prozess_ende",
+                    return_value=False,
+                ), \
+                patch("core.outbound_policy.tls_context", return_value=kontext):
+            with self.assertRaises(ssl.SSLError):
+                client.connect()
+        roh.close.assert_called()
+        self.assertIsNone(client._sock)
 
 
 class TestFulcrumRequestRetry(unittest.TestCase):

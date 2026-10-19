@@ -237,7 +237,9 @@ def hop_kette_html(
             f"{summary.get('unresolved_inputs')} unaufgelöste Eingänge"
         )
     if voll is False:
-        meta_teile.append("Trace unvollständig — Untergrenze möglich")
+        # Lücken zählen zur Blockzeit ihrer Tx: das Datum kann zu jung sein,
+        # nie zu alt.
+        meta_teile.append("Trace unvollständig — Datum vorsichtig (Obergrenze)")
     elif voll is True:
         meta_teile.append("Trace vollständig")
 

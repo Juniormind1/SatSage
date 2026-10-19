@@ -51,6 +51,19 @@ def api_price(state: AppState, query: dict) -> dict:
     return preis.to_dict()
 
 
+def api_price_bekannt(state: AppState, _query: dict) -> dict:
+    """Letzter gespeicherter EUR- und USD-Kurs. Kein Netzabruf."""
+    from server import price_mod
+
+    kurse = {}
+    for w in ("EUR", "USD"):
+        preis = price_mod.letzter_bekannter_kurs(
+            w, immutable_cache_dir=state.immutable_cache_dir,
+        )
+        kurse[w] = preis.to_dict() if preis is not None else None
+    return {"kurse": kurse}
+
+
 def api_price_history(state: AppState, query: dict) -> dict:
     """Stand der lokalen BTC-Tageskurs-Historie (EUR/USD).
 

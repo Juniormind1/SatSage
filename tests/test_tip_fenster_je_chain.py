@@ -63,6 +63,7 @@ def _sync(cache: Path, bestand: list[dict], walk=None):
         return set(), kw.get("start_index", 0)
 
     with mock.patch.object(wse, "discover_wallet_scan_addresses", side_effect=discover), \
+            mock.patch.object(wse, "utxo_scan_gap_aus_env", return_value=100), \
             mock.patch("core.fulcrum_history.get_chain_tip_height", return_value=648), \
             mock.patch("core.p2p.header_datei_tip", return_value=648):
         out = main.sync_xpub_zum_tip(
@@ -154,6 +155,69 @@ class TestFensterJeChain(unittest.TestCase):
             entry = main.load_xpub_cache_entry(BIP84_ZPUB, cache)
             self.assertEqual(entry["raw"]["scan_end_je_chain"], {"0": 122, "1": 136})
             self.assertEqual(entry["scan_end_index"], 136)
+
+
+class TestElectrsGapEnv(unittest.TestCase):
+    def test_normalisieren(self):
+        self.assertEqual(wse.utxo_scan_gap_aus_env({}), 100)
+        self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "250"}), 250)
+        self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "0"}), 100)
+        self.assertEqual(wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": "99999"}), 10000)
+
+    def test_unter_100_gilt_als_100(self):
+        """Auch ein Eintrag von Hand wie ``UTXO_SCAN_GAP_LIMIT=20``."""
+        import contextlib
+        import io
+
+        wse._gap_angehoben_gemeldet.discard(20)
+        aus = io.StringIO()
+        with contextlib.redirect_stdout(aus):
+            for roh in ("20", " 20 ", "20"):
+                self.assertEqual(
+                    wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": roh}), 100,
+                )
+        self.assertEqual(aus.getvalue().count("UTXO_SCAN_GAP_LIMIT=20"), 1)
+        self.assertIn("nutzt 100", aus.getvalue())
+        for roh, soll in (("1", 100), ("99", 100), ("100", 100), ("101", 101)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    wse.utxo_scan_gap_aus_env({"UTXO_SCAN_GAP_LIMIT": roh}), soll, roh,
+                )
+
+    def test_hoeheres_limit_schiebt_alte_schaetzung_nicht_vor(self):
+        """Alter Cache ohne Ende je Chain: Start bleibt letzter+100, Walk nutzt 500."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            empfang = _utxo(0, 21, 1_000_000, "r21")
+            change_alt = _utxo(1, 15, 500_000, "c15")
+            main.save_xpub_utxo_cache(
+                BIP84_ZPUB, [empfang, change_alt], cache, "fulcrum",
+                scan_end_index=122, scan_tip_height=647,
+            )
+            abgefragt: list[str] = []
+            aufrufe: list[dict] = []
+
+            def fetch_addr(addr, **_kw):
+                abgefragt.append(addr)
+                return []
+
+            def discover(_xpub, **kw):
+                aufrufe.append(kw)
+                for k, v in (kw.get("start_je_chain") or {}).items():
+                    if kw.get("enden_je_chain") is not None:
+                        kw["enden_je_chain"][k] = v
+                return set(), kw.get("start_index", 0)
+
+            with mock.patch.object(wse, "discover_wallet_scan_addresses", side_effect=discover), \
+                    mock.patch.object(wse, "utxo_scan_gap_aus_env", return_value=500), \
+                    mock.patch("core.fulcrum_history.get_chain_tip_height", return_value=648), \
+                    mock.patch("core.p2p.header_datei_tip", return_value=648):
+                main.sync_xpub_zum_tip(
+                    BIP84_ZPUB, lambda *_a, **_k: [], fetch_addr, fetch_addr, cache, "fulcrum",
+                    fulcrum=FakeFulcrum(),
+                )
+            self.assertEqual(aufrufe[0]["start_je_chain"], {0: 122, 1: 116})
+            self.assertEqual(aufrufe[0]["gap_limit"], 500)
 
 
 class TestGapWalkJeChain(unittest.TestCase):

@@ -726,7 +726,7 @@ def flach(
             bkey = _buendel(
                 kinder, eltern_key, 0.0, tiefe + 1, fokus_sats,
                 neu=neu, kante=kante, zeitfelder=zeitfelder, skala=skala,
-                block_zeit=block_zeit,
+                block_zeit=block_zeit, eltern=eltern,
             )
             instanz[id(eltern)] = (eltern_key, ("buendel", bkey))
             continue
@@ -854,20 +854,28 @@ def flach(
 
 def _buendel(
     kinder, eltern_key, anteil, tiefe, fokus_sats, *,
-    neu, kante, zeitfelder, skala, block_zeit,
+    neu, kante, zeitfelder, skala, block_zeit, eltern=None,
 ) -> str:
     """Alle Eingänge eines Hops als ein Endknoten „n Eingänge“.
 
     Das Lot nimmt die jüngste bekannte Eingangszeit. Fehlt jede Zeit, bleibt
     der Knoten ohne Position und damit grau. Liefert den Bündel-Schlüssel.
+
+    Stehen unaufgelöste Eingänge im Bündel, kann einer davon fremd sein und
+    erst mit der Tx *eltern* ins Wallet gekommen sein: Dann zählt auch die
+    Output-Zeit von *eltern* (die Blockzeit dieser Tx) — eine Obergrenze,
+    nie zu alt. CoinJoin-Bündel ohne unaufgelöste Eingänge bleiben bei den
+    bekannten Zeiten.
     """
     anzahl = 0
     sats = 0
     eigen = False
     zeiten: list[datetime] = []
+    luecke = False
     for kind in kinder:
         if kind.get("type") == "external_unresolved":
             anzahl += int(kind.get("input_count") or 0)
+            luecke = True
             continue
         anzahl += 1
         sats += int(kind.get("amount_sats") or 0)
@@ -875,6 +883,10 @@ def _buendel(
         zeit = output_zeit(kind, block_zeit)
         if zeit is not None:
             zeiten.append(zeit)
+    if luecke and eltern is not None:
+        eingang = output_zeit(eltern, block_zeit)
+        if eingang is not None:
+            zeiten.append(eingang)
     key = f"buendel:{eltern_key}"
     # X: jüngste bekannte Output-Zeit im Bündel (die defensiv maßgebliche).
     felder = zeitfelder(max(zeiten) if zeiten else None)

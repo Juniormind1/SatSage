@@ -18,7 +18,13 @@ Knöpfe Grau und Gelb: rote Ringe müssen bleiben, Herkunft braucht
 Electrs (``doc/issues/p2p-herkunft.md``). Electrs auf demselben
 Cache, noch einmal Grau und Gelb: die Ringe sind weg, jedes UTXO ist
 entweder vollständig verfolgt oder ohne Baum schon außerhalb der
-Haltefrist.
+Haltefrist. Ausnahme: das Sammel-Bündel aus ``scenario-report.json``
+(``buendel``) bleibt offen und ist der eine rote Ring
+(unvollständiger Baum). Sein Anschaffungsdatum muss die Blockzeit
+der Sammel-Tx sein, nicht der ältere eigene Eingang. Danach der Bestand
+am 31.12. jedes abgeschlossenen Jahres gegen die Kette
+(``stichtag_chain.py``): gezählt wird nach Entstehung des Outputs,
+nicht nach Anschaffung.
 
 Soll: ``.data/herkunft-inventar.json`` (von ``generate_scenarios.py``).
 Der Labor-Node ist nicht geprunt. „Pruned Node“ meint den Slot
@@ -194,11 +200,10 @@ def _aktiviere_env(pfad: Path, werte: dict[str, str]) -> None:
         "\n".join(f"{k}={v}" for k, v in werte.items()) + "\n",
         encoding="utf-8",
     )
-    import core.env_bootstrap as boot
+    from infra_check import pinne_lab_env
     import main
 
-    boot.ENV_FILE = pfad
-    main.ENV_FILE = pfad
+    pinne_lab_env(pfad)
     for key in list(os.environ):
         if key in _STREICHEN or key.startswith("FULCRUM_TOR_") or key.startswith("UTXO_RPC"):
             os.environ.pop(key, None)
@@ -653,7 +658,7 @@ def _steuer_stand(utxos: list[dict], ctx, imm: Path, env: dict[str, str]):
         f"{e.get('txid')}:{e.get('vout')}": e
         for e in (auswertung.get("eintraege") or [])
     }
-    return zeilen, steuer, klaeren_keys(auswertung)
+    return zeilen, steuer, klaeren_keys(auswertung), auswertung
 
 
 def _rote_ringe(zeilen: list[dict]) -> list[str]:
@@ -669,17 +674,15 @@ def _ungeklaert(zeilen: list[dict], steuer: dict[str, dict]) -> list[str]:
     return offen
 
 
-def _resume_origin(txid: str, vout: int, imm: Path, eigene: set):
+def _resume_origin(
+    txid: str, vout: int, imm: Path, eigene: set, *, erzwingen: bool = False,
+):
+    """Wie ``/trace/alle``: erzwingen baut neu, veraltete Bäume auch."""
     from core import trace_cache
-    from core.utxo_origin import hat_brauchbaren_teilfortschritt
 
-    geladen = trace_cache.laden(txid, vout, imm, eigene)
-    if not geladen or not isinstance(geladen.get("baum"), dict):
-        return None
-    origin = geladen["baum"].get("origin_tree")
-    if isinstance(origin, dict) and hat_brauchbaren_teilfortschritt(origin):
-        return origin
-    return None
+    return trace_cache.fortsetzbarer_origin(
+        txid, vout, imm, eigene, erzwingen=erzwingen,
+    )
 
 
 def _klaere_keys(
@@ -740,7 +743,9 @@ def _klaere_keys(
                 cache_dir=cache_dir,
                 immutable_cache_dir=imm,
                 cache_source=cache_source,
-                resume_origin=_resume_origin(txid, vout, imm, eigene),
+                resume_origin=_resume_origin(
+                    txid, vout, imm, eigene, erzwingen=erzwingen,
+                ),
             )
             if graue_anteile:
                 externe_blockzeiten_speichern(txid, vout, get_tx, imm)
@@ -753,7 +758,7 @@ def _klaere_keys(
 
 def _druecke_grau(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle: str) -> None:
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     print(f"  Grau: {len(keys['grau_keys'])} UTXOs", flush=True)
     _klaere_keys(
         keys["grau_keys"],
@@ -766,7 +771,7 @@ def _druecke_grau(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle:
         cache_source=quelle,
     )
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     print(f"  Lot-Grau: {len(keys['lot_grau_keys'])} UTXOs", flush=True)
     _klaere_keys(
         keys["lot_grau_keys"],
@@ -782,12 +787,12 @@ def _druecke_grau(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle:
 
 def _druecke_gelb(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle: str) -> None:
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     if keys["grau_keys"]:
         print("  Gelb startet zuerst Grau", flush=True)
         _druecke_grau(env, ctx, cache_dir, imm, wallets, get_tx, quelle)
         utxos = _utxos_aus_cache(cache_dir, wallets)
-        _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+        _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     print(f"  Gelb: {len(keys['gelb_keys'])} UTXOs", flush=True)
     _klaere_keys(
         keys["gelb_keys"],
@@ -807,16 +812,19 @@ def _grau_und_gelb(env, ctx, cache_dir, imm, wallets, get_tx, quelle: str) -> di
     print("  Knopf Gelb", flush=True)
     _druecke_gelb(env, ctx, cache_dir, imm, wallets, get_tx, quelle)
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    zeilen, steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    zeilen, steuer, keys, auswertung = _steuer_stand(utxos, ctx, imm, env)
     rote = [k for k in _rote_ringe(zeilen) if k]
     offen = _ungeklaert(zeilen, steuer)
     stand = {
         "rote": len(rote),
+        "rote_keys": rote,
         "grau": list(keys["grau_keys"]),
         "gelb": list(keys["gelb_keys"]),
         "lot": list(keys["lot_grau_keys"]),
         "offen": offen,
         "utxos": len(zeilen),
+        "steuer": steuer,
+        "auswertung": auswertung,
     }
     print(
         f"  Ringe {stand['rote']}, grau {len(stand['grau'])}, "
@@ -994,6 +1002,7 @@ def _laufe_p2p(
         nach_electrs = _grau_und_gelb(
             env_electrs, ctx, cache_dir, imm, wallets, get_tx, "fulcrum",
         )
+        _buendel_offen_ausnehmen(nach_electrs)
         ok_electrs, grund = electrs_nach_klaeren_ok(
             rote=nach_electrs["rote"],
             grau=nach_electrs["grau"],
@@ -1002,6 +1011,8 @@ def _laufe_p2p(
         )
         if not ok_electrs:
             raise RuntimeError(grund)
+        _pruefe_buendel(nach_electrs, env_electrs)
+        stichtage = _pruefe_stichtage(env_electrs, ctx, imm)
     finally:
         if p2p_client is not None:
             _schliesse_p2p(p2p_client)
@@ -1025,7 +1036,85 @@ def _laufe_p2p(
         "rote_nach_p2p": nach_p2p["rote"],
         "rote_nach_electrs": nach_electrs["rote"],
         "gelb_nach_electrs": len(nach_electrs["gelb"]),
+        "stichtage": stichtage,
     }
+
+
+def _buendel_offen_ausnehmen(nach: dict) -> None:
+    """Das Sammel-Bündel bleibt nach dem Klären offen und ein roter Ring."""
+    from buendel_szenario import lade_soll, schluessel, stand_ohne_erwartetes_buendel
+
+    soll = lade_soll(HERE / ".data" / "scenario-report.json")
+    if stand_ohne_erwartetes_buendel(nach, soll):
+        print(f"  Bündel bleibt offen (erwartet): {schluessel(soll)}", flush=True)
+    nach["buendel_soll"] = soll
+
+
+def _pruefe_buendel(nach: dict, env: dict[str, str]) -> None:
+    """Anschaffung der Sammel-Tx ist ihre Blockzeit, nie der ältere eigene Eingang."""
+    from datetime import datetime
+
+    from core.tax import lese_steuer_einstellungen, parse_stichtag
+    from buendel_szenario import pruefe_zeile, schluessel
+
+    soll = nach.get("buendel_soll")
+    if not isinstance(soll, dict):
+        raise RuntimeError("Bündel-Szenario wurde nicht gelesen")
+    key = schluessel(soll)
+    zeile = None
+    for roh, eintrag in (nach.get("steuer") or {}).items():
+        if str(roh).strip().lower() == key:
+            zeile = eintrag
+            break
+    if zeile is None:
+        raise RuntimeError(f"Bündel-UTXO {key} fehlt in der Steuerauswertung")
+    einstellung = lese_steuer_einstellungen(env)
+    bezug = datetime.fromtimestamp(
+        float((nach.get("auswertung") or {}).get("bezug_ts") or 0)
+    )
+    fehler = pruefe_zeile(
+        zeile,
+        soll,
+        bezug=bezug,
+        haltefrist_jahre=int(einstellung["haltefrist_jahre"]),
+        stichtag=parse_stichtag(einstellung["stichtag"]),
+    )
+    if fehler:
+        raise RuntimeError("Bündel-Szenario: " + "; ".join(fehler))
+    print(f"  OK  Bündel {key}: Anschaffung ist die Blockzeit, vorsichtig", flush=True)
+
+
+def _pruefe_stichtage(env: dict[str, str], ctx, imm: Path) -> list[dict]:
+    """
+    Bestand am 31.12. jedes abgeschlossenen Jahres gegen die Kette, dazu
+    die Anschaffung (Empfang durch das Wallet) je UTXO mit Herkunft.
+
+    Läuft nach dem Electrs-Klären: Jedes UTXO hat dann eine Herkunft, und
+    ein Output aus dem Folgejahr mit alter Anschaffung fiele auf, wenn die
+    Auswertung nach Anschaffung statt nach Entstehung filterte.
+    """
+    from generate_scenarios import Rpc, choose_native
+    from stichtag_chain import chain_wahrheit, pruefe_stichtage, rpc_json
+
+    t0 = time.monotonic()
+    wahrheit = chain_wahrheit(
+        rpc_json(Rpc(choose_native(False))), set(ctx.address_to_wallet),
+    )
+    fehler, zeilen = pruefe_stichtage(wahrheit, imm=imm, ctx=ctx, env=env)
+    for z in zeilen:
+        print(
+            f"  Stichtag 31.12.{z['jahr']}: {z['ist_count']} Outputs / "
+            f"{z['ist_sats']} sats (Kette {z['soll_count']} / {z['soll_sats']}), "
+            f"Anschaffung {z.get('anschaffung_geprueft', 0) - z.get('anschaffung_falsch', 0)}"
+            f"/{z.get('anschaffung_geprueft', 0)} im Empfangsfenster",
+            flush=True,
+        )
+    print(f"  Stichtage gegen Kette: {time.monotonic() - t0:.1f}s", flush=True)
+    if not zeilen:
+        raise RuntimeError("Stichtag: Kette ohne abgeschlossenes Jahr")
+    if fehler:
+        raise RuntimeError("; ".join(fehler))
+    return zeilen
 
 
 def main() -> int:

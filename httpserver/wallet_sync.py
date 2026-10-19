@@ -181,6 +181,7 @@ def starte_wallet_aktualisierung(
         threading.Thread(
             target=herzschlag, args=(stand, halt), daemon=True,
         ).start()
+        fetchers = None
         try:
             nur_bekannte = resolve_wallets_nur_bekannte_utxos(
                 state.env().values()
@@ -365,6 +366,12 @@ def starte_wallet_aktualisierung(
                 "empfang_scharf": n_empfang,
             }
         finally:
+            schliessen = fetchers.get("close") if isinstance(fetchers, dict) else None
+            if schliessen is not None:
+                try:
+                    schliessen()
+                except Exception:
+                    pass
             halt.set()
             stand.close()
             # Slot freigeben sobald der Job-Thread endet (done/fail/cancel).

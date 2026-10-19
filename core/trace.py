@@ -96,6 +96,16 @@ def resolve_vin_prevout(
     if isinstance(prevout, dict) and prevout:
         return prevout
 
+    duenn = getattr(get_tx, "prevout_duenn", None)
+    if callable(duenn):
+        try:
+            leicht = duenn(str(vin["txid"]), int(vin["vout"]))
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            leicht = None
+        if isinstance(leicht, dict) and leicht:
+            return leicht
+
     if progress:
         vout = int(vin["vout"])
         progress(
@@ -329,12 +339,30 @@ def _mit_vorgaengerzeit(
     Ergänzt die Blockzeit des Vorgängers, wenn sie noch fehlt.
 
     Esplora liefert den Vorgänger-Output inline in ``vin[].prevout`` — aber
-    ohne dessen Blockzeit, und genau die ist das Anschaffungsdatum. Ein
-    get_tx pro Eingang holt sie nach; das ist derselbe Preis, den der
-    deferred-Pfad ohnehin zahlt, und get_tx ist gecacht.
+    ohne dessen Blockzeit, und genau die ist das Anschaffungsdatum. Liegt
+    ``vorgaengerzeit`` am Abruf, reicht ``/tx/:id/status``. Sonst holt ein
+    get_tx pro Eingang die Zeit nach.
     """
     if edge.prev_time_ts is not None:
         return edge
+    duenn = getattr(get_tx, "prevout_duenn", None)
+    if callable(duenn):
+        try:
+            leicht = duenn(edge.prevout.txid, edge.prevout.vout)
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            leicht = None
+        if isinstance(leicht, dict) and leicht.get("_prev_tx_time_ts") is not None:
+            return replace(edge, prev_time_ts=int(leicht["_prev_tx_time_ts"]))
+    zeit_fn = getattr(get_tx, "vorgaengerzeit", None)
+    if callable(zeit_fn):
+        try:
+            zeit = zeit_fn(edge.prevout.txid)
+        except Exception as exc:
+            _abbruch_durchreichen(exc)
+            zeit = None
+        if zeit is not None:
+            return replace(edge, prev_time_ts=int(zeit))
     if progress:
         progress(f"↻ Herkunft: Blockzeit zu {edge.prevout.txid[:16]}…")
     try:
@@ -475,8 +503,10 @@ def iter_trace_funding_inputs(
     # bleibt Schritt für Schritt und liefert dieselbe Reihenfolge. Der
     # Vorlader blockiert nicht: sonst hängt der ganze Baum am langsamsten
     # Vorgänger einer großen Sammel-Tx, ohne dass eine Zeile entsteht.
+    # Liegt die Vorgängerzeit am Explorer, würde das Vorladen die volle
+    # Vorgänger-Tx trotzdem ziehen.
     vorladen = getattr(get_tx, "prefetch", None)
-    if vorladen is not None:
+    if vorladen is not None and not callable(getattr(get_tx, "vorgaengerzeit", None)):
         try:
             vorladen([vin["txid"] for vin in deferred if vin.get("txid")])
         except Exception as exc:
@@ -777,11 +807,25 @@ def _knoten_blockhoehe(knoten: dict) -> int | None:
     return n if n > 0 else None
 
 
+def _zeit_ref(knoten: dict) -> str:
+    """
+    „txid:vout“, dessen Blockzeit die Zeit des Knotens ist.
+
+    Externe Blätter: die Tx, mit der die Sats im Wallet ankamen
+    (``funding_txid``), nicht der fremde Prevout. Ohne ``funding_txid``
+    (älteres Format) wird nichts geraten.
+    """
+    if knoten.get("type") == "external":
+        fund = str(knoten.get("funding_txid") or "").strip()
+        return f"{fund}:0" if fund else ""
+    return str(knoten.get("from_utxo") or "")
+
+
 def _zeit_aus_tx_cache(
     from_utxo: str,
     immutable: Path | None,
 ) -> tuple[int | None, str]:
-    """Blockzeit der Prevout-Tx aus dem Tx-Cache (inkl. Header-Nachzug)."""
+    """Blockzeit der Tx zu „txid:vout“ aus dem Tx-Cache (inkl. Header-Nachzug)."""
     if not immutable or not from_utxo or ":" not in str(from_utxo):
         return None, ""
     try:
@@ -823,7 +867,7 @@ def _knoten_zeit_fuellen(
             cache = None
     _setze_externe_zeit(knoten)
     if not (knoten.get("time_label") and knoten.get("block_time")):
-        ts, label = _zeit_aus_tx_cache(knoten.get("from_utxo") or "", cache)
+        ts, label = _zeit_aus_tx_cache(_zeit_ref(knoten), cache)
         if label and not knoten.get("time_label"):
             knoten["time_label"] = label
         if ts:
@@ -910,7 +954,7 @@ def hat_extern_ohne_zeit(baum: dict | None) -> bool:
         if (
             knoten.get("type") == "external"
             and _knoten_ohne_datum(knoten)
-            and ":" in str(knoten.get("from_utxo") or "")
+            and ":" in _zeit_ref(knoten)
         ):
             return True
         for kind in knoten.get("children") or []:
@@ -957,7 +1001,7 @@ def externe_blockzeiten_nachziehen(baum: dict | None, get_tx) -> int:
         nonlocal geaendert
         if knoten.get("type") != "external" or not _knoten_ohne_datum(knoten):
             return
-        ref = str(knoten.get("from_utxo") or "")
+        ref = _zeit_ref(knoten)
         if ":" not in ref:
             return
         try:
@@ -1047,8 +1091,22 @@ def baum_zeiten_nachziehen(
     return n
 
 
-def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
-    """Baut einen Knoten aus einem Quellen-Eintrag des Analysebaums."""
+#: Blätter, hinter denen der Trace nicht weiterkam. Sie tragen
+#: ``eingang_time_ts`` = Blockzeit der Tx, in die sie eingehen — der
+#: späteste mögliche Empfang (siehe ``utxo_ingress_report._luecken_event``).
+LUECKEN_BLATT_TYPEN = frozenset(
+    {"external_unresolved", "error", "unknown", "pending", "cycle"}
+)
+
+
+def _kind_knoten(
+    quelle: dict, wallet, pfad: str, tiefe: int, eltern_ts=None,
+) -> dict:
+    """
+    Baut einen Knoten aus einem Quellen-Eintrag des Analysebaums.
+
+    *eltern_ts*: Blockzeit der Tx, deren Eingang *quelle* ist.
+    """
     typ = quelle.get("type", "unknown")
     adresse = quelle.get("address", "")
 
@@ -1148,6 +1206,9 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
                     "block_height": None,
                     "block_time": unterbaum.get("time_ts"),
                     "tax_horizon": bool(unterbaum.get("tax_horizon")),
+                    "eingang_time_ts": (
+                        eltern_ts if marker in LUECKEN_BLATT_TYPEN else None
+                    ),
                     "children": [],
                     "expandable": False,
                     "note": (
@@ -1187,10 +1248,13 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
         from_utxo = str(quelle.get("from_utxo") or "")
         prev_txid = from_utxo.rsplit(":", 1)[0] if ":" in from_utxo else ""
         knoten["label"] = labels.beschrifte(adresse, txid=prev_txid)
-        # Blockzeit des Prevouts: wann diese Sats die fremde Adresse erreichten
-        # (bzw. der Funding-Output bestätigt wurde). analyze legt time_ts ab;
-        # ohne das blieb die UI-Zeile ohne Datum, obwohl die jüngsten sats
-        # genau aus diesen Zeiten berechnet werden.
+        # Zeit = Empfang durch das Wallet: Blockzeit der Tx, mit der diese
+        # Sats auf der eigenen Adresse ankamen (funding_txid). Daraus
+        # werden „jüngste sats“ und die Anschaffung berechnet.
+        if quelle.get("funding_txid"):
+            knoten["funding_txid"] = quelle.get("funding_txid")
+        if quelle.get("prevout_time_ts"):
+            knoten["prevout_time_ts"] = quelle.get("prevout_time_ts")
         _setze_externe_zeit(knoten, quelle)
     elif typ == "external_unresolved":
         anzahl = int(quelle.get("input_count", 0) or 0)
@@ -1218,6 +1282,8 @@ def _kind_knoten(quelle: dict, wallet, pfad: str, tiefe: int) -> dict:
             or "Herkunft unvollständig — kein externes oder Coinbase-Ende."
         )
 
+    if typ in LUECKEN_BLATT_TYPEN and eltern_ts:
+        knoten["eingang_time_ts"] = eltern_ts
     return knoten
 
 
@@ -1225,7 +1291,10 @@ def _quellen_zu_knoten(baum: dict, wallet, pfad: str, tiefe: int) -> list[dict]:
     kinder = []
     for nummer, quelle in enumerate(baum.get("sources", [])):
         kinder.append(
-            _kind_knoten(quelle, wallet, f"{pfad}.{nummer}", tiefe)
+            _kind_knoten(
+                quelle, wallet, f"{pfad}.{nummer}", tiefe,
+                eltern_ts=baum.get("time_ts"),
+            )
         )
     return kinder
 
@@ -1319,6 +1388,7 @@ def _ui_knoten_als_quelle(knoten: dict) -> dict:
     return {
         "type": knoten.get("type"),
         "time_ts": knoten.get("block_time") or knoten.get("time_ts"),
+        "eingang_time_ts": knoten.get("eingang_time_ts"),
         "amount_sats": knoten.get("amount_sats", 0),
         "address": knoten.get("address") or "",
         "from_utxo": knoten.get("from_utxo") or "",
@@ -1351,7 +1421,8 @@ def _stempel_aus_ui_baum(
         if not isinstance(knoten, dict):
             continue
         stapel.extend(knoten.get("children") or [])
-        if knoten.get("type") in ("external", "external_unresolved", "coinbase"):
+        typ = knoten.get("type")
+        if typ in ("external", "coinbase") or typ in LUECKEN_BLATT_TYPEN:
             quellen.append(_ui_knoten_als_quelle(knoten))
     if not quellen and not baum.get("tax_horizon"):
         return

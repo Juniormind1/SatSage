@@ -49,7 +49,7 @@ PRIVACY_LOW = "gering"
 #: Schreibzugriff auf beliebige Einträge der .env.
 EDITIERBARE_FELDER: dict[str, tuple[str, ...]] = {
     "own_fulcrum": ("FULCRUM_HOST", "FULCRUM_TOR", "FULCRUM_PORT",
-                    "FULCRUM_SSL", "FULCRUM_TOR_PROXY"),
+                    "FULCRUM_SSL", "FULCRUM_TOR_PROXY", "UTXO_SCAN_GAP_LIMIT"),
     # scantxoutset am eigenen bitcoind — schneller UTXO-Bestand, kein Verlauf.
     "own_core": ("NODE_IP", "RPCPORT", "RPCUSER", "RPCPASSWORD", "RPC_SSL",
                  "RPC_COOKIE_FILE", "FULCRUM_TOR_PROXY"),
@@ -88,7 +88,7 @@ class Feld:
 
     key: str
     label: str
-    typ: str = "text"          # text | port | schalter | geheim | liste
+    typ: str = "text"          # text | port | schalter | checkbox | geheim | liste | zahl
     value: str = ""
     hinweis: str = ""
     gesetzt: bool = False
@@ -725,6 +725,12 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     if not host and tor and (values.get("FULCRUM_TOR_SSL") or "").strip():
         ssl_an = _flag(values, "FULCRUM_TOR_SSL", True)
     ziel = host or tor
+    from core.wallet_sync_engine import utxo_scan_gap_aus_env
+
+    electrs_gap = utxo_scan_gap_aus_env(values)
+    # Ein Feld. Stehen IP und Onion beide in der .env, zeigt es die IP;
+    # Übernehmen schreibt nur noch die eine Adresse.
+    adresse = electrs_adresse_fuer_formular(host, tor)
     quellen.append(SourceInfo(
         rank=1,
         key="own_fulcrum",
@@ -737,21 +743,23 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
         privacy=PRIVACY_HIGH,
         configured=bool(ziel),
         note="" if ziel else "Host eintragen — Fulcrum, electrs oder ElectrumX",
+        gap_limit=electrs_gap,
         felder=[
-            Feld("FULCRUM_HOST", "Host im LAN", "text", host,
-                 "IP oder Name, z. B. 192.168.1.50"),
-            Feld("FULCRUM_TOR", "Onion-Adresse", "text", tor,
-                 "optional, statt oder zusätzlich zum LAN-Host"),
+            Feld("FULCRUM_HOST", "Adresse", "text", adresse,
+                 "IP, Name oder .onion"),
+            Feld("FULCRUM_TOR_PROXY", "Proxy", "text",
+                 values.get("FULCRUM_TOR_PROXY", "").strip(),
+                 "nur für .onion nötig, z. B. 127.0.0.1:9150"),
             Feld("FULCRUM_PORT", "Port", "port", str(port),
                  "Gilt für LAN und Onion. Fulcrum meist 50002 (TLS) oder "
                  "50001, electrs oft 50001"),
-            Feld("FULCRUM_SSL", "TLS verwenden", "schalter",
+            Feld("FULCRUM_SSL", "TLS", "checkbox",
                  "true" if ssl_an else "false",
-                 "Beim Verbinden wird die andere Einstellung mitprobiert "
-                 "und der Erfolg in .env festgeschrieben"),
-            Feld("FULCRUM_TOR_PROXY", "Tor-SOCKS-Proxy", "text",
-                 values.get("FULCRUM_TOR_PROXY", "").strip(),
-                 "nur für .onion nötig, z. B. 127.0.0.1:9150"),
+                 "Beim Verbinden wird die andere Einstellung mitprobiert, "
+                 "in .env geschrieben, und das offene Häkchen folgt sofort"),
+            Feld("UTXO_SCAN_GAP_LIMIT", "Gap-Limit", "zahl", str(electrs_gap),
+                 "Unbenutzte Indizes in Folge, dann bricht der Scan die Kette ab. "
+                 "Vorgabe und Minimum 100, höchstens 10.000. Höher = langsamer."),
         ],
     ))
 
@@ -963,6 +971,31 @@ def describe_sources(values: dict[str, str]) -> list[SourceInfo]:
     return quellen
 
 
+def electrs_adresse_fuer_formular(host: str, tor: str) -> str:
+    """Ein Eingabefeld: LAN-Host, sonst die Onion."""
+    host = (host or "").strip()
+    tor = (tor or "").strip()
+    if host and not _host_ist_onion(host):
+        return host
+    return tor or host
+
+
+def electrs_adresse_in_env(adresse: str) -> tuple[str | None, str | None]:
+    """
+    Eine Adresse aus dem Formular auf die zwei .env-Schlüssel.
+
+    Rückgabe ``(FULCRUM_HOST, FULCRUM_TOR)``. Leer löscht beide.
+    Eine .onion landet nur in ``FULCRUM_TOR``, alles andere nur in
+    ``FULCRUM_HOST``.
+    """
+    text = (adresse or "").strip()
+    if not text:
+        return None, None
+    if _host_ist_onion(text):
+        return None, text
+    return text, None
+
+
 def _host_ist_onion(host: str) -> bool:
     text = (host or "").strip().lower()
     for prefix in ("https://", "http://"):
@@ -1010,6 +1043,8 @@ def check_sources(
     timeout: int = 5,
     on_log=None,
     still: bool = False,
+    vierfach: bool = False,
+    on_geprueft=None,
 ) -> list[SourceInfo]:
     """
     Prüft die eigenen Nodes.
@@ -1034,8 +1069,19 @@ def check_sources(
     gefunden: dict[str, SourceInfo] = {}
     lan_ok: SourceInfo | None = None
 
+    def _nach_pruefung(geprueft: SourceInfo) -> SourceInfo:
+        # Electrs sofort melden, bevor Core, P2P und öffentliche Server drankommen.
+        if on_geprueft is None or geprueft.key != "own_fulcrum":
+            return geprueft
+        ersetzt = on_geprueft(geprueft)
+        return ersetzt if ersetzt is not None else geprueft
+
     for quelle in lan:
-        geprueft = check_reachable(quelle, values, timeout=timeout, on_log=log)
+        geprueft = _nach_pruefung(
+            check_reachable(
+                quelle, values, timeout=timeout, on_log=log, vierfach=vierfach,
+            ),
+        )
         gefunden[quelle.key] = geprueft
         if geprueft.reachable and lan_ok is None:
             lan_ok = geprueft
@@ -1053,9 +1099,9 @@ def check_sources(
                 note=text,
             )
             continue
-        gefunden[quelle.key] = check_reachable(
-            quelle, values, timeout=timeout, on_log=log,
-        )
+        gefunden[quelle.key] = _nach_pruefung(check_reachable(
+            quelle, values, timeout=timeout, on_log=log, vierfach=vierfach,
+        ))
 
     for quelle in rest:
         gefunden[quelle.key] = check_reachable(
@@ -1614,6 +1660,7 @@ def check_reachable(
     *,
     timeout: int = 5,
     on_log=None,
+    vierfach: bool = False,
 ) -> SourceInfo:
     """
     Prüft eine einzelne Quelle. Verändert *info* nicht, sondern liefert eine
@@ -1761,14 +1808,20 @@ def check_reachable(
     ssl_gewuenscht = True
     port_gewuenscht = 0
     tor_proxy = None
+    behalten = False
 
     try:
-        from core.fulcrum_client import connect_fulcrum
+        from core.fulcrum_client import connect_fulcrum, lebende_zum_ziel
 
         for host, port, use_ssl, tor_proxy in kandidaten:
             ssl_gewuenscht = use_ssl
             port_gewuenscht = port
-            if tor_proxy is None and chain_sources.host_ist_klare_ip(host):
+            behalten = False
+            if (
+                vierfach
+                and tor_proxy is None
+                and chain_sources.host_ist_klare_ip(host)
+            ):
                 if port and int(port) not in (
                     chain_sources.EIGENE_ELECTRS_STANDARD_PORTS
                 ):
@@ -1795,6 +1848,27 @@ def check_reachable(
                     break
                 log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
                 continue
+            if tor_proxy is None and chain_sources.host_ist_klare_ip(host):
+                log(
+                    f"Verbinde mit "
+                    f"{_verbindung_ziel(host, port, use_ssl)}"
+                )
+                gehalten = lebende_zum_ziel(
+                    host, int(port), use_ssl=bool(use_ssl),
+                )
+                if gehalten is not None:
+                    client = gehalten
+                    behalten = True
+                    fehler = None
+                    break
+                client, fehler = connect_fulcrum(
+                    host, port, use_ssl=use_ssl, timeout=timeout,
+                    tor_proxy=None, require_listunspent=True,
+                )
+                if client:
+                    break
+                log(f"Verbindung fehlgeschlagen: {fehler or 'unbekannt'}")
+                continue
             log(
                 f"Verbinde mit "
                 f"{_verbindung_ziel(host, port, use_ssl, tor_proxy)}"
@@ -1804,7 +1878,7 @@ def check_reachable(
                 tor_proxy=tor_proxy, require_listunspent=True,
             )
             # TLS ja/nein: bei Protokoll-Mismatch die andere Einstellung.
-            if not client and fehler and chain_sources.tls_should_try_opposite(
+            if vierfach and not client and fehler and chain_sources.tls_should_try_opposite(
                 fehler, use_ssl=use_ssl, port=port,
             ):
                 alt = not use_ssl
@@ -1865,7 +1939,8 @@ def check_reachable(
                     tor_proxy=tor_proxy, require_listunspent=True,
                 )
                 if (
-                    not client
+                    vierfach
+                    and not client
                     and fehler
                     and chain_sources.tls_should_try_opposite(
                         fehler, use_ssl=use_ssl, port=port,
@@ -1934,10 +2009,11 @@ def check_reachable(
             + (f" ({soft})" if soft else "")
             + f". Privatsphäre: {ergebnis.privacy}"
         )
-        try:
-            client.close()
-        except Exception:
-            pass
+        if not behalten:
+            try:
+                client.close()
+            except Exception:
+                pass
         return ergebnis
 
     ergebnis.reachable = False

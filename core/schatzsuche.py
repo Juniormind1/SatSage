@@ -1,7 +1,7 @@
 """
 Jäger der verlorene Schätze.
 
-scantxoutset jenseits des normalen Suchfensters. Treffer werden in den
+scantxoutset im Indexfenster der beiden Felder. Treffer werden in den
 UTXO-Cache der Wallets einsortiert — derselbe Bestand, den die Wallet-Ansicht
 liest. Der Lauf ist langsam, weil der Node das UTXO-Set abklopft.
 """
@@ -18,8 +18,31 @@ from core.wallet_sync_engine import _scan_index_cap_per_chain
 
 #: Indizes je Kette hinter dem normalen Fenster (Empfang und Wechselgeld).
 SCHATZ_WEITE = 2000
+#: Vorgabe der beiden Indexfelder im Werkzeug.
+SCHATZ_AB_VORGABE = 0
+SCHATZ_BIS_VORGABE = 500
 
 LogFn = Callable[[str], None]
+
+
+def schatz_index_grenzen(ab: int, bis: int) -> tuple[int, int]:
+    """
+    Inklusives Indexfenster aus den beiden Feldern.
+
+    ``bis`` ist der letzte Index, den scantxoutset noch mitnimmt.
+    """
+    try:
+        start = int(ab)
+        ende = int(bis)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Scan ab und Scan bis müssen ganze Zahlen ≥ 0 sein."
+        ) from None
+    if start < 0 or ende < 0:
+        raise ValueError("Scan ab und Scan bis müssen ganze Zahlen ≥ 0 sein.")
+    if ende < start:
+        raise ValueError("Scan bis liegt vor Scan ab.")
+    return start, ende
 
 
 def suchfenster(cap: int, *, cache_scan_end: int | None = None) -> tuple[int, int]:
@@ -42,9 +65,15 @@ def schatz_hinweis(
     index: int,
     fenster_bis: int,
     sats: int,
+    scan_ab: int = 0,
 ) -> str:
     """Was der normale Scan an diesem UTXO übersehen hat."""
     kette = "Empfang" if int(chain) == 0 else "Wechselgeld"
+    if int(index) < int(fenster_bis):
+        return (
+            f"Schatz: {int(sats)} sats auf {kette} #{int(index)} von {wallet}. "
+            f"Gefunden, weil der Scan bei Index #{int(scan_ab)} begann."
+        )
     bis = max(0, int(fenster_bis) - 1)
     return (
         f"Schatz: {int(sats)} sats auf {kette} #{int(index)} von {wallet}. "
@@ -121,6 +150,7 @@ def sammle_schaetze(
         chain = int(info["chain"])
         index = int(info["index"])
         fenster_bis = int(info["fenster_bis"])
+        scan_ab = int(info.get("scan_ab") or 0)
         wallet = str(info["wallet"])
         funde.append({
             "xpub": xpub,
@@ -130,6 +160,7 @@ def sammle_schaetze(
             "chain": chain,
             "index": index,
             "fenster_bis": fenster_bis,
+            "scan_ab": scan_ab,
             "txid": utxo.get("txid"),
             "vout": utxo.get("vout"),
             "hinweis": schatz_hinweis(
@@ -138,6 +169,7 @@ def sammle_schaetze(
                 index=index,
                 fenster_bis=fenster_bis,
                 sats=sats,
+                scan_ab=scan_ab,
             ),
             "utxo": utxo,
         })
@@ -211,14 +243,17 @@ def jage_verlorene_schaetze(
     wallets: list[Any],
     wallet_ctx: Any,
     cache_dir: Path,
+    scan_ab: int = SCHATZ_AB_VORGABE,
+    scan_bis: int = SCHATZ_BIS_VORGABE,
     on_log: LogFn | None = None,
     on_progress: Callable[..., None] | None = None,
     raise_if_cancelled: Callable[[], None] | None = None,
 ) -> list[dict]:
     """
-    Sucht und speichert UTXOs außerhalb des normalen Suchfensters.
+    Sucht und speichert UTXOs im angegebenen Indexfenster.
 
-    Wirft, wenn kein Core mit scantxoutset verbunden ist.
+    ``scan_ab`` und ``scan_bis`` sind inklusive. Wirft, wenn kein Core
+    mit scantxoutset verbunden ist oder das Fenster unlesbar ist.
     """
     from core.bitcoind_rpc import scantxoutset_utxos
     from core.wallet_context import _register_wallet_address
@@ -247,9 +282,11 @@ def jage_verlorene_schaetze(
             "Keine verbundene Bitcoin-Core-Quelle mit scantxoutset."
         )
 
+    start, ende = schatz_index_grenzen(scan_ab, scan_bis)
     schluessel: list[str] = []
     start_by: dict[str, int] = {}
     end_by: dict[str, int] = {}
+    normal_by: dict[str, int] = {}
     type_by: dict[str, str] = {}
     name_by: dict[str, str] = {}
     max_by: dict[str, int] = {}
@@ -265,10 +302,10 @@ def jage_verlorene_schaetze(
         )
         cache = load_xpub_cache_entry(key, cache_dir)
         cache_end = cache["scan_end_index"] if cache else None
-        start, ende = suchfenster(cap, cache_scan_end=cache_end)
         schluessel.append(key)
         start_by[key] = start
         end_by[key] = ende
+        normal_by[key] = cap
         type_by[key] = (
             wallet_ctx.script_type_for(key) if wallet_ctx is not None else "auto"
         )
@@ -277,8 +314,7 @@ def jage_verlorene_schaetze(
         scan_end_by[key] = cache_end
         vorhanden[key] = list(cache["utxos"]) if cache else []
         log(
-            f"{name}: scantxoutset ab Index #{start} "
-            f"({SCHATZ_WEITE} weitere je Kette, normal bis #{start - 1})…"
+            f"{name}: scantxoutset Index #{start} bis #{ende}…"
         )
 
     brich_ab()
@@ -311,7 +347,8 @@ def jage_verlorene_schaetze(
                 "wallet": name_by[key],
                 "chain": chain,
                 "index": index,
-                "fenster_bis": start_by[key],
+                "fenster_bis": normal_by[key],
+                "scan_ab": start_by[key],
             })
 
     funde = sammle_schaetze(

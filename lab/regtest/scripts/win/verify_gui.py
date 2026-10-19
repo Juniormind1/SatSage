@@ -76,8 +76,8 @@ def main() -> int:
 
     with sync_playwright() as p:
         # Windows-Lab: installiertes Chrome. Gebündeltes Playwright-Chromium
-        # hängt an der Fernsteuer-Zustimmung. macOS/Linux diesen channel
-        # nicht übernehmen. doc/gui-test-protokoll.md
+        # hängt an der Fernsteuer-Zustimmung. macOS nutzt ebenfalls Chrome,
+        # Linux das gebündelte Chromium. doc/gui-test-protokoll.md
         browser = p.chromium.launch(headless=not args.headed, channel="chrome")
         context = browser.new_context(viewport={"width": 1400, "height": 900})
         page = context.new_page()
