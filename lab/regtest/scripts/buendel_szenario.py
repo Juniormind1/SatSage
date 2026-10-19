@@ -46,6 +46,27 @@ def offen_ohne_erwartetes_buendel(offen: list[str], soll: dict) -> list[str]:
     return [k for k in offen if str(k).strip().lower() != ziel]
 
 
+def stand_ohne_erwartetes_buendel(nach: dict, soll: dict) -> bool:
+    """Nimmt das Bündel aus den offenen UTXOs und aus den roten Ringen.
+
+    Der Baum bleibt unvollständig (fremde Eingänge nach dem ersten
+    eigenen). Das ist genau ein roter Ring. Jeder weitere Ring bleibt
+    stehen und fällt in der strengen Electrs-Prüfung auf.
+    """
+    vorher_offen = list(nach.get("offen") or [])
+    hatte_ringe = "rote_keys" in nach
+    vorher_ringe = list(nach.get("rote_keys") or [])
+    nach["offen"] = offen_ohne_erwartetes_buendel(vorher_offen, soll)
+    ringe = offen_ohne_erwartetes_buendel(vorher_ringe, soll)
+    nach["rote_keys"] = ringe
+    if hatte_ringe:
+        nach["rote"] = len(ringe)
+    return (
+        len(nach["offen"]) < len(vorher_offen)
+        or len(ringe) < len(vorher_ringe)
+    )
+
+
 def pruefe_zeile(
     zeile: dict,
     soll: dict,

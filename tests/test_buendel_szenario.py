@@ -17,6 +17,7 @@ from buendel_szenario import (  # noqa: E402
     lade_soll,
     offen_ohne_erwartetes_buendel,
     pruefe_zeile,
+    stand_ohne_erwartetes_buendel,
 )
 from core.trace import FULL_RESOLUTION_INPUT_LIMIT  # noqa: E402
 from generate_scenarios import BUENDEL_FREMDE, BUENDEL_NAME  # noqa: E402
@@ -98,6 +99,20 @@ class TestBuendelSzenario(unittest.TestCase):
             offen_ohne_erwartetes_buendel([key.upper(), "cc" * 32 + ":1"], soll),
             ["cc" * 32 + ":1"],
         )
+
+    def test_roter_ring_des_buendels_faellt_raus(self):
+        soll = _soll()
+        key = f"{soll['txid']}:{soll['vout']}"
+        anderer = "ee" * 32 + ":3"
+        stand = {
+            "offen": [key, "dd" * 32 + ":2"],
+            "rote_keys": [key.upper(), anderer],
+            "rote": 2,
+        }
+        self.assertTrue(stand_ohne_erwartetes_buendel(stand, soll))
+        self.assertEqual(stand["offen"], ["dd" * 32 + ":2"])
+        self.assertEqual(stand["rote_keys"], [anderer])
+        self.assertEqual(stand["rote"], 1)
 
     def test_bericht_ohne_buendel_bricht_ab(self):
         with tempfile.TemporaryDirectory() as tmp:

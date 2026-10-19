@@ -19,7 +19,8 @@ Electrs (``doc/issues/p2p-herkunft.md``). Electrs auf demselben
 Cache, noch einmal Grau und Gelb: die Ringe sind weg, jedes UTXO ist
 entweder vollständig verfolgt oder ohne Baum schon außerhalb der
 Haltefrist. Ausnahme: das Sammel-Bündel aus ``scenario-report.json``
-(``buendel``) bleibt offen. Sein Anschaffungsdatum muss die Blockzeit
+(``buendel``) bleibt offen und ist der eine rote Ring
+(unvollständiger Baum). Sein Anschaffungsdatum muss die Blockzeit
 der Sammel-Tx sein, nicht der ältere eigene Eingang. Danach der Bestand
 am 31.12. jedes abgeschlossenen Jahres gegen die Kette
 (``stichtag_chain.py``): gezählt wird nach Entstehung des Outputs,
@@ -816,6 +817,7 @@ def _grau_und_gelb(env, ctx, cache_dir, imm, wallets, get_tx, quelle: str) -> di
     offen = _ungeklaert(zeilen, steuer)
     stand = {
         "rote": len(rote),
+        "rote_keys": rote,
         "grau": list(keys["grau_keys"]),
         "gelb": list(keys["gelb_keys"]),
         "lot": list(keys["lot_grau_keys"]),
@@ -1039,15 +1041,13 @@ def _laufe_p2p(
 
 
 def _buendel_offen_ausnehmen(nach: dict) -> None:
-    """Das Sammel-Bündel bleibt nach dem Klären offen. Alles andere nicht."""
-    from buendel_szenario import lade_soll, offen_ohne_erwartetes_buendel, schluessel
+    """Das Sammel-Bündel bleibt nach dem Klären offen und ein roter Ring."""
+    from buendel_szenario import lade_soll, schluessel, stand_ohne_erwartetes_buendel
 
     soll = lade_soll(HERE / ".data" / "scenario-report.json")
-    vorher = list(nach.get("offen") or [])
-    nach["offen"] = offen_ohne_erwartetes_buendel(vorher, soll)
-    nach["buendel_soll"] = soll
-    if len(nach["offen"]) < len(vorher):
+    if stand_ohne_erwartetes_buendel(nach, soll):
         print(f"  Bündel bleibt offen (erwartet): {schluessel(soll)}", flush=True)
+    nach["buendel_soll"] = soll
 
 
 def _pruefe_buendel(nach: dict, env: dict[str, str]) -> None:
