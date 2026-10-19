@@ -137,7 +137,16 @@ def utc_ts(iso_date: str) -> int:
 
 
 def set_time(rpc: Rpc, unix_ts: int) -> None:
-    rpc.call("setmocktime", str(int(unix_ts)))
+    """Mocktime setzen. 0 hebt sie auf.
+
+    Core lehnt einen Block ab, dessen Zeit mehr als zwei Stunden vor der
+    Host-Uhr liegt (time-too-new). Ein Zeitsprung, der darüber hinaus
+    wollte, bleibt auf der Host-Uhr.
+    """
+    ts = int(unix_ts)
+    if ts > 0:
+        ts = min(ts, int(time.time()))
+    rpc.call("setmocktime", str(ts))
 
 
 def mine_at(rpc: Rpc, ts: int, blocks: int, address: str) -> int:
