@@ -40,6 +40,19 @@ AGE_INDEX_COUNT = 40
 #: Indizes AGE_INDEX_COUNT .. AGE+SPEND-1 = Spend-Pool (CJ/Hop/…).
 SPEND_INDEX_COUNT = 40
 
+# Sammel-Tx, die das 20er-Auflöse-Limit trifft: ein eigener Eingang zuerst,
+# danach mehr fremde Eingänge als core.trace.FULL_RESOLUTION_INPUT_LIMIT.
+# Indizes 96 und 97 liegen in der Lücke zwischen Shape (~55) und Volumen (120).
+# Eingang 0,002 BTC und Ausgang 0,0061 BTC liegen unter select_near (ab 0,01),
+# der Spend-Pool fasst sie nicht an.
+BUENDEL_NAME = "Sammel-eigen-zuerst"
+BUENDEL_EIGEN_INDEX = 96
+BUENDEL_AUSGANG_INDEX = 97
+BUENDEL_FREMDE = 21
+BUENDEL_EIGEN_SATS = 200_000
+BUENDEL_FREMD_SATS = 20_000
+BUENDEL_FEE_SATS = 10_000
+
 #: Eigenes Core-Wallet, nicht in SatSage WALLET_* und nicht im Herkunfts-Inventar.
 #: Empfang 0 ist belegt, 1…100 leer, 101 belegt. Gap 100 findet 101 nicht.
 GAP_WALLET = "lab-gap"
@@ -297,6 +310,135 @@ def receive_addresses(rpc: Rpc, wallet: str, count: int = LAB_RECEIVE_COUNT) -> 
 
 def _sats_betrag(amount: object) -> int:
     return int(round(float(amount) * 1e8))
+
+
+def _btc_aus_sats(sats: int) -> float:
+    return round(int(sats) / 1e8, 8)
+
+
+def _blockzeit(rpc: Rpc, txid: str) -> int:
+    tx = rpc.json("getrawtransaction", txid, "true")
+    zeit = tx.get("blocktime")
+    if zeit is None:
+        raise RuntimeError(f"{txid}: keine Blockzeit")
+    return int(zeit)
+
+
+def _vout_an(rpc: Rpc, txid: str, address: str) -> int:
+    tx = rpc.json("getrawtransaction", txid, "true")
+    for out in tx.get("vout") or []:
+        if (out.get("scriptPubKey") or {}).get("address") == address:
+            return int(out["n"])
+    raise RuntimeError(f"{txid}: kein Ausgang an {address}")
+
+
+def fund_eine_adresse(
+    rpc: Rpc,
+    address: str,
+    faucet: str,
+    ts: int,
+    amount: float,
+) -> dict[str, Any]:
+    """Faucet zahlt genau eine Adresse und bestätigt einen Block."""
+    global _MOCK_CURSOR
+    ts = max(int(ts), int(_MOCK_CURSOR) + 60 if _MOCK_CURSOR else int(ts))
+    set_time(rpc, ts)
+    txid = str(rpc.call(
+        "sendmany",
+        "",
+        json.dumps({address: round(float(amount), 8)}, separators=(",", ":")),
+        wallet="lab-faucet",
+    )).strip()
+    _MOCK_CURSOR = mine_at(rpc, ts, 1, faucet)
+    return {
+        "txid": txid,
+        "vout": _vout_an(rpc, txid, address),
+        "block_time": _blockzeit(rpc, txid),
+        "address": address,
+    }
+
+
+def lege_sammel_buendel(
+    rpc: Rpc,
+    addresses: dict[str, list[str]],
+    faucet: str,
+    eigen: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Ein eigener Eingang, danach 21 fremde, ein Ausgang an Alpha.
+
+    Der eigene Eingang ist Jahre alt. Die Sammel-Tx wird am aktuellen
+    Mock-Cursor bestätigt, direkt nach dem Alters-Funding (etwa ein Tag
+    vor dem Laborlauf) und damit noch in der Haltefrist von einem Jahr.
+    """
+    alpha = "lab-alpha"
+    ausgang = addresses["alpha"][BUENDEL_AUSGANG_INDEX]
+    rescan_wallets(rpc, alpha, "lab-faucet")
+    eigene = [
+        u for u in unspent(rpc, alpha)
+        if u.get("address") == eigen["address"]
+    ]
+    if len(eigene) != 1:
+        raise RuntimeError(
+            f"{BUENDEL_NAME}: eigener Eingang {len(eigene)}× statt 1×"
+        )
+    fremd_adressen = [new_address(rpc, "lab-faucet") for _ in range(BUENDEL_FREMDE)]
+    betrag = _btc_aus_sats(BUENDEL_FREMD_SATS)
+    set_time(rpc, int(_MOCK_CURSOR) or int(time.time()))
+    rpc.call(
+        "sendmany",
+        "",
+        json.dumps({a: betrag for a in fremd_adressen}, separators=(",", ":")),
+        wallet="lab-faucet",
+    )
+    mine_next(rpc, 1, faucet)
+    rescan_wallets(rpc, "lab-faucet")
+    fremde = []
+    for adresse in fremd_adressen:
+        treffer = [u for u in unspent(rpc, "lab-faucet") if u.get("address") == adresse]
+        if len(treffer) != 1:
+            raise RuntimeError(
+                f"{BUENDEL_NAME}: fremder Eingang {adresse} {len(treffer)}×"
+            )
+        fremde.append(treffer[0])
+    fremde.sort(key=lambda row: (row["txid"], int(row["vout"])))
+    summe = BUENDEL_EIGEN_SATS + BUENDEL_FREMDE * BUENDEL_FREMD_SATS
+    ausgang_sats = summe - BUENDEL_FEE_SATS
+    if ausgang_sats <= 0:
+        raise RuntimeError(f"{BUENDEL_NAME}: Ausgang nicht positiv")
+    rec = raw_spend(
+        rpc,
+        BUENDEL_NAME,
+        [eigene[0], *fremde],
+        [(ausgang, _btc_aus_sats(ausgang_sats))],
+        [alpha, "lab-faucet"],
+    )
+    tx = rpc.json("getrawtransaction", rec["txid"], "true")
+    erster = tx["vin"][0]
+    if (
+        erster["txid"] != eigene[0]["txid"]
+        or int(erster["vout"]) != int(eigene[0]["vout"])
+    ):
+        raise RuntimeError(f"{BUENDEL_NAME}: eigener Eingang steht nicht vorn")
+    if len(tx["vin"]) != 1 + BUENDEL_FREMDE:
+        raise RuntimeError(
+            f"{BUENDEL_NAME}: {len(tx['vin'])} Eingänge, erwartet {1 + BUENDEL_FREMDE}"
+        )
+    mine_next(rpc, 1, faucet)
+    block_time = _blockzeit(rpc, rec["txid"])
+    if block_time <= int(eigen["block_time"]):
+        raise RuntimeError(f"{BUENDEL_NAME}: Sammel-Tx nicht jünger als der eigene Eingang")
+    vout = _vout_an(rpc, rec["txid"], ausgang)
+    rec.update({
+        "alias": "Sammel-Bündel",
+        "expected_kind": "unknown",
+        "viewer_wallet": alpha,
+        "vout_index": vout,
+        "block_time": block_time,
+        "eigen_time": int(eigen["block_time"]),
+        "foreign_inputs": BUENDEL_FREMDE,
+    })
+    return rec
 
 
 def _unspents_an_adresse(rpc: Rpc, address: str) -> list[dict[str, Any]]:
@@ -640,8 +782,21 @@ def run(rpc: Rpc) -> None:
         idx = AGE_INDEX_COUNT + j
         fund_slots.append((rng.randint(lo, hi), idx, SPEND_FUND_AMOUNT))
     fund_slots.sort(key=lambda row: (row[0], row[1]))
+    # Der eigene Eingang liegt nah am Fensteranfang, Jahre vor der Sammel-Tx.
+    eigen_ts = t0 + 120 * 24 * 3600
+    if not (t0 < eigen_ts < t1):
+        raise RuntimeError("Bündel-Zeiten liegen außerhalb des Laborfensters")
+    buendel_eigen: dict[str, Any] | None = None
     age_dates: list[str] = []
     for ts, index, amount in fund_slots:
+        if buendel_eigen is None and ts >= eigen_ts:
+            buendel_eigen = fund_eine_adresse(
+                rpc,
+                addresses["alpha"][BUENDEL_EIGEN_INDEX],
+                faucet,
+                eigen_ts,
+                _btc_aus_sats(BUENDEL_EIGEN_SATS),
+            )
         fund_index_at(rpc, addresses, faucet, index, ts, amount=amount)
         if amount == AGE_FUND_AMOUNT:
             age_dates.append(
@@ -666,6 +821,30 @@ def run(rpc: Rpc) -> None:
     print(
         f"Phase random-age-funding: Höhe {phases[-1]['height']} — "
         f"Alters-Jahre {dict(sorted(year_hist.items()))}",
+        file=sys.stderr,
+    )
+
+    # Sammel-Tx jetzt: der Cursor steht am Ende des Alters-Fundings, etwa
+    # einen Tag vor der Host-Uhr. Spätere Shape-Sprünge ändern diese
+    # Blockzeit nicht mehr. Der Ausgang bleibt liegen (unter select_near).
+    if buendel_eigen is None:
+        raise RuntimeError(f"{BUENDEL_NAME}: eigener Eingang wurde nicht angelegt")
+    buendel_record = lege_sammel_buendel(rpc, addresses, faucet, buendel_eigen)
+    phases.append({
+        "label": "sammel-buendel",
+        "date": datetime.fromtimestamp(
+            int(buendel_record["block_time"]), tz=timezone.utc,
+        ).date().isoformat(),
+        "mock_ts": int(buendel_record["block_time"]),
+        "height": int(rpc.call("getblockcount")),
+        "note": (
+            f"{BUENDEL_NAME}: 1 eigener Eingang vor {BUENDEL_FREMDE} "
+            "fremden. Anschaffung = Blockzeit dieser Tx, noch in der Haltefrist."
+        ),
+    })
+    print(
+        f"Phase sammel-buendel: Höhe {phases[-1]['height']} "
+        f"({phases[-1]['date']})",
         file=sys.stderr,
     )
 
@@ -709,7 +888,7 @@ def run(rpc: Rpc) -> None:
     )
 
     alpha, beta, _change, gamma = WALLETS
-    records: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = [buendel_record]
 
     # Shape-Spends nur aus Spend-Pool (0.05); Alters-Kohorte bleibt liegen.
     def _bump(hours: float = 2.0) -> None:
@@ -968,6 +1147,16 @@ def run(rpc: Rpc) -> None:
             f"Spend-Pool @{SPEND_FUND_AMOUNT} BTC für Hop/CJ."
         ),
         "records": records,
+        "buendel": {
+            "name": BUENDEL_NAME,
+            "txid": buendel_record["txid"],
+            "vout": int(buendel_record["vout_index"]),
+            "block_time": int(buendel_record["block_time"]),
+            "eigen_time": int(buendel_record["eigen_time"]),
+            "input_count": 1 + BUENDEL_FREMDE,
+            "foreign_inputs": BUENDEL_FREMDE,
+            "viewer_wallet": "lab-alpha",
+        },
     }
     (HERE / ".data" / "scenario-report.json").write_text(json.dumps(report, indent=2) + "\n")
     from herkunft_inventar import schreibe_inventar

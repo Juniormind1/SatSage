@@ -18,9 +18,12 @@ Knöpfe Grau und Gelb: rote Ringe müssen bleiben, Herkunft braucht
 Electrs (``doc/issues/p2p-herkunft.md``). Electrs auf demselben
 Cache, noch einmal Grau und Gelb: die Ringe sind weg, jedes UTXO ist
 entweder vollständig verfolgt oder ohne Baum schon außerhalb der
-Haltefrist. Danach der Bestand am 31.12. jedes abgeschlossenen Jahres
-gegen die Kette (``stichtag_chain.py``): gezählt wird nach Entstehung
-des Outputs, nicht nach Anschaffung.
+Haltefrist. Ausnahme: das Sammel-Bündel aus ``scenario-report.json``
+(``buendel``) bleibt offen. Sein Anschaffungsdatum muss die Blockzeit
+der Sammel-Tx sein, nicht der ältere eigene Eingang. Danach der Bestand
+am 31.12. jedes abgeschlossenen Jahres gegen die Kette
+(``stichtag_chain.py``): gezählt wird nach Entstehung des Outputs,
+nicht nach Anschaffung.
 
 Soll: ``.data/herkunft-inventar.json`` (von ``generate_scenarios.py``).
 Der Labor-Node ist nicht geprunt. „Pruned Node“ meint den Slot
@@ -654,7 +657,7 @@ def _steuer_stand(utxos: list[dict], ctx, imm: Path, env: dict[str, str]):
         f"{e.get('txid')}:{e.get('vout')}": e
         for e in (auswertung.get("eintraege") or [])
     }
-    return zeilen, steuer, klaeren_keys(auswertung)
+    return zeilen, steuer, klaeren_keys(auswertung), auswertung
 
 
 def _rote_ringe(zeilen: list[dict]) -> list[str]:
@@ -754,7 +757,7 @@ def _klaere_keys(
 
 def _druecke_grau(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle: str) -> None:
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     print(f"  Grau: {len(keys['grau_keys'])} UTXOs", flush=True)
     _klaere_keys(
         keys["grau_keys"],
@@ -767,7 +770,7 @@ def _druecke_grau(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle:
         cache_source=quelle,
     )
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     print(f"  Lot-Grau: {len(keys['lot_grau_keys'])} UTXOs", flush=True)
     _klaere_keys(
         keys["lot_grau_keys"],
@@ -783,12 +786,12 @@ def _druecke_grau(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle:
 
 def _druecke_gelb(env, ctx, cache_dir: Path, imm: Path, wallets, get_tx, quelle: str) -> None:
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     if keys["grau_keys"]:
         print("  Gelb startet zuerst Grau", flush=True)
         _druecke_grau(env, ctx, cache_dir, imm, wallets, get_tx, quelle)
         utxos = _utxos_aus_cache(cache_dir, wallets)
-        _zeilen, _steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+        _zeilen, _steuer, keys, _auswertung = _steuer_stand(utxos, ctx, imm, env)
     print(f"  Gelb: {len(keys['gelb_keys'])} UTXOs", flush=True)
     _klaere_keys(
         keys["gelb_keys"],
@@ -808,7 +811,7 @@ def _grau_und_gelb(env, ctx, cache_dir, imm, wallets, get_tx, quelle: str) -> di
     print("  Knopf Gelb", flush=True)
     _druecke_gelb(env, ctx, cache_dir, imm, wallets, get_tx, quelle)
     utxos = _utxos_aus_cache(cache_dir, wallets)
-    zeilen, steuer, keys = _steuer_stand(utxos, ctx, imm, env)
+    zeilen, steuer, keys, auswertung = _steuer_stand(utxos, ctx, imm, env)
     rote = [k for k in _rote_ringe(zeilen) if k]
     offen = _ungeklaert(zeilen, steuer)
     stand = {
@@ -818,6 +821,8 @@ def _grau_und_gelb(env, ctx, cache_dir, imm, wallets, get_tx, quelle: str) -> di
         "lot": list(keys["lot_grau_keys"]),
         "offen": offen,
         "utxos": len(zeilen),
+        "steuer": steuer,
+        "auswertung": auswertung,
     }
     print(
         f"  Ringe {stand['rote']}, grau {len(stand['grau'])}, "
@@ -995,6 +1000,7 @@ def _laufe_p2p(
         nach_electrs = _grau_und_gelb(
             env_electrs, ctx, cache_dir, imm, wallets, get_tx, "fulcrum",
         )
+        _buendel_offen_ausnehmen(nach_electrs)
         ok_electrs, grund = electrs_nach_klaeren_ok(
             rote=nach_electrs["rote"],
             grau=nach_electrs["grau"],
@@ -1003,6 +1009,7 @@ def _laufe_p2p(
         )
         if not ok_electrs:
             raise RuntimeError(grund)
+        _pruefe_buendel(nach_electrs, env_electrs)
         stichtage = _pruefe_stichtage(env_electrs, ctx, imm)
     finally:
         if p2p_client is not None:
@@ -1029,6 +1036,52 @@ def _laufe_p2p(
         "gelb_nach_electrs": len(nach_electrs["gelb"]),
         "stichtage": stichtage,
     }
+
+
+def _buendel_offen_ausnehmen(nach: dict) -> None:
+    """Das Sammel-Bündel bleibt nach dem Klären offen. Alles andere nicht."""
+    from buendel_szenario import lade_soll, offen_ohne_erwartetes_buendel, schluessel
+
+    soll = lade_soll(HERE / ".data" / "scenario-report.json")
+    vorher = list(nach.get("offen") or [])
+    nach["offen"] = offen_ohne_erwartetes_buendel(vorher, soll)
+    nach["buendel_soll"] = soll
+    if len(nach["offen"]) < len(vorher):
+        print(f"  Bündel bleibt offen (erwartet): {schluessel(soll)}", flush=True)
+
+
+def _pruefe_buendel(nach: dict, env: dict[str, str]) -> None:
+    """Anschaffung der Sammel-Tx ist ihre Blockzeit, nie der ältere eigene Eingang."""
+    from datetime import datetime
+
+    from core.tax import lese_steuer_einstellungen, parse_stichtag
+    from buendel_szenario import pruefe_zeile, schluessel
+
+    soll = nach.get("buendel_soll")
+    if not isinstance(soll, dict):
+        raise RuntimeError("Bündel-Szenario wurde nicht gelesen")
+    key = schluessel(soll)
+    zeile = None
+    for roh, eintrag in (nach.get("steuer") or {}).items():
+        if str(roh).strip().lower() == key:
+            zeile = eintrag
+            break
+    if zeile is None:
+        raise RuntimeError(f"Bündel-UTXO {key} fehlt in der Steuerauswertung")
+    einstellung = lese_steuer_einstellungen(env)
+    bezug = datetime.fromtimestamp(
+        float((nach.get("auswertung") or {}).get("bezug_ts") or 0)
+    )
+    fehler = pruefe_zeile(
+        zeile,
+        soll,
+        bezug=bezug,
+        haltefrist_jahre=int(einstellung["haltefrist_jahre"]),
+        stichtag=parse_stichtag(einstellung["stichtag"]),
+    )
+    if fehler:
+        raise RuntimeError("Bündel-Szenario: " + "; ".join(fehler))
+    print(f"  OK  Bündel {key}: Anschaffung ist die Blockzeit, vorsichtig", flush=True)
 
 
 def _pruefe_stichtage(env: dict[str, str], ctx, imm: Path) -> list[dict]:

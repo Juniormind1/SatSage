@@ -77,13 +77,14 @@ Die Basis-Szenarien streuen **unspent UTXO-Alter zufällig** über **gestern …
 |-------|----------------|
 | bootstrap | 110 Blocks am Fensterstart (Coinbase-Reife) |
 | random-age-funding | 40× unspent @0,049 BTC (nur Alter) + 40× Spend-Pool @0,05 BTC — je Index eigene Zufallszeit |
+| sammel-buendel | Alpha Empfang #96 (Jahre alt) vor 21 fremden Eingängen → Empfang #97. Anschaffung = Blockzeit dieser Tx |
 | random-volume-funding | noch einmal 40× unspent, gleiche Zeitstreuung, Betrag log-gleich 1000 Sat … 0,2 BTC (Index 120…159) |
 | shapes | Hop/CJ/Fan-out nur aus Spend-Pool (Alters-Kohorte bleibt liegen) |
 | tip-now | Tip auf Host-Uhr; danach `setmocktime 0` |
 
 In der GUI: viele unterschiedliche `hold_days` (nicht nur 1 T / 377 T).
 
-**Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
+**Frische Chain nötig:** Mocktime nicht rückwärts auf bestehendem Tip. Vor dem ersten Lauf mit Zeitstreuung `.data/` wipen (Bitcoin-, Electrs-/Fulcrum-DB, Mempool-DB, Lab-`utxo_cache` / `immutable_cache`). Nur `.tools/` kann bleiben. Der GitHub-Workflow löscht diese Verzeichnisse vor `start.sh` und bricht ab, wenn die Blockhöhe danach nicht 0 ist. `generate_scenarios.py` baut die UTXO-Mengen danach neu, Electrs indexiert diese Kette. Phasen stehen in `.data/scenario-report.json` → `phases`. Lab-Env setzt `STEUER_HALTEFRIST_JAHRE=1`.
 
 **Kette vor jedem Test nachziehen:** `verify_tx_classify.py` ruft `scripts/kette_aktualisieren.py` auf, bevor es die Fälle prüft. Liegt die Zeit des Tip-Blocks hinter der Host-Uhr, setzt das Skript `setmocktime` auf jetzt, mined einen Block und löst die Mock-Zeit wieder (`setmocktime 0`). Eine stehen gebliebene Labor-Kette scheitert sonst mit `time-too-new`, obwohl ein einzelner Block sie anschlussfähig macht. Der Nachzug ist kein Ersatz für einen Wipe: eine Kette, deren Tip in der Zukunft liegt, oder eine ohne `lab-faucet`, muss neu aufgesetzt werden.
 
@@ -104,6 +105,9 @@ Die Szenarien erzeugen vier Lab-Wallets sowie Hops, Selbstüberweisung, Konsolid
 | `PayJoin-like` | `payjoin` |
 | `Beta-aged-fanout` / Fan-out-own | `fan_out_own` (1→viele; n→1 wäre `fan_in_own`) |
 | `Exchange-batch-like` | `exchange_batch` |
+| `Sammel-eigen-zuerst` | `unknown` — 1× Alpha (vorn) + 21× Faucet; ein Ausgang an Alpha #97. Kein CoinJoin |
+
+**Sammel-Bündel:** `Sammel-eigen-zuerst` ist der riskante Fall über dem Auflöse-Limit von 20 Eingängen. Der eigene Eingang steht vorn und ist Jahre alt, die 21 fremden folgen. SatSage bricht nach dem ersten eigenen Eingang ab. Die Anschaffung muss die Blockzeit der Sammel-Tx sein (noch in der Haltefrist, also nicht grün), Markierung „Bündel, vorsichtig“. `verify_quellen_inventar.py` lässt genau dieses UTXO nach dem Electrs-Klären offen und prüft das Datum gegen `scenario-report.json` → `buendel`. CoinJoin-Formen bleiben davon getrennt. Eine alte Chain ohne diese Phase braucht einen Wipe.
 
 **Fremd-Peers:** `lab-faucet` finanziert alle Lab-Sats und stellt Mix-Peer-Inputs. Die Faucet-XPUB steht **nicht** in SatSage `WALLET_*` — in der App sind das fremde Inputs. Alles Einzelsignatur (kein Multisig). Keine Coordinator-/echte WabiSabi-Implementierung, nur On-Chain-Form. Expectations: `.data/scenario-report-txclass.json`.
 

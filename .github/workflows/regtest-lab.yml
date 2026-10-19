@@ -37,7 +37,29 @@ jobs:
           SATSAGE_LAB_SKIP_MEMPOOL: "1"
         run: |
           chmod +x scripts/start.sh
+          # Mocktime geht nicht rückwärts. Eine alte Chain im Bind-Mount
+          # kommt veraltet hoch. Vor dem Start verwerfen, danach die
+          # Szenarien die UTXO-Mengen neu bauen. .tools bleibt.
+          rm -rf \
+            .data/bitcoin \
+            .data/electrs \
+            .data/mempool-mysql \
+            .data/mempool-cache \
+            .data/utxo_cache \
+            .data/immutable_cache \
+            .data/fulcrum \
+            .data/quellen-inventar \
+            .data/p2p-traces \
+            .data/electrs-traces
           ./scripts/start.sh
+          hoehe="$(docker compose -f docker-compose.yml exec -T bitcoind \
+            bitcoin-cli -regtest -rpcuser=bitcoin -rpcpassword=secret \
+            getblockcount | tr -d '[:space:]')"
+          echo "Blockhoehe nach Start: ${hoehe}"
+          if [[ "${hoehe}" != "0" ]]; then
+            echo "Chain ist nicht frisch (Hoehe ${hoehe}). Neuaufbau abgebrochen." >&2
+            exit 1
+          fi
 
       - name: Core-Allowlist und rpcwhitelist
         env:
