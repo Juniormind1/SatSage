@@ -77,6 +77,21 @@ def _warte_config(base: str, token: str, sekunden: float = 25.0) -> dict:
     raise RuntimeError(f"Server antwortet nicht auf /api/config: {letzte}")
 
 
+def _server_anhalten(emb) -> None:
+    """HTTP-Server und laufenden Header-Job beenden."""
+    state = getattr(emb, "state", None)
+    hid = getattr(state, "header_job_id", None) if state is not None else None
+    if hid:
+        try:
+            state.jobs.cancel(hid)
+        except Exception:
+            pass
+    try:
+        emb.stop()
+    except Exception:
+        pass
+
+
 def _spawn():
     sys.path.insert(0, str(ROOT))
     import server
@@ -455,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     tmp_hold = None
+    emb = None
     url = args.url
     if args.spawn or (not url and not args.attach):
         if not url:
@@ -481,7 +497,11 @@ def main(argv: list[str] | None = None) -> int:
         channel=args.channel or None,
     )
     # Nur der Wegwerf-Spawn. --url und --attach zeigen auf eine echte Sitzung.
+    # Der Userflow-Server bleibt sonst im Prozess und lädt Header, während
+    # die Passwort-Server scramblen.
     if tmp_hold is not None:
+        if emb is not None:
+            _server_anhalten(emb)
         from webgui_passwort_flow import lauf_passwort_zyklen
 
         print("Passwort setzen / ändern / löschen…", flush=True)

@@ -30,7 +30,11 @@ UMBREL_BOOT = "umbrel-flow-pass"
 
 def _spawn(modus: str):
     import server
+    from core.env_scramble import clear_session_key
 
+    # Drei Server im selben Prozess. Ein Schlüssel vom vorigen Modus
+    # würde die nächste Klartext-.env beim Start verschlüsseln.
+    clear_session_key()
     tmp = tempfile.TemporaryDirectory(prefix=f"satsage-passwort-{modus}-")
     wurzel = Path(tmp.name)
     zeilen = [
