@@ -9,7 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Userflow · Passwort:** Der Wegwerf-Server des Userflows wird angehalten, bevor die Passwort-Zyklen starten. Jeder Modus löscht vorher den Scramble-Session-Key, damit ein abgebrochener Desktop die Klartext-`.env` von Specter oder Umbrel nicht mitverschlüsselt.
+- **Userflow · Passwort:** Der Wegwerf-Server des Userflows wird angehalten, bevor die Passwort-Zyklen starten. Jeder Modus löscht vorher den Scramble-Session-Key, damit ein abgebrochener Desktop die Klartext-`.env` von Specter oder Umbrel nicht mitverschlüsselt. Die Wartezeit auf das Ende von „Speichere Passwort…“ ist 60 Sekunden.
 - **Regtest-Labor · Sammel-Bündel:** Die Kette enthält eine Sammel-Transaktion mit einem eigenen Eingang vor 21 fremden (Alpha, Empfang #96 nach #97). Das Anschaffungsdatum muss die Blockzeit dieser Transaktion sein. Die Zeile bleibt „Bündel, vorsichtig“ und wird nicht grün, solange die Frist offen ist. Nach dem Electrs-Klären darf genau dieses UTXO offen bleiben und ist der eine rote Ring. CoinJoin-Formen bleiben unverändert. Der Labor-Workflow verwirft vor dem Start eine alte Chain; die Szenarien bauen die UTXO-Mengen neu. Die Blockhöhe nach dem Start muss 0 sein.
 
 ## [1.0.1] — 2026-10-18

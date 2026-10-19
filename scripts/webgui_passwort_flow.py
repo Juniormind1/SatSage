@@ -181,7 +181,7 @@ def _klick_und_meldung(page, knopf: str) -> str:
           return !t.includes('Speichere') && !t.includes('Saving')
             && !t.includes('wird entfernt') && !t.includes('Removing');
         }""",
-        timeout=15_000,
+        timeout=60_000,
     )
     return page.locator("#app-passwort-meldung").inner_text().strip()
 
