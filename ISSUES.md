@@ -754,6 +754,254 @@ Aufwand: **unbekannt/hoch** · hängt an libbitcoin
 `scantxoutset` über libbitcoin-RPC für Exoten-Wallets (Vollständigkeit, nicht Speed). **Abhängig von libbitcoin-Fähigkeit/Verfügbarkeit.** Priorität niedrig.
 
 ---
+---
+
+## Transaktion · lokal zeichnen, Explorer nur für Sonderfälle
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · UI
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Ort:** Tx-Cache (`immutable_cache/tx`), Herkunftsnetz, Wallet-Verlauf
+
+Aufwand: **mittel–hoch** (Zeichnung aus vorhandenem Cache, kein Netz beim Öffnen)
+
+Eine Transaktion zeichnet SatSage selbst: Eingänge links, Ausgänge rechts, die Gebühr als eigene Spange. Die Breiten folgen den Beträgen. Betrag unbekannt bleibt gleich breit und heißt unbekannt. Eigentum nur, wenn Script oder Outpoint lokal zu einem eigenen Wallet passt. Ein Bein, dessen Transaktion schon im Cache liegt, öffnet diese Transaktion in der App. Aufklappen stellt keine Verbindung her, auch nicht zum eigenen Explorer.
+
+Der Verweis auf mempool.space bleibt für den Sonderfall: die Transaktion fehlt lokal, oder der Nutzer will den öffentlichen Explorer. Öffentliche Explorer bleiben Opt-in.
+
+**Schnitt:** SVG oder Canvas. Die Glas-Ansicht in 3D ist kein Ziel.
+
+**Verbote:**
+
+- Die gezeichnete Summe einer Bitcoin-Transaktion ist die Ausgänge plus die Gebühr. Fehlt jede Summe, sind alle Beine gleich breit. Beide Seiten füllen dieselbe Außenhöhe.
+- Ab 250 Beinen je Seite fällt der Rest in ein Bein „+N weitere“.
+- Breiten sind nur Zeichnung. Sie ändern keine Beträge und keine Lose.
+- Die Reihenfolge der Beine sagt nicht, welcher Eingang welchen Ausgang gezahlt hat.
+- Ein Import ohne Eingänge und Ausgänge bleibt leer. Kein geratenes Bild.
+- Derselbe Betrag ist nur ein möglicher Empfang, kein Eigentum.
+- Wechselgeld nur mit Beleg der Wechselgeld-Kette. Eine Rückzahlung an ein Wallet, dem schon ein Eingang dieser Transaktion gehört, ist eine Rückzahlung.
+- Nachschlagen nur über die bereits gewählte eigene Datenquelle, und nur wenn lokal Beträge fehlen. Kein mitgelieferter öffentlicher Server. Das Öffnen der Zeichnung holt nichts.
+
+---
+---
+
+## Passwort · Touch ID und andere Biometrie
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Sicherheit
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen. Die Windows- und Linux-Fassung ist dort selbst noch offen.
+**Ort:** `.env`-Scramble, Passwort-Dialog
+
+Aufwand: **hoch** (zuerst macOS, Windows und Linux danach)
+
+Biometrie gibt das schon gesetzte App-Passwort frei. Sie wird nicht selbst der Schlüssel. Die Argon2-Verschlüsselung der `.env` bleibt. Eine geänderte Passphrase macht die hinterlegte Kopie ungültig. Einschreiben und Abschalten macht der Nutzer selbst.
+
+Reihenfolge: Touch ID über die macOS-Keychain. Danach dasselbe Muster für Windows Hello und für libsecret unter Linux. Kein schwächeres Passwort auf den späteren Plattformen.
+
+**Verbote:**
+
+- Eine leere Passphrase wird nicht gespeichert.
+- Eine veraltete Kopie liefert kein Passwort, auch nicht das vorherige.
+- Schlägt das Merken der Markierung fehl, wird der Keychain-Eintrag zurückgenommen. Schlägt das Löschen der Veraltet-Markierung fehl, werden die Kopien mitgelöscht.
+- „Sensor fehlt“ und „nicht eingerichtet“ bleiben zwei Zustände.
+- Solange Windows Hello oder libsecret nicht stehen, gibt es dort keinen stillen Ersatzspeicher.
+- Ein Build ohne die nötige Berechtigung überschreibt einen schon geschützten Eintrag nicht.
+- Das Passwort geht an keine zweite Komponente, keinen Agenten und kein Log.
+- Das Geheimnis bleibt die Passphrase der `.env`. Biometrie legt keinen zweiten Schlüssel an.
+
+---
+---
+
+## Börse · CSV als Trade-Historie
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Import
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen. Spec je Börse, unbekannte Zeilentypen in Quarantäne.
+**Ort:** `core/exchange_reports.py`
+
+Aufwand: **hoch** (Stufe 1). Stufe 2 erst nach Änderung des Nutzerprofils.
+
+Heute bleiben aus einem Börsen-CSV nur Bitcoin-Adressen und TxIDs. Sie beschriften den externen Zugang.
+
+**Stufe 1, im Nutzerprofil:** Eine Zeile erklärt einen schon gesehenen Zu- oder Abfluss: Datum, BTC-Betrag, Gebühr, Auszahlungs-Tx, Börsenname. Eine Zeile ohne passenden Chain-Hop bleibt eine Lücke und wird kein erfundener Zugang. Unbekannter Zeilentyp wird markiert und nicht als Kauf oder Verkauf geraten. Pro Börse zuerst eine kurze Spec (Zeilentypen, Zeitzone, Zahlenformat), dann der Importer.
+
+**Stufe 2, Regelbruch:** Ein mitgeführter Börsenbestand, Lose auf der Börse oder eine eigene Steuerrechnung daraus verletzt [`doc/user-profile-ux.md`](doc/user-profile-ux.md). Das bleibt zu, bis dieses Profil geändert ist.
+
+**Verbote:**
+
+- Spalten, Zeilentypen, Zeitzone und Zahlenformat kommen aus der Doku der Börse. Kein Abschreiben eines fremden Importers.
+- Zeitzone nur, wenn die Börse sie nennt. Sonst bleibt die Zeit der Zeile unmarkiert.
+- Zeilen ohne Bitcoin bleiben draußen. Sie werden keine Sats.
+- Ein unbekannter Zeilentyp bleibt Quarantäne. Daraus wird kein Kauf und kein Verkauf.
+- Eine Zeile ohne passenden Chain-Hop wird kein Zugang und kein Datum der Anschaffung.
+
+---
+---
+
+## Bericht · Export an den Beweisstand binden
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Export
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Verwandt:** „Steuerbericht · HTML/CSV-Knöpfe gelb/grün nach Trace-Tiefe“, „Nachweis · HTML-Report + Proof-JSON“
+
+Aufwand: **mittel** (Fingerabdruck der benutzten Bäume, keine zweite Buchhaltung)
+
+Ein gespeicherter Bericht behält die Fakten, mit denen er erzeugt wurde. Der Dialog zeigt den Beweisstand (welche Herkunftsbäume und Zeiten). Zieht ein Trace danach nach, gilt der nächste Export als veraltet, bis der Nutzer ihn neu ansieht und ausdrücklich neu erzeugt. Ein stiller zweiter Download mit anderem Inhalt entsteht nicht.
+
+Der Fingerabdruck steht im HTML, damit zwei Dateien vergleichbar sind. Das ersetzt weder die gelb/grüne Trace-Tiefe noch den signierten Nachweis.
+
+**Verbote:**
+
+- Eine Vorschau und ein Entwurf sind keine Freigabe.
+- Vorschau und Erzeugen verwenden dieselben Kanten. Weicht der Stand ab, wird der Bericht neu angesehen.
+- Abgeschnittene Tiefe, ein Fehler in der Vorschau und ein unvollständiger Stand geben den Export nicht frei.
+- Ein schon geschriebener Bericht wird nicht still mit späteren Regeln neu gerendert. Das Urteil „Gebühr“ oder „Differenz“ bleibt das Urteil des Erzeugungszeitpunkts. Neue Regeln gelten für einen ausdrücklich neu erzeugten Bericht.
+
+---
+---
+
+## Bericht · nur den angefragten Pfad herausgeben
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Export
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Verwandt:** „Steuerbericht · zwei Berichtsarten (Geldwäsche vs. Haltefrist/Stichtag)“, „Herkunft · manuelle Wurzelbelege“
+
+Aufwand: **mittel** (Auswahl, Weglassen, zwei Zeichnungen im Bericht; keine neue Losrechnung)
+
+Ziel des Berichts ist ein UTXO oder ein Teilbetrag daraus. Andere Wallets und unbenutzte Äste bleiben draußen. Eine fehlende Station ist eine sichtbare Lücke. Ein Teilbetrag nur entlang eines eindeutigen, exakten Verhältnisses. Mehrere mögliche Quellen oder eine Rundung bleiben ungelöst. Die Auswahl ändert nur, was der Bericht zeigt, nicht die gespeicherten Traces.
+
+Die Wahl „voll bis zum externen Zugang“ oder „Abbruch an der Haltefrist“ bleibt der eigene offene Punkt. Dieser Punkt ergänzt sie um die Reichweite: nur der angefragte Pfad.
+
+**Zeichnung · Pfad:** Derselbe Pfad ist ein Graph, nicht das Herkunftsnetz. Das Netz bleibt das Werkzeug zum Suchen. Im Bericht sind nur die Stationen des angefragten Ziels. Eine durchgezogene Kante ist die Chain. Eine gestrichelte Kante ist eine Vermutung. Eine gepunktete Kante ist veraltet oder widersprüchlich. Eine Lücke ist ein eigener Knoten. Ein CoinJoin- oder PayJoin-Hop trägt eine Marke und wird nicht weiter durchgezeichnet. Zoom und Einpassen bleiben in der Ansicht. Ein Klick auf eine Station öffnet die Transaktion, wenn sie im Cache liegt. Dieselbe Zeichnung steht als SVG im HTML-Bericht. Aufklappen holt nichts.
+
+**Zeichnung · Ring der Herkunftsarten:** Neben dem Pfad ein Donut, ein Segment je Art und nur für ein Asset. Arten aus der Chain: Coinbase, datierter fremder Zugang, undatiert, Privacy-Hop. Unbekannt bleibt ein eigenes Segment. Angaben des Nutzers aus „Herkunft · manuelle Wurzelbelege“ sind eigene Segmente und als Angabe beschriftet. Eröffnungsbestand bleibt ein getrenntes Segment. Die Mitte nennt die Summe dieses einen Assets. Der Lot-Donut am Zeitstrahl bleibt die Frage der Haltefrist. Dieser Ring sagt, woraus der angefragte Pfad besteht.
+
+**Verbote:**
+
+- Trifft einer dieser Zustände zu, steht er im Bericht: fehlende Historie, unklare Zuteilung, ungelöster Privacy-Hop, abgeschnittene Tiefe, unbestätigter Vorschlag, unbestätigte Chain-Daten.
+- Ein Abbruch der Tiefe steht als Abbruch.
+- Ein unbekannter Ursprung darf im Bericht stehen und zählt nicht als vollständig geklärt.
+- Beträge verschiedener Assets werden nicht addiert.
+- Zyklen, eine überschrittene Tiefe und zu wenig Beleg blockieren den Export.
+- Ein Teilbetrag ändert nur die Anzeige, nicht den gespeicherten Trace.
+- Der Pfad-Graph zeichnet keine unbenutzten Äste und keine fremden Teilnehmer eines Privacy-Hops.
+- Der Ring addiert keine verschiedenen Assets und rechnet sie nicht still um. Mehr als ein Asset oder eine leere Mischung ergibt keinen Ring.
+- Ein Segment im Ring ändert keine Lot-Farbe, kein Anschaffungsdatum und kein „vollständig geklärt“.
+
+---
+---
+
+## Herkunft · mehrere Eingänge nicht anteilig verteilen
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Berichtssatz
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Ort:** Herkunftsbericht, Lot-Farben
+
+Aufwand: **gering–mittel** (Satz und Kennzeichnung; der Walk stoppt CoinJoin schon)
+
+Ohne Beleg bleibt ein Anteil aus mehreren Eingängen unklar, auch im Berichtssatz. Eine proportionale Aufteilung darf nur danebenstehen und muss als Vermutung beschriftet sein. Bei CoinJoin und PayJoin zeigt der Bericht den Hop und verfolgt die fremden Teilnehmer nicht. Der Walk hält dort bereits an. Es fehlt der Satz, der das so sagt, statt einen grauen Rest wie eine geklärte Herkunft aussehen zu lassen.
+
+**Verbote:**
+
+- Adressen und TxIDs fremder Teilnehmer eines CoinJoin oder PayJoin stehen nicht als eigene Herkunft.
+- Über einen solchen Hop wird keine automatische Kante gelegt.
+- Ein N:1-Rest, bei dem offen ist, welcher Eingang die Gebühr oder einen fremden Ausgang gezahlt hat, bleibt ein Vorschlag und wird nicht übernommen.
+- Zwei Beschreibungen derselben Kante ordnen den Hop nicht doppelt zu. Sonst ist die Zuteilung unklar.
+
+---
+---
+
+## Herkunft · Differenz nicht als Gebühr verbuchen
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Berichtssatz
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Hängt an:** „Börse · CSV als Trade-Historie“
+
+Aufwand: **gering–mittel** (Regel, sobald Börsenzeile und Chain-Hop zusammentreffen)
+
+Eine Lücke zwischen zwei Stationen heißt Gebühr nur, wenn jeder Hop genau seine eigene ausgewiesene Gebühr verbraucht und kein CoinJoin- oder PayJoin-Hop auf dem Weg liegt. Sonst heißt sie Differenz. Miner-Gebühr und Börsen-Gebühr bleiben zwei Posten.
+
+**Verbote:**
+
+- Ein Hop mit negativem Verbrauch oder ein Privacy-Hop auf dem Weg verwirft „Gebühr“ für die ganze Route.
+- Dass die Summe zufällig aufgeht, reicht nicht. Jeder verbrauchende Hop muss einzeln seine eigene gebuchte Gebühr treffen.
+- Das Urteil wird mit dem Bericht gespeichert. Siehe „Bericht · Export an den Beweisstand binden“.
+- Die ganze Transaktionsgebühr ist nicht automatisch der Schwund des eigenen Wallets. Geben zwei Beteiligte je 1 BTC und bekommen je 0,9999 BTC zurück, ist die Transaktionsgebühr 20 000 Sats und der eigene Schwund 10 000 Sats. Der ungeklärte Rest bleibt ungelöst.
+
+---
+---
+
+## Herkunft · manuelle Wurzelbelege
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Beleg
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Verwandt:** „Börse · CSV als Trade-Historie“, „Bericht · nur den angefragten Pfad herausgeben“
+
+Aufwand: **mittel** (Stufe 1). Stufe 2 erst nach Änderung des Nutzerprofils.
+
+An einem externen Ende kann eine Kategorie stehen, die die Chain nicht hergibt: Kauf gegen Fiat, Schenkung, Mining, Einkommen, Eröffnungsbestand, frühere Börsenauszahlung, unbekannt. Die Chain bleibt der Verlauf. Die Kategorie ist eine Angabe.
+
+**Stufe 1, im Nutzerprofil:** Die Angabe steht sichtbar als Angabe des Nutzers am externen Ende und als eigenes Segment im Ring der Herkunftsarten. Siehe „Bericht · nur den angefragten Pfad herausgeben“. Sie ändert keine Lot-Farbe, kein Anschaffungsdatum und kein „vollständig geklärt“.
+
+**Stufe 2, Regelbruch:** Die Angabe zählt als geprüfte Herkunft, beendet den Walk oder macht aus Grau ein erklärtes Ende. Das verletzt [`doc/user-profile-ux.md`](doc/user-profile-ux.md). Das bleibt zu, bis dieses Profil die manuelle Angabe ausdrücklich erlaubt.
+
+**Verbote:**
+
+- Der Walk erfindet keine Wurzel. Nur eine vom Nutzer bestätigte Angabe steht im Bericht. Ein Vorschlag ist kein Beleg.
+- Kategorien nur die genannten. Eine als Lücke markierte Station ist keine davon.
+- Eröffnungsbestand bleibt sichtbar getrennt von einer erklärten Herkunft. Er heißt: die Vorgeschichte endet hier mit einer Angabe.
+- Ein Wurzelbeleg, der nach der Transaktion datiert ist, die er erklären soll, gilt nicht.
+- Beträge verschiedener Assets werden nicht zu einer Herkunftssumme addiert.
+
+---
+---
+
+## Herkunft · Quarantäne löst sich selbst
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Bericht
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen. Kein Journal und keine Steuer-Engine übernehmen.
+**Verwandt:** graue und gelbe Lose, „Herkunft · mehrere Eingänge nicht anteilig verteilen“, „Bericht · nur den angefragten Pfad herausgeben“
+
+Aufwand: **mittel** (Gründe sichtbar machen; die nächste Rechnung hebt den Halt auf)
+
+Ein Hop oder UTXO ohne ausreichenden Beleg bleibt aus „erfüllt“ und aus einem grünen Berichtssatz draußen. Die nächste Herkunfts- oder Steuerrechnung hebt das von selbst auf, sobald der fehlende Beleg da ist: Trace fertig, Zeit nachgezogen oder passende Exportzeile. Dafür gibt es keinen eigenen Knopf, der den Beleg überstimmt.
+
+Die Ursache wird benannt. Folgen zeigen auf diese Ursache und verschwinden nicht still. Eine angezeigte Liste, die älter ist als die Caches, ist als veraltet markiert.
+
+**Gründe, einer als Ursache, der Rest als Zusatz:** Wallet-Historie fehlt. Chain-Beleg fehlt, etwa unbekannte Eingangsbeträge oder unbestätigt. Für eine Fiat-Angabe fehlt der Kurs. Die Anschaffung fehlt. Mehr als eine Lesart ist gültig. Die Form ordnet SatSage nicht ein. Der Rest ist Folge einer anderen offenen Ursache.
+
+**Verbote:**
+
+- Aus wenig Beleg wird kein steuerliches Ereignis geraten.
+- Ein Abfluss wird kein Verkauf, nur weil das Ziel-Wallet nicht angebunden ist.
+- Ein Eingang ohne Art wird kein Kauf zum Marktkurs.
+- Die Haltedauer wartet nicht auf einen Kurs. Ein fehlender Kurs hält nur die Fiat-Angabe zurück.
+- Kein zweites Buch, keine Journale, keine Engine, die Lose fortschreibt.
+
+---
+---
+
+## Beleg · Anhang an einem Hop
+
+**Stand:** 2026-11-04 · **offen** · Idee / später · Beleg
+**Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen.
+**Verwandt:** „Bericht · Export an den Beweisstand binden“, „Herkunft · manuelle Wurzelbelege“
+
+Aufwand: **mittel** (eine Ablage, Hash, kein Dokumentensystem)
+
+An einer Transaktion, einer Kante oder einem Wurzelbeleg kann eine Datei oder eine URL hängen. Die Datei wird lokal kopiert und über ihren Hash geführt. Die URL ist nur die Zeichenkette.
+
+Solange der Anhang Lot-Farbe, Anschaffungsdatum und Eigentum nicht verändert, bleibt das im Nutzerprofil. Soll der Anhang selbst als Herkunft oder Datum zählen, gilt „Herkunft · manuelle Wurzelbelege“ und dessen Sperre.
+
+**Verbote:**
+
+- Eine URL wird nicht geholt, nicht gespiegelt und nicht auf Erreichbarkeit geprüft.
+- Kein OCR, keine Belegerkennung, kein Hochladen nach außen.
+- Ein Anhang begründet kein Eigentum, kein Lot und kein Anschaffungsdatum.
+- Eine Ablage. Kein zweites System für Dokumente.
+- Der Export prüft den gespeicherten Hash. Eine fehlende oder geänderte Datei blockiert den Export. Sie wird nicht still neu gehasht.
+- Wiederverwenden an einem anderen Hop legt eine eigene Kopie mit eigenem Hash an.
+- Logs enthalten keine volle URL.
+- Entfernt der Nutzer den Anhang, geht er mit. Die Chain-Transaktion bleibt.
+
+---
 
 # Historie / Langtexte
 
