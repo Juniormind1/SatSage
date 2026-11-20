@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -232,7 +233,8 @@ class NativeWegTests(unittest.TestCase):
         self.dienst = _server(lambda pfad: (200, {"address": True}, "application/json"))
         zeilen: list[str] = []
         kunde = self._kunde()
-        text = abfrage_hinweis(kunde, log=zeilen.append)
+        with mock.patch.dict("os.environ", {"LIBBITCOIN_NATIVE_DEBUG": ""}):
+            text = abfrage_hinweis(kunde, log=zeilen.append)
         port = self.dienst.server_address[1]
         self.assertEqual(
             zeilen,
@@ -242,7 +244,7 @@ class NativeWegTests(unittest.TestCase):
                 "Bestand und Herkunft darüber.",
             ],
         )
-        self.assertEqual(text, zeilen[-1])
+        self.assertEqual(text, zeilen[1])
         self.assertEqual(self.dienst.pfade, ["/v1/configuration"])
         self.dienst.pfade.clear()
         self.assertEqual(abfrage_hinweis(kunde), text)
@@ -268,6 +270,45 @@ class NativeWegTests(unittest.TestCase):
         fremd._libbitcoin_werte["FULCRUM_HOST"] = "127.0.0.1"
         self.assertIsNone(abfrage_hinweis(fremd, log=zeilen.append))
         self.assertEqual(len(zeilen), 2)
+
+    def test_antwortender_port_gilt_fuer_den_prozess(self) -> None:
+        import core.libbitcoin_native as modul
+
+        def lauf(reihenfolge: tuple[int, int], tot: int) -> list[int]:
+            modul._port_merker.clear()
+            versuche: list[int] = []
+
+            def holen(self, pfad, *, datenformat):
+                versuche.append(self.port)
+                if self.port == tot:
+                    raise modul.NativeFehler("Netz")
+                return {"store": {"address": True}}
+
+            erster = _Kunde("libbitcoin", "127.0.0.1", 9)
+            zweiter = _Kunde("libbitcoin", "127.0.0.1", 9)
+            for kunde in (erster, zweiter):
+                kunde._libbitcoin_werte = {"FULCRUM_HOST": "127.0.0.1"}
+            lebt = reihenfolge[1] if reihenfolge[0] == tot else reihenfolge[0]
+            with mock.patch.object(modul.NativeSitzung, "_holen", holen), mock.patch(
+                "core.libbitcoin_native._KANDIDATEN_PORTS", reihenfolge,
+            ), mock.patch.dict(
+                "os.environ",
+                {"LIBBITCOIN_NATIVE_PORT": "", "LIBBITCOIN_NATIVE_DEBUG": ""},
+            ):
+                zeilen: list[str] = []
+                abfrage_hinweis(erster, log=zeilen.append)
+                vorher = len(versuche)
+                abfrage_hinweis(zweiter, log=zeilen.append)
+            pruefen = [zeile for zeile in zeilen if zeile.startswith("Prüfe ")]
+            self.assertEqual(len(pruefen), 2)
+            self.assertIn(" und ", pruefen[0])
+            self.assertEqual(pruefen[1], f"Prüfe libbitcoin-Abfrage 127.0.0.1:{lebt}…")
+            self.assertEqual(versuche[vorher:], [lebt])
+            self.assertIn("Adressindex an", zeilen[-1])
+            return versuche
+
+        self.assertEqual(lauf((8181, 8180), 8181)[:2], [8181, 8180])
+        self.assertEqual(lauf((8180, 8181), 8180)[:2], [8180, 8181])
 
     def test_nimmt_den_port_auf_dem_libbitcoin_antwortet(self) -> None:
         fremd = _server(lambda pfad: (200, {"ok": True}, "application/json"))
@@ -296,6 +337,52 @@ class NativeWegTests(unittest.TestCase):
         finally:
             fremd.shutdown()
             fremd.server_close()
+
+    def test_store_address_ist_der_index_network_address_nicht(self) -> None:
+        nur_netz = _server(
+            lambda pfad: (200, {"network": {"address": True}}, "application/json"),
+        )
+        self.dienst = _server(
+            lambda pfad: (
+                200,
+                {"store": {"address": True}, "network": {"address": True}},
+                "application/json",
+            ),
+        )
+        try:
+            falsch = nur_netz.server_address[1]
+            richtig = self.dienst.server_address[1]
+            kunde = self._kunde()
+            kunde._libbitcoin_werte = {"FULCRUM_HOST": "127.0.0.1"}
+            with mock.patch(
+                "core.libbitcoin_native._KANDIDATEN_PORTS",
+                (falsch, richtig),
+            ), mock.patch.dict("os.environ", {"LIBBITCOIN_NATIVE_PORT": ""}):
+                text = abfrage_hinweis(kunde)
+            self.assertIn("Adressindex an", text or "")
+            self.assertEqual(kunde._libbitcoin_native.port, richtig)
+            self.assertEqual(nur_netz.pfade, ["/v1/configuration"])
+
+            aus = self._kunde()
+            aus._libbitcoin_werte = {
+                "FULCRUM_HOST": "127.0.0.1",
+                "LIBBITCOIN_NATIVE_PORT": str(falsch),
+            }
+            self.dienst.router = lambda pfad: (
+                200,
+                {"store": {"address": False}, "network": {"address": True}},
+                "application/json",
+            )
+            aus.port = self.dienst.server_address[1]
+            # Port kommt aus den Werten, nicht aus dem Socket des Kunden.
+            aus._libbitcoin_werte["LIBBITCOIN_NATIVE_PORT"] = str(
+                self.dienst.server_address[1],
+            )
+            self.assertIn("kein Adressindex", abfrage_hinweis(aus) or "")
+            self.assertFalse(aus._libbitcoin_native.aktiv)
+        finally:
+            nur_netz.shutdown()
+            nur_netz.server_close()
 
     def test_libbitcoin_ohne_index_bleibt_auf_dem_port(self) -> None:
         self.dienst = _server(lambda pfad: (200, {"address": False}, "application/json"))
@@ -647,6 +734,58 @@ class NativeWegTests(unittest.TestCase):
         )
         ergaenzt = _mit_vorgaengerzeit(get_tx, kante)
         self.assertEqual(ergaenzt.prev_time_ts, ZEIT)
+
+    def test_diagnose_bleibt_aus_ohne_variable(self) -> None:
+        import core.libbitcoin_native as modul
+
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("LIBBITCOIN_NATIVE_DEBUG", None)
+            self.assertFalse(modul._diagnose_an())
+        for wert in ("1", "true", "ja", "yes", "on", "an"):
+            with mock.patch.dict("os.environ", {"LIBBITCOIN_NATIVE_DEBUG": wert}):
+                self.assertTrue(modul._diagnose_an(), wert)
+        for wert in ("", "0", "false", "nein", "off", "aus"):
+            with mock.patch.dict("os.environ", {"LIBBITCOIN_NATIVE_DEBUG": wert}):
+                self.assertFalse(modul._diagnose_an(), wert)
+
+    def test_diagnose_kuerzt_skript_hash_und_merkt_store_feld(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        import core.libbitcoin_native as modul
+
+        def router(pfad):
+            if pfad == "/v1/configuration":
+                return 200, {"store": {"address": True}}, "application/json"
+            if pfad.endswith("/confirmed"):
+                return 200, [{
+                    "point": {"hash": TX, "index": 0},
+                    "value": WERT,
+                }], "application/json"
+            return None
+
+        self.dienst = _server(router)
+        kunde = self._kunde()
+        with tempfile.TemporaryDirectory() as ordner:
+            datei = Path(ordner) / "libbitcoin-native.log"
+            modul._DIAGNOSE_FRISCH = False
+            with mock.patch.object(modul, "_diagnose_pfad", lambda: datei), mock.patch.dict(
+                "os.environ", {"LIBBITCOIN_NATIVE_DEBUG": "1"},
+            ):
+                text = abfrage_hinweis(kunde, log=lambda _zeile: None)
+                self.assertTrue(kunde._libbitcoin_native.aktiv)
+                sitzung = kunde._libbitcoin_native
+                sitzung.hash_bestaetigt = True
+                sitzung.utxos(self.adresse)
+                sitzung._holen(f"tx/{TX}/header", datenformat="json")
+            inhalt = datei.read_text(encoding="utf-8")
+        self.assertIn("feld=store", inhalt)
+        self.assertIn("index=an", inhalt)
+        self.assertIn("Adressindex an", text or "")
+        self.assertNotIn(self.electrum_hash, inhalt)
+        self.assertIn(self.electrum_hash[:8].lower(), inhalt)
+        self.assertIn(TX, inhalt)
+        self.assertNotIn(self.adresse, inhalt)
 
 
 if __name__ == "__main__":

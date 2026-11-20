@@ -9,6 +9,13 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Verlauf · Log:** Die Fortschrittszeile fasst 10, 20 oder 50 Adressen zusammen. Die Stufe ist so gewählt, dass zwischen zwei Zeilen weniger als 10 Sekunden liegen. Liegt schon die Zehnergruppe darüber, bleibt es bei 10 Adressen.
+- **Wallet · Historie:** Nach dem Verlaufsscan bleibt die Gruppe „Bereits ausgegeben“ unter den UTXOs stehen. Bisher erschien sie erst, nachdem man das Wallet einmal verlassen und wieder geöffnet hatte.
+- **Datenquellen · libbitcoin:** Antwortet die native Abfrage auf 8180 und nicht auf 8181, verbindet SatSage in diesem Prozess nicht mehr zu 8181. Umgekehrt genauso.
+- **Datenquellen · libbitcoin:** Die native Abfrage bleibt an, wenn der Adressindex unter `store.address` steht. Die ältere Fassung mit `address` an der Wurzel gilt weiter. `network.address` schaltet sie nicht ein. Die Pfade bleiben `address`, `output` und `tx`.
+- **Anmeldung und Einstellungen · Auge:** Maskierte Felder (Anmeldung, Ersteinrichtung, App-Passwort, SMTP-Passwort, LLM-Key, Geheimfelder der Datenquellen) haben einen Knopf, der den Inhalt zeigt und wieder verbirgt. Das Feld startet verborgen. Der Knopf schickt das Formular nicht ab.
+- **Navigation · standardmäßig angeheftet:** Ohne gemerkte Wahl bleibt die Leiste angeheftet, sobald neben den 210 px noch Inhalt steht (ab 720 px Breite). Darunter und in der Einbettung (iframe, StartOS) ist sie das Overlay und klappt beim Verlassen des Zeigers zu. Ein gespeichertes An- oder Abheften gewinnt. Der Umbruch der Kopf-Pillen klappt die Leiste nicht mehr ein.
+
 ## [1.0.1] — 2026-10-18
 
 - **Regtest-Labor · Blockzeit:** Szenarien setzen die Mocktime nicht mehr über die Host-Uhr. Ein Zeitsprung, der darüber hinaus wollte, bleibt auf der aktuellen Uhr, statt das Minen mit „time-too-new“ abzubrechen.

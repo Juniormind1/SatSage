@@ -3615,3 +3615,55 @@ async function apiSourceCheck(optionen = {}) {
   return koerper;
 }
 
+const GEHEIM_AUGE_SVG = (
+  '<svg class="geheim-auge-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">'
+  + '<path class="auge-auf" fill="none" stroke="currentColor" stroke-width="1.25" '
+  + 'd="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4S1.5 8 1.5 8z"/>'
+  + '<circle class="auge-auf" cx="8" cy="8" r="1.5" fill="currentColor"/>'
+  + '<path class="auge-zu" fill="none" stroke="currentColor" stroke-width="1.25" '
+  + 'd="M3 3.2 13 12.8M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4S1.5 8 1.5 8z"/>'
+  + "</svg>"
+);
+
+function setzeGeheimAuge(knopf, offen) {
+  const schluessel = offen ? "common.hideSecret" : "common.showSecret";
+  knopf.setAttribute("aria-pressed", offen ? "true" : "false");
+  knopf.setAttribute("data-i18n-aria-label", schluessel);
+  knopf.setAttribute("data-i18n-title", schluessel);
+  const text = t(schluessel);
+  knopf.setAttribute("aria-label", text);
+  knopf.title = text;
+}
+
+/** Zeigt den Feldinhalt und verbirgt ihn wieder. Schickt nichts ab und loggt nichts. */
+function haengeGeheimAuge(eingabe) {
+  if (!eingabe || eingabe.dataset.geheimAuge === "1") return;
+  if (eingabe.type !== "password") return;
+  const eltern = eingabe.parentNode;
+  if (!eltern) return;
+  eingabe.dataset.geheimAuge = "1";
+  const zeile = document.createElement("span");
+  zeile.className = "geheim-zeile";
+  eltern.insertBefore(zeile, eingabe);
+  zeile.appendChild(eingabe);
+  const knopf = document.createElement("button");
+  knopf.type = "button";
+  knopf.className = "geheim-auge";
+  knopf.innerHTML = GEHEIM_AUGE_SVG;
+  knopf.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    const offen = eingabe.type === "password";
+    eingabe.type = offen ? "text" : "password";
+    setzeGeheimAuge(knopf, offen);
+  });
+  setzeGeheimAuge(knopf, false);
+  zeile.appendChild(knopf);
+}
+
+function bindeGeheimAugen(wurzel) {
+  const basis = wurzel || document;
+  basis.querySelectorAll('input[type="password"]').forEach((eingabe) => {
+    haengeGeheimAuge(eingabe);
+  });
+}
+

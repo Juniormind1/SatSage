@@ -498,7 +498,7 @@ if (fehler.length) {
         self.assertIn(".buehne:not(.log-an)", css)
 
     def test_chat_nur_mit_llm_und_nav_pin_bei_pillenumbruch(self):
-        """Ohne LLM kein Chat; schmale Kopfzeile → Overlay-Navi mit Pin."""
+        """Ohne LLM kein Chat; schmale Breite oder Einbettung → Overlay-Navi mit Pin."""
         html = (WEB / "index.html").read_text(encoding="utf-8")
         css = (WEB / "style.css").read_text(encoding="utf-8")
         nav_js = (WEB / "chrome_nav.js").read_text(encoding="utf-8")
@@ -518,7 +518,10 @@ if (fehler.length) {
         self.assertIn("setzeChatSichtbar", self.js)
         self.assertIn('s.pille === "gut" || s.pille === "warn"', self.js)
         self.assertIn('buehne.classList.toggle("chat-an", an)', self.js)
-        self.assertIn("kopfPillenUmgebrochen", nav_js)
+        self.assertIn("function navSchmal()", nav_js)
+        self.assertIn("NAV_LEISTE_PX = 210", nav_js)
+        self.assertIn('wahl === "0"', nav_js)
+        self.assertNotIn("kopfPillenUmgebrochen", nav_js)
         self.assertIn("navKompaktErzwungen", nav_js)
         self.assertIn("navInEinbettung", nav_js)
         self.assertIn("bindeNavLeiste", nav_js)
@@ -533,6 +536,13 @@ if (fehler.length) {
         self.assertIn('"nav.toggleTitle"', de)
         self.assertIn('"nav.pinTitle"', en)
         self.assertIn('"nav.toggleTitle"', en)
+        format_js = (WEB / "format.js").read_text(encoding="utf-8")
+        self.assertIn("function haengeGeheimAuge", format_js)
+        self.assertIn("function bindeGeheimAugen", format_js)
+        self.assertIn('knopf.type = "button"', format_js)
+        self.assertIn('"common.showSecret"', de)
+        self.assertIn('"common.hideSecret"', en)
+        self.assertIn(".geheim-auge", css)
 
     def test_empfang_qr_in_nav_nur_ohne_log_und_llm(self):
         """Log aus und kein LLM: QR in der Leiste. Sonst rechts unten."""

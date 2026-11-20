@@ -386,13 +386,12 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--akzent-zart);
 }
 .nav-leiste-kopf {
-  display: none;
+  display: flex;
   flex-shrink: 0;
   justify-content: flex-end;
   align-items: center;
   padding: 0 8px 4px 8px;
 }
-#app.nav-kompakt .nav-leiste-kopf { display: flex; }
 .nav-rand {
   display: none;
   position: absolute;
@@ -1289,6 +1288,44 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
   text-align: left;
   width: 100%;
 }
+.geheim-zeile {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+.geheim-zeile > input {
+  width: 100%;
+  min-width: 0;
+  padding-right: 1.8rem;
+}
+.geheim-auge {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  width: 1.7rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--gedaempft);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.geheim-auge:hover,
+.geheim-auge:focus-visible { color: var(--text); }
+.geheim-auge:focus-visible {
+  outline: 2px solid var(--akzent);
+  outline-offset: 1px;
+}
+.geheim-auge .auge-zu { display: none; }
+.geheim-auge[aria-pressed="true"] .auge-auf { display: none; }
+.geheim-auge[aria-pressed="true"] .auge-zu { display: block; }
 .app-passwort-aktuell-reihe,
 .app-passwort-repeat-reihe {
   display: flex;
@@ -2198,6 +2235,9 @@ input[type="text"].fifo-ziel-fee.ungueltig {
   background: var(--flaeche); border: 1px solid var(--linie);
   border-radius: var(--r); padding: 5px 9px; color: var(--text);
   font-size: 12px; width: 100%;
+}
+.feld-zeile .geheim-zeile > input {
+  padding-right: 1.8rem;
 }
 .feld-zeile textarea { resize: vertical; line-height: 1.5; }
 .feld-hinweis { font-size: 11px; color: var(--blass); }

@@ -240,6 +240,93 @@ class VerlaufTest(unittest.TestCase):
         )
 
 
+def _sofort_adressnummern(gesehen: list[tuple[str, bool]]) -> list[int]:
+    nummern = []
+    for text, sofort in gesehen:
+        if not sofort or "Adresse " not in text:
+            continue
+        teil = text.split("Adresse ", 1)[1]
+        nummern.append(int(teil.split("/", 1)[0]))
+    return nummern
+
+
+class TestVerlaufLogTakt(unittest.TestCase):
+    """Logzeilen im Abstand unter 10 s, Stufe 10, 20 oder 50 Adressen."""
+
+    def test_stufe_bleibt_unter_zehn_sekunden(self):
+        from fulcrum import _verlauf_log_schritt
+
+        self.assertEqual(_verlauf_log_schritt(0), 10)
+        self.assertEqual(_verlauf_log_schritt(-1), 10)
+        # 50 × 0,15 s = 7,5 s
+        self.assertEqual(_verlauf_log_schritt(0.15), 50)
+        # 50 × 0,2 s = 10 s, das liegt nicht darunter → 20
+        self.assertEqual(_verlauf_log_schritt(0.2), 20)
+        self.assertEqual(_verlauf_log_schritt(0.4), 20)
+        # 10 × 0,8 s = 8 s, 20 × 0,8 s = 16 s
+        self.assertEqual(_verlauf_log_schritt(0.8), 10)
+        self.assertEqual(_verlauf_log_schritt(2), 10)
+
+    def test_sofortzeile_nur_an_der_stufe(self):
+        gesehen = []
+
+        def fortschritt(text, *, sofort=False):
+            gesehen.append((text, sofort))
+
+        with mock.patch(
+            "core.fulcrum_history._verlauf_log_schritt", return_value=10,
+        ):
+            fetch_wallet_history_fulcrum(
+                FakeFulcrumClient({}, {}),
+                [EXTERN_A] * 25,
+                on_progress=fortschritt,
+            )
+        self.assertEqual(_sofort_adressnummern(gesehen), [1, 10, 20, 25])
+        sofort = [text for text, ist_sofort in gesehen if ist_sofort]
+        self.assertEqual(sum("get_history" in text for text in sofort), 1)
+        self.assertTrue(sofort[0].startswith("Frage Verlauf für 25 Adressen"))
+        self.assertIn("noch 15 von 25 Adressen", sofort[1])
+        self.assertIn("Adresse 10/25", sofort[1])
+        self.assertNotIn("get_history", sofort[1])
+
+    def test_grosse_stufe_ueberspringt_die_zehner(self):
+        gesehen = []
+
+        def fortschritt(text, *, sofort=False):
+            gesehen.append((text, sofort))
+
+        with mock.patch(
+            "core.fulcrum_history._verlauf_log_schritt", return_value=50,
+        ):
+            fetch_wallet_history_fulcrum(
+                FakeFulcrumClient({}, {}),
+                [EXTERN_A] * 30,
+                on_progress=fortschritt,
+            )
+        self.assertEqual(_sofort_adressnummern(gesehen), [1, 30])
+
+    def test_gemessene_dauer_waehlt_zwanzig(self):
+        """0,4 s je Adresse: 20 × 0,4 s = 8 s, 50 × 0,4 s = 20 s."""
+        uhr = {"t": 0.0}
+
+        def monotonic():
+            uhr["t"] += 0.4
+            return uhr["t"]
+
+        gesehen = []
+
+        def fortschritt(text, *, sofort=False):
+            gesehen.append((text, sofort))
+
+        with mock.patch("core.fulcrum_history.time.monotonic", monotonic):
+            fetch_wallet_history_fulcrum(
+                FakeFulcrumClient({}, {}),
+                [EXTERN_A] * 45,
+                on_progress=fortschritt,
+            )
+        self.assertEqual(_sofort_adressnummern(gesehen), [1, 20, 40, 45])
+
+
 class TestGapScanNenntUtxos(unittest.TestCase):
     """Die Index-Zeile trägt die UTXO-Zahl, sobald die Adresse geprüft ist."""
 

@@ -869,17 +869,36 @@ function aktualisiereSpeicherleiste() {
 // ---------------------------------------------------------------------------
 
 const NAV_PIN_MERKER = "satsage-nav-pin";
+const NAV_LEISTE_PX = 210;
+// Darunter bleibt neben der Leiste kein nutzbarer Inhalt. Dieselbe Grenze
+// wie die schmalen Einstellungs-Spalten (720 px).
+const NAV_INHALT_MIN_PX = 510;
 let navKompaktGebunden = false;
 let navHoverTimer = 0;
 let navZeigerDrin = false;
 let navBeobachter = null;
 
-function navPinGemerkt() {
+function navPinWahl() {
   try {
-    return localStorage.getItem(NAV_PIN_MERKER) === "1";
+    const wert = localStorage.getItem(NAV_PIN_MERKER);
+    if (wert === "0" || wert === "1") return wert;
   } catch (_) {
-    return false;
+    /* ohne Speicher gilt die Breite */
   }
+  return "";
+}
+
+function navSchmal() {
+  const app = document.getElementById("app");
+  const breite = app && app.clientWidth ? app.clientWidth : window.innerWidth;
+  return breite < NAV_LEISTE_PX + NAV_INHALT_MIN_PX;
+}
+
+function navPinGemerkt() {
+  const wahl = navPinWahl();
+  if (wahl === "1") return true;
+  if (wahl === "0") return false;
+  return !navKompaktErzwungen() && !navSchmal();
 }
 
 function merkeNavPin(an) {
@@ -902,29 +921,6 @@ function navKompaktErzwungen() {
   // Start9-Dienst-UI und jedes iframe (StartOS/Specter/Umbrel) haben wenig Breite.
   if (navInEinbettung()) return true;
   return Zustand.config?.managed_by === "start9";
-}
-
-function kopfPillenUmgebrochen() {
-  const app = document.getElementById("app");
-  const kopf = document.querySelector(".kopf");
-  const pillen = document.getElementById("quelle-pillen");
-  if (!app || app.hidden || !kopf || !pillen) return false;
-  const sichtbare = Array.from(pillen.children).filter(
-    (el) => el.getClientRects().length > 0,
-  );
-  if (sichtbare.length >= 2) {
-    const oben = sichtbare[0].getBoundingClientRect().top;
-    const unten = sichtbare[sichtbare.length - 1].getBoundingClientRect().top;
-    if (unten - oben > 8) return true;
-  }
-  const start = kopf.querySelector(".kopf-start") || kopf.querySelector(".marke");
-  const quelle = kopf.querySelector(".quelle");
-  if (start && quelle) {
-    if (quelle.getBoundingClientRect().top - start.getBoundingClientRect().top > 8) {
-      return true;
-    }
-  }
-  return kopf.scrollHeight - kopf.clientHeight > 6;
 }
 
 function navIstOffen() {
@@ -1000,10 +996,12 @@ function aktualisiereNavWerkzeuge() {
 function aktualisiereNavKompakt() {
   const app = document.getElementById("app");
   if (!app || app.hidden) return;
-  const umbruch = kopfPillenUmgebrochen();
+  const wahl = navPinWahl();
   const gepinnt = navPinGemerkt();
   app.classList.toggle("nav-gepinnt", gepinnt);
-  const kompakt = umbruch || navKompaktErzwungen();
+  // Overlay bei schmaler Breite, Einbettung oder bewusstem Lösen.
+  // Ein gesetztes 1 bleibt angedockt, auch wenn die Leiste sonst Overlay wäre.
+  const kompakt = wahl === "0" || navSchmal() || navKompaktErzwungen();
   app.classList.toggle("nav-kompakt", kompakt);
   if (!kompakt) {
     app.classList.remove("nav-offen");

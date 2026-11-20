@@ -5,6 +5,60 @@ Erledigte Abschnitte weiter unten unter **Erledigt:** / Historie (Detail behalte
 
 **Priorität (bis auf Widerruf):** 1. ~~GUI-Start · Sprachstrings~~ (erledigt, siehe Historie). 2. ~~Umfangreiche Wallets · seitenweise~~ (erledigt, siehe Historie). Bis Release 1.0: fehlerfreie Electrs-Walks. Core-Walks und ihr Abgleich gegen Electrs danach.
 
+**Kurzfristig (2026-11-12, Stand 2026-11-18):** Passwort-Auge und Navigation angeheftet sind umgesetzt, Abnahme offen. Die Token-URL steht schon in der zweituntersten Konsolenzeile. Die bc1-Prüfung in Tools ist schon da, siehe unten.
+
+## Passwort · Auge zum Sichtbarmachen
+
+**Stand:** 2026-11-18 · **umgesetzt** · Abnahme offen · kurzfristig
+**Ort:** `httpserver/handler_auth.py` (Login und Ersteinrichtung), `web/index.html` (`#app-passwort-aktuell`, `#app-passwort-neu`, `#app-passwort-neu2`, `#llm-api-key`, `#status-mail-password`), `web/views/datenquellen.js` (Felder mit `typ === "geheim"`)
+Aufwand: **gering**
+
+Jedes maskierte Feld (`type=password`) bekommt ein Auge. Ein Klick zeigt den Inhalt, der nächste verbirgt ihn wieder. Das Feld startet verborgen. Der Knopf ist `type=button`, schickt das Formular nicht ab und schreibt nichts ins Log.
+
+Dasselbe Verhalten für das Login, die Ersteinrichtung (neues Passwort und Wiederholung), das App-Passwort in den Einstellungen (aktuell, neu, Wiederholung), das SMTP-Passwort, den LLM-API-Key und die Geheimfelder der Datenquellen. Beschriftung deutsch und englisch, anzeigen und verbergen, plus `aria-pressed`.
+
+---
+
+## Navigation · standardmäßig angeheftet, wenn die Breite reicht
+
+**Stand:** 2026-11-18 · **umgesetzt** · Abnahme offen · kurzfristig
+**Ort:** `web/chrome_nav.js` (`satsage-nav-pin`, `navPinGemerkt`, `aktualisiereNavKompakt`), `web/style.css` (`.nav-kompakt`)
+Aufwand: **gering**
+
+Ohne gemerkte Wahl bleibt die Navigation angeheftet, sobald neben den 210 px der Inhalt stehen bleibt. Darunter und in der Einbettung (iframe, StartOS) bleibt sie das Overlay und klappt beim Verlassen des Zeigers zu.
+
+Ein gesetztes `satsage-nav-pin` von `0` oder `1` gewinnt. Wer die Leiste absichtlich gelöst hat, sieht sie beim nächsten Start weiter gelöst.
+
+Heute pinnt nur der Merker `1`. Fehlt er, ist die Leiste los. Kompakt wird sie, wenn die Kopf-Pillen umbrechen oder die Oberfläche eingebettet ist. Auf einem breiten Schirm klappt dieser Umbruch die Leiste trotzdem ein. Die Vorgabe richtet sich nach der Breite.
+
+---
+
+## Konsole · Token-URL kopierbar festsetzen
+
+**Stand:** 2026-11-18 · **schon da** · kein offener Bau
+**Ort:** `core/terminal_steuerung.py` (`Fussleiste._fuss_zeilen`, `_schreibe_banner`)
+Aufwand: **gering**
+
+Die Browser-URL mit Token steht in der zweituntersten Zeile der Fußleiste, darunter das Menü. Kein zusätzlicher Bau.
+
+Heute steht sie einmal im Banner und rutscht mit dem Log weg. Die Fußzeile zeichnet sie neu und schneidet sie auf die Fensterbreite ab (`url[:breite]`). Das Neuzeichnen reißt eine angefangene Markierung ab. StartOS bleibt: keine Container-Adresse `127.0.0.1` als Öffnen-Link, die Oberfläche geht über „Web UI“.
+
+---
+
+## Tools · bc1-Adresse
+
+**Stand:** 2026-11-12 · **schon da** · kein offener Bau
+
+Eine bc1-Adresse ist in Tools schon prüfbar.
+
+- **Adresse prüfen** nimmt `bc1q…` und `bc1p…`, auch großgeschrieben und als `bitcoin:`-URI. Die Antwort ist der Wallet-Name oder „gehört Dir nicht“. Die Prüfung leitet lokal aus den hinterlegten Schlüsseln ab, ohne Node, auch ohne Guthaben und ohne Verlauf. Abgenommen 2026-10-04, Abschnitt „Auswerten · Tools · Adresse nachschlagen“. Die Testadresse in `tests/fixtures.py` ist eine bc1q.
+- **Cache-Suche** trifft eine bc1 als Freitext, wenn sie im UTXO- oder Verlaufs-Cache steht. Eine unbenutzte eigene Adresse steht dort noch nicht. Die findet „Adresse prüfen“.
+- **Gezielte Tx-Analyse** nimmt eine TxID. Eine bc1 dort antwortet mit „Das ist keine Transaktions-ID.“
+
+Eine Kettenanalyse einer beliebigen bc1 (Bestand, Verlauf, Herkunft, auch einer fremden Adresse) ist ein anderes Werkzeug und hier nicht aufgemacht.
+
+---
+
 ## Release 1.0 · Core as is
 
 **Stand:** 2026-10-08 · **offen** · bewusst zurückgestellt

@@ -6,12 +6,36 @@ Server-Symbole werden lazy gebunden, um Import-Zyklen zu vermeiden.
 
 from __future__ import annotations
 
+import html
 import ipaddress
 import json
 import secrets
 import time
 from http.cookies import SimpleCookie, CookieError
 from urllib.parse import urlparse
+
+_AUGE_SVG = (
+    '<svg class="geheim-auge-icon" viewBox="0 0 16 16" width="16" height="16" '
+    'aria-hidden="true">'
+    '<path class="auge-auf" fill="none" stroke="currentColor" stroke-width="1.25" '
+    'd="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4S1.5 8 1.5 8z"/>'
+    '<circle class="auge-auf" cx="8" cy="8" r="1.5" fill="currentColor"/>'
+    '<path class="auge-zu" fill="none" stroke="currentColor" stroke-width="1.25" '
+    'd="M3 3.2 13 12.8M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4S1.5 8 1.5 8z"/>'
+    "</svg>"
+)
+
+
+def _passwort_eingabe(feld_id: str, name: str, attrs: str, anzeigen: str) -> str:
+    """Maskiertes Feld mit Auge. Der Knopf ist type=button und schickt nichts."""
+    return (
+        '<div class="geheim-zeile">'
+        f'<input id="{feld_id}" name="{name}" type="password" {attrs}>'
+        '<button type="button" class="geheim-auge" aria-pressed="false" '
+        f'aria-label="{html.escape(anzeigen, quote=True)}">{_AUGE_SVG}</button>'
+        "</div>"
+    )
+
 
 _BOUND = False
 _SERVER_NAMES = (
@@ -341,12 +365,20 @@ class HandlerAuthMixin:
                 f"<p>{t['nur_loopback']}</p>"
                 '<form id="setup-form" action="/api/auth/setup" method="post">'
                 f'<label for="new-password">{t["neues_passwort"]}</label>'
-                '<input id="new-password" name="password" type="password" '
-                'autocomplete="new-password" required autofocus>'
-                f'<label for="confirm-password">{t["wiederholen"]}</label>'
-                '<input id="confirm-password" name="confirm" type="password" '
-                'autocomplete="new-password" required>'
-                f'<button type="submit">{t["passwort_setzen"]}</button></form>'
+                + _passwort_eingabe(
+                    "new-password",
+                    "password",
+                    'autocomplete="new-password" required autofocus',
+                    t["anzeigen"],
+                )
+                + f'<label for="confirm-password">{t["wiederholen"]}</label>'
+                + _passwort_eingabe(
+                    "confirm-password",
+                    "confirm",
+                    'autocomplete="new-password" required',
+                    t["anzeigen"],
+                )
+                + f'<button type="submit">{t["passwort_setzen"]}</button></form>'
             )
         if password_set:
             if self.state.managed_by == "start9":
@@ -361,9 +393,13 @@ class HandlerAuthMixin:
                 f"{plattform_hinweis}"
                 '<form id="login-form" action="/api/auth/login" method="post">'
                 f'<label for="password">{t["passwort"]}</label>'
-                '<input id="password" name="password" type="password" '
-                'autocomplete="current-password" required autofocus>'
-                f'<button type="submit">{t["anmelden"]}</button></form>'
+                + _passwort_eingabe(
+                    "password",
+                    "password",
+                    'autocomplete="current-password" required autofocus',
+                    t["anzeigen"],
+                )
+                + f'<button type="submit">{t["anmelden"]}</button></form>'
                 f'<button type="button" class="vergessen" id="passwort-vergessen">'
                 f'{t["passwort_vergessen"]}</button>'
                 f'<div id="vergessen-folge" class="folge" hidden>'
