@@ -369,6 +369,7 @@ Production-Binaries von Specter laden fremde Extensions **nicht** aus dem CWD; d
 - **XPUBs** erlauben das Ableiten aller Wallet-Adressen — behandle sie wie sensible Daten.
 - **Wallet-Namen** in `.env`, `utxo_cache/` und `immutable_cache/` können persönliche Bezeichnungen enthalten — nicht committen oder in Screenshots zeigen.
 - **`.env`-Scramble:** `.env` ist mit Passwort at rest verschlüsselt. Caches und Exporte sind Klartext — wer die mit schützen will, legt das SatSage-Verzeichnis auf eine verschlüsselte Volume (System-FDE und/oder VeraCrypt) und beendet SatSage, bevor die Volume wieder zu geht.
+- **Touch ID (nur macOS, opt-in):** Nach einem Login mit Passwort lässt sich Touch ID für diesen Mac aktivieren. SatSage legt dann eine Kopie des Passworts im Login-Schlüsselbund ab (dateibasiert, nicht synchronisiert). Das kleine Hilfsprogramm `satsage-touchid` gibt sie erst nach dem Fingerabdruck heraus. Der Server prüft sie wie ein getipptes Passwort. Das Passwortfeld bleibt immer da. Passwort ändern oder löschen, „Passwort vergessen“ und geänderte Fingerabdrücke schalten Touch ID ab. Grenze: Die Kopie schützt die Zugriffsliste des Schlüsselbunds, keine Secure-Enclave-Sperre. Nur am Mac selbst (Loopback), nicht über das Netzwerk.
 - Nutze das Tool lokal; teile keine XPUBs in Issues oder Screenshots.
 - **Fulcrum (öffentliche Onions/Clearnet):** Rotation mildert Einzelserver-Risiko — Privatsphäre „mäßig“.
 - **Eigener Node (BIP-158 / eigener Fulcrum):** beste Option — Privatsphäre „hoch“.

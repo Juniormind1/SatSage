@@ -236,7 +236,11 @@
       </ol>
     </li>
     <li><a href="#caches">Caches</a></li>
-    <li><a href="#sicherheit">Sicherheit und Datenschutz</a></li>
+    <li><a href="#sicherheit">Sicherheit und Datenschutz</a>
+      <ol>
+        <li><a href="#touchid">Touch ID am Mac</a></li>
+      </ol>
+    </li>
     <li><a href="#technik">Technischer Teil</a>
       <ol>
         <li><a href="#architektur">Architektur</a></li>
@@ -1978,6 +1982,47 @@ Schreibvorgänge pausiert (Warnung einmalig).</p>
   Exporte sind Klartext — wer die mit schützen will, legt das
   SatSage-Verzeichnis auf eine verschlüsselte Volume (System-FDE und/oder
   VeraCrypt) und beendet SatSage, bevor die Volume wieder zu geht.</p>
+</div>
+
+<h3 id="touchid">11.1 Touch ID am Mac</h3>
+
+<p>Auf einem Mac mit Touch ID kannst du dich ohne Tippen anmelden. Die
+Funktion ist <strong>aus</strong>, bis du sie einschaltest:</p>
+<ul>
+  <li><strong>Einschalten:</strong> Auf der Anmeldeseite „Nach der Anmeldung
+      Touch ID für diesen Mac aktivieren“ ankreuzen und mit dem Passwort
+      anmelden. Oder später unter Einstellungen · Passwort: aktuelles Passwort
+      eingeben, „Touch ID aktivieren“. macOS fragt einmal den Fingerabdruck ab.</li>
+  <li><strong>Anmelden:</strong> „Mit Touch ID entsperren“, Finger auflegen.
+      Das Passwortfeld bleibt immer da, falls Touch ID nicht geht.</li>
+  <li><strong>Ausschalten:</strong> Einstellungen · Passwort · „Touch ID
+      deaktivieren“. Der Schlüsselbund-Eintrag wird gelöscht.</li>
+</ul>
+<p>Touch ID schaltet sich von selbst ab, wenn du das Passwort änderst oder
+löschst, „Passwort vergessen“ nutzt oder in den Systemeinstellungen einen
+Fingerabdruck hinzufügst oder entfernst. Dann einmal mit Passwort anmelden
+und neu aktivieren.</p>
+<p>Klappt etwas nicht, steht der Grund in <code>logs/touchid.log</code> neben
+dem Programm: nur Codes wie <code>la_name=userCancel</code> oder
+<code>osstatus=-25300</code>, nie das Passwort. Diese Datei kannst du für eine
+Fehlermeldung weitergeben.</p>
+
+<div class="hinweis">
+  <div class="kopf">Sicherheit · Touch ID</div>
+  <p>SatSage legt eine Kopie deines Passworts als Eintrag „SatSage Touch ID“
+  im <strong>Login-Schlüsselbund</strong> ab (dateibasiert, kein iCloud-Sync).
+  Das Hilfsprogramm <code>satsage-touchid</code> gibt sie erst nach dem
+  Fingerabdruck heraus. Der Server prüft sie wie ein getipptes Passwort und
+  entsperrt damit die <code>.env</code>. Das Mac-Passwort ersetzt den
+  Fingerabdruck nicht.</p>
+  <p>Grenze: Den Eintrag schützt die Zugriffsliste des Schlüsselbunds, keine
+  an die Hardware gebundene Biometrie-Sperre. Ein anderes Programm, das ihn
+  lesen will, löst einen macOS-Dialog mit Mac-Passwort aus. Nach einem
+  SatSage-Update kann macOS einmal fragen, ob <code>satsage-touchid</code>
+  wieder zugreifen darf („Immer erlauben“).</p>
+  <p>Touch ID gibt es nur am Mac, auf dem SatSage läuft. Wer die Oberfläche
+  über das Netzwerk öffnet, sieht den Knopf nicht. Auf Linux, Windows,
+  StartOS und Umbrel gibt es die Funktion nicht.</p>
 </div>
 
 <a class="zurueck" href="#">↑ nach oben</a>

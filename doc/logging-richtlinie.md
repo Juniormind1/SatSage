@@ -46,6 +46,10 @@ Das Log baut **Vertrauen** und hilft bei der **Fehlersuche** — es ist kein Deb
 - Roh-i18n-Keys, Stacktraces für Normalnutzer (Detail nur wo nötig)  
 - Secrets, XPUBs, Tokens, Seed-Hinweise  
 
+## Touch ID (macOS)
+
+Eigene Datei `logs/touchid.log` (nur macOS), zusätzlich Logger `satsage.server.touchid`. Geschrieben wird über `core.touchid.log_event`, das nur Codes, Zahlen, `ja`/`nein`, Dauer, einen 8-Zeichen-Kopf des Account-Hashes und den Dateinamen des Hilfsprogramms durchlässt. Alles andere wird zu `<gefiltert>`. Die stderr-Zeile des Swift-Hilfsprogramms übernimmt es nur in ihrem eigenen Format `satsage-touchid: cmd=… code=… la=… osstatus=… domain_changed=…`. Nie ins Log: Passwort, Passwortlänge, Schlüsselbund-Inhalt, DomainState-Bytes, voller Account-Hash, Pfade mit Benutzernamen, Ausnahmetexte. Felder und Beispiele: [`testprotokoll-touchid-macos.md`](testprotokoll-touchid-macos.md) Abschnitt 4. Tests: `tests/test_touchid_log.py`.
+
 ## Für Assistenten / Reviews
 
 Bei Änderungen an Verbindung, Peer-Takt, Header-Vorab, Tor, Quellen-Pillen: diese Richtlinie einhalten. Konkrete Merge-Härte zu Leaks/Seed: [`merge-dealbreakers.md`](merge-dealbreakers.md).

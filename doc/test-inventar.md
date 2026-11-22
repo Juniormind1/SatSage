@@ -38,6 +38,9 @@ Zahlen: Methoden | Zeilen. Dateien mit einem Satz Zweck.
 | `test_start9_phase_s0.py` | 5 | Default-Bind Loopback, Health |
 | `test_start9_phase_s1.py` | 23 | Passwort, Login, Proxy, CSRF/Origin hinter Start9 |
 | `test_start9_phase_s2.py` | 9 | Outbound/SSRF |
+| `test_touchid.py` | 17 | Touch ID (macOS): Helper-Protokoll über Ersatz-Skript, Marker, Timeout, argv leer |
+| `test_touchid_http.py` | 31 | Touch-ID-Routen: Gates (Loopback, Origin, Sitzung, Rate-Limit, ein Dialog), Invalidierung bei Passwortwechsel |
+| `test_touchid_log.py` | 18 | Touch-ID-Diagnose: Codes und Dauer im Log, nie Testpasswort oder voller Account-Hash, auch bei Ausnahmen |
 | `test_start9_phase_s3.py` | 4 | Import-Limits / DoS |
 | `test_umbrel_mode.py` | 16 | Managed Electrum/Auth; Klartext-Passwort setzen/ändern/löschen |
 | `test_env_scramble.py` | 8 | `.env` SSGB1 |

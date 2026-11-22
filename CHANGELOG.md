@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Anmeldung · Touch ID (macOS, opt-in):** Auf einem Mac mit Touch ID lässt sich das Passwort beim Anmelden durch den Fingerabdruck ersetzen. Aktivieren geht nach dem Login (Häkchen auf der Anmeldeseite) oder in Einstellungen · Passwort, nur mit dem getippten Passwort. Das Passwortfeld bleibt immer da. Passwort ändern oder löschen, „Passwort vergessen“ und geänderte Fingerabdrücke schalten Touch ID ab. Nur am Mac selbst, nicht über das Netzwerk. Linux, Windows, StartOS und Umbrel ändern sich nicht. Der macOS-Build braucht dafür `swiftc` (Xcode Command Line Tools), sonst entsteht er ohne Touch ID. Diagnose steht in `logs/touchid.log`: nur Codes (LAError, Keychain-OSStatus, Gate, Dauer), nie das Passwort.
+
 - **Börsenhistorie · Zuordnung:** Auszahlungen können einem eigenen Empfang zugeordnet werden (exakte TxID automatisch, sonst Vorschlag über Adresse oder Betrag und Zeit). Bestätigen und Ablehnen ändert nur die Erklärung. Datum, Grundlage und Farbe im Herkunftsbaum und im Steuerjahr bleiben unverändert.
 
 - **Börsenhistorie · Speicher v2:** Import schreibt Buchungen nach `<exchange_dir>/<slug>/` (jsonl). Re-Import ist idempotent, abweichender Inhalt wird Konflikt statt Überschreiben. Derselbe Datei-Hash gilt als schon importiert. v1-Beschriftungsdateien bleiben lesbar, bis sie bestätigt gelöscht werden. Die GUI zeigt vor dem Import eine Vorschau mit Zählern und Quarantäne. Quelldateinamen werden nicht gespeichert.
