@@ -140,7 +140,7 @@ class TestZieladresse(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ordner = Path(tmp)
             (ordner / "kraken.json").write_text(json.dumps({
-                "version": boerse.VERSION,
+                "version": boerse.V1_DATEI,
                 "name": "Kraken",
                 "addresses": {P2TR_MAIN: {"roles": ["deposit"]}},
                 "txids": {},
@@ -167,7 +167,7 @@ class TestZieladresse(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ordner = Path(tmp)
             (ordner / "boerse.json").write_text(json.dumps({
-                "version": boerse.VERSION,
+                "version": boerse.V1_DATEI,
                 "name": "Kraken",
                 "addresses": {BIP84_RECEIVE_0: {"roles": ["withdrawal"]}},
                 "txids": {},
