@@ -67,6 +67,14 @@ _RE_TXID = re.compile(r"^[0-9a-fA-F]{64}$")
 _RE_SLUG = re.compile(r"[^a-z0-9]+")
 
 
+def _ist_lightning_ziel(wert: str) -> bool:
+    """Lightning-Rechnung oder -URI, kein On-Chain-Ziel."""
+    t = (wert or "").strip().casefold()
+    if t.startswith("lightning:"):
+        t = t[len("lightning:"):]
+    return t.startswith(("lnbc", "lntb"))
+
+
 class ExchangeReportError(ValueError):
     """Ungültiger Import oder fehlende Pflichtangabe."""
 
@@ -174,7 +182,15 @@ def _finde_adressen_in_zeile(row: list[str], spalten: list[int] | None) -> list[
     return treffer
 
 
+def _zeile_ist_lightning(row: list[str]) -> bool:
+    """True, wenn die Zeile eine Lightning-Rechnung als Ziel trägt."""
+    return any(_ist_lightning_ziel(_zelle(row, i)) for i in range(len(row)))
+
+
 def _finde_txids_in_zeile(row: list[str], spalten: list[int] | None) -> list[str]:
+    """64-Hex-Werte, die wie eine TxID aussehen. Keine Lightning-Payment-Hashes."""
+    if _zeile_ist_lightning(row):
+        return []
     treffer: list[str] = []
     gesehen: set[str] = set()
     indizes = spalten if spalten else range(len(row))

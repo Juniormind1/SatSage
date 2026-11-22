@@ -1,0 +1,9 @@
+Reference,Date & Time (UTC),Transaction Type,Amount EUR,Fee EUR,Amount BTC,Fee BTC,BTC Price,Cost Basis (EUR),Destination,Description,Transaction Hash,Note
+STSYN-0001,Jan 15 2026 10:30:00,Deposit,1500.00,0.00,-,-,-,-,-,Fiat deposit,-,
+STSYN-0002,Mar 01 2026 12:00:00,Purchase,-500.00,1.25,0.01000000,0.00000000,50000.00,500.00,-,Bought BTC,-,
+STSYN-0003,Jun 15 2026 08:30:00,Sell,240.00,0.60,-0.00400000,0.00001000,60000.00,-,-,Sold BTC,-,
+STSYN-0004,Jul 01 2026 10:00:00,Send,-,-,-0.00500000,0.00010000,-,-,bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu,On-chain withdrawal,c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1,
+STSYN-0005,Jul 02 2026 11:00:00,Send,-,-,-0.00050000,0.00000000,-,-,lnbc1synthetictestinvoice0001,Lightning send,abababababababababababababababababababababababababababababababab,
+STSYN-0006,Jul 03 2026 09:00:00,Receive,-,-,0.00100000,0.00000000,-,-,bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu,On-chain receive,c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1,
+STSYN-0007,Jul 04 2026 09:00:00,P2P Buy,-50.00,0.00,0.00100000,0.00000000,50000.00,-,-,P2P trade,-,
+STSYN-0008,Jul 05 2026 09:00:00,Withdrawal,-200.00,1.00,-,-,-,-,-,Fiat withdrawal,-,

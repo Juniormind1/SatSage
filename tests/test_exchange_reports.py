@@ -64,6 +64,28 @@ class TestParseCsv(unittest.TestCase):
         self.assertIn(KRK_ADDR, p["addresses"])
         self.assertIn(TX_DEP, p["txids"])
 
+    def test_strike_lightning_payment_hash_ist_keine_txid(self):
+        from tests.fixtures import BIP84_RECEIVE_0, txid
+        kette = txid("c1")
+        zahlung = txid("ab")
+        invoice = "lnbc1synthetictestinvoice0001"
+        kopf = (
+            "Reference," + "Date & Time (UTC)," + "Transaction Type,Amount EUR,Fee EUR,"
+            "Amount BTC,Fee BTC,BTC Price,Cost Basis (EUR),Destination,"
+            "Description,Transaction Hash,Note"
+        )
+        text = (
+            kopf + "\n"
+            f"STSYN-ON,Jul 01 2026 10:00:00,Send,-,-,-0.00500000,0.00010000,-,-,"
+            f"{BIP84_RECEIVE_0},on-chain,{kette},\n"
+            f"STSYN-LN,Jul 02 2026 10:00:00,Send,-,-,-0.00050000,0.00000000,-,-,"
+            f"{invoice},lightning,{zahlung},\n"
+        )
+        p = boerse.parse_csv_btc_refs(text)
+        self.assertIn(kette, p["txids"])
+        self.assertIn(BIP84_RECEIVE_0, p["addresses"])
+        self.assertNotIn(zahlung, p["txids"])
+
 
 class TestExchangeBatchSoftLabel(unittest.TestCase):
     def test_auszahlung_von_namen(self):

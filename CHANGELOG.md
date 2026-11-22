@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Börsenhistorie · Strike:** Der Parser liest nur Account-Statements. Ein Lightning-Payment-Hash wird nicht als Chain-TxID gelesen, auch nicht im bisherigen Report-Import.
+
 - **Börsenhistorie · Coinbase:** Der Parser liest das Custom-Statement (Varianten 2019–2024+), überspringt die Präambel und lehnt andere Coinbase-Exporte ab. Testdaten sind synthetisch.
 
 - **Börsenhistorie · Kraken:** Der Parser liest Ledgers und optional Trades, paart über `refid` und nimmt den Kurs aus der Trades-Datei oder, fehlt sie, aus der Fiat-Gegenzeile (E9). Testdaten sind synthetisch.
