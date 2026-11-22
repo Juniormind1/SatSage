@@ -29,6 +29,7 @@ P2P ist keine ausreichende Datenquelle. `verify_p2p_traces.py` nicht starten. Im
 ## Commit und Push
 
 Helfer: `scripts/commit.sh`|`.bat`, `scripts/push.sh`|`.bat` (brechen bei Identitäts-Abweichung ab; `--fix-identity` setzt name/email/hooks). Identität, Branches und Remote-Pflicht stehen in [`../githooks/AGENTS.md`](../githooks/AGENTS.md).
+- Leak-Scan: `scripts/leak_scan.py` (`--staged` / `--tracked`). Vor dem Commit den gestagten Diff damit prüfen, solange der Hook-Aufruf (S3) nicht freigegeben ist.
 
 - **Windows `.bat`:** echte `cmd.exe`-Dateien — **CRLF**-Zeilenenden (LF-only zerlegt CMD in Müll-Befehle), `REM`/`::` statt `#`, kein Bash-Syntax. Nach dem Schreiben Bytes prüfen (`\r\n`, kein UTF-16/NUL). `.sh` bleibt LF/Bash.
 - Commit-Default der Maintainer-Skripte: getrackte + untracked **Text** auto; untracked **Binär** nach Nachfrage (`-A` alles, `-u` nur getrackt).

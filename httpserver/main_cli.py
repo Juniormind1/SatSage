@@ -59,6 +59,23 @@ def build_argumente() -> argparse.ArgumentParser:
                         help="Verzeichnis der Sanktionslisten")
     parser.add_argument("--label-dir", default=None,
                         help="Verzeichnis der Adress-Labels")
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="Datenwurzel (.env, Caches, Börsenimporte, Logs). "
+             "Sonst SATSAGE_DATA_DIR, sonst der Anwendungsordner. "
+             "Entscheidung E13, änderbar.",
+    )
+    parser.add_argument(
+        "--exchange-dir",
+        default=None,
+        help="Verzeichnis der Börsen-Importe (sonst <Datenwurzel>/exchange_reports)",
+    )
+    parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="Verzeichnis der Logdateien (sonst <Datenwurzel>/logs)",
+    )
     parser.add_argument("--no-browser", action="store_true",
                         help="Browser nicht automatisch öffnen")
     parser.add_argument(
@@ -231,6 +248,15 @@ def main_cli(argv=None) -> int:
 
     print(f"Code {CODE_LAUF_ID}", flush=True)
     state = build_state(args)
+    try:
+        from core.paths import warnhinweis_daten_im_arbeitsbaum
+
+        hinweis = warnhinweis_daten_im_arbeitsbaum()
+        if hinweis:
+            print(hinweis, flush=True)
+            LOGGER.warning(hinweis)
+    except Exception:
+        pass
     bind = _bind_host(args.bind, state=state, args=args)
     try:
         from core.i18n import init_from_env

@@ -44,3 +44,7 @@ githooks
 .env.*
 .satsage-password
 .satsage-password.*
+
+exchange_reports
+logs
+privat

@@ -1796,8 +1796,22 @@ class Handler(
         """Keine Zugriffsprotokolle — die Pfade enthalten Wallet-Kennungen."""
 
 
+def wende_datenpfade_an(args) -> None:
+    """Übernimmt --data-dir / SATSAGE_DATA_DIR und optionale Einzelpfade."""
+    from core import paths as pfade
+
+    data_dir = getattr(args, "data_dir", None)
+    if data_dir:
+        pfade.setze_data_dir(data_dir)
+    pfade.aktualisiere_modulkonstanten()
+    # Immer setzen, auch auf None: sonst bleibt ein vorheriger Testlauf stehen.
+    pfade.setze_log_dir(getattr(args, "log_dir", None))
+    pfade.setze_exchange_dir(getattr(args, "exchange_dir", None))
+
+
 def build_state(args) -> AppState:
     # Damit main._load_dotenv() dieselbe Datei sieht wie --env / AppState.
+    wende_datenpfade_an(args)
     if args.env:
         main.ENV_FILE = Path(args.env)
     if args.cache_dir:
@@ -1819,6 +1833,10 @@ def build_state(args) -> AppState:
             else sanctioned.SANCTIONED_CACHE_DIR
         ),
         label_dir=Path(args.label_dir) if args.label_dir else None,
+        exchange_reports_dir=(
+            Path(args.exchange_dir) if getattr(args, "exchange_dir", None)
+            else None
+        ),
     )
     _seed_managed_password(state)
     registriere_status_mail_hook(state)

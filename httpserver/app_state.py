@@ -75,7 +75,8 @@ class AppState:
 
     def __init__(self, env_path: Path, cache_dir: Path,
                  immutable_cache_dir: Path, sanctions_dir: Path | None = None,
-                 label_dir: Path | None = None, managed_by: str | None = None):
+                 label_dir: Path | None = None, managed_by: str | None = None,
+                 exchange_reports_dir: Path | None = None):
         self.env_path = env_path
         # Vor dem ersten Laufzeit-Schreiben: vorgefundene .env rotieren.
         try:
@@ -95,11 +96,15 @@ class AppState:
         self.immutable_cache_dir = immutable_cache_dir
         self.sanctions_dir = sanctions_dir
         self.label_dir = label_dir or labels.LABEL_CACHE_DIR
-        # Börsen-CSV-Reports (Klarname Ein-/Auszahlung) neben dem App-Verzeichnis.
+        # Börsen-CSV-Reports (Klarname Ein-/Auszahlung) unter der Datenwurzel
+        # oder dem expliziten --exchange-dir.
         from core import exchange_reports as boerse_mod
-        from core.paths import app_dir as _app_dir
+        from core.paths import exchange_dir as _exchange_dir
 
-        self.exchange_reports_dir = Path(_app_dir()) / "exchange_reports"
+        self.exchange_reports_dir = (
+            Path(exchange_reports_dir) if exchange_reports_dir
+            else _exchange_dir()
+        )
         boerse_mod.setze_verzeichnis(self.exchange_reports_dir)
         # None bedeutet eigenständige Desktop-GUI; der Plugin-Einstieg setzt
         # dieses Merkmal ausdrücklich, nicht über eine fremde .env.

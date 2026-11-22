@@ -269,9 +269,8 @@ def _diagnose_an() -> bool:
 
 
 def _diagnose_pfad():
-    from core.paths import app_dir
-
-    return app_dir() / "logs" / _DIAGNOSE_DATEI
+    from core.paths import log_dir
+    return log_dir() / _DIAGNOSE_DATEI
 
 
 def _ms(start: float) -> int:

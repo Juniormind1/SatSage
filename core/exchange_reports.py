@@ -17,8 +17,6 @@ import re
 import time
 from pathlib import Path
 
-from core.paths import app_dir
-
 VERSION = 1
 META_NAME = "_index.json"
 
@@ -83,7 +81,8 @@ def verzeichnis(cache_dir: Path | str | None = None) -> Path:
         return Path(cache_dir)
     if _aktives_verzeichnis is not None:
         return _aktives_verzeichnis
-    return app_dir() / "exchange_reports"
+    from core.paths import exchange_dir
+    return exchange_dir()
 
 
 def slug_aus_name(name: str) -> str:

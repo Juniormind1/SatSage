@@ -92,3 +92,15 @@ python3-tk_*.deb
 .env.*secrets
 .env.backup*
 exchange_reports/
+
+# Börsen-Exporte und private Daten (M0). Fixtures nur unter tests/fixtures/boerse/.
+/*.csv
+/*.tsv
+/*.xlsx
+**/ledgers*.csv
+**/trades*.csv
+**/*statement*.csv
+**/*transaction*history*.csv
+/privat/
+tests/privat/daten/
+!tests/fixtures/boerse/**

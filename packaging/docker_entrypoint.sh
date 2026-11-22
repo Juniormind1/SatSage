@@ -8,7 +8,9 @@ mkdir -p \
   "$DATA/utxo_cache" \
   "$DATA/immutable_cache" \
   "$DATA/sanctioned_cache" \
-  "$DATA/label_cache"
+  "$DATA/label_cache" \
+  "$DATA/exchange_reports" \
+  "$DATA/logs"
 
 if [ ! -f "$DATA/.env" ]; then
   umask 077

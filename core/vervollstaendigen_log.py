@@ -24,9 +24,9 @@ _MAX_BYTES = 8 * 1024 * 1024
 
 
 def pfad() -> Path:
-    from core.paths import app_dir
+    from core.paths import log_dir
 
-    ziel = app_dir() / "logs"
+    ziel = log_dir()
     ziel.mkdir(parents=True, exist_ok=True)
     return ziel / _DATEI
 
