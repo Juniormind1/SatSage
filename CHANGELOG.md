@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+## [1.0.2] — 2026-11-22
+
+- **Release 1.0.2:** Versionsnummer auf 1.0.2. StartOS-Paket `1.0.2:0`; `1.0.1:0` bleibt im Versionsgraphen, damit Geräte von dort wandern. Specter-Plugin 1.0.2.
 - **Verlauf · Log:** Die Fortschrittszeile fasst 10, 20 oder 50 Adressen zusammen. Die Stufe ist so gewählt, dass zwischen zwei Zeilen weniger als 10 Sekunden liegen. Liegt schon die Zehnergruppe darüber, bleibt es bei 10 Adressen.
 - **Wallet · Historie:** Nach dem Verlaufsscan bleibt die Gruppe „Bereits ausgegeben“ unter den UTXOs stehen. Bisher erschien sie erst, nachdem man das Wallet einmal verlassen und wieder geöffnet hatte.
 - **Datenquellen · libbitcoin:** Antwortet die native Abfrage auf 8180 und nicht auf 8181, verbindet SatSage in diesem Prozess nicht mehr zu 8181. Umgekehrt genauso.
