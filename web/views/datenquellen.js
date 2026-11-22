@@ -1163,6 +1163,9 @@ function baueQuellenFeld(feld, quelle, gemerkt, bridgeManaged, extraKlasse, hinw
   if (bridgeManaged) eingabe.disabled = true;
   if (feld.typ === "checkbox") zeile.append(eingabe, titel);
   else zeile.append(titel, eingabe);
+  if (feld.typ === "geheim" && typeof haengeGeheimAuge === "function") {
+    haengeGeheimAuge(eingabe);
+  }
 
   const hinweisText = quelleFeldHinweis(feld, quelle.key);
   if (hinweisText) {

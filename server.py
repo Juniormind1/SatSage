@@ -195,6 +195,18 @@ button:disabled{opacity:.65;cursor:wait;filter:none}
 .folge-knopf .still{
   background:var(--flaeche-2);color:var(--text);border-color:var(--linie);
 }
+.geheim-zeile{position:relative;display:block}
+.geheim-zeile input{padding-right:2.2rem}
+.geheim-auge{
+  position:absolute;right:2px;top:50%;transform:translateY(-50%);
+  width:1.8rem;height:1.8rem;margin:0;padding:0;border:0;
+  background:transparent;color:var(--gedaempft);
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.geheim-auge:hover{color:var(--text);filter:none}
+.geheim-auge .auge-zu{display:none}
+.geheim-auge[aria-pressed="true"] .auge-auf{display:none}
+.geheim-auge[aria-pressed="true"] .auge-zu{display:block}
 """.strip()
 
 # Login ohne app.js: Form per fetch, Fehler im Dialog, Fortschritt bei Unlock.
@@ -357,9 +369,27 @@ LOGIN_PAGE_JS = r"""
         });
     });
   }
+  function bindAugen() {
+    var knoepfe = document.querySelectorAll(".geheim-auge");
+    for (var i = 0; i < knoepfe.length; i++) {
+      (function (knopf) {
+        knopf.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var zeile = knopf.parentNode;
+          var feld = zeile ? zeile.querySelector("input") : null;
+          if (!feld) return;
+          var offen = feld.type === "password";
+          feld.type = offen ? "text" : "password";
+          knopf.setAttribute("aria-pressed", offen ? "true" : "false");
+          knopf.setAttribute("aria-label", offen ? T.verbergen : T.anzeigen);
+        });
+      })(knoepfe[i]);
+    }
+  }
   bindLogin($("#login-form"));
   bindSetup($("#setup-form"));
   bindVergessen();
+  bindAugen();
 })();
 """.strip()
 
@@ -493,6 +523,8 @@ _LOGIN_TEXTE = {
         "neues_passwort": "Neues Passwort",
         "wiederholen": "Wiederholen",
         "passwort_setzen": "Passwort setzen",
+        "anzeigen": "Anzeigen",
+        "verbergen": "Verbergen",
         "status_pruefen": "Status prüfen",
         "passwort_vergessen": "Passwort vergessen",
         "vergessen_titel": "Passwort vergessen",
@@ -534,6 +566,8 @@ _LOGIN_TEXTE = {
         "neues_passwort": "New password",
         "wiederholen": "Repeat",
         "passwort_setzen": "Set password",
+        "anzeigen": "Show",
+        "verbergen": "Hide",
         "status_pruefen": "Check status",
         "passwort_vergessen": "Forgot password",
         "vergessen_titel": "Forgot password",
@@ -575,6 +609,8 @@ def _login_js_texte(t: dict) -> dict:
         "fehler",
         "vergessen_laeuft",
         "vergessen_fertig",
+        "anzeigen",
+        "verbergen",
     )
     return {k: t[k] for k in keys if k in t}
 

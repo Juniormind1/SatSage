@@ -220,6 +220,153 @@ class TestApiAbbruch(unittest.TestCase):
         self.assertNotEqual(erg["status"], 408)
 
 
+@unittest.skipUnless(shutil.which("node"), "node fehlt")
+class TestVerlaufNachBestand(unittest.TestCase):
+    """„Bereits ausgegeben“ überlebt einen zweiten Paint, solange der Verlauf wartet."""
+
+    def _lauf(self, skript: str) -> dict:
+        stub = r"""
+          const Zustand = {
+            config: { wallets: [{ id: "a", name: "A" }] },
+            ansicht: "wallet",
+            walletId: "a",
+            walletLadeGen: 1,
+            _walletUtxoDaten: null,
+            verlaufNachWallet: {},
+            _verlaufStandLauf: {},
+          };
+          const t = (k) => k;
+          const gezeichnet = [];
+          function $(sel) {
+            return { hidden: false, value: "betrag", id: sel };
+          }
+          function uiSprache() { return "de"; }
+          function setzeWalletBestandtext() { gezeichnet.push("meta"); }
+          function setzeWalletAusgegeben(daten) {
+            gezeichnet.push(Boolean(daten && daten.hat_verlauf));
+          }
+          function zeichneUtxos(daten) {
+            gezeichnet.push("voll:" + Boolean(daten && daten.hat_verlauf));
+          }
+          const aufrufe = [];
+          let verlaufAntwort = Promise.resolve({
+            hat_verlauf: true,
+            verlauf: { total_count: 4, total_sats: 1, pending_count: 0,
+                       shown_count: 0, utxos: [], addresses: [] },
+          });
+          function api(pfad) {
+            aufrufe.push(String(pfad));
+            if (String(pfad).includes("teil=verlaufstand")) return verlaufAntwort;
+            return Promise.resolve({});
+          }
+        """
+        teile = [
+            stub,
+            _funktion(WALLETS, "function holeVerlaufStand("),
+            _funktion(WALLETS, "function verlaufErgaenzen("),
+        ]
+        code = "\n".join(teile) + "\n(async () => {\n" + skript + "\n})().catch((e) => { console.error(e); process.exit(1); });"
+        aus = subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=30)
+        if aus.returncode != 0:
+            raise AssertionError(aus.stderr[-2000:])
+        return json.loads(aus.stdout)
+
+    def test_zweite_generation_behaelt_die_gruppe(self):
+        erg = self._lauf(r"""
+          let loese;
+          verlaufAntwort = new Promise((r) => { loese = r; });
+          Zustand._walletUtxoDaten = {
+            wallet_id: "a", verlauf_ausstehend: true, hat_verlauf: false, total_count: 2,
+          };
+          holeVerlaufStand("a", 1);
+          holeVerlaufStand("a", 1);
+          Zustand.walletLadeGen = 2;
+          Zustand._walletUtxoDaten = {
+            wallet_id: "a", verlauf_ausstehend: true, hat_verlauf: false, total_count: 2,
+          };
+          loese({
+            hat_verlauf: true,
+            verlauf: { total_count: 4, total_sats: 1, pending_count: 0,
+                       shown_count: 0, utxos: [], addresses: [] },
+          });
+          await verlaufAntwort;
+          const daten = Zustand._walletUtxoDaten;
+          process.stdout.write(JSON.stringify({
+            anfragen: aufrufe.filter((p) => p.includes("verlaufstand")).length,
+            hat: daten.hat_verlauf,
+            ausstehend: daten.verlauf_ausstehend,
+            n: daten.verlauf.total_count,
+            gezeichnet,
+          }));
+        """)
+        self.assertEqual(erg["anfragen"], 1)
+        self.assertTrue(erg["hat"])
+        self.assertFalse(erg["ausstehend"])
+        self.assertEqual(erg["n"], 4)
+        self.assertIn(True, erg["gezeichnet"])
+
+    def test_fremdes_wallet_bekommt_den_stand_nicht(self):
+        erg = self._lauf(r"""
+          Zustand._walletUtxoDaten = {
+            wallet_id: "a", verlauf_ausstehend: true, hat_verlauf: false, total_count: 2,
+          };
+          const p = holeVerlaufStand("a", 1);
+          Zustand.walletId = "b";
+          Zustand._walletUtxoDaten = {
+            wallet_id: "b", verlauf_ausstehend: true, hat_verlauf: false, total_count: 1,
+          };
+          await verlaufAntwort;
+          await Promise.resolve();
+          process.stdout.write(JSON.stringify({
+            hatB: Zustand._walletUtxoDaten.hat_verlauf,
+            gemerkt: Boolean(Zustand.verlaufNachWallet.a && Zustand.verlaufNachWallet.a.hat_verlauf),
+            gezeichnet,
+          }));
+        """)
+        self.assertFalse(erg["hatB"])
+        self.assertTrue(erg["gemerkt"])
+        self.assertEqual(erg["gezeichnet"], [])
+
+    def test_mempool_redraw_nutzt_fertigen_und_gemerkten_stand(self):
+        erg = self._lauf(r"""
+          const fertig = {
+            wallet_id: "a", verlauf_ausstehend: false, hat_verlauf: true,
+            verlauf: { total_count: 5 },
+          };
+          Zustand._walletUtxoDaten = fertig;
+          const neu = { wallet_id: "a", verlauf_ausstehend: true, hat_verlauf: false };
+          verlaufErgaenzen(neu);
+          const nachFertig = {
+            hat: neu.hat_verlauf, ausstehend: neu.verlauf_ausstehend, n: neu.verlauf.total_count,
+          };
+          const wartend = { wallet_id: "a", verlauf_ausstehend: true, hat_verlauf: false };
+          Zustand._walletUtxoDaten = wartend;
+          Zustand.verlaufNachWallet = {
+            a: { hat_verlauf: true, verlauf: { total_count: 7 }, wallet_id: "a" },
+          };
+          const spaeter = { wallet_id: "a", verlauf_ausstehend: true, hat_verlauf: false };
+          verlaufErgaenzen(spaeter);
+          const fremd = { wallet_id: "b", verlauf_ausstehend: true, hat_verlauf: false };
+          verlaufErgaenzen(fremd);
+          process.stdout.write(JSON.stringify({
+            nachFertig,
+            spaeter: {
+              hat: spaeter.hat_verlauf,
+              ausstehend: spaeter.verlauf_ausstehend,
+              n: spaeter.verlauf.total_count,
+            },
+            fremd: fremd.hat_verlauf,
+          }));
+        """)
+        self.assertTrue(erg["nachFertig"]["hat"])
+        self.assertFalse(erg["nachFertig"]["ausstehend"])
+        self.assertEqual(erg["nachFertig"]["n"], 5)
+        self.assertTrue(erg["spaeter"]["hat"])
+        self.assertTrue(erg["spaeter"]["ausstehend"])
+        self.assertEqual(erg["spaeter"]["n"], 7)
+        self.assertFalse(erg["fremd"])
+
+
 class TestEinbindung(unittest.TestCase):
 
     def test_start_ende_holt_nach(self):

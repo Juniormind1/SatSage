@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextvars
+import time
 from typing import Any
 
 from embit.script import Script, address_to_scriptpubkey
@@ -950,6 +951,30 @@ def fetch_address_history_fulcrum(
     return eintraege
 
 
+# Eine Logzeile fasst so viele Adressen, dass der Abstand unter 10 s bleibt.
+# Kürzer als 10 Adressen wird nicht geschrieben: die alte Fünfer-Zeile
+# (Start und Ende) kam bei schnellen Adressen im Sekundentakt.
+_VERLAUF_LOG_STUFEN = (10, 20, 50)
+_VERLAUF_LOG_ZIEL_S = 10.0
+
+
+def _verlauf_log_schritt(sekunden_je_adresse: float) -> int:
+    """Größte Stufe 10, 20 oder 50, deren Dauer unter 10 s bleibt.
+
+    Ohne Messung die kleinste Stufe. Liegt schon die Zehnergruppe bei
+    oder über 10 s, bleibt es bei 10.
+    """
+    if sekunden_je_adresse <= 0:
+        return _VERLAUF_LOG_STUFEN[0]
+    gewaehlt = _VERLAUF_LOG_STUFEN[0]
+    for stufe in _VERLAUF_LOG_STUFEN:
+        if stufe * sekunden_je_adresse < _VERLAUF_LOG_ZIEL_S:
+            gewaehlt = stufe
+        else:
+            break
+    return gewaehlt
+
+
 def _verlauf_fortschritt(
     rest: int,
     gesamt: int,
@@ -1018,7 +1043,18 @@ def fetch_wallet_history_fulcrum(
         except TypeError:
             on_progress(text)
 
-    if erledigt_basis and on_progress:
+    summe_s = 0.0
+    gemessen = 0
+    seit_log = 0
+    if offen and not erledigt_basis:
+        # Eine Zeile zum Start. Die nächste kommt erst nach der Stufe.
+        _melde(
+            len(offen),
+            sofort=True,
+            adresse_nr=1,
+            detail="get_history…",
+        )
+    elif erledigt_basis and on_progress:
         _melde(len(offen), sofort=True)
 
     for nummer, address in enumerate(offen, start=1):
@@ -1026,15 +1062,26 @@ def fetch_wallet_history_fulcrum(
             return eintraege
         rest = len(offen) - nummer + 1
         adresse_nr = erledigt_basis + nummer
-        # Erste Adresse / jede 5.: sofort ins Log — sonst nur „Moment noch“,
-        # während Tor an get_history oder den Tx-Downloads hängt.
-        _melde(
-            rest,
-            sofort=(nummer == 1 or nummer % 5 == 1),
-            adresse_nr=adresse_nr,
-            detail="get_history…",
-        )
+        t0 = time.monotonic()
         neu: list[dict] = []
+
+        def _abschluss(*, _rest=rest, _nr=adresse_nr, _nummer=nummer) -> None:
+            nonlocal summe_s, gemessen, seit_log
+            dauer = time.monotonic() - t0
+            if dauer < 0:
+                dauer = 0.0
+            summe_s += dauer
+            gemessen += 1
+            seit_log += 1
+            schritt = _verlauf_log_schritt(summe_s / gemessen)
+            # Letzte Adresse immer, sonst erst wenn die Stufe voll ist.
+            # Dazwischen nur der Tick: der schreibt nach langer Stille,
+            # nicht bei jeder Adresse.
+            fertig = seit_log >= schritt or _nummer == len(offen)
+            _melde(max(0, _rest - 1), sofort=fertig, adresse_nr=_nr)
+            if fertig:
+                seit_log = 0
+
         try:
             scripthash = address_to_scripthash(address)
         except Exception as exc:
@@ -1047,6 +1094,7 @@ def fetch_wallet_history_fulcrum(
                 pass
             if on_address_done:
                 on_address_done(address, [])
+            _abschluss()
             continue
 
         def _schritt(detail: str, *, _rest=rest, _nr=adresse_nr) -> None:
@@ -1061,12 +1109,7 @@ def fetch_wallet_history_fulcrum(
             eintraege.append(eintrag)
         if on_address_done:
             on_address_done(address, neu)
-        # Nach Adresse: Rest zählt runter (tick, nicht jede Adresse phase).
-        _melde(
-            max(0, rest - 1),
-            sofort=(nummer % 5 == 0 or nummer == len(offen)),
-            adresse_nr=adresse_nr,
-        )
+        _abschluss()
         if on_progress is None and (
             (erledigt_basis + nummer) % 25 == 0 or nummer == len(offen)
         ):

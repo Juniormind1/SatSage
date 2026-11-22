@@ -90,6 +90,7 @@ from core.fulcrum_history import (
     _vout_matches_address,
     _vout_value_sats,
     _verlauf_fortschritt,
+    _verlauf_log_schritt,
     _walk_address_history,
     date_to_block_height_fulcrum,
     fetch_address_history_fulcrum,

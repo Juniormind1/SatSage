@@ -249,6 +249,7 @@ async function start() {
   macheDockSpalter();
   macheEmpfangSpalter();
   if (typeof bindeNavLeiste === "function") bindeNavLeiste();
+  if (typeof bindeGeheimAugen === "function") bindeGeheimAugen(document);
   setzeLernhinweiseDelegates();
   setzeEmpfangAnimDebug();
   setzeEmpfangLabSenden();

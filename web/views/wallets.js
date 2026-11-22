@@ -945,8 +945,10 @@ async function zeigeWallet(walletId, { ohneEmpfang = false } = {}) {
       `/wallets/${walletId}/utxos?${walletListenParameter("bestand", 0, quelle.groesse, quelle.q)}&mempool=0`,
     );
     if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
+    // „Bereits ausgegeben“ hängt zeichneUtxos nach, sobald der Bestand
+    // noch auf die Verlaufsdatei wartet. Ein zweiter Paint (Mempool,
+    // Scan-Ende) darf diese Antwort nicht verwerfen.
     zeichneUtxos(daten, wallet, { ...bestandSeitenAuszug(daten), offset: 0 });
-    if (daten && daten.verlauf_ausstehend === true) holeVerlaufStand(walletId, ladeGen);
   } catch (fehler) {
     if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
     zeigeLeer(t("wallet.loadFailed", { msg: fehler.message }), "");
@@ -1047,37 +1049,85 @@ function walletListenParameter(teil, offset, limit, filter = "") {
  * „Bereits ausgegeben“ ziehen nach. Noch keine Zeilen: einmal ganz zeichnen,
  * damit ein Wallet nur mit Historie nicht auf „nie gescannt“ stehen bleibt.
  */
-function holeVerlaufStand(walletId, ladeGen) {
+function holeVerlaufStand(walletId, ladeGen, versuch = 0) {
+  const id = String(walletId || "");
+  if (!id) return;
+  // Ein Paint, der den vorigen ersetzt, solange die Datei noch lädt,
+  // startet keine zweite Lesung. Die laufende Antwort gilt für den
+  // wartenden Bestand derselben Wallet.
+  if (!Zustand._verlaufStandLauf) Zustand._verlaufStandLauf = {};
+  if (Zustand._verlaufStandLauf[id]) return;
+  const token = {};
+  Zustand._verlaufStandLauf[id] = token;
   const sprache = typeof uiSprache === "function" ? uiSprache() : "de";
   api(
-    `/wallets/${walletId}/utxos?seite=1&teil=verlaufstand&mempool=0&lang=${sprache}`,
+    `/wallets/${id}/utxos?seite=1&teil=verlaufstand&mempool=0&lang=${sprache}`,
   )
     .then((stand) => {
-      if (Zustand.walletId !== walletId || Zustand.walletLadeGen !== ladeGen) return;
-      if (Zustand.ansicht !== "wallet") return;
-      const aktuell = Zustand._walletUtxoDaten;
-      if (!aktuell || String(aktuell.wallet_id || "") !== String(walletId)) return;
-      aktuell.hat_verlauf = Boolean(stand && stand.hat_verlauf);
-      aktuell.verlauf = (stand && stand.verlauf) || {
-        total_count: 0,
-        total_sats: 0,
-        pending_count: 0,
-        shown_count: 0,
-        utxos: [],
-        addresses: [],
-      };
-      aktuell.verlauf_ausstehend = false;
-      const wallet = (Zustand.config?.wallets || []).find((w) => w.id === walletId) || null;
-      const liste = $("#adress-liste");
-      const sichtbar = Boolean(liste && !liste.hidden && Number(aktuell.total_count) > 0);
-      if (!sichtbar) {
-        zeichneUtxos(aktuell, wallet, Zustand._walletUtxoSeite);
-        return;
+      try {
+        if (!Zustand._verlaufStandLauf || Zustand._verlaufStandLauf[id] !== token) return;
+        const hat = Boolean(stand && stand.hat_verlauf);
+        const verlauf = (stand && stand.verlauf) || {
+          total_count: 0,
+          total_sats: 0,
+          pending_count: 0,
+          shown_count: 0,
+          utxos: [],
+          addresses: [],
+        };
+        if (hat) {
+          if (!Zustand.verlaufNachWallet) Zustand.verlaufNachWallet = {};
+          Zustand.verlaufNachWallet[id] = {
+            hat_verlauf: true,
+            verlauf,
+            wallet_id: id,
+          };
+        }
+        const aktuell = Zustand._walletUtxoDaten;
+        const payloadId = String((aktuell && aktuell.wallet_id) || "");
+        const offen = Zustand.ansicht === "wallet"
+          && String(Zustand.walletId || "") === id
+          && aktuell
+          && (!payloadId || payloadId === id);
+        if (!offen) return;
+        const gleicheGen = Zustand.walletLadeGen === ladeGen;
+        const wartet = aktuell.verlauf_ausstehend === true;
+        // Neu gezeichnet, Verlauf aber noch nicht da: die Antwort gehört
+        // zu diesem Bild. Nur eine schon fertige neuere Lesung bleibt stehen.
+        if (!gleicheGen && !wartet) return;
+        aktuell.hat_verlauf = hat;
+        aktuell.verlauf = verlauf;
+        aktuell.verlauf_ausstehend = false;
+        const wallet = (Zustand.config?.wallets || []).find((w) => w.id === id) || null;
+        const liste = $("#adress-liste");
+        const sichtbar = Boolean(liste && !liste.hidden && Number(aktuell.total_count) > 0);
+        if (!sichtbar) {
+          zeichneUtxos(aktuell, wallet, Zustand._walletUtxoSeite);
+          return;
+        }
+        setzeWalletBestandtext(aktuell, wallet, Zustand._walletUtxoSeite);
+        setzeWalletAusgegeben(aktuell, Zustand._walletUtxoSeite);
+      } catch (_) {
+        /* Anzeigefehler nicht als fehlgeschlagene Lesung wiederholen. */
       }
-      setzeWalletBestandtext(aktuell, wallet, Zustand._walletUtxoSeite);
-      setzeWalletAusgegeben(aktuell, Zustand._walletUtxoSeite);
     })
-    .catch(() => {});
+    .catch(() => {
+      if (Zustand._verlaufStandLauf && Zustand._verlaufStandLauf[id] === token) {
+        delete Zustand._verlaufStandLauf[id];
+      }
+      if (
+        versuch < 1
+        && Zustand.walletLadeGen === ladeGen
+        && String(Zustand.walletId || "") === id
+      ) {
+        holeVerlaufStand(id, ladeGen, versuch + 1);
+      }
+    })
+    .finally(() => {
+      if (Zustand._verlaufStandLauf && Zustand._verlaufStandLauf[id] === token) {
+        delete Zustand._verlaufStandLauf[id];
+      }
+    });
 }
 
 /**
@@ -1341,15 +1391,30 @@ function zeigeLeer(titel, text) {
  * Ein neuer Bestand ohne Verlauf übernimmt den schon gelesenen Verlauf
  * desselben Wallets. Sonst würde Blättern oder der Mempool-Nachzug die
  * Zeile „bereits ausgegeben“ wieder leer räumen.
+ *
+ * Der vorige Paint kann selbst noch warten (Mempool kam vor der
+ * Verlaufsdatei). Dann gilt der zuletzt gelesene Stand dieser Wallet,
+ * die Summen holt holeVerlaufStand danach neu.
  */
 function verlaufErgaenzen(daten) {
   if (!daten || daten.verlauf_ausstehend !== true) return;
+  const id = String(daten.wallet_id || "");
+  if (!id) return;
   const alt = Zustand._walletUtxoDaten;
-  if (!alt || alt.verlauf_ausstehend === true) return;
-  if (String(alt.wallet_id || "") !== String(daten.wallet_id || "")) return;
-  daten.hat_verlauf = Boolean(alt.hat_verlauf);
-  daten.verlauf = alt.verlauf;
-  daten.verlauf_ausstehend = false;
+  const altPasst = Boolean(
+    alt
+    && alt.verlauf_ausstehend !== true
+    && String(alt.wallet_id || "") === id
+    && alt.hat_verlauf,
+  );
+  const gemerkt = Zustand.verlaufNachWallet && Zustand.verlaufNachWallet[id];
+  const quelle = altPasst ? alt : (gemerkt && gemerkt.hat_verlauf ? gemerkt : null);
+  if (!quelle) return;
+  daten.hat_verlauf = true;
+  daten.verlauf = quelle.verlauf;
+  // Gemerkter Stand kann von vor dem letzten Historie-Lauf sein.
+  // Ausstehend lassen, damit die frischen Summen nachgezogen werden.
+  if (altPasst) daten.verlauf_ausstehend = false;
 }
 
 /** Meta-Zeile der Wallet-Ansicht, inklusive „bereits ausgegeben“, sobald bekannt. */
@@ -1440,6 +1505,13 @@ function setzeWalletAusgegeben(daten, seite = null) {
 function zeichneUtxos(daten, wallet, seite = null) {
   walletWarteAus();
   verlaufErgaenzen(daten);
+  // Bestand aus verlauf=0. Die Gruppe „Bereits ausgegeben“ kommt aus
+  // der Verlaufsdatei. Jeder solche Paint fragt nach, nicht nur der
+  // erste in zeigeWallet — sonst bleibt sie leer, wenn der Mempool
+  // oder das Scan-Ende dazwischen neu zeichnet.
+  if (daten && daten.verlauf_ausstehend === true) {
+    holeVerlaufStand(daten.wallet_id || Zustand.walletId, Zustand.walletLadeGen);
+  }
   // Für Kopf-Filter: Ausgegeben-Block lazy nachzeichnen.
   Zustand._walletUtxoDaten = daten || null;
   Zustand._walletUtxoSeite = seite;
