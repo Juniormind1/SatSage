@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Börsenhistorie · Zahlen:** `core/boerse/` nimmt Beträge als Decimal und wandelt BTC exakt in Sats, ohne Float.
+
 - **Datenschutz · Leak-Scan:** CSV-Köpfe dürfen in `doc/boerse/` wörtlich stehen, Werte und IDs weiterhin nicht.
 - **Doku · Strike-Spec:** `doc/boerse/strike.md` beschreibt das Account-Statement (Spalten, Typen, Lightning vs. On-Chain). Nur Statements, kein Activity-Export.
 - **Doku · Coinbase-Spec:** `doc/boerse/coinbase.md` beschreibt das Custom-Statement (Varianten 2019–2024+, Präambel, Typen). Das Spaltenlayout ist nur sekundär belegt, ein unbekannter Kopf wird abgelehnt.
