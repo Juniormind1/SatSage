@@ -10,6 +10,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 ## [Unveröffentlicht]
 
 - **Datenschutz · Leak-Scan:** CSV-Köpfe dürfen in `doc/boerse/` wörtlich stehen, Werte und IDs weiterhin nicht.
+- **Doku · Strike-Spec:** `doc/boerse/strike.md` beschreibt das Account-Statement (Spalten, Typen, Lightning vs. On-Chain). Nur Statements, kein Activity-Export.
 - **Doku · Coinbase-Spec:** `doc/boerse/coinbase.md` beschreibt das Custom-Statement (Varianten 2019–2024+, Präambel, Typen). Das Spaltenlayout ist nur sekundär belegt, ein unbekannter Kopf wird abgelehnt.
 - **Doku · Kraken-Spec:** `doc/boerse/kraken.md` beschreibt Ledgers und Trades (Spalten, Typen, Zeitzone, Quelle je Angabe). Unbekannte Formate werden nicht geraten.
 
