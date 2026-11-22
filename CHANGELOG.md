@@ -9,6 +9,9 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Börsenhistorie · Kraken:** Der Parser liest Ledgers und optional Trades, paart über `refid` und nimmt den Kurs aus der Trades-Datei oder, fehlt sie, aus der Fiat-Gegenzeile (E9). Testdaten sind synthetisch.
+- **Datenschutz · Leak-Scan:** CSV-Köpfe dürfen außerdem in `core/boerse/` und `tests/test_boerse_*.py` wörtlich stehen.
+
 - **Börsenhistorie · Erkennung:** Der CSV-Kopf bestimmt Börse und Variante. Ein unbekannter Kopf wird abgelehnt, die Meldung nennt nur Spaltennamen.
 
 - **Börsenhistorie · Zahlen:** `core/boerse/` nimmt Beträge als Decimal und wandelt BTC exakt in Sats, ohne Float.
