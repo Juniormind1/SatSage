@@ -15,6 +15,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **Datenquellen · libbitcoin:** Die native Abfrage bleibt an, wenn der Adressindex unter `store.address` steht. Die ältere Fassung mit `address` an der Wurzel gilt weiter. `network.address` schaltet sie nicht ein. Die Pfade bleiben `address`, `output` und `tx`.
 - **Anmeldung und Einstellungen · Auge:** Maskierte Felder (Anmeldung, Ersteinrichtung, App-Passwort, SMTP-Passwort, LLM-Key, Geheimfelder der Datenquellen) haben einen Knopf, der den Inhalt zeigt und wieder verbirgt. Das Feld startet verborgen. Der Knopf schickt das Formular nicht ab.
 - **Navigation · standardmäßig angeheftet:** Ohne gemerkte Wahl bleibt die Leiste angeheftet, sobald neben den 210 px noch Inhalt steht (ab 720 px Breite). Darunter und in der Einbettung (iframe, StartOS) ist sie das Overlay und klappt beim Verlassen des Zeigers zu. Ein gespeichertes An- oder Abheften gewinnt. Der Umbruch der Kopf-Pillen klappt die Leiste nicht mehr ein.
+- **Release · Kurs-Dateien:** Der Image-Workflow darf `btc-price-EUR.csv` und `btc-price-USD.csv` ans Release hängen. Bisher fehlte ihm dafür die Schreibberechtigung.
 
 ## [1.0.1] — 2026-10-18
 
