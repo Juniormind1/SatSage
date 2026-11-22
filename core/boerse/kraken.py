@@ -95,11 +95,20 @@ def _feld(zeile: dict[str, str], *namen: str) -> str:
 
 def parse_ledgers(text: str, *, konto: str = "kraken") -> ParseErgebnis:
     """Nur das Ledger. Kurse aus der Fiat-Gegenzeile, falls nötig (E9, änderbar)."""
-    return _parse(text, None, konto=konto)
+    return parse(text, None, konto=konto)
 
 
 def parse(ledgers_text: str, trades_text: str | None = None, *, konto: str = "kraken") -> ParseErgebnis:
-    return _parse(ledgers_text, trades_text, konto=konto)
+    import time
+    from core.boerse import protokoll
+    start = time.perf_counter()
+    try:
+        return protokoll.nach_parse("kraken", _parse(ledgers_text, trades_text, konto=konto), start)
+    except FormatFehler:
+        raise
+    except Exception as exc:
+        protokoll.fehler("parse_fehler", exc, boerse="kraken")
+        raise
 
 
 def _parse(ledgers_text: str, trades_text: str | None, *, konto: str) -> ParseErgebnis:
@@ -123,7 +132,7 @@ def _parse(ledgers_text: str, trades_text: str | None, *, konto: str) -> ParseEr
         refid = _feld(zeile, "refid").strip()
         typ = _feld(zeile, "type").strip().lower()
         if typ in {"trade", "spend", "receive"} and not refid:
-            quarantaene.append(Quarantaene(nr, "refid fehlt", typ, datei))
+            quarantaene.append(Quarantaene(nr, "refid fehlt", typ, datei, spalte="refid"))
             continue
         if refid:
             gruppen[refid].append((nr, zeile))
@@ -199,7 +208,7 @@ def _gruppe(
         if sub <= _INTERN_SUB and sub:
             return _intern(konto, datei, refid, zeilen)
         return [], [
-            Quarantaene(nr, "Transfer ohne bekannten Subtyp", _feld(z, "type"), datei)
+            Quarantaene(nr, "Transfer ohne bekannten Subtyp", _feld(z, "type"), datei, spalte="subtype")
             for nr, z in zeilen
         ]
 
@@ -234,7 +243,7 @@ def _intern(konto, datei, refid, zeilen) -> tuple[list[Buchung], list[Quarantaen
     quarantaene: list[Quarantaene] = []
     for nr, z in zeilen:
         if _unsicherer_btc(_feld(z, "asset")):
-            quarantaene.append(Quarantaene(nr, "unbekannter BTC-Suffix", _feld(z, "type"), datei))
+            quarantaene.append(Quarantaene(nr, "unbekannter BTC-Suffix", _feld(z, "type"), datei, spalte="asset"))
             continue
         try:
             buchungen.append(_buchung_aus_zeile(
@@ -260,7 +269,7 @@ def _handel(konto, datei, refid, zeilen, trades):
             fremd.append((nr, z))
     if any(_unsicherer_btc(_feld(z, "asset")) for _, z in zeilen):
         return [], [
-            Quarantaene(nr, "unbekannter BTC-Suffix", _feld(z, "type"), datei)
+            Quarantaene(nr, "unbekannter BTC-Suffix", _feld(z, "type"), datei, spalte="asset")
             for nr, z in zeilen if _unsicherer_btc(_feld(z, "asset"))
         ]
     quarantaene: list[Quarantaene] = []
@@ -301,7 +310,7 @@ def _handel(konto, datei, refid, zeilen, trades):
     try:
         zeit = _zeit_ts(_feld(zb, "time"))
     except ZahlenFehler:
-        return [], [Quarantaene(nr, "Zeit nicht lesbar", _feld(zb, "type"), datei)]
+        return [], [Quarantaene(nr, "Zeit nicht lesbar", _feld(zb, "type"), datei, spalte="time")]
 
     buchung = Buchung(
         konto=konto,
@@ -377,7 +386,7 @@ def _einzel(konto, datei, nr, z) -> tuple[Buchung | None, Quarantaene | None]:
     typ = _feld(z, "type").strip().lower()
     asset = _asset(_feld(z, "asset"))
     if _unsicherer_btc(_feld(z, "asset")):
-        return None, Quarantaene(nr, "unbekannter BTC-Suffix", typ, datei)
+        return None, Quarantaene(nr, "unbekannter BTC-Suffix", typ, datei, spalte="asset")
     if typ in _QUARANTAENE_TYP or _feld(z, "subtype").strip().lower() in _QUARANTAENE_SUB:
         return None, Quarantaene(nr, "nicht unterstützter Typ", typ, datei)
     if typ == "withdrawal" and asset == "BTC":
@@ -389,7 +398,7 @@ def _einzel(konto, datei, nr, z) -> tuple[Buchung | None, Quarantaene | None]:
     elif typ == "withdrawal" and asset in {"EUR", "USD"}:
         art = Art.FIAT_AUS
     elif typ in {"trade", "spend", "receive"}:
-        return None, Quarantaene(nr, "refid fehlt", typ, datei)
+        return None, Quarantaene(nr, "refid fehlt", typ, datei, spalte="refid")
     elif asset not in {"BTC", "EUR", "USD"} and typ in {"deposit", "withdrawal", "transfer", "earn"}:
         return None, None  # andere Assets still ignorieren
     else:
@@ -402,11 +411,18 @@ def _einzel(konto, datei, nr, z) -> tuple[Buchung | None, Quarantaene | None]:
 
 def pruefe_saldo(text: str) -> tuple[int, ...]:
     """Zeilennummern, an denen der Ledger-Saldo nicht zur Vorgängerzeile passt."""
+    return tuple(int(d["zeile"]) for d in pruefe_saldo_details(text))
+
+
+def pruefe_saldo_details(text: str) -> tuple[dict, ...]:
+    """Saldo-Lücken mit Größenordnung und Kalendertag, ohne exakten Betrag+Uhrzeit."""
+    from core.boerse import protokoll
+
     erkannt = erkenne(text)
     if erkannt.boerse != "kraken" or not erkannt.variante.startswith("ledgers"):
         raise FormatFehler("Kein Kraken-Ledger", erkannt.spalten)
     letzte: dict[tuple[str, str], Decimal] = {}
-    luecken: list[int] = []
+    luecken: list[dict] = []
     eintraege = []
     for nr, z in _dict_zeilen(erkannt):
         try:
@@ -415,7 +431,7 @@ def pruefe_saldo(text: str) -> tuple[int, ...]:
             zeit = 0
         eintraege.append((zeit, nr, z))
     eintraege.sort()
-    for _zeit, nr, z in eintraege:
+    for zeit, nr, z in eintraege:
         asset = _feld(z, "asset").strip().lower()
         wallet = _feld(z, "wallet").strip().lower()
         try:
@@ -423,13 +439,21 @@ def pruefe_saldo(text: str) -> tuple[int, ...]:
             fee = parse_decimal(_feld(z, "fee")) or Decimal(0)
             balance = parse_decimal(_feld(z, "balance"))
         except ZahlenFehler:
-            luecken.append(nr)
+            luecken.append(protokoll.saldo_eintrag(
+                zeile=nr, differenz=None, zeit_ts=zeit or None, einheit="",
+            ))
             continue
         if balance is None:
             continue
         key = (asset, wallet)
         alt = letzte.get(key)
         if alt is not None and alt + amount - fee != balance:
-            luecken.append(nr)
+            einheit = "sat" if asset in _BTC or asset in {"xxbt", "xbt", "btc"} else (asset or "")
+            luecken.append(protokoll.saldo_eintrag(
+                zeile=nr,
+                differenz=balance - (alt + amount - fee),
+                zeit_ts=zeit or None,
+                einheit=einheit,
+            ))
         letzte[key] = balance
     return tuple(luecken)

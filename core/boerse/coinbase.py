@@ -125,6 +125,19 @@ def _ref(zeile: dict[str, str]) -> str:
 
 
 def parse(text: str, *, konto: str = "coinbase") -> ParseErgebnis:
+    import time
+    from core.boerse import protokoll
+    start = time.perf_counter()
+    try:
+        return protokoll.nach_parse("coinbase", _parse(text, konto=konto), start)
+    except FormatFehler:
+        raise
+    except Exception as exc:
+        protokoll.fehler("parse_fehler", exc, boerse="coinbase")
+        raise
+
+
+def _parse(text: str, *, konto: str = "coinbase") -> ParseErgebnis:
     erkannt = erkenne(text)
     if erkannt.boerse != "coinbase":
         raise FormatFehler("Kein Coinbase-Statement", erkannt.spalten)
@@ -155,7 +168,7 @@ def _zeile(konto, datei, nr, zeile, typ, typ_n, asset, asset_n, spalten):
     if typ_n not in _KAUF | _VERKAUF | _AUS | _EIN | _FIAT_EIN | _FIAT_AUS | _INTERN:
         if typ_n:
             return None, Quarantaene(nr, "nicht unterstützter Typ", typ, datei)
-        return None, Quarantaene(nr, "Typ fehlt", None, datei)
+        return None, Quarantaene(nr, "Typ fehlt", None, datei, spalte="transaction type")
 
     ist_btc = asset_n in _BTC
     ist_fiat = asset_n in _FIAT or asset_n in {"eur", "usd"}

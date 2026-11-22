@@ -266,12 +266,16 @@ def importiere_ergebnis(
     datei_trades: str | None = None,
 ) -> dict:
     """Hängt neue Buchungen an. Gleicher Inhalt ist idempotent, abweichender Inhalt ein Konflikt."""
+    import time
+    from core.boerse import protokoll
+
+    start = time.perf_counter()
     if not slug:
         raise SpeicherFehler("Slug fehlt.")
     if datei_schon_importiert(slug, cache_dir, ergebnis.datei_hash) and not ersetzen:
         bestehend = lies_buchungen(slug, cache_dir)
         labels = lies_labels(slug, cache_dir)
-        return {
+        bericht = {
             "slug": slug,
             "name": name,
             "fassung": FASSUNG,
@@ -285,6 +289,13 @@ def importiere_ergebnis(
             "txids": len(labels.get("txids") or {}),
             "variante": ergebnis.variante,
         }
+        protokoll.nach_speicher(
+            slug=slug, variante=ergebnis.variante,
+            neu=0, doppelt=0, konflikte=0, konflikt_zeilen=[],
+            n_buchungen=bericht["buchungen"], n_quarantaene=bericht["quarantaene"],
+            schon=True, start=start,
+        )
+        return bericht
 
     ziel = ordner(slug, cache_dir)
     if ersetzen:
@@ -304,6 +315,7 @@ def importiere_ergebnis(
 
     index = {(b.konto, b.ref): b for b in bestehend}
     neu = doppelt = konflikte = 0
+    konflikt_zeilen: list[int] = []
     for b in ergebnis.buchungen:
         alt = index.get((b.konto, b.ref))
         if alt is None:
@@ -315,6 +327,7 @@ def importiere_ergebnis(
             doppelt += 1
             continue
         konflikte += 1
+        konflikt_zeilen.append(b.zeile)
         quarantaene.append({
             "zeile": b.zeile,
             "grund": "Konflikt gleicher Schlüssel",
@@ -362,7 +375,7 @@ def importiere_ergebnis(
     _atomar(ziel / DATEI_QUELLEN, json.dumps(quellen, ensure_ascii=False, indent=2, sort_keys=True))
     _atomar(ziel / DATEI_LABELS, json.dumps(labels, ensure_ascii=False, indent=2, sort_keys=True))
 
-    return {
+    bericht = {
         "slug": slug,
         "name": name,
         "fassung": FASSUNG,
@@ -376,6 +389,14 @@ def importiere_ergebnis(
         "txids": len(labels.get("txids") or {}),
         "variante": ergebnis.variante,
     }
+    protokoll.nach_speicher(
+        slug=slug, variante=ergebnis.variante,
+        neu=neu, doppelt=doppelt, konflikte=konflikte,
+        konflikt_zeilen=konflikt_zeilen,
+        n_buchungen=bericht["buchungen"], n_quarantaene=bericht["quarantaene"],
+        schon=False, start=start,
+    )
+    return bericht
 
 
 def loesche_v2(slug: str, cache_dir: Path) -> bool:

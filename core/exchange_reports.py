@@ -473,6 +473,11 @@ def vorschau(
     """Format erkennen und zaehlen. Schreibt nichts, nennt keine Dateinamen."""
     from core.boerse.modell import FormatFehler
 
+    import time
+    from core.boerse import protokoll
+    from core.log_redaktion import spalten_anzeige
+
+    start = time.perf_counter()
     try:
         ergebnis, erkannt = _parse_erkannt(csv_text, trades_text)
     except FormatFehler as exc:
@@ -484,7 +489,7 @@ def vorschau(
         antwort = {
             "erkannt": False,
             "grund": exc.grund,
-            "spalten": list(exc.spalten),
+            "spalten": spalten_anzeige(exc.spalten),
         }
         if v1:
             antwort["v1"] = True
@@ -492,15 +497,26 @@ def vorschau(
             antwort["txids"] = len(v1.get("txids") or {})
             antwort["rows_total"] = v1.get("rows_total")
             antwort["rows_btc"] = v1.get("rows_btc")
+        protokoll.nach_vorschau(
+            boerse=None, variante=None, erkannt=False,
+            nach_art={}, n_buchungen=0,
+            quarantaene=[], saldo=[],
+            dauer_start=start, schon_importiert=False,
+        )
         return antwort
+    except Exception as exc:
+        protokoll.fehler("vorschau_fehler", exc)
+        raise
 
     nach_art: dict[str, int] = {}
     for b in ergebnis.buchungen:
         nach_art[str(b.art)] = nach_art.get(str(b.art), 0) + 1
     saldo_luecken: tuple[int, ...] = ()
+    saldo_details: tuple[dict, ...] = ()
     if erkannt.boerse == "kraken" and erkannt.variante.startswith("ledgers"):
         from core.boerse import kraken
-        saldo_luecken = kraken.pruefe_saldo(csv_text)
+        saldo_details = kraken.pruefe_saldo_details(csv_text)
+        saldo_luecken = tuple(int(d["zeile"]) for d in saldo_details)
     slug = slug_aus_name(name or erkannt.boerse)
     schon = False
     if cache_dir is not None:
@@ -508,6 +524,26 @@ def vorschau(
         schon = speicher.datei_schon_importiert(
             slug, verzeichnis(cache_dir), ergebnis.datei_hash
         )
+    quar_public = [
+        {
+            "zeile": q.zeile,
+            "grund": q.grund,
+            "roh_typ": q.roh_typ,
+            **({"spalte": q.spalte} if getattr(q, "spalte", None) else {}),
+        }
+        for q in ergebnis.quarantaene
+    ]
+    protokoll.nach_vorschau(
+        boerse=erkannt.boerse,
+        variante=erkannt.variante,
+        erkannt=True,
+        nach_art=nach_art,
+        n_buchungen=len(ergebnis.buchungen),
+        quarantaene=[{"zeile": q.zeile, "grund": q.grund, "spalte": getattr(q, "spalte", None) or "-"} for q in ergebnis.quarantaene],
+        saldo=list(saldo_details),
+        dauer_start=start,
+        schon_importiert=schon,
+    )
     return {
         "erkannt": True,
         "boerse": erkannt.boerse,
@@ -515,10 +551,7 @@ def vorschau(
         "vorschlag_name": erkannt.boerse.capitalize(),
         "buchungen": len(ergebnis.buchungen),
         "nach_art": nach_art,
-        "quarantaene": [
-            {"zeile": q.zeile, "grund": q.grund, "roh_typ": q.roh_typ}
-            for q in ergebnis.quarantaene
-        ],
+        "quarantaene": quar_public,
         "saldo_luecken": list(saldo_luecken),
         "schon_importiert": schon,
     }
@@ -539,8 +572,11 @@ def importiere_csv(
 
     *filename* wird nicht in Fassung 2 gespeichert.
     """
+    import time
+    from core.boerse import protokoll
     from core.boerse.modell import FormatFehler
 
+    start = time.perf_counter()
     anzeige = (name or "").strip()
     if not anzeige:
         raise ExchangeReportError("Bitte einen Börsennamen angeben.")
@@ -549,6 +585,10 @@ def importiere_csv(
         ergebnis, erkannt = _parse_erkannt(csv_text, csv_trades, konto=slug)
     except FormatFehler:
         ergebnis = None
+        erkannt = None
+    except Exception as exc:
+        protokoll.fehler("import_fehler", exc, boerse=anzeige)
+        raise
     if ergebnis is not None:
         from core.boerse import speicher
         trades_hash = None
@@ -568,6 +608,7 @@ def importiere_csv(
         bericht["rows_total"] = len(ergebnis.buchungen) + len(ergebnis.quarantaene)
         bericht["rows_btc"] = bericht.get("buchungen") or 0
         _index_aktualisieren(cache_dir)
+        protokoll.nach_import(bericht, start, boerse=getattr(erkannt, 'boerse', None))
         return bericht
     parsed = parse_csv_btc_refs(csv_text)
 
@@ -615,7 +656,7 @@ def importiere_csv(
     daten["updated_ts"] = jetzt
 
     _schreibe(daten, cache_dir)
-    return {
+    bericht_v1 = {
         "slug": slug,
         "name": anzeige,
         "addresses": len(daten.get("addresses") or {}),
@@ -624,8 +665,9 @@ def importiere_csv(
         "imported_txids": len(parsed["txids"]),
         "rows_total": parsed["rows_total"],
         "rows_btc": parsed["rows_btc"],
-        "filename": (filename or "")[:200],
     }
+    protokoll.nach_import(bericht_v1, start, boerse="v1")
+    return bericht_v1
 
 
 def liste(cache_dir: Path | None = None) -> list[dict]:

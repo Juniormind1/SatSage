@@ -52,6 +52,7 @@ class Quarantaene:
     roh_typ: str | None
     datei: str
     ref: str | None = None
+    spalte: str | None = None
 
 
 @dataclass(frozen=True)

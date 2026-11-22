@@ -49,6 +49,11 @@ def schlage_vor(
     bestehend: list[Zuordnung] | tuple[Zuordnung, ...] = (),
 ) -> ZuordnungLauf:
     """Ordnet Auszahlungen Empfängen zu. Bestehende Entscheidungen bleiben."""
+    import time
+    from collections import Counter
+    from core.boerse import protokoll
+    start = time.perf_counter()
+    kandidaten: list[int] = []
     entschieden = {
         (z.konto, z.auszahlung_ref): z
         for z in bestehend
@@ -97,7 +102,7 @@ def schlage_vor(
         if not outs:
             rest.extend(gruppe)
             continue
-        ergebnis = _txid_gruppe(gruppe, outs, belegt)
+        ergebnis = _txid_gruppe(gruppe, outs, belegt, kandidaten)
         zuordnungen.extend(ergebnis[0])
         quarantaene.extend(ergebnis[1])
         rest.extend(ergebnis[2])
@@ -106,7 +111,7 @@ def schlage_vor(
                 belegt.add((z.txid, z.vout))
 
     for b in ohne_txid + rest:
-        z, q, luecke = _adresse_oder_zeit(b, empfange, belegt)
+        z, q, luecke = _adresse_oder_zeit(b, empfange, belegt, kandidaten)
         if z:
             zuordnungen.append(z)
             belegt.add((z.txid, z.vout))
@@ -115,15 +120,35 @@ def schlage_vor(
         elif luecke:
             luecken.append(b.ref)
 
-    return ZuordnungLauf(tuple(zuordnungen), tuple(luecken), tuple(quarantaene), tuple(kein_hop))
+    lauf = ZuordnungLauf(tuple(zuordnungen), tuple(luecken), tuple(quarantaene), tuple(kein_hop))
+    n_aus = sum(1 for b in buchungen if b.art is Art.BTC_AUSGANG)
+    protokoll.nach_zuordnung(
+        n_auszahlungen=n_aus,
+        n_empfaenge=len(empfange),
+        nach_status=dict(Counter(z.status for z in lauf.zuordnungen)),
+        nach_methode=dict(Counter(z.methode for z in lauf.zuordnungen)),
+        n_luecken=len(lauf.luecken),
+        n_quarantaene=len(lauf.quarantaene),
+        n_kein_hop=len(lauf.kein_hop),
+        kandidaten=kandidaten,
+        quarantaene_gruende=[
+            str((q.get("grund") if isinstance(q, dict) else getattr(q, "grund", "")))
+            for q in lauf.quarantaene
+        ],
+        start=start,
+    )
+    return lauf
 
 
 def _txid_gruppe(
     gruppe: list[Buchung],
     outs: list[KettenEmpfang],
     belegt: set[tuple[str, int]],
+    kandidaten: list[int] | None = None,
 ) -> tuple[list[Zuordnung], list[dict], list[Buchung]]:
     frei = [o for o in outs if (o.txid.lower(), o.vout) not in belegt]
+    if kandidaten is not None:
+        kandidaten.append(len(frei))
     if any(o.eigene_eingaenge for o in outs):
         return [], [
             {"ref": b.ref, "konto": b.konto, "grund": "eigene Eingänge in der Tx"}
@@ -170,6 +195,7 @@ def _adresse_oder_zeit(
     b: Buchung,
     empfange: list[KettenEmpfang] | tuple[KettenEmpfang, ...],
     belegt: set[tuple[str, int]],
+    kandidaten: list[int] | None = None,
 ) -> tuple[Zuordnung | None, dict | None, bool]:
     soll = erwarteter_output_sats(b)
     frei = [
@@ -178,11 +204,17 @@ def _adresse_oder_zeit(
     ]
     if b.adresse:
         nach_adr = [e for e in frei if e.adresse == b.adresse and im_fenster(b.zeit_ts, e.zeit_ts)]
+        if kandidaten is not None:
+            kandidaten.append(len(nach_adr))
         if len(nach_adr) == 1:
             return _zuordnung(b, nach_adr[0], "adresse", "vorschlag"), None, False
         if len(nach_adr) > 1:
             return None, {"ref": b.ref, "konto": b.konto, "grund": "mehrere Kandidaten"}, False
     zeit = [e for e in frei if im_fenster(b.zeit_ts, e.zeit_ts)]
+    if kandidaten is not None and not b.adresse:
+        kandidaten.append(len(zeit))
+    elif kandidaten is not None and b.adresse and not nach_adr:
+        kandidaten.append(len(zeit))
     if len(zeit) == 1:
         return _zuordnung(b, zeit[0], "betrag_zeit", "vorschlag"), None, False
     if len(zeit) > 1:
@@ -374,6 +406,15 @@ def aktualisiere_zuordnungen(slug: str, exchange_dir, utxo_cache_dir) -> dict:
     gem = mergen(bestehend, lauf)
     speicher.schreibe_zuordnungen(slug, wurzel, gem)
     _erklaerung_cache.clear()
+    from core.log_redaktion import schreibe
+    schreibe(
+        "zuordnung_gespeichert",
+        slug=slug,
+        n_zuordnungen=len(gem),
+        n_luecken=len(lauf.luecken),
+        n_quarantaene=len(lauf.quarantaene),
+        n_kein_hop=len(lauf.kein_hop),
+    )
     return {
         "slug": slug,
         "zuordnungen": [speicher.zuordnung_zu_dict(z) for z in gem],

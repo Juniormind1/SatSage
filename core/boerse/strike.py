@@ -112,6 +112,19 @@ def _zeit(roh: str) -> int | None:
 
 
 def parse(text: str, *, konto: str = "strike") -> ParseErgebnis:
+    import time
+    from core.boerse import protokoll
+    start = time.perf_counter()
+    try:
+        return protokoll.nach_parse("strike", _parse(text, konto=konto), start)
+    except FormatFehler:
+        raise
+    except Exception as exc:
+        protokoll.fehler("parse_fehler", exc, boerse="strike")
+        raise
+
+
+def _parse(text: str, *, konto: str = "strike") -> ParseErgebnis:
     erkannt = erkenne(text)
     if erkannt.boerse != "strike":
         raise FormatFehler("Kein Strike-Statement", erkannt.spalten)
@@ -140,7 +153,7 @@ def _zeile(konto, datei, nr, zeile, typ, typ_n):
     if typ_n not in _KAUF | _VERKAUF | _EIN | _AUS | _FIAT_EIN | _FIAT_AUS:
         if typ_n:
             return None, Quarantaene(nr, "nicht unterstützter Typ", typ, datei)
-        return None, Quarantaene(nr, "Typ fehlt", None, datei)
+        return None, Quarantaene(nr, "Typ fehlt", None, datei, spalte="transaction type")
 
     ziel = _get(zeile, "destination")
     ln = _ist_lightning(ziel)

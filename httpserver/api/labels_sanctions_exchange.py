@@ -146,9 +146,17 @@ def api_exchange_reports_vorschau(state: AppState, payload: dict) -> dict:
             cache_dir=state.exchange_reports_dir,
         )
     except FormatFehler as exc:
-        raise ApiError(400, str(exc)) from exc
+        from core.log_redaktion import redigiere, spalten_anzeige
+        raise ApiError(400, redigiere(exc.grund) + (
+            (": " + ", ".join(spalten_anzeige(exc.spalten))) if exc.spalten else ""
+        )) from None
     except boerse.ExchangeReportError as exc:
-        raise ApiError(400, str(exc)) from exc
+        from core.log_redaktion import redigiere
+        raise ApiError(400, redigiere(str(exc))) from None
+    except Exception as exc:
+        from core.boerse import protokoll
+        protokoll.fehler("vorschau_fehler", exc)
+        raise
 
 
 def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
@@ -190,9 +198,16 @@ def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
             csv_trades=trades,
         )
     except boerse.ExchangeReportError as exc:
-        raise ApiError(400, str(exc)) from exc
+        from core.log_redaktion import redigiere
+        raise ApiError(400, redigiere(str(exc))) from None
     except OSError as exc:
-        raise ApiError(500, "Interner Serverfehler.") from exc
+        from core.boerse import protokoll
+        protokoll.fehler("import_fehler", exc, boerse=name)
+        raise ApiError(500, "Interner Serverfehler.") from None
+    except Exception as exc:
+        from core.boerse import protokoll
+        protokoll.fehler("import_fehler", exc, boerse=name)
+        raise
     ergebnis["status"] = boerse.status(state.exchange_reports_dir)
     return ergebnis
 
@@ -294,7 +309,8 @@ def api_exchange_zuordnung_setzen(state: AppState, payload: dict) -> dict:
             methode=payload.get("methode"),
         )
     except ValueError as exc:
-        raise ApiError(400, str(exc)) from exc
+        from core.log_redaktion import redigiere
+        raise ApiError(400, redigiere(str(exc))) from None
     speicher.schreibe_zuordnungen(slug, wurzel, neu)
     zuordnung._erklaerung_cache.clear()
     return {"slug": slug, "zuordnungen": [speicher.zuordnung_zu_dict(z) for z in neu]}
