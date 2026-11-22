@@ -8,7 +8,7 @@ Gilt für alles unter `core/` **und** für die Root-Fassaden, die denselben Stof
 
 Zusätzlich zur Root-Verfassung ([`../AGENTS.md`](../AGENTS.md)). Bei Konflikt gewinnt Root-HART.
 
-Wissen nur aus Mainchain-Traces der xpubs und Fremdwallet-Exporten. Caches sparen Electrs-Abfragen. Eine eigene Buchhaltung (Extremfall: Losregister) verletzt [`../doc/user-profile-ux.md`](../doc/user-profile-ux.md) — das sagen, bevor es gebaut wird.
+On-Chain-Wissen nur aus Mainchain-Traces der xpubs und Fremdwallet-Exporten. Caches sparen Electrs-Abfragen, sie sind keine Buchhaltung. Aus Börsen-CSV darf SatSage striktes FIFO je Börsenkonto ableiten (BTC gegen EUR/USD, nur mit Chain-Hop, Lose nicht speichern) — Grenzen in [`../doc/user-profile-ux.md`](../doc/user-profile-ux.md). Eine allgemeine Los-Buchhaltung verletzt das Profil — das sagen, bevor es gebaut wird.
 
 ## Einstieg
 

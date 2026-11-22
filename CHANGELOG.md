@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Nutzerprofil · Börsen-FIFO:** Für Börsentransaktionen, die nicht on-chain sind, darf SatSage aus dem CSV-Export einer Börse eine strikte FIFO-Kaufhistorie je Börsenkonto ableiten, zurück bis zum Kauf auf der Börse. On-Chain bleibt die Trace-Welt. Die Grenzen stehen in `doc/user-profile-ux.md`.
+
 ## [1.0.2] — 2026-11-22
 
 - **Release 1.0.2:** Versionsnummer auf 1.0.2. StartOS-Paket `1.0.2:0`; `1.0.1:0` bleibt im Versionsgraphen, damit Geräte von dort wandern. Specter-Plugin 1.0.2.

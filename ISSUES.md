@@ -884,17 +884,17 @@ Reihenfolge: Touch ID über die macOS-Keychain. Danach dasselbe Muster für Wind
 
 ## Börse · CSV als Trade-Historie
 
-**Stand:** 2026-11-04 · **offen** · Idee / später · Import
+**Stand:** 2026-11-22 · **offen** · Idee / später · Import
 **Quelle:** Kassiber (https://github.com/bitcoinaustria/kassiber) war die Inspiration und kann die Umsetzungsreferenz liefern. Lesen und in SatSage neu fassen. Quelltext nicht übernehmen. Spec je Börse, unbekannte Zeilentypen in Quarantäne.
 **Ort:** `core/exchange_reports.py`
 
-Aufwand: **hoch** (Stufe 1). Stufe 2 erst nach Änderung des Nutzerprofils.
+Aufwand: **hoch** (Stufe 1 und Stufe 2). Beide Stufen liegen im Nutzerprofil; eine eigene Steuerrechnung bleibt außerhalb.
 
 Heute bleiben aus einem Börsen-CSV nur Bitcoin-Adressen und TxIDs. Sie beschriften den externen Zugang.
 
 **Stufe 1, im Nutzerprofil:** Eine Zeile erklärt einen schon gesehenen Zu- oder Abfluss: Datum, BTC-Betrag, Gebühr, Auszahlungs-Tx, Börsenname. Eine Zeile ohne passenden Chain-Hop bleibt eine Lücke und wird kein erfundener Zugang. Unbekannter Zeilentyp wird markiert und nicht als Kauf oder Verkauf geraten. Pro Börse zuerst eine kurze Spec (Zeilentypen, Zeitzone, Zahlenformat), dann der Importer.
 
-**Stufe 2, Regelbruch:** Ein mitgeführter Börsenbestand, Lose auf der Börse oder eine eigene Steuerrechnung daraus verletzt [`doc/user-profile-ux.md`](doc/user-profile-ux.md). Das bleibt zu, bis dieses Profil geändert ist.
+**Stufe 2, im Nutzerprofil:** Aus dem CSV-Export einer Börse darf SatSage einen Börsenbestand und strikte FIFO-Lose je Börsenkonto ableiten, zurück bis zum Kauf auf der Börse. Die Lose werden aus den Importfakten neu berechnet, nicht als Buchhaltung gespeichert. Eine Auszahlung wird nur mit passendem Chain-Hop (TxID exakt oder vom Nutzer bestätigter Vorschlag) zum Zugang; ohne Hop bleibt sie Lücke. Im Bericht als Börsenbeleg gekennzeichnet; die Blockzeit des Chain-Zugangs bleibt als sichere Untergrenze sichtbar. Nur BTC gegen EUR/USD, nur Export, keine API. Grundlage und Grenzen stehen in [`doc/user-profile-ux.md`](doc/user-profile-ux.md). Eine eigene Steuerrechnung oder eine allgemeine Los-Buchhaltung bleibt außerhalb und braucht eine weitere Profiländerung.
 
 **Verbote:**
 
@@ -903,6 +903,8 @@ Heute bleiben aus einem Börsen-CSV nur Bitcoin-Adressen und TxIDs. Sie beschrif
 - Zeilen ohne Bitcoin bleiben draußen. Sie werden keine Sats.
 - Ein unbekannter Zeilentyp bleibt Quarantäne. Daraus wird kein Kauf und kein Verkauf.
 - Eine Zeile ohne passenden Chain-Hop wird kein Zugang und kein Datum der Anschaffung.
+- Keine API und keine Secrets. Nur der Export.
+- FIFO nur strikt je Börsenkonto. Kein LIFO, kein Aussuchen einzelner Lose.
 
 ---
 ---
