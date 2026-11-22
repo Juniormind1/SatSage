@@ -35,17 +35,24 @@ def api_save_steuer(state: AppState, payload: dict) -> dict:
     except ValueError as exc:
         raise ApiError(400, str(exc)) from exc
 
+    from core.boerse.bericht import parse_boerse_pnl
+
     env = state.env()
     bisher = tax_mod.lese_steuer_einstellungen(env.values())
     if "anschaffung" in payload:
         anschaffung = tax_mod.parse_anschaffung(payload.get("anschaffung"))
     else:
         anschaffung = bisher["anschaffung"]
+    if "boerse_pnl" in payload:
+        boerse_pnl = parse_boerse_pnl(payload.get("boerse_pnl"))
+    else:
+        boerse_pnl = bool(bisher.get("boerse_pnl"))
 
     env.apply({
         "STEUER_HALTEFRIST_JAHRE": str(frist),
         "STEUER_STICHTAG": tax_mod.format_stichtag(tag),
         "STEUER_ANSCHAFFUNG": anschaffung,
+        "STEUER_BOERSE_PNL": "1" if boerse_pnl else "0",
     })
     try:
         env.save()

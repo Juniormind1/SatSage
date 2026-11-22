@@ -210,6 +210,7 @@ def _steuer_auswertung(
         lang=lang,
         mit_lots=mit_lots,
         on_lot=on_lot,
+        boerse_pnl=bool(einstellungen.get("boerse_pnl")),
     )
     auswertung["verfuegbare_jahre"] = jahre
     auswertung["ohne_verlauf"] = ohne_verlauf

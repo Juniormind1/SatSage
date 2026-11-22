@@ -262,6 +262,8 @@ def lese_steuer_einstellungen(werte: dict[str, str] | None) -> dict:
     stichtag = parse_stichtag(werte.get("STEUER_STICHTAG"))
     anschaffung = parse_anschaffung(werte.get("STEUER_ANSCHAFFUNG"))
 
+    from core.boerse.bericht import parse_boerse_pnl
+
     return {
         "haltefrist_jahre": frist,
         "stichtag": format_stichtag(stichtag),
@@ -269,6 +271,7 @@ def lese_steuer_einstellungen(werte: dict[str, str] | None) -> dict:
         "haltefrist_jahre_auswahl": list(range(1, HALTEFRIST_MAX_JAHRE + 1)),
         "anschaffung": anschaffung,
         "anschaffung_auswahl": list(ANSCHAFFUNG_MODI),
+        "boerse_pnl": parse_boerse_pnl(werte.get("STEUER_BOERSE_PNL")),
     }
 
 
@@ -910,6 +913,9 @@ def auswerten(
     lang: str | None = None,
     mit_lots: bool = True,
     on_lot=None,
+    boerse_kontext=None,
+    boerse_pnl: bool | None = None,
+    kurs_am=None,
 ) -> dict:
     """
     Wertet die Eingänge bis zum Bezugsdatum des Steuerjahres aus.
@@ -924,8 +930,17 @@ def auswerten(
     *mit_lots*: False lässt die Punkte auf dem einen Anschaffungsdatum.
     Die Bäume liest erst der zweite Lauf; *on_lot* bekommt jeden Punkt,
     sobald sein Lot feststeht.
+
+    *boerse_kontext*: Overlay für bestätigte Börsenzuordnungen (M8).
+    ``None`` lädt den Speicher, ``False`` schaltet das Overlay aus.
+    *boerse_pnl*: Gewinn/Verlust-Spalten; Default aus den Einstellungen
+    bzw. aus. Ohne P&L bleibt der Bericht ein Herkunftsnachweis.
     """
     modus = parse_anschaffung(anschaffung)
+    if boerse_pnl is None:
+        boerse_pnl = False
+    else:
+        boerse_pnl = bool(boerse_pnl)
     ende, laufend = bezugsdatum(jahr, jetzt)
     eintraege: list[Eingang] = []
     abgaenge: list[dict] = []
@@ -1137,6 +1152,7 @@ def auswerten(
         "haltefrist_jahre": haltefrist_jahre,
         "stichtag_regel": format_stichtag(stichtag),
         "anschaffung": modus,
+        "lang": lang,
         "erstellt": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "eintraege": [e.as_dict() for e in eintraege],
         "kennzahlen": {
@@ -1177,6 +1193,7 @@ def auswerten(
             ),
             wallet,
         ),
+        "boerse_pnl": bool(boerse_pnl),
         "hinweise": hinweise,
         "_objekte": eintraege,
     }
@@ -1186,6 +1203,14 @@ def auswerten(
             ergebnis, eintraege, immutable_cache_dir, on_lot=on_lot,
             wallet=wallet,
         )
+    _boerse_lose_eintragen(
+        ergebnis,
+        immutable_cache_dir,
+        boerse_kontext=boerse_kontext,
+        boerse_pnl=bool(boerse_pnl),
+        kurs_am=kurs_am,
+        wallet=wallet,
+    )
     return ergebnis
 
 
@@ -1256,6 +1281,141 @@ def _lot_aus_cache(
         return seg
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return None
+
+
+
+def _boerse_lose_eintragen(
+    ergebnis: dict,
+    cache: Path | None,
+    *,
+    boerse_kontext=None,
+    boerse_pnl: bool = False,
+    kurs_am=None,
+    wallet=None,
+) -> None:
+    """Hängt FIFO-Lose aus bestätigten Börsenzuordnungen an die Einträge.
+
+    On-Chain-Datum, Grundlage und Lot-Farbe bleiben unverändert. P&L-Felder
+    entstehen nur, wenn *boerse_pnl* gesetzt ist. Ohne Lose bleibt der
+    Eintrag unverändert.
+    """
+    from core.boerse.bericht import (
+        haenge_an_eintrag,
+        lokaler_kurs_fn,
+        lose_im_netz,
+        pnl_summen,
+    )
+    from core.boerse.overlay import BoerseKontext
+    from core import herkunftsnetz
+    from core import i18n
+
+    if boerse_kontext is False:
+        kontext = None
+    elif boerse_kontext is None:
+        try:
+            kontext = BoerseKontext.aus_speicher()
+        except Exception:
+            kontext = None
+    else:
+        kontext = boerse_kontext
+    if kontext is None:
+        ergebnis["boerse_pnl"] = bool(boerse_pnl)
+        ergebnis["boerse_pnl_summen"] = {}
+        return
+
+    try:
+        bezug = datetime.fromtimestamp(float(ergebnis.get("bezug_ts") or 0))
+    except (TypeError, ValueError, OSError, OverflowError):
+        bezug = None
+    if bezug is None or bezug.year < 2009:
+        return
+
+    jahre = int(ergebnis.get("haltefrist_jahre") or 0)
+    try:
+        stichtag_lot = parse_stichtag(str(ergebnis.get("stichtag_regel") or ""))
+    except ValueError:
+        stichtag_lot = None
+    if kurs_am is None:
+        kurs_am = lokaler_kurs_fn(cache)
+
+    strahl = ergebnis.get("zeitstrahl") or {}
+    skala = herkunftsnetz.skala_aus_auswertung(ergebnis)
+    fifo = herkunftsnetz.FifoKontext.aus_cache(cache, wallet) if cache else None
+    n_belegt = 0
+    n_lose = 0
+
+    for eintrag in ergebnis.get("eintraege") or []:
+        txid = str(eintrag.get("txid") or "")
+        vout = int(eintrag.get("vout") or 0)
+        lose = kontext.lose_fuer_outpoint(txid, vout)
+        if not lose and cache is not None and skala is not None:
+            lose = _boerse_lose_aus_baum(
+                eintrag, cache, skala, fifo, kontext,
+            )
+        if not lose:
+            continue
+        haenge_an_eintrag(
+            eintrag,
+            lose,
+            bezug=bezug,
+            haltefrist_jahre=jahre,
+            stichtag=stichtag_lot,
+            pnl=bool(boerse_pnl),
+            kurs_am=kurs_am,
+        )
+        n_belegt += 1
+        n_lose += len(eintrag.get("boerse_lose") or [])
+
+    kennzahlen = ergebnis.setdefault("kennzahlen", {})
+    kennzahlen["boerse_belegt_count"] = n_belegt
+    kennzahlen["boerse_los_count"] = n_lose
+    ergebnis["boerse_pnl"] = bool(boerse_pnl)
+    ergebnis["boerse_pnl_summen"] = pnl_summen(
+        ergebnis.get("eintraege") or [], pnl=bool(boerse_pnl),
+    )
+
+    if n_belegt:
+        lang = ergebnis.get("lang")
+        def _h(key: str, **vars) -> str:
+            return i18n.t_lang(lang, key, **vars)
+        hinweise = ergebnis.setdefault("hinweise", [])
+        hinweise.append(_h("tax.hintExchangeLots"))
+        if boerse_pnl:
+            hinweise.append(_h("tax.hintExchangePnl"))
+        else:
+            hinweise.append(_h("tax.hintExchangeNoPnl"))
+
+
+def _boerse_lose_aus_baum(eintrag: dict, cache: Path, skala, fifo, kontext):
+    """Lose über Vorfahren im Herkunftsnetz, falls der Empfang ein Hop früher liegt."""
+    from core import herkunftsnetz
+    from core import trace_cache
+    from core import xpub_cache
+    from core.boerse.bericht import lose_im_netz
+    from core.trace import baum_zeiten_nachziehen
+
+    txid = str(eintrag.get("txid") or "")
+    vout = int(eintrag.get("vout") or 0)
+    try:
+        geladen = trace_cache.laden(txid, vout, cache)
+    except (OSError, ValueError, TypeError):
+        return ()
+    baum = (geladen or {}).get("baum") or {}
+    if not baum.get("found") or not baum.get("root"):
+        return ()
+    key = f"{txid}:{vout}"
+    try:
+        baum_zeiten_nachziehen(baum, cache, txid=txid, vout=vout)
+
+        def block_zeit(hoehe: int) -> int | None:
+            return xpub_cache.load_cached_block_time(hoehe, cache)
+
+        netz = herkunftsnetz.flach(
+            baum, key, skala, block_zeit=block_zeit, fifo=fifo,
+        )
+        return lose_im_netz(netz, kontext)
+    except (TypeError, ValueError, KeyError, ZeroDivisionError, OSError):
+        return ()
 
 
 def _lot_kennzahlen_nachziehen(ergebnis: dict) -> None:
@@ -1825,6 +1985,66 @@ def zeitstrahl(
 # ---------------------------------------------------------------------------
 
 
+
+def _csv_utxo_zeile(eintrag: dict, wallet_ersatz, pnl: bool) -> list:
+    zeile = [
+        eintrag["datum"], eintrag["zeit"],
+        wallet_fuer_bericht(eintrag["wallet"], wallet_ersatz),
+        eintrag["address"],
+        _btc(eintrag["value_sats"]), eintrag["value_sats"],
+        eintrag["haltedauer_tage"], eintrag["frist_ende"],
+        "ja" if eintrag["erfuellt"] else "nein",
+        eintrag["grundlage_label"],
+        eintrag["herkunft"], eintrag["txid"], eintrag["vout"],
+        eintrag.get("boerse_label") or "",
+        "", "", "",
+    ]
+    if pnl:
+        zeile.extend(["", ""])
+    return zeile
+
+
+def _csv_boerse_los_zeile(eintrag: dict, los: dict, wallet_ersatz, pnl: bool) -> list:
+    preis = los.get("einzelpreis") or ""
+    waehrung = los.get("waehrung") or ""
+    if preis and waehrung:
+        preis = f"{preis} {waehrung}/BTC"
+    kosten = los.get("kosten") or ""
+    if kosten and waehrung:
+        kosten = f"{kosten} {waehrung}"
+    anmerkung = los.get("beleg") or "Börsenbeleg"
+    if los.get("hinweis") == "einzahlung_ohne_kaufpreis":
+        anmerkung = "Börsenbeleg, Einzahlung ohne Kaufpreis"
+    zeile = [
+        los.get("datum") or "",
+        los.get("zeit") or "",
+        wallet_fuer_bericht(eintrag["wallet"], wallet_ersatz),
+        "",
+        _btc(int(los.get("sats") or 0)),
+        int(los.get("sats") or 0),
+        los.get("haltedauer_tage") if los.get("haltedauer_tage") is not None else "",
+        los.get("frist_ende") or "",
+        "ja" if los.get("erfuellt") else "nein",
+        los.get("label") or "laut Börse",
+        anmerkung,
+        eintrag["txid"],
+        eintrag["vout"],
+        los.get("label") or "laut Börse",
+        preis,
+        kosten,
+        waehrung,
+    ]
+    if pnl:
+        wert = los.get("wert_bezug") or ""
+        ergebnis = los.get("ergebnis") or ""
+        if wert and waehrung:
+            wert = f"{wert} {waehrung}"
+        if ergebnis and waehrung:
+            ergebnis = f"{ergebnis} {waehrung}"
+        zeile.extend([wert, ergebnis])
+    return zeile
+
+
 def _btc(sats: int) -> str:
     """Betrag in BTC mit deutscher Dezimaltrennung und acht Nachkommastellen."""
     return f"{sats / 1e8:.8f}".replace(".", ",")
@@ -1866,23 +2086,21 @@ def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
         schreiber.writerow(["Hinweis", hinweis])
     schreiber.writerow([])
 
-    schreiber.writerow([
+    pnl = bool(auswertung.get("boerse_pnl"))
+    kopf = [
         "UTXO Datum", "UTXO Zeit", "Wallet", "Adresse",
         "Betrag BTC", "Betrag sats", "Haltedauer Tage",
         "Frist erfüllt am", "Frist erfüllt", "Grundlage Anschaffungsdatum",
         "Anmerkung", "Transaktion", "Output",
-    ])
+        "laut Börse", "Einzelkaufpreis", "Kaufkosten", "Währung",
+    ]
+    if pnl:
+        kopf.extend(["Wert zum Bezugstag", "Ergebnis laut Börse"])
+    schreiber.writerow(kopf)
     for eintrag in auswertung["eintraege"]:
-        schreiber.writerow([
-            eintrag["datum"], eintrag["zeit"],
-            wallet_fuer_bericht(eintrag["wallet"], wallet_ersatz),
-            eintrag["address"],
-            _btc(eintrag["value_sats"]), eintrag["value_sats"],
-            eintrag["haltedauer_tage"], eintrag["frist_ende"],
-            "ja" if eintrag["erfuellt"] else "nein",
-            eintrag["grundlage_label"],
-            eintrag["herkunft"], eintrag["txid"], eintrag["vout"],
-        ])
+        schreiber.writerow(_csv_utxo_zeile(eintrag, wallet_ersatz, pnl))
+        for los in eintrag.get("boerse_lose") or []:
+            schreiber.writerow(_csv_boerse_los_zeile(eintrag, los, wallet_ersatz, pnl))
 
     kennzahlen = auswertung["kennzahlen"]
     schreiber.writerow([])
@@ -1921,6 +2139,22 @@ def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
             kennzahlen["buendel_sats"],
             "", "", "", "Haltefrist kann zu kurz ausgewiesen sein",
         ])
+    if kennzahlen.get("boerse_belegt_count"):
+        schreiber.writerow([
+            "davon mit Börsenbeleg (FIFO je Konto)", "", "", "",
+            "",
+            "",
+            "", "", "",
+            f"{kennzahlen['boerse_belegt_count']} UTXOs, {kennzahlen.get('boerse_los_count') or 0} Lose",
+        ])
+    if pnl:
+        for waehrung, betrag in (auswertung.get("boerse_pnl_summen") or {}).items():
+            schreiber.writerow([
+                f"Summe Ergebnis laut Börse ({waehrung})",
+                "", "", "", "", "", "", "", "",
+                "Tageskurs zum Bezugstag, nicht Börsenausführung",
+                "", "", "", "", "", "", waehrung, "", betrag,
+            ])
 
     # Veräußerungen als eigener Block. Nach § 23 EStG ist die Veräußerung der
     # steuerlich maßgebliche Vorgang — sie gehört in die Datei, die zum
@@ -1966,6 +2200,71 @@ def als_csv(auswertung: dict, *, wallet_ersatz: str | None = None) -> bytes:
     return b"\xef\xbb\xbf" + puffer.getvalue().encode("utf-8")
 
 
+
+def _html_utxo_zeile(eintrag: dict, wallet_ersatz, pnl: bool, hat_boerse: bool) -> str:
+    zellen = [
+        f"<td>{_html_escape(eintrag['datum'])}</td>",
+        f"<td class='mono'>{_html_escape(wallet_fuer_bericht(eintrag['wallet'], wallet_ersatz))}</td>",
+        f"<td class='mono klein'>{_html_escape(eintrag['address'])}</td>",
+        f"<td class='r mono'>{_btc(eintrag['value_sats'])}</td>",
+        f"<td class='r'>{eintrag['haltedauer_tage']}</td>",
+        f"<td>{_html_escape(eintrag['frist_ende'])}</td>",
+        f"<td>{'ja' if eintrag['erfuellt'] else 'nein'}</td>",
+        f"<td class='klein'>{_html_escape(eintrag['grundlage_label'])}</td>",
+    ]
+    if hat_boerse:
+        zellen.append(f"<td class='klein'>{_html_escape(eintrag.get('boerse_label') or '')}</td>")
+        zellen.append("<td></td>")
+        zellen.append("<td></td>")
+    if pnl:
+        zellen.append("<td></td>")
+        zellen.append("<td></td>")
+    return "<tr>" + "".join(zellen) + "</tr>"
+
+
+def _html_boerse_los_zeile(eintrag: dict, los: dict, wallet_ersatz, pnl: bool) -> str:
+    preis = los.get("einzelpreis") or ""
+    waehrung = los.get("waehrung") or ""
+    preis_text = f"{preis} {waehrung}/BTC" if preis and waehrung else preis
+    kosten = los.get("kosten") or ""
+    kosten_text = f"{kosten} {waehrung}" if kosten and waehrung else kosten
+    grund = los.get("label") or "laut Börse"
+    zellen = [
+        f"<td>{_html_escape(los.get('datum') or '')}</td>",
+        f"<td class='mono'>{_html_escape(wallet_fuer_bericht(eintrag['wallet'], wallet_ersatz))}</td>",
+        "<td class='klein'>Los</td>",
+        f"<td class='r mono'>{_btc(int(los.get('sats') or 0))}</td>",
+        f"<td class='r'>{los.get('haltedauer_tage') if los.get('haltedauer_tage') is not None else ''}</td>",
+        f"<td>{_html_escape(los.get('frist_ende') or '')}</td>",
+        f"<td>{'ja' if los.get('erfuellt') else 'nein'}</td>",
+        f"<td class='klein'>{_html_escape(grund)} · Börsenbeleg</td>",
+        f"<td class='klein'>{_html_escape(los.get('label') or '')}</td>",
+        f"<td class='r mono'>{_html_escape(preis_text)}</td>",
+        f"<td class='r mono'>{_html_escape(kosten_text)}</td>",
+    ]
+    if pnl:
+        wert = los.get("wert_bezug") or ""
+        ergebnis = los.get("ergebnis") or ""
+        if wert and waehrung:
+            wert = f"{wert} {waehrung}"
+        if ergebnis and waehrung:
+            ergebnis = f"{ergebnis} {waehrung}"
+        zellen.append(f"<td class='r mono'>{_html_escape(wert)}</td>")
+        zellen.append(f"<td class='r mono'>{_html_escape(ergebnis)}</td>")
+    return "<tr class='boerse-los'>" + "".join(zellen) + "</tr>"
+
+
+def _html_pnl_summe(auswertung: dict) -> str:
+    summen = auswertung.get("boerse_pnl_summen") or {}
+    if not summen:
+        return ""
+    teile = ", ".join(f"{betrag} {w}" for w, betrag in summen.items())
+    return (
+        "<p class='unter'>Summe Ergebnis laut Börse (Tageskurs zum Bezugstag, "
+        f"nicht Börsenausführung): { _html_escape(teile) }</p>"
+    )
+
+
 def _html_escape(text: str) -> str:
     return (
         str(text)
@@ -1997,20 +2296,13 @@ def als_bericht(
     from core import herkunft_bericht as hb
 
     kennzahlen = auswertung["kennzahlen"]
+    pnl = bool(auswertung.get("boerse_pnl"))
+    hat_boerse = any(e.get("boerse_lose") for e in auswertung.get("eintraege") or [])
     zeilen = []
     for eintrag in auswertung["eintraege"]:
-        zeilen.append(
-            "<tr>"
-            f"<td>{_html_escape(eintrag['datum'])}</td>"
-            f"<td class='mono'>{_html_escape(wallet_fuer_bericht(eintrag['wallet'], wallet_ersatz))}</td>"
-            f"<td class='mono klein'>{_html_escape(eintrag['address'])}</td>"
-            f"<td class='r mono'>{_btc(eintrag['value_sats'])}</td>"
-            f"<td class='r'>{eintrag['haltedauer_tage']}</td>"
-            f"<td>{_html_escape(eintrag['frist_ende'])}</td>"
-            f"<td>{'ja' if eintrag['erfuellt'] else 'nein'}</td>"
-            f"<td class='klein'>{_html_escape(eintrag['grundlage_label'])}</td>"
-            "</tr>"
-        )
+        zeilen.append(_html_utxo_zeile(eintrag, wallet_ersatz, pnl, hat_boerse))
+        for los in eintrag.get("boerse_lose") or []:
+            zeilen.append(_html_boerse_los_zeile(eintrag, los, wallet_ersatz, pnl))
 
     hinweise = "".join(
         f"<li>{_html_escape(h)}</li>"
@@ -2133,14 +2425,17 @@ def als_bericht(
     <th>UTXO</th><th>Wallet</th><th>Adresse</th>
     <th class="r">Betrag BTC</th><th class="r">Tage</th>
     <th>Frist erfüllt am</th><th>Erfüllt</th><th>Grundlage</th>
+    {"<th>laut Börse</th><th class='r'>Einzelkaufpreis</th><th class='r'>Kaufkosten</th>" if hat_boerse else ""}
+    {"<th class='r'>Wert zum Bezugstag</th><th class='r'>Ergebnis laut Börse</th>" if pnl else ""}
   </tr></thead>
   <tbody>{''.join(zeilen)}</tbody>
 </table>
+{_html_pnl_summe(auswertung) if pnl else ""}
 {abgang_block}
 {hop_abschnitt}
 <div class="hinweise"><ul>{hinweise}</ul>
 <p>Erzeugt mit SatSage aus lokal abgefragten Blockchain-Daten.
-Herkunftsnachweis: on-chain Hop-Kette aus dem Trace-Cache (keine Börsenbelege).</p></div>
+Herkunftsnachweis: on-chain Hop-Kette aus dem Trace-Cache{"; bestätigte Börsenauszahlungen zusätzlich als Börsenbeleg (FIFO je Konto, Einzelkaufpreis je Los)" if hat_boerse else " (keine Börsenbelege in dieser Aufstellung)"}.</p></div>
 
 </body></html>
 """.encode("utf-8")
