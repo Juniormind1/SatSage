@@ -28,6 +28,25 @@ PASS_ZWEI = "flow-pass-zwei"
 UMBREL_BOOT = "umbrel-flow-pass"
 
 
+def thread_dump(grund: str) -> None:
+    """Alle Threads dieses Prozesses ins Log, auch die des Wegwerf-Servers.
+
+    Die Testserver laufen im selben Prozess (``starte_im_hintergrund``).
+    Bei einem Timeout zeigt der Dump, worauf eine Anfrage wartet. Nur im
+    Testskript, kein Endpoint und nichts im Produktivserver.
+    """
+    import faulthandler
+
+    print(f"\n=== Thread-Dump ({grund}) ===", flush=True)
+    sys.stderr.flush()
+    try:
+        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+    except Exception as exc:  # z. B. stderr ohne Dateideskriptor
+        print(f"Thread-Dump nicht möglich: {exc}", flush=True)
+    sys.stderr.flush()
+    print("=== Ende Thread-Dump ===\n", flush=True)
+
+
 def _spawn(modus: str):
     import server
     from core.env_scramble import clear_session_key
@@ -41,6 +60,9 @@ def _spawn(modus: str):
         "UI_LANG=de",
         "OEFFENTLICHE_ELECTRUM=0",
         "SATSAGE_PRICE_HISTORY_OPT_IN=0",
+        # Kein Header-Vorab gegen echte Mainnet-Peers. Der Test darf nicht
+        # vom Internet abhängen (der CI-Runner erreicht Port 8333).
+        "BIP158_P2P=0",
     ]
     managed = None
     if modus == "specter":
@@ -321,6 +343,8 @@ def lauf_passwort_zyklen(*, headless: bool = True, channel: str | None = None) -
                     ok = False
                     eintrag["ok"] = False
                     eintrag["fehler"] = str(exc)
+                    if "Timeout" in str(exc):
+                        thread_dump(f"passwort_{modus}: {exc}")
                 schritte.append(eintrag)
                 context.close()
                 try:

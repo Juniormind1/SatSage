@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Userflow · ohne Mainnet:** Die Wegwerf-Server des Userflows und der Passwort-Zyklen laden keine Block-Header mehr über P2P (`BIP158_P2P=0`). Der CI-Runner hatte sich sonst mit echten Mainnet-Peers verbunden, und `passwort_desktop` lief in den Timeout. Scheitert ein Schritt mit Timeout, steht ein Thread-Dump aller Threads im Log.
+
 ## [1.0.2] — 2026-11-22
 
 - **Release 1.0.2:** Versionsnummer auf 1.0.2. StartOS-Paket `1.0.2:0`; `1.0.1:0` bleibt im Versionsgraphen, damit Geräte von dort wandern. Specter-Plugin 1.0.2.

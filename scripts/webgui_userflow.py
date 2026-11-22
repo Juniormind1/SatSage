@@ -112,6 +112,8 @@ def _spawn():
                 "UI_LANG=de",
                 "OEFFENTLICHE_ELECTRUM=0",
                 "SATSAGE_PRICE_HISTORY_OPT_IN=0",
+                # Kein Header-Vorab gegen echte Mainnet-Peers (CI hat Internet).
+                "BIP158_P2P=0",
             ]
         )
         + "\n",
@@ -347,6 +349,10 @@ def run_userflow(
                 ok = False
                 eintrag["ok"] = False
                 eintrag["fehler"] = str(exc)
+                if "Timeout" in str(exc):
+                    from webgui_passwort_flow import thread_dump
+
+                    thread_dump(f"{eintrag.get('schritt')}: {exc}")
             schritte.append(eintrag)
 
         # EN → DE, danach Roh-Schlüssel und Texte der anderen Sprache.
