@@ -84,6 +84,14 @@ Compact Filter suchen den UTXO-Bestand, und nur wenn eigener Electrum-Server und
 
 ---
 
+## Passwort speichern hängt während P2P-Header-Abgleich?
+
+**Stand:** 2026-11-22 · **offen** · Verdacht, nicht belegt
+**Ort:** `doc/issues/passwort-speichern-header-abgleich.md`, `httpserver/api/auth_session.py` (`api_save_app_password`), `core/p2p.py` (`hole_header`)
+Aufwand: **unbekannt** (erst Diagnose)
+
+In der CI an PR #5 (Lauf 45011131229, beide Versuche) blieb `passwort_desktop` 60 Sekunden bei „Speichere Passwort…“ stehen. Die Testserver hatten sich zum Header-Vorab mit echten Mainnet-Peers verbunden. Lokal ohne Mainnet grün. Der Test hat jetzt `BIP158_P2P=0` und schreibt bei Timeout einen Thread-Dump ins Log. Offen: Kann das Speichern auch bei echten Desktop-Nutzern hängen, solange der Header-Abgleich läuft? Detail: [`doc/issues/passwort-speichern-header-abgleich.md`](doc/issues/passwort-speichern-header-abgleich.md).
+
 ## Herkunft · grün, aber unvollständig: roter Ring bleibt
 
 **Stand:** 2026-11-22 · **offen** · Designfrage
