@@ -1699,5 +1699,22 @@
   "format.durDays": "{n} T",
   "format.durYears": "{j} J",
   "format.durMonths": "{m} M",
-  "format.durYearsMonths": "{j} J {m} M"
+  "format.durYearsMonths": "{j} J {m} M",
+  "sources.exchangePreview": "Vorschau",
+  "sources.exchangeNameLabel": "Name der Börse",
+  "sources.exchangeImportNow": "Importieren",
+  "sources.exchangeCancel": "Abbrechen",
+  "sources.exchangeAddTrades": "Trades-CSV optional hinzufügen",
+  "sources.exchangeTradesTitle": "Kraken-Trades für Kurse, falls vorhanden.",
+  "sources.exchangeAlready": "Diese Datei ist bereits importiert.",
+  "sources.exchangeCounts": "{buchungen} Buchungen, {quarantaene} in Quarantäne.",
+  "sources.exchangeArtCounts": "Nach Typ: {arten}",
+  "sources.exchangeSaldoLuecken": "Saldo-Lücken in Zeile {zeilen}.",
+  "sources.exchangeRecognized": "Erkannt: {boerse} ({variante}).",
+  "sources.exchangeUnknownFormat": "Format unbekannt. Import als Adress-/TxID-Liste ({addresses} Adr., {txids} Tx).",
+  "sources.exchangeUnknownEmpty": "Format nicht erkannt, und keine Bitcoin-Adressen oder TxIDs gefunden.",
+  "sources.exchangeV1Left": "Alte Beschriftungsdatei (v1) ist noch vorhanden.",
+  "sources.exchangeRemoveV1": "Alte Datei entfernen",
+  "sources.exchangeImportedV2": "{name}: {neu} neu, {doppelt} schon bekannt, {konflikte} Konflikte, {buchungen} Buchungen.",
+  "sources.exchangeLineV2": "{buchungen} Buchungen · {quarantaene} Quarantäne · {addresses} Adr. · {txids} Tx"
 }

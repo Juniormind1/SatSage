@@ -62,6 +62,20 @@ class ParseErgebnis:
     datei_hash: str
 
 
+@dataclass(frozen=True)
+class Zuordnung:
+    """Auszahlung ↔ On-Chain-Empfang. Nur Erklärung, bis Stufe 2 das Datum ändert."""
+
+    konto: str
+    auszahlung_ref: str
+    txid: str
+    vout: int
+    sats_onchain: int
+    methode: str  # txid_exakt | betrag_zeit | adresse | manuell
+    status: str  # vorschlag | bestaetigt | abgelehnt
+    bestaetigt_ts: int | None = None
+
+
 class FormatFehler(ValueError):
     """Unbekannter oder unbrauchbarer Kopf. Nennt Spalten, keine Werte."""
 

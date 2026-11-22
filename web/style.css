@@ -3667,3 +3667,6 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 .utxo-zeile.receive-pending-zeile {
   opacity: 0.95;
 }
+
+.boerse-vorschau { margin: 0.75rem 0; padding: 0.75rem; border: 1px solid var(--linie, #ccc); border-radius: 6px; }
+.boerse-vorschau .knopf-reihe { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }

@@ -132,13 +132,16 @@ function zeichneBoersenReports(stand) {
     zeile.className = "sanktions-zeile";
     zeile.append(pille("gut", e.name || e.slug || "?"));
     const text = document.createElement("span");
-    text.textContent = t("sources.exchangeLine", {
-      name: "",
-      addresses: formatZahl(e.addresses || 0),
-      txids: formatZahl(e.txids || 0),
-    }).replace(/^:\s*/, "").replace(/^\s+/, "");
-    // exchangeLine starts with {name}: — name already in pill
-    text.textContent = `${formatZahl(e.addresses || 0)} Adr. · ${formatZahl(e.txids || 0)} Tx`;
+    if (Number(e.fassung) === 2) {
+      text.textContent = t("sources.exchangeLineV2", {
+        buchungen: formatZahl(e.buchungen || 0),
+        quarantaene: formatZahl(e.quarantaene || 0),
+        addresses: formatZahl(e.addresses || 0),
+        txids: formatZahl(e.txids || 0),
+      });
+    } else {
+      text.textContent = `${formatZahl(e.addresses || 0)} Adr. · ${formatZahl(e.txids || 0)} Tx`;
+    }
     zeile.append(text);
     const knopf = document.createElement("button");
     knopf.type = "button";
@@ -149,6 +152,20 @@ function zeichneBoersenReports(stand) {
     knopf.addEventListener("click", () => verwerfeBoersenReport(e.slug));
     zeile.append(knopf);
     kasten.append(zeile);
+    if (e.v1_vorhanden && Number(e.fassung) === 2) {
+      const alt = document.createElement("div");
+      alt.className = "sanktions-zeile";
+      const hinweis = document.createElement("span");
+      hinweis.textContent = t("sources.exchangeV1Left");
+      alt.append(hinweis);
+      const v1 = document.createElement("button");
+      v1.type = "button";
+      v1.className = "stift knopf knopf-klein";
+      v1.textContent = t("sources.exchangeRemoveV1");
+      v1.addEventListener("click", () => verwerfeBoersenReport(e.slug, false, true));
+      alt.append(v1);
+      kasten.append(alt);
+    }
   }
   if (liste.length > 1) {
     const alle = document.createElement("button");
@@ -162,46 +179,194 @@ function zeichneBoersenReports(stand) {
   }
 }
 
+let _boerseCsv = "";
+let _boerseTrades = "";
+
 function starteBoersenCsvImport() {
   const feld = $("#boerse-csv-datei");
   if (feld) feld.click();
 }
 
-function liesBoersenCsvDatei(ereignis) {
+function starteBoersenTradesImport() {
+  const feld = $("#boerse-csv-trades");
+  if (feld) feld.click();
+}
+
+function _liesBoersenDatei(ereignis, art) {
   const datei = ereignis.target.files && ereignis.target.files[0];
   ereignis.target.value = "";
   if (!datei) return;
-  const name = window.prompt(t("sources.exchangePromptName"), "");
-  if (name == null) return;
-  const boerse = String(name || "").trim();
+  const leser = new FileReader();
+  leser.onload = async () => {
+    const text = String(leser.result || "");
+    if (art === "trades") _boerseTrades = text;
+    else _boerseCsv = text;
+    try {
+      await zeigeBoersenVorschau();
+    } catch (fehler) {
+      meldung(fehler.message, "krit");
+    }
+  };
+  leser.onerror = () => {
+    meldung(t("common.fileUnreadable"), "krit");
+  };
+  leser.readAsText(datei);
+}
+
+function liesBoersenCsvDatei(ereignis) {
+  _boerseTrades = "";
+  _liesBoersenDatei(ereignis, "ledgers");
+}
+
+function liesBoersenTradesDatei(ereignis) {
+  _liesBoersenDatei(ereignis, "trades");
+}
+
+function schliesseBoersenVorschau() {
+  _boerseCsv = "";
+  _boerseTrades = "";
+  const kasten = $("#boerse-vorschau");
+  if (!kasten) return;
+  kasten.hidden = true;
+  kasten.replaceChildren();
+}
+
+async function zeigeBoersenVorschau() {
+  const kasten = $("#boerse-vorschau");
+  if (!kasten || !_boerseCsv) return;
+  const nameFeldWert = (kasten.querySelector("#boerse-vorschau-name") || {}).value;
+  const daten = { csv: _boerseCsv };
+  if (_boerseTrades) daten.csv_trades = _boerseTrades;
+  if (nameFeldWert) daten.name = String(nameFeldWert).trim();
+  const vor = await api("/exchange-reports/vorschau", {
+    methode: "POST",
+    daten,
+    timeoutMs: 60_000,
+  });
+  kasten.hidden = false;
+  kasten.replaceChildren();
+  const titel = document.createElement("p");
+  titel.className = "meta";
+  if (vor.erkannt) {
+    titel.textContent = t("sources.exchangeRecognized", {
+      boerse: vor.boerse || "?",
+      variante: vor.variante || "?",
+    });
+  } else if (vor.v1) {
+    titel.textContent = t("sources.exchangeUnknownFormat", {
+      addresses: formatZahl(vor.addresses || 0),
+      txids: formatZahl(vor.txids || 0),
+    });
+  } else {
+    titel.textContent = t("sources.exchangeUnknownEmpty");
+  }
+  kasten.append(titel);
+  if (vor.erkannt) {
+    const counts = document.createElement("p");
+    counts.textContent = t("sources.exchangeCounts", {
+      buchungen: formatZahl(vor.buchungen || 0),
+      quarantaene: formatZahl((vor.quarantaene || []).length),
+    });
+    kasten.append(counts);
+    const arten = vor.nach_art || {};
+    const artText = Object.keys(arten).sort().map((k) => `${k} ${arten[k]}`).join(", ");
+    if (artText) {
+      const artP = document.createElement("p");
+      artP.className = "meta";
+      artP.textContent = t("sources.exchangeArtCounts", { arten: artText });
+      kasten.append(artP);
+    }
+    if ((vor.quarantaene || []).length) {
+      const liste = document.createElement("ul");
+      for (const q of vor.quarantaene) {
+        const li = document.createElement("li");
+        li.textContent = `${q.zeile}: ${q.grund}${q.roh_typ ? ` (${q.roh_typ})` : ""}`;
+        liste.append(li);
+      }
+      kasten.append(liste);
+    }
+    if ((vor.saldo_luecken || []).length) {
+      const luecke = document.createElement("p");
+      luecke.textContent = t("sources.exchangeSaldoLuecken", {
+        zeilen: (vor.saldo_luecken || []).join(", "),
+      });
+      kasten.append(luecke);
+    }
+    if (vor.schon_importiert) {
+      const schon = document.createElement("p");
+      schon.textContent = t("sources.exchangeAlready");
+      kasten.append(schon);
+    }
+  }
+  const label = document.createElement("label");
+  label.className = "feld";
+  const labText = document.createElement("span");
+  labText.className = "feld-titel";
+  labText.textContent = t("sources.exchangeNameLabel");
+  const name = document.createElement("input");
+  name.type = "text";
+  name.id = "boerse-vorschau-name";
+  name.value = String(nameFeldWert || vor.vorschlag_name || "").trim();
+  label.append(labText, name);
+  kasten.append(label);
+  const knoepfe = document.createElement("div");
+  knoepfe.className = "knopf-reihe";
+  if (vor.erkannt && vor.boerse === "kraken") {
+    const trades = document.createElement("button");
+    trades.type = "button";
+    trades.className = "knopf knopf-klein";
+    trades.textContent = t("sources.exchangeAddTrades");
+    trades.title = t("sources.exchangeTradesTitle");
+    trades.addEventListener("click", starteBoersenTradesImport);
+    knoepfe.append(trades);
+  }
+  const ok = document.createElement("button");
+  ok.type = "button";
+  ok.className = "knopf knopf-klein";
+  ok.id = "boerse-vorschau-import";
+  ok.textContent = t("sources.exchangeImportNow");
+  ok.disabled = !vor.erkannt && !vor.v1;
+  ok.addEventListener("click", () => importiereBoersenCsv(name.value));
+  const ab = document.createElement("button");
+  ab.type = "button";
+  ab.className = "knopf knopf-klein";
+  ab.textContent = t("sources.exchangeCancel");
+  ab.addEventListener("click", schliesseBoersenVorschau);
+  knoepfe.append(ok, ab);
+  kasten.append(knoepfe);
+}
+
+async function importiereBoersenCsv(nameRoh) {
+  const boerse = String(nameRoh || "").trim();
   if (!boerse) {
     meldung(t("sources.exchangePromptName"), "krit");
     return;
   }
-  logZeile(t("ui.hard.9ef8652c95", { name: datei.name, boerse }));
-  const leser = new FileReader();
-  leser.onload = async () => {
-    try {
-      const ergebnis = await api("/exchange-reports/import", {
-        methode: "POST",
-        daten: {
-          name: boerse,
-          csv: String(leser.result || ""),
-          filename: datei.name,
-          ersetzen: false,
-        },
-        timeoutMs: 120_000,
-      });
-      logZeile(
-        t("sources.exchangeImported", {
-          name: ergebnis.name || boerse,
-          addresses: formatZahl(ergebnis.imported_addresses || 0),
-          txids: formatZahl(ergebnis.imported_txids || 0),
-          btc: formatZahl(ergebnis.rows_btc || 0),
-          total: formatZahl(ergebnis.rows_total || 0),
-        }),
-        true,
-      );
+  if (!_boerseCsv) return;
+  try {
+    const daten = { name: boerse, csv: _boerseCsv, ersetzen: false };
+    if (_boerseTrades) daten.csv_trades = _boerseTrades;
+    const ergebnis = await api("/exchange-reports/import", {
+      methode: "POST",
+      daten,
+      timeoutMs: 120_000,
+    });
+    if (ergebnis && ergebnis.fassung === 2) {
+      logZeile(t("sources.exchangeImportedV2", {
+        name: ergebnis.name || boerse,
+        neu: formatZahl(ergebnis.neu || 0),
+        doppelt: formatZahl(ergebnis.doppelt || 0),
+        konflikte: formatZahl(ergebnis.konflikte || 0),
+        buchungen: formatZahl(ergebnis.buchungen || 0),
+      }), true);
+      meldung(t("sources.exchangeImportedV2", {
+        name: ergebnis.name || boerse,
+        neu: formatZahl(ergebnis.neu || 0),
+        doppelt: formatZahl(ergebnis.doppelt || 0),
+        konflikte: formatZahl(ergebnis.konflikte || 0),
+        buchungen: formatZahl(ergebnis.buchungen || 0),
+      }), "gut");
+    } else {
       meldung(
         t("sources.exchangeImported", {
           name: ergebnis.name || boerse,
@@ -212,22 +377,19 @@ function liesBoersenCsvDatei(ereignis) {
         }),
         "gut",
       );
-      await ladeBoersenReports();
-    } catch (fehler) {
-      logZeile(t("ui.hard.b55a184807", { msg: fehler.message }), true);
-      meldung(fehler.message, "krit");
     }
-  };
-  leser.onerror = () => {
-    logZeile(t("ui.hard.d7a4215402"), true);
-    meldung(t("common.fileUnreadable"), "krit");
-  };
-  leser.readAsText(datei);
+    schliesseBoersenVorschau();
+    await ladeBoersenReports();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  }
 }
 
-async function verwerfeBoersenReport(slug, alle = false) {
+async function verwerfeBoersenReport(slug, alle = false, v1Auch = false) {
   try {
-    const q = alle ? "all=1" : `slug=${encodeURIComponent(slug || "")}`;
+    const q = alle
+      ? "all=1"
+      : `slug=${encodeURIComponent(slug || "")}${v1Auch ? "&v1=1" : ""}`;
     await api(`/exchange-reports?${q}`, { methode: "DELETE" });
     await ladeBoersenReports();
   } catch (fehler) {

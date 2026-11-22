@@ -696,6 +696,8 @@ async function start() {
   if (boerseImport) boerseImport.addEventListener("click", starteBoersenCsvImport);
   const boerseDatei = $("#boerse-csv-datei");
   if (boerseDatei) boerseDatei.addEventListener("change", liesBoersenCsvDatei);
+  const boerseTrades = $("#boerse-csv-trades");
+  if (boerseTrades) boerseTrades.addEventListener("change", liesBoersenTradesDatei);
   $("#mempool-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") speichereMempool();
   });

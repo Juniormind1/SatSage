@@ -1699,5 +1699,22 @@
   "format.durDays": "{n} d",
   "format.durYears": "{j} y",
   "format.durMonths": "{m} m",
-  "format.durYearsMonths": "{j} y {m} m"
+  "format.durYearsMonths": "{j} y {m} m",
+  "sources.exchangePreview": "Preview",
+  "sources.exchangeNameLabel": "Exchange name",
+  "sources.exchangeImportNow": "Import",
+  "sources.exchangeCancel": "Cancel",
+  "sources.exchangeAddTrades": "Optionally add trades CSV",
+  "sources.exchangeTradesTitle": "Kraken trades for prices, if you have them.",
+  "sources.exchangeAlready": "This file has already been imported.",
+  "sources.exchangeCounts": "{buchungen} bookings, {quarantaene} in quarantine.",
+  "sources.exchangeArtCounts": "By type: {arten}",
+  "sources.exchangeSaldoLuecken": "Balance gaps on line {zeilen}.",
+  "sources.exchangeRecognized": "Detected: {boerse} ({variante}).",
+  "sources.exchangeUnknownFormat": "Unknown format. Import as address/TxID list ({addresses} addr, {txids} tx).",
+  "sources.exchangeUnknownEmpty": "Format not recognized, and no Bitcoin addresses or TxIDs found.",
+  "sources.exchangeV1Left": "The old label file (v1) is still present.",
+  "sources.exchangeRemoveV1": "Remove old file",
+  "sources.exchangeImportedV2": "{name}: {neu} new, {doppelt} already known, {konflikte} conflicts, {buchungen} bookings.",
+  "sources.exchangeLineV2": "{buchungen} bookings · {quarantaene} quarantine · {addresses} addr · {txids} tx"
 }

@@ -1119,6 +1119,7 @@ from httpserver.api.tools import (  # noqa: E402
 from httpserver.api.labels_sanctions_exchange import (  # noqa: E402
     api_exchange_reports,
     api_exchange_reports_import,
+    api_exchange_reports_vorschau,
     api_exchange_reports_loesche,
     api_labels,
     api_labels_import,
@@ -1667,6 +1668,10 @@ class Handler(
             return 200, api_labels_verwerfen(state, query)
         if teile == ["exchange-reports"] and methode == "GET":
             return 200, api_exchange_reports(state, query)
+        if teile == ["exchange-reports", "vorschau"] and methode == "POST":
+            return 200, api_exchange_reports_vorschau(
+                state, self._body(max_bytes=45 * 1024 * 1024)
+            )
         if teile == ["exchange-reports", "import"] and methode == "POST":
             return 200, api_exchange_reports_import(
                 state, self._body(max_bytes=45 * 1024 * 1024)

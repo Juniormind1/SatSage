@@ -17,7 +17,8 @@ import re
 import time
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2  # aktuelle Fassade (v2-Ordner). v1-Dateien bleiben version 1.
+V1_DATEI = 1
 META_NAME = "_index.json"
 
 #: Verzeichnis-Override (Server setzt beim Start).
@@ -366,7 +367,7 @@ def _lies(slug: str, cache_dir: Path | None = None) -> dict | None:
         daten = json.loads(ziel.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(daten, dict) or int(daten.get("version") or 0) != VERSION:
+    if not isinstance(daten, dict) or int(daten.get("version") or 0) != V1_DATEI:
         return None
     return daten
 
@@ -399,7 +400,7 @@ def _index_aktualisieren(cache_dir: Path | None = None) -> None:
                 d = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if not isinstance(d, dict) or int(d.get("version") or 0) != VERSION:
+            if not isinstance(d, dict) or int(d.get("version") or 0) != V1_DATEI:
                 continue
             eintraege.append({
                 "slug": d.get("slug") or p.stem,
@@ -434,6 +435,95 @@ def _merge_maps(ziel: dict, quell: dict, *, addr_link: bool = False) -> None:
                 ein["addresses"].append(a)
 
 
+def _parse_erkannt(csv_text: str, trades_text: str | None = None, *, konto: str | None = None):
+    """Liefert ParseErgebnis oder wirft FormatFehler."""
+    from core.boerse.erkennung import erkenne
+    from core.boerse.modell import FormatFehler
+
+    erkannt = erkenne(csv_text)
+    kw = {}
+    if konto:
+        kw["konto"] = konto
+    if erkannt.boerse == "kraken":
+        from core.boerse import kraken
+        if erkannt.variante.startswith("ledgers"):
+            return kraken.parse(csv_text, trades_text, **kw), erkannt
+        if erkannt.variante == "trades":
+            raise FormatFehler(
+                "Kraken-Trades nur zusammen mit dem Ledger hochladen",
+                erkannt.spalten,
+            )
+        raise FormatFehler("Unbekannte Kraken-Variante", erkannt.spalten)
+    if erkannt.boerse == "coinbase":
+        from core.boerse import coinbase
+        return coinbase.parse(csv_text, **kw), erkannt
+    if erkannt.boerse == "strike":
+        from core.boerse import strike
+        return strike.parse(csv_text, **kw), erkannt
+    raise FormatFehler("Format nicht erkannt", erkannt.spalten)
+
+
+def vorschau(
+    csv_text: str,
+    trades_text: str | None = None,
+    *,
+    name: str = "",
+    cache_dir: Path | None = None,
+) -> dict:
+    """Format erkennen und zaehlen. Schreibt nichts, nennt keine Dateinamen."""
+    from core.boerse.modell import FormatFehler
+
+    try:
+        ergebnis, erkannt = _parse_erkannt(csv_text, trades_text)
+    except FormatFehler as exc:
+        v1 = None
+        try:
+            v1 = parse_csv_btc_refs(csv_text)
+        except ExchangeReportError:
+            v1 = None
+        antwort = {
+            "erkannt": False,
+            "grund": exc.grund,
+            "spalten": list(exc.spalten),
+        }
+        if v1:
+            antwort["v1"] = True
+            antwort["addresses"] = len(v1.get("addresses") or {})
+            antwort["txids"] = len(v1.get("txids") or {})
+            antwort["rows_total"] = v1.get("rows_total")
+            antwort["rows_btc"] = v1.get("rows_btc")
+        return antwort
+
+    nach_art: dict[str, int] = {}
+    for b in ergebnis.buchungen:
+        nach_art[str(b.art)] = nach_art.get(str(b.art), 0) + 1
+    saldo_luecken: tuple[int, ...] = ()
+    if erkannt.boerse == "kraken" and erkannt.variante.startswith("ledgers"):
+        from core.boerse import kraken
+        saldo_luecken = kraken.pruefe_saldo(csv_text)
+    slug = slug_aus_name(name or erkannt.boerse)
+    schon = False
+    if cache_dir is not None:
+        from core.boerse import speicher
+        schon = speicher.datei_schon_importiert(
+            slug, verzeichnis(cache_dir), ergebnis.datei_hash
+        )
+    return {
+        "erkannt": True,
+        "boerse": erkannt.boerse,
+        "variante": erkannt.variante,
+        "vorschlag_name": erkannt.boerse.capitalize(),
+        "buchungen": len(ergebnis.buchungen),
+        "nach_art": nach_art,
+        "quarantaene": [
+            {"zeile": q.zeile, "grund": q.grund, "roh_typ": q.roh_typ}
+            for q in ergebnis.quarantaene
+        ],
+        "saldo_luecken": list(saldo_luecken),
+        "schon_importiert": schon,
+    }
+
+
 def importiere_csv(
     csv_text: str,
     *,
@@ -441,22 +531,51 @@ def importiere_csv(
     filename: str = "",
     cache_dir: Path | None = None,
     ersetzen: bool = False,
+    csv_trades: str | None = None,
 ) -> dict:
     """
-    CSV einlesen und in ``<slug>.json`` mergen (oder ersetzen).
+    CSV einlesen. Erkannte Kraken-/Coinbase-/Strike-Statements landen in
+    Fassung 2. Unbekannte Formate bleiben bei der v1-Beschriftungsdatei.
 
-    *name*: Anzeigename der Börse (Kraken, Binance, …).
+    *filename* wird nicht in Fassung 2 gespeichert.
     """
+    from core.boerse.modell import FormatFehler
+
     anzeige = (name or "").strip()
     if not anzeige:
         raise ExchangeReportError("Bitte einen Börsennamen angeben.")
     slug = slug_aus_name(anzeige)
+    try:
+        ergebnis, erkannt = _parse_erkannt(csv_text, csv_trades, konto=slug)
+    except FormatFehler:
+        ergebnis = None
+    if ergebnis is not None:
+        from core.boerse import speicher
+        trades_hash = None
+        if csv_trades:
+            import hashlib
+            trades_hash = hashlib.sha256(csv_trades.encode("utf-8")).hexdigest()
+        bericht = speicher.importiere_ergebnis(
+            ergebnis,
+            name=anzeige,
+            slug=slug,
+            cache_dir=verzeichnis(cache_dir),
+            ersetzen=ersetzen,
+            datei_trades=trades_hash,
+        )
+        bericht["imported_addresses"] = bericht.get("addresses") or 0
+        bericht["imported_txids"] = bericht.get("txids") or 0
+        bericht["rows_total"] = len(ergebnis.buchungen) + len(ergebnis.quarantaene)
+        bericht["rows_btc"] = bericht.get("buchungen") or 0
+        _index_aktualisieren(cache_dir)
+        return bericht
     parsed = parse_csv_btc_refs(csv_text)
+
     jetzt = int(time.time())
 
     if ersetzen:
         daten = {
-            "version": VERSION,
+            "version": V1_DATEI,
             "slug": slug,
             "name": anzeige,
             "created_ts": jetzt,
@@ -467,7 +586,7 @@ def importiere_csv(
         }
     else:
         daten = _lies(slug, cache_dir) or {
-            "version": VERSION,
+            "version": V1_DATEI,
             "slug": slug,
             "name": anzeige,
             "created_ts": jetzt,
@@ -510,16 +629,41 @@ def importiere_csv(
 
 
 def liste(cache_dir: Path | None = None) -> list[dict]:
-    """Kurzliste aller importierten Börsen."""
+    """Kurzliste aller importierten Börsen (v2-Ordner und v1-Dateien)."""
+    from core.boerse import speicher
+
+    wurzel = verzeichnis(cache_dir)
+    eintraege: list[dict] = []
+    gesehen: set[str] = set()
+    for slug in speicher.v2_slugs(wurzel):
+        info = speicher.kurzinfo(slug, wurzel)
+        info["v1_vorhanden"] = _pfad(slug, wurzel).is_file()
+        eintraege.append(info)
+        gesehen.add(slug)
     _index_aktualisieren(cache_dir)
-    pfad = _index_pfad(cache_dir)
-    if not pfad.is_file():
-        return []
-    try:
-        daten = json.loads(pfad.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return list(daten.get("exchanges") or [])
+    if wurzel.is_dir():
+        for pf in sorted(wurzel.glob("*.json")):
+            if pf.name.startswith("_"):
+                continue
+            try:
+                d = json.loads(pf.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(d, dict) or int(d.get("version") or 0) != V1_DATEI:
+                continue
+            slug = str(d.get("slug") or pf.stem)
+            if slug in gesehen:
+                continue
+            eintraege.append({
+                "slug": slug,
+                "name": d.get("name") or slug,
+                "fassung": 1,
+                "addresses": len(d.get("addresses") or {}),
+                "txids": len(d.get("txids") or {}),
+                "updated_ts": d.get("updated_ts"),
+                "v1_vorhanden": True,
+            })
+    return eintraege
 
 
 def status(cache_dir: Path | None = None) -> dict:
@@ -532,17 +676,32 @@ def status(cache_dir: Path | None = None) -> dict:
     }
 
 
-def loesche(slug: str, cache_dir: Path | None = None) -> bool:
-    s = slug_aus_name(slug)
-    ziel = _pfad(s, cache_dir)
+def _loesche_v1_datei(slug: str, cache_dir: Path | None = None) -> bool:
+    ziel = _pfad(slug, cache_dir)
     if not ziel.is_file():
         return False
     try:
         ziel.unlink()
     except OSError:
         return False
-    _index_aktualisieren(cache_dir)
     return True
+
+
+def loesche(slug: str, cache_dir: Path | None = None, *, v1_auch: bool = False) -> bool:
+    """Löscht Fassung 2. v1 nur, wenn sie allein steht oder v1_auch gesetzt ist."""
+    from core.boerse import speicher
+
+    s = slug_aus_name(slug)
+    wurzel = verzeichnis(cache_dir)
+    getroffen = False
+    if speicher.ist_v2(s, wurzel):
+        getroffen = speicher.loesche_v2(s, wurzel) or getroffen
+        if v1_auch:
+            getroffen = _loesche_v1_datei(s, cache_dir) or getroffen
+    else:
+        getroffen = _loesche_v1_datei(s, cache_dir) or getroffen
+    _index_aktualisieren(cache_dir)
+    return getroffen
 
 
 def _rolle_label(roles: list) -> str:
@@ -592,7 +751,8 @@ def _baue_lookup(cache_dir: Path | None = None) -> tuple[
     mtime_sig = "0"
     if ordner.is_dir():
         try:
-            mtime_sig = str(sum(int(p.stat().st_mtime) for p in ordner.glob("*.json")))
+            pfade = list(ordner.glob("*.json")) + list(ordner.glob("*/*.json")) + list(ordner.glob("*/*.jsonl"))
+            mtime_sig = str(sum(int(p.stat().st_mtime) for p in pfade))
         except OSError:
             mtime_sig = "0"
     cache_key = f"{key}:{mtime_sig}"
@@ -609,7 +769,7 @@ def _baue_lookup(cache_dir: Path | None = None) -> tuple[
                 d = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if not isinstance(d, dict) or int(d.get("version") or 0) != VERSION:
+            if not isinstance(d, dict) or int(d.get("version") or 0) != V1_DATEI:
                 continue
             name = str(d.get("name") or p.stem)
             for addr, meta in (d.get("addresses") or {}).items():
@@ -618,6 +778,21 @@ def _baue_lookup(cache_dir: Path | None = None) -> tuple[
                 roles = list((meta or {}).get("roles") or [])
                 by_addr[str(addr)] = (name, roles)
             for tid, meta in (d.get("txids") or {}).items():
+                if not tid:
+                    continue
+                roles = list((meta or {}).get("roles") or [])
+                by_txid[str(tid).lower()] = (name, roles)
+
+        from core.boerse import speicher
+        for slug in speicher.v2_slugs(ordner):
+            labels = speicher.lies_labels(slug, ordner)
+            name = (speicher.lies_quellen(slug, ordner).get("name") or slug)
+            for addr, meta in (labels.get("addresses") or {}).items():
+                if not addr:
+                    continue
+                roles = list((meta or {}).get("roles") or [])
+                by_addr[str(addr)] = (name, roles)
+            for tid, meta in (labels.get("txids") or {}).items():
                 if not tid:
                     continue
                 roles = list((meta or {}).get("roles") or [])

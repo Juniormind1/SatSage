@@ -116,6 +116,41 @@ def api_exchange_reports(state: AppState, query: dict) -> dict:
     return boerse.status(state.exchange_reports_dir)
 
 
+
+
+def api_exchange_reports_vorschau(state: AppState, payload: dict) -> dict:
+    """CSV erkennen und zählen, ohne zu speichern. Keine Dateinamen in der Antwort."""
+    from server import ApiError
+
+    from core import exchange_reports as boerse
+    from core.boerse.modell import FormatFehler
+
+    if not isinstance(payload, dict):
+        raise ApiError(400, "JSON-Objekt erwartet.")
+    csv_text = payload.get("csv")
+    if csv_text is None:
+        raise ApiError(400, "Feld „csv“ fehlt.")
+    if not isinstance(csv_text, str):
+        raise ApiError(400, "Feld „csv“ muss Text sein.")
+    if len(csv_text) > 40 * 1024 * 1024:
+        raise ApiError(400, "CSV zu groß (max. 40 MB).")
+    trades = payload.get("csv_trades")
+    if trades is not None and not isinstance(trades, str):
+        raise ApiError(400, "Feld „csv_trades“ muss Text sein.")
+    name = str(payload.get("name") or "").strip()
+    try:
+        return boerse.vorschau(
+            csv_text,
+            trades,
+            name=name,
+            cache_dir=state.exchange_reports_dir,
+        )
+    except FormatFehler as exc:
+        raise ApiError(400, str(exc)) from exc
+    except boerse.ExchangeReportError as exc:
+        raise ApiError(400, str(exc)) from exc
+
+
 def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
     """
     Börsen-Transaktionsreport (CSV) einlesen.
@@ -142,6 +177,9 @@ def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
         raise ApiError(400, "CSV zu groß (max. 40 MB).")
     dateiname = str(payload.get("filename") or "").strip()[:200]
     ersetzen = bool(payload.get("ersetzen"))
+    trades = payload.get("csv_trades")
+    if trades is not None and not isinstance(trades, str):
+        raise ApiError(400, "Feld „csv_trades“ muss Text sein.")
     try:
         ergebnis = boerse.importiere_csv(
             csv_text,
@@ -149,6 +187,7 @@ def api_exchange_reports_import(state: AppState, payload: dict) -> dict:
             filename=dateiname,
             cache_dir=state.exchange_reports_dir,
             ersetzen=ersetzen,
+            csv_trades=trades,
         )
     except boerse.ExchangeReportError as exc:
         raise ApiError(400, str(exc)) from exc
@@ -173,7 +212,8 @@ def api_exchange_reports_loesche(state: AppState, query: dict) -> dict:
     slug = str(query.get("slug") or "").strip()
     if not slug:
         raise ApiError(400, "Query „slug“ oder „all=1“ fehlt.")
-    ok = boerse.loesche(slug, state.exchange_reports_dir)
+    v1_auch = str(query.get("v1") or "").strip() in ("1", "true", "yes")
+    ok = boerse.loesche(slug, state.exchange_reports_dir, v1_auch=v1_auch)
     return {
         "geloescht": 1 if ok else 0,
         "slug": slug,
