@@ -221,6 +221,85 @@ def api_exchange_reports_loesche(state: AppState, query: dict) -> dict:
     }
 
 
+
+
+def api_exchange_zuordnungen(state: AppState, query: dict) -> dict:
+    """Gespeicherte Zuordnungen (Erklärung). Optional gefiltert nach slug."""
+    from core.boerse import speicher
+    from core import exchange_reports as boerse
+
+    wurzel = state.exchange_reports_dir
+    slug = str(query.get("slug") or "").strip()
+    slugs = [boerse.slug_aus_name(slug)] if slug else speicher.v2_slugs(wurzel)
+    listen = []
+    for s in slugs:
+        listen.append({
+            "slug": s,
+            "name": speicher.lies_quellen(s, wurzel).get("name") or s,
+            "zuordnungen": [speicher.zuordnung_zu_dict(z) for z in speicher.lies_zuordnungen(s, wurzel)],
+        })
+    return {"exchanges": listen}
+
+
+def api_exchange_zuordnungen_vorschlagen(state: AppState, payload: dict) -> dict:
+    """Vorschläge neu rechnen. Bestätigt und abgelehnt bleiben erhalten."""
+    from server import ApiError
+    from core.boerse import speicher, zuordnung
+    from core import exchange_reports as boerse
+
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise ApiError(400, "JSON-Objekt erwartet.")
+    wurzel = state.exchange_reports_dir
+    slug = str(payload.get("slug") or "").strip()
+    slugs = [boerse.slug_aus_name(slug)] if slug else speicher.v2_slugs(wurzel)
+    ergebnisse = []
+    for s in slugs:
+        if not speicher.ist_v2(s, wurzel):
+            raise ApiError(404, "Keine importierten Buchungen für diese Börse.")
+        ergebnisse.append(zuordnung.aktualisiere_zuordnungen(s, wurzel, state.cache_dir))
+    return {"exchanges": ergebnisse}
+
+
+def api_exchange_zuordnung_setzen(state: AppState, payload: dict) -> dict:
+    """Eine Zuordnung bestätigen oder ablehnen."""
+    from server import ApiError
+    from core.boerse import speicher, zuordnung
+    from core import exchange_reports as boerse
+    import time
+
+    if not isinstance(payload, dict):
+        raise ApiError(400, "JSON-Objekt erwartet.")
+    slug = boerse.slug_aus_name(str(payload.get("slug") or "").strip())
+    ref = str(payload.get("auszahlung_ref") or payload.get("ref") or "").strip()
+    status = str(payload.get("status") or "").strip()
+    if not slug or not ref:
+        raise ApiError(400, "Felder „slug“ und „auszahlung_ref“ fehlen.")
+    if status not in {"bestaetigt", "abgelehnt"}:
+        raise ApiError(400, "Status muss bestätigt oder abgelehnt sein.")
+    wurzel = state.exchange_reports_dir
+    if not speicher.ist_v2(slug, wurzel):
+        raise ApiError(404, "Keine importierten Buchungen für diese Börse.")
+    try:
+        neu = zuordnung.setze_status(
+            speicher.lies_zuordnungen(slug, wurzel),
+            konto=str(payload.get("konto") or slug),
+            auszahlung_ref=ref,
+            status=status,
+            bestaetigt_ts=int(time.time()) if status == "bestaetigt" else None,
+            txid=payload.get("txid"),
+            vout=payload.get("vout"),
+            sats_onchain=payload.get("sats_onchain"),
+            methode=payload.get("methode"),
+        )
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
+    speicher.schreibe_zuordnungen(slug, wurzel, neu)
+    zuordnung._erklaerung_cache.clear()
+    return {"slug": slug, "zuordnungen": [speicher.zuordnung_zu_dict(z) for z in neu]}
+
+
 def api_sanctions_import(state: AppState, payload: dict) -> dict:
     """Manueller Sanktionslisten-Import (JSON/TXT/XML/ZIP)."""
     from server import (

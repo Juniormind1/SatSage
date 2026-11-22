@@ -773,6 +773,15 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
     zusatz.textContent = eintrag.herkunft;
     grundlage.append(zusatz);
   }
+  const erklaerung = typeof boerseErklaerungText === "function"
+    ? boerseErklaerungText(eintrag)
+    : "";
+  if (erklaerung) {
+    const note = document.createElement("div");
+    note.className = "zart boerse-erklaerung";
+    note.textContent = erklaerung;
+    grundlage.append(note);
+  }
   // Innerhalb Haltefrist + nur Wallet-Eingang → klären (wie Scorecard).
   if (nurWallet && !eintrag.erfuellt) {
     const klaeren = document.createElement("button");

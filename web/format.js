@@ -3667,3 +3667,11 @@ function bindeGeheimAugen(wurzel) {
   });
 }
 
+
+function boerseErklaerungText(obj) {
+  const e = obj && obj.boerse_erklaerung;
+  if (!e || !e.konto) return "";
+  if (e.status === "bestaetigt") return t("sources.exchangeExplained", { name: e.konto });
+  if (e.status === "vorschlag") return t("sources.exchangeExplainedHint", { name: e.konto });
+  return "";
+}

@@ -100,6 +100,7 @@ async function ladeBoersenReports() {
   try {
     const stand = await api("/exchange-reports");
     zeichneBoersenReports(stand);
+    await ladeBoersenZuordnungen();
   } catch (fehler) {
     kasten.replaceChildren();
     kasten.append(hinweisZeile(t("common.loadFailed", { msg: fehler.message })));
@@ -392,6 +393,107 @@ async function verwerfeBoersenReport(slug, alle = false, v1Auch = false) {
       : `slug=${encodeURIComponent(slug || "")}${v1Auch ? "&v1=1" : ""}`;
     await api(`/exchange-reports?${q}`, { methode: "DELETE" });
     await ladeBoersenReports();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  }
+}
+
+
+async function ladeBoersenZuordnungen() {
+  const kasten = $("#boerse-zuordnung");
+  if (!kasten) return;
+  try {
+    const stand = await api("/exchange-reports/zuordnungen");
+    zeichneBoersenZuordnungen(stand);
+  } catch (fehler) {
+    kasten.replaceChildren();
+    kasten.append(hinweisZeile(t("common.loadFailed", { msg: fehler.message })));
+  }
+}
+
+function zeichneBoersenZuordnungen(stand) {
+  const kasten = $("#boerse-zuordnung");
+  if (!kasten) return;
+  kasten.replaceChildren();
+  const listen = stand?.exchanges || [];
+  const titel = document.createElement("p");
+  titel.className = "feld-titel";
+  titel.textContent = t("sources.exchangeAssignTitle");
+  kasten.append(titel);
+  const auffrischen = document.createElement("button");
+  auffrischen.type = "button";
+  auffrischen.className = "knopf knopf-klein";
+  auffrischen.id = "boerse-zuordnung-refresh";
+  auffrischen.textContent = t("sources.exchangeAssignRefresh");
+  auffrischen.addEventListener("click", aktualisiereBoersenZuordnungen);
+  kasten.append(auffrischen);
+  let irgendwelche = false;
+  for (const e of listen) {
+    for (const z of e.zuordnungen || []) {
+      irgendwelche = true;
+      const zeile = document.createElement("div");
+      zeile.className = "sanktions-zeile";
+      const text = document.createElement("span");
+      text.textContent = `${e.name || e.slug}: ` + t("sources.exchangeAssignLine", {
+        ref: z.auszahlung_ref || "",
+        methode: z.methode || "",
+        status: z.status || "",
+      });
+      zeile.append(text);
+      if (z.status === "vorschlag") {
+        const ok = document.createElement("button");
+        ok.type = "button";
+        ok.className = "knopf knopf-klein";
+        ok.textContent = t("sources.exchangeConfirm");
+        ok.addEventListener("click", () => setzeBoersenZuordnung(e.slug, z, "bestaetigt"));
+        const nein = document.createElement("button");
+        nein.type = "button";
+        nein.className = "knopf knopf-klein";
+        nein.textContent = t("sources.exchangeReject");
+        nein.addEventListener("click", () => setzeBoersenZuordnung(e.slug, z, "abgelehnt"));
+        zeile.append(ok, nein);
+      }
+      kasten.append(zeile);
+    }
+  }
+  if (!irgendwelche) {
+    kasten.append(hinweisZeile(t("sources.exchangeAssignNone")));
+  }
+}
+
+async function aktualisiereBoersenZuordnungen() {
+  try {
+    const erg = await api("/exchange-reports/zuordnungen/vorschlagen", {
+      methode: "POST",
+      daten: {},
+      timeoutMs: 60_000,
+    });
+    const luecken = (erg.exchanges || []).reduce((n, e) => n + (e.luecken || []).length, 0);
+    const hop = (erg.exchanges || []).reduce((n, e) => n + (e.kein_hop || []).length, 0);
+    if (luecken) meldung(t("sources.exchangeLuecken", { anzahl: formatZahl(luecken) }), "info");
+    if (hop) meldung(t("sources.exchangeKeinHop", { anzahl: formatZahl(hop) }), "info");
+    await ladeBoersenZuordnungen();
+  } catch (fehler) {
+    meldung(fehler.message, "krit");
+  }
+}
+
+async function setzeBoersenZuordnung(slug, z, status) {
+  try {
+    await api("/exchange-reports/zuordnungen", {
+      methode: "POST",
+      daten: {
+        slug,
+        konto: z.konto,
+        auszahlung_ref: z.auszahlung_ref,
+        status,
+        txid: z.txid,
+        vout: z.vout,
+        sats_onchain: z.sats_onchain,
+        methode: z.methode,
+      },
+    });
+    await ladeBoersenZuordnungen();
   } catch (fehler) {
     meldung(fehler.message, "krit");
   }

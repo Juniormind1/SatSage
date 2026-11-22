@@ -39,5 +39,33 @@ class BoerseGuiTest(unittest.TestCase):
                 self.assertTrue(katalog.get(key), f"{code}: {key}")
 
 
+
+    def test_zuordnung_und_erklaerung(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="boerse-zuordnung"', html)
+        js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
+        self.assertIn('"/exchange-reports/zuordnungen/vorschlagen"', js)
+        self.assertIn("function setzeBoersenZuordnung", js)
+        fmt = (WEB / "format.js").read_text(encoding="utf-8")
+        self.assertIn("function boerseErklaerungText", fmt)
+        herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
+        self.assertIn("boerseErklaerungText", herkunft)
+        self.assertIn("boerse-erklaerung", herkunft)
+        # Keine Fristklasse an der Erklärung.
+        idx = herkunft.index("boerseErklaerungText(utxo")
+        ausschnitt = herkunft[idx:idx + 500]
+        self.assertNotIn("knoten-frist", ausschnitt)
+        steuer = (WEB / "views" / "steuerjahr.js").read_text(encoding="utf-8")
+        self.assertIn("boerseErklaerungText(eintrag)", steuer)
+        self.assertIn("boerse-erklaerung", steuer)
+
+    def test_erklaerung_locale(self):
+        for code in ("de", "en"):
+            katalog = json.loads((WEB / "locales" / f"{code}.json").read_text(encoding="utf-8"))
+            for key in ("sources.exchangeExplained", "sources.exchangeExplainedHint",
+                        "sources.exchangeConfirm", "sources.exchangeAssignRefresh"):
+                self.assertTrue(katalog.get(key), f"{code}: {key}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1716,5 +1716,15 @@
   "sources.exchangeV1Left": "The old label file (v1) is still present.",
   "sources.exchangeRemoveV1": "Remove old file",
   "sources.exchangeImportedV2": "{name}: {neu} new, {doppelt} already known, {konflikte} conflicts, {buchungen} bookings.",
-  "sources.exchangeLineV2": "{buchungen} bookings · {quarantaene} quarantine · {addresses} addr · {txids} tx"
+  "sources.exchangeLineV2": "{buchungen} bookings · {quarantaene} quarantine · {addresses} addr · {txids} tx",
+  "sources.exchangeExplained": "Explanation: withdrawal from {name} (confirmed). Date and colour stay the same.",
+  "sources.exchangeExplainedHint": "Suggestion: withdrawal from {name}. Date and colour stay the same.",
+  "sources.exchangeAssignTitle": "Withdrawal and receipt",
+  "sources.exchangeAssignNone": "No assignment yet.",
+  "sources.exchangeAssignRefresh": "Refresh suggestions",
+  "sources.exchangeConfirm": "Confirm",
+  "sources.exchangeReject": "Decline",
+  "sources.exchangeAssignLine": "{ref} · {methode} · {status}",
+  "sources.exchangeKeinHop": "Lightning, no chain hop: {anzahl}.",
+  "sources.exchangeLuecken": "No candidates: {anzahl}."
 }

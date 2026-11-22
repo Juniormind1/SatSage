@@ -1121,6 +1121,9 @@ from httpserver.api.labels_sanctions_exchange import (  # noqa: E402
     api_exchange_reports_import,
     api_exchange_reports_vorschau,
     api_exchange_reports_loesche,
+    api_exchange_zuordnungen,
+    api_exchange_zuordnungen_vorschlagen,
+    api_exchange_zuordnung_setzen,
     api_labels,
     api_labels_import,
     api_labels_update,
@@ -1678,6 +1681,12 @@ class Handler(
             )
         if teile == ["exchange-reports"] and methode == "DELETE":
             return 200, api_exchange_reports_loesche(state, query)
+        if teile == ["exchange-reports", "zuordnungen"] and methode == "GET":
+            return 200, api_exchange_zuordnungen(state, query)
+        if teile == ["exchange-reports", "zuordnungen", "vorschlagen"] and methode == "POST":
+            return 200, api_exchange_zuordnungen_vorschlagen(state, self._body())
+        if teile == ["exchange-reports", "zuordnungen"] and methode == "POST":
+            return 200, api_exchange_zuordnung_setzen(state, self._body())
         if teile == ["source", "status"] and methode == "GET":
             return 200, api_source_status(state, query)
         if teile == ["logbereich"] and methode == "POST":

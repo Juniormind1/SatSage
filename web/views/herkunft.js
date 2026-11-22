@@ -1533,6 +1533,16 @@ function setzeWurzelTxClass(zweig, ergebnis, utxo = null) {
     tx_class_label: basis.tx_class_label || ergebnis.tx_class_label,
     tx_class_label_en: basis.tx_class_label_en || ergebnis.tx_class_label_en,
   });
+  const erklaerung = boerseErklaerungText(utxo || basis);
+  if (erklaerung) {
+    let note = wurzel.querySelector(".boerse-erklaerung");
+    if (!note) {
+      note = document.createElement("span");
+      note.className = "boerse-erklaerung";
+      unten.append(note);
+    }
+    note.textContent = erklaerung;
+  }
 }
 
 /**

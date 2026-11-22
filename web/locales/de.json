@@ -1716,5 +1716,15 @@
   "sources.exchangeV1Left": "Alte Beschriftungsdatei (v1) ist noch vorhanden.",
   "sources.exchangeRemoveV1": "Alte Datei entfernen",
   "sources.exchangeImportedV2": "{name}: {neu} neu, {doppelt} schon bekannt, {konflikte} Konflikte, {buchungen} Buchungen.",
-  "sources.exchangeLineV2": "{buchungen} Buchungen · {quarantaene} Quarantäne · {addresses} Adr. · {txids} Tx"
+  "sources.exchangeLineV2": "{buchungen} Buchungen · {quarantaene} Quarantäne · {addresses} Adr. · {txids} Tx",
+  "sources.exchangeExplained": "Erklärung: Auszahlung von {name} (bestätigt). Datum und Farbe bleiben unverändert.",
+  "sources.exchangeExplainedHint": "Vorschlag: Auszahlung von {name}. Datum und Farbe bleiben unverändert.",
+  "sources.exchangeAssignTitle": "Auszahlung und Empfang",
+  "sources.exchangeAssignNone": "Noch keine Zuordnung.",
+  "sources.exchangeAssignRefresh": "Vorschläge aktualisieren",
+  "sources.exchangeConfirm": "Bestätigen",
+  "sources.exchangeReject": "Ablehnen",
+  "sources.exchangeAssignLine": "{ref} · {methode} · {status}",
+  "sources.exchangeKeinHop": "Lightning, kein Chain-Hop: {anzahl}.",
+  "sources.exchangeLuecken": "Ohne Kandidaten: {anzahl}."
 }

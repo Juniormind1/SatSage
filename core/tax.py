@@ -763,7 +763,7 @@ class Eingang:
         )
 
     def as_dict(self) -> dict:
-        return {
+        d = {
             "txid": self.txid,
             "vout": self.vout,
             "address": self.address,
@@ -791,6 +791,12 @@ class Eingang:
             "sats_grau": self.sats_grau,
             "sats_ohne_datum": self.sats_ohne_datum,
         }
+        try:
+            from core.boerse.zuordnung import erklaerung_fuer_outpoint
+            d["boerse_erklaerung"] = erklaerung_fuer_outpoint(self.txid, self.vout)
+        except Exception:
+            d["boerse_erklaerung"] = None
+        return d
 
 
 def _eintrag_flag(eintrag, name: str) -> bool:

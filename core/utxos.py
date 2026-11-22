@@ -173,6 +173,13 @@ def utxo_as_dict(
             eintrag["boerse_namen"] = list(gespeichert.get("boerse_namen") or [])
             eintrag["tx_class"] = str(gespeichert.get("tx_class") or "")
 
+    try:
+        from core.boerse.zuordnung import erklaerung_fuer_outpoint
+        eintrag["boerse_erklaerung"] = erklaerung_fuer_outpoint(
+            eintrag.get("txid") or "", eintrag.get("vout")
+        )
+    except Exception:
+        eintrag["boerse_erklaerung"] = None
     return eintrag
 
 

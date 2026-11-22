@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Börsenhistorie · Zuordnung:** Auszahlungen können einem eigenen Empfang zugeordnet werden (exakte TxID automatisch, sonst Vorschlag über Adresse oder Betrag und Zeit). Bestätigen und Ablehnen ändert nur die Erklärung. Datum, Grundlage und Farbe im Herkunftsbaum und im Steuerjahr bleiben unverändert.
+
 - **Börsenhistorie · Speicher v2:** Import schreibt Buchungen nach `<exchange_dir>/<slug>/` (jsonl). Re-Import ist idempotent, abweichender Inhalt wird Konflikt statt Überschreiben. Derselbe Datei-Hash gilt als schon importiert. v1-Beschriftungsdateien bleiben lesbar, bis sie bestätigt gelöscht werden. Die GUI zeigt vor dem Import eine Vorschau mit Zählern und Quarantäne. Quelldateinamen werden nicht gespeichert.
 
 - **Börsenhistorie · Strike:** Der Parser liest nur Account-Statements. Ein Lightning-Payment-Hash wird nicht als Chain-TxID gelesen, auch nicht im bisherigen Report-Import.
