@@ -84,6 +84,16 @@ Compact Filter suchen den UTXO-Bestand, und nur wenn eigener Electrum-Server und
 
 ---
 
+## Herkunft · grün, aber unvollständig: roter Ring bleibt
+
+**Stand:** 2026-11-22 · **offen** · Designfrage
+**Ort:** `doc/issues/gruen-unvollstaendig-roter-ring.md`, `core/steuer_fenster.py` (`klaeren_keys`)
+Aufwand: **gering** (nach Entscheidung)
+
+Bleibt ein Herkunftsbaum unvollständig (etwa weil P2P einen Vorgänger nicht laden kann), das UTXO steuerlich aber grün, nehmen Grau, Lot-Grau und Gelb es nicht mit. Auch mit Electrs wird es nie neu verfolgt, der rote Ring bleibt. Steuerlich korrekt bei „jüngste“. Im Regtest-Labor einmal in vier Läufen (Quelle 4, WabiSabi-artige Tx), auch auf `00c35f8`. Offen: Soll Gelb grüne, unvollständige UTXOs neu klären, sobald eine Quelle mit voller Herkunft verbunden ist? Detail: [`doc/issues/gruen-unvollstaendig-roter-ring.md`](doc/issues/gruen-unvollstaendig-roter-ring.md).
+
+---
+
 ## Bitcoin Core · RPC-Allowlist + rpcwhitelist-Hinweis
 
 **Stand:** 2026-09-28 · **umgesetzt** · Maintainer-Abnahme offen · Sicherheit / Doku
