@@ -204,6 +204,11 @@ button:disabled{opacity:.65;cursor:wait;filter:none}
   display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
 }
 .geheim-auge:hover{color:var(--text);filter:none}
+.touchid{margin-top:.4rem}
+.oder{margin:14px 0 0;text-align:center;font-size:12px;color:var(--blass)}
+.oder[hidden],.touchid[hidden]{display:none!important}
+.touchid-option{display:flex;align-items:center;gap:8px;margin:.85rem 0 0;cursor:pointer}
+.touchid-option input{width:auto;margin:0}
 .geheim-auge .auge-zu{display:none}
 .geheim-auge[aria-pressed="true"] .auge-auf{display:none}
 .geheim-auge[aria-pressed="true"] .auge-zu{display:block}
@@ -260,6 +265,72 @@ LOGIN_PAGE_JS = r"""
     }
     return data;
   }
+  function touchIdCode(err) {
+    return String((err && err.data && err.data.code) || "");
+  }
+  function touchIdText(err) {
+    var code = touchIdCode(err);
+    if (code === "cancelled") return T.touchid_abgebrochen;
+    if (code === "failed") return T.touchid_fehlgeschlagen;
+    if (code === "invalidated" || code === "not_found" || code === "stale" || code === "not_enrolled") {
+      return T.touchid_aus;
+    }
+    if (code === "locked_out") return T.touchid_gesperrt;
+    if (code === "busy") return T.touchid_belegt;
+    if (code === "timeout") return T.touchid_zeit;
+    if (err && err.status === 429) return T.zu_viele;
+    return T.touchid_fehler;
+  }
+  function touchIdFaelltWeg(err) {
+    var code = touchIdCode(err);
+    return [
+      "invalidated", "not_found", "stale", "not_enrolled",
+      "not_available", "helper_missing", "remote",
+    ].indexOf(code) >= 0;
+  }
+  function bindTouchId() {
+    var knopf = $("#touchid-login");
+    if (!knopf) return;
+    var msg = $("#login-meldung");
+    knopf.addEventListener("click", function () {
+      knopf.disabled = true;
+      setMsg(msg, T.touchid_warten, "warn");
+      postJson("/api/auth/touchid", {})
+        .then(function () {
+          setMsg(msg, T.fertig, "gut");
+          location.href = safeNext();
+        })
+        .catch(function (err) {
+          setMsg(msg, touchIdText(err), "krit");
+          if (touchIdFaelltWeg(err)) {
+            knopf.hidden = true;
+            var oder = $(".oder");
+            if (oder) oder.hidden = true;
+          } else {
+            knopf.disabled = false;
+          }
+          var pw = $("#password");
+          if (pw) pw.focus();
+        });
+    });
+  }
+  // Opt-in nach erfolgreichem Login: dasselbe Passwort, ein Touch-ID-Dialog.
+  function touchIdAktivieren(msg, password) {
+    var opt = $("#touchid-aktivieren");
+    if (!opt || !opt.checked) return Promise.resolve(true);
+    setMsg(msg, T.touchid_aktiviere, "warn");
+    return postJson("/api/auth/touchid/enroll", { password: password })
+      .then(function () {
+        setMsg(msg, T.touchid_aktiv, "gut");
+        return true;
+      })
+      .catch(function () {
+        setMsg(msg, T.touchid_nicht_aktiviert, "warn");
+        return new Promise(function (fertig) {
+          setTimeout(function () { fertig(false); }, 3000);
+        });
+      });
+  }
   function bindLogin(form) {
     if (!form) return;
     var msg = $("#login-meldung");
@@ -290,7 +361,10 @@ LOGIN_PAGE_JS = r"""
           return data;
         })
         .then(function () {
-          setMsg(msg, T.fertig, "gut");
+          return touchIdAktivieren(msg, password);
+        })
+        .then(function (ok) {
+          if (ok) setMsg(msg, T.fertig, "gut");
           location.href = safeNext();
         })
         .catch(function (err) {
@@ -387,6 +461,7 @@ LOGIN_PAGE_JS = r"""
     }
   }
   bindLogin($("#login-form"));
+  bindTouchId();
   bindSetup($("#setup-form"));
   bindVergessen();
   bindAugen();
@@ -550,6 +625,30 @@ _LOGIN_TEXTE = {
         "fehler": "Anmeldung fehlgeschlagen.",
         "vergessen_laeuft": "Konfiguration wird verworfen…",
         "vergessen_fertig": "Neu anfangen — öffne SatSage…",
+        # Touch ID (nur macOS, nur Loopback)
+        "touchid_login": "Mit Touch ID entsperren",
+        "touchid_oder": "oder mit Passwort",
+        "touchid_aktivieren": "Nach der Anmeldung Touch ID für diesen Mac aktivieren",
+        "touchid_warten": "Bitte Finger auf den Touch-ID-Sensor legen…",
+        "touchid_aktiviere": "Touch ID wird aktiviert — bitte Finger auflegen…",
+        "touchid_aktiv": "Touch ID ist aktiv — öffne SatSage…",
+        "touchid_nicht_aktiviert": (
+            "Touch ID wurde nicht aktiviert. In den Einstellungen nachholbar."
+        ),
+        "touchid_abgebrochen": "Touch ID abgebrochen. Bitte Passwort eingeben.",
+        "touchid_fehlgeschlagen": (
+            "Fingerabdruck nicht erkannt. Nochmal versuchen oder Passwort eingeben."
+        ),
+        "touchid_aus": (
+            "Touch ID ist aus (Passwort oder Fingerabdrücke geändert). "
+            "Bitte Passwort eingeben."
+        ),
+        "touchid_gesperrt": "Touch ID ist gesperrt. Bitte Passwort eingeben.",
+        "touchid_belegt": "Ein Touch-ID-Dialog läuft bereits.",
+        "touchid_zeit": (
+            "Touch ID nicht rechtzeitig bestätigt. Nochmal versuchen oder Passwort eingeben."
+        ),
+        "touchid_fehler": "Touch ID nicht möglich. Bitte Passwort eingeben.",
     },
     "en": {
         "titel": "SatSage – Sign in",
@@ -592,6 +691,29 @@ _LOGIN_TEXTE = {
         "fehler": "Sign-in failed.",
         "vergessen_laeuft": "Discarding configuration…",
         "vergessen_fertig": "Starting over — opening SatSage…",
+        "touchid_login": "Unlock with Touch ID",
+        "touchid_oder": "or with your password",
+        "touchid_aktivieren": "Turn on Touch ID for this Mac after signing in",
+        "touchid_warten": "Place your finger on the Touch ID sensor…",
+        "touchid_aktiviere": "Turning on Touch ID — place your finger…",
+        "touchid_aktiv": "Touch ID is on — opening SatSage…",
+        "touchid_nicht_aktiviert": (
+            "Touch ID was not turned on. You can do it later in Settings."
+        ),
+        "touchid_abgebrochen": "Touch ID cancelled. Please enter your password.",
+        "touchid_fehlgeschlagen": (
+            "Fingerprint not recognised. Try again or enter your password."
+        ),
+        "touchid_aus": (
+            "Touch ID is off (password or fingerprints changed). "
+            "Please enter your password."
+        ),
+        "touchid_gesperrt": "Touch ID is locked. Please enter your password.",
+        "touchid_belegt": "A Touch ID prompt is already open.",
+        "touchid_zeit": (
+            "Touch ID was not confirmed in time. Try again or enter your password."
+        ),
+        "touchid_fehler": "Touch ID not possible. Please enter your password.",
     },
 }
 
@@ -611,6 +733,17 @@ def _login_js_texte(t: dict) -> dict:
         "vergessen_fertig",
         "anzeigen",
         "verbergen",
+        "touchid_warten",
+        "touchid_aktiviere",
+        "touchid_aktiv",
+        "touchid_nicht_aktiviert",
+        "touchid_abgebrochen",
+        "touchid_fehlgeschlagen",
+        "touchid_aus",
+        "touchid_gesperrt",
+        "touchid_belegt",
+        "touchid_zeit",
+        "touchid_fehler",
     )
     return {k: t[k] for k in keys if k in t}
 

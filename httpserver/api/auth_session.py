@@ -147,6 +147,18 @@ def _write_password_hash(state, password: str) -> None:
                 tmp.unlink()
             except OSError:
                 pass
+    # Neues Passwort: eine Touch-ID-Kopie des alten ist ungültig.
+    _touchid_invalidieren(state, "passwort_gesetzt")
+
+
+def _touchid_invalidieren(state, grund: str) -> None:
+    """Touch ID (macOS) für diese ``.env`` abschalten. Ohne Marker ein No-op."""
+    try:
+        from core import touchid
+
+        touchid.invalidate(state.env_path, grund=grund)
+    except Exception:  # pragma: no cover - darf Passwortwege nie brechen
+        pass
 
 
 def _clear_password_hash(state) -> None:
@@ -161,6 +173,8 @@ def _clear_password_hash(state) -> None:
     except OSError:
         if path.is_file():
             path.unlink()
+    # Passwort entfernt oder vergessen: Touch ID hat nichts mehr zu entsperren.
+    _touchid_invalidieren(state, "passwort_entfernt")
 
 
 def api_save_app_password(state: AppState, payload: dict) -> dict:

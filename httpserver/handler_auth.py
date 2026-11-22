@@ -387,10 +387,27 @@ class HandlerAuthMixin:
                 plattform_hinweis = f'<p class="hinweis">{t["hinweis_umbrel"]}</p>'
             else:
                 plattform_hinweis = ""
+            touchid = self._touchid_status()
+            touchid_knopf = ""
+            touchid_option = ""
+            if touchid.get("available") and touchid.get("enrolled"):
+                touchid_knopf = (
+                    '<button type="button" class="touchid" id="touchid-login">'
+                    f'{t["touchid_login"]}</button>'
+                    f'<p class="oder">{t["touchid_oder"]}</p>'
+                )
+            elif touchid.get("available"):
+                # Opt-in: Default aus. Aktiviert erst nach erfolgreichem Login.
+                touchid_option = (
+                    '<label class="touchid-option">'
+                    '<input type="checkbox" id="touchid-aktivieren">'
+                    f'<span>{t["touchid_aktivieren"]}</span></label>'
+                )
             inhalt = (
                 f"<h1>{t['anmelden']}</h1>"
                 f"<p>{t['passwort_eingeben']}</p>"
                 f"{plattform_hinweis}"
+                f"{touchid_knopf}"
                 '<form id="login-form" action="/api/auth/login" method="post">'
                 f'<label for="password">{t["passwort"]}</label>'
                 + _passwort_eingabe(
@@ -399,6 +416,7 @@ class HandlerAuthMixin:
                     'autocomplete="current-password" required autofocus',
                     t["anzeigen"],
                 )
+                + touchid_option
                 + f'<button type="submit">{t["anmelden"]}</button></form>'
                 f'<button type="button" class="vergessen" id="passwort-vergessen">'
                 f'{t["passwort_vergessen"]}</button>'
@@ -469,13 +487,28 @@ class HandlerAuthMixin:
             "setup_required": not _password_is_set(self.state),
             "managed_by": self.state.managed_by,
             "ui_lang": ui_lang,
+            "touchid": self._touchid_status(),
         }
+
+    def _touchid_status(self) -> dict:
+        """Touch ID (macOS, nur Loopback). Fehler hier sperren nie den Login."""
+        try:
+            from httpserver.api import touchid as touchid_api
+
+            return touchid_api.status_fuer(self)
+        except Exception:
+            return {"available": False, "enrolled": False}
 
     def _auth_api(self, methode: str, pfad: str) -> bool:
         _ensure_server_names()
         if pfad == "/api/auth/status" and methode == "GET":
             self._json(200, self._auth_status())
             return True
+        if pfad.startswith("/api/auth/touchid"):
+            from httpserver.api import touchid as touchid_api
+
+            if touchid_api.handle(self, methode, pfad):
+                return True
         if pfad == "/api/auth/login" and methode == "POST":
             if not _password_is_set(self.state):
                 self._fehler(409, "Noch kein Passwort gesetzt.")

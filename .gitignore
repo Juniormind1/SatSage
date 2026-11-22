@@ -12,6 +12,8 @@
 # App-Login-Hash (Argon2id/scrypt) — nie committen
 .satsage-password
 .satsage-password.tmp
+.satsage-touchid
+.satsage-touchid.*
 
 __pycache__/
 *.pyc

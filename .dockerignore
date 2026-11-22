@@ -44,6 +44,8 @@ githooks
 .env.*
 .satsage-password
 .satsage-password.*
+.satsage-touchid
+.satsage-touchid.*
 
 exchange_reports
 logs
