@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Doku · Kraken-Spec:** `doc/boerse/kraken.md` beschreibt Ledgers und Trades (Spalten, Typen, Zeitzone, Quelle je Angabe). Unbekannte Formate werden nicht geraten.
+
 - **Datenschutz · Datenwurzel:** `SATSAGE_DATA_DIR` und `--data-dir` legen `.env`, Caches, Börsenimporte und Logs außerhalb des Repos. Ohne Angabe bleibt das bisherige Verhalten. Liegen die Daten im Git-Arbeitsbaum, warnt der Start (Entscheidung E13, änderbar). `--exchange-dir` und `--log-dir` setzen einzelne Verzeichnisse. Im Container liegen Börsenimporte und Logs jetzt mit auf dem Daten-Volume.
 - **Datenschutz · Leak-Scan:** `scripts/leak_scan.py` prüft gestagte und getrackte Dateien auf erweiterte Schlüssel, Mainnet-Adressen, Börsen-CSV-Köpfe, IBAN und E-Mail. Echte Exporte gehören nicht ins Repo. Synthetische Fixtures nur unter `tests/fixtures/boerse/` mit Herkunftsdatei. Ein Hook-Aufruf in `githooks/pre-commit` braucht noch Freigabe (S3).
 - **Nutzerprofil · Börsen-FIFO:** Für Börsentransaktionen, die nicht on-chain sind, darf SatSage aus dem CSV-Export einer Börse eine strikte FIFO-Kaufhistorie je Börsenkonto ableiten, zurück bis zum Kauf auf der Börse. On-Chain bleibt die Trace-Welt. Die Grenzen stehen in `doc/user-profile-ux.md`.
