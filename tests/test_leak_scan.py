@@ -74,6 +74,14 @@ class LeakScanTest(unittest.TestCase):
             self.assertEqual(funde, [], funde)
 
 
+
+    def test_kraken_kopf_im_parser_ist_erlaubt(self):
+        ziel = ROOT / "core" / "boerse" / "_scan_tmp.py"
+        self.addCleanup(lambda: ziel.exists() and ziel.unlink())
+        ziel.write_text("KOPF = " + repr(KOPF_LEDGER) + "\n", encoding="utf-8")
+        funde = pruefe_text(ziel.read_text(encoding="utf-8"), ziel)
+        self.assertFalse([f for f in funde if "kopf" in f.regel], funde)
+
     def test_kraken_kopf_in_spec_ist_erlaubt(self):
         ziel = ROOT / "doc" / "boerse" / "_scan_tmp.md"
         self.addCleanup(lambda: ziel.exists() and ziel.unlink())

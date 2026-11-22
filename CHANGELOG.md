@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Börsenhistorie · Erkennung:** Der CSV-Kopf bestimmt Börse und Variante. Ein unbekannter Kopf wird abgelehnt, die Meldung nennt nur Spaltennamen.
+
 - **Börsenhistorie · Zahlen:** `core/boerse/` nimmt Beträge als Decimal und wandelt BTC exakt in Sats, ohne Float.
 
 - **Datenschutz · Leak-Scan:** CSV-Köpfe dürfen in `doc/boerse/` wörtlich stehen, Werte und IDs weiterhin nicht.

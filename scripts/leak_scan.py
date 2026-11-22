@@ -23,6 +23,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = (REPO_ROOT / "tests" / "fixtures" / "boerse").resolve()
 SPEC_DIR = (REPO_ROOT / "doc" / "boerse").resolve()
+PARSER_DIR = (REPO_ROOT / "core" / "boerse").resolve()
 
 # SHA-256 der bekannten öffentlichen Testvektoren (BIP-84 u. a. aus
 # tests/fixtures.py) sowie fest im Repo stehender Descriptor-Schlüssel.
@@ -134,8 +135,15 @@ def _ist_fixture(pfad: Path) -> bool:
 
 
 def _ist_spec(pfad: Path) -> bool:
-    """CSV-Köpfe dürfen in den Börsen-Specs wörtlich stehen (ohne Werte)."""
-    return _ist_unter(pfad, SPEC_DIR)
+    """CSV-Köpfe dürfen in Specs, Parser und dessen Tests wörtlich stehen."""
+    if _ist_unter(pfad, SPEC_DIR) or _ist_unter(pfad, PARSER_DIR):
+        return True
+    name = pfad.name
+    if pfad.parent.resolve() == (REPO_ROOT / "tests").resolve() and (
+        name.startswith("test_boerse_") and name.endswith(".py")
+    ):
+        return True
+    return False
 
 
 def _hat_herkunft(pfad: Path) -> bool:
