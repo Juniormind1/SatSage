@@ -1,0 +1,2 @@
+Timestamp,Transaction Type,Asset,Quantity Transacted,EUR Spot Price at Transaction,EUR Subtotal,EUR Total (inclusive of fees),EUR Fees,Notes
+2020-01-15 19:20:00 UTC,Buy,BTC,0.00300000,"€8,000.00","€24.00","€24.50",€0.50,Legacy buy

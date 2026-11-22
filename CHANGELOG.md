@@ -9,6 +9,8 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Börsenhistorie · Coinbase:** Der Parser liest das Custom-Statement (Varianten 2019–2024+), überspringt die Präambel und lehnt andere Coinbase-Exporte ab. Testdaten sind synthetisch.
+
 - **Börsenhistorie · Kraken:** Der Parser liest Ledgers und optional Trades, paart über `refid` und nimmt den Kurs aus der Trades-Datei oder, fehlt sie, aus der Fiat-Gegenzeile (E9). Testdaten sind synthetisch.
 - **Datenschutz · Leak-Scan:** CSV-Köpfe dürfen außerdem in `core/boerse/` und `tests/test_boerse_*.py` wörtlich stehen.
 

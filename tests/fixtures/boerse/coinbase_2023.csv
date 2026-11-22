@@ -1,0 +1,2 @@
+Timestamp,Transaction Type,Asset,Quantity Transacted,Spot Price Currency,Spot Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes
+2023-11-11 11:11:11 UTC,Buy,BTC,0.00200000,USD,40000.00,80.00,80.80,0.80,Bought BTC

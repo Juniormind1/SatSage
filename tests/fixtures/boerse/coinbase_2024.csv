@@ -1,0 +1,11 @@
+Transactions
+User,00000000-0000-0000-0000-000000000000
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes
+CBSYN-0001,2024-02-01 09:00:00 UTC,Deposit,EUR,1500.00,EUR,"€1,500.00","€1,500.00","€1,500.00",€0.00,Fiat deposit
+CBSYN-0002,2024-03-01 12:00:00 UTC,Buy,BTC,0.01000000,EUR,"€50,000.00","€500.00","€505.00",€5.00,Bought BTC
+CBSYN-0003,2024-06-15 08:30:00 UTC,Sell,BTC,0.00400000,EUR,"€60,000.00","€240.00","€238.80",€1.20,Sold BTC
+CBSYN-0004,2024-07-01 10:00:00 UTC,Send,BTC,0.00500000,EUR,"€61,000.00","€305.00","€305.00",€0.00,Sent to bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu
+CBSYN-0005,2024-07-15 12:00:00 UTC,Receive,BTC,0.00100000,EUR,"€62,000.00","€62.00","€62.00",€0.00,Received BTC
+CBSYN-0006,2024-08-01 08:00:00 UTC,Convert,BTC,0.00050000,EUR,"€63,000.00","€31.50","€31.50",€0.00,Converted BTC to ETH
+CBSYN-0007,2024-08-02 08:00:00 UTC,Rewards Income,BTC,0.00001000,EUR,"€63,000.00","€0.63","€0.63",€0.00,Rewards
+CBSYN-0008,2024-08-03 08:00:00 UTC,Advanced Trade Buy,ETH,1.00000000,EUR,"€2,500.00","€2,500.00","€2,510.00",€10.00,Bought ETH
