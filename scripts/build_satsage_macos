@@ -31,6 +31,38 @@ echo "→ Marke und Splash (für Cross-Check / Linux-Win-Builds)…"
 echo "→ BTC-Preis-Bundle bis Tip (Bitstamp/CDD; SKIP_BTC_PRICE_REFRESH=1 zum Überspringen)…"
 "$PY" "$ROOT/scripts/refresh_btc_price_bundle.py"
 
+echo "→ Touch-ID-Hilfsprogramm (Swift, optional)…"
+TOUCHID_DIR="$ROOT/build/touchid"
+TOUCHID_OUT="$TOUCHID_DIR/satsage-touchid"
+TOUCHID_STATUS="ohne Touch ID"
+rm -rf "$TOUCHID_DIR"
+unset SATSAGE_TOUCHID_BIN
+if [[ "${SATSAGE_SKIP_TOUCHID:-0}" == "1" ]]; then
+  echo "  übersprungen (SATSAGE_SKIP_TOUCHID=1) — Build ohne Touch ID."
+elif [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "  kein macOS — Build ohne Touch ID."
+elif ! command -v swiftc >/dev/null 2>&1; then
+  echo "WARNUNG: swiftc fehlt (Xcode Command Line Tools: xcode-select --install) — Build ohne Touch ID." >&2
+else
+  mkdir -p "$TOUCHID_DIR"
+  TOUCHID_TARGET="$(uname -m)-apple-macos${SATSAGE_TOUCHID_MIN_MACOS:-11.0}"
+  if swiftc -O -swift-version 5 -target "$TOUCHID_TARGET" \
+      -framework LocalAuthentication -framework Security \
+      -o "$TOUCHID_OUT" "$ROOT/packaging/macos/satsage-touchid.swift"; then
+    # Ad-hoc-Signatur (kein Developer-Konto). Der Schlüsselbund merkt sich
+    # das Programm über diese Signatur.
+    if codesign --force --sign - "$TOUCHID_OUT"; then
+      export SATSAGE_TOUCHID_BIN="$TOUCHID_OUT"
+      TOUCHID_STATUS="mit Touch ID ($TOUCHID_TARGET)"
+      echo "  ok: build/touchid/satsage-touchid (ad-hoc signiert)"
+    else
+      echo "WARNUNG: codesign fehlgeschlagen — Build ohne Touch ID." >&2
+    fi
+  else
+    echo "WARNUNG: swiftc fehlgeschlagen — Build ohne Touch ID." >&2
+  fi
+fi
+
 echo "→ PyInstaller (Onefile; unter macOS ohne Splash-Bootloader)…"
 export SATSAGE_BINARY_NAME=satsage-macos
 rm -rf build/satsage-webgui dist/satsage-webgui "dist/${SATSAGE_BINARY_NAME}"
@@ -53,6 +85,7 @@ echo
 echo "Fertig."
 echo "  Binary : $OUT"
 echo "  Splash : unter macOS nicht im Bootloader (PyInstaller-Limit); Win/Linux ja"
+echo "  TouchID: $TOUCHID_STATUS (Selbsttest: python3 scripts/touchid_selftest_macos.py)"
 echo "  Start  : $OUT"
 echo "  Config : .env neben dem Binary anlegen (Vorlage: dist/.env.example)"
 echo "  Caches : utxo_cache/ und immutable_cache/ entstehen neben dem Binary"

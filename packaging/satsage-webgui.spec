@@ -71,6 +71,17 @@ _splash_png = PROJEKT_ROOT / "packaging" / "satsage-splash.png"
 if _splash_png.is_file():
     datas.append((str(_splash_png), "packaging"))
 
+# Touch-ID-Hilfsprogramm (nur macOS, optional). scripts/build_satsage_macos
+# baut es mit swiftc und setzt SATSAGE_TOUCHID_BIN. Ohne swiftc fehlt es,
+# dann zeigt SatSage kein Touch ID an. Linux/Windows: nie gebündelt.
+binaries = []
+_touchid_bin = os.environ.get("SATSAGE_TOUCHID_BIN", "").strip()
+if sys.platform == "darwin" and _touchid_bin:
+    _touchid_pfad = Path(_touchid_bin)
+    if not _touchid_pfad.is_file():
+        raise SystemExit(f"SATSAGE_TOUCHID_BIN zeigt auf keine Datei: {_touchid_pfad}")
+    binaries.append((str(_touchid_pfad), "bin"))
+
 # Bootloader-Splash nur Windows/Linux.
 SPLASH_OK = sys.platform.startswith(("win", "linux"))
 
@@ -90,6 +101,8 @@ hidden = [
     "core.single_instance",
     "core.gui_session",
     "core.env_scramble",
+    "core.touchid",
+    "httpserver.api.touchid",
     "argon2",
     "argon2.low_level",
     "cryptography",
@@ -105,6 +118,7 @@ excludes = [] if SPLASH_OK else ["pyi_splash"]
 a = Analysis(
     [str(PROJEKT_ROOT / "server.py")],
     pathex=[str(PROJEKT_ROOT)],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hidden,
     hookspath=[],
