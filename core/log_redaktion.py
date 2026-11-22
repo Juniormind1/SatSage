@@ -12,6 +12,7 @@ import hashlib
 import logging
 import re
 import traceback
+from pathlib import Path
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 from typing import Iterable
 
@@ -38,9 +39,11 @@ _RE_UUID = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
-_RE_UNIX_HOME = re.compile(r"(?i)(?:/Users|/home)/[^\s,;:'\"]+")
+# Nur Heimatpräfix inkl. Benutzername, nicht der restliche Pfad.
+# Sonst würde ein Stack-Frame unter /home/runner/work/… vollständig zu ref:…
+_RE_UNIX_HOME = re.compile(r"(?i)(?:/Users|/home)/[^/\s,;:'\"]+")
 _RE_WIN_HOME = re.compile(
-    r"(?i)(?:[A-Z]:\\Users\\|[A-Z]:\\Dokumente und Einstellungen\\)[^\s,;]+"
+    r"(?i)(?:[A-Z]:\\Users\\|[A-Z]:\\Dokumente und Einstellungen\\)[^\\\s,;]+"
 )
 _RE_TILDE = re.compile(r"~/[^\s,;:'\"]+")
 _RE_DATEINAME = re.compile(
@@ -129,12 +132,138 @@ def tag_iso(ts: int | float | None) -> str:
     )
 
 
+_RE_STACK_FILE = re.compile(r'(File ")([^"]+)(")')
+_RE_SITE = re.compile(r"(?i)/(?:site|dist)-packages/")
+_RE_MEI = re.compile(r"(?i)(?:^|/)(_MEI[^/]*)/")
+_RE_STDLIB = re.compile(r"(?i)/lib/python[^/]+/")
+
+_TOP_PFLICHT = frozenset(
+    {
+        "core",
+        "tests",
+        "web",
+        "httpserver",
+        "scripts",
+        "githooks",
+        "packaging",
+        "doc",
+        "lab",
+    }
+)
+_top_cache: frozenset[str] | None = None
+
+
+def repo_wurzel() -> Path:
+    """Wurzel des SatSage-Arbeitsbaums (``core/`` liegt darunter)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _norm_pfad(pfad: str | Path) -> str:
+    return str(pfad).replace("\\", "/").strip()
+
+
+def _repo_top() -> frozenset[str]:
+    global _top_cache
+    if _top_cache is None:
+        namen = set(_TOP_PFLICHT)
+        try:
+            for kind in repo_wurzel().iterdir():
+                if kind.name.startswith("."):
+                    continue
+                namen.add(kind.name)
+        except OSError:
+            pass
+        _top_cache = frozenset(namen)
+    return _top_cache
+
+
+def _relativ_zu(norm: str, wurzel: Path) -> str | None:
+    w = _norm_pfad(wurzel)
+    try:
+        if Path(str(wurzel)).exists():
+            w = _norm_pfad(Path(str(wurzel)).resolve())
+    except OSError:
+        pass
+    w = w.rstrip("/")
+    if not w:
+        return None
+    if norm.casefold() == w.casefold():
+        return Path(w).name
+    if norm.casefold().startswith(w.casefold() + "/"):
+        return norm[len(w) + 1 :]
+    return None
+
+
+def _repo_relativ(norm: str, wurzel: Path | None = None) -> str | None:
+    teile = [t for t in norm.split("/") if t and t != "."]
+    if teile and len(teile[0]) == 2 and teile[0][1] == ":":
+        teile = teile[1:]
+    basis = wurzel if wurzel is not None else repo_wurzel()
+    repo = Path(str(basis)).name
+    top = {n.casefold() for n in _repo_top()}
+    treffer = None
+    for i, t in enumerate(teile):
+        if (
+            t.casefold() == repo.casefold()
+            and i + 1 < len(teile)
+            and teile[i + 1].casefold() in top
+        ):
+            treffer = i
+    if treffer is not None:
+        return "/".join(teile[treffer + 1 :])
+    for i, t in enumerate(teile):
+        if t.casefold() in top:
+            return "/".join(teile[i:])
+    return None
+
+
+def kuerze_stack_pfad(pfad: str, *, wurzel: Path | None = None) -> str:
+    """Kürzt einen Stack-Pfad: ohne Heimat/Benutzer, Datei und Lage bleiben lesbar."""
+    roh = pfad.strip()
+    if not roh or (roh.startswith("<") and roh.endswith(">")):
+        return roh
+    norm = _norm_pfad(roh)
+    site = _RE_SITE.search(norm)
+    if site:
+        rest = norm[site.end():].lstrip("/")
+        return "<site>/" + rest if rest else "<site>"
+    mei = _RE_MEI.search(norm)
+    if mei:
+        rest = norm[mei.end():].lstrip("/")
+        return "<bundle>/" + rest if rest else "<bundle>"
+    basis = wurzel if wurzel is not None else repo_wurzel()
+    relativ = _relativ_zu(norm, basis)
+    if relativ:
+        return relativ
+    gefunden = _repo_relativ(norm, basis)
+    if gefunden:
+        return gefunden
+    std = _RE_STDLIB.search(norm)
+    if std:
+        rest = norm[std.end():].lstrip("/")
+        return "<py>/" + rest if rest else "<py>"
+    name = Path(norm).name
+    return name or roh
+
+
+def kuerze_stack_pfade(text: str, *, wurzel: Path | None = None) -> str:
+    """Ersetzt ``File "…"``-Pfade in einem Traceback-Text."""
+
+    def _sub(m: re.Match[str]) -> str:
+        innen = m.group(2)
+        if innen.startswith("<") and innen.endswith(">"):
+            return m.group(0)
+        return f"{m.group(1)}{kuerze_stack_pfad(innen, wurzel=wurzel)}{m.group(3)}"
+
+    return _RE_STACK_FILE.sub(_sub, text)
+
+
 def ausnahme_text(exc: BaseException) -> str:
     """Exception-Typ und Stack, Werte und Pfade redigiert."""
     typ = type(exc).__name__
     msg = redigiere(str(exc))
-    roh = traceback.format_exception(type(exc), exc, exc.__traceback__)
-    koerper = redigiere("".join(roh))
+    roh = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    koerper = redigiere(kuerze_stack_pfade(roh))
     return f"{typ}: {msg}\n{koerper}".rstrip()
 
 

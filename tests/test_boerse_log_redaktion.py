@@ -13,6 +13,8 @@ from core.log_redaktion import (
     ausnahme_text,
     get_logger,
     groessenordnung,
+    kuerze_stack_pfad,
+    kuerze_stack_pfade,
     redigiere,
     ref_hash,
     schreibe,
@@ -123,7 +125,135 @@ class RedaktionUnitTest(unittest.TestCase):
             text = ausnahme_text(exc)
         self.assertIn("ValueError", text)
         self.assertIn("test_boerse_log_redaktion", text)
+        self.assertRegex(
+            text,
+            r'File "tests/test_boerse_log_redaktion\.py", line \d+',
+        )
+        self.assertNotIn('File "ref:', text)
         self.assertEqual(_enthalt_marke(text), [], text)
+
+    def test_stack_pfade_ohne_benutzer_mit_datei(self):
+        faelle = (
+            (
+                "/home/runner/work/SatSage/SatSage/tests/test_boerse_log_redaktion.py",
+                "tests/test_boerse_log_redaktion.py",
+                ("runner", "/home/"),
+            ),
+            (
+                "/Users/max/Projects/SatSage/core/log_redaktion.py",
+                "core/log_redaktion.py",
+                ("max", "/Users/"),
+            ),
+            (
+                r"C:\Users\max\src\SatSage\core\log_redaktion.py",
+                "core/log_redaktion.py",
+                ("max", "C:\\Users", "C:/Users"),
+            ),
+            (
+                "/tmp/_MEIabcdef/core/fifo.py",
+                "<bundle>/core/fifo.py",
+                (),
+            ),
+            (
+                r"C:\Users\max\AppData\Local\Temp\_MEIxyz123\core\fifo.py",
+                "<bundle>/core/fifo.py",
+                ("max",),
+            ),
+            (
+                "/home/runner/.local/lib/python3.11/site-packages/urllib3/util.py",
+                "<site>/urllib3/util.py",
+                ("runner", "/home/"),
+            ),
+            (
+                "/Users/max/Library/Python/3.12/lib/python/site-packages/pip/_internal/main.py",
+                "<site>/pip/_internal/main.py",
+                ("max", "/Users/"),
+            ),
+            (
+                "/usr/lib/python3.12/traceback.py",
+                "<py>/traceback.py",
+                (),
+            ),
+            (
+                "<frozen importlib._bootstrap>",
+                "<frozen importlib._bootstrap>",
+                (),
+            ),
+        )
+        for roh, erwartet, verboten in faelle:
+            with self.subTest(roh=roh):
+                aus = kuerze_stack_pfad(roh)
+                self.assertEqual(aus, erwartet, roh)
+                name = Path(erwartet.replace("\\", "/")).name if not erwartet.startswith("<frozen") else ""
+                if name:
+                    self.assertIn(name, aus)
+                for wort in verboten:
+                    self.assertNotIn(wort, aus, aus)
+                self.assertNotIn("ref:", aus)
+
+    def test_stack_text_ci_und_heimat_bleibt_lesbar(self):
+        rahmen = (
+            "Traceback (most recent call last):\n"
+            '  File "{pfad}", line 121, in test_ausnahme_ohne_werte\n'
+            '    raise ValueError("Zeile")\n'
+            "ValueError: Zeile\n"
+        )
+        faelle = (
+            "/home/runner/work/SatSage/SatSage/tests/test_boerse_log_redaktion.py",
+            "/Users/max/Projects/SatSage/tests/test_boerse_log_redaktion.py",
+            r"C:\Users\max\src\SatSage\tests\test_boerse_log_redaktion.py",
+        )
+        for pfad in faelle:
+            with self.subTest(pfad=pfad):
+                roh = rahmen.format(pfad=pfad)
+                aus = redigiere(kuerze_stack_pfade(roh))
+                self.assertIn('File "tests/test_boerse_log_redaktion.py", line 121', aus)
+                self.assertNotIn('File "ref:', aus)
+                self.assertNotIn("runner", aus)
+                self.assertNotIn("max", aus)
+                self.assertNotIn("/home/", aus)
+                self.assertNotIn("/Users/", aus)
+                self.assertNotIn("C:\\Users", aus)
+                self.assertNotIn("C:/Users", aus)
+
+    def test_stack_unter_simuliertem_github_actions_pfad(self):
+        """Pfad-Injektion wie auf CI: Repo unter /home/runner/work/…."""
+        with tempfile.TemporaryDirectory() as tmp:
+            wurzel = Path(tmp) / "home" / "runner" / "work" / "SatSage" / "SatSage"
+            datei = wurzel / "tests" / "test_boerse_log_redaktion.py"
+            datei.parent.mkdir(parents=True)
+            datei.write_text("# simuliert\n", encoding="utf-8")
+            pfad = str(datei)
+            self.assertIn("/home/runner/work/SatSage/SatSage/", pfad.replace("\\", "/"))
+            aus = kuerze_stack_pfad(pfad, wurzel=wurzel)
+            self.assertEqual(aus, "tests/test_boerse_log_redaktion.py")
+            roh = (
+                "Traceback (most recent call last):\n"
+                f'  File "{pfad}", line 7, in test_ausnahme_ohne_werte\n'
+                "    raise ValueError('x')\n"
+            )
+            text = redigiere(kuerze_stack_pfade(roh, wurzel=wurzel))
+            self.assertIn('File "tests/test_boerse_log_redaktion.py", line 7', text)
+            self.assertNotIn("runner", text)
+            self.assertNotIn('File "ref:', text)
+
+    def test_ausnahme_text_mit_injiziertem_ci_frame(self):
+        try:
+            raise ValueError(f"Zeile mit {BIP84_RECEIVE_0}")
+        except ValueError as exc:
+            roh = "".join(
+                __import__("traceback").format_exception(type(exc), exc, exc.__traceback__)
+            )
+        echt = str(Path(__file__).resolve())
+        ci = "/home/runner/work/SatSage/SatSage/tests/test_boerse_log_redaktion.py"
+        self.assertIn(echt, roh)
+        aus = redigiere(kuerze_stack_pfade(roh.replace(echt, ci)))
+        self.assertIn('File "tests/test_boerse_log_redaktion.py"', aus)
+        self.assertIn("ValueError", aus)
+        self.assertNotIn("runner", aus)
+        self.assertNotIn(BIP84_RECEIVE_0, aus)
+        self.assertNotIn('File "ref:', aus)
+        self.assertIn(ref_hash(BIP84_RECEIVE_0), aus)
 
     def test_schreibe_filtert_auch_unstrukturierte_werte(self):
         log = get_logger()
