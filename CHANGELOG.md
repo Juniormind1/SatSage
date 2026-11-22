@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Datenschutz · Leak-Scan:** CSV-Köpfe dürfen in `doc/boerse/` wörtlich stehen, Werte und IDs weiterhin nicht.
 - **Doku · Kraken-Spec:** `doc/boerse/kraken.md` beschreibt Ledgers und Trades (Spalten, Typen, Zeitzone, Quelle je Angabe). Unbekannte Formate werden nicht geraten.
 
 - **Datenschutz · Datenwurzel:** `SATSAGE_DATA_DIR` und `--data-dir` legen `.env`, Caches, Börsenimporte und Logs außerhalb des Repos. Ohne Angabe bleibt das bisherige Verhalten. Liegen die Daten im Git-Arbeitsbaum, warnt der Start (Entscheidung E13, änderbar). `--exchange-dir` und `--log-dir` setzen einzelne Verzeichnisse. Im Container liegen Börsenimporte und Logs jetzt mit auf dem Daten-Volume.

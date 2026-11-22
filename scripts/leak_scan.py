@@ -22,6 +22,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = (REPO_ROOT / "tests" / "fixtures" / "boerse").resolve()
+SPEC_DIR = (REPO_ROOT / "doc" / "boerse").resolve()
 
 # SHA-256 der bekannten öffentlichen Testvektoren (BIP-84 u. a. aus
 # tests/fixtures.py) sowie fest im Repo stehender Descriptor-Schlüssel.
@@ -120,12 +121,21 @@ def _erlaubt(text: str) -> bool:
     return _sha(text) in ALLOWLIST_SHA256
 
 
-def _ist_fixture(pfad: Path) -> bool:
+def _ist_unter(pfad: Path, wurzel: Path) -> bool:
     try:
-        pfad.resolve().relative_to(FIXTURE_DIR)
+        pfad.resolve().relative_to(wurzel)
         return True
     except ValueError:
         return False
+
+
+def _ist_fixture(pfad: Path) -> bool:
+    return _ist_unter(pfad, FIXTURE_DIR)
+
+
+def _ist_spec(pfad: Path) -> bool:
+    """CSV-Köpfe dürfen in den Börsen-Specs wörtlich stehen (ohne Werte)."""
+    return _ist_unter(pfad, SPEC_DIR)
 
 
 def _hat_herkunft(pfad: Path) -> bool:
@@ -256,6 +266,7 @@ def _email_erlaubt(mail: str) -> bool:
 def pruefe_text(text: str, pfad: Path) -> list[Fund]:
     funde: list[Fund] = []
     fixture = _ist_fixture(pfad)
+    spec = _ist_spec(pfad)
     zeilen = text.splitlines() or [text]
 
     def add(regel: str, nr: int, roh: str, treffer: str = "") -> None:
@@ -276,13 +287,13 @@ def pruefe_text(text: str, pfad: Path) -> list[Fund]:
             for m in RE_EXT_KEY.finditer(zeile):
                 if not _erlaubt(m.group(0)):
                     add("deskriptor-fingerprint", nr, zeile, m.group(0))
-        if RE_KRAKEN_LEDGER_KOPF.search(zeile) and not fixture:
+        if RE_KRAKEN_LEDGER_KOPF.search(zeile) and not fixture and not spec:
             add("kraken-ledger-kopf", nr, zeile)
-        if RE_KRAKEN_TRADES_KOPF.search(zeile) and not fixture:
+        if RE_KRAKEN_TRADES_KOPF.search(zeile) and not fixture and not spec:
             add("kraken-trades-kopf", nr, zeile)
-        if RE_COINBASE_KOPF.search(zeile) and not fixture:
+        if RE_COINBASE_KOPF.search(zeile) and not fixture and not spec:
             add("coinbase-kopf", nr, zeile)
-        if RE_STRIKE_KOPF.search(zeile) and not fixture:
+        if RE_STRIKE_KOPF.search(zeile) and not fixture and not spec:
             add("strike-kopf", nr, zeile)
         for m in RE_KRAKEN_LEDGER_ID.finditer(zeile):
             ident = m.group(0)
@@ -306,7 +317,7 @@ def pruefe_text(text: str, pfad: Path) -> list[Fund]:
             if _base58_check_ok(addr) and not _erlaubt(addr):
                 add("mainnet-adresse", nr, zeile, addr)
 
-    if RE_COINBASE_PRAEAMBEL.search(text) and not fixture:
+    if RE_COINBASE_PRAEAMBEL.search(text) and not fixture and not spec:
         nr = 1
         for i, zeile in enumerate(zeilen, 1):
             if re.search(r"^Transactions\b", zeile, re.I):
