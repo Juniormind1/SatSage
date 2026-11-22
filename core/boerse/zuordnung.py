@@ -5,9 +5,22 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from core.boerse.modell import Art, Buchung, Zuordnung
+from core.boerse.schwellen import (
+    FENSTER_NACH_S,
+    FENSTER_VOR_S,
+    Schwellen,
+    auto_erlaubt,
+    betrag_delta_sats,
+    betrag_passt,
+    bucket_minuten,
+    bucket_rel,
+    im_fenster as _im_fenster,
+    lese_zuordnung_einstellungen,
+    standard as standard_schwellen,
+    zeit_abstand_s,
+)
 
-FENSTER_VOR_S = 3600
-FENSTER_NACH_S = 72 * 3600
+# Re-Export: bestehende Tests und Aufrufer nutzen die Konstanten weiter.
 # Idee nach Kassiber (MIT): exakte TxID mit genau einem eigenen Output
 # und passendem Betrag gilt als bestätigt; sonst nicht raten.
 
@@ -22,6 +35,7 @@ class KettenEmpfang:
     zeit_ts: int | None = None
     adresse: str | None = None
     eigene_eingaenge: bool = False
+    wallet: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,18 +51,18 @@ def erwarteter_output_sats(buchung: Buchung) -> int:
     return abs(int(buchung.sats))
 
 
-def im_fenster(buchung_ts: int | None, ketten_ts: int | None) -> bool:
-    if buchung_ts is None or ketten_ts is None:
-        return False
-    return buchung_ts - FENSTER_VOR_S <= ketten_ts <= buchung_ts + FENSTER_NACH_S
+def im_fenster(buchung_ts: int | None, ketten_ts: int | None, schwellen: Schwellen | None = None) -> bool:
+    return _im_fenster(buchung_ts, ketten_ts, schwellen)
 
 
 def schlage_vor(
     buchungen: list[Buchung] | tuple[Buchung, ...],
     empfange: list[KettenEmpfang] | tuple[KettenEmpfang, ...],
     bestehend: list[Zuordnung] | tuple[Zuordnung, ...] = (),
+    schwellen: Schwellen | None = None,
 ) -> ZuordnungLauf:
     """Ordnet Auszahlungen Empfängen zu. Bestehende Entscheidungen bleiben."""
+    s = schwellen or standard_schwellen()
     import time
     from collections import Counter
     from core.boerse import protokoll
@@ -102,7 +116,7 @@ def schlage_vor(
         if not outs:
             rest.extend(gruppe)
             continue
-        ergebnis = _txid_gruppe(gruppe, outs, belegt, kandidaten)
+        ergebnis = _txid_gruppe(gruppe, outs, belegt, kandidaten, s)
         zuordnungen.extend(ergebnis[0])
         quarantaene.extend(ergebnis[1])
         rest.extend(ergebnis[2])
@@ -111,7 +125,7 @@ def schlage_vor(
                 belegt.add((z.txid, z.vout))
 
     for b in ohne_txid + rest:
-        z, q, luecke = _adresse_oder_zeit(b, empfange, belegt, kandidaten)
+        z, q, luecke = _adresse_oder_zeit(b, empfange, belegt, kandidaten, s)
         if z:
             zuordnungen.append(z)
             belegt.add((z.txid, z.vout))
@@ -145,6 +159,7 @@ def _txid_gruppe(
     outs: list[KettenEmpfang],
     belegt: set[tuple[str, int]],
     kandidaten: list[int] | None = None,
+    schwellen: Schwellen | None = None,
 ) -> tuple[list[Zuordnung], list[dict], list[Buchung]]:
     frei = [o for o in outs if (o.txid.lower(), o.vout) not in belegt]
     if kandidaten is not None:
@@ -159,7 +174,7 @@ def _txid_gruppe(
     if len(gruppe) == 1 and len(frei) == 1:
         b, o = gruppe[0], frei[0]
         if o.sats == erwarteter_output_sats(b):
-            return [_zuordnung(b, o, "txid_exakt", "bestaetigt")], [], []
+            return [_zuordnung(b, o, "txid_exakt", "bestaetigt", durch="txid_exakt")], [], []
         return [], [{"ref": b.ref, "konto": b.konto, "grund": "Betrag passt nicht zur Tx"}], []
 
     # Mehrere Auszahlungen, mehrere Outputs: eindeutige Betragspaarung.
@@ -188,7 +203,50 @@ def _txid_gruppe(
             {"ref": b.ref, "konto": b.konto, "grund": "Batch nicht eindeutig zuordenbar"}
             for b in gruppe
         ], []
-    return [_zuordnung(b, o, "txid_exakt", "bestaetigt") for b, o in paar], [], []
+    return [_zuordnung(b, o, "txid_exakt", "bestaetigt", durch="txid_exakt") for b, o in paar], [], []
+
+
+def _kandidaten(
+    b: Buchung,
+    empfange: list[KettenEmpfang] | tuple[KettenEmpfang, ...],
+    belegt: set[tuple[str, int]],
+    s: Schwellen,
+    *,
+    nur_adresse: bool = False,
+) -> list[KettenEmpfang]:
+    soll = erwarteter_output_sats(b)
+    geb = int(b.gebuehr_sats or 0)
+    treffer: list[KettenEmpfang] = []
+    for e in empfange:
+        if (e.txid.lower(), e.vout) in belegt:
+            continue
+        if nur_adresse and not (b.adresse and e.adresse == b.adresse):
+            continue
+        if not betrag_passt(soll, e.sats, geb, s):
+            continue
+        if not im_fenster(b.zeit_ts, e.zeit_ts, s):
+            continue
+        treffer.append(e)
+
+    def _score(e: KettenEmpfang) -> tuple:
+        adr = 0 if (b.adresse and e.adresse == b.adresse) else 1
+        delta = betrag_delta_sats(soll, e.sats, geb, inkl_gebuehr=s.gebuehr_als_toleranz)
+        abstand = zeit_abstand_s(b.zeit_ts, e.zeit_ts)
+        zeit = abs(abstand) if abstand is not None else 10**12
+        return (adr, delta, zeit)
+
+    treffer.sort(key=_score)
+    return treffer
+
+
+def _abstand_zweit(b: Buchung, treffer: list[KettenEmpfang]) -> int | None:
+    if len(treffer) < 2:
+        return None
+    a1 = zeit_abstand_s(b.zeit_ts, treffer[0].zeit_ts)
+    a2 = zeit_abstand_s(b.zeit_ts, treffer[1].zeit_ts)
+    if a1 is None or a2 is None:
+        return None
+    return abs(abs(a2) - abs(a1))
 
 
 def _adresse_oder_zeit(
@@ -196,33 +254,60 @@ def _adresse_oder_zeit(
     empfange: list[KettenEmpfang] | tuple[KettenEmpfang, ...],
     belegt: set[tuple[str, int]],
     kandidaten: list[int] | None = None,
+    schwellen: Schwellen | None = None,
 ) -> tuple[Zuordnung | None, dict | None, bool]:
-    soll = erwarteter_output_sats(b)
-    frei = [
-        e for e in empfange
-        if (e.txid.lower(), e.vout) not in belegt and e.sats == soll
-    ]
+    s = schwellen or standard_schwellen()
+    # Adresse zuerst, sonst Betrag+Zeit — gleiches Vorgehen wie bisher, nur mit Schwellen.
     if b.adresse:
-        nach_adr = [e for e in frei if e.adresse == b.adresse and im_fenster(b.zeit_ts, e.zeit_ts)]
+        nach_adr = _kandidaten(b, empfange, belegt, s, nur_adresse=True)
         if kandidaten is not None:
             kandidaten.append(len(nach_adr))
         if len(nach_adr) == 1:
-            return _zuordnung(b, nach_adr[0], "adresse", "vorschlag"), None, False
+            return _entscheide_kandidat(b, nach_adr, "adresse", s)
         if len(nach_adr) > 1:
+            _kalibrier_log(b, nach_adr, "adresse", "verworfen", s)
             return None, {"ref": b.ref, "konto": b.konto, "grund": "mehrere Kandidaten"}, False
-    zeit = [e for e in frei if im_fenster(b.zeit_ts, e.zeit_ts)]
+    zeit = _kandidaten(b, empfange, belegt, s, nur_adresse=False)
     if kandidaten is not None and not b.adresse:
         kandidaten.append(len(zeit))
-    elif kandidaten is not None and b.adresse and not nach_adr:
+    elif kandidaten is not None and b.adresse:
         kandidaten.append(len(zeit))
     if len(zeit) == 1:
-        return _zuordnung(b, zeit[0], "betrag_zeit", "vorschlag"), None, False
+        methode = "adresse" if (b.adresse and zeit[0].adresse == b.adresse) else "betrag_zeit"
+        return _entscheide_kandidat(b, zeit, methode, s)
     if len(zeit) > 1:
+        _kalibrier_log(b, zeit, "betrag_zeit", "verworfen", s)
         return None, {"ref": b.ref, "konto": b.konto, "grund": "mehrere Kandidaten"}, False
     return None, None, True
 
 
-def _zuordnung(b: Buchung, e: KettenEmpfang, methode: str, status: str) -> Zuordnung:
+def _entscheide_kandidat(
+    b: Buchung,
+    treffer: list[KettenEmpfang],
+    methode: str,
+    s: Schwellen,
+) -> tuple[Zuordnung | None, dict | None, bool]:
+    best = treffer[0]
+    n = len(treffer)
+    zweit = _abstand_zweit(b, treffer)
+    adresse_trifft = bool(b.adresse and best.adresse == b.adresse)
+    if auto_erlaubt(n, zweit, adresse_trifft, s):
+        grund = "eindeutig_adresse" if adresse_trifft else "eindeutig_betrag_zeit"
+        _kalibrier_log(b, treffer, methode, "auto", s)
+        return _zuordnung(b, best, methode, "bestaetigt", durch="auto", auto_grund=grund), None, False
+    _kalibrier_log(b, treffer, methode, "vorschlag", s)
+    return _zuordnung(b, best, methode, "vorschlag"), None, False
+
+
+def _zuordnung(
+    b: Buchung,
+    e: KettenEmpfang,
+    methode: str,
+    status: str,
+    *,
+    durch: str | None = None,
+    auto_grund: str | None = None,
+) -> Zuordnung:
     return Zuordnung(
         konto=b.konto,
         auszahlung_ref=b.ref,
@@ -232,6 +317,8 @@ def _zuordnung(b: Buchung, e: KettenEmpfang, methode: str, status: str) -> Zuord
         methode=methode,
         status=status,
         bestaetigt_ts=None,
+        bestaetigt_durch=durch if status == "bestaetigt" else None,
+        auto_grund=auto_grund if status == "bestaetigt" else None,
     )
 
 
@@ -262,6 +349,7 @@ def setze_status(
     for z in zuordnungen:
         if z.konto == konto and z.auszahlung_ref == auszahlung_ref:
             gefunden = True
+            durch = "manuell" if status == "bestaetigt" else None
             aus.append(Zuordnung(
                 konto=z.konto,
                 auszahlung_ref=z.auszahlung_ref,
@@ -271,13 +359,16 @@ def setze_status(
                 methode=methode or z.methode,
                 status=status,
                 bestaetigt_ts=bestaetigt_ts if status == "bestaetigt" else None,
+                bestaetigt_durch=durch,
+                auto_grund=None,
             ))
+            _entscheidung_log(z, status)
         else:
             aus.append(z)
     if not gefunden:
         if not txid or vout is None:
             raise ValueError("Zuordnung nicht gefunden.")
-        aus.append(Zuordnung(
+        neu = Zuordnung(
             konto=konto,
             auszahlung_ref=auszahlung_ref,
             txid=txid.lower(),
@@ -286,7 +377,11 @@ def setze_status(
             methode=methode or "manuell",
             status=status,
             bestaetigt_ts=bestaetigt_ts if status == "bestaetigt" else None,
-        ))
+            bestaetigt_durch="manuell" if status == "bestaetigt" else None,
+            auto_grund=None,
+        )
+        aus.append(neu)
+        _entscheidung_log(neu, status)
     return aus
 
 
@@ -346,12 +441,14 @@ def sammeln_empfaenge(utxo_cache_dir: "Path | None" = None) -> list[KettenEmpfan
             except (TypeError, ValueError):
                 zeit = None
             gesehen.add((tid, vout))
+            wallet = str(utxo.get("wallet") or utxo.get("_wallet_fallback") or "").strip() or None
             treffer.append(KettenEmpfang(
                 txid=tid,
                 vout=vout,
                 sats=sats,
                 zeit_ts=zeit,
                 adresse=str(utxo.get("address") or "") or None,
+                wallet=wallet,
             ))
     return treffer
 
@@ -394,7 +491,7 @@ def erklaerung_fuer_outpoint(txid: str, vout: int, cache_dir=None) -> dict | Non
     return index.get(f"{tid}:{n}")
 
 
-def aktualisiere_zuordnungen(slug: str, exchange_dir, utxo_cache_dir) -> dict:
+def aktualisiere_zuordnungen(slug: str, exchange_dir, utxo_cache_dir, schwellen: Schwellen | None = None) -> dict:
     """Rechnet Vorschläge neu und speichert sie, bestätigt/abgelehnt bleibt."""
     from pathlib import Path
     from core.boerse import speicher
@@ -402,7 +499,7 @@ def aktualisiere_zuordnungen(slug: str, exchange_dir, utxo_cache_dir) -> dict:
     wurzel = Path(exchange_dir)
     buchungen = speicher.lies_buchungen(slug, wurzel)
     bestehend = speicher.lies_zuordnungen(slug, wurzel)
-    lauf = schlage_vor(buchungen, sammeln_empfaenge(utxo_cache_dir), bestehend)
+    lauf = schlage_vor(buchungen, sammeln_empfaenge(utxo_cache_dir), bestehend, schwellen=schwellen)
     gem = mergen(bestehend, lauf)
     speicher.schreibe_zuordnungen(slug, wurzel, gem)
     _erklaerung_cache.clear()
@@ -422,3 +519,112 @@ def aktualisiere_zuordnungen(slug: str, exchange_dir, utxo_cache_dir) -> dict:
         "quarantaene": list(lauf.quarantaene),
         "kein_hop": list(lauf.kein_hop),
     }
+
+def _kalibrier_log(
+    b: Buchung,
+    treffer: list[KettenEmpfang],
+    methode: str,
+    entscheidung: str,
+    s: Schwellen,
+) -> None:
+    """Kalibrierung ohne Kennungen: nur Buckets, Zähler und ref-Hash."""
+    from core.log_redaktion import ref_hash, schreibe
+
+    best = treffer[0] if treffer else None
+    abstand = zeit_abstand_s(b.zeit_ts, best.zeit_ts) if best else None
+    soll = erwarteter_output_sats(b)
+    delta = (
+        betrag_delta_sats(soll, best.sats, int(b.gebuehr_sats or 0), inkl_gebuehr=s.gebuehr_als_toleranz)
+        if best else None
+    )
+    rel = (delta / max(soll, 1)) if delta is not None else None
+    zweit = _abstand_zweit(b, treffer)
+    schreibe(
+        "zuordnung_kandidat",
+        ref=ref_hash(b.ref),
+        methode=methode,
+        zeit_min_bucket=bucket_minuten(abstand),
+        delta_rel_bucket=bucket_rel(rel),
+        n_kandidaten=len(treffer),
+        abstand_zweit_min_bucket=bucket_minuten(zweit),
+        entscheidung=entscheidung,
+    )
+
+
+def _entscheidung_log(z: Zuordnung, status: str) -> None:
+    from core.log_redaktion import ref_hash, schreibe
+
+    schreibe(
+        "zuordnung_entscheidung",
+        ref=ref_hash(z.auszahlung_ref),
+        status=status,
+        vorher=z.status,
+        methode=z.methode,
+        bisher_durch=z.bestaetigt_durch or "-",
+    )
+
+
+def txid_kurz(txid: str, vor: int = 8, hinten: int = 8) -> str:
+    text = str(txid or "")
+    if len(text) <= vor + hinten:
+        return text
+    return f"{text[:vor]}…{text[-hinten:]}"
+
+
+def _datum_de(ts: int | None) -> str:
+    if ts is None:
+        return ""
+    from datetime import datetime
+    try:
+        return datetime.fromtimestamp(int(ts)).strftime("%d.%m.%Y %H:%M")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def gui_felder(
+    z: Zuordnung,
+    buchung: Buchung | None = None,
+    empfang: KettenEmpfang | None = None,
+    wallet: str | None = None,
+) -> dict:
+    """Felder nur für die lokale GUI/API, nicht fürs Log."""
+    from core.boerse import speicher
+
+    d = speicher.zuordnung_zu_dict(z)
+    aus_ts = buchung.zeit_ts if buchung is not None else None
+    emp_ts = empfang.zeit_ts if empfang is not None else None
+    soll = erwarteter_output_sats(buchung) if buchung is not None else None
+    d.update({
+        "txid_kurz": txid_kurz(z.txid),
+        "auszahlung_ts": aus_ts,
+        "auszahlung_datum": _datum_de(aus_ts),
+        "auszahlung_sats": soll,
+        "gebuehr_sats": int(buchung.gebuehr_sats or 0) if buchung is not None else None,
+        "empfang_sats": z.sats_onchain,
+        "wallet": wallet or (empfang.wallet if empfang is not None else None),
+        "zeitabstand_s": zeit_abstand_s(aus_ts, emp_ts),
+        "betrag_delta_sats": (int(z.sats_onchain) - int(soll)) if soll is not None else None,
+    })
+    return d
+
+
+def anreichern_liste(
+    zuordnungen: list[Zuordnung] | tuple[Zuordnung, ...],
+    buchungen: list[Buchung] | tuple[Buchung, ...] = (),
+    empfange: list[KettenEmpfang] | tuple[KettenEmpfang, ...] = (),
+    wallet_fn=None,
+) -> list[dict]:
+    nach_ref = {b.ref: b for b in buchungen}
+    nach_op = {(e.txid.lower(), int(e.vout)): e for e in empfange}
+    aus: list[dict] = []
+    for z in zuordnungen:
+        b = nach_ref.get(z.auszahlung_ref)
+        e = nach_op.get((z.txid.lower(), int(z.vout)))
+        wallet = e.wallet if e is not None else None
+        if not wallet and wallet_fn is not None and e is not None and e.adresse:
+            try:
+                wallet = wallet_fn(e.adresse) or wallet
+            except Exception:
+                pass
+        aus.append(gui_felder(z, b, e, wallet))
+    return aus

@@ -1164,6 +1164,7 @@ from httpserver.api.config_ui import (  # noqa: E402
     api_save_ui_lang,
     api_save_fifo_strategie,
     api_save_ui_theme,
+    api_save_zuordnung,
     registriere_status_mail_hook,
     _ui_theme_aus_env,
 )
@@ -1756,6 +1757,8 @@ class Handler(
             return 200, api_save_lernhinweise_plebs(state, self._body())
         if teile == ["config", "steuer"] and methode == "PUT":
             return 200, api_save_steuer(state, self._body())
+        if teile == ["config", "zuordnung"] and methode == "PUT":
+            return 200, api_save_zuordnung(state, self._body())
         if teile == ["config", "person"] and methode == "PUT":
             return 200, api_save_steuer_person(state, self._body())
         if teile == ["config", "bericht-wallet"] and methode == "PUT":

@@ -116,6 +116,8 @@ def zuordnung_zu_dict(z: Zuordnung) -> dict:
         "methode": z.methode,
         "status": z.status,
         "bestaetigt_ts": z.bestaetigt_ts,
+        "bestaetigt_durch": z.bestaetigt_durch,
+        "auto_grund": z.auto_grund,
     }
 
 
@@ -129,6 +131,8 @@ def zuordnung_aus_dict(d: dict) -> Zuordnung:
         methode=str(d["methode"]),
         status=str(d["status"]),
         bestaetigt_ts=d.get("bestaetigt_ts"),
+        bestaetigt_durch=d.get("bestaetigt_durch"),
+        auto_grund=d.get("auto_grund"),
     )
 
 

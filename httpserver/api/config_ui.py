@@ -26,6 +26,30 @@ def _lernhinweise_plebs_aus_env(werte: dict) -> bool:
     return roh in ("1", "true", "yes", "ja", "on")
 
 
+def _zuordnung_einstellungen(werte: dict) -> dict:
+    from core.boerse.schwellen import lese_zuordnung_einstellungen
+    return lese_zuordnung_einstellungen(werte).als_dict()
+
+
+def api_save_zuordnung(state: AppState, payload: dict) -> dict:
+    """Speichert Schwellen und Auto-Bestätigung für Auszahlung↔Empfang."""
+    from server import ApiError
+    from core.boerse.schwellen import lese_zuordnung_einstellungen, schwellen_aus_payload
+
+    if not isinstance(payload, dict):
+        raise ApiError(400, "JSON-Objekt erwartet.")
+    env = state.env()
+    bisher = lese_zuordnung_einstellungen(env.values())
+    neu = schwellen_aus_payload(payload, bisher)
+    env.apply(neu.env_werte())
+    try:
+        env.save()
+    except OSError as exc:
+        raise ApiError(500, "Interner Serverfehler.") from exc
+    return {"saved": True, "zuordnung": neu.als_dict()}
+
+
+
 def api_config(
     state: AppState,
     query: dict,
@@ -102,6 +126,7 @@ def api_config(
         "rpc_password_set": bool((werte.get("RPCUSER") or "").strip() and (werte.get("RPCPASSWORD") or "").strip()),
         "mempool": mempool_info(werte.get("MEMPOOL_URL", "")),
         "steuer": tax_mod.lese_steuer_einstellungen(werte),
+        "zuordnung": _zuordnung_einstellungen(werte),
         "person": sa_mod.lese_steuer_person(werte),
         "bericht_wallet": tax_mod.lese_bericht_wallet(werte),
         "wallets_beim_start_aktualisieren": (

@@ -75,6 +75,10 @@ class Zuordnung:
     methode: str  # txid_exakt | betrag_zeit | adresse | manuell
     status: str  # vorschlag | bestaetigt | abgelehnt
     bestaetigt_ts: int | None = None
+    #: txid_exakt | auto | manuell — nur bei status bestaetigt relevant.
+    bestaetigt_durch: str | None = None
+    #: Kurzer Grund, warum automatisch bestätigt wurde. Ohne Kennungen.
+    auto_grund: str | None = None
 
 
 class FormatFehler(ValueError):

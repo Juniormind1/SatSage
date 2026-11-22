@@ -238,6 +238,27 @@ def api_exchange_reports_loesche(state: AppState, query: dict) -> dict:
 
 
 
+def _zuordnungen_fuer_gui(state: AppState, slug: str, zuordnungen) -> list[dict]:
+    from core.boerse import speicher, zuordnung
+
+    wurzel = state.exchange_reports_dir
+    buchungen = speicher.lies_buchungen(slug, wurzel)
+    empfange = zuordnung.sammeln_empfaenge(state.cache_dir)
+    fn = None
+    ctx = getattr(state, "wallet_ctx", None)
+    if ctx is not None and hasattr(ctx, "resolve_address"):
+        fn = ctx.resolve_address
+    return zuordnung.anreichern_liste(zuordnungen, buchungen, empfange, wallet_fn=fn)
+
+
+def _schwellen_aus_state(state: AppState):
+    from core.boerse.schwellen import lese_zuordnung_einstellungen
+    try:
+        return lese_zuordnung_einstellungen(state.env().values())
+    except Exception:
+        return None
+
+
 def api_exchange_zuordnungen(state: AppState, query: dict) -> dict:
     """Gespeicherte Zuordnungen (Erklärung). Optional gefiltert nach slug."""
     from core.boerse import speicher
@@ -248,10 +269,11 @@ def api_exchange_zuordnungen(state: AppState, query: dict) -> dict:
     slugs = [boerse.slug_aus_name(slug)] if slug else speicher.v2_slugs(wurzel)
     listen = []
     for s in slugs:
+        zu = speicher.lies_zuordnungen(s, wurzel)
         listen.append({
             "slug": s,
             "name": speicher.lies_quellen(s, wurzel).get("name") or s,
-            "zuordnungen": [speicher.zuordnung_zu_dict(z) for z in speicher.lies_zuordnungen(s, wurzel)],
+            "zuordnungen": _zuordnungen_fuer_gui(state, s, zu),
         })
     return {"exchanges": listen}
 
@@ -273,7 +295,14 @@ def api_exchange_zuordnungen_vorschlagen(state: AppState, payload: dict) -> dict
     for s in slugs:
         if not speicher.ist_v2(s, wurzel):
             raise ApiError(404, "Keine importierten Buchungen für diese Börse.")
-        ergebnisse.append(zuordnung.aktualisiere_zuordnungen(s, wurzel, state.cache_dir))
+        erg = zuordnung.aktualisiere_zuordnungen(
+            s, wurzel, state.cache_dir, schwellen=_schwellen_aus_state(state),
+        )
+        # Anzeige-Felder nur in der API-Antwort, nicht in der gespeicherten Datei.
+        if isinstance(erg, dict) and "zuordnungen" in erg:
+            gespeichert = speicher.lies_zuordnungen(s, wurzel)
+            erg["zuordnungen"] = _zuordnungen_fuer_gui(state, s, gespeichert)
+        ergebnisse.append(erg)
     return {"exchanges": ergebnisse}
 
 
@@ -313,7 +342,7 @@ def api_exchange_zuordnung_setzen(state: AppState, payload: dict) -> dict:
         raise ApiError(400, redigiere(str(exc))) from None
     speicher.schreibe_zuordnungen(slug, wurzel, neu)
     zuordnung._erklaerung_cache.clear()
-    return {"slug": slug, "zuordnungen": [speicher.zuordnung_zu_dict(z) for z in neu]}
+    return {"slug": slug, "zuordnungen": _zuordnungen_fuer_gui(state, slug, neu)}
 
 
 def api_sanctions_import(state: AppState, payload: dict) -> dict:
