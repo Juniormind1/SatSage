@@ -1319,6 +1319,22 @@
                 Passwort setzen
               </button>
             </div>
+            <div id="app-touchid" class="feld app-touchid" hidden>
+              <span class="feld-titel" data-i18n="settings.touchid.title">Touch ID</span>
+              <p id="app-touchid-status" class="meta" data-i18n="settings.touchid.off">Aus. Nur auf diesem Mac, nur fürs Anmelden.</p>
+              <div class="knopf-zeile">
+                <button type="button" id="app-touchid-an" class="knopf knopf-klein"
+                        data-i18n="settings.touchid.enable"
+                        data-i18n-title="settings.touchid.enableTitle"
+                        title="Aktuelles Passwort eingeben, dann hier klicken. macOS fragt einmal den Fingerabdruck ab.">
+                  Touch ID aktivieren
+                </button>
+                <button type="button" id="app-touchid-aus" class="knopf knopf-klein" hidden
+                        data-i18n="settings.touchid.disable">
+                  Touch ID deaktivieren
+                </button>
+              </div>
+            </div>
             <p id="app-passwort-meldung" class="hinweis app-passwort-meldung" hidden></p>
           </div>
           <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.password.hint">

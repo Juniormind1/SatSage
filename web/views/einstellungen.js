@@ -112,6 +112,126 @@ function zeichneAppPasswort() {
   }
   aktualisiereAppPasswortMatch();
   bindeAppPasswortUi();
+  zeichneTouchId();
+}
+
+// ---------------------------------------------------------------------------
+// Touch ID (nur macOS, nur am Mac selbst). Opt-in; Passwort bleibt möglich.
+// ---------------------------------------------------------------------------
+
+let touchIdStand = null;
+let touchIdLaedt = null;
+let touchIdBeschaeftigt = false;
+
+async function ladeTouchIdStand({ neu = false } = {}) {
+  if (!neu && touchIdStand) return touchIdStand;
+  if (!touchIdLaedt) {
+    touchIdLaedt = api("/auth/status")
+      .then((status) => {
+        const tid = (status && status.touchid) || {};
+        touchIdStand = {
+          available: Boolean(tid.available),
+          enrolled: Boolean(tid.enrolled),
+        };
+        return touchIdStand;
+      })
+      .catch(() => {
+        touchIdStand = { available: false, enrolled: false };
+        return touchIdStand;
+      })
+      .finally(() => {
+        touchIdLaedt = null;
+      });
+  }
+  return touchIdLaedt;
+}
+
+function _zeichneTouchIdStand(stand) {
+  const block = $("#app-touchid");
+  if (!block) return;
+  const gesetzt = Boolean(Zustand.config?.password_set);
+  const zeigen = Boolean(stand && stand.available && gesetzt);
+  block.hidden = !zeigen;
+  if (!zeigen) return;
+  const an = $("#app-touchid-an");
+  const aus = $("#app-touchid-aus");
+  const text = $("#app-touchid-status");
+  if (an) {
+    an.hidden = stand.enrolled;
+    an.disabled = touchIdBeschaeftigt;
+  }
+  if (aus) {
+    aus.hidden = !stand.enrolled;
+    aus.disabled = touchIdBeschaeftigt;
+  }
+  if (text) {
+    const schluessel = stand.enrolled ? "settings.touchid.on" : "settings.touchid.off";
+    text.setAttribute("data-i18n", schluessel);
+    text.textContent = t(schluessel);
+  }
+}
+
+async function zeichneTouchId({ neu = false } = {}) {
+  if (!$("#app-touchid")) return;
+  _zeichneTouchIdStand(await ladeTouchIdStand({ neu }));
+}
+
+async function aktiviereTouchId() {
+  if (touchIdBeschaeftigt) return;
+  const aktuellFeld = $("#app-passwort-aktuell");
+  const aktuell = String(aktuellFeld?.value || "");
+  if (!aktuell) {
+    appPasswortMeldung(t("settings.touchid.needCurrent"), "krit");
+    if (aktuellFeld) {
+      aktuellFeld.disabled = false;
+      aktuellFeld.focus();
+    }
+    return;
+  }
+  touchIdBeschaeftigt = true;
+  _zeichneTouchIdStand(touchIdStand);
+  appPasswortMeldung(t("settings.touchid.enabling"), "warn");
+  try {
+    // Dialog wartet auf den Finger: großzügig, Server bricht nach 60 s ab.
+    const ergebnis = await api("/auth/touchid/enroll", {
+      methode: "POST",
+      daten: { password: aktuell },
+      timeoutMs: 75000,
+    });
+    if (aktuellFeld) aktuellFeld.value = "";
+    touchIdStand = {
+      available: Boolean(ergebnis?.touchid?.available),
+      enrolled: Boolean(ergebnis?.touchid?.enrolled),
+    };
+    appPasswortMeldung(t("settings.touchid.enabled"), "gut");
+  } catch (fehler) {
+    appPasswortMeldung(
+      t("settings.touchid.failed", { msg: (fehler && fehler.message) || String(fehler) }),
+      "krit",
+    );
+  } finally {
+    touchIdBeschaeftigt = false;
+    await zeichneTouchId({ neu: true });
+  }
+}
+
+async function deaktiviereTouchId() {
+  if (touchIdBeschaeftigt) return;
+  touchIdBeschaeftigt = true;
+  _zeichneTouchIdStand(touchIdStand);
+  appPasswortMeldung(t("settings.touchid.disabling"), "warn");
+  try {
+    await api("/auth/touchid/remove", { methode: "POST", daten: {} });
+    appPasswortMeldung(t("settings.touchid.disabled"), "gut");
+  } catch (fehler) {
+    appPasswortMeldung(
+      t("settings.touchid.disableFailed", { msg: (fehler && fehler.message) || String(fehler) }),
+      "krit",
+    );
+  } finally {
+    touchIdBeschaeftigt = false;
+    await zeichneTouchId({ neu: true });
+  }
 }
 
 function _appPasswortFelderLeeren({ auchAktuell = true } = {}) {
@@ -168,6 +288,8 @@ async function speichereAppPasswort() {
       Zustand.config.env_scramble = ergebnis.env_scramble;
     }
     _appPasswortFelderLeeren();
+    // Server hat Touch ID mit dem alten Passwort verworfen.
+    touchIdStand = null;
     zeichneAppPasswort();
     appPasswortMeldung(t("settings.password.saved"), "gut");
     try {
@@ -223,6 +345,8 @@ async function entferneAppPasswort() {
       Zustand.config.env_scramble = ergebnis.env_scramble;
     }
     _appPasswortFelderLeeren();
+    // Server hat Touch ID mit dem alten Passwort verworfen.
+    touchIdStand = null;
     zeichneAppPasswort();
     appPasswortMeldung(t("settings.password.removed"), "gut");
     try { await ladeConfig(); } catch (_) { /* ignore */ }
@@ -252,6 +376,12 @@ function bindeAppPasswortUi() {
     } else if (el.closest("#app-passwort-entfernen")) {
       e.preventDefault();
       entferneAppPasswort();
+    } else if (el.closest("#app-touchid-an")) {
+      e.preventDefault();
+      aktiviereTouchId();
+    } else if (el.closest("#app-touchid-aus")) {
+      e.preventDefault();
+      deaktiviereTouchId();
     }
   });
   karte.addEventListener("input", (e) => {

@@ -1288,6 +1288,13 @@ input[type="date"] { font-family: var(--mono); font-size: 11px; }
   text-align: left;
   width: 100%;
 }
+/* Touch ID (nur macOS): unter „Passwort setzen“, eigene Trennlinie. */
+.app-touchid {
+  border-top: 1px solid var(--linie);
+  padding-top: 10px;
+}
+.app-touchid[hidden] { display: none !important; }
+.app-touchid .meta { margin: 4px 0 0; }
 .geheim-zeile {
   position: relative;
   display: flex;
