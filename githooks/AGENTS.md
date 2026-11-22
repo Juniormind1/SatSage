@@ -28,7 +28,7 @@ git config user.email juniormind@proton.me
 git config core.hooksPath githooks
 ```
 
-Hooks in `githooks/` (`pre-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). `pre-push` fährt die Unit-Suite nur bei Push nach `main` (inkl. Hart-Tests, `SATSAGE_HARD_TESTS=1`); `dev-juniormind` bleibt ohne Suite. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten. Hooks ersetzen diese Prüfung nicht.
+Hooks in `githooks/` (`pre-commit`, `pre-merge-commit`, `post-commit`, `pre-push`) blockieren abweichende Identitäten und `pre-commit` zusätzlich bekannte Secret-Pfade (**S1**) sowie fehlende Chat-Bestätigung (siehe unten) — **nur wenn** `core.hooksPath=githooks` aktiv ist (Maintainer-Setup). `pre-push` fährt die Unit-Suite nur bei Push nach `main` (inkl. Hart-Tests, `SATSAGE_HARD_TESTS=1`); `dev-juniormind` bleibt ohne Suite. Assistenten müssen vor jedem Commit die **lokale** Repo-Config prüfen und den staged Diff selbst gegen **HART · Geheimnisse und Doxxing** halten. Hooks ersetzen diese Prüfung nicht.
 
 **Fremde Contributor (z. B. tbusch) und PRs:** eigene Autor-/Committer-IDs sind **erlaubt und erwünscht** (übliche OSS-Praxis) — sie nutzen **nicht** das Maintainer-hooksPath-Setup und nicht die Maintainer-commit/push-Skripte als Identitätszwang. CI verlangt nicht „jeder Commit im Repo = Juniormind1“. Merge nach `main` weiter nur nach Prüfung (siehe Branches).
 
@@ -40,6 +40,23 @@ Assistenten sollen:
 - Vor Commit/Push: **HART · Geheimnisse und Doxxing** am staged Diff prüfen; bei Treffer abbrechen
 - Vor Commit/Push: lokale `user.name`/`user.email` verifizieren; bei Abweichung abbrechen und korrigieren
 - Für Commit/Push ohne Token-Verbrauch die Maintainer-Skripte vorschlagen (`scripts/commit.*`, `scripts/push.*`)
+- Bestätigungsdateien `satsage-commit-ok` / `satsage-push-ok` nur nach explizitem OK im Chat anlegen; nie vorsorglich, nie `--no-verify`
+
+
+## Bestätigung im Chat
+
+Commits und Pushes in diesen Clones brauchen zusätzlich zur Identität und zu S1 ein **explizites OK des Nutzers im Chat**. Die Hooks erzwingen das über eine Datei im gemeinsamen Git-Verzeichnis (`git rev-parse --git-common-dir`, damit Worktrees dieselbe Datei sehen):
+
+- Commit: `<git-common-dir>/satsage-commit-ok`
+- Push nach `Juniormind1/SatSage`: `<git-common-dir>/satsage-push-ok`
+
+**Assistenten** legen eine dieser Dateien **nur** an, wenn der Nutzer im Chat ausdrücklich zugestimmt hat (z. B. „OK“, „Ja“, oder die klare Anweisung zu genau diesem Commit bzw. Push). Je OK eine Datei, nie vorsorglich, nie für einen späteren Schritt, nie selbst überschreiben, wenn noch eine gültige Datei liegt. Der Inhalt ist egal; eine Datei älter als zwei Stunden gilt als abgelaufen und wird abgelehnt. Die Hooks löschen die Datei nach erfolgreichem Commit (`post-commit`), nach bestandener Prüfung in `pre-merge-commit` (`git merge` ruft `post-commit` nicht auf) bzw. nach bestandenen pre-push-Prüfungen, unmittelbar vor `exit 0` (Git hat keinen post-push-Hook). Ein OK gilt für genau einen Commit bzw. einen Push-Versuch. Schlägt der Push danach netzseitig fehl, braucht es ein neues OK.
+
+`git commit --no-verify` und `git push --no-verify` umgehen die Hooks, **nicht** diese Regel. `--no-verify` ist für Assistenten verboten. `SATSAGE_SKIP_TESTS=1` überspringt nur die Unit-Suite auf `main`, nicht die Chat-Bestätigung.
+
+Lokale Merges ohne Konflikt rufen `pre-merge-commit` statt `pre-commit` auf. `githooks/pre-merge-commit` startet denselben Prüfer wie `pre-commit` (Identität, S1, Chat-OK). Fehlt der Hook, fällt Git seit 2.24 auf `pre-commit` zurück; der Wrapper macht die Pflicht sichtbar.
+
+Die Maintainer-Skripte `scripts/commit.*` und `scripts/push.*` rufen normales `git commit` / `git push` auf und umgehen die Hooks nicht. Ohne Bestätigungsdatei schlagen sie deshalb ebenfalls fehl. Wer am eigenen Rechner selbst committen oder pushen will, legt die Datei vorher an — der Mensch am eigenen Rechner ist sein eigenes OK — oder bestätigt im Chat, damit ein Assistent sie anlegt.
 
 ## Remote-Stand prüfen (Pflicht, multi-machine)
 

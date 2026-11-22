@@ -1,0 +1,11 @@
+#!/bin/sh
+# SatSage Maintainer-Hook (core.hooksPath=githooks):
+# Löscht die Chat-Bestätigung nach einem Commit (ein OK = ein Commit).
+# Läuft auch nach git commit --no-verify (pre-commit war dann übersprungen).
+# --no-verify ist für Assistenten verboten; die Datei darf trotzdem nicht
+# für einen zweiten Commit liegen bleiben.
+
+set -e
+gitdir="$(git rev-parse --git-common-dir)"
+rm -f "$gitdir/satsage-commit-ok"
+exit 0

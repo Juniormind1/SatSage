@@ -1,0 +1,17 @@
+#!/bin/sh
+# SatSage Maintainer-Hook (core.hooksPath=githooks):
+# Lokale Merges ohne Konflikt rufen pre-merge-commit statt pre-commit auf.
+# Fehlt dieser Hook, fällt Git (seit 2.24) auf pre-commit zurück.
+# Der Wrapper macht die Chat-OK-Pflicht sichtbar und prüft dasselbe
+# (Identität, S1, satsage-commit-ok).
+#
+# git merge erzeugt den Merge-Commit selbst und ruft post-commit nicht auf.
+# Deshalb löscht dieser Hook die Bestätigungsdatei nach bestandener Prüfung
+# (ein OK = ein Merge-Commit; analog zu pre-push).
+
+set -e
+HOOKDIR="$(dirname "$0")"
+"$HOOKDIR/pre-commit"
+gitdir="$(git rev-parse --git-common-dir)"
+rm -f "$gitdir/satsage-commit-ok"
+exit 0

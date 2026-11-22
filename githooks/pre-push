@@ -2,14 +2,19 @@
 # SatSage Maintainer-Hook (core.hooksPath=githooks):
 # 1) Tip-Autor muss Juniormind1 sein.
 #    Auf refs/heads/dev-juniormind zusätzlich busch21.
-# 2) Unit-Suite nur bei Push nach main (dev-juniormind = WIP, ohne Suite)
+# 2) Chat-Bestätigung: <git-common-dir>/satsage-push-ok
+#    Prüfung vor der Unit-Suite, auch bei reiner Branch-Löschung.
+#    Datei wird vor exit 0 gelöscht (kein post-push-Hook).
+# 3) Unit-Suite nur bei Push nach main (dev-juniormind = WIP, ohne Suite)
 #
 # Getestet wird der *gepushte* Stand (git worktree des local_sha), nicht der
 # Arbeitsbaum — fremde, ungestagte Änderungen (parallele Worker) zählen nicht.
 # Dauer: ~5½ min (2013 Tests, ~320 s). Ein schon grün getesteter SHA wird
 # nicht noch einmal geprüft (Marke unter .git/satsage-gruen/).
 # Ausnahme bewusst und sichtbar: SATSAGE_SKIP_TESTS=1 git push …
-# (git push --no-verify überspringt den ganzen Hook, auch die Identität).
+# (überspringt nur die Suite, nicht die Chat-Bestätigung).
+# (git push --no-verify überspringt den ganzen Hook, auch die Identität;
+#  --no-verify ist für Assistenten verboten.)
 
 set -e
 
@@ -25,6 +30,13 @@ case "$url" in
   *Juniormind1/SatSage*|*juniormind1/satsage*) ;;
   *) exit 0 ;;
 esac
+
+# Chat-Bestätigung vor der langen Unit-Suite und vor der Tip-Prüfung.
+# Auch ein Push, der nur Branches löscht, braucht ein OK.
+HOOKDIR="$(dirname "$0")"
+# shellcheck source=satsage-chat-ok.sh
+. "$HOOKDIR/satsage-chat-ok.sh"
+satsage_require_ok push
 
 zeros=0000000000000000000000000000000000000000
 zu_testen=""
@@ -61,54 +73,59 @@ do
   esac
 done
 
-[ -z "$zu_testen" ] && exit 0
-if [ "${SATSAGE_SKIP_TESTS:-0}" = "1" ]; then
-  echo "WARNUNG: SATSAGE_SKIP_TESTS=1 — Unit-Suite übersprungen." >&2
-  exit 0
+if [ -n "$zu_testen" ]; then
+  if [ "${SATSAGE_SKIP_TESTS:-0}" = "1" ]; then
+    echo "WARNUNG: SATSAGE_SKIP_TESTS=1 — Unit-Suite übersprungen." >&2
+  else
+    wurzel="$(git rev-parse --show-toplevel)"
+    gitdir="$(git rev-parse --git-common-dir)"
+    py=""
+    for kandidat in \
+      "$wurzel/.venv/bin/python" \
+      "$wurzel/.venv/Scripts/python.exe"
+    do
+      # Windows-Git setzt auf .exe oft kein +x — -f reicht, -x fängt Unix.
+      if [ -x "$kandidat" ] || [ -f "$kandidat" ]; then
+        py="$kandidat"
+        break
+      fi
+    done
+    if [ -z "$py" ]; then
+      echo "ERROR: .venv Python fehlt (bin/python oder Scripts/python.exe) — Unit-Suite nicht lauffähig (SATSAGE_SKIP_TESTS=1 zum Übergehen)." >&2
+      exit 1
+    fi
+    marken="$gitdir/satsage-gruen"
+    mkdir -p "$marken"
+
+    for sha in $(printf '%s\n' $zu_testen | sort -u); do
+      [ -f "$marken/$sha" ] && { echo "pre-push: $sha schon grün getestet." >&2; continue; }
+      baum="$(mktemp -d "${TMPDIR:-/tmp}/satsage-prepush.XXXXXX")"
+      log="$baum.log"
+      git worktree add --quiet --detach "$baum" "$sha"
+      echo "pre-push: Unit-Suite auf ${sha%"${sha#???????}"} (~5½ min, Log: $log) …" >&2
+      start=$(date +%s)
+      set +e
+      ( cd "$baum" && SATSAGE_HARD_TESTS=1 "$py" -m unittest discover -s tests -t . ) >"$log" 2>&1
+      rc=$?
+      set -e
+      git worktree remove --force "$baum" >/dev/null 2>&1 || rm -rf "$baum"
+      dauer=$(( $(date +%s) - start ))
+      if [ "$rc" -ne 0 ]; then
+        echo "ERROR: refusing push: Unit-Suite rot auf $sha (${dauer}s)." >&2
+        grep -E '^(FAIL|ERROR):' "$log" | sed 's/^/  /' >&2 || true
+        tail -n 3 "$log" | sed 's/^/  /' >&2
+        exit 1
+      fi
+      echo "pre-push: grün ($(grep -E '^Ran ' "$log" | tail -n 1), ${dauer}s)." >&2
+      : > "$marken/$sha"
+      rm -f "$log"
+    done
+  fi
 fi
 
-wurzel="$(git rev-parse --show-toplevel)"
+# Alle Prüfungen bestanden. Ein OK = ein Push-Versuch.
+# Git hat keinen post-push-Hook; schlägt der Push danach netzseitig fehl,
+# braucht es ein neues OK.
 gitdir="$(git rev-parse --git-common-dir)"
-py=""
-for kandidat in \
-  "$wurzel/.venv/bin/python" \
-  "$wurzel/.venv/Scripts/python.exe"
-do
-  # Windows-Git setzt auf .exe oft kein +x — -f reicht, -x fängt Unix.
-  if [ -x "$kandidat" ] || [ -f "$kandidat" ]; then
-    py="$kandidat"
-    break
-  fi
-done
-if [ -z "$py" ]; then
-  echo "ERROR: .venv Python fehlt (bin/python oder Scripts/python.exe) — Unit-Suite nicht lauffähig (SATSAGE_SKIP_TESTS=1 zum Übergehen)." >&2
-  exit 1
-fi
-marken="$gitdir/satsage-gruen"
-mkdir -p "$marken"
-
-for sha in $(printf '%s\n' $zu_testen | sort -u); do
-  [ -f "$marken/$sha" ] && { echo "pre-push: $sha schon grün getestet." >&2; continue; }
-  baum="$(mktemp -d "${TMPDIR:-/tmp}/satsage-prepush.XXXXXX")"
-  log="$baum.log"
-  git worktree add --quiet --detach "$baum" "$sha"
-  echo "pre-push: Unit-Suite auf ${sha%"${sha#???????}"} (~5½ min, Log: $log) …" >&2
-  start=$(date +%s)
-  set +e
-  ( cd "$baum" && SATSAGE_HARD_TESTS=1 "$py" -m unittest discover -s tests -t . ) >"$log" 2>&1
-  rc=$?
-  set -e
-  git worktree remove --force "$baum" >/dev/null 2>&1 || rm -rf "$baum"
-  dauer=$(( $(date +%s) - start ))
-  if [ "$rc" -ne 0 ]; then
-    echo "ERROR: refusing push: Unit-Suite rot auf $sha (${dauer}s)." >&2
-    grep -E '^(FAIL|ERROR):' "$log" | sed 's/^/  /' >&2 || true
-    tail -n 3 "$log" | sed 's/^/  /' >&2
-    exit 1
-  fi
-  echo "pre-push: grün ($(grep -E '^Ran ' "$log" | tail -n 1), ${dauer}s)." >&2
-  : > "$marken/$sha"
-  rm -f "$log"
-done
-
+rm -f "$gitdir/satsage-push-ok"
 exit 0

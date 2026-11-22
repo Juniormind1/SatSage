@@ -3,6 +3,8 @@
 # 1) Config und Committer: nur Juniormind1.
 #    Autor: Juniormind1, auf dev-juniormind zusätzlich busch21.
 # 2) keine bekannten Secret-Pfade im Commit
+# 3) Chat-Bestätigung: <git-common-dir>/satsage-commit-ok
+#    (post-commit löscht die Datei; pre-merge-commit ruft diesen Hook)
 # Contributor-Clones setzen hooksPath nicht — eigene IDs OK; S1 gilt trotzdem.
 
 set -e
@@ -82,5 +84,12 @@ if [ -n "$(printf '%s' "$blocked" | tr -d '[:space:]')" ]; then
   echo "Unstage: git rm --cached -- <path>  and keep it in .gitignore." >&2
   exit 1
 fi
+
+# Chat-Bestätigung erst nach Identität und S1. Fehlt die Datei, sofort
+# abbrechen — nicht warten. post-commit löscht sie nach Erfolg.
+HOOKDIR="$(dirname "$0")"
+# shellcheck source=satsage-chat-ok.sh
+. "$HOOKDIR/satsage-chat-ok.sh"
+satsage_require_ok commit
 
 exit 0
