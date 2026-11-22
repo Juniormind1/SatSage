@@ -9,9 +9,6 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
-- **Herkunft · Tx-Cache:** Jeder Schreiber legt eine eigene Temp-Datei an und tauscht sie atomar aus. Bisher teilten sich Vorlader und Hauptweg `<txid>.json.tmp`. Speicherten beide dieselbe Tx gleichzeitig, scheiterte einer mit `FileNotFoundError`, und eine Sammel-Tx mit mehr als 20 Eingängen verlor über Electrs oder Fulcrum mitunter ihr Bündel: Die fremden Eingänge erschienen einzeln.
-- **Userflow · ohne Mainnet:** Die Wegwerf-Server des Userflows und der Passwort-Zyklen laden keine Block-Header mehr über P2P (`BIP158_P2P=0`). Der CI-Runner hatte sich sonst mit echten Mainnet-Peers verbunden, und `passwort_desktop` lief in den Timeout. Scheitert ein Schritt mit Timeout, steht ein Thread-Dump aller Threads im Log.
-
 ## [1.0.2] — 2026-11-22
 
 - **Release 1.0.2:** Versionsnummer auf 1.0.2. StartOS-Paket `1.0.2:0`; `1.0.1:0` bleibt im Versionsgraphen, damit Geräte von dort wandern. Specter-Plugin 1.0.2.
@@ -19,9 +16,11 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 - **Wallet · Historie:** Nach dem Verlaufsscan bleibt die Gruppe „Bereits ausgegeben“ unter den UTXOs stehen. Bisher erschien sie erst, nachdem man das Wallet einmal verlassen und wieder geöffnet hatte.
 - **Datenquellen · libbitcoin:** Antwortet die native Abfrage auf 8180 und nicht auf 8181, verbindet SatSage in diesem Prozess nicht mehr zu 8181. Umgekehrt genauso.
 - **Datenquellen · libbitcoin:** Die native Abfrage bleibt an, wenn der Adressindex unter `store.address` steht. Die ältere Fassung mit `address` an der Wurzel gilt weiter. `network.address` schaltet sie nicht ein. Die Pfade bleiben `address`, `output` und `tx`.
+- **Herkunft · Tx-Cache:** Jeder Schreiber legt eine eigene Temp-Datei an und tauscht sie atomar aus. Bisher teilten sich Vorlader und Hauptweg `<txid>.json.tmp`. Speicherten beide dieselbe Tx gleichzeitig, scheiterte einer mit `FileNotFoundError`, und eine Sammel-Tx mit mehr als 20 Eingängen verlor über Electrs oder Fulcrum mitunter ihr Bündel: Die fremden Eingänge erschienen einzeln.
 - **Anmeldung und Einstellungen · Auge:** Maskierte Felder (Anmeldung, Ersteinrichtung, App-Passwort, SMTP-Passwort, LLM-Key, Geheimfelder der Datenquellen) haben einen Knopf, der den Inhalt zeigt und wieder verbirgt. Das Feld startet verborgen. Der Knopf schickt das Formular nicht ab.
 - **Navigation · standardmäßig angeheftet:** Ohne gemerkte Wahl bleibt die Leiste angeheftet, sobald neben den 210 px noch Inhalt steht (ab 720 px Breite). Darunter und in der Einbettung (iframe, StartOS) ist sie das Overlay und klappt beim Verlassen des Zeigers zu. Ein gespeichertes An- oder Abheften gewinnt. Der Umbruch der Kopf-Pillen klappt die Leiste nicht mehr ein.
 - **Release · Kurs-Dateien:** Der Image-Workflow darf `btc-price-EUR.csv` und `btc-price-USD.csv` ans Release hängen. Bisher fehlte ihm dafür die Schreibberechtigung.
+- **Userflow · ohne Mainnet:** Die Wegwerf-Server des Userflows und der Passwort-Zyklen laden keine Block-Header mehr über P2P (`BIP158_P2P=0`). Der CI-Runner hatte sich sonst mit echten Mainnet-Peers verbunden, und `passwort_desktop` lief in den Timeout. Scheitert ein Schritt mit Timeout, steht ein Thread-Dump aller Threads im Log.
 
 ## [1.0.1] — 2026-10-18
 

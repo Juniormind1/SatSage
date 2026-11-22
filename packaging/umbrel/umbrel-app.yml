@@ -2,7 +2,7 @@ manifestVersion: 1
 id: satsage
 category: bitcoin
 name: SatSage
-version: "1.0.1"
+version: "1.0.2"
 tagline: Know your sats — on-chain holding periods for tax and overview
 description: >-
   SatSage analyses your XPUB wallets and reconstructs when your sats entered or
@@ -55,15 +55,14 @@ description: >-
   from the public sources listed above. Public fallbacks for prices, e-mail
   notifications and the optional LLM assistant are switched off by default.
 releaseNotes: >-
-  SatSage 1.0.1. Filters accept fiat amounts (EUR, USD, €, $) and convert
-  them to sats at the current price. Global search hits show the fiat value.
-  Wallets appear faster on first load, and the scan keeps the platform data
-  source. Acquisition is the moment sats arrive at your own address, not when
-  the sender received them. Unresolved inputs of a batch transaction count as
-  a bundle at that transaction's block time and do not turn green early. The
-  31 December balance counts only outputs that already existed that day.
-  Prior-year figures change: after the update, trace the origin of all UTXOs
-  and recalculate the tax year.
+  SatSage 1.0.2. Masked fields (login, setup, app password, SMTP password,
+  LLM key, data source secrets) get an eye button to show and hide the
+  value. The navigation stays pinned by default when the window is wide
+  enough. After a history scan, "Already spent" appears under the UTXOs
+  without reopening the wallet. libbitcoin: the native query stays on with
+  store.address and no longer connects to the other port once one answers.
+  The transaction cache writes atomically, so batch transactions keep their
+  bundle reliably.
 
 developer: Juniormind1
 website: https://github.com/Juniormind1/SatSage
