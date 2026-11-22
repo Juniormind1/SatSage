@@ -9,6 +9,7 @@ Neue Einträge oben. Format angelehnt an [Keep a Changelog](https://keepachangel
 
 ## [Unveröffentlicht]
 
+- **Herkunft · Tx-Cache:** Jeder Schreiber legt eine eigene Temp-Datei an und tauscht sie atomar aus. Bisher teilten sich Vorlader und Hauptweg `<txid>.json.tmp`. Speicherten beide dieselbe Tx gleichzeitig, scheiterte einer mit `FileNotFoundError`, und eine Sammel-Tx mit mehr als 20 Eingängen verlor über Electrs oder Fulcrum mitunter ihr Bündel: Die fremden Eingänge erschienen einzeln.
 - **Userflow · ohne Mainnet:** Die Wegwerf-Server des Userflows und der Passwort-Zyklen laden keine Block-Header mehr über P2P (`BIP158_P2P=0`). Der CI-Runner hatte sich sonst mit echten Mainnet-Peers verbunden, und `passwort_desktop` lief in den Timeout. Scheitert ein Schritt mit Timeout, steht ein Thread-Dump aller Threads im Log.
 
 ## [1.0.2] — 2026-11-22

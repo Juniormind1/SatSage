@@ -306,6 +306,29 @@ def _vout_adressen_ins_netz(tx: dict) -> None:
             spk["address"] = neu
 
 
+def _schreibe_atomar(path: Path, text: str) -> None:
+    """Schreibt *text* atomar nach *path*, auch aus mehreren Threads.
+
+    Jeder Schreiber bekommt eine eigene Temp-Datei. Mit einer gemeinsamen
+    ``<name>.json.tmp`` kollidieren Vorlader und Hauptweg, wenn beide
+    dieselbe Tx speichern: Einer verschiebt die Datei, der andere scheitert
+    mit FileNotFoundError, und der Herkunfts-Walk sieht einen Ladefehler.
+    """
+    import os
+
+    tmp = path.with_name(
+        f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def load_cached_tx(txid: str, cache_root: Path | None = None) -> dict | None:
     """Lädt eine gecachte Transaktion (RAM → Flatfile).
 
@@ -373,9 +396,7 @@ def save_cached_tx(
         with _immutable_tx_lock:
             _immutable_tx_memory[key] = tx
         return path
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(_dump_cache_json(payload), encoding="utf-8")
-    tmp.replace(path)
+    _schreibe_atomar(path, _dump_cache_json(payload))
     with _immutable_tx_lock:
         _immutable_tx_memory[key] = tx
     _maybe_log_sqlite_flatfile_hint(path.parent, kind="tx")
@@ -456,9 +477,7 @@ def save_cached_block_time(
         pass
     if not cache_disk_write_allowed(root):
         return path
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(_dump_cache_json(payload), encoding="utf-8")
-    tmp.replace(path)
+    _schreibe_atomar(path, _dump_cache_json(payload))
     return path
 
 #: (Pfad, mtime_ns, HeaderChain) — Header-Datei nicht je Höhe neu laden.
@@ -703,9 +722,7 @@ def rewrite_utxo_cache_times(
         return
     data["utxos"] = utxos
     data["utxo_count"] = len(utxos)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(_dump_cache_json(data), encoding="utf-8")
-    tmp.replace(path)
+    _schreibe_atomar(path, _dump_cache_json(data))
 
 def _utxo_ingress_cache_path(txid: str, vout: int, cache_root: Path) -> Path:
     return cache_root / UTXO_INGRESS_CACHE_SUBDIR / f"{_normalize_txid(txid)}_{int(vout)}.json"
@@ -791,9 +808,7 @@ def save_utxo_ingress_cache(
         pass
     if not cache_disk_write_allowed(root):
         return path
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(_dump_cache_json(payload), encoding="utf-8")
-    tmp.replace(path)
+    _schreibe_atomar(path, _dump_cache_json(payload))
     _maybe_log_sqlite_flatfile_hint(path.parent, kind="utxo_ingress")
     return path
 
