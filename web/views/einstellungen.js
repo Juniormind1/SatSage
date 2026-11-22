@@ -464,6 +464,8 @@ function zeichneSteuerEinstellungen() {
     anschaffung.value =
       steuer.anschaffung === "aelteste" ? "aelteste" : "juengste";
   }
+  const pnl = $("#steuer-boerse-pnl");
+  if (pnl) pnl.checked = Boolean(steuer.boerse_pnl);
   zeichnePersonEinstellungen();
   zeichneBerichtWalletEinstellungen();
   // FIFO-Spend-Leiste der Wallet-Ansicht: Text hängt an defensiv/offensiv.
@@ -683,6 +685,7 @@ async function speichereSteuerEinstellungen() {
         haltefrist_jahre: Number($("#steuer-haltefrist").value),
         stichtag: $("#steuer-stichtag").value,
         anschaffung: $("#steuer-anschaffung")?.value || "juengste",
+        boerse_pnl: Boolean($("#steuer-boerse-pnl")?.checked),
       },
     });
     if (Zustand.config) Zustand.config.steuer = ergebnis.steuer;
@@ -698,6 +701,62 @@ async function speichereSteuerEinstellungen() {
     meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
   } finally {
     knopf.disabled = false;
+  }
+}
+
+
+function zuordnungEinstellungen() {
+  return Zustand.config?.zuordnung || {};
+}
+
+function zeichneZuordnungEinstellungen() {
+  const z = zuordnungEinstellungen();
+  const vor = $("#zuordnung-fenster-vor");
+  const nach = $("#zuordnung-fenster-nach");
+  const abs = $("#zuordnung-max-delta-sats");
+  const rel = $("#zuordnung-max-delta-rel");
+  const geb = $("#zuordnung-gebuehr-toleranz");
+  const auto = $("#zuordnung-auto");
+  const adr = $("#zuordnung-auto-adresse");
+  const gap = $("#zuordnung-auto-min-abstand");
+  if (vor) vor.value = z.fenster_vor_s != null ? String(z.fenster_vor_s / 3600) : "1";
+  if (nach) nach.value = z.fenster_nach_s != null ? String(z.fenster_nach_s / 3600) : "72";
+  if (abs) abs.value = z.max_delta_sats != null ? String(z.max_delta_sats) : "0";
+  if (rel) rel.value = z.max_delta_rel != null ? String(z.max_delta_rel * 100) : "0";
+  if (geb) geb.checked = Boolean(z.gebuehr_als_toleranz);
+  if (auto) auto.checked = Boolean(z.auto);
+  if (adr) adr.checked = z.auto_adresse !== false;
+  if (gap) gap.value = z.auto_min_abstand_s != null ? String(z.auto_min_abstand_s) : "0";
+}
+
+async function speichereZuordnungEinstellungen() {
+  const knopf = $("#zuordnung-uebernehmen");
+  if (knopf) knopf.disabled = true;
+  try {
+    const stunden = (id, fallback) => {
+      const n = Number($(id)?.value);
+      return Number.isFinite(n) ? Math.round(n * 3600) : fallback;
+    };
+    const ergebnis = await api("/config/zuordnung", {
+      methode: "PUT",
+      daten: {
+        fenster_vor_s: stunden("#zuordnung-fenster-vor", 3600),
+        fenster_nach_s: stunden("#zuordnung-fenster-nach", 259200),
+        max_delta_sats: Number($("#zuordnung-max-delta-sats")?.value || 0),
+        max_delta_rel: Number($("#zuordnung-max-delta-rel")?.value || 0) / 100,
+        gebuehr_als_toleranz: Boolean($("#zuordnung-gebuehr-toleranz")?.checked),
+        auto: Boolean($("#zuordnung-auto")?.checked),
+        auto_adresse: Boolean($("#zuordnung-auto-adresse")?.checked),
+        auto_min_abstand_s: Number($("#zuordnung-auto-min-abstand")?.value || 0),
+      },
+    });
+    if (Zustand.config) Zustand.config.zuordnung = ergebnis.zuordnung;
+    zeichneZuordnungEinstellungen();
+    meldung(t("settings.assignSaved"), "gut");
+  } catch (fehler) {
+    meldung(t("settings.notSaved", { msg: fehler.message }), "krit");
+  } finally {
+    if (knopf) knopf.disabled = false;
   }
 }
 

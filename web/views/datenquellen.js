@@ -411,6 +411,83 @@ async function ladeBoersenZuordnungen() {
   }
 }
 
+
+function boerseMethodeText(methode) {
+  const key = "sources.exchangeMethod." + String(methode || "");
+  const text = t(key);
+  return text !== key ? text : String(methode || "");
+}
+
+function boerseStatusText(z) {
+  if (z.status === "bestaetigt" && z.bestaetigt_durch === "auto") {
+    return t("sources.exchangeStatus.auto");
+  }
+  if (z.status === "bestaetigt" && z.bestaetigt_durch === "txid_exakt") {
+    return t("sources.exchangeStatus.txid");
+  }
+  const key = "sources.exchangeStatus." + String(z.status || "");
+  const text = t(key);
+  return text !== key ? text : String(z.status || "");
+}
+
+function formatZeitabstand(s) {
+  if (s == null || s === "") return t("sources.exchangeNoTime");
+  const wert = Number(s);
+  if (!Number.isFinite(wert)) return t("sources.exchangeNoTime");
+  const abs = Math.abs(wert);
+  let dauer;
+  if (abs < 60) dauer = t("sources.exchangeSeconds", { n: String(Math.round(abs)) });
+  else if (abs < 3600) dauer = t("sources.exchangeMinutes", { n: String(Math.round(abs / 60)) });
+  else if (abs < 86400) {
+    const st = abs < 7200 ? (abs / 3600).toFixed(1).replace(".", ",") : String(Math.round(abs / 3600));
+    dauer = t("sources.exchangeHours", { n: st });
+  } else dauer = t("sources.exchangeDays", { n: String(Math.round(abs / 86400)) });
+  return wert >= 0
+    ? t("sources.exchangeLater", { time: dauer })
+    : t("sources.exchangeEarlier", { time: dauer });
+}
+
+function zeichneBoersenZuordnungText(e, z) {
+  const wrap = document.createElement("span");
+  const name = document.createElement("strong");
+  name.textContent = e.name || e.slug || "";
+  wrap.append(name);
+  const teile = [];
+  if (z.auszahlung_datum) teile.push(z.auszahlung_datum);
+  const sats = z.auszahlung_sats ?? z.sats_onchain;
+  if (sats != null) {
+    const btc = (Number(sats) / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
+    teile.push(`${btc} BTC`);
+  }
+  if (teile.length) wrap.append(document.createTextNode(" · " + teile.join(" · ") + " · "));
+  else wrap.append(document.createTextNode(": "));
+
+  if (z.txid) {
+    const tx = document.createElement("span");
+    tx.className = "mono";
+    tx.textContent = z.txid_kurz || z.txid;
+    if (typeof macheKopierbar === "function") macheKopierbar(tx, z.txid, "TxID");
+    else tx.title = z.txid;
+    wrap.append(tx);
+  }
+  if (z.wallet) wrap.append(document.createTextNode(` (${z.wallet})`));
+  const meta = [];
+  if (z.zeitabstand_s != null) meta.push(formatZeitabstand(z.zeitabstand_s));
+  if (z.betrag_delta_sats != null) {
+    const geb = z.gebuehr_sats ? t("sources.exchangeFee", { sats: String(z.gebuehr_sats) }) : "";
+    meta.push(t("sources.exchangeDelta", { sats: String(z.betrag_delta_sats), fee: geb }));
+  }
+  meta.push(boerseMethodeText(z.methode));
+  meta.push(boerseStatusText(z));
+  if (z.auto_grund && z.bestaetigt_durch === "auto") {
+    const gkey = "sources.exchangeAutoGrund." + z.auto_grund;
+    const g = t(gkey);
+    meta.push(g !== gkey ? g : z.auto_grund);
+  }
+  wrap.append(document.createTextNode(" · " + meta.filter(Boolean).join(" · ")));
+  return wrap;
+}
+
 function zeichneBoersenZuordnungen(stand) {
   const kasten = $("#boerse-zuordnung");
   if (!kasten) return;
@@ -432,13 +509,11 @@ function zeichneBoersenZuordnungen(stand) {
     for (const z of e.zuordnungen || []) {
       irgendwelche = true;
       const zeile = document.createElement("div");
-      zeile.className = "sanktions-zeile";
+      zeile.className = "sanktions-zeile boerse-zuordnung-zeile";
+      if (z.bestaetigt_durch === "auto") zeile.classList.add("boerse-auto");
       const text = document.createElement("span");
-      text.textContent = `${e.name || e.slug}: ` + t("sources.exchangeAssignLine", {
-        ref: z.auszahlung_ref || "",
-        methode: z.methode || "",
-        status: z.status || "",
-      });
+      text.className = "boerse-zuordnung-text";
+      text.append(zeichneBoersenZuordnungText(e, z));
       zeile.append(text);
       if (z.status === "vorschlag") {
         const ok = document.createElement("button");
@@ -452,6 +527,13 @@ function zeichneBoersenZuordnungen(stand) {
         nein.textContent = t("sources.exchangeReject");
         nein.addEventListener("click", () => setzeBoersenZuordnung(e.slug, z, "abgelehnt"));
         zeile.append(ok, nein);
+      } else if (z.status === "bestaetigt") {
+        const nein = document.createElement("button");
+        nein.type = "button";
+        nein.className = "knopf knopf-klein";
+        nein.textContent = t("sources.exchangeReject");
+        nein.addEventListener("click", () => setzeBoersenZuordnung(e.slug, z, "abgelehnt"));
+        zeile.append(nein);
       }
       kasten.append(zeile);
     }

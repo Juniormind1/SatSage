@@ -683,6 +683,152 @@ function steuerUtxoSchluessel(eintrag) {
  * Eine Datenzeile der UTXO-Tabelle (Steuerjahr).
  * *versteckt*: Startzustand in eingeklappten Gruppen.
  */
+
+function steuerHatBoerseLose(daten) {
+  return (daten?.eintraege || []).some((e) => (e.boerse_lose || []).length);
+}
+
+function steuerPnlAn(daten) {
+  return Boolean(daten && daten.boerse_pnl);
+}
+
+function steuerSpaltenzahl(daten) {
+  let n = 7;
+  if (steuerHatBoerseLose(daten)) n += 3;
+  if (steuerPnlAn(daten)) n += 2;
+  return n;
+}
+
+function steuerKopfZelle(key, fallback, className) {
+  const th = document.createElement("th");
+  if (className) th.className = className;
+  th.setAttribute("data-i18n", key);
+  th.textContent = (typeof t === "function" && t(key) !== key) ? t(key) : fallback;
+  return th;
+}
+
+function setzeSteuerBoerseKopfe(daten) {
+  const kopf = document.querySelector("#steuer-tabelle thead tr");
+  if (!kopf) return;
+  for (const th of kopf.querySelectorAll(".steuer-boerse-kopf, .steuer-pnl-kopf")) {
+    th.remove();
+  }
+  if (steuerHatBoerseLose(daten)) {
+    kopf.append(
+      steuerKopfZelle("tax.colLautBoerse", "laut Börse", "steuer-boerse-kopf"),
+      steuerKopfZelle("tax.colUnitPrice", "Einzelkaufpreis", "steuer-boerse-kopf r"),
+      steuerKopfZelle("tax.colCost", "Kaufkosten", "steuer-boerse-kopf r"),
+    );
+  }
+  if (steuerPnlAn(daten)) {
+    kopf.append(
+      steuerKopfZelle("tax.colValueAtRef", "Wert zum Bezugstag", "steuer-pnl-kopf r"),
+      steuerKopfZelle("tax.colPnl", "Ergebnis laut Börse", "steuer-pnl-kopf r"),
+    );
+  }
+}
+
+function steuerBoerseZusatzZellen(eintrag, daten, los) {
+  const zellen = [];
+  const zelle = (text, className) => {
+    const td = document.createElement("td");
+    if (className) td.className = className;
+    td.textContent = text || "";
+    return td;
+  };
+  if (steuerHatBoerseLose(daten)) {
+    if (los) {
+      const preis = los.einzelpreis && los.waehrung
+        ? `${los.einzelpreis} ${los.waehrung}/BTC`
+        : (los.einzelpreis || "");
+      const kosten = los.kosten && los.waehrung
+        ? `${los.kosten} ${los.waehrung}`
+        : (los.kosten || "");
+      zellen.push(zelle(los.label || "laut Börse", "steuer-boerse-zelle"));
+      zellen.push(zelle(preis, "r zahl steuer-boerse-zelle"));
+      zellen.push(zelle(kosten, "r zahl steuer-boerse-zelle"));
+    } else {
+      zellen.push(zelle(eintrag.boerse_label || "", "steuer-boerse-zelle zart"));
+      zellen.push(zelle("", "steuer-boerse-zelle"));
+      zellen.push(zelle("", "steuer-boerse-zelle"));
+    }
+  }
+  if (steuerPnlAn(daten)) {
+    if (los) {
+      const w = los.waehrung || "";
+      const wert = los.wert_bezug ? `${los.wert_bezug} ${w}`.trim() : "";
+      const erg = los.ergebnis ? `${los.ergebnis} ${w}`.trim() : "";
+      zellen.push(zelle(wert, "r zahl steuer-pnl-zelle"));
+      zellen.push(zelle(erg, "r zahl steuer-pnl-zelle"));
+    } else {
+      zellen.push(zelle("", "steuer-pnl-zelle"));
+      zellen.push(zelle("", "steuer-pnl-zelle"));
+    }
+  }
+  return zellen;
+}
+
+function zeichneSteuerBoerseLosZeile(eintrag, los, daten, { versteckt = true } = {}) {
+  const zeile = document.createElement("tr");
+  zeile.className = "steuer-boerse-los-zeile";
+  if (versteckt) zeile.hidden = true;
+  const schluessel = steuerUtxoSchluessel(eintrag);
+  if (schluessel) zeile.dataset.key = `${schluessel}:los`;
+  if (eintrag.wallet) zeile.dataset.wallet = eintrag.wallet;
+  zeile.dataset.filterLabels = [
+    eintrag.wallet,
+    los.label,
+    los.beleg,
+    "Börsenbeleg",
+  ].filter(Boolean).join(" ");
+
+  const datum = document.createElement("td");
+  datum.className = "zahl";
+  datum.textContent = los.datum || "";
+  const unter = document.createElement("div");
+  unter.className = "zart";
+  unter.textContent = los.beleg || "Börsenbeleg";
+  datum.append(unter);
+
+  const betrag = document.createElement("td");
+  betrag.className = "r betrag";
+  const atTs = Number(los.time_ts || 0);
+  if (atTs && typeof formatSats === "function") {
+    betrag.textContent = formatSats(los.sats, { atTs });
+  } else if (typeof formatSatsBasis === "function") {
+    betrag.textContent = formatSatsBasis(los.sats);
+  } else {
+    betrag.textContent = String(los.sats || "");
+  }
+
+  const wallet = document.createElement("td");
+  wallet.textContent = eintrag.wallet || "";
+
+  const adresse = document.createElement("td");
+  adresse.className = "zart";
+  adresse.textContent = "Los";
+
+  const dauer = document.createElement("td");
+  dauer.className = "r zahl";
+  dauer.textContent = los.haltedauer_tage != null ? `${los.haltedauer_tage} T` : "";
+
+  const grundlage = document.createElement("td");
+  const marke = document.createElement("span");
+  marke.className = "grundlage-ok";
+  marke.textContent = `${los.label || "laut Börse"} · Börsenbeleg`;
+  grundlage.append(marke);
+
+  const status = document.createElement("td");
+  status.className = "r steuer-utxo-status";
+  const text = los.erfuellt
+    ? (los.frist_ende ? `erfüllt laut Börse · ab ${los.frist_ende}` : "erfüllt laut Börse")
+    : (los.frist_ende ? `offen laut Börse · ab ${los.frist_ende}` : "offen laut Börse");
+  status.append(pille(los.erfuellt ? "gut" : "warn", text));
+
+  zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status, ...steuerBoerseZusatzZellen(eintrag, daten, los));
+  return zeile;
+}
+
 function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
   const zeile = document.createElement("tr");
   zeile.className = "steuer-utxo-zeile";
@@ -834,7 +980,14 @@ function zeichneSteuerUtxoZeile(eintrag, daten, { versteckt = true } = {}) {
     if (extern) status.append(extern);
   }
 
-  zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status);
+  if (eintrag.boerse_label) {
+    const note = document.createElement("div");
+    note.className = "zart boerse-beleg";
+    note.textContent = `${eintrag.boerse_label} · Blockzeit als Untergrenze`;
+    grundlage.append(note);
+  }
+
+  zeile.append(datum, betrag, wallet, adresse, dauer, grundlage, status, ...steuerBoerseZusatzZellen(eintrag, daten, null));
   if (typeof saZeileMitAuswahl === "function") saZeileMitAuswahl(zeile);
   return zeile;
 }
@@ -860,7 +1013,7 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten, fenster = 
   kopfZeile.className = "steuer-gruppe-kopf";
 
   const kopfZelle = document.createElement("td");
-  kopfZelle.colSpan = 7;
+  kopfZelle.colSpan = steuerSpaltenzahl(daten);
 
   const kopf = document.createElement("button");
   kopf.type = "button";
@@ -902,9 +1055,13 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten, fenster = 
 
   const setzeZeilen = (liste) => {
     for (const z of datenZeilen) z.remove();
-    datenZeilen = liste.map((eintrag) =>
-      zeichneSteuerUtxoZeile(eintrag, daten, { versteckt: !auf })
-    );
+    datenZeilen = [];
+    for (const eintrag of liste) {
+      datenZeilen.push(zeichneSteuerUtxoZeile(eintrag, daten, { versteckt: !auf }));
+      for (const los of eintrag.boerse_lose || []) {
+        datenZeilen.push(zeichneSteuerBoerseLosZeile(eintrag, los, daten, { versteckt: !auf }));
+      }
+    }
     if (pagerZeile) pagerZeile.before(...datenZeilen);
     else tbody.append(...datenZeilen);
   };
@@ -917,7 +1074,7 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten, fenster = 
     pagerZeile = document.createElement("tr");
     pagerZeile.className = "steuer-pager-zeile";
     const pagerZelle = document.createElement("td");
-    pagerZelle.colSpan = 7;
+    pagerZelle.colSpan = steuerSpaltenzahl(daten);
     pagerZeile.append(pagerZelle);
     tbody.append(pagerZeile);
     const teil = art;
@@ -978,6 +1135,7 @@ function zeichneSteuerUtxoGruppe(titel, eintraege, { art = "", daten, fenster = 
 function zeichneSteuerUtxoGruppen(daten) {
   const tabelle = $("#steuer-tabelle");
   if (!tabelle) return;
+  setzeSteuerBoerseKopfe(daten);
 
   // Alte Gruppen-tbodys und den leeren Default-Körper ersetzen.
   for (const alt of tabelle.querySelectorAll("tbody")) {
@@ -996,7 +1154,7 @@ function zeichneSteuerUtxoGruppen(daten) {
     koerper.id = "steuer-koerper";
     const zeile = document.createElement("tr");
     const zelle = document.createElement("td");
-    zelle.colSpan = 7;
+    zelle.colSpan = steuerSpaltenzahl(daten);
     zelle.className = "zart";
     zelle.style.padding = "20px 0";
     zelle.textContent = t("tax.hard.a2708f164f");

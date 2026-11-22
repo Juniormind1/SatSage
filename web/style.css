@@ -2849,6 +2849,21 @@ button.baum-knoten:hover { background: var(--flaeche-2); }
 }
 
 /* UTXO-Tabelle: Haltefrist-Gruppen (initial zugeklappt) */
+
+
+.boerse-zuordnung-zeile.boerse-auto {
+  border-left: 3px solid var(--gut, #2e7d32);
+  padding-left: 8px;
+}
+.boerse-zuordnung-text { display: inline; }
+
+tr.steuer-boerse-los-zeile td:first-child {
+  padding-left: 1.6em;
+}
+tr.steuer-boerse-los-zeile {
+  background: color-mix(in srgb, var(--flaeche, transparent) 70%, transparent);
+}
+
 .steuer-gruppe-kopf td {
   padding: 0;
   border-bottom: 1px solid var(--linie);

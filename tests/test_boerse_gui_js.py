@@ -43,9 +43,13 @@ class BoerseGuiTest(unittest.TestCase):
     def test_zuordnung_und_erklaerung(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="boerse-zuordnung"', html)
+        self.assertIn('id="zuordnung-auto"', html)
         js = (WEB / "views" / "datenquellen.js").read_text(encoding="utf-8")
         self.assertIn('"/exchange-reports/zuordnungen/vorschlagen"', js)
         self.assertIn("function setzeBoersenZuordnung", js)
+        self.assertIn("function zeichneBoersenZuordnungText", js)
+        self.assertIn("txid_kurz", js)
+        self.assertIn("boerse-auto", js)
         fmt = (WEB / "format.js").read_text(encoding="utf-8")
         self.assertIn("function boerseErklaerungText", fmt)
         herkunft = (WEB / "views" / "herkunft.js").read_text(encoding="utf-8")
@@ -63,7 +67,9 @@ class BoerseGuiTest(unittest.TestCase):
         for code in ("de", "en"):
             katalog = json.loads((WEB / "locales" / f"{code}.json").read_text(encoding="utf-8"))
             for key in ("sources.exchangeExplained", "sources.exchangeExplainedHint",
-                        "sources.exchangeConfirm", "sources.exchangeAssignRefresh"):
+                        "sources.exchangeConfirm", "sources.exchangeAssignRefresh",
+                        "sources.exchangeStatus.auto", "sources.exchangeMethod.adresse",
+                        "settings.assign.auto"):
                 self.assertTrue(katalog.get(key), f"{code}: {key}")
 
 

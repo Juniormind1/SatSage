@@ -463,6 +463,8 @@ async function start() {
     ladeSteuerjahr();
   });
   $("#steuer-uebernehmen").addEventListener("click", speichereSteuerEinstellungen);
+  const zuordnungBtn = $("#zuordnung-uebernehmen");
+  if (zuordnungBtn) zuordnungBtn.addEventListener("click", speichereZuordnungEinstellungen);
   const personBtn = $("#person-uebernehmen");
   if (personBtn) personBtn.addEventListener("click", speicherePersonEinstellungen);
   const berichtWalletBtn = $("#bericht-wallet-uebernehmen");

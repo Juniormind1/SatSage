@@ -1386,9 +1386,14 @@
                 <option value="aelteste" data-i18n="settings.deadlines.offensive">Offensiv (grüner Lot-Anteil)</option>
               </select>
             </label>
+            <label class="check-zeile" data-i18n-title="settings.deadlines.pnlTitle"
+                   title="Optional. Standard aus. Ohne diese Spalten bleibt der Börsenbeleg ein Herkunftsnachweis (Datum, Menge, Einzelkaufpreis je Los), ohne Gewinn oder Verlust zu saldieren.">
+              <input type="checkbox" id="steuer-boerse-pnl">
+              <span data-i18n="settings.deadlines.pnl">Gewinn und Verlust aus Börsenhistorie anzeigen</span>
+            </label>
             <button type="button" id="steuer-uebernehmen" class="knopf"
                     data-i18n="common.save" data-i18n-title="settings.deadlines.applyTitle"
-                    title="Schreibt Stichtag, Haltefrist und Anschaffungslesart in die .env. Das Steuerjahr rechnet danach damit.">
+                    title="Schreibt Stichtag, Haltefrist, Anschaffungslesart und die P&amp;L-Option in die .env. Das Steuerjahr rechnet danach damit.">
               Übernehmen
             </button>
           </div>
@@ -1409,6 +1414,65 @@
             Andere europäische Länder haben keinen vergleichbaren Cutoff.
           </p>
           <p class="meta steuer-einstellungen-hinweis" id="frist-onchain-hinweis" data-i18n="dialog.onchain.body">SatSage rekonstruiert aus der Blockchain, wann Sats diese Wallet-Adressen erreicht oder verlassen haben. Das ist ein On-Chain-Beleg, kein vollständiger Anschaffungsnachweis. Börsenhistorien, Kaufbelege, Kontoauszüge und ähnliche Unterlagen ersetzt das nicht — es kann sie nur ergänzen. Ob ein Stichtag oder eine Haltefrist greift, prüft nicht dieses Programm. Ob das Ausgeben grüner Sats tatsächlich steuerfrei ist, ist nicht abschließend geklärt. Niemand übernimmt eine Haftung, falls dennoch Steuern fällig werden.</p>
+        </div>
+
+        <div class="karte">
+          <div class="karte-kopf">
+            <span class="karte-titel" data-i18n="settings.assign.title">Zuordnung Auszahlung und Empfang</span>
+            <span class="karte-zusatz" data-i18n="settings.assign.zusatz">
+              Schwellen für Vorschläge; automatische Bestätigung standardmäßig aus
+            </span>
+          </div>
+          <div class="karte-fuss steuer-einstellungen">
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.assign.windowBefore">Zeitfenster vorher (Stunden)</span>
+              <input type="number" id="zuordnung-fenster-vor" min="0" step="0.25" value="1">
+            </label>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.assign.windowAfter">Zeitfenster nachher (Stunden)</span>
+              <input type="number" id="zuordnung-fenster-nach" min="0" step="0.25" value="72">
+            </label>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.assign.maxDeltaSats">Max. Betragsabweichung (sats)</span>
+              <input type="number" id="zuordnung-max-delta-sats" min="0" step="1" value="0">
+            </label>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.assign.maxDeltaRel">Max. relative Abweichung (Prozent)</span>
+              <input type="number" id="zuordnung-max-delta-rel" min="0" step="0.001" value="0">
+            </label>
+            <label class="check-zeile" data-i18n-title="settings.assign.feeTitle"
+                   title="Wenn die Differenz genau der Börsengebühr entspricht, gilt der Betrag als passend.">
+              <input type="checkbox" id="zuordnung-gebuehr-toleranz">
+              <span data-i18n="settings.assign.fee">Gebühr als Toleranz zählen</span>
+            </label>
+            <label class="check-zeile" data-i18n-title="settings.assign.autoTitle"
+                   title="Standard aus. Bestätigt nur eindeutige Treffer, die alle strengen Kriterien erfüllen. Jederzeit ablehnbar.">
+              <input type="checkbox" id="zuordnung-auto">
+              <span data-i18n="settings.assign.auto">Eindeutige Treffer automatisch bestätigen</span>
+            </label>
+            <label class="check-zeile" data-i18n-title="settings.assign.autoAddrTitle"
+                   title="Für die automatische Bestätigung muss die Empfangsadresse zur Börsenbuchung passen.">
+              <input type="checkbox" id="zuordnung-auto-adresse" checked>
+              <span data-i18n="settings.assign.autoAddr">Automatisch nur bei Adresstreffer</span>
+            </label>
+            <label class="feld">
+              <span class="feld-titel" data-i18n="settings.assign.minGap">Mindestabstand zum zweitbesten (Sekunden)</span>
+              <input type="number" id="zuordnung-auto-min-abstand" min="0" step="1" value="0"
+                     data-i18n-title="settings.assign.minGapTitle"
+                     title="0 bedeutet: bei mehreren Kandidaten im Fenster nie automatisch bestätigen.">
+            </label>
+            <button type="button" id="zuordnung-uebernehmen" class="knopf"
+                    data-i18n="common.save" data-i18n-title="settings.assign.applyTitle"
+                    title="Schreibt die Schwellen in die .env. Vorschläge nutzen sie beim nächsten Aktualisieren.">
+              Übernehmen
+            </button>
+          </div>
+          <p class="meta steuer-einstellungen-hinweis" data-i18n="settings.assign.hint">
+            Vorgabe wie bisher: 1 Stunde vorher, 72 Stunden nachher, exakter Betrag.
+            Automatische Bestätigung ist aus. Eingeschaltet bestätigt SatSage nur
+            eindeutige Treffer; bei mehreren Kandidaten im Fenster nie. Solche
+            Zeilen sind als automatisch bestätigt gekennzeichnet und bleiben ablehnbar.
+          </p>
         </div>
 
         <div class="karte">
