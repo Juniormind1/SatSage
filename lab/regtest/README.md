@@ -1,6 +1,6 @@
 # SatSage-Regtest-Labor
 
-Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, dazu Userflow und Chaos). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
+Vor einem Merge nach `main` und vor jedem Release (Tag `v*`, Image, Linux-Binary, StartOS-Paket) muss dieses Labor auf GitHub grün sein (Workflow `Regtest-Labor`: Core, Electrs, `verify_rpc_allowlist.py`, Szenarien, `verify_electrs_gap.py`, `verify_tx_classify.py`, `verify_sanctions_hops.py`, `verify_quellen_inventar.py`, `verify_boerse_zuordnung.py`, dazu Userflow und Chaos). Der Mempool-Explorer ist dafür nicht nötig (`SATSAGE_LAB_SKIP_MEMPOOL=1`). Montags prüft `Regtest-Labor Woche` den Branch `dev-juniormind` und startet das Labor nur, wenn seit dem letzten grünen Lauf etwas am Prüfpfad lag.
 
 Dieses Verzeichnis enthält ein **secrets-freies, portables Regtest-Labor** für SatSage. Es ist kein Mainnet-Node und keine Verbindung zu einem Heim-Node. Bitcoin-Core-Daten, Electrum-Index (Electrs oder Fulcrum), generierte XPUBs und Szenario-Reports bleiben lokal unter `lab/regtest/.data/`; sie werden niemals gepusht. Portable Binaries liegen unter `lab/regtest/.tools/` (ebenfalls gitignore).
 
@@ -117,6 +117,15 @@ python3 lab/regtest/scripts/verify_tx_classify.py
 ```
 
 **GUI-Abnahme Herkunft:** UTXO aus einem CJ-Szenario tracen — Soft-Label der CoinJoin-Art; nur **eigene** Ins weiter; Faucet-Peers nicht als Herkunft „von extern“ auflisten. Auch mit allen vier Lab-Wallets bleiben Faucet-Ins fremd.
+
+### Börsen-Zuordnung
+
+`lab-boerse` zahlt aus einem Core-Wallet, das nicht in `WALLET_*` steht, an `lab-boerse-empfang` (ebenfalls nicht in der Lab-Env, damit das Herkunfts-Inventar unverändert bleibt). Eine Sammelauszahlung hat zwei eigene und drei fremde Ausgänge, dazu eine Einzelauszahlung. Synthetische Strike-CSV mit der echten Regtest-TxID der Sammel-Tx, Kraken-Ledger ohne TxID zur Einzelauszahlung. `verify_boerse_zuordnung.py` prüft: Strike wird über `txid_exakt` bestätigt, Kraken liefert genau einen Vorschlag. Haltefrist und Lot-Ring bleiben nach der Bestätigung unverändert (Zuordnung ist in dieser Stufe nur Erklärung). Alte Chain: das Szenario-Skript ist idempotent, wenn die Auszahlungen schon existieren; sonst nach `generate_scenarios.py` laufen lassen.
+
+```bash
+python3 lab/regtest/scripts/boerse_szenario.py
+python3 lab/regtest/scripts/verify_boerse_zuordnung.py
+```
 
 ### Electrs-Gap über 100
 

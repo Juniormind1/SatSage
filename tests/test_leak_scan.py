@@ -89,6 +89,11 @@ class LeakScanTest(unittest.TestCase):
         funde = pruefe_text(ziel.read_text(encoding="utf-8"), ziel)
         self.assertFalse([f for f in funde if f.regel == "kraken-ledger-kopf"], funde)
 
+    def test_kraken_kopf_im_lab_szenario_ist_erlaubt(self):
+        ziel = ROOT / "lab" / "regtest" / "scripts" / "boerse_szenario.py"
+        funde = pruefe_text(ziel.read_text(encoding="utf-8"), ziel)
+        self.assertFalse([f for f in funde if "kopf" in f.regel], funde)
+
     def test_fixture_ohne_herkunft_wird_blockiert(self):
         ziel = ROOT / "tests" / "fixtures" / "boerse" / "_scan_ohne_herkunft.csv"
         self.addCleanup(lambda: ziel.exists() and ziel.unlink())

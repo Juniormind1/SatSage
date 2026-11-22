@@ -135,13 +135,17 @@ def _ist_fixture(pfad: Path) -> bool:
 
 
 def _ist_spec(pfad: Path) -> bool:
-    """CSV-Köpfe dürfen in Specs, Parser und dessen Tests wörtlich stehen."""
+    """CSV-Köpfe dürfen in Specs, Parser, Tests und dem Lab-Szenario stehen."""
     if _ist_unter(pfad, SPEC_DIR) or _ist_unter(pfad, PARSER_DIR):
         return True
     name = pfad.name
-    if pfad.parent.resolve() == (REPO_ROOT / "tests").resolve() and (
+    tests = (REPO_ROOT / "tests").resolve()
+    if pfad.parent.resolve() == tests and (
         name.startswith("test_boerse_") and name.endswith(".py")
     ):
+        return True
+    lab = (REPO_ROOT / "lab" / "regtest" / "scripts").resolve()
+    if pfad.parent.resolve() == lab and name in {"boerse_szenario.py"}:
         return True
     return False
 

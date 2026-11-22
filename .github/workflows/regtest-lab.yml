@@ -3,7 +3,7 @@ name: Regtest-Labor
 # Wiederverwendbar. Auslöser: regtest-lab-dispatch.yml (Merge, Tag v*,
 # manuell), regtest-lab-weekly.yml (Montag, nur bei Delta am Prüfpfad),
 # Image-, Linux- und StartOS-Build. Core und Electrs, Allowlist gegen
-# den echten Node, Szenarien, Electrs-Gap über 100, Klassifikation,
+# den echten Node, Szenarien, Börsen-Zuordnung, Electrs-Gap über 100, Klassifikation,
 # Sanktions-Hops und jede eigene Datenquelle allein gegen das
 # Herkunfts-Inventar. Danach Dachboden in einer Lab-Sitzung (Chromium).
 # Userflow und Chaos laufen parallel im mitgelieferten Chromium
@@ -71,6 +71,16 @@ jobs:
         run: |
           python3 scripts/generate_scenarios.py
           python3 scripts/generate_sanctions_scenarios.py
+          python3 scripts/boerse_szenario.py
+
+      - name: Börsen-Zuordnung
+        env:
+          TOR_AUTOSTART: "0"
+          NETWORK: regtest
+          SATSAGE_ANSI_MENU: "0"
+          SATSAGE_TERMINAL_MENU: "0"
+          SATSAGE_SPLASH: "0"
+        run: python3 lab/regtest/scripts/verify_boerse_zuordnung.py
 
       - name: Electrs-Gap über 100
         env:
